@@ -8,6 +8,7 @@ import {
 	IconUserOutlineDuo18,
 } from "@bittery/ui/icons";
 import React, {
+	useCallback,
 	useEffect,
 	useLayoutEffect,
 	useMemo,
@@ -17,6 +18,7 @@ import React, {
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
 import type { PasskeyGetPromptOption } from "@/passkey/types";
+import { I18nProvider, useI18n } from "@/providers/i18n-provider";
 
 type PickerData = {
 	kind: "get-picker";
@@ -24,38 +26,39 @@ type PickerData = {
 	options: PasskeyGetPromptOption[];
 };
 
-function formatRelativeTime(value?: string): string {
-	if (!value) {
-		return "Never used";
-	}
-
-	const timestamp = Date.parse(value);
-	if (Number.isNaN(timestamp)) {
-		return "Used recently";
-	}
-	const deltaMs = Date.now() - timestamp;
-	const deltaDays = Math.floor(deltaMs / (24 * 60 * 60 * 1000));
-	if (deltaDays <= 0) {
-		return "Used today";
-	}
-	if (deltaDays === 1) {
-		return "Used yesterday";
-	}
-	if (deltaDays < 30) {
-		return `Used ${deltaDays}d ago`;
-	}
-	const deltaMonths = Math.floor(deltaDays / 30);
-	if (deltaMonths < 12) {
-		return `Used ${deltaMonths}mo ago`;
-	}
-	const deltaYears = Math.floor(deltaMonths / 12);
-	return `Used ${deltaYears}y ago`;
-}
-
 function PasskeyPickerIframe() {
+	const { m } = useI18n();
 	const [data, setData] = useState<PickerData | null>(null);
 	const [selectedCredentialId, setSelectedCredentialId] = useState<string>("");
 	const containerRef = useRef<HTMLDivElement>(null);
+
+	const formatRelativeTime = useCallback((value?: string): string => {
+		if (!value) {
+			return m.ext_passkey_never_used();
+		}
+
+		const timestamp = Date.parse(value);
+		if (Number.isNaN(timestamp)) {
+			return m.ext_passkey_used_recently();
+		}
+		const deltaMs = Date.now() - timestamp;
+		const deltaDays = Math.floor(deltaMs / (24 * 60 * 60 * 1000));
+		if (deltaDays <= 0) {
+			return m.ext_passkey_used_today();
+		}
+		if (deltaDays === 1) {
+			return m.ext_passkey_used_yesterday();
+		}
+		if (deltaDays < 30) {
+			return m.ext_passkey_used_days_ago({ days: String(deltaDays) });
+		}
+		const deltaMonths = Math.floor(deltaDays / 30);
+		if (deltaMonths < 12) {
+			return m.ext_passkey_used_months_ago({ months: String(deltaMonths) });
+		}
+		const deltaYears = Math.floor(deltaMonths / 12);
+		return m.ext_passkey_used_years_ago({ years: String(deltaYears) });
+	}, [m]);
 
 	const updateHeight = React.useCallback(() => {
 		const height = document.body.scrollHeight;
@@ -127,10 +130,10 @@ function PasskeyPickerIframe() {
 					</div>
 					<div className="min-w-0 flex-1">
 						<div className="flex items-center justify-between gap-2">
-							<p className="font-medium text-sm">Choose a passkey</p>
-							<span className="shrink-0 rounded-full border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
-								{data.options.length}{" "}
-								{data.options.length === 1 ? "option" : "options"}
+						<p className="font-medium text-sm">{m.ext_passkey_choose()}</p>
+						<span className="shrink-0 rounded-full border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
+							{data.options.length}{" "}
+							{data.options.length === 1 ? m.ext_passkey_option() : m.ext_passkey_options()}
 							</span>
 						</div>
 						<p className="truncate font-medium text-[11px] text-primary/80">
@@ -142,7 +145,7 @@ function PasskeyPickerIframe() {
 				<div className="max-h-[228px] space-y-1.5 overflow-y-auto pr-0.5">
 					{data.options.length === 0 && (
 						<p className="rounded-md border border-border border-dashed px-2.5 py-4 text-center text-muted-foreground text-xs">
-							No passkeys available for this site.
+						{m.ext_passkey_no_passkeys()}
 						</p>
 					)}
 
@@ -232,7 +235,7 @@ function PasskeyPickerIframe() {
 												)}
 											>
 												<IconUserOutlineDuo18 size={11} />
-												{option.vaultName || "Vault"}
+												{option.vaultName || m.ext_passkey_vault_fallback()}
 											</span>
 											<span
 												className={cn(
@@ -274,7 +277,7 @@ function PasskeyPickerIframe() {
 						className="flex-1 shadow-sm"
 						disabled={!selectedCredentialId}
 					>
-						Use passkey
+						{m.ext_passkey_use()}
 					</Button>
 					<Button
 						onClick={handleCancel}
@@ -282,7 +285,7 @@ function PasskeyPickerIframe() {
 						size="sm"
 						className="flex-1 border border-transparent hover:border-border/80"
 					>
-						Cancel
+						{m.ext_passkey_cancel()}
 					</Button>
 				</div>
 			</Card>
@@ -294,7 +297,9 @@ const root = document.getElementById("root");
 if (root) {
 	ReactDOM.createRoot(root).render(
 		<React.StrictMode>
-			<PasskeyPickerIframe />
+			<I18nProvider>
+				<PasskeyPickerIframe />
+			</I18nProvider>
 		</React.StrictMode>,
 	);
 }

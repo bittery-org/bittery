@@ -49,7 +49,7 @@ function runRevealSequence(
 
 function RevealStateIcon({ phase }: { phase: RevealAnimationPhase }) {
   return (
-    <div className="relative flex items-center justify-center rounded-full border border-border bg-white p-4 shadow-sm dark:bg-gray-900">
+    <div className="relative flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
       <IconLockOutlineDuo18
         className="size-7 text-primary transition-opacity duration-300"
         style={{ opacity: phase === "locked" ? 1 : 0 }}
@@ -75,7 +75,7 @@ export function AuthDoorsOverlay({
       aria-hidden="true"
     >
       <div
-        className="absolute inset-y-0 left-0 z-10 w-1/3 overflow-visible bg-secondary"
+        className="absolute inset-y-0 left-0 z-10 w-1/3 overflow-visible bg-auth-panel"
         style={{
           transform: open ? "translateX(-110%)" : "translateX(0)",
           transition: open
@@ -83,7 +83,7 @@ export function AuthDoorsOverlay({
             : "none",
         }}
       >
-        <div className="absolute inset-y-0 right-0 w-0.5 bg-black/10 dark:bg-white/10" />
+        <div className="absolute inset-y-0 right-0 w-0.5 bg-foreground/10" />
 
         <div className="absolute top-1/4 right-0 translate-x-1/2">
           {children}
@@ -95,7 +95,7 @@ export function AuthDoorsOverlay({
       </div>
 
       <div
-        className="absolute inset-y-0 right-0 w-2/3 bg-white md:w-3/4 dark:bg-gray-900"
+        className="absolute inset-y-0 right-0 w-2/3 bg-background md:w-3/4"
         style={{
           transform: open ? "translateX(100%)" : "translateX(0)",
           transition: open
@@ -103,7 +103,7 @@ export function AuthDoorsOverlay({
             : "none",
         }}
       >
-        <div className="absolute inset-y-0 left-0 w-0.5 bg-black/10 dark:bg-white/10" />
+        <div className="absolute inset-y-0 left-0 w-0.5 bg-foreground/10" />
       </div>
     </div>
   );
@@ -117,7 +117,7 @@ export function AuthDoorsPendingLoader({
       open={false}
       logoPositionClassName={logoPositionClassName}
     >
-      <div className="flex items-center justify-center rounded-full border border-border bg-white p-4 shadow-sm dark:bg-gray-900">
+      <div className="flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
         <IconLoader2Fill18 className="size-7 animate-spin text-primary" />
       </div>
     </AuthDoorsOverlay>

@@ -1,8 +1,12 @@
-import type { Entitlements } from "@bittery/api/billing/entitlements";
+import type { Entitlements } from "@bittery/shared/billing";
+
+type TeamEntitlements = Partial<Pick<Entitlements, "team_management">> & {
+	teamManagement?: boolean;
+};
 
 interface GetTeamPageAccessInput {
 	userRole?: string | null;
-	entitlements?: Partial<Pick<Entitlements, "team_management">> | null;
+	entitlements?: TeamEntitlements | null;
 }
 
 export interface TeamPageAccess {
@@ -17,7 +21,9 @@ export function getTeamPageAccess({
 	entitlements,
 }: GetTeamPageAccessInput): TeamPageAccess {
 	const canEditProfile = userRole === "owner" || userRole === "admin";
-	const teamManagementEnabled = entitlements?.team_management === true;
+	const teamManagementEnabled =
+		entitlements?.team_management === true ||
+		entitlements?.teamManagement === true;
 	const canManageTeam = canEditProfile && teamManagementEnabled;
 
 	return {

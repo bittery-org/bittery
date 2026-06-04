@@ -4,8 +4,8 @@
  */
 
 import type { DecryptedItem } from "@bittery/shared/types";
+import { rpcClient } from "./rpc-client";
 import { updateActivity } from "./session-manager";
-import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
@@ -47,7 +47,7 @@ export async function handleGetWritableVaults(): Promise<MessageResponse> {
 	updateActivity();
 
 	try {
-		const vaults = await trpcClient.vault.list.query();
+		const vaults = await rpcClient.vault.list.query();
 		const writableVaults = vaults.filter((vault) => vault.role !== "read-only");
 
 		return {
@@ -55,7 +55,7 @@ export async function handleGetWritableVaults(): Promise<MessageResponse> {
 			vaults: writableVaults.map((vault) => ({
 				id: vault.id,
 				name: vault.name,
-				type: vault.type,
+				type: vault.vaultType,
 				role: vault.role,
 			})),
 		};

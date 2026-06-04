@@ -44,7 +44,7 @@ export {
 	checkEmailExists,
 	clearSession,
 	getSessionState,
-	type IAuthTRPCClient,
+	type IAuthClient,
 	type LoginResult,
 	type LoginUserData,
 	performSRPLogin,
@@ -196,10 +196,6 @@ export {
 	useItems,
 	useItemsUnified,
 } from "./use-items";
-export {
-	analyzePassword,
-	usePasswordSecurity,
-} from "./use-password-security";
 export {
 	type UseVaultInfoOptions,
 	useVaultInfo,

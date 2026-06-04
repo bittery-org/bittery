@@ -9,6 +9,7 @@ import { Eye, EyeOff } from "lucide-react-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
+import { useI18n } from "@/providers/i18n-provider";
 
 const StyledEye = withUniwind(Eye);
 const StyledEyeOff = withUniwind(EyeOff);
@@ -34,6 +35,7 @@ export const CreditCardForm = forwardRef<
 	CreditCardFormRef,
 	CreditCardFormProps
 >(({ initialData }, ref) => {
+	const { m } = useI18n();
 	const [cardholderName, setCardholderName] = useState(
 		initialData?.cardholderName || "",
 	);
@@ -90,9 +92,9 @@ export const CreditCardForm = forwardRef<
 	return (
 		<>
 			<TextField className="mb-4">
-				<Label>Cardholder Name</Label>
+				<Label>{m.mob_form_cc_cardholder_label()}</Label>
 				<Input
-					placeholder="Name on card"
+					placeholder={m.mob_form_cc_cardholder_placeholder()}
 					value={cardholderName}
 					onChangeText={setCardholderName}
 					autoCapitalize="words"
@@ -101,7 +103,7 @@ export const CreditCardForm = forwardRef<
 
 			<TextField className="mb-4">
 				<View className="mb-2 flex-row items-center justify-between">
-					<Label>Card Number</Label>
+					<Label>{m.mob_form_cc_number_label()}</Label>
 					{detectedCardBrand && detectedCardBrand !== "unknown" && (
 						<Text className="text-muted text-xs">
 							{getCardBrandDisplayName(detectedCardBrand)}
@@ -109,7 +111,7 @@ export const CreditCardForm = forwardRef<
 					)}
 				</View>
 				<Input
-					placeholder="1234 5678 9012 3456"
+					placeholder={m.mob_form_cc_number_placeholder()}
 					value={formatCardNumber(cardNumber, detectedCardBrand || undefined)}
 					onChangeText={handleCardNumberChange}
 					keyboardType="numeric"
@@ -120,9 +122,9 @@ export const CreditCardForm = forwardRef<
 
 			<View className="mb-4 flex-row gap-2">
 				<TextField className="flex-1">
-					<Label>Expiry</Label>
+					<Label>{m.mob_form_cc_expiry_label()}</Label>
 					<Input
-						placeholder="MM/YY"
+						placeholder={m.mob_form_cc_expiry_placeholder()}
 						value={expiryDate}
 						onChangeText={handleExpiryChange}
 						keyboardType="numeric"
@@ -132,10 +134,10 @@ export const CreditCardForm = forwardRef<
 				</TextField>
 
 				<TextField className="flex-1">
-					<Label>CVV</Label>
+					<Label>{m.mob_form_cc_cvv_label()}</Label>
 					<View className="w-full flex-row items-center">
 						<Input
-							placeholder="123"
+							placeholder={m.mob_form_cc_cvv_placeholder()}
 							value={cvv}
 							onChangeText={handleCvvChange}
 							keyboardType="numeric"
@@ -158,9 +160,9 @@ export const CreditCardForm = forwardRef<
 			</View>
 
 			<TextField className="mb-4">
-				<Label>Billing Address</Label>
+				<Label>{m.mob_form_cc_billing_label()}</Label>
 				<Input
-					placeholder="123 Main St, City, State ZIP"
+					placeholder={m.mob_form_cc_billing_placeholder()}
 					value={billingAddress}
 					onChangeText={setBillingAddress}
 					multiline

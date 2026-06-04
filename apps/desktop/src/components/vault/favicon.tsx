@@ -5,5 +5,7 @@ import { readCurrentAuthServerUrl } from "@/lib/auth-server";
 type FaviconProps = Omit<VaultFaviconProps, "defaultServerUrl">;
 
 export function Favicon(props: FaviconProps) {
-	return <VaultFavicon {...props} defaultServerUrl={readCurrentAuthServerUrl()} />;
+	return (
+		<VaultFavicon {...props} defaultServerUrl={readCurrentAuthServerUrl()} />
+	);
 }

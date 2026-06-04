@@ -1,6 +1,6 @@
 import { storage } from "./storage";
 
-export function isUnauthorizedTrpcError(error: unknown): boolean {
+export function isUnauthorizedRpcError(error: unknown): boolean {
 	if (
 		error &&
 		typeof error === "object" &&

@@ -1,7 +1,6 @@
 import {
 	type ConnectionStatus,
 	OutboundQueue,
-	type SyncEvent,
 	type SyncStorage,
 } from "@bittery/sync";
 import type { IQueryInvalidator } from "@bittery/types";
@@ -16,7 +15,6 @@ import {
 	useState,
 } from "react";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
-import { invalidateExtensionQueriesForSyncEvent } from "./sync-event-invalidation";
 
 /**
  * Context for sync state
@@ -56,18 +54,12 @@ interface SyncStatusMessage {
 	status: ConnectionStatus;
 }
 
-interface SyncEventMessage {
-	type: "SYNC_EVENT";
-	event: SyncEvent;
-}
-
 interface SyncFullRefreshMessage {
 	type: "SYNC_FULL_REFRESH_REQUIRED";
 }
 
 type BackgroundMessage =
 	| SyncStatusMessage
-	| SyncEventMessage
 	| SyncFullRefreshMessage;
 
 function isBackgroundMessage(message: unknown): message is BackgroundMessage {
@@ -77,7 +69,6 @@ function isBackgroundMessage(message: unknown): message is BackgroundMessage {
 	const typed = message as Partial<BackgroundMessage>;
 	return (
 		typed.type === "SYNC_STATUS_CHANGED" ||
-		typed.type === "SYNC_EVENT" ||
 		typed.type === "SYNC_FULL_REFRESH_REQUIRED"
 	);
 }
@@ -136,14 +127,6 @@ export function ExtensionSyncProvider({
 		})();
 	}, []);
 
-	// Handle sync events and invalidate queries
-	const handleSyncEvent = useCallback(
-		async (event: SyncEvent) => {
-			await invalidateExtensionQueriesForSyncEvent(invalidator, event);
-		},
-		[invalidator],
-	);
-
 	const handleFullRefresh = useCallback(async () => {
 		await queryClient.invalidateQueries();
 	}, [queryClient]);
@@ -157,8 +140,6 @@ export function ExtensionSyncProvider({
 
 			if (message.type === "SYNC_STATUS_CHANGED") {
 				setStatus(message.status);
-			} else if (message.type === "SYNC_EVENT") {
-				void handleSyncEvent(message.event);
 			} else if (message.type === "SYNC_FULL_REFRESH_REQUIRED") {
 				void handleFullRefresh();
 			}
@@ -169,7 +150,7 @@ export function ExtensionSyncProvider({
 		return () => {
 			chrome.runtime.onMessage.removeListener(handleMessage);
 		};
-	}, [handleSyncEvent, handleFullRefresh]);
+	}, [handleFullRefresh]);
 
 	const contextValue: SyncContextValue = {
 		status,

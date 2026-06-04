@@ -21,8 +21,11 @@ import {
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
-import { type DropVaultData, useVaultDnd } from "@/providers/vault-dnd-provider";
 import { useI18n } from "@/providers/i18n-provider";
+import {
+	type DropVaultData,
+	useVaultDnd,
+} from "@/providers/vault-dnd-provider";
 
 interface VaultInfo {
 	vaultId: string;

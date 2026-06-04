@@ -104,7 +104,7 @@ function CrossVaultTagRouteComponent() {
 									? m.vaults_detail_items_list_empty_filtered_description()
 									: m.vaults_tag_empty_description({
 											tagName: decodedTagName,
-									  })}
+										})}
 							</p>
 						</div>
 					) : (

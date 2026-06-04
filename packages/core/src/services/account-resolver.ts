@@ -1,12 +1,12 @@
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ActiveAccount } from "@bittery/storage/types";
 
-export type DefaultTrpcClient = ReturnType<typeof createAccountTrpcClient>;
+export type DefaultRpcClient = ReturnType<typeof createAccountRpcClient>;
 
 /**
- * Complete account information including metadata, credentials, and tRPC client.
+ * Complete account information including metadata, credentials, and RPC client.
  */
 export interface AccountInfo {
 	email: string;
@@ -16,7 +16,7 @@ export interface AccountInfo {
 	teamAvatarUrl?: string | null;
 	authToken: string;
 	serverUrl: string;
-	trpcClient: ReturnType<typeof createAccountTrpcClient>;
+	rpcClient: DefaultRpcClient;
 }
 
 export interface ResolveAccountsResult {
@@ -51,13 +51,13 @@ export function findAccountForItem(
 }
 
 /**
- * Returns an account-specific tRPC client when accountEmail is provided.
+ * Returns an account-specific RPC client when accountEmail is provided.
  */
 export async function getClientForAccount(
 	storage: IStorageAdapter,
-	defaultClient: DefaultTrpcClient,
+	defaultClient: DefaultRpcClient,
 	accountEmail?: string,
-): Promise<DefaultTrpcClient> {
+): Promise<DefaultRpcClient> {
 	if (!accountEmail) {
 		return defaultClient;
 	}
@@ -71,7 +71,7 @@ export async function getClientForAccount(
 		return defaultClient;
 	}
 
-	return createAccountTrpcClient(
+	return createAccountRpcClient(
 		authToken,
 		serverUrl || "http://localhost:3000",
 	);
@@ -118,7 +118,7 @@ export class AccountResolver {
 					}
 
 					const resolvedServerUrl = serverUrl || "http://localhost:3000";
-					const trpcClient = createAccountTrpcClient(
+					const rpcClient = createAccountRpcClient(
 						authToken,
 						resolvedServerUrl,
 					);
@@ -131,7 +131,7 @@ export class AccountResolver {
 						teamAvatarUrl: metadata.teamAvatarUrl,
 						authToken,
 						serverUrl: resolvedServerUrl,
-						trpcClient,
+						rpcClient: rpcClient,
 					};
 				} catch (error) {
 					console.error(
@@ -151,9 +151,9 @@ export class AccountResolver {
 	}
 
 	async getClientForAccount(
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 		accountEmail?: string,
-	): Promise<DefaultTrpcClient> {
+	): Promise<DefaultRpcClient> {
 		return getClientForAccount(this.storage, defaultClient, accountEmail);
 	}
 

@@ -1,4 +1,4 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -153,11 +153,11 @@ function RenameDeviceDialog({
 	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [deviceName, setDeviceName] = useState(session.deviceName || "");
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 
 	const renameMutation = useMutation({
 		mutationFn: (input: { sessionId: string; deviceName: string }) =>
-			trpcClient.auth.renameDevice.mutate(input),
+			rpcClient.auth.renameDevice.mutate(input),
 		onSuccess: () => {
 			toast.success(m.settings_devices_toast_rename_success());
 			setOpen(false);
@@ -239,11 +239,11 @@ function RevokeDeviceDialog({
 }) {
 	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 
 	const revokeMutation = useMutation({
 		mutationFn: (sessionId: string) =>
-			trpcClient.auth.revokeDevice.mutate({ sessionId }),
+			rpcClient.auth.revokeDevice.mutate({ sessionId }),
 		onSuccess: () => {
 			toast.success(m.settings_devices_toast_revoke_success());
 			setOpen(false);
@@ -367,9 +367,9 @@ function DeviceListSkeleton() {
 
 export function DeviceManagement() {
 	const { m } = useI18n();
-	const trpc = useTRPC();
+	const rpc = useRPC();
 
-	const devicesQuery = useQuery(trpc.auth.listDevices.queryOptions());
+	const devicesQuery = useQuery(rpc.auth.listDevices.queryOptions());
 
 	const handleUpdate = () => {
 		devicesQuery.refetch();

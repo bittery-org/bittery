@@ -1,5 +1,5 @@
 import { TeamAvatarError, useTeamAvatar } from "@bittery/core/hooks";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	Avatar,
 	AvatarFallback,
@@ -49,7 +49,7 @@ export function TeamSettings({
 	const [isEditing, setIsEditing] = useState(false);
 	const [name, setName] = useState(teamName);
 	const fileInputRef = useRef<HTMLInputElement>(null);
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const { uploadAvatar, removeAvatar, isUploading, isRemoving } =
 		useTeamAvatar();
@@ -60,7 +60,9 @@ export function TeamSettings({
 
 	const updateMutation = useMutation({
 		mutationFn: (input: { teamId: string; name: string }) =>
-			trpcClient.team.update.mutate(input),
+			rpcClient.team.update.mutate(
+				input as Parameters<typeof rpcClient.team.update.mutate>[0],
+			),
 		onSuccess: async () => {
 			toast.success(m.team_settings_toast_name_updated());
 			await invalidator.invalidateTeam();

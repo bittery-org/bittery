@@ -1,7 +1,7 @@
 /** biome-ignore-all lint/style/noNonNullAssertion: The queries are only enabled when a team id is there */
 
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import {
 	Avatar,
 	AvatarFallback,
@@ -35,20 +35,20 @@ export const Route = createFileRoute("/_app/team/")({
 });
 
 function TeamPage() {
-	const trpc = useTRPC();
+	const rpc = useRPC();
 	const { m } = useI18n();
 
-	const teamListQuery = useQuery(trpc.team.list.queryOptions());
+	const teamListQuery = useQuery(rpc.team.list.queryOptions());
 	const teamId = teamListQuery.data?.id;
 	const billingEntitlementsQuery = useQuery(
-		trpc.billing.entitlements.queryOptions(),
+		rpc.billing.entitlements.queryOptions(),
 	);
 	const registrationStatusQuery = useQuery(
-		trpc.auth.registrationStatus.queryOptions(),
+		rpc.auth.registrationStatus.queryOptions(),
 	);
-	const meQuery = useQuery(trpc.auth.me.queryOptions());
+	const meQuery = useQuery(rpc.auth.me.queryOptions());
 	const teamQuery = useQuery({
-		...trpc.team.get.queryOptions({ teamId: teamId! }),
+		...rpc.team.get.queryOptions({ teamId: teamId! }),
 		enabled: !!teamId,
 	});
 	const team = teamQuery.data;
@@ -58,11 +58,11 @@ function TeamPage() {
 			entitlements: billingEntitlementsQuery.data?.entitlements,
 		});
 	const membersQuery = useQuery({
-		...trpc.team.members.list.queryOptions({ teamId: teamId! }),
+		...rpc.team.members.list.queryOptions({ teamId: teamId! }),
 		enabled: !!teamId,
 	});
 	const invitationsQuery = useQuery({
-		...trpc.team.invitations.list.queryOptions({ teamId: teamId! }),
+		...rpc.team.invitations.list.queryOptions({ teamId: teamId! }),
 		enabled: !!teamId && canViewInvitations,
 	});
 
@@ -119,13 +119,13 @@ function TeamPage() {
 	};
 
 	const memberCountLabel =
-		team.memberCount === 1
+		Number(team.memberCount) === 1
 			? m.team_page_hero_member_count_created_by_single({
-					count: team.memberCount,
+					count: Number(team.memberCount),
 					ownerName: team.ownerName,
 				})
 			: m.team_page_hero_member_count_created_by_plural({
-					count: team.memberCount,
+					count: Number(team.memberCount),
 					ownerName: team.ownerName,
 				});
 
@@ -133,7 +133,7 @@ function TeamPage() {
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			{/* Hero Banner */}
 			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
+				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
 
 				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex min-w-0 items-center gap-3">

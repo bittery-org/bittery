@@ -38,16 +38,16 @@ export async function seedTestVaultItem(
 		| "identity"
 		| "totp" = "login",
 ): Promise<string | null> {
-	// This would need to be called through the tRPC client
+	// This would need to be called through the RPC client
 	// For E2E tests, we'll create items through the UI flow if possible
 	// or use direct API calls with the auth token
 
 	const result = await page.evaluate(
 		async ({ vaultId: _vaultId, itemData: _itemData, category: _category }) => {
-			// Access the tRPC client from the window if available
-			const trpcClient = (window as any).__TRPC_CLIENT__;
-			if (!trpcClient) {
-				console.error("tRPC client not available");
+			// Access an exposed RPC client from the window if available
+			const rpcClient = (window as any).__RPC_CLIENT__;
+			if (!rpcClient) {
+				console.error("RPC client not available");
 				return null;
 			}
 

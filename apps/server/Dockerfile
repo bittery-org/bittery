@@ -1,77 +1,48 @@
-# ============================================================
-# Stage 1: Rust NAPI builder — compile native crypto bindings
-# ============================================================
-FROM rust:1-bookworm AS rust-builder
+FROM rust:1-bookworm AS builder
 
-WORKDIR /build
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends \
+		build-essential \
+		ca-certificates \
+		clang \
+		cmake \
+		libssl-dev \
+		pkg-config \
+		perl \
+	&& rm -rf /var/lib/apt/lists/*
 
-# Copy the Rust workspace (needed for workspace inheritance in Cargo.toml)
-COPY packages/crypto/core packages/crypto/core
+WORKDIR /app/apps/server
 
-# Copy NAPI crate
-COPY packages/crypto/napi/Cargo.toml packages/crypto/napi/Cargo.lock packages/crypto/napi/
-COPY packages/crypto/napi/build.rs packages/crypto/napi/
-COPY packages/crypto/napi/src packages/crypto/napi/src
+COPY apps/server/Cargo.toml apps/server/Cargo.lock ./
+COPY apps/server/src ./src
+COPY packages/crypto/core/crates/bittery-crypto-core /app/packages/crypto/core/crates/bittery-crypto-core
 
-RUN cd packages/crypto/napi && cargo build --release
+RUN cargo build --release
 
-# ============================================================
-# Stage 2: JS builder — install deps and bundle with tsdown
-# ============================================================
-FROM node:22-bookworm-slim AS js-builder
+FROM debian:bookworm-slim
 
-RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
-
-WORKDIR /app
-
-# Copy entire repo (filtered by .dockerignore)
-COPY . .
-
-# Stub workspace packages whose package.json is generated (not in git)
-RUN mkdir -p packages/crypto/wasm && echo '{"name":"@bittery/crypto-wasm","version":"0.1.0","private":true}' > packages/crypto/wasm/package.json \
- && mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json
-
-RUN pnpm install --frozen-lockfile --ignore-scripts
-
-# Copy NAPI .node binary from Rust builder stage
-COPY --from=rust-builder /build/packages/crypto/napi/target/release/libbittery_crypto_napi.so packages/crypto/napi/bittery-crypto.linux-x64-gnu.node
-
-# Build server bundle
-RUN cd apps/server && pnpm exec tsdown
-
-# ============================================================
-# Stage 3: Runtime — minimal Bun image
-# ============================================================
-FROM oven/bun:1-slim
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates wget \
+	&& rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 RUN groupadd --system --gid 10001 bittery \
- && useradd --system --uid 10001 --gid 10001 --home-dir /home/bittery --create-home bittery \
- && mkdir -p /app/node_modules/@bittery/crypto-napi /app/migrations \
- && chown -R 10001:10001 /app /home/bittery
+	&& useradd --system --uid 10001 --gid 10001 --home-dir /home/bittery --create-home bittery \
+	&& mkdir -p /app/migrations \
+	&& chown -R 10001:10001 /app /home/bittery
 
-# Copy built server bundle (all deps bundled except crypto-napi)
-COPY --from=js-builder --chown=10001:10001 /app/apps/server/dist ./dist
-
-# Set up @bittery/crypto-napi module for runtime resolution
-COPY --from=rust-builder --chown=10001:10001 /build/packages/crypto/napi/target/release/libbittery_crypto_napi.so ./node_modules/@bittery/crypto-napi/bittery-crypto.node
-COPY --from=js-builder --chown=10001:10001 /app/packages/crypto/napi/index.js ./node_modules/@bittery/crypto-napi/index.js
-COPY --from=js-builder --chown=10001:10001 /app/packages/crypto/napi/index.d.ts ./node_modules/@bittery/crypto-napi/index.d.ts
-COPY --from=js-builder --chown=10001:10001 /app/packages/crypto/napi/package.json ./node_modules/@bittery/crypto-napi/package.json
-
-# Copy database migrations
+COPY --from=builder --chown=10001:10001 /app/apps/server/target/release/bittery-server ./bittery-server
 COPY --chown=10001:10001 packages/db/src/migrations ./migrations
 
 ENV MIGRATIONS_FOLDER=/app/migrations
-ENV NAPI_RS_NATIVE_LIBRARY_PATH=/app/node_modules/@bittery/crypto-napi/bittery-crypto.node
-ENV NODE_ENV=production
+ENV PORT=3000
 
 USER 10001:10001
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget -q --spider http://localhost:3000/healthz || exit 1
+	CMD wget -q --spider http://localhost:3000/healthz || exit 1
 
 EXPOSE 3000
 
-CMD ["bun", "run", "dist/index.mjs"]
+CMD ["./bittery-server"]

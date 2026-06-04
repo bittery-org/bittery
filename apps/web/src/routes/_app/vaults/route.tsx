@@ -102,92 +102,92 @@ function VaultsLayout() {
 
 	return (
 		<VaultDndProvider>
-		<div className="flex min-h-0 flex-1 overflow-hidden">
-			{/* Desktop sidebar */}
-			<aside className="hidden w-52 shrink-0 flex-col border-r pt-11 lg:flex xl:pt-12">
-				<VaultNavSidebar
-					vaults={vaultKeys}
-					tags={tags}
-					currentVaultId={currentVaultId}
-					onNewVault={() => setIsCreateVaultDialogOpen(true)}
-					onEditVault={handleOpenEditVault}
-					onDeleteVault={handleOpenDeleteVault}
-				/>
-			</aside>
-
-			{/* Main content area */}
-			<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-				{/* Mobile header with sidebar toggle */}
-				<div className="flex h-10 shrink-0 items-center border-b pr-3 pl-12 lg:hidden">
-					<Button
-						variant="ghost"
-						size="sm"
-						className="h-8 w-8 p-0"
-						onClick={() => setIsSidebarOpen(true)}
-						aria-label={m.vaults_nav_sidebar_toggle()}
-					>
-						<VaultIcon className="h-4 w-4" />
-					</Button>
-				</div>
-
-				{/* Child routes render here */}
-				<div className="flex min-h-0 flex-1 overflow-hidden">
-					<Outlet />
-				</div>
-			</div>
-
-			{/* Mobile sidebar Sheet */}
-			<Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
-				<SheetContent side="left" className="w-64 p-0">
+			<div className="flex min-h-0 flex-1 overflow-hidden">
+				{/* Desktop sidebar */}
+				<aside className="hidden w-52 shrink-0 flex-col border-r pt-11 lg:flex xl:pt-12">
 					<VaultNavSidebar
 						vaults={vaultKeys}
 						tags={tags}
 						currentVaultId={currentVaultId}
-						onNewVault={() => {
-							setIsSidebarOpen(false);
-							setIsCreateVaultDialogOpen(true);
-						}}
-						onEditVault={(vault) => {
-							setIsSidebarOpen(false);
-							handleOpenEditVault(vault);
-						}}
-						onDeleteVault={(vault) => {
-							setIsSidebarOpen(false);
-							handleOpenDeleteVault(vault);
-						}}
-						onNavigate={() => setIsSidebarOpen(false)}
+						onNewVault={() => setIsCreateVaultDialogOpen(true)}
+						onEditVault={handleOpenEditVault}
+						onDeleteVault={handleOpenDeleteVault}
 					/>
-				</SheetContent>
-			</Sheet>
+				</aside>
 
-			{/* Vault Dialogs */}
-			<CreateVaultDialog
-				open={isCreateVaultDialogOpen}
-				onOpenChange={setIsCreateVaultDialogOpen}
-				onSubmit={handleCreateVault}
-			/>
+				{/* Main content area */}
+				<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+					{/* Mobile header with sidebar toggle */}
+					<div className="flex h-10 shrink-0 items-center border-b pr-3 pl-12 lg:hidden">
+						<Button
+							variant="ghost"
+							size="sm"
+							className="h-8 w-8 p-0"
+							onClick={() => setIsSidebarOpen(true)}
+							aria-label={m.vaults_nav_sidebar_toggle()}
+						>
+							<VaultIcon className="h-4 w-4" />
+						</Button>
+					</div>
 
-			<EditVaultDialog
-				key={editingVault?.id || "edit-vault-dialog"}
-				open={isEditVaultDialogOpen}
-				onOpenChange={(open) => {
-					setIsEditVaultDialogOpen(open);
-					if (!open) setEditingVault(null);
-				}}
-				vault={editingVault}
-				onSubmit={handleUpdateVault}
-			/>
+					{/* Child routes render here */}
+					<div className="flex min-h-0 flex-1 overflow-hidden">
+						<Outlet />
+					</div>
+				</div>
 
-			<DeleteVaultDialog
-				open={isDeleteVaultDialogOpen}
-				onOpenChange={(open) => {
-					setIsDeleteVaultDialogOpen(open);
-					if (!open) setDeletingVault(null);
-				}}
-				vault={deletingVault}
-				onConfirm={handleDeleteVault}
-			/>
-		</div>
+				{/* Mobile sidebar Sheet */}
+				<Sheet open={isSidebarOpen} onOpenChange={setIsSidebarOpen}>
+					<SheetContent side="left" className="w-64 p-0">
+						<VaultNavSidebar
+							vaults={vaultKeys}
+							tags={tags}
+							currentVaultId={currentVaultId}
+							onNewVault={() => {
+								setIsSidebarOpen(false);
+								setIsCreateVaultDialogOpen(true);
+							}}
+							onEditVault={(vault) => {
+								setIsSidebarOpen(false);
+								handleOpenEditVault(vault);
+							}}
+							onDeleteVault={(vault) => {
+								setIsSidebarOpen(false);
+								handleOpenDeleteVault(vault);
+							}}
+							onNavigate={() => setIsSidebarOpen(false)}
+						/>
+					</SheetContent>
+				</Sheet>
+
+				{/* Vault Dialogs */}
+				<CreateVaultDialog
+					open={isCreateVaultDialogOpen}
+					onOpenChange={setIsCreateVaultDialogOpen}
+					onSubmit={handleCreateVault}
+				/>
+
+				<EditVaultDialog
+					key={editingVault?.id || "edit-vault-dialog"}
+					open={isEditVaultDialogOpen}
+					onOpenChange={(open) => {
+						setIsEditVaultDialogOpen(open);
+						if (!open) setEditingVault(null);
+					}}
+					vault={editingVault}
+					onSubmit={handleUpdateVault}
+				/>
+
+				<DeleteVaultDialog
+					open={isDeleteVaultDialogOpen}
+					onOpenChange={(open) => {
+						setIsDeleteVaultDialogOpen(open);
+						if (!open) setDeletingVault(null);
+					}}
+					vault={deletingVault}
+					onConfirm={handleDeleteVault}
+				/>
+			</div>
 		</VaultDndProvider>
 	);
 }

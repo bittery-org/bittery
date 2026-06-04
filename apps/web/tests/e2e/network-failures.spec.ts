@@ -328,7 +328,7 @@ test.describe("API Error Responses", () => {
 		);
 
 		// Simulate 500 error on vault list
-		await networkSimulator.simulateTrpcFailure(
+		await networkSimulator.simulateRpcFailure(
 			"vault.list",
 			"INTERNAL_SERVER_ERROR",
 		);
@@ -364,7 +364,7 @@ test.describe("API Error Responses", () => {
 		);
 
 		// Simulate service unavailable
-		await networkSimulator.simulateTrpcFailure(
+		await networkSimulator.simulateRpcFailure(
 			"vault.list",
 			"SERVICE_UNAVAILABLE",
 		);
@@ -389,7 +389,7 @@ test.describe("API Error Responses", () => {
 		);
 
 		// Simulate rate limiting
-		await networkSimulator.simulateTrpcFailure("vault.list", "RATE_LIMITED");
+		await networkSimulator.simulateRpcFailure("vault.list", "RATE_LIMITED");
 
 		await page.goto("/vaults");
 
@@ -413,7 +413,7 @@ test.describe("API Error Responses", () => {
 		);
 
 		// Simulate unauthorized (session expired)
-		await networkSimulator.simulateTrpcFailure("vault.list", "UNAUTHORIZED");
+		await networkSimulator.simulateRpcFailure("vault.list", "UNAUTHORIZED");
 
 		await page.goto("/vaults");
 
@@ -464,7 +464,7 @@ test.describe("Connection Timeouts", () => {
 		);
 
 		// Simulate timeout
-		await networkSimulator.simulateTimeout("**/trpc/vault.list*", 60000);
+		await networkSimulator.simulateProcedureTimeout("vault.list", 60000);
 
 		await page.goto("/vaults");
 
@@ -512,7 +512,7 @@ test.describe("Connection Reset", () => {
 		);
 
 		// Simulate connection reset
-		await networkSimulator.simulateConnectionReset("**/trpc/vault.list*");
+		await networkSimulator.simulateProcedureConnectionReset("vault.list");
 
 		await page.goto("/vaults");
 

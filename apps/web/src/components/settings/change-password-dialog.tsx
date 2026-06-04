@@ -2,7 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
 	Dialog,
@@ -42,12 +42,12 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 	const [showCurrentPassword, setShowCurrentPassword] = useState(false);
 	const [showNewPassword, setShowNewPassword] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
-	const trpcClient = useTRPCClient();
-	const trpc = useTRPC();
+	const rpcClient = useRPCClient();
+	const rpc = useRPC();
 	const navigate = useNavigate();
 
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
-	const vaultListQuery = useQuery(trpc.vault.list.queryOptions());
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const vaultListQuery = useQuery(rpc.vault.list.queryOptions());
 
 	const changePasswordMutation = useMutation({
 		mutationFn: (input: {
@@ -58,7 +58,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				vaultId: string;
 				encryptedVaultKey: string;
 			}>;
-		}) => trpcClient.auth.changePassword.mutate(input),
+		}) => rpcClient.auth.changePassword.mutate(input),
 		onSuccess: () => {
 			toast.success(m.settings_change_password_dialog_toast_changed());
 			setOpen(false);

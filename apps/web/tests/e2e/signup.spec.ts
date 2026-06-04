@@ -416,7 +416,7 @@ test.describe("Signup with Network Failures", () => {
 		await bitteryPage.fillSignupForm(testUser);
 
 		// Simulate API error
-		await networkSimulator.simulateTrpcFailure(
+		await networkSimulator.simulateRpcFailure(
 			"auth.signup",
 			"INTERNAL_SERVER_ERROR",
 		);
@@ -424,7 +424,7 @@ test.describe("Signup with Network Failures", () => {
 		// Try to submit
 		await bitteryPage.submitSignup();
 
-		// Should show error toast (various possible error messages depending on how tRPC handles the simulated error)
+		// Should show error toast (exact wording depends on RPC error handling)
 		const toast = page
 			.locator("[data-sonner-toast]")
 			.filter({ hasText: /failed|error|internal|server|network|request/i })

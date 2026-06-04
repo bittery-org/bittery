@@ -1,15 +1,15 @@
 import { Link } from "@tanstack/react-router";
 import { BitteryLogo } from "@/components/bittery-logo";
+import { billingMarketingEnabled } from "@/lib/urls";
 
-const footerLinks = [
+const footerLinkGroups = [
 	{
 		title: "Product",
 		links: [
 			{ label: "Features", href: "/", hash: "features" },
 			{ label: "Pricing", href: "/", hash: "pricing" },
 			{ label: "Roadmap", href: "/roadmap" },
-			{ label: "Download", href: "/" },
-			{ label: "Changelog", href: "/" },
+			{ label: "Download", href: "/download" },
 		],
 	},
 	{
@@ -24,8 +24,6 @@ const footerLinks = [
 	{
 		title: "Company",
 		links: [
-			{ label: "About", href: "/about" },
-			{ label: "Blog", href: "/" },
 			{
 				label: "GitHub",
 				href: "https://github.com/bittery-org/bittery",
@@ -38,7 +36,7 @@ const footerLinks = [
 		title: "Legal",
 		links: [
 			{ label: "Privacy", href: "/privacy" },
-			{ label: "Terms", href: "/terms" },
+			{ label: "Imprint", href: "/imprint" },
 			{
 				label: "License",
 				href: "https://github.com/bittery-org/bittery/blob/main/LICENSE",
@@ -49,6 +47,17 @@ const footerLinks = [
 ];
 
 export function Footer() {
+	const footerLinks = footerLinkGroups
+		.map((group) =>
+			group.title === "Product" && !billingMarketingEnabled()
+				? {
+						...group,
+						links: group.links.filter((link) => link.label !== "Pricing"),
+					}
+				: group,
+		)
+		.filter((group) => group.links.length > 0);
+
 	return (
 		<footer className="border-border/60 border-t bg-muted/20">
 			<div className="mx-auto max-w-5xl px-4 py-12 sm:py-16">
@@ -56,7 +65,7 @@ export function Footer() {
 					<div className="col-span-2 md:col-span-1">
 						<BitteryLogo className="h-8 text-foreground" />
 						<p className="mt-3 max-w-50 text-muted-foreground text-xs leading-relaxed">
-							Open-source, zero-knowledge password manager for everyone.
+							Source-available, zero-knowledge password manager for everyone.
 						</p>
 					</div>
 

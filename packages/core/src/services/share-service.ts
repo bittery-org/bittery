@@ -5,7 +5,7 @@ import {
 import type { DecryptedItem } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
-import type { AccountResolver, DefaultTrpcClient } from "./account-resolver";
+import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
 
 export type ShareExpirationOption =
 	| "1hour"
@@ -62,7 +62,7 @@ export class ShareService {
 
 	async createShare(
 		input: CreateShareInput,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 	): Promise<CreateShareResult> {
 		const {
 			item,
@@ -140,7 +140,7 @@ export class ShareService {
 			isOneTimeUse,
 			expiresIn,
 			allowedEmails:
-				accessMode === "email-restricted" ? allowedEmails : undefined,
+				accessMode === "email-restricted" ? (allowedEmails ?? null) : null,
 			encryptedItemData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
 			encryptedShareKey: shareKeyEncrypted.ciphertext,

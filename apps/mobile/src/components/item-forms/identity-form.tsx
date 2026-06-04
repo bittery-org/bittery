@@ -1,6 +1,7 @@
 import { Input, Label, TextField } from "heroui-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { View } from "react-native";
+import { useI18n } from "@/providers/i18n-provider";
 
 export interface IdentityFormData {
 	firstName: string;
@@ -19,6 +20,7 @@ interface IdentityFormProps {
 
 export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
 	({ initialData }, ref) => {
+		const { m } = useI18n();
 		const [firstName, setFirstName] = useState(initialData?.firstName || "");
 		const [lastName, setLastName] = useState(initialData?.lastName || "");
 		const [email, setEmail] = useState(initialData?.email || "");
@@ -36,9 +38,9 @@ export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
 			<>
 				<View className="mb-4 flex-row gap-2">
 					<TextField className="flex-1">
-						<Label>First Name</Label>
+						<Label>{m.mob_form_identity_first_name_label()}</Label>
 						<Input
-							placeholder="First name"
+							placeholder={m.mob_form_identity_first_name_placeholder()}
 							value={firstName}
 							onChangeText={setFirstName}
 							autoCapitalize="words"
@@ -46,9 +48,9 @@ export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
 					</TextField>
 
 					<TextField className="flex-1">
-						<Label>Last Name</Label>
+						<Label>{m.mob_form_identity_last_name_label()}</Label>
 						<Input
-							placeholder="Last name"
+							placeholder={m.mob_form_identity_last_name_placeholder()}
 							value={lastName}
 							onChangeText={setLastName}
 							autoCapitalize="words"
@@ -57,9 +59,9 @@ export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
 				</View>
 
 				<TextField className="mb-4">
-					<Label>Email</Label>
+					<Label>{m.mob_form_identity_email_label()}</Label>
 					<Input
-						placeholder="email@example.com"
+						placeholder={m.mob_form_identity_email_placeholder()}
 						value={email}
 						onChangeText={setEmail}
 						autoCapitalize="none"

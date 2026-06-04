@@ -12,6 +12,7 @@ import {
 	View,
 } from "react-native";
 import { withUniwind } from "uniwind";
+import { useI18n } from "@/providers/i18n-provider";
 
 const StyledCopy = withUniwind(Copy);
 const StyledHistory = withUniwind(History);
@@ -50,6 +51,7 @@ export function PasswordHistorySheet({
 	onRestorePassword,
 	isRestoring = false,
 }: PasswordHistorySheetProps) {
+	const { m } = useI18n();
 	const sortedHistory = useMemo(() => {
 		return [...(passwordHistory ?? [])].sort((left, right) => {
 			const leftTs = Date.parse(left.changedAt);
@@ -77,15 +79,15 @@ export function PasswordHistorySheet({
 
 	const handleRestorePress = (password: string) => {
 		Alert.alert(
-			"Restore Password",
-			"Restore this password? The current password will be archived automatically.",
+			m.mob_password_history_restore_dialog_title(),
+			m.mob_password_history_restore_dialog_message(),
 			[
 				{
-					text: "Cancel",
+					text: m.mob_password_history_restore_dialog_cancel(),
 					style: "cancel",
 				},
 				{
-					text: "Restore",
+					text: m.mob_password_history_restore_dialog_confirm(),
 					style: "destructive",
 					onPress: () => {
 						void onRestorePassword(password);
@@ -118,13 +120,13 @@ export function PasswordHistorySheet({
 					</View>
 
 					<Text className="mb-4 text-muted text-sm">
-						View previous passwords and restore one when needed.
+						{m.mob_password_history_description()}
 					</Text>
 
 					{sortedHistory.length === 0 ? (
 						<View className="rounded-lg bg-card p-4">
 							<Text className="text-center text-muted text-sm">
-								No previous passwords saved yet.
+							{m.mob_password_history_empty()}
 							</Text>
 						</View>
 					) : (
@@ -156,7 +158,7 @@ export function PasswordHistorySheet({
 													}}
 												>
 													<StyledCopy size={16} className="text-current" />
-													<Button.Label>Copy</Button.Label>
+													<Button.Label>{m.mob_password_history_copy()}</Button.Label>
 												</Button>
 												<Button
 													variant={isCurrent ? "secondary" : "primary"}
@@ -177,10 +179,10 @@ export function PasswordHistorySheet({
 													/>
 													<Button.Label>
 														{isCurrent
-															? "Current"
+															? m.mob_password_history_current()
 															: isRestoring
-																? "Restoring..."
-																: "Restore"}
+																? m.mob_password_history_restoring()
+																: m.mob_password_history_restore()}
 													</Button.Label>
 												</Button>
 											</View>

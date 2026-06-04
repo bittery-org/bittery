@@ -2,7 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
 	Dialog,
@@ -41,12 +41,12 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 	const [currentPassword, setCurrentPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
-	const trpcClient = useTRPCClient();
-	const trpc = useTRPC();
+	const rpcClient = useRPCClient();
+	const rpc = useRPC();
 	const navigate = useNavigate();
 
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
-	const vaultListQuery = useQuery(trpc.vault.list.queryOptions());
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const vaultListQuery = useQuery(rpc.vault.list.queryOptions());
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -168,7 +168,7 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 			}
 
 			// 7. Send to server
-			await trpcClient.auth.updateEmail.mutate({
+			await rpcClient.auth.updateEmail.mutate({
 				newEmail: normalizedNewEmail,
 				srpSalt,
 				srpVerifier,

@@ -218,8 +218,8 @@ export function PlatformSection() {
 						transition={{ duration: 0.5, delay: 0.25 }}
 					>
 						{/* Layered gradient glow behind the mockup */}
-						<div className="absolute -inset-3 -z-10 rounded-3xl bg-linear-to-br from-primary/15 via-primary/4 to-chart-4/12 blur-2xl" />
-						<div className="absolute -inset-1 -z-10 rounded-2xl bg-linear-to-tr from-chart-4/10 via-transparent to-primary/10 blur-md" />
+						<div className="absolute -inset-3 -z-10 rounded-3xl bg-linear-to-br from-primary/15 via-primary/4 to-chart-4/12 blur-2xl dark:from-primary/6 dark:via-primary/[0.02] dark:to-chart-4/5" />
+						<div className="absolute -inset-1 -z-10 rounded-2xl bg-linear-to-tr from-chart-4/10 via-transparent to-primary/10 blur-md dark:from-chart-4/4 dark:to-primary/4" />
 
 						<div className="relative flex h-75 items-center justify-center rounded-2xl border border-border/40 bg-card/30 p-4 backdrop-blur-sm sm:h-100 sm:p-6 lg:h-120 lg:p-8">
 							{/* Active platform screenshot with crossfade */}

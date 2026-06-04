@@ -41,6 +41,9 @@ services:
       postgres:
         condition: service_healthy
         required: false
+      valkey:
+        condition: service_healthy
+        required: false
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/healthz"]
       interval: 10s

@@ -1,3 +1,5 @@
+import { billingMarketingEnabled } from "@/lib/urls";
+
 export interface CategoryMeta {
 	slug: string;
 	title: string;
@@ -39,8 +41,19 @@ export const categories: CategoryMeta[] = [
 		icon: "CreditCard",
 		order: 4,
 	},
+	{
+		slug: "self-hosting",
+		title: "Self-Hosting",
+		description:
+			"Deploy Bittery on your own infrastructure with Docker, Railway, or any container platform.",
+		icon: "Server",
+		order: 5,
+	},
 ];
 
 export function getCategoryBySlug(slug: string): CategoryMeta | undefined {
+	if (slug === "billing" && !billingMarketingEnabled()) {
+		return undefined;
+	}
 	return categories.find((c) => c.slug === slug);
 }

@@ -29,10 +29,10 @@ export {
 	generateRsaKeyPair,
 	// Secret Key
 	generateSecretKey,
+	// TOTP
+	generateTotp,
 	getSecretKeyHint,
 	rsaDecrypt,
 	rsaEncrypt,
 	validateSecretKey,
-	// TOTP
-	generateTotp,
 } from "./BitteryCryptoModule";

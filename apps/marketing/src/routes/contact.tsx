@@ -11,7 +11,6 @@ import {
 	Shield,
 } from "lucide-react";
 import { motion } from "motion/react";
-import { Layout } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
@@ -90,13 +89,13 @@ const faqs = [
 	{
 		question: "Can I contribute to Bittery?",
 		answer:
-			"Absolutely! Bittery is open source. Check out our GitHub repository for contribution guidelines, or open a discussion to suggest ideas.",
+			"Absolutely. Bittery's source code is public under FSL. Check out our GitHub repository for contribution guidelines, or open a discussion to suggest ideas.",
 	},
 ];
 
 function ContactPage() {
 	return (
-		<Layout>
+		<>
 			{/* ─── Hero ─────────────────────────────────────────────── */}
 			<section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
 				{/* Gradient background accent */}
@@ -185,22 +184,13 @@ function ContactPage() {
 							<div className="md:col-span-2">
 								<div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 font-medium text-primary text-xs">
 									<Building2 className="size-3.5" />
-									qrawall GmbH
+									Bittery Software
 								</div>
 								<h2 className="font-display text-2xl tracking-tight sm:text-3xl">
 									Built and maintained in Germany
 								</h2>
 								<p className="mt-4 max-w-lg text-muted-foreground text-sm leading-relaxed sm:text-base">
-									Bittery is developed by{" "}
-									<a
-										href="https://qrawall.com/"
-										target="_blank"
-										rel="noopener noreferrer"
-										className="font-medium text-foreground underline decoration-primary/30 underline-offset-2 transition-colors hover:decoration-primary/60"
-									>
-										qrawall GmbH
-									</a>
-									, based in Germany. We operate under strict EU data protection
+									We operate under strict EU data protection
 									regulations including GDPR, ensuring your privacy is protected
 									by law — not just by promise.
 								</p>
@@ -240,12 +230,12 @@ function ContactPage() {
 											Website
 										</p>
 										<a
-											href="https://qrawall.com/"
+											href="https://bittery.com/"
 											target="_blank"
 											rel="noopener noreferrer"
 											className="text-primary text-sm transition-colors hover:text-primary/80"
 										>
-											qrawall.com
+											bittery.com
 										</a>
 									</div>
 								</div>
@@ -342,6 +332,6 @@ function ContactPage() {
 					</div>
 				</motion.div>
 			</section>
-		</Layout>
+		</>
 	);
 }

@@ -13,6 +13,7 @@ import { useCallback, useMemo, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
+import { useI18n } from "@/providers/i18n-provider";
 import { storage } from "@/lib/storage";
 
 type MultiAccountItem = DecryptedItemWithContext & {
@@ -114,6 +115,7 @@ function ItemListRow({
 	isAllAccountsMode: boolean;
 	onClick: () => void;
 }) {
+	const { m } = useI18n();
 	const title = item.title;
 	const subtitle = item.username || item.url;
 	const passkeyCount =
@@ -136,13 +138,13 @@ function ItemListRow({
 					<div className="flex items-center gap-1.5">
 						<span className="truncate font-medium text-sm">{title}</span>
 						{item.category === "login" && item.totpSecret && (
-							<span title="Has 2FA">
+							<span title={m.ext_vault_has_2fa()}>
 								<IconMobileOutlineDuo18 className="size-3 shrink-0" />
 							</span>
 						)}
 						{passkeyCount > 0 && (
 							<span
-								title={`${passkeyCount} passkey${passkeyCount === 1 ? "" : "s"}`}
+								title={passkeyCount === 1 ? m.ext_vault_passkey_count_single({ count: passkeyCount }) : m.ext_vault_passkey_count_plural({ count: passkeyCount })}
 								className={cn(
 									"inline-flex items-center",
 									isSelected
@@ -182,6 +184,7 @@ function ItemListRow({
 export function VaultPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const { m } = useI18n();
 	const [searchQuery, setSearchQuery] = useState("");
 	const [manualSelectionByScope, setManualSelectionByScope] = useState<
 		Record<string, string>
@@ -243,7 +246,7 @@ export function VaultPage() {
 
 			//   window.open(DESKTOP_APP_URL, "_blank", "noopener,noreferrer");
 			toast.error(
-				"Couldn't open the desktop app directly. Opening the web fallback.",
+				m.ext_vault_toast_desktop_fallback(),
 			);
 		}
 	};
@@ -346,13 +349,13 @@ export function VaultPage() {
 							size="icon"
 							variant="ghost"
 							onClick={() => navigate({ to: "/settings" })}
-							title="Settings"
+							title={m.ext_vault_settings()}
 						>
 							<IconGear3OutlineDuo18 className="size-[18px]" />
 						</Button>
 						<Button size="sm" onClick={handleOpenDesktopApp}>
 							<IconPlusOutlineDuo18 className="mr-2 size-4" />
-							New Item
+							{m.ext_vault_new_item()}
 						</Button>
 					</div>
 				</div>
@@ -367,7 +370,7 @@ export function VaultPage() {
 								size={16}
 							/>
 							<Input
-								placeholder="Search items..."
+								placeholder={m.ext_vault_search_placeholder()}
 								value={searchQuery}
 								onChange={(e) => setSearchQuery(e.target.value)}
 								className="h-9 pl-9"
@@ -385,12 +388,12 @@ export function VaultPage() {
 						) : sortedItems.length === 0 ? (
 							<div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
 								<div className="font-semibold">
-									{searchQuery ? "No matches found" : "No items yet"}
+									{searchQuery ? m.ext_vault_no_matches() : m.ext_vault_no_items()}
 								</div>
 								<p className="text-muted-foreground text-sm">
 									{searchQuery
-										? "Try a different search term."
-										: "Create your first item in the desktop app."}
+										? m.ext_vault_no_matches_hint()
+										: m.ext_vault_no_items_hint()}
 								</p>
 								{!searchQuery && (
 									<Button
@@ -398,7 +401,7 @@ export function VaultPage() {
 										variant="outline"
 										onClick={handleOpenDesktopApp}
 									>
-										Open Desktop App
+										{m.ext_vault_open_desktop()}
 									</Button>
 								)}
 							</div>
@@ -407,7 +410,7 @@ export function VaultPage() {
 								{favoriteItems.length > 0 && (
 									<>
 										<div className="mb-2 px-2 font-semibold text-muted-foreground text-xs uppercase">
-											Favorites
+											{m.ext_vault_favorites()}
 										</div>
 										{favoriteItems.map((item) => (
 											<ItemListRow
@@ -419,7 +422,7 @@ export function VaultPage() {
 											/>
 										))}
 										<div className="mt-4 mb-2 px-2 font-semibold text-muted-foreground text-xs uppercase">
-											All Items
+											{m.ext_vault_all_items()}
 										</div>
 									</>
 								)}
@@ -452,9 +455,9 @@ export function VaultPage() {
 							/>
 						) : (
 							<div className="flex h-full flex-col items-center justify-center gap-3 text-center">
-								<div className="font-semibold">Select an item</div>
+								<div className="font-semibold">{m.ext_vault_select_item()}</div>
 								<p className="text-muted-foreground text-sm">
-									Choose an item from the list to see its details.
+									{m.ext_vault_select_item_hint()}
 								</p>
 							</div>
 						)}

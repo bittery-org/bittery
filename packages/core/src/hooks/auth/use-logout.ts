@@ -4,11 +4,11 @@
  * React hook for logging out and clearing session data.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
-	clearAccountTrpcClient,
-	clearTrpcClientCache,
-} from "@bittery/shared/trpc-client-factory";
+	clearAccountRpcClient,
+	clearRpcClientCache,
+} from "@bittery/shared/rpc-client-factory";
 import {
 	type UseMutationResult,
 	useMutation,
@@ -78,7 +78,7 @@ export interface LogoutInput {
 export function useLogout(
 	options: UseLogoutOptions = {},
 ): UseMutationResult<void, Error, LogoutInput> {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const storage = usePlatformStorage();
 	const queryClient = useQueryClient();
 
@@ -89,7 +89,7 @@ export function useLogout(
 			// Notify server about logout (invalidate session)
 			if (notifyServer) {
 				try {
-					await trpcClient.auth.logout.mutate();
+					await rpcClient.auth.logout.mutate();
 				} catch {
 					// Ignore server errors during logout
 					// The user still wants to clear local data
@@ -99,17 +99,17 @@ export function useLogout(
 			// Clear local session data
 			await clearSession(storage, email, clearSecretKey);
 
-			// Clear tRPC client cache
+			// Clear account RPC client cache
 			// If email is provided, clear only that account's client
 			// Otherwise, clear all clients (full logout)
 			if (email) {
 				const authToken = await storage.getAuthToken(email);
 				const serverUrl = await storage.getServerUrl(email);
 				if (authToken && serverUrl) {
-					clearAccountTrpcClient(authToken, serverUrl);
+					clearAccountRpcClient(authToken, serverUrl);
 				}
 			} else {
-				clearTrpcClientCache();
+				clearRpcClientCache();
 			}
 		},
 		onSuccess: async () => {

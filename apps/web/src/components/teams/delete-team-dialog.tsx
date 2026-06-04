@@ -1,4 +1,4 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -29,13 +29,13 @@ interface DeleteTeamDialogProps {
 export function DeleteTeamDialog({ teamId, teamName }: DeleteTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [confirmText, setConfirmText] = useState("");
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const { m } = useI18n();
 
 	const deleteMutation = useMutation({
-		mutationFn: () => trpcClient.team.delete.mutate({ teamId }),
+		mutationFn: () => rpcClient.team.delete.mutate({ teamId }),
 		onSuccess: async () => {
 			toast.success(m.team_delete_dialog_toast_deleted());
 			await invalidator.invalidateTeam();

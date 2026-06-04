@@ -7,6 +7,7 @@ import { useCallback, useMemo, useState } from "react";
 import { FlatList, RefreshControl, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { useI18n } from "@/providers/i18n-provider";
 import { VaultListItem } from "../../src/components/vault-list-item";
 
 // Create styled icon components
@@ -23,6 +24,7 @@ type VaultSection =
 	  };
 
 export default function VaultsScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const { toast } = useToast();
 	const [refreshing, setRefreshing] = useState(false);
@@ -43,16 +45,18 @@ export default function VaultsScreen() {
 		// TODO: Navigate to create vault screen when implemented
 		toast.show({
 			variant: "default",
-			label: "Create Vault",
-			description:
-				"Vault creation is coming soon. For now, create vaults from the web app.",
+			label: m.mob_vaults_toast_create_title(),
+			description: m.mob_vaults_toast_create_description(),
 			placement: "bottom",
 		});
 	};
 
-	const handleVaultPress = useCallback((vaultId: string) => {
-		router.push(`/(vault)/${vaultId}`);
-	}, [router]);
+	const handleVaultPress = useCallback(
+		(vaultId: string) => {
+			router.push(`/(vault)/${vaultId}`);
+		},
+		[router],
+	);
 
 	const { personalVaults, teamVaults, accountVaultsByTeamName } =
 		useMemo(() => {
@@ -85,13 +89,16 @@ export default function VaultsScreen() {
 			};
 		}, [vaultKeys]);
 
-	const renderSectionHeader = useCallback((title: string, count: number) => (
-		<View className="flex-row items-center px-4 pt-4 pb-2">
-			<Card.Title className="font-semibold text-muted text-xs uppercase tracking-wide">
-				{title} ({count})
-			</Card.Title>
-		</View>
-	), []);
+	const renderSectionHeader = useCallback(
+		(title: string, count: number) => (
+			<View className="flex-row items-center px-4 pt-4 pb-2">
+				<Card.Title className="font-semibold text-muted text-xs uppercase tracking-wide">
+					{title} ({count})
+				</Card.Title>
+			</View>
+		),
+		[],
+	);
 
 	const sections = useMemo(() => {
 		if (!vaultKeys || vaultKeys.length === 0) {
@@ -120,7 +127,7 @@ export default function VaultsScreen() {
 			if (personalVaults.length > 0) {
 				nextSections.push({
 					type: "header",
-					title: "Personal Vaults",
+					title: m.mob_vaults_section_personal(),
 					count: personalVaults.length,
 				});
 				for (let i = 0; i < personalVaults.length; i++) {
@@ -136,7 +143,7 @@ export default function VaultsScreen() {
 			if (teamVaults.length > 0) {
 				nextSections.push({
 					type: "header",
-					title: "Team Vaults",
+					title: m.mob_vaults_section_team(),
 					count: teamVaults.length,
 				});
 				for (let i = 0; i < teamVaults.length; i++) {
@@ -157,6 +164,7 @@ export default function VaultsScreen() {
 		accountVaultsByTeamName,
 		personalVaults,
 		teamVaults,
+		m,
 	]);
 
 	const renderSection = useCallback(
@@ -202,10 +210,10 @@ export default function VaultsScreen() {
 					>
 						<StyledShield size={48} className="mb-4 text-muted" />
 						<Card.Title className="mb-2 text-center text-lg">
-							No vaults yet
+							{m.mob_vaults_empty_title()}
 						</Card.Title>
 						<Card.Description className="text-center">
-							Create a vault to start storing your passwords
+							{m.mob_vaults_empty_description()}
 						</Card.Description>
 					</Card>
 				</View>

@@ -20,7 +20,7 @@ import type {
 import type {
 	AccountInfo,
 	AccountResolver,
-	DefaultTrpcClient,
+	DefaultRpcClient,
 } from "./account-resolver";
 import { buildItemEncryptionContext } from "./encryption-context";
 
@@ -147,6 +147,38 @@ type DecryptableItemRecord = {
 	version?: number;
 	lastModifiedBy?: string | null;
 };
+
+type RpcVaultSummary = {
+	id: string;
+	name: string;
+	vaultType: string;
+	icon: string | null;
+	imageUrl: string | null;
+} | null;
+
+function normalizeVaultSummary(
+	vault: RpcVaultSummary,
+	vaultId: string,
+): RawEncryptedItemWithVault["vault"] {
+	return {
+		id: vault?.id ?? vaultId,
+		name: vault?.name ?? "Unknown Vault",
+		type: vault?.vaultType ?? "personal",
+		icon: vault?.icon ?? null,
+		imageUrl: vault?.imageUrl ?? null,
+	};
+}
+
+function normalizeRawItemWithVault<
+	TItem extends RawEncryptedItem & {
+		vault: RpcVaultSummary;
+	},
+>(item: TItem): RawEncryptedItemWithVault {
+	return {
+		...item,
+		vault: normalizeVaultSummary(item.vault, item.vaultId),
+	};
+}
 
 interface ItemServiceDeps {
 	storage: IStorageAdapter;
@@ -403,10 +435,10 @@ export class ItemService {
 	}
 
 	private async fetchBootstrapItems(
-		client: DefaultTrpcClient,
+		client: DefaultRpcClient,
 	): Promise<RawEncryptedItemWithVault[]> {
 		const allItems: RawEncryptedItemWithVault[] = [];
-		let cursor: string | undefined;
+		let cursor: string | null = null;
 
 		while (true) {
 			const page = await client.sync.bootstrapItems.query({
@@ -414,12 +446,14 @@ export class ItemService {
 				limit: 500,
 			});
 
-			allItems.push(...(page.items as RawEncryptedItemWithVault[]));
+			allItems.push(
+				...page.items.map((item) => normalizeRawItemWithVault(item)),
+			);
 			if (!page.hasMore || !page.nextCursor) {
 				break;
 			}
 
-			cursor = page.nextCursor;
+			cursor = page.nextCursor ?? null;
 		}
 
 		return allItems;
@@ -448,7 +482,7 @@ export class ItemService {
 							false,
 						);
 					} else {
-						rawItems = await this.fetchBootstrapItems(account.trpcClient);
+						rawItems = await this.fetchBootstrapItems(account.rpcClient);
 						const cachedItems = this.toCachedItems(rawItems, account);
 						const cachedVaults = this.toCachedVaults(rawItems, account);
 						await Promise.all([
@@ -592,12 +626,12 @@ export class ItemService {
 					updatedAt: item.updatedAt,
 				}));
 			} else {
-				rawItems = await ownerAccount.trpcClient.vault.listItems.query({
+				rawItems = await ownerAccount.rpcClient.vault.listItems.query({
 					vaultId,
 				});
 			}
 		} else {
-			rawItems = await ownerAccount.trpcClient.vault.listItems.query({
+			rawItems = await ownerAccount.rpcClient.vault.listItems.query({
 				vaultId,
 			});
 		}
@@ -653,7 +687,7 @@ export class ItemService {
 
 	async fetchAndDecryptItem(
 		itemId: string,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 		accountEmail?: string,
 	): Promise<FetchDecryptedItemResult> {
 		if (!itemId) {
@@ -753,12 +787,14 @@ export class ItemService {
 								true,
 							);
 						} else {
-							rawItems =
-								await account.trpcClient.vault.listAllDeletedItems.query();
+							rawItems = (
+								await account.rpcClient.vault.listAllDeletedItems.query()
+							).map((item) => normalizeRawItemWithVault(item));
 						}
 					} else {
-						rawItems =
-							await account.trpcClient.vault.listAllDeletedItems.query();
+						rawItems = (
+							await account.rpcClient.vault.listAllDeletedItems.query()
+						).map((item) => normalizeRawItemWithVault(item));
 					}
 
 					const vaultKeyCache = new Map<string, Uint8Array>();
@@ -853,7 +889,7 @@ export class ItemService {
 
 	async createItem(
 		input: CreateItemInput,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 	): Promise<CreateItemResult> {
 		const vaultKey = await this.getVaultKey(input.vaultId, input.accountEmail);
 		if (!vaultKey) {
@@ -887,6 +923,7 @@ export class ItemService {
 			encryptedData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
 			encryptionAlgorithm: encryptedData.algorithm,
+			clientId: null,
 		})) as { itemId?: string; id?: string };
 
 		const fallbackId =
@@ -908,7 +945,7 @@ export class ItemService {
 
 	async updateItem(
 		input: UpdateItemInput,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 	): Promise<UpdateItemResult> {
 		const vaultKey = await this.getVaultKey(input.vaultId, input.accountEmail);
 		if (!vaultKey) {
@@ -962,6 +999,8 @@ export class ItemService {
 			encryptedData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
 			encryptionAlgorithm: encryptedData.algorithm,
+			expectedVersion: rawItem?.version ?? null,
+			clientId: null,
 		});
 
 		return { _encryptedData: encryptedData, _accountEmail: input.accountEmail };
@@ -969,7 +1008,7 @@ export class ItemService {
 
 	async moveItem(
 		input: MoveItemInput,
-		defaultClient: DefaultTrpcClient,
+		defaultClient: DefaultRpcClient,
 	): Promise<MoveItemResult> {
 		const sourceAccountEmail = input.sourceAccountEmail;
 		let targetAccountEmail = input.targetAccountEmail ?? sourceAccountEmail;
@@ -1052,6 +1091,7 @@ export class ItemService {
 				encryptedData: encryptedData.ciphertext,
 				encryptionIv: encryptedData.iv,
 				encryptionAlgorithm: encryptedData.algorithm,
+				clientId: null,
 			})) as {
 				itemId?: string;
 				id?: string;
@@ -1074,9 +1114,13 @@ export class ItemService {
 					defaultClient,
 					sourceAccountEmail,
 				);
-				await sourceClient.vault.deleteItem.mutate({ itemId: input.itemId });
+				await sourceClient.vault.deleteItem.mutate({
+					itemId: input.itemId,
+					clientId: null,
+				});
 				await sourceClient.vault.permanentlyDeleteItem.mutate({
 					itemId: input.itemId,
+					clientId: null,
 				});
 			} catch (error) {
 				console.error(
@@ -1108,6 +1152,7 @@ export class ItemService {
 			encryptedData: encryptedData.ciphertext,
 			encryptionIv: encryptedData.iv,
 			encryptionAlgorithm: encryptedData.algorithm,
+			clientId: null,
 		});
 
 		return {

@@ -1,105 +1,20 @@
-import { Quote } from "lucide-react";
+import { MessageSquare, Quote } from "lucide-react";
 import { motion } from "motion/react";
 
-const row1 = [
-	{
-		quote:
-			"Finally a password manager that doesn't feel like it was designed by engineers for engineers. My whole family uses it now.",
-		name: "Sarah Mitchell",
-		role: "Product Designer",
-		avatar: "SM",
-		color: "bg-pink-500",
-	},
-	{
-		quote:
-			"I self-host everything, and Bittery made it incredibly easy to set up. Docker compose and done. The sync just works.",
-		name: "James Kim",
-		role: "Software Engineer",
-		avatar: "JK",
-		color: "bg-blue-500",
-	},
-	{
-		quote:
-			"Set up our whole team in 10 minutes. Shared vaults are a game-changer for credentials we all need access to.",
-		name: "Lisa Torres",
-		role: "Startup Founder",
-		avatar: "LT",
-		color: "bg-emerald-500",
-	},
-	{
-		quote:
-			"I've reviewed the source code. The cryptographic implementation is solid and follows best practices. Refreshing transparency.",
-		name: "Marcus Reed",
-		role: "Security Researcher",
-		avatar: "MR",
-		color: "bg-amber-500",
-	},
-	{
-		quote:
-			"Switching from 1Password was seamless. Imported everything in under a minute and the apps feel just as polished.",
-		name: "Rachel Chen",
-		role: "Product Manager",
-		avatar: "RC",
-		color: "bg-indigo-500",
-	},
-];
+// Add real testimonials here once you have them.
+// When both arrays are empty the section shows a "coming soon" empty state.
+const row1: Testimonial[] = [];
+const row2: Testimonial[] = [];
 
-const row2 = [
-	{
-		quote:
-			"I used to reuse the same password everywhere. Bittery made it painless to fix that — the browser extension fills everything automatically.",
-		name: "Emma Walsh",
-		role: "Teacher",
-		avatar: "EW",
-		color: "bg-violet-500",
-	},
-	{
-		quote:
-			"The offline mode is perfect for when I'm traveling. Access my passwords on planes, in tunnels, wherever.",
-		name: "David Liu",
-		role: "Freelance Photographer",
-		avatar: "DL",
-		color: "bg-teal-500",
-	},
-	{
-		quote:
-			"We rolled Bittery out to 200+ employees. The admin controls and SSO integration made it a smooth transition.",
-		name: "Tom Anderson",
-		role: "IT Director",
-		avatar: "TA",
-		color: "bg-orange-500",
-	},
-	{
-		quote:
-			"Beautiful UI, fast autofill, and I know my data is actually private. What more could you want?",
-		name: "Nina Patel",
-		role: "UX Designer",
-		avatar: "NP",
-		color: "bg-rose-500",
-	},
-	{
-		quote:
-			"The CLI tool is a game-changer for managing secrets in CI/CD pipelines. Fits perfectly into our dev workflow.",
-		name: "Alex Rivera",
-		role: "DevOps Engineer",
-		avatar: "AR",
-		color: "bg-cyan-500",
-	},
-];
-
-function TestimonialCard({
-	quote,
-	name,
-	role,
-	avatar,
-	color,
-}: {
+type Testimonial = {
 	quote: string;
 	name: string;
 	role: string;
 	avatar: string;
 	color: string;
-}) {
+};
+
+function TestimonialCard({ quote, name, role, avatar, color }: Testimonial) {
 	return (
 		<div className="flex w-[320px] shrink-0 flex-col rounded-2xl border border-border/60 bg-card p-5 sm:w-[360px]">
 			<Quote className="mb-3 size-4 shrink-0 text-primary/25" />
@@ -127,7 +42,7 @@ function MarqueeRow({
 	items,
 	reverse = false,
 }: {
-	items: typeof row1;
+	items: Testimonial[];
 	reverse?: boolean;
 }) {
 	const doubled = [...items, ...items];
@@ -146,7 +61,48 @@ function MarqueeRow({
 	);
 }
 
+const PLACEHOLDER_QUOTES = [
+	"Your experience with Bittery could be here.",
+	"Be the first to share how Bittery helped you.",
+	"Early access users share their stories here.",
+];
+
+function EmptyState() {
+	return (
+		<div className="mx-auto max-w-5xl px-4">
+			<div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+				{PLACEHOLDER_QUOTES.map((text, i) => (
+					<div
+						key={i}
+						className="flex flex-col rounded-2xl border border-dashed border-border bg-card p-6"
+					>
+						<Quote className="mb-3 size-4 shrink-0 text-primary/40" />
+						<p className="flex-1 text-muted-foreground/70 text-sm leading-relaxed italic">
+							"{text}"
+						</p>
+						<div className="mt-4 flex items-center gap-3 border-border/60 border-t pt-4">
+							<div className="size-8 animate-pulse rounded-full bg-muted/60 shrink-0" />
+							<div className="space-y-1.5">
+								<div className="h-2 w-20 animate-pulse rounded-full bg-muted/60" />
+								<div className="h-2 w-14 animate-pulse rounded-full bg-muted/50" />
+							</div>
+						</div>
+					</div>
+				))}
+			</div>
+			<div className="mt-8 text-center">
+				<div className="inline-flex items-center gap-2 rounded-full border border-primary/25 bg-primary/8 px-4 py-2 font-medium text-primary/80 text-sm">
+					<MessageSquare className="size-3.5" />
+					Reviews from early users will appear here
+				</div>
+			</div>
+		</div>
+	);
+}
+
 export function Testimonials() {
+	const hasTestimonials = row1.length > 0 || row2.length > 0;
+
 	return (
 		<section className="overflow-hidden py-20 sm:py-28">
 			<motion.div
@@ -165,10 +121,14 @@ export function Testimonials() {
 				</p>
 			</motion.div>
 
-			<div className="space-y-4">
-				<MarqueeRow items={row1} />
-				<MarqueeRow items={row2} reverse />
-			</div>
+			{hasTestimonials ? (
+				<div className="space-y-4">
+					<MarqueeRow items={row1} />
+					<MarqueeRow items={row2} reverse />
+				</div>
+			) : (
+				<EmptyState />
+			)}
 		</section>
 	);
 }

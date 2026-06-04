@@ -1,4 +1,5 @@
 import { type CategoryMeta, categories } from "@/content/docs/_categories";
+import { billingMarketingEnabled } from "@/lib/urls";
 
 export interface ArticleFrontmatter {
 	title: string;
@@ -61,22 +62,41 @@ function buildArticles(): ArticleEntry[] {
 
 const articles = buildArticles();
 
+function isBillingArticle(article: ArticleEntry): boolean {
+	return article.category === "billing" || article.slug.startsWith("billing/");
+}
+
+function getVisibleArticles(): ArticleEntry[] {
+	if (billingMarketingEnabled()) {
+		return articles;
+	}
+	return articles.filter((article) => !isBillingArticle(article));
+}
+
+function getVisibleCategories(): CategoryMeta[] {
+	if (billingMarketingEnabled()) {
+		return categories;
+	}
+	return categories.filter((category) => category.slug !== "billing");
+}
+
 export function getAllArticles(): ArticleEntry[] {
-	return articles;
+	return getVisibleArticles();
 }
 
 export function getArticleBySlug(slug: string): ArticleEntry | undefined {
-	return articles.find((a) => a.slug === slug);
+	return getVisibleArticles().find((a) => a.slug === slug);
 }
 
 export function getArticlesByCategory(categorySlug: string): ArticleEntry[] {
-	return articles.filter((a) => a.category === categorySlug);
+	return getVisibleArticles().filter((a) => a.category === categorySlug);
 }
 
 export function getCategories(): (CategoryMeta & { articleCount: number })[] {
-	return categories.map((cat) => ({
+	const visibleArticles = getVisibleArticles();
+	return getVisibleCategories().map((cat) => ({
 		...cat,
-		articleCount: articles.filter((a) => a.category === cat.slug).length,
+		articleCount: visibleArticles.filter((a) => a.category === cat.slug).length,
 	}));
 }
 
@@ -88,7 +108,7 @@ export function searchArticles(query: string): ArticleEntry[] {
 		.filter((t) => t.length > 1);
 	if (terms.length === 0) return [];
 
-	return articles
+	return getVisibleArticles()
 		.map((article) => {
 			const haystack =
 				`${article.frontmatter.title} ${article.frontmatter.description} ${article.frontmatter.category}`.toLowerCase();

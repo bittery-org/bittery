@@ -34,16 +34,16 @@ export function useItemListFilters<TItem extends ItemListFilterable>({
 	initialSortDirection = "desc",
 }: UseItemListFiltersOptions<TItem>) {
 	const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
-	const [categoryFilter, setCategoryFilter] =
-		useState<ItemListCategoryFilter>(initialCategoryFilter);
-	const [sortField, setSortField] = useState<ItemListSortField>(initialSortField);
+	const [categoryFilter, setCategoryFilter] = useState<ItemListCategoryFilter>(
+		initialCategoryFilter,
+	);
+	const [sortField, setSortField] =
+		useState<ItemListSortField>(initialSortField);
 	const [sortDirection, setSortDirection] =
 		useState<ItemListSortDirection>(initialSortDirection);
 
 	const filteredItems = useMemo(() => {
-
-        console.log('filtering items');
-        
+		console.log("filtering items");
 
 		let result = [...items];
 

@@ -245,14 +245,30 @@ function DeviceSetupDialogContent({
 								/>
 							</div>
 							<ol className="space-y-1 text-left text-muted-foreground text-xs">
-								<li>1. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_1()}</li>
-								<li>2. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_2()}</li>
-								<li>3. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_3()}</li>
-								<li>4. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_4()}</li>
-								<li>5. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_5()}</li>
+								<li>
+									1.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_1()}
+								</li>
+								<li>
+									2.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_2()}
+								</li>
+								<li>
+									3.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_3()}
+								</li>
+								<li>
+									4.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_4()}
+								</li>
+								<li>
+									5.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_5()}
+								</li>
 							</ol>
 						</div>
-					) : setupPreview.errorKey === "vaults_sidebar_account_switcher_device_setup_dialog_error_no_secret_key" ? (
+					) : setupPreview.errorKey ===
+						"vaults_sidebar_account_switcher_device_setup_dialog_error_no_secret_key" ? (
 						<p className="text-center text-muted-foreground text-sm">
 							{m.vaults_sidebar_account_switcher_device_setup_dialog_no_secret_key_guidance()}
 						</p>

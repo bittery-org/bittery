@@ -1,10 +1,11 @@
 import { Link, useLocation } from "@tanstack/react-router";
 import { Menu, Moon, Sun, X } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { BitteryLogo } from "@/components/bittery-logo";
 import { Button } from "@/components/ui/button";
-import { signupUrl } from "@/lib/urls";
+import { ThemeContext } from "@/lib/theme-context";
+import { billingMarketingEnabled, signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
 interface NavLink {
@@ -15,25 +16,36 @@ interface NavLink {
 	isExternal?: boolean;
 }
 
-const navLinks: NavLink[] = [
+const baseNavLinks: NavLink[] = [
 	{ label: "Features", href: "/", hash: "features", sectionId: "features" },
-	{ label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" },
 	{ label: "FAQ", href: "/", hash: "faq", sectionId: "faq" },
+	{ label: "Download", href: "/download", sectionId: null },
 	{ label: "Docs", href: "/docs", sectionId: null },
-	{
-		label: "GitHub",
-		href: "https://github.com/bittery-org/bittery",
-		sectionId: null,
-		isExternal: true,
-	},
 ];
 
-const sectionIds = navLinks.map((l) => l.sectionId).filter(Boolean) as string[];
+function getNavLinks(): NavLink[] {
+	const billingEnabled = billingMarketingEnabled();
+	return [
+		{ label: "Features", href: "/", hash: "features", sectionId: "features" },
+		billingEnabled
+			? { label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" }
+			: { label: "Waitlist", href: "/", hash: "waitlist", sectionId: "waitlist" },
+		...baseNavLinks.slice(1),
+	];
+}
+
+const sectionIds = ["features", "pricing", "waitlist", "faq"];
 
 function useActiveSection() {
 	const [active, setActive] = useState<string | null>(null);
+	const { pathname } = useLocation();
 
 	useEffect(() => {
+		if (pathname !== "/") {
+			setActive(null);
+			return;
+		}
+
 		const observers: IntersectionObserver[] = [];
 		const visibleSections = new Map<string, number>();
 
@@ -76,23 +88,22 @@ function useActiveSection() {
 				observer.disconnect();
 			}
 		};
-	}, []);
+	}, [pathname]);
 
 	return active;
 }
 
 function ThemeToggle() {
-	const [dark, setDark] = useState(
-		() =>
-			typeof document !== "undefined" &&
-			document.documentElement.classList.contains("dark"),
-	);
+	const serverTheme = useContext(ThemeContext);
+	const [dark, setDark] = useState(() => serverTheme === "dark");
 
 	const toggle = () => {
 		const next = !dark;
 		setDark(next);
 		document.documentElement.classList.toggle("dark", next);
-		localStorage.setItem("theme", next ? "dark" : "light");
+		const value = `theme=${next ? "dark" : "light"};path=/;max-age=31536000;SameSite=Lax`;
+		// biome-ignore lint: Setting a theme cookie requires direct assignment to document.cookie
+		document.cookie = value;
 	};
 
 	return (
@@ -108,17 +119,22 @@ function ThemeToggle() {
 }
 
 export function Header() {
-	const [scrolled, setScrolled] = useState(() =>
-		typeof window !== "undefined" ? window.scrollY > 20 : false,
-	);
+	const [scrolled, setScrolled] = useState(false);
 	const [mobileOpen, setMobileOpen] = useState(false);
 	const activeSection = useActiveSection();
 	const location = useLocation();
+	const navLinks = getNavLinks();
 
 	useEffect(() => {
 		const onScroll = () => setScrolled(window.scrollY > 20);
+		// Scroll restoration happens asynchronously after mount — defer the
+		// initial check so we read the restored scrollY, not 0.
+		const rafId = requestAnimationFrame(onScroll);
 		window.addEventListener("scroll", onScroll, { passive: true });
-		return () => window.removeEventListener("scroll", onScroll);
+		return () => {
+			cancelAnimationFrame(rafId);
+			window.removeEventListener("scroll", onScroll);
+		};
 	}, []);
 
 	return (
@@ -192,10 +208,10 @@ export function Header() {
 								hash={link.hash}
 								className={linkClassName}
 							>
-								{content}
-							</Link>
-						);
-					})}
+							{content}
+						</Link>
+					);
+				})}
 				</div>
 
 				<div className="flex items-center gap-1.5">
@@ -205,7 +221,9 @@ export function Header() {
 						className="rounded-full px-5 font-semibold text-xs"
 						asChild
 					>
-						<a href={signupUrl()}>Get Started</a>
+						<a href={billingMarketingEnabled() ? signupUrl() : "/#waitlist"}>
+							{billingMarketingEnabled() ? "Get Started" : "Join waitlist"}
+						</a>
 					</Button>
 					<button
 						type="button"

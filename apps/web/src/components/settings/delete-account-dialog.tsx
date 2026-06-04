@@ -1,4 +1,4 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -25,13 +25,13 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const [open, setOpen] = useState(false);
 	const [confirmEmail, setConfirmEmail] = useState("");
 	const [confirmText, setConfirmText] = useState("");
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const navigate = useNavigate();
 	const confirmPhrase = m.settings_delete_account_dialog_confirm_phrase();
 
 	const deleteAccountMutation = useMutation({
 		mutationFn: (input: { confirmEmail: string }) =>
-			trpcClient.auth.deleteAccount.mutate(input),
+			rpcClient.auth.deleteAccount.mutate(input),
 		onSuccess: async () => {
 			await storage.clearAllStoredData();
 			toast.success(m.settings_delete_account_dialog_toast_deleted());

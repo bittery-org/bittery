@@ -1,6 +1,6 @@
 {$DOMAIN} {
-	# API and tRPC routes → server
-	handle /trpc/* {
+	# API and RPC routes → server
+	handle /rpc/* {
 		reverse_proxy server:3000
 	}
 
@@ -21,6 +21,11 @@
 
 	# Health check → server
 	handle /healthz {
+		reverse_proxy server:3000
+	}
+
+	# Stripe webhooks → server
+	handle /webhooks/* {
 		reverse_proxy server:3000
 	}
 

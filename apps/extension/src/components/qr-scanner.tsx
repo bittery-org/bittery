@@ -17,6 +17,7 @@ import {
 } from "@bittery/ui/icons";
 import jsQR from "jsqr";
 import { useCallback, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 
 export type ScanStatus =
 	| "idle"
@@ -150,6 +151,7 @@ async function captureAndScanTab(): Promise<QRScanResult> {
 }
 
 export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
+	const { m } = useI18n();
 	const [status, setStatus] = useState<ScanStatus>("idle");
 	const [errorMessage, setErrorMessage] = useState<string>("");
 	const [scanResult, setScanResult] = useState<ParsedOtpAuthUri | null>(null);
@@ -168,17 +170,17 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 				onScanComplete(result);
 			} else {
 				setStatus(result.status);
-				setErrorMessage(result.error || "Unknown error occurred");
+				setErrorMessage(result.error || m.ext_qr_error_scan_toast());
 
 				// Only call onScanComplete for success - let user retry or cancel for errors
 				if (result.status === "error") {
-					toast.error(result.error || "Failed to scan QR code");
+				toast.error(result.error || m.ext_qr_error_scan_toast());
 				}
 			}
 		} catch (error: any) {
 			setStatus("error");
-			setErrorMessage(error.message || "Failed to scan QR code");
-			toast.error("Failed to scan QR code");
+			setErrorMessage(error.message || m.ext_qr_error_scan_toast());
+			toast.error(m.ext_qr_error_scan_toast());
 		}
 	}, [onScanComplete]);
 
@@ -193,7 +195,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 			<div className="mb-4 flex items-center justify-between">
 				<div className="flex items-center gap-2">
 					<IconQrcodeOutlineDuo18 className="h-5 w-5 text-primary" />
-					<h3 className="font-medium text-sm">Scan TOTP QR Code</h3>
+					<h3 className="font-medium text-sm">{m.ext_qr_scan_title()}</h3>
 				</div>
 				<Button
 					size="icon"
@@ -217,7 +219,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 						variant="default"
 					>
 						<IconScanOutlineDuo18 className="h-4 w-4" />
-						Scan Page for QR Code
+					{m.ext_qr_scan_button()}
 					</Button>
 				</div>
 			)}
@@ -226,7 +228,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 				<div className="flex flex-col items-center gap-3 py-4">
 					<IconLoader2OutlineDuo18 className="h-8 w-8 animate-spin text-primary" />
 					<p className="text-muted-foreground text-sm">
-						Scanning page for QR code...
+						{m.ext_qr_scanning()}
 					</p>
 				</div>
 			)}
@@ -235,17 +237,17 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 				<div className="space-y-3">
 					<div className="flex items-center gap-2 text-green-600">
 						<IconCircleCheck2OutlineDuo18 className="h-5 w-5" />
-						<span className="font-medium text-sm">QR Code Found!</span>
+						<span className="font-medium text-sm">{m.ext_qr_found()}</span>
 					</div>
 					{scanResult.issuer && (
 						<p className="text-sm">
-							<span className="text-muted-foreground">Service:</span>{" "}
+							<span className="text-muted-foreground">{m.ext_qr_service()}</span>{" "}
 							{scanResult.issuer}
 						</p>
 					)}
 					{scanResult.accountName && (
 						<p className="text-sm">
-							<span className="text-muted-foreground">Account:</span>{" "}
+							<span className="text-muted-foreground">{m.ext_qr_account()}</span>{" "}
 							{scanResult.accountName}
 						</p>
 					)}
@@ -257,7 +259,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 					<div className="flex items-center gap-2 text-destructive">
 						<IconCircleWarningOutlineDuo18 className="h-5 w-5" />
 						<span className="font-medium text-sm">
-							{status === "no-qr-found" ? "No QR Code Found" : "Scan Failed"}
+							{status === "no-qr-found" ? m.ext_qr_no_qr_found() : m.ext_qr_scan_failed()}
 						</span>
 					</div>
 					<p className="text-muted-foreground text-xs">{errorMessage}</p>
@@ -268,10 +270,10 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 							className="flex-1 gap-2"
 						>
 							<IconCameraOutlineDuo18 className="h-4 w-4" />
-							Try Again
+						{m.ext_qr_try_again()}
 						</Button>
 						<Button onClick={onCancel} variant="ghost" className="flex-1">
-							Cancel
+							{m.ext_qr_cancel()}
 						</Button>
 					</div>
 				</div>

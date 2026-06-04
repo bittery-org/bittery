@@ -11,7 +11,7 @@ import {
 	type ImportSourceVault,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import { useCallback, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "@/lib/wasm-crypto";
@@ -203,7 +203,7 @@ function normalizeImportError(
 
 export function useVaultImport() {
 	const core = useCoreContext();
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const clientId = useClientId();
 	const { vaultKeys } = useAllVaultKeys();
@@ -491,7 +491,7 @@ export function useVaultImport() {
 							icon: DEFAULT_CREATED_VAULT_ICON,
 							accountEmail: defaultAccountEmail,
 						},
-						trpcClient,
+						rpcClient,
 					);
 
 					const resolvedTarget: ResolvedTargetVault = {
@@ -506,7 +506,7 @@ export function useVaultImport() {
 
 				if (createdVaults.length > 0) {
 					await core.vaults.refreshVaultKeys(
-						trpcClient,
+						rpcClient,
 						createdVaults[0].accountEmail,
 					);
 					await invalidator.invalidateVaultKeys();
@@ -608,9 +608,9 @@ export function useVaultImport() {
 								index,
 								index + IMPORT_BATCH_SIZE,
 							);
-							const result = await trpcClient.vault.bulkImportItems.mutate({
+							const result = await rpcClient.vault.bulkImportItems.mutate({
 								vaultId: resolvedTarget.vaultId,
-								clientId: clientId || undefined,
+								clientId: clientId ?? null,
 								items: batch,
 							});
 							importedItemsInVault += result.importedCount;
@@ -710,7 +710,7 @@ export function useVaultImport() {
 			core.vaults,
 			core.accounts,
 			core.vaultCoordinator,
-			trpcClient,
+			rpcClient,
 			invalidator,
 			clientId,
 		]);

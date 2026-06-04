@@ -1,5 +1,5 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { Button, toast } from "@bittery/ui";
 import {
 	IconCircleWarningOutlineDuo18 as AlertCircle,
@@ -62,8 +62,8 @@ function getInvitationStatusLabel(
 function InvitationPage() {
 	const { token } = Route.useParams();
 	const navigate = useNavigate();
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const { m } = useI18n();
 	const [view, setView] = useState<"signup" | "signin">("signup");
 	const authenticatedQuery = useQuery({
@@ -74,12 +74,12 @@ function InvitationPage() {
 
 	// Get invitation details
 	const invitationQuery = useQuery(
-		trpc.team.invitations.getByToken.queryOptions({ token }),
+		rpc.team.invitations.getByToken.queryOptions({ token }),
 	);
 
 	// Accept mutation
 	const acceptMutation = useMutation({
-		mutationFn: () => trpcClient.team.invitations.accept.mutate({ token }),
+		mutationFn: () => rpcClient.team.invitations.accept.mutate({ token }),
 		onSuccess: (data) => {
 			toast.success(m.auth_invite_toast_joined({ teamName: data.teamName }));
 			navigate({ to: "/team" });
@@ -91,7 +91,7 @@ function InvitationPage() {
 
 	// Decline mutation
 	const declineMutation = useMutation({
-		mutationFn: () => trpcClient.team.invitations.decline.mutate({ token }),
+		mutationFn: () => rpcClient.team.invitations.decline.mutate({ token }),
 		onSuccess: () => {
 			toast.success(m.auth_invite_toast_declined());
 			navigate({ to: "/team" });

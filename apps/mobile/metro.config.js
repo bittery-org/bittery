@@ -20,7 +20,6 @@ config.resolver.nodeModulesPaths = [
 
 // 3. Resolve workspace packages
 config.resolver.extraNodeModules = {
-	"@bittery/api": path.resolve(monorepoRoot, "packages/api"),
 	"@bittery/crypto": path.resolve(monorepoRoot, "packages/crypto"),
 	"@bittery/i18n": path.resolve(monorepoRoot, "packages/i18n"),
 	"@bittery/shared": path.resolve(monorepoRoot, "packages/shared"),

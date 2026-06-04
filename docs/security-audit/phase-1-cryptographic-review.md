@@ -3,6 +3,8 @@
 Date: 2026-03-05
 Scope: Rust Crypto Core and all bridge/client code that directly handles cryptographic operations.
 
+> Note: `apps/server` and `packages/api` were removed after the Rust server cutover. Any references to those paths in this document are historical audit context, not current implementation guidance.
+
 ## 1. Summary
 The Rust cryptographic primitives are generally solid (AES-256-GCM, RSA-OAEP-SHA256, SRP math checks, KDF policy checks). The highest-risk issues are in integration boundaries: sensitive key material is exported into JS/TS memory, key rotation returns plaintext new vault keys, and vault-key wrapping with MUK is not context-bound. These issues materially weaken the stated zero-knowledge/opaque-handle design.
 

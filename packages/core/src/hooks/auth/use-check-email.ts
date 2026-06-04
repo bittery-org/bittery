@@ -5,7 +5,7 @@
  * Returns the secret key hint if the account exists.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import { type UseQueryResult, useQuery } from "@tanstack/react-query";
 import type { CheckEmailResult } from "../../auth";
 
@@ -41,7 +41,7 @@ export function useCheckEmail(
 	email?: string,
 	options: UseCheckEmailOptions = {},
 ): UseQueryResult<CheckEmailResult, Error> {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 
 	// Only enable if email is provided and looks valid
 	const hasValidEmail = Boolean(email?.includes("@"));
@@ -53,7 +53,7 @@ export function useCheckEmail(
 			if (!email) {
 				throw new Error("Email is required");
 			}
-			return trpcClient.auth.checkEmail.query({ email });
+			return rpcClient.auth.checkEmail.query({ email });
 		},
 		enabled,
 		staleTime: 60 * 1000, // Cache for 1 minute

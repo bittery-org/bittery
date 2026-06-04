@@ -1,4 +1,4 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
 	copyWithToast,
@@ -48,16 +48,16 @@ export function RegenerateRecoveryKeyDialog({
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
 
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 	const queryClient = useQueryClient();
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
 
 	const storeRecoveryKeyMutation = useMutation({
 		mutationFn: (input: {
 			encryptedMasterKey: string;
 			recoveryKeyHint: string;
-		}) => trpcClient.auth.storeRecoveryKey.mutate(input),
+		}) => rpcClient.auth.storeRecoveryKey.mutate(input),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
 			toast.success(m.settings_recovery_key_regenerate_toast_regenerated());

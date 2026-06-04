@@ -1,4 +1,4 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
 	Dialog,
@@ -20,12 +20,12 @@ import { useQueryInvalidator } from "../../providers/sync-provider";
 export function CreateTeamDialog() {
 	const [open, setOpen] = useState(false);
 	const [name, setName] = useState("");
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 
 	const createMutation = useMutation({
-		mutationFn: (input: { name: string }) =>
-			trpcClient.team.create.mutate(input),
+		mutationFn: (input: { name: string; teamType: null }) =>
+			rpcClient.team.create.mutate(input),
 		onSuccess: async () => {
 			toast.success("Team created");
 			await invalidator.invalidateTeam();
@@ -40,7 +40,7 @@ export function CreateTeamDialog() {
 	const handleSubmit = (e: React.FormEvent) => {
 		e.preventDefault();
 		if (!name.trim()) return;
-		createMutation.mutate({ name: name.trim() });
+		createMutation.mutate({ name: name.trim(), teamType: null });
 	};
 
 	return (

@@ -1,6 +1,7 @@
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import { useQuery } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { normalizeVaultListEntry } from "@/lib/rpc-normalizers";
 import { storage, type VaultKeyData } from "@/lib/storage";
 
 /**
@@ -13,10 +14,10 @@ import { storage, type VaultKeyData } from "@/lib/storage";
  * This hook should be used in a component that renders when the user is authenticated.
  */
 export function useVaultKeysSync() {
-	const trpc = useTRPC();
+	const rpc = useRPC();
 
 	const { data: vaults } = useQuery({
-		...trpc.vault.list.queryOptions(),
+		...rpc.vault.list.queryOptions(),
 		retry: false,
 	});
 
@@ -24,15 +25,7 @@ export function useVaultKeysSync() {
 		if (!vaults || vaults.length === 0) return;
 
 		// Map vault.list response to VaultKeyData format
-		const vaultKeys: VaultKeyData[] = vaults.map((vault) => ({
-			vaultId: vault.id,
-			vaultName: vault.name,
-			vaultType: vault.type,
-			vaultIcon: vault.icon,
-			vaultImageUrl: vault.imageUrl,
-			encryptedVaultKey: vault.encryptedVaultKey,
-			role: vault.role,
-		}));
+		const vaultKeys: VaultKeyData[] = vaults.map(normalizeVaultListEntry);
 
 		// Update sessionStorage with the latest vault keys
 		storage.storeVaultKeys(vaultKeys);

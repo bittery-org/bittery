@@ -59,7 +59,7 @@ export async function hydrateDesktopAccountMaterial(
 		return;
 	}
 
-	// Keep local token in sync (used for account-scoped tRPC clients).
+	// Keep local token in sync for account-scoped RPC clients.
 	const localToken = await storage.getAuthToken(normalizedEmail);
 	if (!localToken) {
 		const desktopToken = await desktopClient.getAuthToken(normalizedEmail);

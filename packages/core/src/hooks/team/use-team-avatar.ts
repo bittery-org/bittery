@@ -2,7 +2,7 @@
  * Hook for managing team avatar upload and removal
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 interface UploadAvatarInput {
@@ -30,7 +30,7 @@ export class TeamAvatarError extends Error {
 }
 
 export function useTeamAvatar() {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const queryClient = useQueryClient();
 
 	const uploadAvatar = useMutation({
@@ -48,7 +48,7 @@ export function useTeamAvatar() {
 
 			// 3. Get presigned upload URL from server
 			const { key, uploadUrl, publicUrl } =
-				await trpcClient.team.createImageUpload.mutate({
+				await rpcClient.team.createImageUpload.mutate({
 					teamId,
 					fileName: file.name,
 					contentType: file.type,
@@ -68,10 +68,10 @@ export function useTeamAvatar() {
 			}
 
 			// 5. Update team with new imageKey
-			await trpcClient.team.update.mutate({
+			await rpcClient.team.update.mutate({
 				teamId,
 				imageKey: key,
-			});
+			} as Parameters<typeof rpcClient.team.update.mutate>[0]);
 
 			return { key, publicUrl };
 		},
@@ -85,10 +85,10 @@ export function useTeamAvatar() {
 
 	const removeAvatar = useMutation({
 		mutationFn: async ({ teamId }: RemoveAvatarInput) => {
-			await trpcClient.team.update.mutate({
+			await rpcClient.team.update.mutate({
 				teamId,
 				imageKey: null,
-			});
+			} as Parameters<typeof rpcClient.team.update.mutate>[0]);
 		},
 		onSuccess: () => {
 			// Invalidate team queries to refetch without avatar

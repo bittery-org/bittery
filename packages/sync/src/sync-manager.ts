@@ -2,7 +2,6 @@ import type {
 	ConnectionStatus,
 	SessionRevokedControlPayload,
 	SyncCursor,
-	SyncEvent,
 	SyncManagerOptions,
 	SyncStorage,
 } from "./types";
@@ -43,11 +42,11 @@ export class SyncManager {
 	private getAuthToken: () => Promise<string | null>;
 	private clientId: string;
 	private storage: SyncStorage;
-	private onEvent?: (event: SyncEvent) => void;
 	private onStatusChange?: (status: ConnectionStatus) => void;
 	private onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
+	private onSyncPing?: () => void | Promise<void>;
 
 	private fetchImpl: (url: string, init?: any) => Promise<Response>;
 	private abortController: AbortController | null = null;
@@ -61,21 +60,14 @@ export class SyncManager {
 	private lastHeartbeatTime: number | null = null;
 	private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
-	// Event deduplication: batch events for the same entityId within a window
-	private static readonly DEDUP_WINDOW_MS = 500;
-	private pendingEvents = new Map<
-		string,
-		{ event: SyncEvent; timer: ReturnType<typeof setTimeout> }
-	>();
-
 	constructor(options: SyncManagerOptions) {
 		this.serverUrl = options.serverUrl;
 		this.getAuthToken = options.getAuthToken;
 		this.clientId = options.clientId;
 		this.storage = options.storage || new MemoryStorage();
-		this.onEvent = options.onEvent;
 		this.onStatusChange = options.onStatusChange;
 		this.onSessionRevoked = options.onSessionRevoked;
+		this.onSyncPing = options.onSyncPing;
 		this.reconnectDelay = options.reconnectDelay || 1000;
 		this.maxReconnectDelay = options.maxReconnectDelay || 30000;
 		this.fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
@@ -251,7 +243,13 @@ export class SyncManager {
 	}
 
 	/**
-	 * Process a single SSE event
+	 * Process a single SSE event.
+	 *
+	 * The server sends lightweight pings:
+	 *   event: sync       → something changed, client should call getEventsSince
+	 *   event: session_revoked → a session was revoked
+	 *   event: connected   → connection established
+	 *   event: limit_exceeded → plan connection limit reached
 	 */
 	private processEvent(eventStr: string): void {
 		const lines = eventStr.trim().split(/\r?\n/);
@@ -290,25 +288,27 @@ export class SyncManager {
 
 			// Handle heartbeat events
 			if (eventType === "heartbeat" || event.type === "heartbeat") {
-				// Just update the heartbeat time, already done above
 				return;
 			}
 
 			// Handle connection message
-			if (event.type === "connected") {
+			if (eventType === "connected" || event.type === "connected") {
 				console.log("Sync connected");
 				return;
 			}
 
-			// Handle control message for targeted session revocation.
-			if (
-				(eventType === "control" || event.type === "session_revoked") &&
-				event.type === "session_revoked"
-			) {
+			// Handle sync ping — server says something changed, fetch via getEventsSince
+			if (eventType === "sync" && !event.id) {
+				void this.onSyncPing?.();
+				return;
+			}
+
+			// Handle session revocation (new format: event: session_revoked)
+			if (eventType === "session_revoked") {
 				void this.onSessionRevoked?.({
 					type: "session_revoked",
-					userId: String(event.userId ?? ""),
-					sessionId: String(event.sessionId ?? ""),
+					userId: String(event.userId ?? event.user_id ?? ""),
+					sessionId: String(event.sessionId ?? event.session_id ?? ""),
 					timestamp:
 						typeof event.timestamp === "number" ? event.timestamp : Date.now(),
 					reason: typeof event.reason === "string" ? event.reason : undefined,
@@ -316,105 +316,14 @@ export class SyncManager {
 				return;
 			}
 
-			// Convert to SyncEvent
-			const syncEvent: SyncEvent = {
-				id: event.id,
-				type: event.type,
-				entityId: event.entityId,
-				entityType: event.entityType,
-				vaultId: event.vaultId,
-				version: event.version,
-				clientId: event.clientId,
-				userId: event.userId,
-				timestamp: event.timestamp,
-				metadata: event.metadata,
-			};
-
-			// Track last seen cursor from stream. Persistence is handled after
-			// successful event application in the orchestrator path.
-			this.lastEventCursor = { id: syncEvent.id };
-			this.lastEventTimestamp = syncEvent.timestamp;
-
-			// Events from this client are already reflected locally via optimistic
-			// updates. They do not require delta application, so we can acknowledge
-			// the cursor immediately.
-			if (syncEvent.clientId === this.clientId) {
-				void this.setStoredLastSyncCursor({ id: syncEvent.id }).catch(
-					(error) => {
-						console.error("Failed to persist sync cursor:", error);
-					},
-				);
+			// Handle limit exceeded
+			if (eventType === "limit_exceeded" || event.type === "limit_exceeded") {
+				console.warn("SSE connection limit exceeded");
 				return;
 			}
-
-			// Deduplicate: if multiple events arrive for the same entity within the
-			// dedup window, only dispatch the latest one. This avoids redundant
-			// network fetches and query invalidations for rapid-fire updates.
-			this.scheduleEventDispatch(syncEvent);
 		} catch (error) {
 			console.error("Failed to parse SSE event:", error, data);
 		}
-	}
-
-	private mergeDedupedEvent(
-		existing: SyncEvent,
-		incoming: SyncEvent,
-	): SyncEvent {
-		if (
-			existing.type === "vault_updated" &&
-			incoming.type === "vault_updated" &&
-			existing.entityId === incoming.entityId
-		) {
-			const existingBulkImport = existing.metadata?.reason === "bulk_import";
-			const incomingBulkImport = incoming.metadata?.reason === "bulk_import";
-			if (existingBulkImport || incomingBulkImport) {
-				return {
-					...incoming,
-					metadata: {
-						...(existing.metadata ?? {}),
-						...(incoming.metadata ?? {}),
-						reason: "bulk_import",
-					},
-				};
-			}
-		}
-
-		return incoming;
-	}
-
-	/**
-	 * Schedule an event for dispatch, deduplicating by event type + entityId.
-	 * If another event for the same entity and type arrives within the window,
-	 * the previous one is replaced and only the latest is dispatched.
-	 */
-	private scheduleEventDispatch(event: SyncEvent): void {
-		const key = `${event.type}:${event.entityId}`;
-		const existing = this.pendingEvents.get(key);
-		const mergedEvent = existing
-			? this.mergeDedupedEvent(existing.event, event)
-			: event;
-
-		if (existing) {
-			clearTimeout(existing.timer);
-		}
-
-		const timer = setTimeout(() => {
-			this.pendingEvents.delete(key);
-			this.onEvent?.(mergedEvent);
-		}, SyncManager.DEDUP_WINDOW_MS);
-
-		this.pendingEvents.set(key, { event: mergedEvent, timer });
-	}
-
-	/**
-	 * Flush all pending debounced events immediately (e.g. on disconnect).
-	 */
-	private flushPendingEvents(): void {
-		for (const [, { event, timer }] of this.pendingEvents) {
-			clearTimeout(timer);
-			this.onEvent?.(event);
-		}
-		this.pendingEvents.clear();
 	}
 
 	/**
@@ -442,7 +351,6 @@ export class SyncManager {
 	 */
 	disconnect(): void {
 		this.stopStaleCheck();
-		this.flushPendingEvents();
 
 		if (this.reconnectTimeout) {
 			clearTimeout(this.reconnectTimeout);

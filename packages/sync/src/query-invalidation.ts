@@ -25,7 +25,7 @@ export interface QueryKeyHelpers {
  */
 export interface InvalidationContext {
 	queryClient: QueryClient;
-	trpc: QueryKeyHelpers;
+	rpc: QueryKeyHelpers;
 	event: SyncEvent;
 }
 
@@ -34,14 +34,14 @@ export interface InvalidationContext {
  */
 export interface QueryInvalidatorOptions {
 	queryClient: QueryClient;
-	trpc: QueryKeyHelpers;
+	rpc: QueryKeyHelpers;
 }
 
 /**
  * Get query keys to invalidate based on sync event type
  */
 export function getQueryKeysForEvent(
-	trpc: QueryKeyHelpers,
+	rpc: QueryKeyHelpers,
 	event: SyncEvent,
 ): unknown[][] {
 	const keys: unknown[][] = [];
@@ -59,41 +59,41 @@ export function getQueryKeysForEvent(
 
 		case "vault_created":
 			keys.push(["vault-keys"]);
-			keys.push(trpc.vault.list.queryKey());
+			keys.push(rpc.vault.list.queryKey());
 			break;
 
 		case "vault_updated":
 			keys.push(["vault-keys"]);
-			keys.push(trpc.vault.list.queryKey());
+			keys.push(rpc.vault.list.queryKey());
 			if (event.metadata?.reason === "bulk_import" && vaultId) {
-				keys.push(trpc.vault.listItems.queryKey({ vaultId }));
-				keys.push(trpc.vault.listAllItems.queryKey());
+				keys.push(rpc.vault.listItems.queryKey({ vaultId }));
+				keys.push(rpc.vault.listAllItems.queryKey());
 			}
 			break;
 
 		case "vault_deleted":
 			keys.push(["vault-keys"]);
-			keys.push(trpc.vault.list.queryKey());
+			keys.push(rpc.vault.list.queryKey());
 			break;
 
 		case "vault_access_revoked": {
 			keys.push(["vault-keys"]);
-			keys.push(trpc.vault.list.queryKey());
+			keys.push(rpc.vault.list.queryKey());
 			break;
 		}
 
 		case "vault_member_added":
 		case "vault_member_removed":
 			if (vaultId) {
-				keys.push(trpc.vault.members.list.queryKey({ vaultId }));
+				keys.push(rpc.vault.members.list.queryKey({ vaultId }));
 			}
 			keys.push(["vault-keys"]);
-			keys.push(trpc.vault.list.queryKey());
+			keys.push(rpc.vault.list.queryKey());
 			break;
 
 		case "vault_key_rotated":
 			keys.push(["vault-keys"]);
-			keys.push(trpc.vault.list.queryKey());
+			keys.push(rpc.vault.list.queryKey());
 			break;
 	}
 
@@ -106,7 +106,7 @@ export function getQueryKeysForEvent(
 export async function invalidateQueriesForEvent(
 	ctx: InvalidationContext,
 ): Promise<void> {
-	const keys = getQueryKeysForEvent(ctx.trpc, ctx.event);
+	const keys = getQueryKeysForEvent(ctx.rpc, ctx.event);
 
 	await Promise.all(
 		keys.map((queryKey) => ctx.queryClient.invalidateQueries({ queryKey })),
@@ -141,7 +141,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 
 			await invalidateQueriesForEvent({
 				queryClient: options.queryClient,
-				trpc: options.trpc,
+				rpc: options.rpc,
 				event: syntheticEvent,
 			});
 		},
@@ -150,16 +150,16 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate item-related queries
 		 */
 		invalidateItem: async (itemId: string, vaultId: string): Promise<void> => {
-			const { queryClient, trpc } = options;
+			const { queryClient, rpc } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.listItems.queryKey({ vaultId }),
+					queryKey: rpc.vault.listItems.queryKey({ vaultId }),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.getItem.queryKey({ itemId }),
+					queryKey: rpc.vault.getItem.queryKey({ itemId }),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.listAllItems.queryKey(),
+					queryKey: rpc.vault.listAllItems.queryKey(),
 				}),
 			]);
 		},
@@ -168,14 +168,14 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate vault list queries
 		 */
 		invalidateVaultList: async (vaultId: string): Promise<void> => {
-			const { queryClient, trpc } = options;
+			const { queryClient, rpc } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.listItems.queryKey({ vaultId }),
+					queryKey: rpc.vault.listItems.queryKey({ vaultId }),
 				}),
 				// Invalidate "All Objects" tRPC query
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.listAllItems.queryKey(),
+					queryKey: rpc.vault.listAllItems.queryKey(),
 				}),
 			]);
 		},
@@ -184,13 +184,13 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate deleted items list
 		 */
 		invalidateDeletedItems: async (vaultId: string): Promise<void> => {
-			const { queryClient, trpc } = options;
+			const { queryClient, rpc } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.listDeletedItems.queryKey({ vaultId }),
+					queryKey: rpc.vault.listDeletedItems.queryKey({ vaultId }),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.listAllDeletedItems.queryKey(),
+					queryKey: rpc.vault.listAllDeletedItems.queryKey(),
 				}),
 			]);
 		},
@@ -199,11 +199,11 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate vault keys
 		 */
 		invalidateVaultKeys: async (): Promise<void> => {
-			const { queryClient, trpc } = options;
+			const { queryClient, rpc } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
 				queryClient.invalidateQueries({
-					queryKey: trpc.vault.list.queryKey(),
+					queryKey: rpc.vault.list.queryKey(),
 				}),
 			]);
 		},
@@ -245,9 +245,9 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate vault member queries
 		 */
 		invalidateVaultMembers: async (vaultId: string): Promise<void> => {
-			const { queryClient, trpc } = options;
+			const { queryClient, rpc } = options;
 			await queryClient.invalidateQueries({
-				queryKey: trpc.vault.members.list.queryKey({ vaultId }),
+				queryKey: rpc.vault.members.list.queryKey({ vaultId }),
 			});
 		},
 
@@ -256,18 +256,18 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Use this when switching accounts to clear all cached data from the previous account
 		 */
 		invalidateAllAccountData: async (): Promise<void> => {
-			const { queryClient, trpc } = options;
+			const { queryClient, rpc } = options;
 
 			// Remove tRPC API queries entirely to prevent automatic refetch attempts
 			// This is important when switching to "All Accounts" mode where there's no auth token
 			queryClient.removeQueries({
-				queryKey: trpc.vault.list.queryKey(),
+				queryKey: rpc.vault.list.queryKey(),
 			});
 			queryClient.removeQueries({
-				queryKey: trpc.vault.listAllItems.queryKey(),
+				queryKey: rpc.vault.listAllItems.queryKey(),
 			});
 			queryClient.removeQueries({
-				queryKey: trpc.vault.listAllDeletedItems.queryKey(),
+				queryKey: rpc.vault.listAllDeletedItems.queryKey(),
 			});
 
 			// Invalidate (not remove) local storage queries - these should refetch from storage

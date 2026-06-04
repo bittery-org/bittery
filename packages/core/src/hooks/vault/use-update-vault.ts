@@ -4,7 +4,7 @@
  * Updates an existing vault's metadata.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import { useMutation } from "@tanstack/react-query";
 import {
 	useCoreContext,
@@ -27,7 +27,7 @@ export interface UpdateVaultInput {
  * Hook for updating a vault's metadata.
  */
 export function useUpdateVault() {
-	const defaultClient = useTRPCClient();
+	const defaultClient = useRPCClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 

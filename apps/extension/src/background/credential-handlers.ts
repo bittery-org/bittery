@@ -5,6 +5,7 @@
 
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
+import { rpcClient } from "./rpc-client";
 import {
 	resolveAccountEmailForItemId,
 	resolveAccountEmailForVault,
@@ -17,7 +18,6 @@ import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
 } from "./session-manager";
-import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import {
 	getDecryptedItemsForCurrentMode,
@@ -170,7 +170,7 @@ export async function handleSaveNewCredential(payload: {
 				},
 				accountEmail,
 			},
-			trpcClient as Parameters<typeof core.items.createItem>[1],
+			rpcClient as Parameters<typeof core.items.createItem>[1],
 		);
 
 		await onLocalItemCreated({
@@ -291,7 +291,7 @@ export async function handleUpdateExistingCredential(payload: {
 				},
 				accountEmail,
 			},
-			trpcClient as Parameters<typeof core.items.updateItem>[1],
+			rpcClient as Parameters<typeof core.items.updateItem>[1],
 		);
 
 		await onLocalItemUpdated({

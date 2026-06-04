@@ -9,6 +9,7 @@ test.describe("Navigation visibility filter", () => {
 	test("shows cloud billing and sentinel when entitled", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
+			billingEnabled: true,
 			entitlements: { sentinel: true },
 			plan: "personal",
 			role: "owner",
@@ -22,6 +23,7 @@ test.describe("Navigation visibility filter", () => {
 	test("hides sentinel when entitlement is missing", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
+			billingEnabled: true,
 			entitlements: { sentinel: false, team_management: true },
 			plan: "team",
 			role: "owner",
@@ -35,6 +37,7 @@ test.describe("Navigation visibility filter", () => {
 	test("hides cloud-only nav in self-hosted mode", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "self-hosted",
+			billingEnabled: false,
 			entitlements: { sentinel: true },
 			plan: "team",
 			role: "owner",
@@ -50,6 +53,7 @@ test.describe("Navigation visibility filter", () => {
 	test("hides admin nav for non-admin team members", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
+			billingEnabled: true,
 			entitlements: { team_management: true },
 			plan: "team",
 			role: "member",
@@ -62,11 +66,25 @@ test.describe("Navigation visibility filter", () => {
 	test("hides billing nav for members on non-team plans", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",
+			billingEnabled: true,
 			entitlements: {},
 			plan: "personal",
 			role: "member",
 		});
 
 		expect(getPaths(result)).not.toContain("/billing");
+	});
+
+	test("hides billing nav when hosted billing is disabled", () => {
+		const result = filterNavItems(appNavItems, {
+			mode: "cloud",
+			billingEnabled: false,
+			entitlements: { sentinel: true },
+			plan: "personal",
+			role: "owner",
+		});
+
+		expect(getPaths(result)).not.toContain("/billing");
+		expect(getPaths(result)).toContain("/security");
 	});
 });

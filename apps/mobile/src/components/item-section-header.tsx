@@ -1,6 +1,6 @@
-import { memo } from "react";
 import { Card } from "heroui-native";
 import { Star } from "lucide-react-native";
+import { memo } from "react";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
 

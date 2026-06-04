@@ -25,8 +25,10 @@ import {
 import { PasswordHistorySheet } from "@/components/password-history-sheet";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { ShareItemSheet } from "@/components/share/share-item-sheet";
+import { useI18n } from "@/providers/i18n-provider";
 
 export default function ItemDetailScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const { vaultId, itemId } = useLocalSearchParams<{
 		vaultId: string;
@@ -48,8 +50,8 @@ export default function ItemDetailScreen() {
 		await Clipboard.setStringAsync(value);
 		toast.show({
 			variant: "accent",
-			label: "Copied to clipboard",
-			description: `${label} has been copied to clipboard.`,
+			label: m.mob_item_detail_toast_copied(),
+			description: m.mob_item_detail_toast_copied_description({ label }),
 			placement: "bottom",
 		});
 	};
@@ -59,15 +61,15 @@ export default function ItemDetailScreen() {
 			await deleteItem.mutateAsync({ itemId, vaultId });
 			toast.show({
 				variant: "accent",
-				label: "Item moved to trash",
-				description: "The item has been moved to trash.",
+				label: m.mob_item_detail_toast_deleted(),
+				description: m.mob_item_detail_toast_deleted_description(),
 				placement: "bottom",
 			});
 			router.back();
 		} catch (error) {
 			toast.show({
 				variant: "danger",
-				label: "Failed to delete item",
+				label: m.mob_item_detail_toast_delete_failed(),
 				description: error instanceof Error ? error.message : "Unknown error",
 				placement: "bottom",
 			});
@@ -95,15 +97,15 @@ export default function ItemDetailScreen() {
 			});
 			toast.show({
 				variant: "accent",
-				label: "Password restored",
-				description: "The password has been restored successfully.",
+				label: m.mob_item_detail_toast_password_restored(),
+				description: m.mob_item_detail_toast_password_restored_description(),
 				placement: "bottom",
 			});
 			setPasswordHistoryVisible(false);
 		} catch (error) {
 			toast.show({
 				variant: "danger",
-				label: "Failed to restore password",
+				label: m.mob_item_detail_toast_password_restore_failed(),
 				description: error instanceof Error ? error.message : "Unknown error",
 				placement: "bottom",
 			});

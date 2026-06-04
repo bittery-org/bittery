@@ -2,7 +2,7 @@ import {
 	buildDeviceSetupLinkUri,
 	buildDeviceSetupQrUri,
 } from "@bittery/shared";
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import {
 	Button,
 	copyWithToast,
@@ -48,10 +48,10 @@ function WebDeviceSetupDialogContent({
 	onOpenChange,
 }: Pick<WebDeviceSetupDialogProps, "onOpenChange">) {
 	const { m } = useI18n();
-	const trpc = useTRPC();
+	const rpc = useRPC();
 	const serverUrl = getServerUrl();
 
-	const meQuery = useQuery(trpc.auth.me.queryOptions());
+	const meQuery = useQuery(rpc.auth.me.queryOptions());
 	const email = meQuery.data?.email ?? "";
 	const teamName = meQuery.data?.teamName ?? meQuery.data?.name ?? "";
 
@@ -100,9 +100,7 @@ function WebDeviceSetupDialogContent({
 	return (
 		<DialogContent className="sm:max-w-md">
 			<DialogHeader>
-				<DialogTitle>
-					{m.settings_devices_action_setup_another()}
-				</DialogTitle>
+				<DialogTitle>{m.settings_devices_action_setup_another()}</DialogTitle>
 				<DialogDescription>
 					{m.vaults_sidebar_account_switcher_device_setup_dialog_description()}
 				</DialogDescription>
@@ -123,11 +121,26 @@ function WebDeviceSetupDialogContent({
 								/>
 							</div>
 							<ol className="space-y-1 text-left text-muted-foreground text-xs">
-								<li>1. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_1()}</li>
-								<li>2. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_2()}</li>
-								<li>3. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_3()}</li>
-								<li>4. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_4()}</li>
-								<li>5. {m.vaults_sidebar_account_switcher_device_setup_dialog_step_5()}</li>
+								<li>
+									1.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_1()}
+								</li>
+								<li>
+									2.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_2()}
+								</li>
+								<li>
+									3.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_3()}
+								</li>
+								<li>
+									4.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_4()}
+								</li>
+								<li>
+									5.{" "}
+									{m.vaults_sidebar_account_switcher_device_setup_dialog_step_5()}
+								</li>
 							</ol>
 						</div>
 					) : (

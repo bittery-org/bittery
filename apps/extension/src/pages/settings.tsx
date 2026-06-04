@@ -17,27 +17,8 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
+import { useI18n } from "../providers/i18n-provider";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
-
-// Auto-lock timeout options (in milliseconds)
-// -1 means never auto-lock
-const AUTO_LOCK_OPTIONS = [
-	{ value: "60000", label: "1 minute" },
-	{ value: "300000", label: "5 minutes" },
-	{ value: "600000", label: "10 minutes" },
-	{ value: "900000", label: "15 minutes" },
-	{ value: "1800000", label: "30 minutes" },
-	{ value: "3600000", label: "1 hour" },
-	{ value: "-1", label: "Never" },
-] as const;
-
-// Format timeout milliseconds to human-readable string
-function formatTimeout(ms: number): string {
-	if (ms === -1) return "Never";
-	if (ms < 60000) return `${ms / 1000} seconds`;
-	if (ms < 3600000) return `${ms / 60000} minutes`;
-	return `${ms / 3600000} hour${ms / 3600000 > 1 ? "s" : ""}`;
-}
 
 interface DesktopStatus {
 	available: boolean;
@@ -50,6 +31,28 @@ interface DesktopStatus {
 export function SettingsPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const { m } = useI18n();
+
+	// Auto-lock timeout options (in milliseconds)
+	// -1 means never auto-lock
+	const AUTO_LOCK_OPTIONS = [
+		{ value: "60000", label: m.ext_settings_auto_lock_1_minute() },
+		{ value: "300000", label: m.ext_settings_auto_lock_5_minutes() },
+		{ value: "600000", label: m.ext_settings_auto_lock_10_minutes() },
+		{ value: "900000", label: m.ext_settings_auto_lock_15_minutes() },
+		{ value: "1800000", label: m.ext_settings_auto_lock_30_minutes() },
+		{ value: "3600000", label: m.ext_settings_auto_lock_1_hour() },
+		{ value: "-1", label: m.ext_settings_auto_lock_never() },
+	] as const;
+
+	const formatTimeout = (ms: number): string => {
+		const option = AUTO_LOCK_OPTIONS.find((o) => o.value === String(ms));
+		if (option) return option.label;
+		if (ms === -1) return m.ext_settings_auto_lock_never();
+		if (ms < 60000) return `${ms / 1000}s`;
+		if (ms < 3600000) return `${ms / 60000}min`;
+		return `${ms / 3600000}h`;
+	};
 
 	// Query for current auto-lock timeout
 	const autoLockTimeoutQuery = useQuery({
@@ -82,7 +85,7 @@ export function SettingsPage() {
 		const timeoutMs = Number.parseInt(value, 10);
 		await storage.storeAutoLockTimeout(timeoutMs);
 		queryClient.invalidateQueries({ queryKey: ["autoLockTimeout"] });
-		toast.success("Auto-lock timeout updated");
+		toast.success(m.settings_auto_lock_toast_updated());
 
 		// Notify background service worker that settings changed
 		chrome.runtime.sendMessage({ type: "SETTINGS_CHANGED" });
@@ -92,14 +95,14 @@ export function SettingsPage() {
 		try {
 			const response = await chrome.runtime.sendMessage({ type: "LOGOUT" });
 			if (response.success) {
-				toast.success("Signed out successfully");
+				toast.success(m.ext_settings_toast_signed_out());
 				navigate({ to: "/login" });
 			} else {
-				toast.error("Failed to sign out");
+				toast.error(m.ext_settings_toast_sign_out_failed());
 			}
 		} catch (error) {
 			console.error("Sign out error:", error);
-			toast.error("Failed to sign out");
+			toast.error(m.ext_settings_toast_sign_out_failed());
 		}
 	};
 
@@ -132,7 +135,7 @@ export function SettingsPage() {
 				<div className="space-y-6">
 					{/* Security Section */}
 					<div className="space-y-4">
-						<h2 className="font-semibold text-lg">Security</h2>
+						<h2 className="font-semibold text-lg">{m.ext_settings_section_security()}</h2>
 
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
@@ -141,12 +144,12 @@ export function SettingsPage() {
 								</div>
 								<div>
 									<Label className="font-medium text-sm">
-										Auto-Lock Timeout
+										{m.ext_settings_auto_lock_label()}
 									</Label>
 									<p className="text-muted-foreground text-xs">
 										{desktopStatus?.available
-											? `Managed by desktop app (${formatTimeout(desktopStatus.autolockTimeoutMs)})`
-											: "Lock your vault after inactivity"}
+											? m.ext_settings_auto_lock_managed({ timeout: formatTimeout(desktopStatus.autolockTimeoutMs) })
+											: m.ext_settings_auto_lock_description()}
 									</p>
 								</div>
 							</div>
@@ -159,7 +162,7 @@ export function SettingsPage() {
 								}
 							>
 								<SelectTrigger className="w-[140px]">
-									<SelectValue placeholder="Select timeout" />
+									<SelectValue placeholder={m.ext_settings_auto_lock_placeholder()} />
 								</SelectTrigger>
 								<SelectContent>
 									{AUTO_LOCK_OPTIONS.map((option) => (
@@ -174,7 +177,7 @@ export function SettingsPage() {
 
 					{/* Account Section */}
 					<div className="space-y-4">
-						<h2 className="font-semibold text-lg">Account</h2>
+						<h2 className="font-semibold text-lg">{m.ext_settings_section_account()}</h2>
 
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
@@ -182,11 +185,11 @@ export function SettingsPage() {
 									<IconArrowDoorOutOutlineDuo18 className="size-5 text-muted-foreground" />
 								</div>
 								<div>
-									<Label className="font-medium text-sm">Sign Out</Label>
+									<Label className="font-medium text-sm">{m.ext_settings_sign_out_label()}</Label>
 									<p className="text-muted-foreground text-xs">
 										{desktopStatus?.available
-											? "Sign out from the desktop app to sign out here"
-											: "Sign out of your account on this device"}
+											? m.ext_settings_sign_out_managed()
+											: m.ext_settings_sign_out_description()}
 									</p>
 								</div>
 							</div>
@@ -195,7 +198,7 @@ export function SettingsPage() {
 								onClick={handleSignOut}
 								disabled={desktopStatus?.available === true}
 							>
-								Sign Out
+								{m.ext_settings_sign_out_label()}
 							</Button>
 						</div>
 					</div>

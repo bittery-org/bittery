@@ -25,7 +25,7 @@ describe("web CSP rendering", () => {
 		const rendered = renderNginxConfig(
 			template,
 			["'sha256-test-hash'"],
-			resolveConnectSrc("https://api.bittery.com/trpc"),
+			resolveConnectSrc("https://api.bittery.com/rpc"),
 		);
 
 		expect(rendered).not.toContain("cloudflare");

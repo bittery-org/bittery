@@ -21,6 +21,7 @@ import {
 	View,
 } from "react-native";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface SyncConflict {
 	itemId: string;
@@ -56,6 +57,7 @@ export function ConflictResolutionModal({
 	onResolveKeepServer,
 	onDismiss,
 }: ConflictResolutionModalProps) {
+	const { m } = useI18n();
 	const [resolving, setResolving] = useState<"local" | "server" | null>(null);
 
 	if (!conflict) return null;
@@ -133,7 +135,7 @@ export function ConflictResolutionModal({
 								<View className="mb-3 flex-row items-center">
 									<Phone size={20} color="#3b82f6" />
 									<Text className="ml-2 font-bold text-blue-700 dark:text-blue-300">
-										Your Local Version
+										{m.mob_conflict_local_version()}
 									</Text>
 								</View>
 
@@ -144,14 +146,14 @@ export function ConflictResolutionModal({
 								</View>
 
 								<View className="flex-row items-center justify-between">
-									<Text className="text-muted text-sm">Modified locally</Text>
+									<Text className="text-muted text-sm">{m.mob_conflict_modified_locally()}</Text>
 									<Text className="font-medium text-foreground text-sm">
 										{formatTimestamp(conflict.localItem.updatedAt)}
 									</Text>
 								</View>
 
 								<View className="mt-2 flex-row items-center justify-between">
-									<Text className="text-muted text-sm">Local version</Text>
+									<Text className="text-muted text-sm">{m.mob_conflict_local_version_label()}</Text>
 									<Text className="font-mono text-foreground text-sm">
 										v{conflict.localItem.localVersion}
 									</Text>
@@ -162,7 +164,7 @@ export function ConflictResolutionModal({
 							<View className="my-2 flex-row items-center justify-center">
 								<View className="h-px flex-1 bg-border" />
 								<View className="mx-4 rounded-full bg-secondary px-4 py-1">
-									<Text className="font-bold text-muted text-sm">VS</Text>
+									<Text className="font-bold text-muted text-sm">{m.mob_conflict_vs_divider()}</Text>
 								</View>
 								<View className="h-px flex-1 bg-border" />
 							</View>
@@ -174,14 +176,14 @@ export function ConflictResolutionModal({
 										<>
 											<Trash2 size={20} color="#ef4444" />
 											<Text className="ml-2 font-bold text-red-700 dark:text-red-300">
-												Deleted on Server
+												{m.mob_conflict_deleted_on_server()}
 											</Text>
 										</>
 									) : (
 										<>
 											<Cloud size={20} color="#22c55e" />
 											<Text className="ml-2 font-bold text-green-700 dark:text-green-300">
-												Server Version
+												{m.mob_conflict_server_version()}
 											</Text>
 										</>
 									)}
@@ -190,7 +192,7 @@ export function ConflictResolutionModal({
 								{isDeleteConflict ? (
 									<View className="mb-2">
 										<Text className="text-muted italic">
-											This item was deleted on another device
+										{m.mob_conflict_deleted_on_another_device()}
 										</Text>
 									</View>
 								) : (
@@ -203,7 +205,7 @@ export function ConflictResolutionModal({
 
 								<View className="flex-row items-center justify-between">
 									<Text className="text-muted text-sm">
-										{isDeleteConflict ? "Deleted at" : "Modified at"}
+										{isDeleteConflict ? m.mob_conflict_deleted_at() : m.mob_conflict_modified_at()}
 									</Text>
 									<Text className="font-medium text-foreground text-sm">
 										{formatTimestamp(conflict.serverItem.updatedAt)}
@@ -212,7 +214,7 @@ export function ConflictResolutionModal({
 
 								{!isDeleteConflict && (
 									<View className="mt-2 flex-row items-center justify-between">
-										<Text className="text-muted text-sm">Server version</Text>
+										<Text className="text-muted text-sm">{m.mob_conflict_server_version_label()}</Text>
 										<Text className="font-mono text-foreground text-sm">
 											v{conflict.serverItem.version}
 										</Text>
@@ -224,18 +226,18 @@ export function ConflictResolutionModal({
 						{/* Explanation */}
 						<View className="mb-6">
 							<Text className="mb-2 font-semibold text-foreground">
-								What happens when you choose?
+								{m.mob_conflict_explanation_title()}
 							</Text>
 
 							<View className="mb-3 flex-row items-start">
 								<View className="mt-1 mr-3 h-2 w-2 rounded-full bg-blue-500" />
 								<Text className="flex-1 text-muted text-sm">
 									<Text className="font-semibold text-foreground">
-										Keep Local:
+										{m.mob_conflict_keep_local_label()}
 									</Text>{" "}
 									{isDeleteConflict
-										? "Your local changes will be uploaded and the item will be restored on the server."
-										: "Your local changes will overwrite the server version."}
+										? m.mob_conflict_keep_local_delete_explanation()
+										: m.mob_conflict_keep_local_update_explanation()}
 								</Text>
 							</View>
 
@@ -243,11 +245,11 @@ export function ConflictResolutionModal({
 								<View className="mt-1 mr-3 h-2 w-2 rounded-full bg-green-500" />
 								<Text className="flex-1 text-muted text-sm">
 									<Text className="font-semibold text-foreground">
-										Keep Server:
+										{m.mob_conflict_keep_server_label()}
 									</Text>{" "}
 									{isDeleteConflict
-										? "The item will be deleted from your device as well."
-										: "The server version will replace your local changes."}
+										? m.mob_conflict_keep_server_delete_explanation()
+										: m.mob_conflict_keep_server_update_explanation()}
 								</Text>
 							</View>
 						</View>
@@ -311,14 +313,14 @@ export function ConflictResolutionModal({
 								<>
 									<Trash2 size={18} color="#ef4444" />
 									<Text className="ml-2 font-semibold text-red-600 dark:text-red-400">
-										Delete
+									{m.mob_conflict_button_delete()}
 									</Text>
 								</>
 							) : (
 								<>
 									<Cloud size={18} color="#22c55e" />
 									<Text className="ml-2 font-semibold text-green-600 dark:text-green-400">
-										Keep Server
+									{m.mob_conflict_button_keep_server()}
 									</Text>
 								</>
 							)}
@@ -347,6 +349,7 @@ export function ConflictListItem({
 	itemTitle,
 	onPress,
 }: ConflictListItemProps) {
+	const { m } = useI18n();
 	const isDeleteConflict = conflict.conflictType === "delete_conflict";
 
 	return (
@@ -365,7 +368,7 @@ export function ConflictListItem({
 			<View className="flex-1">
 				<Text className="font-semibold text-foreground">{itemTitle}</Text>
 				<Text className="text-red-600 text-sm dark:text-red-400">
-					{isDeleteConflict ? "Deleted on server" : "Modified on both devices"}
+					{isDeleteConflict ? m.mob_conflict_list_deleted_on_server() : m.mob_conflict_list_modified_both()}
 				</Text>
 			</View>
 
@@ -386,6 +389,7 @@ export function ConflictsSummary({
 	conflictsCount,
 	onViewConflicts,
 }: ConflictsSummaryProps) {
+	const { m } = useI18n();
 	if (conflictsCount === 0) return null;
 
 	return (
@@ -396,7 +400,9 @@ export function ConflictsSummary({
 			<AlertTriangle size={24} color="#ef4444" />
 			<View className="ml-3 flex-1">
 				<Text className="font-semibold text-red-700 dark:text-red-300">
-					{conflictsCount} Sync Conflict{conflictsCount > 1 ? "s" : ""}
+					{conflictsCount > 1
+					? m.mob_conflict_summary_plural({ count: String(conflictsCount) })
+					: m.mob_conflict_summary_singular({ count: String(conflictsCount) })}
 				</Text>
 				<Text className="text-red-600 text-sm dark:text-red-400">
 					Tap to resolve
