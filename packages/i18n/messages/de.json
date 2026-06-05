@@ -2283,6 +2283,13 @@
 	"mob_form_cc_billing_label": "Rechnungsadresse",
 	"mob_form_cc_billing_placeholder": "Musterstraße 123, Stadt, PLZ",
 
+	"mob_form_identity_first_name_label": "Vorname",
+	"mob_form_identity_first_name_placeholder": "Vorname",
+	"mob_form_identity_last_name_label": "Nachname",
+	"mob_form_identity_last_name_placeholder": "Nachname",
+	"mob_form_identity_email_label": "E-Mail",
+	"mob_form_identity_email_placeholder": "email@beispiel.de",
+
 	"mob_form_note_label": "Notiz",
 	"mob_form_note_placeholder": "Geben Sie Ihre sichere Notiz ein...",
 

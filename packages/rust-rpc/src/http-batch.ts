@@ -116,9 +116,12 @@ export function httpBatch(host: string, options?: HttpBatchOptions): Transport {
 	}
 
 	async function sendBatch(batch: PendingRequest[]) {
+		const first = batch[0];
+		if (first === undefined) return;
+
 		const isSingle = batch.length === 1;
 		const body = isSingle
-			? JSON.stringify(batch[0].payload)
+			? JSON.stringify(first.payload)
 			: JSON.stringify(batch.map((r) => r.payload));
 
 		try {
@@ -133,7 +136,7 @@ export function httpBatch(host: string, options?: HttpBatchOptions): Transport {
 
 			if (isSingle) {
 				// Single request — response is a single object
-				batch[0].resolve(parseOneResponse(json));
+				first.resolve(parseOneResponse(json));
 			} else {
 				// Batch response — should be an array
 				if (!Array.isArray(json)) {

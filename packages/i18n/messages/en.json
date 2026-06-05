@@ -2283,6 +2283,13 @@
 	"mob_form_cc_billing_label": "Billing Address",
 	"mob_form_cc_billing_placeholder": "123 Main St, City, State ZIP",
 
+	"mob_form_identity_first_name_label": "First Name",
+	"mob_form_identity_first_name_placeholder": "First name",
+	"mob_form_identity_last_name_label": "Last Name",
+	"mob_form_identity_last_name_placeholder": "Last name",
+	"mob_form_identity_email_label": "Email",
+	"mob_form_identity_email_placeholder": "email@example.com",
+
 	"mob_form_note_label": "Note",
 	"mob_form_note_placeholder": "Enter your secure note...",
 
