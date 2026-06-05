@@ -39,7 +39,8 @@
 			"!**/wrangler.jsonc",
 			"!**/.source",
 			"!**/playwright-report",
-			"!**/paraglide"
+			"!**/paraglide",
+			"!**/project.inlang"
 		]
 	},
 	"formatter": {
