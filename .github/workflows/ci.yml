@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: "10.18.3"
+
+jobs:
+  js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Biome
+        run: pnpm exec biome check .
+
+      - name: Typecheck
+        run: pnpm run check-types
+
+      - name: i18n keys
+        run: pnpm run i18n:check
+
+      - name: Version sync
+        run: pnpm run version:check
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Package tests
+        run: |
+          pnpm --filter @bittery/shared test
+          pnpm --filter @bittery/i18n test
+          pnpm --filter @bittery/device test
+
+  server:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: bittery_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bittery_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:password@localhost:5432/bittery_test
+      JWT_SECRET: ci-test-secret
+      CORS_ORIGIN: http://localhost:3001
+      BITTERY_MODE: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/server
+
+      - name: Migrate test database
+        run: cargo run --manifest-path apps/server/Cargo.toml --bin migrate
+
+      - name: Server tests
+        run: cargo test --manifest-path apps/server/Cargo.toml
+
+      - name: Server lint
+        run: pnpm --filter server run check

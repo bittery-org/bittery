@@ -1,5 +1,6 @@
 {
 	"name": "bittery",
+	"version": "0.1.0",
 	"private": true,
 	"license": "FSL-1.1-ALv2",
 	"type": "module",
@@ -48,7 +49,9 @@
 		"db:down": "docker compose -f apps/server/docker-compose.db.yml down",
 		"start:server": "cargo run --manifest-path apps/server/Cargo.toml --release",
 		"stripe:webhooks": "stripe listen --forward-to http://localhost:3000/webhooks/stripe",
-		"i18n:generate": "pnpm --filter @bittery/i18n run build"
+		"i18n:generate": "pnpm --filter @bittery/i18n run build",
+		"version:sync": "node ./scripts/sync-version.mjs",
+		"version:check": "node ./scripts/sync-version.mjs --check"
 	},
 	"dependencies": {
 		"dotenv": "^17.2.2",
