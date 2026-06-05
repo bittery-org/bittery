@@ -50,7 +50,7 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
 					<Card key={url} variant="secondary" className="mb-2">
 						<Card.Body className="py-3">
 							<Card.Description className="mb-1.5">
-							{m.mob_detail_field_website_n({ index: String(index + 2) })}
+								{m.mob_detail_field_website_n({ index: String(index + 2) })}
 							</Card.Description>
 							<View className="flex-row items-center gap-2.5">
 								<StyledGlobe size={16} className="text-muted" />
@@ -75,7 +75,7 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
 						<Card.Description className="mb-2">
-						{m.mob_detail_field_two_factor_code()}
+							{m.mob_detail_field_two_factor_code()}
 						</Card.Description>
 						<TotpDisplay
 							totpSecret={item.totpSecret}

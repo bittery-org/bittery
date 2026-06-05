@@ -46,7 +46,9 @@ export default function CreateItemScreen() {
 	const { m } = useI18n();
 
 	// Filter out "all" option for item creation
-	const categoryOptions = getCategoryOptions(m).filter((opt) => opt.value !== "all");
+	const categoryOptions = getCategoryOptions(m).filter(
+		(opt) => opt.value !== "all",
+	);
 	const router = useRouter();
 	const { toast } = useToast();
 	const { vaultId: vaultIdParam } = useLocalSearchParams<{
@@ -184,7 +186,10 @@ export default function CreateItemScreen() {
 			console.error("Error creating item:", error);
 			toast.show({
 				variant: "danger",
-				label: error instanceof Error ? error.message : m.mob_create_item_toast_failed(),
+				label:
+					error instanceof Error
+						? error.message
+						: m.mob_create_item_toast_failed(),
 				placement: "bottom",
 			});
 		} finally {
@@ -223,7 +228,7 @@ export default function CreateItemScreen() {
 						<StyledArrowLeft size={20} className="text-foreground" />
 					</Button>
 					<Text className="flex-1 font-bold text-foreground text-xl">
-					{m.mob_create_item_header()}
+						{m.mob_create_item_header()}
 					</Text>
 					<Button
 						onPress={handleSave}
@@ -351,7 +356,7 @@ export default function CreateItemScreen() {
 										</>
 									) : (
 										<Button.Label className="flex-1 text-left">
-										{m.mob_create_item_category_placeholder()}
+											{m.mob_create_item_category_placeholder()}
 										</Button.Label>
 									)}
 									<StyledChevronDown size={16} className="text-muted" />

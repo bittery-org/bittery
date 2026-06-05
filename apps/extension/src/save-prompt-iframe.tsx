@@ -126,9 +126,7 @@ function SavePromptIframe() {
 					}, 2000);
 				} else {
 					setState("error");
-					setErrorMessage(
-						event.data.error || m.ext_save_error_fallback(),
-					);
+					setErrorMessage(event.data.error || m.ext_save_error_fallback());
 				}
 			}
 		};
@@ -139,7 +137,7 @@ function SavePromptIframe() {
 		window.parent.postMessage({ type: "SAVE_IFRAME_READY", nonce }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
-	}, [handleCancel, nonce]);
+	}, [handleCancel, nonce, m.ext_save_error_fallback]);
 
 	const handleSave = () => {
 		if (!data || !selectedVaultId) return;
@@ -225,7 +223,7 @@ function SavePromptIframe() {
 					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
-						{isUpdating ? m.ext_save_updating() : m.ext_save_saving()}
+							{isUpdating ? m.ext_save_updating() : m.ext_save_saving()}
 						</p>
 						<p className="mt-0.5 text-muted-foreground text-xs">
 							{selectedVault?.name}
@@ -247,12 +245,12 @@ function SavePromptIframe() {
 					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
-						{isUpdating ? m.ext_save_updated() : m.ext_save_saved()}
-					</p>
-					<p className="mt-0.5 text-muted-foreground text-xs">
-						{isUpdating
-							? m.ext_save_updated_in({ vault: selectedVault?.name ?? "" })
-							: m.ext_save_saved_to({ vault: selectedVault?.name ?? "" })}
+							{isUpdating ? m.ext_save_updated() : m.ext_save_saved()}
+						</p>
+						<p className="mt-0.5 text-muted-foreground text-xs">
+							{isUpdating
+								? m.ext_save_updated_in({ vault: selectedVault?.name ?? "" })
+								: m.ext_save_saved_to({ vault: selectedVault?.name ?? "" })}
 						</p>
 					</div>
 				</div>
@@ -271,7 +269,9 @@ function SavePromptIframe() {
 					/>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
-						{isUpdating ? m.ext_save_failed_update() : m.ext_save_failed_save()}
+							{isUpdating
+								? m.ext_save_failed_update()
+								: m.ext_save_failed_save()}
 						</p>
 						<p className="mt-0.5 text-muted-foreground text-xs">
 							{errorMessage}
@@ -314,9 +314,9 @@ function SavePromptIframe() {
 				<div className="flex items-start gap-2.5">
 					<IconLockOutlineDuo18 size={20} className="shrink-0 text-amber-600" />
 					<div className="min-w-0 flex-1">
-					<p className="font-medium text-sm">{m.ext_save_cannot_save()}</p>
-					<p className="mt-0.5 text-muted-foreground text-xs">
-						{m.ext_save_no_write_access()}
+						<p className="font-medium text-sm">{m.ext_save_cannot_save()}</p>
+						<p className="mt-0.5 text-muted-foreground text-xs">
+							{m.ext_save_no_write_access()}
 						</p>
 						{data && (
 							<p className="mt-1 text-muted-foreground text-xs">
@@ -325,7 +325,7 @@ function SavePromptIframe() {
 							</p>
 						)}
 						<p className="mt-2 text-muted-foreground text-xs">
-						{m.ext_save_permissions_hint()}
+							{m.ext_save_permissions_hint()}
 						</p>
 					</div>
 				</div>
@@ -356,14 +356,16 @@ function SavePromptIframe() {
 				/>
 				<div className="min-w-0 flex-1">
 					<p className="font-medium text-sm">
-					{data.hasDuplicates ? m.ext_save_update_or_save() : m.ext_save_password_question()}
+						{data.hasDuplicates
+							? m.ext_save_update_or_save()
+							: m.ext_save_password_question()}
 					</p>
 					<p className="mt-0.5 truncate text-muted-foreground text-xs">
 						{data.username}
 					</p>
 					{data.hasDuplicates && (
 						<p className="mt-1 text-amber-600 text-xs">
-						{m.ext_save_duplicates_warning()}
+							{m.ext_save_duplicates_warning()}
 						</p>
 					)}
 				</div>
@@ -385,7 +387,7 @@ function SavePromptIframe() {
 								className="shrink-0 text-muted-foreground"
 							/>
 							<span className="truncate">
-							{selectedVault?.name || m.ext_save_select_vault()}
+								{selectedVault?.name || m.ext_save_select_vault()}
 							</span>
 							{selectedVault && (
 								<span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">

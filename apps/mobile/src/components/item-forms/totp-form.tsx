@@ -202,9 +202,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 						className="font-mono"
 					/>
 					{totpSecret && !isValidBase32(totpSecret) && (
-						<FieldError>
-							{m.mob_form_totp_secret_error()}
-						</FieldError>
+						<FieldError>{m.mob_form_totp_secret_error()}</FieldError>
 					)}
 				</TextField>
 
@@ -263,7 +261,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					<View className="mb-4 rounded-lg bg-secondary/30 p-3">
 						<View className="mb-4 flex-row gap-2">
 							<View className="flex-1">
-								<Text className="mb-1 text-muted text-xs">{m.mob_form_totp_digits_label()}</Text>
+								<Text className="mb-1 text-muted text-xs">
+									{m.mob_form_totp_digits_label()}
+								</Text>
 								<View className="flex-row rounded-lg border border-input bg-background">
 									{[6, 7, 8].map((d) => (
 										<Pressable
@@ -291,7 +291,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 								</View>
 							</View>
 							<TextField className="flex-1">
-								<Label className="mb-1 text-muted text-xs">{m.mob_form_totp_period_label()}</Label>
+								<Label className="mb-1 text-muted text-xs">
+									{m.mob_form_totp_period_label()}
+								</Label>
 								<Input
 									value={totpPeriod.toString()}
 									onChangeText={(v: string) =>
@@ -302,7 +304,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 							</TextField>
 						</View>
 						<View>
-							<Text className="mb-1 text-muted text-xs">{m.mob_form_totp_algorithm_label()}</Text>
+							<Text className="mb-1 text-muted text-xs">
+								{m.mob_form_totp_algorithm_label()}
+							</Text>
 							<View className="flex-row rounded-lg border border-input bg-background">
 								{(["SHA1", "SHA256", "SHA512"] as TotpAlgorithm[]).map(
 									(algo) => (

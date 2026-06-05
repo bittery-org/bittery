@@ -287,7 +287,6 @@ async function processEvent(eventStr: string): Promise<void> {
 			sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
 			return;
 		}
-
 	} catch (error) {
 		console.error("[sync-manager] Failed to parse SSE event:", error, data);
 	}

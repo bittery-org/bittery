@@ -127,7 +127,9 @@ export default function SearchScreen() {
 						{m.mob_search_recent_title()}
 					</Text>
 					<TouchableOpacity onPress={clearRecentSearches}>
-						<Text className="text-accent text-sm">{m.mob_search_recent_clear_all()}</Text>
+						<Text className="text-accent text-sm">
+							{m.mob_search_recent_clear_all()}
+						</Text>
 					</TouchableOpacity>
 				</View>
 				{recentSearches.map((query) => (
@@ -179,8 +181,12 @@ export default function SearchScreen() {
 					<View className="px-4 py-2">
 						<Text className="text-muted text-sm">
 							{filteredItems.length !== 1
-								? m.mob_search_result_count_plural({ count: String(filteredItems.length) })
-								: m.mob_search_result_count_singular({ count: String(filteredItems.length) })}
+								? m.mob_search_result_count_plural({
+										count: String(filteredItems.length),
+									})
+								: m.mob_search_result_count_singular({
+										count: String(filteredItems.length),
+									})}
 						</Text>
 					</View>
 				}

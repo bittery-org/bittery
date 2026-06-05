@@ -19,7 +19,9 @@ export function IdentityFields({ item, onCopy }: ItemDetailProps) {
 			{(item.firstName || item.lastName) && (
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
-						<Card.Description className="mb-1.5">{m.mob_detail_field_name()}</Card.Description>
+						<Card.Description className="mb-1.5">
+							{m.mob_detail_field_name()}
+						</Card.Description>
 						<Card.Title className="font-normal text-base" selectable>
 							{[item.firstName, item.middleName, item.lastName]
 								.filter(Boolean)

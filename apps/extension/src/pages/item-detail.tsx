@@ -5,8 +5,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
-import { useI18n } from "@/providers/i18n-provider";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();
@@ -48,7 +48,9 @@ export function ItemDetailPage() {
 	if (!item) {
 		return (
 			<div className="flex h-full items-center justify-center p-4">
-				<p className="text-muted-foreground text-sm">{m.ext_item_detail_not_found()}</p>
+				<p className="text-muted-foreground text-sm">
+					{m.ext_item_detail_not_found()}
+				</p>
 			</div>
 		);
 	}
@@ -65,7 +67,9 @@ export function ItemDetailPage() {
 						<IconArrowLeftOutlineDuo18 className="size-[18px]" />
 					</Button>
 					<div>
-						<div className="font-semibold text-lg">{m.ext_item_detail_title()}</div>
+						<div className="font-semibold text-lg">
+							{m.ext_item_detail_title()}
+						</div>
 						<div className="text-muted-foreground text-xs">
 							{m.ext_item_detail_description()}
 						</div>

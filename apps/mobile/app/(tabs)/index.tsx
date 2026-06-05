@@ -121,7 +121,11 @@ export default function AllItemsScreen() {
 					>
 						<EmptyItemsState
 							icon={<StyledKey size={48} className="mb-4 text-muted" />}
-							title={hasFilter ? m.mob_items_empty_no_items_filtered() : m.mob_items_empty_no_items()}
+							title={
+								hasFilter
+									? m.mob_items_empty_no_items_filtered()
+									: m.mob_items_empty_no_items()
+							}
 							description={
 								hasFilter
 									? m.mob_items_empty_try_filter()

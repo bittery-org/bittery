@@ -29,7 +29,12 @@ function getNavLinks(): NavLink[] {
 		{ label: "Features", href: "/", hash: "features", sectionId: "features" },
 		billingEnabled
 			? { label: "Pricing", href: "/", hash: "pricing", sectionId: "pricing" }
-			: { label: "Waitlist", href: "/", hash: "waitlist", sectionId: "waitlist" },
+			: {
+					label: "Waitlist",
+					href: "/",
+					hash: "waitlist",
+					sectionId: "waitlist",
+				},
 		...baseNavLinks.slice(1),
 	];
 }
@@ -208,10 +213,10 @@ export function Header() {
 								hash={link.hash}
 								className={linkClassName}
 							>
-							{content}
-						</Link>
-					);
-				})}
+								{content}
+							</Link>
+						);
+					})}
 				</div>
 
 				<div className="flex items-center gap-1.5">

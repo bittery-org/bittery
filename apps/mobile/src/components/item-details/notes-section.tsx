@@ -16,7 +16,9 @@ export function NotesSection({
 	return (
 		<Card variant="default" className="mb-2">
 			<Card.Body className="py-3">
-				<Card.Description className="mb-2">{m.mob_detail_field_notes()}</Card.Description>
+				<Card.Description className="mb-2">
+					{m.mob_detail_field_notes()}
+				</Card.Description>
 				<Card.Title className="font-normal text-base" selectable>
 					{notes}
 				</Card.Title>

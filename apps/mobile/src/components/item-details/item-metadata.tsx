@@ -13,10 +13,14 @@ export function ItemMetadata({ createdAt, updatedAt }: ItemMetadataProps) {
 		<Card variant="default" className="mb-4">
 			<Card.Body className="py-3">
 				<Card.Description className="text-xs">
-				{m.mob_detail_field_created({ date: new Date(createdAt).toLocaleString() })}
+					{m.mob_detail_field_created({
+						date: new Date(createdAt).toLocaleString(),
+					})}
 				</Card.Description>
 				<Card.Description className="text-xs">
-				{m.mob_detail_field_updated({ date: new Date(updatedAt).toLocaleString() })}
+					{m.mob_detail_field_updated({
+						date: new Date(updatedAt).toLocaleString(),
+					})}
 				</Card.Description>
 			</Card.Body>
 		</Card>

@@ -190,9 +190,9 @@ function ContactPage() {
 									Built and maintained in Germany
 								</h2>
 								<p className="mt-4 max-w-lg text-muted-foreground text-sm leading-relaxed sm:text-base">
-									We operate under strict EU data protection
-									regulations including GDPR, ensuring your privacy is protected
-									by law — not just by promise.
+									We operate under strict EU data protection regulations
+									including GDPR, ensuring your privacy is protected by law —
+									not just by promise.
 								</p>
 							</div>
 

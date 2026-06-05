@@ -158,6 +158,10 @@ export default function LoginScreen() {
 		searchParams.teamName,
 		searchParams.v,
 		applySetupPayload,
+		m.login_alert_invalid_setup_message,
+		m.login_alert_invalid_setup_title,
+		m.login_alert_setup_loaded_message,
+		m.login_alert_setup_loaded_title,
 	]);
 
 	useEffect(() => {

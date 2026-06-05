@@ -1,7 +1,7 @@
 import { Card } from "heroui-native";
 import { useState } from "react";
-import { TotpDisplay } from "../totp-display";
 import { useI18n } from "@/providers/i18n-provider";
+import { TotpDisplay } from "../totp-display";
 import { FieldRow } from "./field-row";
 import type { ItemDetailProps } from "./types";
 
@@ -15,7 +15,9 @@ export function TotpFields({ item, onCopy }: ItemDetailProps) {
 			{item.totpSecret && (
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
-						<Card.Description className="mb-2">{m.mob_detail_field_current_code()}</Card.Description>
+						<Card.Description className="mb-2">
+							{m.mob_detail_field_current_code()}
+						</Card.Description>
 						<TotpDisplay
 							totpSecret={item.totpSecret}
 							totpAlgorithm={item.totpAlgorithm}
@@ -36,14 +38,24 @@ export function TotpFields({ item, onCopy }: ItemDetailProps) {
 					setShowState: setShowTotpSecret,
 				}}
 			/>
-			<FieldRow label={m.mob_detail_field_issuer()} value={item.totpIssuer} onCopy={onCopy} />
-			<FieldRow label={m.mob_detail_field_account()} value={item.totpAccountName} onCopy={onCopy} />
+			<FieldRow
+				label={m.mob_detail_field_issuer()}
+				value={item.totpIssuer}
+				onCopy={onCopy}
+			/>
+			<FieldRow
+				label={m.mob_detail_field_account()}
+				value={item.totpAccountName}
+				onCopy={onCopy}
+			/>
 
 			{/* Show TOTP settings if non-default */}
 			{item.totpAlgorithm && item.totpAlgorithm !== "SHA1" && (
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
-						<Card.Description className="mb-1.5">{m.mob_detail_field_algorithm()}</Card.Description>
+						<Card.Description className="mb-1.5">
+							{m.mob_detail_field_algorithm()}
+						</Card.Description>
 						<Card.Title className="font-normal text-base">
 							{item.totpAlgorithm}
 						</Card.Title>
@@ -54,7 +66,9 @@ export function TotpFields({ item, onCopy }: ItemDetailProps) {
 			{item.totpDigits && item.totpDigits !== 6 && (
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
-						<Card.Description className="mb-1.5">{m.mob_detail_field_digits()}</Card.Description>
+						<Card.Description className="mb-1.5">
+							{m.mob_detail_field_digits()}
+						</Card.Description>
 						<Card.Title className="font-normal text-base">
 							{item.totpDigits}
 						</Card.Title>
@@ -65,9 +79,13 @@ export function TotpFields({ item, onCopy }: ItemDetailProps) {
 			{item.totpPeriod && item.totpPeriod !== 30 && (
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
-						<Card.Description className="mb-1.5">{m.mob_detail_field_period()}</Card.Description>
+						<Card.Description className="mb-1.5">
+							{m.mob_detail_field_period()}
+						</Card.Description>
 						<Card.Title className="font-normal text-base">
-							{m.mob_detail_field_period_seconds({ seconds: String(item.totpPeriod) })}
+							{m.mob_detail_field_period_seconds({
+								seconds: String(item.totpPeriod),
+							})}
 						</Card.Title>
 					</Card.Body>
 				</Card>

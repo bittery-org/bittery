@@ -332,7 +332,9 @@ export function TotpDisplay({
 					>
 						{formatCode(totpResult?.code || "")}
 					</Animated.Text>
-					{!compact && <Text className="text-muted text-xs">{resolvedLabel}</Text>}
+					{!compact && (
+						<Text className="text-muted text-xs">{resolvedLabel}</Text>
+					)}
 				</View>
 			</TouchableOpacity>
 

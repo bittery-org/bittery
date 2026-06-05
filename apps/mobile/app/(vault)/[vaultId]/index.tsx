@@ -60,7 +60,7 @@ export default function VaultItemsScreen() {
 							<StyledArrowLeft size={18} className="text-muted" />
 						</Button>
 						<Card.Title className="flex-1 text-xl" numberOfLines={1}>
-						{m.mob_vault_items_loading()}
+							{m.mob_vault_items_loading()}
 						</Card.Title>
 						<Button isIconOnly variant="secondary" size="sm">
 							<StyledPlus size={18} className="text-muted" />
@@ -170,13 +170,21 @@ export default function VaultItemsScreen() {
 				>
 					<EmptyItemsState
 						icon={<StyledKey size={48} className="mb-4 text-muted" />}
-						title={hasFilterOrSearch ? m.mob_vault_items_empty_filtered() : m.mob_vault_items_empty_no_items()}
+						title={
+							hasFilterOrSearch
+								? m.mob_vault_items_empty_filtered()
+								: m.mob_vault_items_empty_no_items()
+						}
 						description={
 							hasFilterOrSearch
 								? m.mob_vault_items_empty_filtered_description()
 								: m.mob_vault_items_empty_description()
 						}
-						actionLabel={!hasFilterOrSearch ? m.mob_vault_items_empty_add_item() : undefined}
+						actionLabel={
+							!hasFilterOrSearch
+								? m.mob_vault_items_empty_add_item()
+								: undefined
+						}
 						onAction={
 							!hasFilterOrSearch
 								? () => router.push(`/(vault)/create?vaultId=${vaultId}`)

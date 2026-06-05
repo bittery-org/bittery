@@ -3,8 +3,8 @@ import { useThemeColor } from "heroui-native";
 import { Home, Search, Shield, Tag } from "lucide-react-native";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AccountSwitcher } from "../../src/components/account-switcher";
 import { useI18n } from "@/providers/i18n-provider";
+import { AccountSwitcher } from "../../src/components/account-switcher";
 
 export default function TabsLayout() {
 	const { m } = useI18n();

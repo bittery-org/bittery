@@ -2,7 +2,6 @@ import {
 	ArrowRight,
 	CheckCircle,
 	Loader2,
-	Mail,
 	Server,
 	ShieldCheck,
 	Sparkles,

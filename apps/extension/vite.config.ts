@@ -19,7 +19,10 @@ export default defineConfig({
 		},
 	},
 	optimizeDeps: {
-		include: ["@bittery/i18n/paraglide/messages", "@bittery/i18n/paraglide/runtime"],
+		include: [
+			"@bittery/i18n/paraglide/messages",
+			"@bittery/i18n/paraglide/runtime",
+		],
 	},
 	server: {
 		cors: {

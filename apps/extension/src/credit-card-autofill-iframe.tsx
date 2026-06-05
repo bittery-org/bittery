@@ -35,7 +35,9 @@ const CardBrandIcon = ({ brand }: { brand: string }) => {
 				className="font-bold text-[8px] uppercase"
 				style={{ color: getBrandColor() }}
 			>
-				{brand === "unknown" ? m.ext_autofill_card_brand_unknown() : brand.substring(0, 4)}
+				{brand === "unknown"
+					? m.ext_autofill_card_brand_unknown()
+					: brand.substring(0, 4)}
 			</span>
 		</div>
 	);
@@ -51,7 +53,9 @@ function CreditCardAutofillIframe() {
 		selectMessageType: "CREDIT_CARD_SELECT",
 		filterFn: filterCreditCardItems,
 		preprocessItems: (items: DecryptedItem[]) =>
-			items.filter((item) => item.category === "credit-card" && item.cardNumber),
+			items.filter(
+				(item) => item.category === "credit-card" && item.cardNumber,
+			),
 		defaultFieldType: "cardNumber",
 		emptyIcon: <IconCreditCardLockOutlineDuo18 size={14} />,
 		emptyText: m.ext_autofill_card_empty(),

@@ -27,7 +27,7 @@ export default function TagFilterScreen() {
 		navigation.setOptions({
 			title: decodedTagName || m.mob_tag_filter_fallback_title(),
 		});
-	}, [navigation, decodedTagName]);
+	}, [navigation, decodedTagName, m.mob_tag_filter_fallback_title]);
 
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
@@ -120,7 +120,7 @@ export default function TagFilterScreen() {
 			>
 				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
 					<Card.Title className="mb-4 text-center text-danger text-lg">
-					{m.mob_tag_filter_error_loading()}
+						{m.mob_tag_filter_error_loading()}
 					</Card.Title>
 					<Button onPress={handleRefresh} variant="primary">
 						Retry

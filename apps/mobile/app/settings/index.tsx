@@ -27,10 +27,10 @@ import {
 } from "lucide-react-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Platform, ScrollView, Text, View } from "react-native";
-import { useI18n } from "@/providers/i18n-provider";
 import { Uniwind, useUniwind, withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { storage } from "../../src/services/storage";
@@ -266,7 +266,9 @@ export default function SettingsScreen() {
 	};
 
 	const handleSignOut = async () => {
-		const title = isAllAccountsMode ? m.mob_settings_sign_out_all_title() : m.mob_settings_sign_out();
+		const title = isAllAccountsMode
+			? m.mob_settings_sign_out_all_title()
+			: m.mob_settings_sign_out();
 		const description = isAllAccountsMode
 			? m.mob_settings_sign_out_all_description()
 			: m.mob_settings_sign_out_description();
@@ -383,7 +385,9 @@ export default function SettingsScreen() {
 					>
 						<StyledArrowLeft size={18} className="text-foreground" />
 					</Button>
-					<Card.Title className="flex-1 text-xl">{m.mob_settings_title()}</Card.Title>
+					<Card.Title className="flex-1 text-xl">
+						{m.mob_settings_title()}
+					</Card.Title>
 				</View>
 			</View>
 
@@ -398,7 +402,11 @@ export default function SettingsScreen() {
 						label={accountLabel}
 						value={accountValue}
 					/>
-					<SettingRow icon={StyledServer} label={m.mob_settings_server_label()} value={serverValue} />
+					<SettingRow
+						icon={StyledServer}
+						label={m.mob_settings_server_label()}
+						value={serverValue}
+					/>
 				</Surface>
 
 				{/* Appearance Section */}
@@ -422,7 +430,9 @@ export default function SettingsScreen() {
 						<View className="flex-1">
 							<Label>{m.mob_settings_dark_mode()}</Label>
 							<Description>
-								{theme === "dark" ? m.mob_settings_enabled() : m.mob_settings_disabled()}
+								{theme === "dark"
+									? m.mob_settings_enabled()
+									: m.mob_settings_disabled()}
 							</Description>
 						</View>
 						<ControlField.Indicator>
@@ -459,9 +469,15 @@ export default function SettingsScreen() {
 								)}
 							</View>
 							<View className="flex-1">
-								<Label>{m.mob_settings_biometric_unlock({ biometricType: biometricType || "Biometric" })}</Label>
+								<Label>
+									{m.mob_settings_biometric_unlock({
+										biometricType: biometricType || "Biometric",
+									})}
+								</Label>
 								<Description>
-									{biometricEnabled ? m.mob_settings_enabled() : m.mob_settings_disabled()}
+									{biometricEnabled
+										? m.mob_settings_enabled()
+										: m.mob_settings_disabled()}
 								</Description>
 							</View>
 							<ControlField.Indicator>
@@ -478,10 +494,10 @@ export default function SettingsScreen() {
 									<StyledInfo size={18} className="text-surface-foreground" />
 									<View className="flex-1">
 										<Card.Title className="text-sm">
-										{m.mob_settings_biometric_not_available_title()}
-									</Card.Title>
-									<Card.Description className="text-xs">
-										{m.mob_settings_biometric_not_available_description()}
+											{m.mob_settings_biometric_not_available_title()}
+										</Card.Title>
+										<Card.Description className="text-xs">
+											{m.mob_settings_biometric_not_available_description()}
 										</Card.Description>
 									</View>
 								</View>
@@ -497,10 +513,10 @@ export default function SettingsScreen() {
 									<StyledAlertCircle size={18} className="text-amber-600" />
 									<View className="flex-1">
 										<Card.Title className="text-amber-800 text-sm">
-										{m.mob_settings_biometric_setup_title()}
-									</Card.Title>
-									<Card.Description className="text-amber-700 text-xs">
-										{m.mob_settings_biometric_setup_description()}
+											{m.mob_settings_biometric_setup_title()}
+										</Card.Title>
+										<Card.Description className="text-amber-700 text-xs">
+											{m.mob_settings_biometric_setup_description()}
 										</Card.Description>
 									</View>
 								</View>
@@ -526,12 +542,14 @@ export default function SettingsScreen() {
 									/>
 									<View className="flex-1">
 										<Card.Title className="text-accent-soft-foreground text-sm">
-										{m.mob_settings_password_check_title()}
-									</Card.Title>
-									<Card.Description className="text-accent-soft-foreground text-xs">
-										{masterPasswordDaysRemaining > 0
-											? m.mob_settings_password_check_days_remaining({ days: String(masterPasswordDaysRemaining) })
-											: m.mob_settings_password_check_now()}
+											{m.mob_settings_password_check_title()}
+										</Card.Title>
+										<Card.Description className="text-accent-soft-foreground text-xs">
+											{masterPasswordDaysRemaining > 0
+												? m.mob_settings_password_check_days_remaining({
+														days: String(masterPasswordDaysRemaining),
+													})
+												: m.mob_settings_password_check_now()}
 										</Card.Description>
 									</View>
 								</View>
@@ -573,7 +591,9 @@ export default function SettingsScreen() {
 				{accountsForList.length > 0 && (
 					<Surface variant="secondary" className="mb-6 gap-0 p-0">
 						<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-							{isAllAccountsMode ? m.mob_settings_section_accounts() : m.mob_settings_section_other_accounts()}
+							{isAllAccountsMode
+								? m.mob_settings_section_accounts()
+								: m.mob_settings_section_other_accounts()}
 						</Text>
 						{accountsForList.map((account) => (
 							<View key={account.email}>
@@ -605,7 +625,11 @@ export default function SettingsScreen() {
 					</Text>
 					<SettingRow
 						icon={StyledLogOut}
-						label={isAllAccountsMode ? m.mob_settings_sign_out_all() : m.mob_settings_sign_out()}
+						label={
+							isAllAccountsMode
+								? m.mob_settings_sign_out_all()
+								: m.mob_settings_sign_out()
+						}
 						value={
 							isAllAccountsMode
 								? m.mob_settings_sign_out_all_value()
@@ -621,7 +645,9 @@ export default function SettingsScreen() {
 					<Text className="text-sm text-surface-foreground">
 						{m.mob_settings_app_name()}
 					</Text>
-					<Text className="text-surface-foreground text-xs">{m.mob_settings_app_version()}</Text>
+					<Text className="text-surface-foreground text-xs">
+						{m.mob_settings_app_version()}
+					</Text>
 				</View>
 			</ScrollView>
 		</SafeAreaView>

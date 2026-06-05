@@ -209,7 +209,9 @@ export function AccountSwitcher() {
 				<BottomSheet.Overlay />
 				<BottomSheet.Content>
 					<View className="items-center py-3">
-						<BottomSheet.Title>{m.mob_account_switcher_title()}</BottomSheet.Title>
+						<BottomSheet.Title>
+							{m.mob_account_switcher_title()}
+						</BottomSheet.Title>
 					</View>
 
 					{/* Account list */}
@@ -310,7 +312,9 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
 								<StyledPlus size={20} className="text-muted" />
 							</View>
-							<Text className="font-medium text-foreground">{m.mob_account_switcher_add_account()}</Text>
+							<Text className="font-medium text-foreground">
+								{m.mob_account_switcher_add_account()}
+							</Text>
 						</PressableFeedback>
 
 						{/* Settings */}
@@ -322,7 +326,9 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
 								<StyledSettings size={20} className="text-muted" />
 							</View>
-							<Text className="font-medium text-foreground">{m.mob_account_switcher_settings()}</Text>
+							<Text className="font-medium text-foreground">
+								{m.mob_account_switcher_settings()}
+							</Text>
 						</PressableFeedback>
 
 						{/* Trash */}
@@ -334,7 +340,9 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
 								<StyledTrash2 size={20} className="text-muted" />
 							</View>
-							<Text className="font-medium text-foreground">{m.mob_account_switcher_trash()}</Text>
+							<Text className="font-medium text-foreground">
+								{m.mob_account_switcher_trash()}
+							</Text>
 						</PressableFeedback>
 
 						{/* Lock Vault */}
@@ -346,7 +354,9 @@ export function AccountSwitcher() {
 							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-danger/10">
 								<StyledLock size={20} className="text-danger" />
 							</View>
-							<Text className="font-medium text-danger">{m.mob_account_switcher_lock_vault()}</Text>
+							<Text className="font-medium text-danger">
+								{m.mob_account_switcher_lock_vault()}
+							</Text>
 						</PressableFeedback>
 					</View>
 				</BottomSheet.Content>

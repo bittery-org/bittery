@@ -13,8 +13,8 @@ import { useCallback, useMemo, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
-import { useI18n } from "@/providers/i18n-provider";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 type MultiAccountItem = DecryptedItemWithContext & {
 	account?: {
@@ -144,7 +144,11 @@ function ItemListRow({
 						)}
 						{passkeyCount > 0 && (
 							<span
-								title={passkeyCount === 1 ? m.ext_vault_passkey_count_single({ count: passkeyCount }) : m.ext_vault_passkey_count_plural({ count: passkeyCount })}
+								title={
+									passkeyCount === 1
+										? m.ext_vault_passkey_count_single({ count: passkeyCount })
+										: m.ext_vault_passkey_count_plural({ count: passkeyCount })
+								}
 								className={cn(
 									"inline-flex items-center",
 									isSelected
@@ -245,9 +249,7 @@ export function VaultPage() {
 			console.error(error);
 
 			//   window.open(DESKTOP_APP_URL, "_blank", "noopener,noreferrer");
-			toast.error(
-				m.ext_vault_toast_desktop_fallback(),
-			);
+			toast.error(m.ext_vault_toast_desktop_fallback());
 		}
 	};
 
@@ -388,7 +390,9 @@ export function VaultPage() {
 						) : sortedItems.length === 0 ? (
 							<div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
 								<div className="font-semibold">
-									{searchQuery ? m.ext_vault_no_matches() : m.ext_vault_no_items()}
+									{searchQuery
+										? m.ext_vault_no_matches()
+										: m.ext_vault_no_items()}
 								</div>
 								<p className="text-muted-foreground text-sm">
 									{searchQuery

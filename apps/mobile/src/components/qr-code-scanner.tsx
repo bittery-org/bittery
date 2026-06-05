@@ -124,7 +124,17 @@ export function QrCodeScanner({
 				);
 			}
 		},
-		[isProcessing, onClose, onScanSuccess],
+		[
+			isProcessing,
+			onClose,
+			onScanSuccess,
+			m.mob_qr_scanner_cancel,
+			m.mob_qr_scanner_invalid_qr_message,
+			m.mob_qr_scanner_invalid_qr_title,
+			m.mob_qr_scanner_invalid_secret_message,
+			m.mob_qr_scanner_invalid_secret_title,
+			m.mob_qr_scanner_try_again,
+		],
 	);
 
 	// Reset processing state when modal becomes visible
