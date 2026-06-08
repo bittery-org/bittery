@@ -2,7 +2,7 @@
 	"name": "server",
 	"private": true,
 	"scripts": {
-		"dev": "cargo watch -x run",
+		"dev": "cargo watch --no-vcs-ignores -w . -w ../../packages/crypto/core/crates/bittery-crypto-core -w ../../.env -x run",
 		"dev:once": "cargo run",
 		"format": "cargo fmt",
 		"lint": "cargo clippy --all-targets --all-features -- -D warnings",

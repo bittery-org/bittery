@@ -94,11 +94,11 @@ export default function SelfHostedSignUpForm({
 		return (
 			<div className="w-full">
 				<h1 className="text-center font-semibold text-2xl tracking-tight">
-					{m.auth_signup_invite_only_title()}
+					{m.auth_signup_self_hosted_invite_only_title()}
 				</h1>
 				<div className="mt-6 space-y-4">
 					<p className="text-muted-foreground text-sm leading-relaxed">
-						{m.auth_signup_invite_only_description()}
+						{m.auth_signup_self_hosted_invite_only_description()}
 					</p>
 					<Button type="button" onClick={onSwitchToSignIn} className="w-full">
 						{m.auth_signup_button_back_to_signin()}

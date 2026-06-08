@@ -385,7 +385,9 @@ function SignInFormContent({
 					</div>
 				) : (
 					<div className="mt-4 text-center text-muted-foreground text-sm">
-						{m.auth_signin_signup_disabled()}
+						{isCloudMode
+							? m.auth_signin_signup_disabled_cloud()
+							: m.auth_signin_signup_disabled_self_hosted()}
 					</div>
 				))}
 		</form>
