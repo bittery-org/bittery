@@ -3,7 +3,8 @@
 # ============================================================
 FROM rust:1-bookworm AS wasm-builder
 
-RUN rustup target add wasm32-unknown-unknown
+RUN rustup target add wasm32-unknown-unknown \
+ && cargo install wasm-pack --version 0.13.1 --locked
 
 WORKDIR /build
 

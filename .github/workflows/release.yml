@@ -223,6 +223,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install wasm-pack
+        run: command -v wasm-pack || cargo install wasm-pack --version 0.13.1 --locked
+
+      - name: Build crypto WASM
+        run: pnpm run build:crypto-wasm
+
       - name: Generate i18n
         run: pnpm run i18n:generate
 

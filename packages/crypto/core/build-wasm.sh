@@ -10,7 +10,14 @@ cd "$SCRIPT_DIR"
 # Install wasm-pack if not available
 if ! command -v wasm-pack &> /dev/null; then
   echo "wasm-pack not found, installing..."
-  curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+  # Prefer cargo in CI/Docker: the curl installer downloads prebuilt binaries from
+  # GitHub releases and is prone to transient 504s on GitHub Actions runners.
+  if [ -n "${CI:-}" ] || [ -n "${GITHUB_ACTIONS:-}" ] || [ "${WASM_PACK_INSTALLER:-}" = "cargo" ]; then
+    cargo install wasm-pack --version 0.13.1 --locked
+  elif ! curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh; then
+    echo "wasm-pack curl installer failed, falling back to cargo install..."
+    cargo install wasm-pack --version 0.13.1 --locked
+  fi
 fi
 
 echo "Building WASM package..."
