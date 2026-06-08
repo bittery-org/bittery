@@ -1228,59 +1228,53 @@ async fn with_auth_test_env_async<T, F>(mode: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let previous = {
-        let _guard = crate::test_support::acquire_env_lock();
-        let previous = (
-            std::env::var("BITTERY_MODE").ok(),
-            std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS").ok(),
-            std::env::var("NODE_ENV").ok(),
-            std::env::var("BITTERY_CLOUD_PUBLIC_SIGNUP").ok(),
-            std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok(),
-        );
-        match mode {
-            Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-            None => unsafe { std::env::remove_var("BITTERY_MODE") },
-        }
-        unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", "true") };
-        unsafe { std::env::remove_var("NODE_ENV") };
-        if mode == Some("cloud") {
-            unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "true") };
-            unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", "true") };
-        }
-        previous
-    };
+    let _guard = crate::test_support::acquire_env_lock_async().await;
+    let previous = (
+        std::env::var("BITTERY_MODE").ok(),
+        std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS").ok(),
+        std::env::var("NODE_ENV").ok(),
+        std::env::var("BITTERY_CLOUD_PUBLIC_SIGNUP").ok(),
+        std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok(),
+    );
+    match mode {
+        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
+        None => unsafe { std::env::remove_var("BITTERY_MODE") },
+    }
+    unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", "true") };
+    unsafe { std::env::remove_var("NODE_ENV") };
+    if mode == Some("cloud") {
+        unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "true") };
+        unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", "true") };
+    }
 
     let result = future.await;
 
-    {
-        let _guard = crate::test_support::acquire_env_lock();
-        let (
-            previous_mode,
-            previous_stubs,
-            previous_node_env,
-            previous_cloud_public_signup,
-            previous_cloud_billing,
-        ) = previous;
-        match previous_mode.as_deref() {
-            Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-            None => unsafe { std::env::remove_var("BITTERY_MODE") },
-        }
-        match previous_stubs.as_deref() {
-            Some(value) => unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", value) },
-            None => unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") },
-        }
-        match previous_node_env.as_deref() {
-            Some(value) => unsafe { std::env::set_var("NODE_ENV", value) },
-            None => unsafe { std::env::remove_var("NODE_ENV") },
-        }
-        match previous_cloud_public_signup.as_deref() {
-            Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", value) },
-            None => unsafe { std::env::remove_var("BITTERY_CLOUD_PUBLIC_SIGNUP") },
-        }
-        match previous_cloud_billing.as_deref() {
-            Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", value) },
-            None => unsafe { std::env::remove_var("BITTERY_CLOUD_BILLING_ENABLED") },
-        }
+    let (
+        previous_mode,
+        previous_stubs,
+        previous_node_env,
+        previous_cloud_public_signup,
+        previous_cloud_billing,
+    ) = previous;
+    match previous_mode.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
+        None => unsafe { std::env::remove_var("BITTERY_MODE") },
+    }
+    match previous_stubs.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", value) },
+        None => unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") },
+    }
+    match previous_node_env.as_deref() {
+        Some(value) => unsafe { std::env::set_var("NODE_ENV", value) },
+        None => unsafe { std::env::remove_var("NODE_ENV") },
+    }
+    match previous_cloud_public_signup.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", value) },
+        None => unsafe { std::env::remove_var("BITTERY_CLOUD_PUBLIC_SIGNUP") },
+    }
+    match previous_cloud_billing.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", value) },
+        None => unsafe { std::env::remove_var("BITTERY_CLOUD_BILLING_ENABLED") },
     }
 
     result

@@ -1,7 +1,7 @@
 use std::{
     future::Future,
     sync::atomic::{AtomicU64, Ordering},
-    sync::{Mutex, OnceLock},
+    sync::OnceLock,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -187,11 +187,31 @@ pub(crate) fn authenticated_json_headers(token: &str) -> HeaderMap {
     headers
 }
 
-pub(crate) fn acquire_env_lock() -> std::sync::MutexGuard<'static, ()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
+fn env_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
+pub(crate) struct EnvLockGuard {
+    _guard: tokio::sync::MutexGuard<'static, ()>,
+}
+
+pub(crate) fn acquire_env_lock() -> EnvLockGuard {
+    static SYNC_RT: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    let runtime = SYNC_RT.get_or_init(|| {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("env lock runtime should build")
+    });
+    let guard = runtime.block_on(env_lock().lock());
+    EnvLockGuard { _guard: guard }
+}
+
+pub(crate) async fn acquire_env_lock_async() -> EnvLockGuard {
+    EnvLockGuard {
+        _guard: env_lock().lock().await,
+    }
 }
 
 pub(crate) async fn seed_user(pool: &PgPool, user_id: &str, name: &str, email: &str) {

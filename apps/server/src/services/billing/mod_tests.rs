@@ -11,8 +11,8 @@ use super::{
 };
 use crate::error::AppErrorCode;
 use crate::test_support::{
-    acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, with_rpc_test_app,
+    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
+    seed_item, seed_team, seed_user, seed_vault, with_rpc_test_app,
 };
 
 struct BillingTestEnv<'a> {
@@ -112,51 +112,45 @@ async fn with_billing_test_env_async<T, F>(env: BillingTestEnv<'_>, future: F) -
 where
     F: Future<Output = T>,
 {
-    let previous = {
-        let _guard = acquire_env_lock();
-        let previous = (
-            std::env::var("BITTERY_MODE").ok(),
-            std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok(),
-            std::env::var("STRIPE_SECRET_KEY").ok(),
-            std::env::var("WEB_APP_URL").ok(),
-            std::env::var("STRIPE_PRICE_PERSONAL_MONTHLY").ok(),
-            std::env::var("STRIPE_PRICE_FAMILY_MONTHLY").ok(),
-            std::env::var("STRIPE_PRICE_TEAM_SEAT_MONTHLY").ok(),
-            replace_stripe_mock_state(env.stripe_mock),
-        );
-        set_env_var("BITTERY_MODE", env.bittery_mode);
-        set_env_var("BITTERY_CLOUD_BILLING_ENABLED", env.cloud_billing_enabled);
-        set_env_var("STRIPE_SECRET_KEY", env.stripe_secret_key);
-        set_env_var("WEB_APP_URL", env.web_app_url);
-        set_env_var("STRIPE_PRICE_PERSONAL_MONTHLY", env.stripe_price_personal);
-        set_env_var("STRIPE_PRICE_FAMILY_MONTHLY", env.stripe_price_family);
-        set_env_var("STRIPE_PRICE_TEAM_SEAT_MONTHLY", env.stripe_price_team);
-        previous
-    };
+    let _guard = acquire_env_lock_async().await;
+    let previous = (
+        std::env::var("BITTERY_MODE").ok(),
+        std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok(),
+        std::env::var("STRIPE_SECRET_KEY").ok(),
+        std::env::var("WEB_APP_URL").ok(),
+        std::env::var("STRIPE_PRICE_PERSONAL_MONTHLY").ok(),
+        std::env::var("STRIPE_PRICE_FAMILY_MONTHLY").ok(),
+        std::env::var("STRIPE_PRICE_TEAM_SEAT_MONTHLY").ok(),
+        replace_stripe_mock_state(env.stripe_mock),
+    );
+    set_env_var("BITTERY_MODE", env.bittery_mode);
+    set_env_var("BITTERY_CLOUD_BILLING_ENABLED", env.cloud_billing_enabled);
+    set_env_var("STRIPE_SECRET_KEY", env.stripe_secret_key);
+    set_env_var("WEB_APP_URL", env.web_app_url);
+    set_env_var("STRIPE_PRICE_PERSONAL_MONTHLY", env.stripe_price_personal);
+    set_env_var("STRIPE_PRICE_FAMILY_MONTHLY", env.stripe_price_family);
+    set_env_var("STRIPE_PRICE_TEAM_SEAT_MONTHLY", env.stripe_price_team);
 
     let result = future.await;
 
-    {
-        let _guard = acquire_env_lock();
-        let (
-            previous_mode,
-            previous_cloud_billing,
-            previous_stripe_secret,
-            previous_web_app_url,
-            previous_personal_price,
-            previous_family_price,
-            previous_team_price,
-            previous_stripe_mock,
-        ) = previous;
-        restore_env_var("BITTERY_MODE", previous_mode);
-        restore_env_var("BITTERY_CLOUD_BILLING_ENABLED", previous_cloud_billing);
-        restore_env_var("STRIPE_SECRET_KEY", previous_stripe_secret);
-        restore_env_var("WEB_APP_URL", previous_web_app_url);
-        restore_env_var("STRIPE_PRICE_PERSONAL_MONTHLY", previous_personal_price);
-        restore_env_var("STRIPE_PRICE_FAMILY_MONTHLY", previous_family_price);
-        restore_env_var("STRIPE_PRICE_TEAM_SEAT_MONTHLY", previous_team_price);
-        replace_stripe_mock_state(previous_stripe_mock);
-    }
+    let (
+        previous_mode,
+        previous_cloud_billing,
+        previous_stripe_secret,
+        previous_web_app_url,
+        previous_personal_price,
+        previous_family_price,
+        previous_team_price,
+        previous_stripe_mock,
+    ) = previous;
+    restore_env_var("BITTERY_MODE", previous_mode);
+    restore_env_var("BITTERY_CLOUD_BILLING_ENABLED", previous_cloud_billing);
+    restore_env_var("STRIPE_SECRET_KEY", previous_stripe_secret);
+    restore_env_var("WEB_APP_URL", previous_web_app_url);
+    restore_env_var("STRIPE_PRICE_PERSONAL_MONTHLY", previous_personal_price);
+    restore_env_var("STRIPE_PRICE_FAMILY_MONTHLY", previous_family_price);
+    restore_env_var("STRIPE_PRICE_TEAM_SEAT_MONTHLY", previous_team_price);
+    replace_stripe_mock_state(previous_stripe_mock);
 
     result
 }

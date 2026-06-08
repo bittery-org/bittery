@@ -18,8 +18,8 @@ use crate::{
     rpc_request_context_middleware,
     services::session_control::record_session_revocations,
     test_support::{
-        acquire_env_lock, authenticated_json_headers, seed_item, seed_user, seed_vault,
-        seed_vault_key, with_rpc_test_app, RpcTestApp,
+        acquire_env_lock, acquire_env_lock_async, authenticated_json_headers, seed_item, seed_user,
+        seed_vault, seed_vault_key, with_rpc_test_app, RpcTestApp,
     },
     AppState,
 };
@@ -47,24 +47,18 @@ async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let previous = {
-        let _guard = acquire_env_lock();
-        let previous = std::env::var("BITTERY_MODE").ok();
-        match value {
-            Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-            None => unsafe { std::env::remove_var("BITTERY_MODE") },
-        }
-        previous
-    };
+    let _guard = acquire_env_lock_async().await;
+    let previous = std::env::var("BITTERY_MODE").ok();
+    match value {
+        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
+        None => unsafe { std::env::remove_var("BITTERY_MODE") },
+    }
 
     let result = future.await;
 
-    {
-        let _guard = acquire_env_lock();
-        match previous.as_deref() {
-            Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-            None => unsafe { std::env::remove_var("BITTERY_MODE") },
-        }
+    match previous.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
+        None => unsafe { std::env::remove_var("BITTERY_MODE") },
     }
 
     result
