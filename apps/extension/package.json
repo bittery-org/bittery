@@ -5,8 +5,8 @@
 	"type": "module",
 	"scripts": {
 		"check-types": "tsc --noEmit",
-		"dev": "vite dev",
-		"build:release": "vite build",
+		"dev": "node ./scripts/generate-manifest-locales.mjs && vite dev",
+		"build:release": "node ./scripts/generate-manifest-locales.mjs && vite build",
 		"preview": "vite preview",
 		"test:e2e": "playwright test",
 		"test:e2e:ui": "playwright test --ui",

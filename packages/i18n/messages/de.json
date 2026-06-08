@@ -1663,6 +1663,9 @@
 	"vaults_sidebar_account_switcher_device_setup_dialog_no_secret_key_guidance": "Dein Secret Key ist in dieser Sitzung nicht gespeichert. Verwende den unten stehenden Setup-Link – er füllt deine E-Mail-Adresse und Server-URL auf dem neuen Gerät automatisch aus. Du musst deinen Secret Key manuell eingeben.",
 	"settings_devices_action_setup_another": "Weiteres Gerät einrichten",
 
+	"MSG_extName": "Bittery",
+	"MSG_extDescription": "Passwörter und Passkeys, auf deinem Gerät verschlüsselt. Zero-Knowledge-Autofill.",
+
 	"ext_login_toast_invalid_server_url": "Ungültige Server-URL",
 	"ext_login_toast_account_added": "Konto erfolgreich hinzugefügt",
 	"ext_login_toast_signed_in": "Erfolgreich angemeldet!",

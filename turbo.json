@@ -7,6 +7,11 @@
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
 			"outputs": ["dist/**", ".output/**"]
 		},
+		"build:release": {
+			"dependsOn": ["^build"],
+			"inputs": ["$TURBO_DEFAULT$", ".env*"],
+			"outputs": ["dist/**", ".output/**", "src-tauri/target/**"]
+		},
 		"lint": {
 			"dependsOn": ["^lint"]
 		},

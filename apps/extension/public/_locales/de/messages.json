@@ -1,0 +1,8 @@
+{
+	"extName": {
+		"message": "Bittery"
+	},
+	"extDescription": {
+		"message": "Passwörter und Passkeys, auf deinem Gerät verschlüsselt. Zero-Knowledge-Autofill."
+	}
+}

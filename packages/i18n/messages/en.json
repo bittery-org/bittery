@@ -1663,6 +1663,9 @@
 	"vaults_sidebar_account_switcher_device_setup_dialog_no_secret_key_guidance": "Your Secret Key is not stored in this session. Use the setup link below — it will prefill your email and server URL on the new device. You will need to enter your Secret Key manually.",
 	"settings_devices_action_setup_another": "Set up another device",
 
+	"MSG_extName": "Bittery",
+	"MSG_extDescription": "Passwords and passkeys, encrypted on your device. Zero-knowledge autofill.",
+
 	"ext_login_toast_invalid_server_url": "Invalid server URL",
 	"ext_login_toast_account_added": "Account added successfully",
 	"ext_login_toast_signed_in": "Signed in successfully!",

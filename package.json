@@ -11,7 +11,7 @@
 		}
 	},
 	"scripts": {
-		"preinstall": "export $(cat .env | xargs) || true",
+		"preinstall": "node ./scripts/load-env.mjs",
 		"check": "biome check . && pnpm --filter server check",
 		"check:fix": "biome check --write . && pnpm --filter server format",
 		"check-types": "turbo check-types",
