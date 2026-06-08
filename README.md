@@ -1,85 +1,62 @@
-# Bittery
+# Bittery — Zero-Knowledge Password Manager
 
-A zero-knowledge password manager with end-to-end encryption. Sensitive data is encrypted client-side before reaching the server, so passwords never leave your device unencrypted.
+[![Website](https://img.shields.io/badge/website-bittery.com-2563eb)](https://bittery.com)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-f97316)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-bittery.com%2Fdocs-64748b)](https://bittery.com/docs)
 
-## Public Beta Status
+**Bittery is a source-available password manager with zero-knowledge, end-to-end encryption.** Your passwords, notes, cards, and TOTP secrets are encrypted on your device before they ever reach a server — so no one else can read them, not even us.
 
-Bittery Cloud is preparing for an invite-only hosted beta. Public cloud signup can be disabled with `BITTERY_CLOUD_PUBLIC_SIGNUP=false`, and paid hosted billing can be disabled with `BITTERY_CLOUD_BILLING_ENABLED=false`.
+> The password manager that can't spy on you — even if it wanted to.
 
-Self-hosting is supported under the Functional Source License. Self-hosted deployments run in `BITTERY_MODE=self-hosted` and do not require Stripe or a hosted subscription.
+---
 
-## Platforms
+## Why Bittery?
 
-- **Web** — React app with TanStack Router + Vite
-- **Marketing** — Public website and documentation
-- **Server** — Rust API server with Axum + Qubit
-- **Desktop** — Tauri 2 (macOS, Windows, Linux)
-- **Browser Extension** — Chrome Manifest V3
-- **Mobile** — React Native with Expo (iOS, Android)
+- **True zero-knowledge** — Your master password and Secret Key never leave your device. We only store encrypted data.
+- **Two-key protection** — Your account password plus a unique Secret Key. Guessing one isn't enough.
+- **Everywhere you are** — Web, desktop (macOS, Windows, Linux), mobile (iOS & Android), and a browser extension. Syncs across devices and works offline.
+- **Share safely** — Encrypted vault sharing for families and teams, plus expiring secure links.
+- **Your choice of hosting** — Use [Bittery Cloud](https://app.bittery.com) or [self-host](https://bittery.com/docs/self-hosting/overview) on your own infrastructure with Docker.
+- **Transparent by design** — Source code is public. Anyone can verify how encryption works — or run their own instance.
+
+## Get started
+
+| Option | Best for |
+|--------|----------|
+| [**Bittery Cloud**](https://app.bittery.com) | Hosted sync with no server setup (invite-only closed beta) |
+| [**Self-host**](https://bittery.com/docs/self-hosting/overview) | Full control on your own server — no subscription required |
+| [**Download apps**](https://bittery.com/download) | Desktop, mobile, and browser extension |
+
+New to Bittery? Read the [getting started guide](https://bittery.com/docs/getting-started/create-account) or [import from another password manager](https://bittery.com/docs/getting-started/import-passwords) (1Password, Bitwarden, LastPass, and more).
 
 ## Security
 
-- **Zero-knowledge architecture** — the server never sees plaintext passwords or encryption keys
-- **Dual-key model** — account password + Secret Key (A3-XXXXXX format)
-- **AES-256-GCM + context binding (`AES-GCM-AAD-V1`)** — vault data encrypted client-side with random IVs and entity-bound integrity checks
-- **SRP-6a authentication** — password never transmitted, not even as a hash
-- **RSA-4096** — asymmetric key pairs for secure vault sharing between users
-- **PBKDF2 (310k iterations) + HKDF** — key derivation from master password
-- **Login KDF policy + pinning** — server KDF parameters are validated and pinned locally to block downgrade/tamper attempts
-- **Rust crypto core** — shared implementation compiled to WASM, NAPI, Tauri commands, and native mobile bindings
+Bittery is built around a zero-knowledge architecture:
 
-## Tech Stack
+- **Client-side encryption** with AES-256-GCM before data is stored or synced
+- **SRP authentication** — your password is never sent to the server, not even as a hash
+- **Vault sharing** with RSA-4096 key pairs
+- **Strong key derivation** (PBKDF2 + HKDF) from your master password
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React 19, TanStack Router + Query, Tailwind CSS 4, Radix UI + shadcn/ui |
-| Backend | Rust API server with Axum + Qubit |
-| Database | PostgreSQL + SQLx migrations |
-| Desktop | Tauri 2 (Rust) |
-| Mobile | React Native + Expo |
-| Extension | Chrome MV3 service worker |
-| Crypto | Rust core with WASM, NAPI, and native bindings |
-| Monorepo | pnpm + Turborepo |
-| Code Quality | Biome, TypeScript, Cargo |
+For the full security model, see the [security documentation](https://bittery.com/docs/security).
 
-## Project Structure
+Found a vulnerability? Please report it privately — see [SECURITY.md](SECURITY.md).
 
-```text
-bittery/
-├── apps/
-│   ├── web/              # React web app
-│   ├── marketing/        # Public marketing site and docs
-│   ├── server/           # Rust API server
-│   ├── desktop/          # Tauri 2 desktop app
-│   ├── extension/        # Browser extension
-│   └── mobile/           # React Native (Expo) app
-├── packages/
-│   ├── core/             # Shared business logic and React hooks
-│   ├── db/               # Shared database package
-│   ├── device/           # Device identity helpers
-│   ├── i18n/             # Paraglide messages and generated i18n output
-│   ├── rust-rpc/         # Generated Rust/Qubit TypeScript bindings
-│   ├── shared/           # Shared utilities, billing metadata, and RPC helpers
-│   ├── storage/          # Platform-specific storage adapters
-│   ├── sync/             # Multi-device sync + offline support
-│   ├── types/            # Shared TypeScript types
-│   ├── ui/               # Shared UI component library
-│   └── config/           # Shared TypeScript configuration
-└── deploy/
-    └── docker/           # Self-hosted Docker Compose deployment
-```
+## Contributing
 
-## Getting Started
+We welcome bug reports, feature ideas, and pull requests. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and PR guidelines.
+
+<details>
+<summary><strong>Development setup</strong> (for contributors)</summary>
 
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) 20+
 - [pnpm](https://pnpm.io/) 10+
 - [Rust](https://www.rust-lang.org/tools/install)
-- [Bun](https://bun.sh/) (used by the existing test tooling)
 - [Docker](https://www.docker.com/) (for PostgreSQL)
 
-### Setup
+### Quick start
 
 ```bash
 pnpm install
@@ -88,33 +65,44 @@ pnpm run db:migrate
 pnpm run dev
 ```
 
-For the Rust API auto-restart in `pnpm run dev` / `pnpm run dev:server`, install `cargo-watch` once with `cargo install cargo-watch`.
+Local URLs: web app at [localhost:3001](http://localhost:3001), API at [localhost:3000](http://localhost:3000), marketing site at [localhost:3003](http://localhost:3003).
 
-The web app runs at [http://localhost:3001](http://localhost:3001), the API server at [http://localhost:3000](http://localhost:3000), and the marketing site at [http://localhost:3003](http://localhost:3003).
+For Rust API auto-restart, install `cargo-watch` once: `cargo install cargo-watch`.
 
-### Development Commands
+</details>
 
-```bash
-# Run individual apps
-pnpm run dev:web
-pnpm run dev:server
-pnpm run dev:server:once
-pnpm run dev:desktop
-pnpm run dev:extension
-pnpm run dev:mobile
-pnpm run dev:marketing
+<details>
+<summary><strong>Tech stack & project structure</strong></summary>
 
-# Code quality
-pnpm run check
-pnpm run check-types
-pnpm run test
+### Platforms
 
-# Database
-pnpm run db:create -- add_users_index
-pnpm run db:migrate
+| App | Stack |
+|-----|-------|
+| Web | React, TanStack Router, Vite |
+| Server | Rust, Axum |
+| Desktop | Tauri 2 |
+| Mobile | React Native, Expo |
+| Extension | Chrome Manifest V3 |
+
+### Monorepo layout
+
+```text
+bittery/
+├── apps/
+│   ├── web/              # Web app
+│   ├── marketing/        # Website & docs
+│   ├── server/           # API server
+│   ├── desktop/          # Desktop app
+│   ├── extension/        # Browser extension
+│   └── mobile/           # Mobile app
+├── packages/             # Shared libraries (core, ui, sync, crypto, i18n, …)
+└── deploy/docker/        # Self-hosted Docker Compose
 ```
 
-## Environment Variables
+</details>
+
+<details>
+<summary><strong>Environment variables</strong></summary>
 
 Create `.env` in the repository root:
 
@@ -126,35 +114,12 @@ TRUST_PROXY_MODE=none
 BITTERY_MODE=cloud
 BITTERY_CLOUD_PUBLIC_SIGNUP=true
 BITTERY_CLOUD_BILLING_ENABLED=true
-
-# Optional S3-compatible storage
-BITTERY_STORAGE_ENDPOINT=
-BITTERY_STORAGE_BUCKET=
-BITTERY_STORAGE_ACCESS_KEY_ID=
-BITTERY_STORAGE_SECRET_ACCESS_KEY=
-BITTERY_STORAGE_REGION=auto
-BITTERY_STORAGE_CDN_URL=
-MINIO_ROOT_PASSWORD=
-
-# Optional rate limiting and pub/sub
-RATE_LIMIT_ADAPTER=auto
-RATE_LIMIT_REDIS_URL=
-REDIS_URL=
-SHARE_LINK_DAILY_LIMIT=50
 ```
 
-Marketing builds also support:
+See [CONTRIBUTING.md](CONTRIBUTING.md) and the [self-hosting docs](https://bittery.com/docs/self-hosting/overview) for the full list including optional storage, Redis, and rate limiting settings.
 
-```env
-VITE_WEBAPP_URL=https://app.bittery.com
-VITE_SERVER_URL=https://api.bittery.com
-VITE_BILLING_MARKETING_ENABLED=false
-```
-
-## Contributing
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, issue reporting, and pull request expectations.
+</details>
 
 ## License
 
-This project is source-available under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE). This is not an OSI-approved open-source license. After two years, each release converts to the Apache License 2.0.
+This project is source-available under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE). After two years, each release converts to the Apache License 2.0.

@@ -142,7 +142,7 @@ export function HeroVault() {
 						>
 							<div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 font-medium text-primary text-xs">
 								<span className="size-1.5 animate-pulse rounded-full bg-primary" />
-								Now in public beta
+								Now in closed beta
 							</div>
 
 							<h1 className="font-display font-semibold text-4xl leading-[0.95] tracking-tight sm:text-5xl lg:text-[3.5rem] xl:text-6xl">
