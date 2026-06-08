@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { DocsSidebar, MobileDocsDrawer } from "@/components/docs/docs-sidebar";
-import { Layout } from "@/components/layout";
+
 import { getAllArticles, getCategories } from "@/lib/docs";
 
 export const Route = createFileRoute("/docs/")({
@@ -37,7 +37,7 @@ function DocsIndex() {
 	const allArticles = getAllArticles();
 
 	return (
-		<Layout>
+		<>
 			<div className="pt-28 pb-20 sm:pt-36 sm:pb-28">
 				<div className="mx-auto max-w-5xl px-4">
 					<div className="grid gap-10 lg:grid-cols-[256px_1fr]">
@@ -150,6 +150,6 @@ function DocsIndex() {
 
 			{/* Mobile drawer */}
 			<MobileDocsDrawer currentSlug="" />
-		</Layout>
+		</>
 	);
 }

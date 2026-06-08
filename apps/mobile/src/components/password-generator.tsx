@@ -20,6 +20,7 @@ import { Check, Copy, RefreshCw, Sparkles } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
 import { withUniwind } from "uniwind";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Create styled icon components
 const StyledCheck = withUniwind(Check);
@@ -130,6 +131,7 @@ export function PasswordGenerator({
 	defaultOptions,
 }: PasswordGeneratorProps) {
 	const { toast } = useToast();
+	const { m } = useI18n();
 	const [isOpen, setIsOpen] = useState(false);
 	const [password, setPassword] = useState("");
 	const [copied, setCopied] = useState(false);
@@ -167,7 +169,7 @@ export function PasswordGenerator({
 
 			toast.show({
 				variant: "success",
-				label: "Password copied to clipboard",
+				label: m.mob_password_gen_toast_copied(),
 				placement: "bottom",
 			});
 
@@ -202,7 +204,12 @@ export function PasswordGenerator({
 
 	// Calculate password strength
 	const getPasswordStrength = () => {
-		if (!password) return { score: 0, label: "None", color: "#d1d5db" };
+		if (!password)
+			return {
+				score: 0,
+				label: m.mob_password_gen_strength_none(),
+				color: "#d1d5db",
+			};
 
 		let score = 0;
 		const length = password.length;
@@ -222,12 +229,28 @@ export function PasswordGenerator({
 		const percentage = (score / 8) * 100;
 
 		if (percentage < 40)
-			return { score: percentage, label: "Weak", color: "#ef4444" };
+			return {
+				score: percentage,
+				label: m.mob_password_gen_strength_weak(),
+				color: "#ef4444",
+			};
 		if (percentage < 60)
-			return { score: percentage, label: "Fair", color: "#f97316" };
+			return {
+				score: percentage,
+				label: m.mob_password_gen_strength_fair(),
+				color: "#f97316",
+			};
 		if (percentage < 80)
-			return { score: percentage, label: "Good", color: "#eab308" };
-		return { score: percentage, label: "Strong", color: "#22c55e" };
+			return {
+				score: percentage,
+				label: m.mob_password_gen_strength_good(),
+				color: "#eab308",
+			};
+		return {
+			score: percentage,
+			label: m.mob_password_gen_strength_strong(),
+			color: "#22c55e",
+		};
 	};
 
 	const strength = getPasswordStrength();
@@ -270,7 +293,7 @@ export function PasswordGenerator({
 						{/* Password Type Selector */}
 						<View className="mb-4">
 							<Text className="mb-2 font-medium text-foreground text-sm">
-								Password Type
+								{m.mob_password_gen_type_label()}
 							</Text>
 							<View className="flex-row gap-2">
 								<Button
@@ -283,7 +306,7 @@ export function PasswordGenerator({
 									}}
 									className="flex-1"
 								>
-									Random
+									{m.mob_password_gen_type_random()}
 								</Button>
 								<Button
 									variant={
@@ -299,7 +322,7 @@ export function PasswordGenerator({
 									}}
 									className="flex-1"
 								>
-									Memorable
+									{m.mob_password_gen_type_memorable()}
 								</Button>
 							</View>
 						</View>
@@ -307,7 +330,7 @@ export function PasswordGenerator({
 						{/* Generated Password Display */}
 						<View className="mb-4">
 							<Text className="mb-2 font-medium text-foreground text-sm">
-								Generated Password
+								{m.mob_password_gen_generated_label()}
 							</Text>
 							<View className="flex-row items-center gap-2">
 								<View className="flex-1 rounded-xl border border-border bg-surface-secondary px-4 py-3">
@@ -335,7 +358,9 @@ export function PasswordGenerator({
 						{/* Password Strength Indicator */}
 						<View className="mb-4 rounded-xl border border-border bg-surface-secondary p-3">
 							<View className="flex-row items-center justify-between">
-								<Text className="text-muted text-sm">Strength</Text>
+								<Text className="text-muted text-sm">
+									{m.mob_password_gen_strength_label()}
+								</Text>
 								<Text
 									className="font-semibold text-sm"
 									style={{ color: strength.color }}
@@ -361,7 +386,7 @@ export function PasswordGenerator({
 								<View>
 									<View className="mb-2 flex-row items-center justify-between">
 										<Text className="font-medium text-foreground text-sm">
-											Length
+											{m.mob_password_gen_length_label()}
 										</Text>
 										<TextField className="w-16">
 											<Input
@@ -400,7 +425,7 @@ export function PasswordGenerator({
 								{/* Character Type Options */}
 								<View>
 									<Text className="mb-2 font-medium text-foreground text-sm">
-										Include Characters
+										{m.mob_password_gen_include_label()}
 									</Text>
 									<View className="gap-0 overflow-hidden rounded-xl border border-border">
 										<ControlField
@@ -413,7 +438,9 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.lowercase}
 											className="px-4 py-3"
 										>
-											<Label className="flex-1">Lowercase (a-z)</Label>
+											<Label className="flex-1">
+												{m.mob_password_gen_lowercase()}
+											</Label>
 											<ControlField.Indicator>
 												<Switch />
 											</ControlField.Indicator>
@@ -429,7 +456,9 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.uppercase}
 											className="px-4 py-3"
 										>
-											<Label className="flex-1">Uppercase (A-Z)</Label>
+											<Label className="flex-1">
+												{m.mob_password_gen_uppercase()}
+											</Label>
 											<ControlField.Indicator>
 												<Switch />
 											</ControlField.Indicator>
@@ -445,7 +474,9 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.numbers}
 											className="px-4 py-3"
 										>
-											<Label className="flex-1">Numbers (0-9)</Label>
+											<Label className="flex-1">
+												{m.mob_password_gen_numbers()}
+											</Label>
 											<ControlField.Indicator>
 												<Switch />
 											</ControlField.Indicator>
@@ -461,7 +492,9 @@ export function PasswordGenerator({
 											isDisabled={!canToggleOption && options.symbols}
 											className="px-4 py-3"
 										>
-											<Label className="flex-1">Symbols (!@#$%...)</Label>
+											<Label className="flex-1">
+												{m.mob_password_gen_symbols()}
+											</Label>
 											<ControlField.Indicator>
 												<Switch />
 											</ControlField.Indicator>
@@ -476,7 +509,7 @@ export function PasswordGenerator({
 							<View className="mb-4 gap-4">
 								<View>
 									<Text className="mb-2 font-medium text-foreground text-sm">
-										Number of Words
+										{m.mob_password_gen_word_count_label()}
 									</Text>
 									<View className="flex-row gap-2">
 										{[3, 4, 5, 6].map((count) => (
@@ -512,7 +545,9 @@ export function PasswordGenerator({
 										}}
 										className="px-4 py-3"
 									>
-										<Label className="flex-1">Include number at end</Label>
+										<Label className="flex-1">
+											{m.mob_password_gen_include_number()}
+										</Label>
 										<ControlField.Indicator>
 											<Switch />
 										</ControlField.Indicator>
@@ -521,9 +556,7 @@ export function PasswordGenerator({
 
 								<View className="rounded-xl bg-surface-secondary p-4">
 									<Text className="text-muted text-sm">
-										Memorable passwords use word combinations that are easier to
-										remember while still being secure. Example:
-										"Brave-Tiger-Golden-Phoenix-42"
+										{m.mob_password_gen_memorable_hint()}
 									</Text>
 								</View>
 							</View>
@@ -542,7 +575,7 @@ export function PasswordGenerator({
 							size="lg"
 							className="w-full"
 						>
-							Use This Password
+							{m.mob_password_gen_use_button()}
 						</Button>
 					</View>
 				</BottomSheet.Content>

@@ -13,6 +13,7 @@ import type {
 	PasskeyCreateSaveDecision,
 	PasskeyUserInteractionRequest,
 } from "@/passkey/types";
+import { I18nProvider, useI18n } from "@/providers/i18n-provider";
 
 type SaveTargetData = Extract<
 	PasskeyUserInteractionRequest,
@@ -22,6 +23,7 @@ type SaveTargetData = Extract<
 type SaveMode = "attach-existing" | "create-new";
 
 function PasskeySaveTargetIframe() {
+	const { m } = useI18n();
 	const [data, setData] = useState<SaveTargetData | null>(null);
 	const [mode, setMode] = useState<SaveMode>("create-new");
 	const [selectedItemId, setSelectedItemId] = useState<string>("");
@@ -127,7 +129,7 @@ function PasskeySaveTargetIframe() {
 						<IconCircleKeyOutlineDuo18 size={16} />
 					</div>
 					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm">Choose where to save passkey</p>
+						<p className="font-medium text-sm">{m.ext_passkey_save_title()}</p>
 						<p className="truncate text-muted-foreground text-xs">
 							{data.userDisplayName || data.userName} on {data.rpId}
 						</p>
@@ -157,7 +159,7 @@ function PasskeySaveTargetIframe() {
 						>
 							<span className="flex items-center gap-2 text-xs">
 								<IconUserOutlineDuo18 size={14} />
-								Attach to existing login
+								{m.ext_passkey_save_attach()}
 							</span>
 							<span className="text-[10px] text-muted-foreground">
 								{data.existingItems.length}
@@ -201,7 +203,7 @@ function PasskeySaveTargetIframe() {
 												{item.itemUsername || data.userName}
 											</p>
 											<p className="truncate text-[10px] text-muted-foreground">
-												{item.vaultName || "Vault"}
+												{item.vaultName || m.ext_passkey_save_vault_fallback()}
 												{item.accountEmail ? ` • ${item.accountEmail}` : ""}
 											</p>
 										</div>
@@ -235,15 +237,17 @@ function PasskeySaveTargetIframe() {
 						>
 							<span className="flex items-center gap-2 text-xs">
 								<IconPlusOutlineDuo18 size={14} />
-								Create new login item
+								{m.ext_passkey_save_create_new()}
 							</span>
 							<span className="text-[10px] text-muted-foreground">
-								{selectedVault?.name || "Select vault"}
+								{selectedVault?.name || m.ext_passkey_save_select_vault()}
 							</span>
 						</button>
 						{mode === "create-new" && (
 							<div className="space-y-1 rounded-md border p-2">
-								<p className="text-muted-foreground text-xs">Save to vault</p>
+								<p className="text-muted-foreground text-xs">
+									{m.ext_passkey_save_to_vault()}
+								</p>
 								<div className="space-y-1">
 									{data.writableVaults.map((vault) => (
 										<button
@@ -295,7 +299,7 @@ function PasskeySaveTargetIframe() {
 							(mode === "create-new" && !canCreateNew)
 						}
 					>
-						Continue
+						{m.ext_passkey_save_continue()}
 					</Button>
 					<Button
 						onClick={handleCancel}
@@ -303,7 +307,7 @@ function PasskeySaveTargetIframe() {
 						size="sm"
 						className="flex-1"
 					>
-						Cancel
+						{m.ext_passkey_save_cancel()}
 					</Button>
 				</div>
 			</Card>
@@ -315,7 +319,9 @@ const root = document.getElementById("root");
 if (root) {
 	ReactDOM.createRoot(root).render(
 		<React.StrictMode>
-			<PasskeySaveTargetIframe />
+			<I18nProvider>
+				<PasskeySaveTargetIframe />
+			</I18nProvider>
 		</React.StrictMode>,
 	);
 }

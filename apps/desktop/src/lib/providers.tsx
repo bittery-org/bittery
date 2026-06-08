@@ -1,12 +1,12 @@
+import { createAppRpcOptionsProxy } from "@bittery/shared/rpc-client";
+import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { createAppTrpcOptionsProxy } from "@bittery/shared/trpc-client";
-import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
 import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import {
 	invalidateDesktopAccountSession,
-	isUnauthorizedTrpcError,
+	isUnauthorizedRpcError,
 } from "@/lib/session-invalidation";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
@@ -18,7 +18,7 @@ const fallbackServerUrl =
 let isHandlingAuthError = false;
 
 function isUnauthorizedError(error: unknown): boolean {
-	return isUnauthorizedTrpcError(error);
+	return isUnauthorizedRpcError(error);
 }
 
 function handleUnauthorizedError() {
@@ -96,7 +96,7 @@ async function resolveDesktopServerUrl(): Promise<string> {
 	);
 }
 
-const trpcClient = createSessionRefreshingTrpcClient({
+const rpcClient = createSessionRefreshingRpcClient({
 	defaultServerUrl: fallbackServerUrl,
 	getServerUrl: resolveDesktopServerUrl,
 	appPlatform: "desktop",
@@ -137,6 +137,6 @@ const trpcClient = createSessionRefreshingTrpcClient({
 	getClientId: async () => getOrCreateDesktopSyncClientId(),
 });
 
-const trpc = createAppTrpcOptionsProxy(trpcClient, queryClient);
+const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
 
-export { trpc, trpcClient, queryClient };
+export { rpc, rpcClient, queryClient };

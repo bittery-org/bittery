@@ -3,8 +3,8 @@
  * Updates team avatar URLs and other account data that may change on the server
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import { useRPCClient } from "@bittery/shared/rpc";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 
@@ -35,7 +35,7 @@ export function useAccountMetadataSync(
 	options: UseAccountMetadataSyncOptions = {},
 ) {
 	const { email, enabled = true, refetchInterval = 60000 } = options;
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 	const storage = usePlatformStorage();
 
 	return useQuery({
@@ -46,7 +46,7 @@ export function useAccountMetadataSync(
 
 			try {
 				// Fetch current user data from server
-				const userData = await trpcClient.auth.me.query();
+				const userData = await rpcClient.auth.me.query();
 
 				// Get stored account metadata
 				const accounts = await storage.getAccountsList();
@@ -75,21 +75,21 @@ export function useAccountMetadataSync(
 					// Update account metadata with new team avatar URL
 					await storage.addAccount({
 						...storedAccount,
-						teamName: userData.teamName,
-						teamAvatarUrl: userData.teamAvatarUrl,
+						teamName: userData.teamName ?? undefined,
+						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 					});
 
 					return {
 						updated: true,
 						email,
-						teamAvatarUrl: userData.teamAvatarUrl,
+						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 					};
 				}
 
 				return {
 					updated: false,
 					email,
-					teamAvatarUrl: userData.teamAvatarUrl,
+					teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 				};
 			} catch (error) {
 				console.error(
@@ -152,8 +152,8 @@ export function useAccountMetadataSyncAll(options: {
 					const serverUrl =
 						(await storage.getServerUrl?.(email)) || "http://localhost:3000";
 
-					// Create account-specific tRPC client
-					const accountClient = createAccountTrpcClient(authToken, serverUrl);
+					// Create an account-specific RPC client.
+					const accountClient = createAccountRpcClient(authToken, serverUrl);
 
 					// Fetch current user data from server using account-specific client
 					const userData = await accountClient.auth.me.query();
@@ -185,21 +185,21 @@ export function useAccountMetadataSyncAll(options: {
 						// Update account metadata with new team avatar URL
 						await storage.addAccount({
 							...storedAccount,
-							teamName: userData.teamName,
-							teamAvatarUrl: userData.teamAvatarUrl,
+							teamName: userData.teamName ?? undefined,
+							teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 						});
 
 						return {
 							updated: true,
 							email,
-							teamAvatarUrl: userData.teamAvatarUrl,
+							teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 						};
 					}
 
 					return {
 						updated: false,
 						email,
-						teamAvatarUrl: userData.teamAvatarUrl,
+						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 					};
 				} catch (error) {
 					console.error(

@@ -32,6 +32,7 @@ import type {
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
+import { rpcClient } from "./rpc-client";
 import { resolveAccountEmailForVault } from "./services/account-resolution";
 import {
 	onLocalItemCreated,
@@ -42,7 +43,6 @@ import {
 	setDesktopModeSentinel,
 	updateActivity,
 } from "./session-manager";
-import { trpcClient } from "./trpc-client";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
@@ -113,7 +113,10 @@ type CreateDecisionResolution =
 
 const lastSignCountByCredentialId = new Map<string, number>();
 
-function computeNextSignCount(credentialId: string, knownCount: number): number {
+function computeNextSignCount(
+	credentialId: string,
+	knownCount: number,
+): number {
 	const previousLocal = lastSignCountByCredentialId.get(credentialId) ?? 0;
 	const epochSeconds = Math.floor(Date.now() / 1000);
 	const next = Math.max(knownCount + 1, previousLocal + 1, epochSeconds);
@@ -370,13 +373,13 @@ function readVaultAccountEmail(vault: unknown): string | undefined {
 async function getWritableVaultOptions(): Promise<
 	PasskeyWritableVaultOption[]
 > {
-	const vaults = await trpcClient.vault.list.query();
+	const vaults = await rpcClient.vault.list.query();
 	return vaults
 		.map((vault) => ({
 			id: vault.id,
 			name: vault.name,
 			accountEmail: readVaultAccountEmail(vault),
-			type: normalizeVaultType(vault.type),
+			type: normalizeVaultType(vault.vaultType),
 			role: normalizeVaultRole(vault.role),
 		}))
 		.filter((vault) => vault.role !== "read-only");
@@ -596,7 +599,7 @@ async function attachPasskeyToExistingItem(input: {
 			},
 			accountEmail,
 		},
-		trpcClient as Parameters<typeof core.items.updateItem>[1],
+		rpcClient as Parameters<typeof core.items.updateItem>[1],
 	);
 
 	await onLocalItemUpdated({
@@ -636,7 +639,7 @@ async function createItemWithPasskey(input: {
 			},
 			accountEmail,
 		},
-		trpcClient as Parameters<typeof core.items.createItem>[1],
+		rpcClient as Parameters<typeof core.items.createItem>[1],
 	);
 
 	await onLocalItemCreated({
@@ -793,7 +796,7 @@ async function updateStoredPasskey(input: {
 			},
 			accountEmail,
 		},
-		trpcClient as Parameters<typeof core.items.updateItem>[1],
+		rpcClient as Parameters<typeof core.items.updateItem>[1],
 	);
 
 	await onLocalItemUpdated({

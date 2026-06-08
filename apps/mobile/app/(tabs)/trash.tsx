@@ -23,6 +23,7 @@ import {
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { useI18n } from "@/providers/i18n-provider";
 import { ItemListItem } from "../../src/components/item-list-item";
 
 // Create styled icon components
@@ -31,21 +32,29 @@ const StyledArchiveRestore = withUniwind(ArchiveRestore);
 const StyledChevronLeft = withUniwind(ChevronLeft);
 const StyledChevronRight = withUniwind(ChevronRight);
 
-function formatDeletedAt(dateString: string): string {
+type MessageFunctions = ReturnType<typeof useI18n>["m"];
+
+function formatDeletedAt(dateString: string, m: MessageFunctions): string {
 	const date = new Date(dateString);
 	const now = new Date();
 	const diffMs = now.getTime() - date.getTime();
 	const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
-	if (diffDays === 0) return "Today";
-	if (diffDays === 1) return "Yesterday";
-	if (diffDays < 7) return `${diffDays} days ago`;
-	if (diffDays < 30)
-		return `${Math.floor(diffDays / 7)} week${diffDays >= 14 ? "s" : ""} ago`;
+	if (diffDays === 0) return m.mob_trash_time_today();
+	if (diffDays === 1) return m.mob_trash_time_yesterday();
+	if (diffDays < 7)
+		return m.mob_trash_time_days_ago({ count: String(diffDays) });
+	if (diffDays < 30) {
+		const weeks = Math.floor(diffDays / 7);
+		return diffDays >= 14
+			? m.mob_trash_time_weeks_ago_plural({ count: String(weeks) })
+			: m.mob_trash_time_weeks_ago_singular({ count: String(weeks) });
+	}
 	return date.toLocaleDateString();
 }
 
 export default function TrashScreen() {
+	const { m } = useI18n();
 	const { toast } = useToast();
 	const [refreshing, setRefreshing] = useState(false);
 	const [actionInProgress, setActionInProgress] = useState<string | null>(null);
@@ -81,14 +90,14 @@ export default function TrashScreen() {
 			await refetch();
 			toast.show({
 				variant: "success",
-				label: "Item restored successfully",
+				label: m.mob_trash_toast_restored(),
 				placement: "bottom",
 			});
 		} catch (error) {
 			console.error("Failed to restore item:", error);
 			toast.show({
 				variant: "danger",
-				label: "Failed to restore item. Please try again.",
+				label: m.mob_trash_toast_restore_failed(),
 				placement: "bottom",
 			});
 		} finally {
@@ -98,12 +107,12 @@ export default function TrashScreen() {
 
 	const handlePermanentDelete = (item: DeletedItem) => {
 		Alert.alert(
-			"Permanently Delete",
-			`Are you sure you want to permanently delete "${item.title}"? This cannot be undone.`,
+			m.mob_trash_alert_delete_title(),
+			m.mob_trash_alert_delete_message({ title: item.title }),
 			[
-				{ text: "Cancel", style: "cancel" },
+				{ text: m.mob_trash_alert_cancel(), style: "cancel" },
 				{
-					text: "Delete",
+					text: m.mob_trash_alert_delete_confirm(),
 					style: "destructive",
 					onPress: async () => {
 						setActionInProgress(item.id);
@@ -115,14 +124,14 @@ export default function TrashScreen() {
 							await refetch();
 							toast.show({
 								variant: "success",
-								label: "Item permanently deleted",
+								label: m.mob_trash_toast_deleted(),
 								placement: "bottom",
 							});
 						} catch (error) {
 							console.error("Failed to delete item:", error);
 							toast.show({
 								variant: "danger",
-								label: "Failed to delete item. Please try again.",
+								label: m.mob_trash_toast_delete_failed(),
 								placement: "bottom",
 							});
 						} finally {
@@ -182,7 +191,7 @@ export default function TrashScreen() {
 				onPress={() => {}}
 				rightContent={
 					<Text className="text-muted text-xs">
-						{formatDeletedAt(item.deletedAt ?? "")}
+						{formatDeletedAt(item.deletedAt ?? "", m)}
 					</Text>
 				}
 			/>
@@ -223,10 +232,10 @@ export default function TrashScreen() {
 			>
 				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
 					<Card.Title className="mb-4 text-center text-danger text-lg">
-						Error loading trash
+						{m.mob_trash_error_loading()}
 					</Card.Title>
 					<Button onPress={handleRefresh} variant="primary">
-						Retry
+						{m.mob_items_button_retry()}
 					</Button>
 				</Card>
 			</SafeAreaView>
@@ -253,11 +262,10 @@ export default function TrashScreen() {
 				<View className="flex-1 items-center justify-center p-8">
 					<StyledTrash size={48} className="mb-4 text-muted" />
 					<Text className="text-center font-semibold text-foreground text-lg">
-						Trash is empty
+						{m.mob_trash_empty_title()}
 					</Text>
 					<Text className="mt-2 text-center text-muted">
-						Items you delete will appear here for 30 days before being
-						permanently removed
+						{m.mob_trash_empty_description()}
 					</Text>
 				</View>
 			) : (

@@ -109,16 +109,25 @@ export interface FinishLoginResponse {
 	token: string;
 	serverProof: string;
 	user: LoginUserData;
-	vaultKeys: VaultKeyData[];
 	sessionId?: string;
 	expiresAt: string | Date;
 }
 
+interface VaultListEntry {
+	id: string;
+	name: string;
+	vaultType: string;
+	icon: string | null;
+	imageUrl: string | null;
+	encryptedVaultKey: string;
+	role: string;
+}
+
 /**
- * tRPC client interface for auth operations.
+ * RPC client interface for auth operations.
  * This is the minimal interface needed by auth utilities.
  */
-export interface IAuthTRPCClient {
+export interface IAuthClient {
 	auth: {
 		checkEmail: {
 			query(input: { email: string }): Promise<CheckEmailResult>;
@@ -147,6 +156,11 @@ export interface IAuthTRPCClient {
 			}>;
 		};
 	};
+	vault: {
+		list: {
+			query(): Promise<VaultListEntry[]>;
+		};
+	};
 }
 
 /**
@@ -154,7 +168,8 @@ export interface IAuthTRPCClient {
  */
 export interface SRPLoginDeps {
 	crypto: ICrypto;
-	trpcClient: IAuthTRPCClient;
+	authClient?: IAuthClient;
+	rpcClient?: IAuthClient;
 	storage: IStorageAdapter;
 }
 
@@ -163,8 +178,20 @@ export interface SRPLoginDeps {
  */
 export interface SRPUnlockDeps {
 	crypto: ICrypto;
-	trpcClient: IAuthTRPCClient;
+	authClient?: IAuthClient;
+	rpcClient?: IAuthClient;
 	storage: IStorageAdapter;
+}
+
+function resolveAuthClient(deps: {
+	authClient?: IAuthClient;
+	rpcClient?: IAuthClient;
+}): IAuthClient {
+	const client = deps.authClient ?? deps.rpcClient;
+	if (!client) {
+		throw new Error("Auth client is required");
+	}
+	return client;
 }
 
 interface HandleCapableCrypto extends ICrypto {
@@ -200,6 +227,37 @@ function parseEncryptedData(serialized: string | null): EncryptedData | null {
 	} catch {
 		return null;
 	}
+}
+
+function normalizeVaultType(vaultType: string): VaultKeyData["vaultType"] {
+	return vaultType === "team" ? "team" : "personal";
+}
+
+function normalizeVaultRole(role: string): VaultKeyData["role"] {
+	switch (role) {
+		case "owner":
+		case "admin":
+		case "member":
+		case "read-only":
+			return role;
+		default:
+			return "member";
+	}
+}
+
+async function fetchVaultKeys(
+	authClient: IAuthClient,
+): Promise<VaultKeyData[]> {
+	const vaults = await authClient.vault.list.query();
+	return vaults.map((vault) => ({
+		vaultId: vault.id,
+		vaultName: vault.name,
+		vaultType: normalizeVaultType(vault.vaultType),
+		vaultIcon: vault.icon,
+		vaultImageUrl: vault.imageUrl,
+		encryptedVaultKey: vault.encryptedVaultKey,
+		role: normalizeVaultRole(vault.role),
+	}));
 }
 
 async function validateDerivedUnlockKey(input: {
@@ -276,7 +334,8 @@ export async function performSRPLogin(
 	deps: SRPLoginDeps,
 ): Promise<LoginResult> {
 	const { email, password, secretKey } = input;
-	const { crypto, trpcClient } = deps;
+	const { crypto } = deps;
+	const authClient = resolveAuthClient(deps);
 
 	const isValid = await crypto.validateSecretKey(secretKey);
 	if (!isValid) {
@@ -313,7 +372,7 @@ export async function performSRPLogin(
 	try {
 		const clientEphemeral = await crypto.generateClientEphemeral();
 
-		const startResult = await trpcClient.auth.startLogin.mutate({
+		const startResult = await authClient.auth.startLogin.mutate({
 			email,
 			clientPublicKey: clientEphemeral.publicKey,
 		});
@@ -330,11 +389,22 @@ export async function performSRPLogin(
 			srpPassword,
 		);
 
-		const finishResult = await trpcClient.auth.finishLogin.mutate({
+		const finishResult = await authClient.auth.finishLogin.mutate({
 			attemptId: startResult.attemptId,
 			clientPublicKey: clientEphemeral.publicKey,
 			clientProof: clientSession.proof,
 		});
+
+		// Store token before fetchVaultKeys so the auth header is available
+		await deps.storage.storeAuthToken(finishResult.token, email);
+
+		// On multi-account platforms (desktop), set active account before fetchVaultKeys
+		// so the session-refresh client can resolve the token
+		if (deps.storage.supportsMultiAccount) {
+			await deps.storage.setActiveAccount({ type: "single", email });
+		}
+
+		const vaultKeys = await fetchVaultKeys(authClient);
 
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
@@ -353,7 +423,7 @@ export async function performSRPLogin(
 			sessionId: finishResult.sessionId,
 			expiresAt: finishResult.expiresAt,
 			user: finishResult.user,
-			vaultKeys: finishResult.vaultKeys,
+			vaultKeys,
 			masterUnlockKey,
 			masterUnlockKeyHandle,
 		};
@@ -452,7 +522,8 @@ export async function performSRPUnlock(
 	deps: SRPUnlockDeps,
 ): Promise<UnlockResult> {
 	const { email, password } = input;
-	const { crypto, trpcClient, storage } = deps;
+	const { crypto, storage } = deps;
+	const authClient = resolveAuthClient(deps);
 
 	const storedSecretKey = await storage.getStoredSecretKey(email);
 	if (!storedSecretKey) {
@@ -534,7 +605,7 @@ export async function performSRPUnlock(
 
 		const clientEphemeral = await crypto.generateClientEphemeral();
 
-		const startResult = await trpcClient.auth.startLogin.mutate({
+		const startResult = await authClient.auth.startLogin.mutate({
 			email,
 			clientPublicKey: clientEphemeral.publicKey,
 		});
@@ -551,11 +622,22 @@ export async function performSRPUnlock(
 			srpPassword,
 		);
 
-		const finishResult = await trpcClient.auth.finishLogin.mutate({
+		const finishResult = await authClient.auth.finishLogin.mutate({
 			attemptId: startResult.attemptId,
 			clientPublicKey: clientEphemeral.publicKey,
 			clientProof: clientSession.proof,
 		});
+
+		// Store token before fetchVaultKeys so the auth header is available
+		await deps.storage.storeAuthToken(finishResult.token, email);
+
+		// On multi-account platforms (desktop), set active account before fetchVaultKeys
+		// so the session-refresh client can resolve the token
+		if (deps.storage.supportsMultiAccount) {
+			await deps.storage.setActiveAccount({ type: "single", email });
+		}
+
+		const vaultKeys = await fetchVaultKeys(authClient);
 
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
@@ -575,7 +657,7 @@ export async function performSRPUnlock(
 			sessionId: finishResult.sessionId,
 			expiresAt: finishResult.expiresAt,
 			user: finishResult.user,
-			vaultKeys: finishResult.vaultKeys,
+			vaultKeys,
 			masterUnlockKey,
 			masterUnlockKeyHandle,
 		};
@@ -743,8 +825,8 @@ export async function clearSession(
  * Check if an email has an existing account on the server.
  */
 export async function checkEmailExists(
-	trpcClient: Pick<IAuthTRPCClient, "auth">,
+	authClient: Pick<IAuthClient, "auth">,
 	email: string,
 ): Promise<CheckEmailResult> {
-	return trpcClient.auth.checkEmail.query({ email });
+	return authClient.auth.checkEmail.query({ email });
 }

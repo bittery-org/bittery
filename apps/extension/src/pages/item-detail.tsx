@@ -6,10 +6,12 @@ import { useNavigate, useParams } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
+import { useI18n } from "@/providers/i18n-provider";
 
 export function ItemDetailPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const { m } = useI18n();
 	const { itemId } = useParams({ from: "/item/$itemId" });
 	const invalidator = useMemo(
 		() => createExtensionInvalidator(queryClient),
@@ -46,7 +48,9 @@ export function ItemDetailPage() {
 	if (!item) {
 		return (
 			<div className="flex h-full items-center justify-center p-4">
-				<p className="text-muted-foreground text-sm">Item not found</p>
+				<p className="text-muted-foreground text-sm">
+					{m.ext_item_detail_not_found()}
+				</p>
 			</div>
 		);
 	}
@@ -63,9 +67,11 @@ export function ItemDetailPage() {
 						<IconArrowLeftOutlineDuo18 className="size-[18px]" />
 					</Button>
 					<div>
-						<div className="font-semibold text-lg">Item details</div>
+						<div className="font-semibold text-lg">
+							{m.ext_item_detail_title()}
+						</div>
 						<div className="text-muted-foreground text-xs">
-							View and copy saved credentials
+							{m.ext_item_detail_description()}
 						</div>
 					</div>
 				</div>

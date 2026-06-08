@@ -12,12 +12,14 @@ import { ItemSectionsList } from "@/components/item-sections-list";
 import { ItemsSkeletonList } from "@/components/items-skeleton-list";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { useFilteredItems } from "@/hooks/use-filtered-items";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Create styled icon components
 const StyledKey = withUniwind(Key);
 const StyledPlus = withUniwind(Plus);
 
 export default function AllItemsScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
@@ -71,10 +73,10 @@ export default function AllItemsScreen() {
 			>
 				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
 					<Card.Title className="mb-4 text-center text-danger text-lg">
-						Error loading items
+						{m.mob_items_error_loading()}
 					</Card.Title>
 					<Button onPress={handleRefresh} variant="primary">
-						Retry
+						{m.mob_items_button_retry()}
 					</Button>
 				</Card>
 			</SafeAreaView>
@@ -119,11 +121,15 @@ export default function AllItemsScreen() {
 					>
 						<EmptyItemsState
 							icon={<StyledKey size={48} className="mb-4 text-muted" />}
-							title={hasFilter ? "No items found" : "No items yet"}
+							title={
+								hasFilter
+									? m.mob_items_empty_no_items_filtered()
+									: m.mob_items_empty_no_items()
+							}
 							description={
 								hasFilter
-									? "Try a different filter"
-									: "Add items to your vaults to see them here"
+									? m.mob_items_empty_try_filter()
+									: m.mob_items_empty_add_items_description()
 							}
 						/>
 					</ScrollView>

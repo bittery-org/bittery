@@ -21,3 +21,19 @@ export function webappUrl(path = "/", params?: Record<string, string>): string {
 export function signupUrl(plan?: string): string {
 	return webappUrl("/signup", plan ? { plan } : undefined);
 }
+
+export function billingMarketingEnabled(): boolean {
+	const value = import.meta.env.VITE_BILLING_MARKETING_ENABLED;
+	return ["1", "true", "yes", "on"].includes(value?.toLowerCase?.() ?? "");
+}
+
+export function serverUrl(path = "/"): string {
+	const base = (
+		import.meta.env.VITE_SERVER_URL ?? "https://api.bittery.com"
+	).replace(/\/+$/, "");
+	return new URL(path, base).toString();
+}
+
+export function waitlistUrl(): string {
+	return serverUrl("/waitlist");
+}

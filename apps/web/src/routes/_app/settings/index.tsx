@@ -1,5 +1,5 @@
 import { type AppLocale, supportedLocales } from "@bittery/i18n";
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import {
 	Badge,
 	Button,
@@ -17,6 +17,7 @@ import {
 import {
 	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconClockTimeOutlineDuo18 as Clock,
+	IconArchiveExport2OutlineDuo18 as Download,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
 	IconFingerprintOutlineDuo18 as Fingerprint,
 	IconGear3OutlineDuo18 as Gear,
@@ -31,10 +32,11 @@ import {
 	IconTrash2OutlineDuo18 as Trash2,
 	IconUpload4OutlineDuo18 as Upload,
 	IconUserOutlineDuo18 as User,
-	IconArchiveExport2OutlineDuo18 as Download,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
+import { Monitor, Moon, Sun } from "lucide-react";
+import { useTheme } from "next-themes";
 import { useState } from "react";
 import { VaultExportDialog } from "@/components/export/vault-export-dialog";
 import { VaultImportDialog } from "@/components/import/vault-import-dialog";
@@ -42,8 +44,8 @@ import { AutoLockSettings } from "@/components/settings/auto-lock-settings";
 import { ChangeEmailDialog } from "@/components/settings/change-email-dialog";
 import { ChangePasswordDialog } from "@/components/settings/change-password-dialog";
 import { DeleteAccountDialog } from "@/components/settings/delete-account-dialog";
-import { WebDeviceSetupDialog } from "@/components/settings/device-setup-dialog";
 import { DeviceManagement } from "@/components/settings/device-management";
+import { WebDeviceSetupDialog } from "@/components/settings/device-setup-dialog";
 import { RegenerateRecoveryKeyDialog } from "@/components/settings/regenerate-recovery-key-dialog";
 import { RegenerateSecretKeyDialog } from "@/components/settings/regenerate-secret-key-dialog";
 import { SetupRecoveryKeyDialog } from "@/components/settings/setup-recovery-key-dialog";
@@ -60,13 +62,14 @@ export const Route = createFileRoute("/_app/settings/")({
 const GITHUB_REPO = "bittery-org/bittery";
 
 function SettingsPage() {
-	const trpc = useTRPC();
+	const rpc = useRPC();
 	const { locale, setLocale, m } = useI18n();
+	const { theme, setTheme } = useTheme();
 	const activeLocaleLabel =
 		locale === "en" ? m.i18n_language_en() : m.i18n_language_de();
 	const ActiveLocaleFlag =
 		locale === "en" ? IconFlagUnitedStates : IconFlagGermany;
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
 	const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
 	const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
 	const [isDeviceSetupDialogOpen, setIsDeviceSetupDialogOpen] = useState(false);
@@ -484,6 +487,60 @@ function SettingsPage() {
 												</span>
 											</SelectItem>
 										))}
+									</SelectContent>
+								</Select>
+							</div>
+						</div>
+
+						<div className="rounded-xl border bg-card p-5">
+							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+								<div className="space-y-0.5">
+									<span className="font-medium text-sm">
+										{m.settings_general_appearance_title()}
+									</span>
+									<p className="text-muted-foreground text-xs">
+										{m.settings_general_appearance_description()}
+									</p>
+								</div>
+								<Select value={theme} onValueChange={setTheme}>
+									<SelectTrigger
+										aria-label={m.settings_general_appearance_title()}
+										className="h-7 min-w-28 max-w-30 border-0 bg-transparent px-1.5 text-sm shadow-none ring-0 focus:ring-0"
+									>
+										{theme === "dark" ? (
+											<Moon className="size-3.5 shrink-0" />
+										) : theme === "light" ? (
+											<Sun className="size-3.5 shrink-0" />
+										) : (
+											<Monitor className="size-3.5 shrink-0" />
+										)}
+										<span className="truncate">
+											{theme === "dark"
+												? m.settings_theme_dark()
+												: theme === "light"
+													? m.settings_theme_light()
+													: m.settings_theme_system()}
+										</span>
+									</SelectTrigger>
+									<SelectContent className="min-w-40">
+										<SelectItem value="light" className="gap-2">
+											<span className="inline-flex items-center gap-2 whitespace-nowrap">
+												<Sun className="size-3.5 shrink-0" />
+												<span>{m.settings_theme_light()}</span>
+											</span>
+										</SelectItem>
+										<SelectItem value="dark" className="gap-2">
+											<span className="inline-flex items-center gap-2 whitespace-nowrap">
+												<Moon className="size-3.5 shrink-0" />
+												<span>{m.settings_theme_dark()}</span>
+											</span>
+										</SelectItem>
+										<SelectItem value="system" className="gap-2">
+											<span className="inline-flex items-center gap-2 whitespace-nowrap">
+												<Monitor className="size-3.5 shrink-0" />
+												<span>{m.settings_theme_system()}</span>
+											</span>
+										</SelectItem>
 									</SelectContent>
 								</Select>
 							</div>

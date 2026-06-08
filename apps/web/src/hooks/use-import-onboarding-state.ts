@@ -1,4 +1,4 @@
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
@@ -28,8 +28,8 @@ function writeLocalFlag(key: string, value: boolean): void {
 }
 
 export function useImportOnboardingState() {
-	const trpc = useTRPC();
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const rpc = useRPC();
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
 	const userId = userQuery.data?.id ?? null;
 
 	const [isDismissed, setIsDismissed] = useState(false);

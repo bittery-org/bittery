@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { FileText } from "lucide-react";
 import { motion } from "motion/react";
-import { Layout } from "@/components/layout";
 
 export const Route = createFileRoute("/terms")({
 	component: TermsPage,
@@ -22,7 +21,7 @@ const lastUpdated = "March 1, 2026";
 const sections = [
 	{
 		title: "1. Agreement to terms",
-		content: `These Terms of Service ("Terms") govern your access to and use of the Bittery password manager, including the web application, desktop application, mobile application, browser extension, and related services (collectively, the "Service") operated by qrawall GmbH ("Bittery", "we", "us", "our"), a company registered in Germany.
+		content: `These Terms of Service ("Terms") govern your access to and use of the Bittery password manager, including the web application, desktop application, mobile application, browser extension, and related services (collectively, the "Service") operated by Bittery Software ("Bittery", "we", "us", "our"), a company registered in Germany.
 
 By creating an account or using the Service, you agree to be bound by these Terms. If you do not agree, do not use the Service.`,
 	},
@@ -30,7 +29,7 @@ By creating an account or using the Service, you agree to be bound by these Term
 		title: "2. Description of service",
 		content: `Bittery is a zero-knowledge password manager that allows you to securely store, manage, and share passwords, secure notes, credit card information, identity documents, and TOTP secrets. All sensitive data is encrypted on your device before being transmitted to our servers using AES-256-GCM encryption.
 
-The Service is available as a cloud-hosted solution and as self-hosted open-source software. These Terms apply to the cloud-hosted version. Self-hosted deployments are governed by the software license.`,
+The Service is available as a cloud-hosted beta and as self-hosted source-available software. These Terms apply to the cloud-hosted version. Self-hosted deployments are governed by the software license.`,
 	},
 	{
 		title: "3. Account registration",
@@ -51,27 +50,21 @@ Important: Due to our zero-knowledge architecture, we cannot reset your Master P
 • Use the Service to store, transmit, or facilitate any illegal content or activity
 • Attempt to gain unauthorized access to other users' accounts or data
 • Interfere with or disrupt the Service's infrastructure or security measures
-• Reverse engineer, decompile, or attempt to extract source code from the Service's proprietary components (note: Bittery's core is open source under its respective license)
+• Use the public source code or Service in a way that violates the applicable software license
 • Use automated systems to access the Service in a manner that exceeds reasonable usage
 • Resell, sublicense, or commercialize access to the Service without our written consent
 • Use the Service to conduct phishing, distribute malware, or carry out any form of cyber attack`,
 	},
 	{
-		title: "5. Subscriptions and payments",
-		content: `Bittery offers both free and paid subscription plans. By subscribing to a paid plan:
+		title: "5. Hosted beta access",
+		content: `Bittery Cloud is currently offered as an invite-only hosted beta. Public signup may be limited, and access may be granted from the waitlist in batches.
 
-• You authorize us to charge your chosen payment method on a recurring basis (monthly or annually, depending on the plan selected)
-• Subscription fees are charged in advance for the upcoming billing period
-• All fees are stated in the currency indicated at the time of purchase and are inclusive or exclusive of taxes as specified
-
-You may cancel your subscription at any time. Upon cancellation, you will retain access to paid features until the end of your current billing period. We do not offer prorated refunds for partial billing periods unless required by applicable law.
-
-We reserve the right to change pricing with 30 days' advance notice. Price changes will apply to the next billing cycle after the notice period.`,
+We are not currently selling paid subscriptions for the hosted beta. If paid plans become available later, pricing, billing terms, payment processors, renewal rules, cancellation terms, and tax handling will be presented before any charge is made.`,
 	},
 	{
-		title: "6. Free plan",
+		title: "6. Beta plan",
 		content:
-			"The free plan provides core password management functionality with certain limitations (e.g., number of vaults, items, or team members). We reserve the right to modify the scope of the free plan with reasonable notice. We will not delete your existing data if we reduce free plan limits — you will retain read access to all stored items.",
+			"The hosted beta provides access to core password management functionality while we prepare the public cloud launch. We may change beta limits, availability, or invite policies with reasonable notice. We will not delete your existing encrypted data merely because beta limits change.",
 	},
 	{
 		title: "7. Data ownership and encryption",
@@ -108,7 +101,7 @@ Team administrators are responsible for managing team membership and ensuring co
 	},
 	{
 		title: "10. Source-available license",
-		content: `Bittery's source code is publicly available on GitHub under the Functional Source License 1.1 (FSL-1.1-ALv2). This means you can view, modify, and self-host the software, but you may not use it to offer a competing commercial password management service. After two years from each version's release, that version converts to the Apache License 2.0.
+		content: `Bittery's source code is publicly available on GitHub under the Functional Source License 1.1 (FSL-1.1-ALv2). This is a source-available license, not an OSI-approved open-source license. It lets you view, modify, and self-host the software, but you may not use it to offer a competing commercial password management service. After two years from each version's release, that version converts to the Apache License 2.0.
 
 If you choose to self-host Bittery for your own use or your organization's internal use, you are welcome to do so. You are responsible for your own deployment, security, and data management when self-hosting.`,
 	},
@@ -146,7 +139,7 @@ Nothing in these Terms excludes or limits our liability for death or personal in
 	},
 	{
 		title: "14. Indemnification",
-		content: `You agree to indemnify and hold harmless qrawall GmbH, its officers, directors, and employees from any claims, damages, or expenses (including reasonable legal fees) arising from:
+		content: `You agree to indemnify and hold harmless Bittery Software, its officers, directors, and employees from any claims, damages, or expenses (including reasonable legal fees) arising from:
 
 • Your use of the Service
 • Your violation of these Terms
@@ -181,15 +174,15 @@ For EU consumers: You may also use the European Commission's Online Dispute Reso
 		title: "19. Contact",
 		content: `If you have questions about these Terms of Service, please contact us:
 
-qrawall GmbH
+Bittery Software
 Email: legal@bittery.com
-Website: https://qrawall.com`,
+Website: https://bittery.com`,
 	},
 ];
 
 function TermsPage() {
 	return (
-		<Layout>
+		<>
 			{/* ─── Hero ─────────────────────────────────────────────── */}
 			<section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
 				<div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -269,6 +262,6 @@ function TermsPage() {
 					</div>
 				</div>
 			</section>
-		</Layout>
+		</>
 	);
 }

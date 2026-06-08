@@ -2,7 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
 	copyWithToast,
@@ -51,11 +51,11 @@ export function RegenerateSecretKeyDialog({
 	const [newSecretKey, setNewSecretKey] = useState("");
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
-	const trpcClient = useTRPCClient();
-	const trpc = useTRPC();
+	const rpcClient = useRPCClient();
+	const rpc = useRPC();
 
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
-	const vaultListQuery = useQuery(trpc.vault.list.queryOptions());
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const vaultListQuery = useQuery(rpc.vault.list.queryOptions());
 
 	const handleGenerateNewKey = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -224,7 +224,7 @@ export function RegenerateSecretKeyDialog({
 			}
 
 			// 7. Send to server (other sessions are invalidated, current one is kept)
-			await trpcClient.auth.regenerateSecretKey.mutate({
+			await rpcClient.auth.regenerateSecretKey.mutate({
 				secretKeyHint: getSecretKeyHint(newSecretKey),
 				srpSalt,
 				srpVerifier,

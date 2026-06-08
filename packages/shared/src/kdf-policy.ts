@@ -1,6 +1,6 @@
 export interface KdfParamsPolicyInput {
-	schemaVersion: 1;
-	algorithm: "pbkdf2-sha256";
+	schemaVersion: number;
+	algorithm: string;
 	iterations: number;
 	salt: string;
 }

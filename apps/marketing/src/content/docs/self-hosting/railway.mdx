@@ -1,0 +1,75 @@
+---
+title: Railway Quick Start
+description: Deploy Bittery to Railway in under 5 minutes with a one-click template.
+category: self-hosting
+order: 2
+---
+
+# Railway Quick Start
+
+The fastest way to self-host Bittery is with Railway. The template provisions everything you need — server, web app, database, and networking — in a single click.
+
+## Deploy in under 5 minutes
+
+<Steps>
+<Step title="Click the deploy button">
+Open the Bittery Railway template:
+
+**[Deploy on Railway](https://railway.com/template/PLACEHOLDER)**
+
+Click **Deploy Now** to start provisioning.
+</Step>
+<Step title="Configure your domain">
+Once deployed, Railway assigns a public URL to the **web** service. You can use this directly or add a custom domain:
+
+1. Go to the **web** service in your Railway dashboard
+2. Click **Settings → Networking → Custom Domain**
+3. Add your domain and configure a CNAME record pointing to Railway
+</Step>
+<Step title="Set the server URL">
+The web app needs to know where the API server lives. In the **web** service settings:
+
+1. Go to **Variables**
+2. Set `VITE_SERVER_URL` to your server service's public URL (e.g. `https://your-server.up.railway.app`)
+3. Redeploy the web service
+</Step>
+<Step title="Create your account">
+Open the web app URL in your browser and create your first account. The first user on a self-hosted instance has full access.
+</Step>
+</Steps>
+
+<Callout type="tip">
+Railway's free tier includes enough resources to run a personal Bittery instance. For teams, consider upgrading to a paid plan for more memory and storage.
+</Callout>
+
+## What the template includes
+
+| Service | Details |
+|---------|---------|
+| **bittery-server** | Rust API server from `ghcr.io/bittery-org/bittery-server:latest` |
+| **bittery-web** | Web vault SPA from `ghcr.io/bittery-org/bittery-web:latest` |
+| **PostgreSQL** | Managed Railway Postgres instance |
+
+## Environment variables
+
+The template pre-configures most variables. You may want to customize:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `JWT_SECRET` | Auto-generated | Secret for signing auth tokens |
+| `CORS_ORIGIN` | Template URL | Allowed origins for API requests |
+| `SHARE_LINK_DAILY_LIMIT` | `50` | Max shared links per user per day |
+
+See [Configuration Reference](/docs/self-hosting/configuration) for the full list.
+
+## Updating
+
+Railway automatically tracks the `latest` Docker image tag. To update:
+
+1. Go to your Railway project dashboard
+2. Click **Redeploy** on each service
+3. Railway pulls the latest images and restarts
+
+<Callout type="info">
+Database migrations run automatically on server startup — no manual migration step is needed.
+</Callout>

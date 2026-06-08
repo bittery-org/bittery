@@ -1,4 +1,4 @@
-import type { AppRouter } from "@bittery/api/routers/index";
+import type { AppRpcOptionsProxy } from "@bittery/shared/rpc-client";
 import { Toaster } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
@@ -9,12 +9,12 @@ import {
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
-import type { TRPCOptionsProxy } from "@trpc/tanstack-react-query";
+import { ThemeProvider } from "next-themes";
 import appCss from "../index.css?url";
 import { useI18n } from "../providers/i18n-provider";
 
 export interface RouterAppContext {
-	trpc: TRPCOptionsProxy<AppRouter>;
+	rpc: AppRpcOptionsProxy;
 	queryClient: QueryClient;
 }
 
@@ -80,13 +80,20 @@ function RootDocument() {
 	const isDev = import.meta.env.DEV;
 
 	return (
-		<html lang={locale}>
+		<html lang={locale} suppressHydrationWarning>
 			<head>
 				<HeadContent />
 			</head>
 			<body>
-				<Outlet />
-				<Toaster richColors />
+				<ThemeProvider
+					attribute="class"
+					defaultTheme="system"
+					enableSystem
+					disableTransitionOnChange
+				>
+					<Outlet />
+					<Toaster richColors />
+				</ThemeProvider>
 				{isDev && <TanStackRouterDevtools position="bottom-left" />}
 				{isDev && (
 					<ReactQueryDevtools position="bottom" buttonPosition="bottom-right" />

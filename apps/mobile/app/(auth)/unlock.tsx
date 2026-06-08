@@ -57,12 +57,14 @@ import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../../src/lib/biometric-error-message";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
-import { useServerUrl } from "../../src/lib/trpc";
+import { useServerUrl } from "../../src/lib/rpc";
+import { useI18n } from "../../src/providers/i18n-provider";
 import { type AccountMetadata, storage } from "../../src/services/storage";
 
 export default function UnlockScreen() {
 	const router = useRouter();
 	const { toast } = useToast();
+	const { m } = useI18n();
 	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const {
@@ -98,7 +100,7 @@ export default function UnlockScreen() {
 	}, [activeAccount, allAccounts, selectedAccountEmail, unlockMode]);
 	const selectedAccountValue = useMemo(() => {
 		if (unlockMode === "all") {
-			return { value: "all", label: "All Accounts" };
+			return { value: "all", label: m.mob_unlock_all_accounts() };
 		}
 
 		if (!targetAccount) {
@@ -112,7 +114,7 @@ export default function UnlockScreen() {
 				targetAccount.name ||
 				targetAccount.email.split("@")[0],
 		};
-	}, [targetAccount, unlockMode]);
+	}, [targetAccount, unlockMode, m.mob_unlock_all_accounts]);
 
 	// Get session state for the target account
 	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
@@ -224,8 +226,8 @@ export default function UnlockScreen() {
 				router.replace("/(vault)");
 			} else {
 				Alert.alert(
-					"Session Expired",
-					"Please log in again with your credentials.",
+					m.mob_unlock_alert_session_expired_title(),
+					m.mob_unlock_alert_session_expired_message(),
 				);
 				await storage.clearAllStoredData(targetAccount.email);
 				router.replace("/(auth)/login");
@@ -234,7 +236,8 @@ export default function UnlockScreen() {
 		onError: (error) => {
 			// Show specific error message
 			const errorMessage =
-				error.message || resolveBiometricErrorMessage(error.type || "unknown");
+				error.message ||
+				resolveBiometricErrorMessage(error.type || "unknown", m);
 
 			if (error.type === "master_password_required") {
 				setBiometricError(errorMessage);
@@ -335,7 +338,10 @@ export default function UnlockScreen() {
 			if (showPartialToast) {
 				toast.show({
 					variant: "warning",
-					label: `Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts`,
+					label: m.mob_unlock_partial_toast({
+						unlocked: String(result.unlocked.length),
+						total: String(allAccounts.length),
+					}),
 					placement: "bottom",
 				});
 			}
@@ -348,6 +354,7 @@ export default function UnlockScreen() {
 			router,
 			setNativeMuksForEmails,
 			toast,
+			m.mob_unlock_partial_toast,
 		],
 	);
 
@@ -360,7 +367,10 @@ export default function UnlockScreen() {
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			Alert.alert("Error", error.message || "Unlock failed");
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				error.message || m.mob_unlock_alert_error_unlock_failed(),
+			);
 		},
 	});
 
@@ -383,13 +393,13 @@ export default function UnlockScreen() {
 			try {
 				const result = await storage.unlockAllAccountsWithBiometric();
 				if (result.unlocked.length === 0) {
-					setBiometricError("Biometric authentication failed.");
+					setBiometricError(m.mob_unlock_biometric_failed());
 					return;
 				}
 				await finalizeAllAccountsUnlock(result, result.failed.length > 0);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);
-				setBiometricError("Biometric authentication failed.");
+				setBiometricError(m.mob_unlock_biometric_failed());
 			}
 			return;
 		}
@@ -398,9 +408,7 @@ export default function UnlockScreen() {
 
 		// Check if master password is required first (UI-level check for immediate feedback)
 		if (sessionState?.requiresPasswordReentry) {
-			setBiometricError(
-				"For your security, please enter your master password. This is required every 30 days.",
-			);
+			setBiometricError(m.mob_unlock_password_required_description());
 			return;
 		}
 
@@ -411,7 +419,10 @@ export default function UnlockScreen() {
 	const handlePasswordUnlock = async () => {
 		if (unlockMode === "all") {
 			if (!password.trim()) {
-				Alert.alert("Error", "Please enter your password");
+				Alert.alert(
+					m.mob_unlock_alert_error_title(),
+					m.mob_unlock_alert_error_enter_password(),
+				);
 				return;
 			}
 
@@ -421,7 +432,10 @@ export default function UnlockScreen() {
 		}
 
 		if (!targetAccount || !password.trim()) {
-			Alert.alert("Error", "Please enter your password");
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				m.mob_unlock_alert_error_enter_password(),
+			);
 			return;
 		}
 
@@ -513,7 +527,7 @@ export default function UnlockScreen() {
 								<Lock size={40} color="#fff" />
 							</Button>
 							<Text className="font-bold text-2xl text-foreground">
-								Unlock Bittery
+								{m.mob_unlock_title()}
 							</Text>
 						</View>
 
@@ -528,7 +542,7 @@ export default function UnlockScreen() {
 									<Select.Trigger>
 										<View className="flex-row items-center justify-center gap-3 rounded-2xl bg-surface px-4 py-3">
 											{unlockMode === "all" ? (
-												<Avatar size="md" alt="All Accounts">
+												<Avatar size="md" alt={m.mob_unlock_all_accounts()}>
 													<Avatar.Fallback>
 														<StyledUsers size={20} className="text-muted" />
 													</Avatar.Fallback>
@@ -539,7 +553,7 @@ export default function UnlockScreen() {
 													alt={
 														targetAccount?.name ||
 														targetAccount?.email ||
-														"Account"
+														m.mob_settings_account_fallback()
 													}
 												>
 													{targetAccount?.teamAvatarUrl && (
@@ -555,14 +569,16 @@ export default function UnlockScreen() {
 											<View className="flex-1">
 												<Text className="font-medium text-foreground">
 													{unlockMode === "all"
-														? "All Accounts"
+														? m.mob_unlock_all_accounts()
 														: targetAccount?.teamName ||
 															targetAccount?.name ||
 															targetAccount?.email.split("@")[0]}
 												</Text>
 												<Text className="text-muted text-sm">
 													{unlockMode === "all"
-														? `${allAccounts.length} accounts`
+														? m.mob_unlock_accounts_count({
+																count: String(allAccounts.length),
+															})
 														: targetAccount?.email}
 												</Text>
 											</View>
@@ -572,11 +588,16 @@ export default function UnlockScreen() {
 									<Select.Portal>
 										<Select.Overlay />
 										<Select.Content presentation="dialog">
-											<Select.ListLabel>Select Account</Select.ListLabel>
+											<Select.ListLabel>
+												{m.mob_unlock_select_account()}
+											</Select.ListLabel>
 											{allAccounts.length > 1 && (
-												<Select.Item value="all" label="All Accounts">
+												<Select.Item
+													value="all"
+													label={m.mob_unlock_all_accounts()}
+												>
 													<View className="flex-row items-center gap-3">
-														<Avatar size="md" alt="All Accounts">
+														<Avatar size="md" alt={m.mob_unlock_all_accounts()}>
 															<Avatar.Fallback>
 																<StyledUsers size={20} className="text-muted" />
 															</Avatar.Fallback>
@@ -584,7 +605,9 @@ export default function UnlockScreen() {
 														<View className="flex-1">
 															<Select.ItemLabel />
 															<Text className="text-muted text-sm">
-																{allAccounts.length} accounts
+																{m.mob_unlock_accounts_count({
+																	count: String(allAccounts.length),
+																})}
 															</Text>
 														</View>
 													</View>
@@ -697,14 +720,20 @@ export default function UnlockScreen() {
 										)}
 										<Text className="ml-3 font-medium text-foreground">
 											{loading
-												? "Authenticating..."
-												: `Unlock with ${biometricType || "Biometric"}`}
+												? m.mob_unlock_authenticating()
+												: m.mob_unlock_biometric_label({
+														biometricType:
+															biometricType ||
+															m.mob_unlock_biometric_fallback(),
+													})}
 										</Text>
 									</View>
 								</Button>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted">or</Text>
+									<Text className="mx-4 text-muted">
+										{m.mob_unlock_or_divider()}
+									</Text>
 									<View className="h-px flex-1 bg-border" />
 								</View>
 							</View>
@@ -713,10 +742,10 @@ export default function UnlockScreen() {
 						{/* Password Form */}
 						<View className="gap-4">
 							<TextField>
-								<Label>Password</Label>
+								<Label>{m.mob_unlock_password_label()}</Label>
 								<View className="w-full flex-row items-center">
 									<Input
-										placeholder="Enter your password"
+										placeholder={m.mob_unlock_password_placeholder()}
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
@@ -748,7 +777,9 @@ export default function UnlockScreen() {
 								variant="primary"
 								size="lg"
 							>
-								{loading ? "Unlocking..." : "Unlock"}
+								{loading
+									? m.mob_unlock_button_unlocking()
+									: m.mob_unlock_button_unlock()}
 							</Button>
 
 							<Button
@@ -759,7 +790,7 @@ export default function UnlockScreen() {
 								<View className="flex-row items-center">
 									<StyledUserPlus size={16} className="text-muted" />
 									<Text className="ml-2 text-muted">
-										Sign in with different account
+										{m.mob_unlock_different_account()}
 									</Text>
 								</View>
 							</Button>

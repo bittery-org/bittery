@@ -3,6 +3,7 @@ import { Copy, Globe, Key, User } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
+import { useI18n } from "@/providers/i18n-provider";
 import { TotpDisplay } from "../totp-display";
 import { FieldRow } from "./field-row";
 import type { ItemDetailProps } from "./types";
@@ -13,18 +14,19 @@ const StyledUser = withUniwind(User);
 const StyledKey = withUniwind(Key);
 
 export function LoginFields({ item, onCopy }: ItemDetailProps) {
+	const { m } = useI18n();
 	const [showPassword, setShowPassword] = useState(false);
 
 	return (
 		<>
 			<FieldRow
-				label="Username"
+				label={m.mob_detail_field_username()}
 				value={item.username}
 				onCopy={onCopy}
 				options={{ icon: StyledUser }}
 			/>
 			<FieldRow
-				label="Password"
+				label={m.mob_detail_field_password()}
 				value={item.password}
 				onCopy={onCopy}
 				options={{
@@ -35,7 +37,7 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
 				}}
 			/>
 			<FieldRow
-				label="Website"
+				label={m.mob_detail_field_website()}
 				value={item.url}
 				onCopy={onCopy}
 				options={{ icon: StyledGlobe }}
@@ -48,7 +50,7 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
 					<Card key={url} variant="secondary" className="mb-2">
 						<Card.Body className="py-3">
 							<Card.Description className="mb-1.5">
-								Website {index + 2}
+								{m.mob_detail_field_website_n({ index: String(index + 2) })}
 							</Card.Description>
 							<View className="flex-row items-center gap-2.5">
 								<StyledGlobe size={16} className="text-muted" />
@@ -73,7 +75,7 @@ export function LoginFields({ item, onCopy }: ItemDetailProps) {
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
 						<Card.Description className="mb-2">
-							Two-Factor Code
+							{m.mob_detail_field_two_factor_code()}
 						</Card.Description>
 						<TotpDisplay
 							totpSecret={item.totpSecret}

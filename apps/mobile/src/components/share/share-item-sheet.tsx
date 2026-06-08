@@ -11,7 +11,7 @@ import {
 import type { DecryptedItem } from "@bittery/shared/types";
 import { Button, ControlField, Label, Switch, useToast } from "heroui-native";
 import { Link, Loader2, Share2, X } from "lucide-react-native";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
 	Modal,
 	Pressable,
@@ -22,21 +22,12 @@ import {
 } from "react-native";
 import { withUniwind } from "uniwind";
 
+import { useI18n } from "@/providers/i18n-provider";
+
 const StyledLink = withUniwind(Link);
 const StyledLoader2 = withUniwind(Loader2);
 const StyledShare2 = withUniwind(Share2);
 const StyledX = withUniwind(X);
-
-const EXPIRATION_OPTIONS: {
-	value: ShareExpirationOption;
-	label: string;
-}[] = [
-	{ value: "1hour", label: "1 hour" },
-	{ value: "1day", label: "1 day" },
-	{ value: "7days", label: "7 days" },
-	{ value: "14days", label: "14 days" },
-	{ value: "30days", label: "30 days" },
-];
 
 interface ShareItemSheetProps {
 	item: DecryptedItem;
@@ -49,11 +40,38 @@ export function ShareItemSheet({
 	visible,
 	onClose,
 }: ShareItemSheetProps) {
+	const { m } = useI18n();
 	const [expiresIn, setExpiresIn] = useState<ShareExpirationOption>("7days");
 	const [isOneTimeUse, setIsOneTimeUse] = useState(false);
 
 	const createShare = useCreateShare();
 	const { toast } = useToast();
+
+	const EXPIRATION_OPTIONS = useMemo(
+		() => [
+			{
+				value: "1hour" as ShareExpirationOption,
+				label: m.mob_share_expiry_1hour(),
+			},
+			{
+				value: "1day" as ShareExpirationOption,
+				label: m.mob_share_expiry_1day(),
+			},
+			{
+				value: "7days" as ShareExpirationOption,
+				label: m.mob_share_expiry_7days(),
+			},
+			{
+				value: "14days" as ShareExpirationOption,
+				label: m.mob_share_expiry_14days(),
+			},
+			{
+				value: "30days" as ShareExpirationOption,
+				label: m.mob_share_expiry_30days(),
+			},
+		],
+		[m],
+	);
 
 	const handleCreateAndShare = async () => {
 		try {
@@ -73,21 +91,21 @@ export function ShareItemSheet({
 			// Open native share menu
 			const shareResult = await Share.share({
 				message: shareUrl,
-				title: `Share: ${item.title}`,
+				title: `${m.mob_share_title()}: ${item.title}`,
 			});
 
 			if (shareResult.action === Share.sharedAction) {
 				toast.show({
 					variant: "accent",
-					label: "Link shared",
-					description: "The secure share link has been shared.",
+					label: m.mob_share_toast_shared(),
+					description: m.mob_share_toast_shared_description(),
 					placement: "bottom",
 				});
 			}
 		} catch (error) {
 			toast.show({
 				variant: "danger",
-				label: "Failed to create share link",
+				label: m.mob_share_toast_failed(),
 				description: error instanceof Error ? error.message : "Unknown error",
 				placement: "bottom",
 			});
@@ -113,7 +131,7 @@ export function ShareItemSheet({
 					{/* Header */}
 					<View className="mb-4 flex-row items-center justify-between">
 						<Text className="font-semibold text-foreground text-lg">
-							Share Item
+							{m.mob_share_title()}
 						</Text>
 						<TouchableOpacity
 							onPress={handleClose}
@@ -124,13 +142,13 @@ export function ShareItemSheet({
 					</View>
 
 					<Text className="mb-4 text-muted text-sm">
-						Create a secure link to share "{item.title}"
+						{m.mob_share_description({ title: item.title })}
 					</Text>
 
 					{/* Expiration Selection */}
 					<View className="mb-4">
 						<Text className="mb-2 font-medium text-foreground text-sm">
-							Link expires in
+							{m.mob_share_expires_label()}
 						</Text>
 						<View className="flex-row flex-wrap gap-2">
 							{EXPIRATION_OPTIONS.map((option) => (
@@ -153,9 +171,9 @@ export function ShareItemSheet({
 						className="mb-4 rounded-lg bg-card py-3"
 					>
 						<View className="flex-1">
-							<Label>One-time use</Label>
+							<Label>{m.mob_share_one_time_use()}</Label>
 							<Text className="text-muted text-xs">
-								Link becomes invalid after first access
+								{m.mob_share_one_time_use_description()}
 							</Text>
 						</View>
 						<ControlField.Indicator>
@@ -167,8 +185,7 @@ export function ShareItemSheet({
 					<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-3 dark:bg-amber-950/30">
 						<StyledLink size={16} className="mt-0.5 mr-2 text-amber-600" />
 						<Text className="flex-1 text-amber-800 text-xs dark:text-amber-200">
-							Anyone with this link can view the item's contents until it
-							expires. Share carefully.
+							{m.mob_share_security_notice()}
 						</Text>
 					</View>
 
@@ -180,7 +197,7 @@ export function ShareItemSheet({
 							onPress={handleClose}
 							isDisabled={createShare.isPending}
 						>
-							<Button.Label>Cancel</Button.Label>
+							<Button.Label>{m.mob_share_cancel()}</Button.Label>
 						</Button>
 						<Button
 							variant="primary"
@@ -194,12 +211,12 @@ export function ShareItemSheet({
 										size={18}
 										className="animate-spin text-primary-foreground"
 									/>
-									<Button.Label>Creating...</Button.Label>
+									<Button.Label>{m.mob_share_creating()}</Button.Label>
 								</>
 							) : (
 								<>
 									<StyledShare2 size={18} className="text-primary-foreground" />
-									<Button.Label>Create & Share</Button.Label>
+									<Button.Label>{m.mob_share_create_button()}</Button.Label>
 								</>
 							)}
 						</Button>

@@ -16,8 +16,8 @@ interface MutableItemCacheAdapter extends ItemCacheAdapter {
 }
 
 export interface SyncOrchestratorOptions {
-	syncManager: Omit<SyncManagerOptions, "onEvent" | "onStatusChange">;
-	trpcClient: DeltaSyncClient & CatchUpClient;
+	syncManager: Omit<SyncManagerOptions, "onStatusChange">;
+	rpcClient: DeltaSyncClient & CatchUpClient;
 	itemCache: MutableItemCacheAdapter;
 	outboundQueue: OutboundQueue;
 	itemCacheAccountEmail?: string | null;
@@ -60,14 +60,14 @@ export class SyncOrchestrator {
 
 		this.syncManager = createSyncManager({
 			...options.syncManager,
-			onEvent: (event) => {
-				void this.handleEvent(event);
-			},
 			onStatusChange: (connectionStatus) => {
 				void this.handleStatusChange(connectionStatus);
 			},
 			onSessionRevoked: (payload) => {
 				void options.onSessionRevoked?.(payload);
+			},
+			onSyncPing: () => {
+				void this.handleSyncPing();
 			},
 		});
 
@@ -135,7 +135,7 @@ export class SyncOrchestrator {
 		}
 
 		await performDeltaSync(
-			this.options.trpcClient,
+			this.options.rpcClient,
 			this.options.itemCache,
 			event,
 			this.getDeltaSyncAccountEmail(),
@@ -145,11 +145,12 @@ export class SyncOrchestrator {
 		await this.acknowledgeEvent(event);
 	}
 
-	private async handleEvent(event: SyncEvent): Promise<void> {
+	private async handleSyncPing(): Promise<void> {
 		try {
-			await this.applyEvent(event);
+			await this.runCatchUp();
+			await this.drainQueue();
 		} catch (error) {
-			console.error("[SyncOrchestrator] Failed to process sync event:", error);
+			console.error("[SyncOrchestrator] Sync ping handling failed:", error);
 		}
 	}
 
@@ -161,14 +162,11 @@ export class SyncOrchestrator {
 
 		try {
 			const cursor = await this.syncManager.getStoredLastSyncCursor();
-			if (!cursor) {
-				return;
-			}
 
 			let fullRefreshHandled = false;
 			const result = await runCatchUp({
-				client: this.options.trpcClient,
-				initialCursor: cursor,
+				client: this.options.rpcClient,
+				initialCursor: cursor ?? { id: "" },
 				shouldProcessEvent: (event) =>
 					event.clientId !== this.options.outboundQueue.getClientId() &&
 					!this.options.outboundQueue.hasPendingForItem(event.entityId),
@@ -210,7 +208,7 @@ export class SyncOrchestrator {
 				if (this.getClientForAccount) {
 					return this.getClientForAccount(email);
 				}
-				return this.options.trpcClient as unknown as OutboundQueueClient;
+				return this.options.rpcClient as unknown as OutboundQueueClient;
 			});
 
 			for (const mapping of this.options.outboundQueue.consumeTempIdMappings()) {

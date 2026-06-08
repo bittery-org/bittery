@@ -1,5 +1,5 @@
-import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import { useItemListFilters } from "@bittery/core/hooks";
+import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Checkbox,
@@ -14,8 +14,8 @@ import {
 } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useCallback } from "react";
-import { type DragItemData, useVaultDnd } from "@/providers/vault-dnd-provider";
 import { useI18n } from "@/providers/i18n-provider";
+import { type DragItemData, useVaultDnd } from "@/providers/vault-dnd-provider";
 import { Favicon } from "./favicon";
 
 interface ItemListProps {

@@ -24,24 +24,43 @@ export interface CategoryOption {
 	icon: ComponentType<any>;
 }
 
-export const categoryOptions: CategoryOption[] = [
-	{ value: "all", label: "All Categories", icon: StyledGrid3x3 },
-	{ value: "login", label: "Login", icon: StyledKey },
-	{ value: "credit-card", label: "Credit Card", icon: StyledCreditCard },
-	{ value: "identity", label: "Identity", icon: StyledUser },
-	{ value: "secure-note", label: "Secure Note", icon: StyledFileText },
-	{ value: "totp", label: "TOTP", icon: StyledTimer },
+export function getCategoryOptions(m: any): CategoryOption[] {
+	return [
+		{ value: "all", label: m.mob_category_all(), icon: StyledGrid3x3 },
+		{ value: "login", label: m.mob_category_login(), icon: StyledKey },
+		{
+			value: "credit-card",
+			label: m.mob_category_credit_card(),
+			icon: StyledCreditCard,
+		},
+		{ value: "identity", label: m.mob_category_identity(), icon: StyledUser },
+		{
+			value: "secure-note",
+			label: m.mob_category_secure_note(),
+			icon: StyledFileText,
+		},
+		{ value: "totp", label: m.mob_category_totp(), icon: StyledTimer },
+	];
+}
+
+export function getCategoryLabels(
+	m: any,
+): Record<ItemCategory | "all", string> {
+	return {
+		all: m.mob_category_all(),
+		login: m.mob_category_login(),
+		"credit-card": m.mob_category_credit_card(),
+		identity: m.mob_category_identity(),
+		"secure-note": m.mob_category_secure_note(),
+		totp: m.mob_category_totp(),
+	};
+}
+
+export const categories: (ItemCategory | "all")[] = [
+	"all",
+	"login",
+	"credit-card",
+	"identity",
+	"secure-note",
+	"totp",
 ];
-
-export const categoryLabels: Record<ItemCategory | "all", string> = {
-	all: "All Categories",
-	login: "Login",
-	"credit-card": "Credit Card",
-	identity: "Identity",
-	"secure-note": "Secure Note",
-	totp: "TOTP",
-};
-
-export const categories: (ItemCategory | "all")[] = categoryOptions.map(
-	(opt) => opt.value,
-);

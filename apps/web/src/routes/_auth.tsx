@@ -23,7 +23,7 @@ function AuthLayout() {
 	return (
 		<div className="flex min-h-svh flex-col md:h-svh md:flex-row md:overflow-hidden">
 			{/* Left panel — branding sidebar */}
-			<div className="relative hidden w-1/3 flex-col bg-sidebar md:flex lg:w-1/3">
+			<div className="relative hidden w-1/3 flex-col bg-auth-panel md:flex lg:w-1/3 dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))]">
 				<div className="absolute top-4 left-4 sm:top-5 sm:left-6">
 					<a
 						href="https://bittery.com"
@@ -36,17 +36,17 @@ function AuthLayout() {
 
 				{/* Lock icon — sits on the right edge */}
 				<div className="absolute top-1/4 right-0 z-10 translate-x-1/2">
-					<div className="flex items-center justify-center rounded-full border border-border bg-white p-4 shadow-sm dark:bg-gray-900">
+					<div className="flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
 						<IconLockOutlineDuo18 className="size-7 text-primary" />
 					</div>
 				</div>
 
 				{/* Separator line on the right edge */}
-				<div className="absolute inset-y-0 right-0 w-px bg-black/10 dark:bg-white/10" />
+				<div className="absolute inset-y-0 right-0 w-px bg-foreground/10" />
 			</div>
 
 			{/* Right panel — content area */}
-			<div className="flex min-h-svh flex-1 flex-col bg-white md:h-svh md:min-h-0 dark:bg-gray-900">
+			<div className="flex min-h-svh flex-1 flex-col bg-background md:h-svh md:min-h-0">
 				{/* Mobile logo */}
 				<div className="flex shrink-0 items-center justify-center px-5 pt-4 sm:px-8 sm:pt-6 md:hidden">
 					<a

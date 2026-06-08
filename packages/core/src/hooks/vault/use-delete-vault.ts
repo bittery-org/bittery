@@ -4,7 +4,7 @@
  * Deletes a vault permanently.
  */
 
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import { useMutation } from "@tanstack/react-query";
 import {
 	useCoreContext,
@@ -23,7 +23,7 @@ export interface DeleteVaultInput {
  * Hook for deleting a vault.
  */
 export function useDeleteVault() {
-	const defaultClient = useTRPCClient();
+	const defaultClient = useRPCClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 

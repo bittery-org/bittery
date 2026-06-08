@@ -12,7 +12,6 @@ import {
 	type ConnectionStatus,
 	runCatchUp,
 	type SyncCursor,
-	type SyncEvent,
 } from "@bittery/sync";
 import { syncCacheService } from "./services/sync-cache-service";
 
@@ -65,7 +64,6 @@ export async function getClientId(): Promise<string> {
 
 type SyncRuntimeMessage =
 	| { type: "SYNC_STATUS_CHANGED"; status: ConnectionStatus }
-	| { type: "SYNC_EVENT"; event: SyncEvent }
 	| { type: "SYNC_FULL_REFRESH_REQUIRED" };
 
 function sendRuntimeMessage(message: SyncRuntimeMessage): void {
@@ -96,69 +94,19 @@ export function getStatus(): ConnectionStatus {
 	return connectionStatus;
 }
 
-function isSyncEventPayload(value: unknown): value is SyncEvent {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-
-	const event = value as Partial<SyncEvent>;
-	return (
-		typeof event.id === "string" &&
-		typeof event.type === "string" &&
-		typeof event.entityId === "string" &&
-		typeof event.entityType === "string" &&
-		typeof event.version === "number" &&
-		typeof event.userId === "string" &&
-		typeof event.timestamp === "number"
-	);
-}
-
-/**
- * Handle incoming sync event
- * Cache updates happen before UI notifications so popup reads can be cache-first.
- */
-async function handleSyncEvent(event: SyncEvent): Promise<void> {
-	// Persist cursor in local storage (survives service worker restarts).
-	await setLastSyncCursor({ id: event.id });
-
-	// Skip events from our own client.
-	const clientId = await getClientId();
-	if (event.clientId === clientId) {
-		return;
-	}
-
-	try {
-		await syncCacheService.applyDeltaSyncForEvent(event);
-	} catch (error) {
-		console.error(
-			"[sync-manager] Delta sync failed, popup will do full refetch:",
-			error,
-		);
-	}
-
-	// Notify popup to refresh data (reads from updated cache if delta sync succeeded).
-	sendRuntimeMessage({
-		type: "SYNC_EVENT",
-		event,
-	});
-}
-
 /**
  * Catch up on missed events since last sync timestamp.
  */
 async function catchUpMissedEvents(): Promise<void> {
 	try {
 		const lastCursor = await getLastSyncCursor();
-		if (!lastCursor) {
-			return;
-		}
 
 		const clientId = await getClientId();
 		const client =
 			await syncCacheService.getClientForEmail(syncConnectionEmail);
 		const result = await runCatchUp({
 			client,
-			initialCursor: lastCursor,
+			initialCursor: lastCursor ?? { id: "" },
 			shouldProcessEvent: (event) => event.clientId !== clientId,
 			onEvent: async (event) => {
 				await syncCacheService.applyDeltaSyncForEvent(event);
@@ -284,17 +232,27 @@ async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 
 /**
  * Process a single SSE event payload.
+ *
+ * The server sends lightweight pings:
+ *   event: sync             → something changed, catch up via getEventsSince
+ *   event: session_revoked  → a session was revoked
+ *   event: connected        → connection established
  */
 async function processEvent(eventStr: string): Promise<void> {
 	const lines = eventStr.trim().split("\n");
 	let data = "";
+	let sseEventType = "";
 
 	for (const line of lines) {
 		if (line.startsWith(":")) {
 			continue; // Skip heartbeats/comments.
 		}
-		if (line.startsWith("data: ")) {
+		if (line.startsWith("event: ")) {
+			sseEventType = line.slice(7);
+		} else if (line.startsWith("data: ")) {
 			data = line.slice(6);
+		} else if (line.startsWith("data:")) {
+			data = line.slice(5).trimStart();
 		}
 	}
 
@@ -308,20 +266,27 @@ async function processEvent(eventStr: string): Promise<void> {
 			return;
 		}
 
-		const eventType = (parsed as { type?: unknown }).type;
-		if (eventType === "connected") {
+		const jsonType = (parsed as { type?: unknown }).type;
+
+		// Handle connection message
+		if (sseEventType === "connected" || jsonType === "connected") {
 			return;
 		}
 
-		if (!isSyncEventPayload(parsed)) {
-			console.warn(
-				"[sync-manager] Ignoring malformed sync event payload",
-				parsed,
-			);
+		// Handle sync ping — catch up on missed events
+		if (sseEventType === "sync") {
+			await catchUpMissedEvents();
+			sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
 			return;
 		}
 
-		await handleSyncEvent(parsed);
+		// Handle session revocation
+		if (sseEventType === "session_revoked") {
+			// The extension doesn't handle session revocation via SSE currently,
+			// but notify the UI in case it wants to react.
+			sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
+			return;
+		}
 	} catch (error) {
 		console.error("[sync-manager] Failed to parse SSE event:", error, data);
 	}

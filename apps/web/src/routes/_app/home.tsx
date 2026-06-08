@@ -1,4 +1,4 @@
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import { Button } from "@bittery/ui";
 import { IconMagicShieldOutlineDuo18 as ShieldCheck } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
@@ -16,15 +16,15 @@ export const Route = createFileRoute("/_app/home")({
 });
 
 function RouteComponent() {
-	const trpc = useTRPC();
-	const userQuery = useQuery(trpc.auth.me.queryOptions());
+	const rpc = useRPC();
+	const userQuery = useQuery(rpc.auth.me.queryOptions());
 	const { m } = useI18n();
 	const name = userQuery.data?.name;
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
 			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-				<div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-muted/60 via-transparent to-transparent" />
+				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
 
 				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 					<div className="flex min-w-0 items-center gap-3">

@@ -1,19 +1,23 @@
 import {
-	getDecryptedVaultKey,
-	type VaultKeyCryptoProvider,
-	type VaultExportPayload,
-	type ExportedItem,
-	type ExportedVault,
-	type ExportedAttachment,
-} from "@bittery/shared";
-import {
 	buildAttachmentBlobEncryptionContext,
 	buildAttachmentContentTypeEncryptionContext,
 	buildAttachmentNameEncryptionContext,
 } from "@bittery/core/services/encryption-context";
-import { useTRPCClient } from "@bittery/shared/trpc";
+import {
+	type ExportedAttachment,
+	type ExportedItem,
+	type ExportedVault,
+	getDecryptedVaultKey,
+	type VaultExportPayload,
+	type VaultKeyCryptoProvider,
+} from "@bittery/shared";
+import { useRPCClient } from "@bittery/shared/rpc";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
+import {
+	normalizeItemCategory,
+	normalizeVaultType,
+} from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
 import { decrypt, rsaDecrypt } from "@/lib/wasm-crypto";
 
@@ -58,7 +62,7 @@ function createEmptyProgress(): ExportProgress {
 }
 
 export function useVaultExport() {
-	const trpcClient = useTRPCClient();
+	const rpcClient = useRPCClient();
 
 	const [progress, setProgress] = useState<ExportProgress>(
 		createEmptyProgress(),
@@ -86,21 +90,27 @@ export function useVaultExport() {
 				processedAttachments: 0,
 			});
 
-			const allItems = await trpcClient.vault.listAllItems.query();
-			const me = await trpcClient.auth.me.query();
+			const allItems = await rpcClient.vault.listAllItems.query();
+			const me = await rpcClient.auth.me.query();
 
 			// Collect unique vaults
 			const vaultMap = new Map<
 				string,
-				{ id: string; name: string; type: "personal" | "team"; icon: string | null }
+				{
+					id: string;
+					name: string;
+					type: "personal" | "team";
+					icon: string | null;
+				}
 			>();
 			for (const item of allItems) {
 				if (!vaultMap.has(item.vaultId)) {
+					const vaultRecord = item.vault;
 					vaultMap.set(item.vaultId, {
-						id: item.vault.id,
-						name: item.vault.name,
-						type: item.vault.type,
-						icon: item.vault.icon ?? null,
+						id: vaultRecord?.id ?? item.vaultId,
+						name: vaultRecord?.name ?? item.vaultId,
+						type: normalizeVaultType(vaultRecord?.vaultType ?? "personal"),
+						icon: vaultRecord?.icon ?? null,
 					});
 				}
 			}
@@ -180,7 +190,7 @@ export function useVaultExport() {
 					exportedItems.push({
 						id: item.id,
 						vaultId: item.vaultId,
-						category: item.category,
+						category: normalizeItemCategory(item.category),
 						favorite: item.favorite,
 						data: JSON.parse(decryptedStr),
 						attachments: [],
@@ -242,7 +252,7 @@ export function useVaultExport() {
 							encryptedName,
 							encryptedContentType,
 							encryptedContentTypeIv,
-						} = await trpcClient.vault.getAttachmentDownloadUrl.mutate({
+						} = await rpcClient.vault.getAttachmentDownloadUrl.mutate({
 							attachmentId: attachment.id,
 						});
 
@@ -257,7 +267,11 @@ export function useVaultExport() {
 							algorithm: string;
 						};
 
-						const base64File = await decrypt(encryptedFile, vaultKey, blobContext);
+						const base64File = await decrypt(
+							encryptedFile,
+							vaultKey,
+							blobContext,
+						);
 
 						const fileName = await decrypt(
 							{
@@ -289,15 +303,15 @@ export function useVaultExport() {
 						zip.file(`files/${item.id}/${fileName}`, bytes);
 
 						if (exportedItem) {
-								if (!exportedItem.attachments) {
-									exportedItem.attachments = [];
-								}
-								exportedItem.attachments.push({
+							if (!exportedItem.attachments) {
+								exportedItem.attachments = [];
+							}
+							exportedItem.attachments.push({
 								filename: fileName,
 								contentType,
 								data: base64File,
 							} satisfies ExportedAttachment);
-					}
+						}
 					} catch {
 						// skip failed attachment, continue with others
 					}
@@ -347,7 +361,7 @@ export function useVaultExport() {
 				stage: "error",
 			}));
 		}
-	}, [trpcClient]);
+	}, [rpcClient]);
 
 	const downloadArchive = useCallback(() => {
 		if (!archiveBlob) return;

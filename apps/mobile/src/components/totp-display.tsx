@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Animated, Text, TouchableOpacity, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface TotpDisplayProps {
 	totpSecret: string;
@@ -40,9 +41,11 @@ export function TotpDisplay({
 	totpPeriod = 30,
 	compact = false,
 	inline = false,
-	label = "One-time password",
+	label,
 	onCopy,
 }: TotpDisplayProps) {
+	const { m } = useI18n();
+	const resolvedLabel = label ?? m.mob_totp_display_label();
 	const { toast } = useToast();
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 	const [copied, setCopied] = useState(false);
@@ -133,7 +136,7 @@ export function TotpDisplay({
 			if (!inline) {
 				toast.show({
 					variant: "success",
-					label: "Code copied to clipboard",
+					label: m.mob_totp_display_toast_copied(),
 					placement: "bottom",
 				});
 			}
@@ -329,7 +332,9 @@ export function TotpDisplay({
 					>
 						{formatCode(totpResult?.code || "")}
 					</Animated.Text>
-					{!compact && <Text className="text-muted text-xs">{label}</Text>}
+					{!compact && (
+						<Text className="text-muted text-xs">{resolvedLabel}</Text>
+					)}
 				</View>
 			</TouchableOpacity>
 

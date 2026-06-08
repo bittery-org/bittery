@@ -13,7 +13,7 @@ import {
 import { motion } from "motion/react";
 import { DocsSidebar, MobileDocsDrawer } from "@/components/docs/docs-sidebar";
 import { mdxComponents } from "@/components/docs/mdx-components";
-import { Layout } from "@/components/layout";
+
 import { getCategoryBySlug } from "@/content/docs/_categories";
 import {
 	type ArticleEntry,
@@ -84,7 +84,7 @@ function CategoryPage({ categorySlug }: { categorySlug: string }) {
 	const Icon = iconMap[category?.icon ?? ""] ?? BookOpen;
 
 	return (
-		<Layout>
+		<>
 			<div className="pt-28 pb-20 sm:pt-36 sm:pb-28">
 				<div className="mx-auto max-w-5xl px-4">
 					<div className="grid gap-10 lg:grid-cols-[256px_1fr]">
@@ -165,7 +165,7 @@ function CategoryPage({ categorySlug }: { categorySlug: string }) {
 
 			{/* Mobile drawer */}
 			<MobileDocsDrawer currentSlug={categorySlug} />
-		</Layout>
+		</>
 	);
 }
 
@@ -184,7 +184,7 @@ function ArticlePage({ article }: { article: ArticleEntry }) {
 	const { Component } = article;
 
 	return (
-		<Layout>
+		<>
 			<div className="pt-28 pb-20 sm:pt-36 sm:pb-28">
 				<div className="mx-auto max-w-5xl px-4">
 					<div className="grid gap-10 lg:grid-cols-[256px_1fr]">
@@ -273,7 +273,7 @@ function ArticlePage({ article }: { article: ArticleEntry }) {
 
 			{/* Mobile drawer */}
 			<MobileDocsDrawer currentSlug={article.slug} />
-		</Layout>
+		</>
 	);
 }
 
@@ -281,24 +281,20 @@ function ArticlePage({ article }: { article: ArticleEntry }) {
 
 function NotFoundPage() {
 	return (
-		<Layout>
-			<div className="flex min-h-[60vh] items-center justify-center pt-24">
-				<div className="text-center">
-					<h1 className="font-bold font-display text-4xl text-foreground">
-						404
-					</h1>
-					<p className="mt-2 text-muted-foreground">
-						This page doesn't exist yet.
-					</p>
-					<Link
-						to="/docs"
-						className="mt-4 inline-flex items-center gap-1.5 text-primary text-sm transition-colors hover:text-primary/80"
-					>
-						<ArrowLeft className="size-3.5" />
-						Back to docs
-					</Link>
-				</div>
+		<div className="flex min-h-[60vh] items-center justify-center pt-24">
+			<div className="text-center">
+				<h1 className="font-bold font-display text-4xl text-foreground">404</h1>
+				<p className="mt-2 text-muted-foreground">
+					This page doesn't exist yet.
+				</p>
+				<Link
+					to="/docs"
+					className="mt-4 inline-flex items-center gap-1.5 text-primary text-sm transition-colors hover:text-primary/80"
+				>
+					<ArrowLeft className="size-3.5" />
+					Back to docs
+				</Link>
 			</div>
-		</Layout>
+		</div>
 	);
 }

@@ -28,7 +28,7 @@
 	},
 	"scripts": {
 		"build": "node ./scripts/generate-paraglide.mjs",
-		"check-types": "tsc --noEmit",
+		"check-types": "node ./scripts/generate-paraglide.mjs && tsc --noEmit",
 		"check:keys": "node ./scripts/check-key-parity.mjs",
 		"i18n:watch": "node ./scripts/watch-paraglide.mjs",
 		"test": "bun test ./src"

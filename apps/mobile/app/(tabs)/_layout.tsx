@@ -3,9 +3,11 @@ import { useThemeColor } from "heroui-native";
 import { Home, Search, Shield, Tag } from "lucide-react-native";
 import { View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useI18n } from "@/providers/i18n-provider";
 import { AccountSwitcher } from "../../src/components/account-switcher";
 
 export default function TabsLayout() {
+	const { m } = useI18n();
 	const insets = useSafeAreaInsets();
 	const [accent, foreground, surface, border, muted] = useThemeColor([
 		"accent",
@@ -71,33 +73,33 @@ export default function TabsLayout() {
 			<Tabs.Screen
 				name="index"
 				options={{
-					title: "All Items",
+					title: m.mob_tab_all_items(),
 					tabBarIcon: ({ color, size }) => <Home size={size} color={color} />,
-					headerTitle: "All Items",
+					headerTitle: m.mob_tab_all_items(),
 				}}
 			/>
 			<Tabs.Screen
 				name="search"
 				options={{
-					title: "Search",
+					title: m.mob_tab_search(),
 					tabBarIcon: ({ color, size }) => <Search size={size} color={color} />,
-					headerTitle: "Search",
+					headerTitle: m.mob_tab_search(),
 				}}
 			/>
 			<Tabs.Screen
 				name="tags"
 				options={{
-					title: "Tags",
+					title: m.mob_tab_tags(),
 					tabBarIcon: ({ color, size }) => <Tag size={size} color={color} />,
-					headerTitle: "Tags",
+					headerTitle: m.mob_tab_tags(),
 				}}
 			/>
 			<Tabs.Screen
 				name="vaults"
 				options={{
-					title: "Vaults",
+					title: m.mob_tab_vaults(),
 					tabBarIcon: ({ color, size }) => <Shield size={size} color={color} />,
-					headerTitle: "Vaults",
+					headerTitle: m.mob_tab_vaults(),
 				}}
 			/>
 			{/* Trash is hidden from tabs, accessible from account switcher menu */}
@@ -105,7 +107,7 @@ export default function TabsLayout() {
 				name="trash"
 				options={{
 					href: null,
-					headerTitle: "Trash",
+					headerTitle: m.mob_tab_trash(),
 				}}
 			/>
 		</Tabs>

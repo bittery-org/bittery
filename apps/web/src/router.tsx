@@ -1,7 +1,7 @@
 import { m } from "@bittery/i18n/paraglide/messages";
-import { TRPCProvider } from "@bittery/shared/trpc";
-import { createAppTrpcOptionsProxy } from "@bittery/shared/trpc-client";
-import { createSessionRefreshingTrpcClient } from "@bittery/shared/trpc-session-refresh";
+import { RpcProvider } from "@bittery/shared/rpc";
+import { createAppRpcOptionsProxy } from "@bittery/shared/rpc-client";
+import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
@@ -98,7 +98,7 @@ async function getSyncClientIdHeader(): Promise<string | null> {
 	}
 }
 
-const trpcClient = createSessionRefreshingTrpcClient({
+const rpcClient = createSessionRefreshingRpcClient({
 	defaultServerUrl: serverUrl,
 	getServerUrl: async () => serverUrl,
 	getSessionSnapshot: async () => {
@@ -123,7 +123,7 @@ const trpcClient = createSessionRefreshingTrpcClient({
 	getClientId: getSyncClientIdHeader,
 });
 
-const trpc = createAppTrpcOptionsProxy(trpcClient, queryClient);
+const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
 
 export const getRouter = () => {
 	const router = createTanStackRouter({
@@ -132,17 +132,17 @@ export const getRouter = () => {
 		scrollToTopSelectors: ["#auth-scroll-area", "#app-scroll-area"],
 		defaultPreloadStaleTime: 0,
 		defaultPendingMinMs: 350,
-		context: { trpc, queryClient },
+		context: { rpc, queryClient },
 		defaultPendingComponent: PendingLoader,
 		defaultNotFoundComponent: () => <div>Not Found</div>,
 		Wrap: ({ children }) => (
 			<I18nProvider>
 				<QueryClientProvider client={queryClient}>
-					<TRPCProvider trpcClient={trpcClient} queryClient={queryClient}>
+					<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
 						<SyncProvider queryClient={queryClient}>
 							<WebPlatformProvider>{children}</WebPlatformProvider>
 						</SyncProvider>
-					</TRPCProvider>
+					</RpcProvider>
 				</QueryClientProvider>
 			</I18nProvider>
 		),

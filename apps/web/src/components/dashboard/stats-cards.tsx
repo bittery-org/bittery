@@ -1,4 +1,4 @@
-import { useTRPC } from "@bittery/shared/trpc";
+import { useRPC } from "@bittery/shared/rpc";
 import { Card, CardContent, Skeleton } from "@bittery/ui";
 import {
 	IconKeyOutlineDuo18 as Key,
@@ -10,10 +10,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function StatsCards() {
-	const trpc = useTRPC();
-	const statsQuery = useQuery(trpc.vault.stats.queryOptions());
+	const rpc = useRPC();
+	const statsQuery = useQuery(rpc.vault.stats.queryOptions());
 	const invitationsQuery = useQuery(
-		trpc.team.invitations.pending.queryOptions(),
+		rpc.team.invitations.pending.queryOptions(),
 	);
 	const { m } = useI18n();
 	const isLoading = statsQuery.isLoading || invitationsQuery.isLoading;

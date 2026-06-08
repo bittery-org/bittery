@@ -1,0 +1,343 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PNPM_VERSION: "10.18.3"
+  WASM_PACK_VERSION: "0.13.1"
+  WASM_PACK_SHA256: "c539d91ccab2591a7e975bcf82c82e1911b03335c80aa83d67ad25ed2ad06539"
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      js: ${{ steps.filter.outputs.js }}
+      server: ${{ steps.filter.outputs.server }}
+      crypto_wasm: ${{ steps.filter.outputs.crypto_wasm }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - id: filter
+        name: Detect changed areas
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            {
+              echo "js=true"
+              echo "server=true"
+              echo "crypto_wasm=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+          changed_files="$(git diff --name-only "origin/${{ github.base_ref }}" "$GITHUB_SHA")"
+
+          js=false
+          server=false
+          crypto_wasm=false
+
+          while IFS= read -r path; do
+            case "$path" in
+              .github/workflows/ci.yml|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|turbo.json|biome.json|packages/i18n/messages/*|packages/i18n/scripts/*)
+                js=true
+                ;;
+              apps/web/*|apps/web/**|apps/extension/*|apps/extension/**|apps/marketing/*|apps/marketing/**|apps/mobile/*|apps/mobile/**|apps/desktop/*|apps/desktop/**|packages/config/*|packages/config/**|packages/core/*|packages/core/**|packages/db/*|packages/db/**|packages/device/*|packages/device/**|packages/i18n/*|packages/i18n/**|packages/rust-rpc/*|packages/rust-rpc/**|packages/shared/*|packages/shared/**|packages/storage/*|packages/storage/**|packages/sync/*|packages/sync/**|packages/types/*|packages/types/**|packages/ui/*|packages/ui/**)
+                js=true
+                ;;
+            esac
+
+            case "$path" in
+              .github/workflows/ci.yml|apps/server/*|apps/server/**|packages/crypto/core/*|packages/crypto/core/**)
+                server=true
+                ;;
+            esac
+
+            case "$path" in
+              .github/workflows/ci.yml|packages/crypto/core/*|packages/crypto/core/**|packages/crypto/wasm/*|packages/crypto/wasm/**|apps/web/src/lib/crypto.worker.ts|apps/web/src/lib/wasm-crypto.ts|apps/extension/src/lib/wasm-crypto.ts)
+                crypto_wasm=true
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          {
+            echo "js=$js"
+            echo "server=$server"
+            echo "crypto_wasm=$crypto_wasm"
+          } >> "$GITHUB_OUTPUT"
+
+  crypto-wasm:
+    needs: changes
+    if: needs.changes.outputs.js == 'true' || needs.changes.outputs.crypto_wasm == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/crypto/core
+
+      - name: Install wasm-pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          archive="wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://github.com/wasm-bindgen/wasm-pack/releases/download/v${WASM_PACK_VERSION}/$archive"
+          echo "${WASM_PACK_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          mkdir -p "$HOME/.cargo/bin"
+          cp "$RUNNER_TEMP/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack" "$HOME/.cargo/bin/wasm-pack"
+          chmod +x "$HOME/.cargo/bin/wasm-pack"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          elapsed="$(( $(date +%s) - start ))"
+          echo "wasm-pack install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build crypto WASM
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          packages/crypto/core/build-wasm.sh
+          elapsed="$(( $(date +%s) - start ))"
+          echo "crypto WASM build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crypto-wasm
+          path: packages/crypto/wasm
+          if-no-files-found: error
+
+  js-static:
+    needs:
+      - changes
+      - crypto-wasm
+    if: needs.changes.outputs.js == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: crypto-wasm
+          path: packages/crypto/wasm
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm install --frozen-lockfile
+          elapsed="$(( $(date +%s) - start ))"
+          echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate i18n
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run i18n:generate
+          elapsed="$(( $(date +%s) - start ))"
+          echo "i18n generate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Biome
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm exec biome check .
+          elapsed="$(( $(date +%s) - start ))"
+          echo "Biome: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: i18n keys
+        run: pnpm run i18n:check
+
+      - name: Version sync
+        run: pnpm run version:check
+
+  js-types:
+    needs:
+      - changes
+      - crypto-wasm
+    if: needs.changes.outputs.js == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: crypto-wasm
+          path: packages/crypto/wasm
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm install --frozen-lockfile
+          elapsed="$(( $(date +%s) - start ))"
+          echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Generate i18n
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run i18n:generate
+          elapsed="$(( $(date +%s) - start ))"
+          echo "i18n generate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Typecheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run check-types
+          elapsed="$(( $(date +%s) - start ))"
+          echo "typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+  js-tests:
+    needs: changes
+    if: needs.changes.outputs.js == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm install --frozen-lockfile
+          elapsed="$(( $(date +%s) - start ))"
+          echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package tests
+        run: |
+          pnpm --filter @bittery/shared test
+          pnpm --filter @bittery/i18n test
+          pnpm --filter @bittery/device test
+
+  server:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: bittery_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d bittery_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:password@localhost:5432/bittery_test
+      JWT_SECRET: ci-test-secret
+      CORS_ORIGIN: http://localhost:3001
+      BITTERY_MODE: self-hosted
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/server
+
+      - name: Migrate test database
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo run --manifest-path apps/server/Cargo.toml --bin migrate
+          elapsed="$(( $(date +%s) - start ))"
+          echo "server migration: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Server fmt
+        run: cargo fmt --check --manifest-path apps/server/Cargo.toml
+
+      - name: Compile server tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo test --manifest-path apps/server/Cargo.toml --no-run
+          elapsed="$(( $(date +%s) - start ))"
+          echo "server test compile: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Server tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo test --manifest-path apps/server/Cargo.toml
+          elapsed="$(( $(date +%s) - start ))"
+          echo "server test: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Server lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo clippy --manifest-path apps/server/Cargo.toml --all-targets --all-features -- -D warnings
+          elapsed="$(( $(date +%s) - start ))"
+          echo "server clippy: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats

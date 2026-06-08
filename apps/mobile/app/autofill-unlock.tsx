@@ -45,7 +45,8 @@ import CredentialProvider from "../modules/credential-provider";
 import { useAccount } from "../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../src/lib/biometric-error-message";
 import { arrayBufferToBase64 } from "../src/lib/crypto";
-import { useServerUrl } from "../src/lib/trpc";
+import { useServerUrl } from "../src/lib/rpc";
+import { useI18n } from "../src/providers/i18n-provider";
 import { storage } from "../src/services/storage";
 
 /**
@@ -60,6 +61,7 @@ import { storage } from "../src/services/storage";
  */
 export default function AutofillUnlockScreen() {
 	const router = useRouter();
+	const { m } = useI18n();
 	const params = useLocalSearchParams<{
 		passwordRequired?: string;
 	}>();
@@ -184,11 +186,11 @@ export default function AutofillUnlockScreen() {
 
 				// Show success message and close (user returns to autofill)
 				Alert.alert(
-					"Unlocked",
-					"Your vault is now unlocked. Return to the app to use autofill.",
+					m.mob_autofill_unlock_alert_unlocked_title(),
+					m.mob_autofill_unlock_alert_unlocked_message(),
 					[
 						{
-							text: "OK",
+							text: m.mob_autofill_unlock_alert_ok(),
 							onPress: () => {
 								// Close this screen - user can now use autofill
 								if (router.canGoBack()) {
@@ -202,8 +204,8 @@ export default function AutofillUnlockScreen() {
 				);
 			} else {
 				Alert.alert(
-					"Session Expired",
-					"Please log in again with your credentials.",
+					m.mob_unlock_alert_session_expired_title(),
+					m.mob_unlock_alert_session_expired_message(),
 				);
 				await storage.clearAllStoredData(activeAccount.email);
 				router.replace("/(auth)/login");
@@ -212,7 +214,8 @@ export default function AutofillUnlockScreen() {
 		onError: (error) => {
 			// Show specific error message
 			const errorMessage =
-				error.message || resolveBiometricErrorMessage(error.type || "unknown");
+				error.message ||
+				resolveBiometricErrorMessage(error.type || "unknown", m);
 
 			if (error.type === "master_password_required") {
 				setBiometricError(errorMessage);
@@ -270,11 +273,11 @@ export default function AutofillUnlockScreen() {
 
 			// Show success message and close (user returns to autofill)
 			Alert.alert(
-				"Unlocked",
-				"Your vault is now unlocked. Return to the app to use autofill.",
+				m.mob_autofill_unlock_alert_unlocked_title(),
+				m.mob_autofill_unlock_alert_unlocked_message(),
 				[
 					{
-						text: "OK",
+						text: m.mob_autofill_unlock_alert_ok(),
 						onPress: () => {
 							// Close this screen - user can now use autofill
 							if (router.canGoBack()) {
@@ -290,8 +293,10 @@ export default function AutofillUnlockScreen() {
 		onError: (error) => {
 			console.error("Unlock error:", error);
 			Alert.alert(
-				"Error",
-				error instanceof Error ? error.message : "Unlock failed",
+				m.mob_unlock_alert_error_title(),
+				error instanceof Error
+					? error.message
+					: m.mob_unlock_alert_error_unlock_failed(),
 			);
 		},
 	});
@@ -321,17 +326,20 @@ export default function AutofillUnlockScreen() {
 
 			if (showPartialAlert) {
 				Alert.alert(
-					"Partial Unlock",
-					`Unlocked ${result.unlocked.length} of ${allAccounts.length} accounts.`,
+					m.mob_autofill_unlock_alert_partial(),
+					m.mob_autofill_unlock_alert_partial_message({
+						unlocked: String(result.unlocked.length),
+						total: String(allAccounts.length),
+					}),
 				);
 			}
 
 			Alert.alert(
-				"Unlocked",
-				"Your vault is now unlocked. Return to the app to use autofill.",
+				m.mob_autofill_unlock_alert_unlocked_title(),
+				m.mob_autofill_unlock_alert_unlocked_message(),
 				[
 					{
-						text: "OK",
+						text: m.mob_autofill_unlock_alert_ok(),
 						onPress: () => {
 							if (router.canGoBack()) {
 								router.back();
@@ -343,7 +351,17 @@ export default function AutofillUnlockScreen() {
 				],
 			);
 		},
-		[allAccounts.length, refreshAccounts, router, setNativeMuksForEmails],
+		[
+			allAccounts.length,
+			refreshAccounts,
+			router,
+			setNativeMuksForEmails,
+			m.mob_autofill_unlock_alert_ok,
+			m.mob_autofill_unlock_alert_partial,
+			m.mob_autofill_unlock_alert_partial_message,
+			m.mob_autofill_unlock_alert_unlocked_message,
+			m.mob_autofill_unlock_alert_unlocked_title,
+		],
 	);
 
 	const quickUnlockAll = useQuickUnlockAll({
@@ -355,36 +373,37 @@ export default function AutofillUnlockScreen() {
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			Alert.alert("Error", error.message || "Unlock failed");
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				error.message || m.mob_unlock_alert_error_unlock_failed(),
+			);
 		},
 	});
 
 	const handleBiometricUnlock = async () => {
 		if (isAllAccountsMode) {
 			if (allAccountsStatus.requiresPasswordReentry || passwordRequired) {
-				setBiometricError(
-					"For your security, please enter your master password. This is required every 30 days.",
-				);
+				setBiometricError(m.mob_unlock_password_required_description());
 				return;
 			}
 
 			setBiometricError(null);
 
 			if (!storage.unlockAllAccountsWithBiometric) {
-				setBiometricError("Biometric unlock is not available.");
+				setBiometricError(m.mob_unlock_biometric_not_available());
 				return;
 			}
 
 			try {
 				const result = await storage.unlockAllAccountsWithBiometric();
 				if (result.unlocked.length === 0) {
-					setBiometricError("Biometric authentication failed.");
+					setBiometricError(m.mob_unlock_biometric_failed());
 					return;
 				}
 				await finalizeAllAccountsUnlock(result, result.failed.length > 0);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);
-				setBiometricError("Biometric authentication failed.");
+				setBiometricError(m.mob_unlock_biometric_failed());
 			}
 			return;
 		}
@@ -393,9 +412,7 @@ export default function AutofillUnlockScreen() {
 
 		// Check if master password is required first (UI-level check for immediate feedback)
 		if (sessionState?.requiresPasswordReentry || passwordRequired) {
-			setBiometricError(
-				"For your security, please enter your master password. This is required every 30 days.",
-			);
+			setBiometricError(m.mob_unlock_password_required_description());
 			return;
 		}
 
@@ -406,7 +423,10 @@ export default function AutofillUnlockScreen() {
 	const handlePasswordUnlock = async () => {
 		if (isAllAccountsMode) {
 			if (!password.trim()) {
-				Alert.alert("Error", "Please enter your password");
+				Alert.alert(
+					m.mob_unlock_alert_error_title(),
+					m.mob_unlock_alert_error_enter_password(),
+				);
 				return;
 			}
 
@@ -416,7 +436,10 @@ export default function AutofillUnlockScreen() {
 		}
 
 		if (!activeAccount || !password.trim()) {
-			Alert.alert("Error", "Please enter your password");
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				m.mob_unlock_alert_error_enter_password(),
+			);
 			return;
 		}
 
@@ -481,11 +504,11 @@ export default function AutofillUnlockScreen() {
 								<StyledShieldCheck size={40} className="text-white" />
 							</Button>
 							<Text className="font-bold text-2xl text-foreground">
-								Unlock for Autofill
+								{m.mob_autofill_unlock_title()}
 							</Text>
 							<Text className="mt-2 text-center text-muted">
 								{isAllAccountsMode
-									? `All Accounts • ${allAccounts.length} accounts`
+									? `${m.mob_unlock_all_accounts()} • ${m.mob_unlock_accounts_count({ count: String(allAccounts.length) })}`
 									: activeAccount?.email}
 							</Text>
 						</View>
@@ -496,11 +519,10 @@ export default function AutofillUnlockScreen() {
 								<StyledKeyRound size={20} className="text-amber-600" />
 								<View className="ml-3 flex-1">
 									<Text className="font-medium text-amber-800">
-										Password Required
+										{m.mob_unlock_password_required_title()}
 									</Text>
 									<Text className="text-amber-700 text-sm">
-										For your security, please enter your master password. This
-										is required every 30 days.
+										{m.mob_unlock_password_required_description()}
 									</Text>
 								</View>
 							</View>
@@ -533,14 +555,20 @@ export default function AutofillUnlockScreen() {
 										)}
 										<Text className="ml-3 font-medium text-foreground">
 											{loading
-												? "Authenticating..."
-												: `Unlock with ${biometricType || "Biometric"}`}
+												? m.mob_unlock_authenticating()
+												: m.mob_unlock_biometric_label({
+														biometricType:
+															biometricType ||
+															m.mob_unlock_biometric_fallback(),
+													})}
 										</Text>
 									</View>
 								</Button>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted">or</Text>
+									<Text className="mx-4 text-muted">
+										{m.mob_unlock_or_divider()}
+									</Text>
 									<View className="h-px flex-1 bg-border" />
 								</View>
 							</View>
@@ -549,10 +577,10 @@ export default function AutofillUnlockScreen() {
 						{/* Password Form */}
 						<View className="gap-4">
 							<TextField>
-								<Label>Password</Label>
+								<Label>{m.mob_unlock_password_label()}</Label>
 								<View className="w-full flex-row items-center">
 									<Input
-										placeholder="Enter your password"
+										placeholder={m.mob_unlock_password_placeholder()}
 										value={password}
 										onChangeText={setPassword}
 										secureTextEntry={!showPassword}
@@ -584,7 +612,9 @@ export default function AutofillUnlockScreen() {
 								variant="primary"
 								size="lg"
 							>
-								{loading ? "Unlocking..." : "Unlock"}
+								{loading
+									? m.mob_unlock_button_unlocking()
+									: m.mob_unlock_button_unlock()}
 							</Button>
 
 							<Button
@@ -598,7 +628,7 @@ export default function AutofillUnlockScreen() {
 								variant="ghost"
 								className="mt-2"
 							>
-								Cancel
+								{m.mob_settings_cancel()}
 							</Button>
 						</View>
 					</View>

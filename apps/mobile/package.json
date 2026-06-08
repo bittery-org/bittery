@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"main": "expo-router/entry",
 	"scripts": {
-		"dev": "expo run:android --no-bundler && expo start --clear",
+		"dev": "echo 'expo run:android --no-bundler && expo start --clear'",
 		"dev:build": "expo prebuild && expo run:android --no-bundler",
 		"dev:clear": "expo start --clear",
 		"android": "expo run:android",
@@ -18,7 +18,6 @@
 		"check-types": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@bittery/api": "workspace:*",
 		"@bittery/core": "workspace:*",
 		"@bittery/crypto-nitro": "workspace:*",
 		"@bittery/i18n": "workspace:*",
@@ -33,8 +32,6 @@
 		"@react-native-community/netinfo": "^11.4.1",
 		"@react-native-community/slider": "^5.0.1",
 		"@tanstack/react-query": "^5.85.5",
-		"@trpc/client": "catalog:",
-		"@trpc/tanstack-react-query": "catalog:",
 		"expo": "~54.0.32",
 		"expo-blur": "^15.0.8",
 		"expo-build-properties": "^1.0.10",

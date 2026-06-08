@@ -2,25 +2,26 @@ import type { BiometricErrorType } from "@bittery/storage";
 
 export function resolveBiometricErrorMessage(
 	error: BiometricErrorType,
+	m: any,
 ): string {
 	switch (error) {
 		case "not_available":
-			return "This device does not support biometric authentication.";
+			return m.mob_biometric_error_not_available();
 		case "not_enrolled":
-			return "No biometrics are set up on this device. Please configure Face ID or Touch ID in your device settings.";
+			return m.mob_biometric_error_not_enrolled();
 		case "not_enabled":
-			return "Biometric unlock is not enabled for this account. You can enable it in Settings.";
+			return m.mob_biometric_error_not_enabled();
 		case "authentication_failed":
-			return "Biometric authentication failed. Please try again or use your password.";
+			return m.mob_biometric_error_auth_failed();
 		case "user_cancelled":
-			return "Authentication was cancelled.";
+			return m.mob_biometric_error_user_cancelled();
 		case "lockout":
-			return "Too many failed attempts. Please use your master password to unlock.";
+			return m.mob_biometric_error_lockout();
 		case "master_password_required":
-			return "For security, please enter your master password. This is required periodically based on your settings.";
+			return m.mob_biometric_error_master_password_required();
 		case "session_expired":
-			return "Your session has expired. Please log in with your credentials.";
+			return m.mob_biometric_error_session_expired();
 		default:
-			return "An error occurred during authentication. Please try again.";
+			return m.mob_biometric_error_unknown();
 	}
 }

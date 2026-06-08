@@ -4,7 +4,7 @@
  * Compatibility wrappers around core account resolver helpers.
  */
 
-import type { useTRPCClient } from "@bittery/shared";
+import type { useRPCClient } from "@bittery/shared";
 import type { IStorageAdapter } from "@bittery/storage";
 import type { DeletedItem } from "../hooks/use-deleted-items";
 import type { UnifiedItem } from "../hooks/use-items";
@@ -46,7 +46,7 @@ export function findAccountEmailForItem(
 
 export async function getTRPCClientForAccount(
 	storage: IStorageAdapter,
-	defaultClient: ReturnType<typeof useTRPCClient>,
+	defaultClient: ReturnType<typeof useRPCClient>,
 	accountEmail?: string,
 ) {
 	return getClientForAccountCore(

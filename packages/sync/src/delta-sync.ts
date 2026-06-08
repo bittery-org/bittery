@@ -12,7 +12,7 @@ import type { ItemCacheAdapter, SyncEvent } from "./types";
 
 /**
  * Minimal tRPC client interface required for delta sync operations.
- * Both the extension's createTRPCClient<AppRouter> and the desktop's useTRPCClient() satisfy this.
+ * Both the extension's createTRPCClient<AppRouter> and the desktop's useRPCClient() satisfy this.
  */
 export interface DeltaSyncClient {
 	vault: {
@@ -82,7 +82,7 @@ export interface DeltaSyncClient {
  * This function is platform-agnostic and can be used from React hooks or service workers.
  */
 export async function performDeltaSync(
-	trpcClient: DeltaSyncClient,
+	rpcClient: DeltaSyncClient,
 	cache: ItemCacheAdapter,
 	event: SyncEvent,
 	accountEmail?: string,
@@ -125,7 +125,7 @@ export async function performDeltaSync(
 			return;
 		}
 
-		const vaults = await trpcClient.vault.list.query();
+		const vaults = await rpcClient.vault.list.query();
 		await cache.syncVaultKeys(
 			vaults.map((vault) => ({
 				vaultId: vault.id,
@@ -158,7 +158,7 @@ export async function performDeltaSync(
 		case "item_updated":
 		case "item_restored":
 		case "item_moved": {
-			const item = await trpcClient.vault.getItem.query({
+			const item = await rpcClient.vault.getItem.query({
 				itemId: event.entityId,
 			});
 			await upsertItem({
@@ -182,7 +182,7 @@ export async function performDeltaSync(
 		}
 		case "item_deleted": {
 			try {
-				const item = await trpcClient.vault.getItem.query({
+				const item = await rpcClient.vault.getItem.query({
 					itemId: event.entityId,
 				});
 				await upsertItem({
@@ -220,7 +220,7 @@ export async function performDeltaSync(
 				event.metadata?.reason === "bulk_import"
 			) {
 				const targetVaultId = event.vaultId ?? event.entityId;
-				const items = await trpcClient.vault.listItems.query({
+				const items = await rpcClient.vault.listItems.query({
 					vaultId: targetVaultId,
 				});
 
@@ -245,7 +245,7 @@ export async function performDeltaSync(
 				}
 			}
 
-			const vault = await trpcClient.vault.get.query({
+			const vault = await rpcClient.vault.get.query({
 				vaultId: event.entityId,
 			});
 			await upsertVault({

@@ -13,7 +13,8 @@ import {
 import type { RefObject } from "react";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
-import { categoryLabels } from "@/constants/item-categories";
+import { getCategoryLabels } from "@/constants/item-categories";
+import { useI18n } from "@/providers/i18n-provider";
 import { ItemIcon } from "../item-icon";
 
 const StyledArrowLeft = withUniwind(ArrowLeft);
@@ -55,6 +56,9 @@ export function ItemHeader({
 	isSharing,
 	popoverRef,
 }: ItemHeaderProps) {
+	const { m } = useI18n();
+	const categoryLabels = getCategoryLabels(m);
+
 	return (
 		<View className="flex-row items-center px-4 py-4">
 			<Button
@@ -122,7 +126,7 @@ export function ItemHeader({
 								size="sm"
 							>
 								<StyledEdit size={18} className="mr-1.5 text-current" />
-								<Button.Label>Edit Item</Button.Label>
+								<Button.Label>{m.mob_item_header_action_edit()}</Button.Label>
 							</Button>
 							<Button
 								variant="ghost"
@@ -136,7 +140,9 @@ export function ItemHeader({
 							>
 								<StyledShare2 size={18} className="mr-1.5 text-current" />
 								<Button.Label>
-									{isSharing ? "Creating link..." : "Share Item"}
+									{isSharing
+										? m.mob_item_header_action_share_creating()
+										: m.mob_item_header_action_share()}
 								</Button.Label>
 							</Button>
 							{item.category === "login" && onPasswordHistory && (
@@ -150,7 +156,9 @@ export function ItemHeader({
 									size="sm"
 								>
 									<StyledHistory size={18} className="mr-1.5 text-current" />
-									<Button.Label>Password History</Button.Label>
+									<Button.Label>
+										{m.mob_item_header_action_password_history()}
+									</Button.Label>
 								</Button>
 							)}
 							<Button
@@ -162,7 +170,9 @@ export function ItemHeader({
 							>
 								<StyledTrash2 size={18} className="mr-1.5 text-danger" />
 								<Button.Label className="text-danger">
-									{isDeleting ? "Moving to trash..." : "Move to Trash"}
+									{isDeleting
+										? m.mob_item_header_action_deleting()
+										: m.mob_item_header_action_delete()}
 								</Button.Label>
 							</Button>
 						</View>

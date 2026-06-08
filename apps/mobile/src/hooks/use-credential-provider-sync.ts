@@ -359,7 +359,8 @@ export function useCredentialProviderSync(
 				);
 
 				const vaultKeysSignature = buildVaultKeysSignature(vaultKeys);
-				const accountItemsSignature = buildLoginItemsSignature(accountLoginItems);
+				const accountItemsSignature =
+					buildLoginItemsSignature(accountLoginItems);
 				const nextSignature = `${vaultKeysSignature}|${accountItemsSignature}`;
 				const previousSignature =
 					lastVaultSyncSignatureByAccountRef.current.get(account.userId);
@@ -605,13 +606,17 @@ export function useCredentialProviderSync(
 
 			try {
 				if (mutation.operation === "update_item") {
-					await account.trpcClient.vault.updateItem.mutate({
+					await account.rpcClient.vault.updateItem.mutate({
 						itemId: mutation.itemId,
 						encryptedData: mutation.encryptedData,
 						encryptionIv: mutation.encryptionIv,
+						encryptionAlgorithm:
+							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
+						expectedVersion: null,
+						clientId: null,
 					});
 				} else if (mutation.operation === "create_item") {
-					await account.trpcClient.vault.createItem.mutate({
+					await account.rpcClient.vault.createItem.mutate({
 						itemId: mutation.itemId,
 						vaultId: mutation.vaultId,
 						category: "login",
@@ -619,6 +624,7 @@ export function useCredentialProviderSync(
 						encryptionIv: mutation.encryptionIv,
 						encryptionAlgorithm:
 							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
+						clientId: null,
 					});
 				} else {
 					throw new Error(
@@ -736,10 +742,7 @@ export function useCredentialProviderSync(
 			debugLog("[CredentialProviderSync] Starting vault data sync...");
 			const vaultResult = await syncVaultData();
 			if (vaultResult) {
-				debugLog(
-					"[CredentialProviderSync] Vault sync complete:",
-					vaultResult,
-				);
+				debugLog("[CredentialProviderSync] Vault sync complete:", vaultResult);
 			}
 
 			// Skip legacy credential sync when vault-based sync succeeded.
@@ -893,9 +896,7 @@ export function useCredentialProviderSync(
 			AppState.currentState !== "active" ||
 			Platform.OS !== "android"
 		) {
-			debugLog(
-				"[CredentialProviderSync] Auto-sync skipped due to conditions",
-			);
+			debugLog("[CredentialProviderSync] Auto-sync skipped due to conditions");
 			return;
 		}
 
@@ -903,9 +904,7 @@ export function useCredentialProviderSync(
 
 		// Skip if items haven't changed
 		if (currentHash === lastItemsHashRef.current) {
-			debugLog(
-				"[CredentialProviderSync] Items haven't changed, skipping sync",
-			);
+			debugLog("[CredentialProviderSync] Items haven't changed, skipping sync");
 			return;
 		}
 
@@ -919,9 +918,7 @@ export function useCredentialProviderSync(
 
 		// Set debounced sync
 		debounceTimerRef.current = setTimeout(() => {
-			debugLog(
-				"[CredentialProviderSync] Debounce timer fired, starting sync",
-			);
+			debugLog("[CredentialProviderSync] Debounce timer fired, starting sync");
 			sync();
 		}, debounceMs);
 

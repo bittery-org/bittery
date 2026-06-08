@@ -40,6 +40,7 @@ import {
 import { ItemIcon } from "@/components/item-icon";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { TagInput } from "@/components/tag-input";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Create styled icon components
 const StyledKey = withUniwind(Key);
@@ -62,6 +63,7 @@ const categoryOptions: {
 ];
 
 export default function EditItemScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const { vaultId, itemId } = useLocalSearchParams<{
 		vaultId: string;
@@ -85,13 +87,13 @@ export default function EditItemScreen() {
 	if (!item) {
 		return (
 			<SafeAreaView className="flex-1 items-center justify-center bg-background">
-				<Text className="text-foreground">Item not found</Text>
+				<Text className="text-foreground">{m.mob_edit_item_not_found()}</Text>
 				<Button
 					onPress={() => router.back()}
 					variant="primary"
 					className="mt-4"
 				>
-					Go Back
+					{m.mob_edit_item_go_back()}
 				</Button>
 			</SafeAreaView>
 		);
@@ -131,6 +133,7 @@ function EditItemForm({
 	onSaved: () => void;
 	updateItem: ReturnType<typeof useUpdateItem>;
 }) {
+	const { m } = useI18n();
 	const { toast } = useToast();
 	const [saving, setSaving] = useState(false);
 	const [title, setTitle] = useState(item.title || "");
@@ -147,7 +150,7 @@ function EditItemForm({
 		if (!title.trim()) {
 			toast.show({
 				variant: "danger",
-				label: "Title is required",
+				label: m.mob_edit_item_toast_title_required(),
 				placement: "bottom",
 			});
 			return;
@@ -172,7 +175,7 @@ function EditItemForm({
 				if (!isValid) {
 					toast.show({
 						variant: "danger",
-						label: "Please enter a valid TOTP secret key",
+						label: m.mob_edit_item_toast_totp_invalid(),
 						placement: "bottom",
 					});
 					return;
@@ -224,7 +227,7 @@ function EditItemForm({
 
 			toast.show({
 				variant: "success",
-				label: "Item updated successfully",
+				label: m.mob_edit_item_toast_success(),
 				placement: "bottom",
 			});
 			onSaved();
@@ -232,7 +235,10 @@ function EditItemForm({
 			console.error("Error updating item:", error);
 			toast.show({
 				variant: "danger",
-				label: error instanceof Error ? error.message : "Failed to update item",
+				label:
+					error instanceof Error
+						? error.message
+						: m.mob_edit_item_toast_failed(),
 				placement: "bottom",
 			});
 		} finally {
@@ -269,7 +275,7 @@ function EditItemForm({
 							numberOfLines={1}
 							ellipsizeMode="tail"
 						>
-							{item.title || "Untitled"}
+							{item.title || m.mob_edit_item_untitled()}
 						</Text>
 						<Text className="text-muted text-sm">{categoryLabel}</Text>
 					</View>
@@ -279,16 +285,16 @@ function EditItemForm({
 						variant="primary"
 						size="sm"
 					>
-						{saving ? "Saving..." : "Save"}
+						{saving ? m.mob_edit_item_saving() : m.mob_edit_item_save()}
 					</Button>
 				</View>
 
 				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
 					{/* Title */}
 					<TextField className="my-4" isRequired>
-						<Label>Title</Label>
+						<Label>{m.mob_edit_item_title_label()}</Label>
 						<Input
-							placeholder="Enter title"
+							placeholder={m.mob_edit_item_title_placeholder()}
 							value={title}
 							onChangeText={setTitle}
 						/>
@@ -354,16 +360,16 @@ function EditItemForm({
 					<TagInput
 						tags={tags}
 						onTagsChange={setTags}
-						placeholder="Add a tag..."
+						placeholder={m.mob_edit_item_tags_placeholder()}
 						label="Tags (optional)"
 					/>
 
 					{/* Notes (for non-secure-note items) */}
 					{item.category !== "secure-note" && (
 						<TextField className="mb-4">
-							<Label>Notes (optional)</Label>
+							<Label>{m.mob_edit_item_notes_label()}</Label>
 							<Input
-								placeholder="Add any additional notes..."
+								placeholder={m.mob_edit_item_notes_placeholder()}
 								value={notes}
 								onChangeText={setNotes}
 								multiline

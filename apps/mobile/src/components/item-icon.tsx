@@ -8,7 +8,7 @@ import { CreditCard, FileText, Key, Timer, User } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
-import { useServerUrl } from "@/lib/trpc";
+import { useServerUrl } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 
 // Create styled icon components

@@ -1,4 +1,4 @@
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import type { ItemCategory } from "@bittery/shared/types";
 import {
 	Button,
@@ -72,8 +72,8 @@ interface SharedItemData {
 
 function ShareAccessPage() {
 	const { token } = Route.useParams();
-	const trpc = useTRPC();
-	const trpcClient = useTRPCClient();
+	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 
 	const [email, setEmail] = useState("");
 	const [verificationCode, setVerificationCode] = useState("");
@@ -90,13 +90,13 @@ function ShareAccessPage() {
 
 	// Get share link info
 	const linkInfoQuery = useQuery(
-		trpc.share.getPublicInfo.queryOptions({ token }),
+		rpc.share.getPublicInfo.queryOptions({ token }),
 	);
 
 	// Request email verification
 	const requestVerificationMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.share.requestEmailVerification.mutate({ token, email }),
+			rpcClient.share.requestEmailVerification.mutate({ token, email }),
 		onSuccess: () => {
 			setEmailSent(true);
 			toast.success("Verification code sent to your email!");
@@ -109,7 +109,7 @@ function ShareAccessPage() {
 	// Verify email and access
 	const verifyAndAccessMutation = useMutation({
 		mutationFn: () =>
-			trpcClient.share.verifyEmailAndAccess.mutate({
+			rpcClient.share.verifyEmailAndAccess.mutate({
 				token,
 				email,
 				code: verificationCode,
@@ -165,7 +165,7 @@ function ShareAccessPage() {
 			!decryptedItem &&
 			!decryptionError,
 		queryFn: async () => {
-			const data = await trpcClient.share.accessPublic.mutate({ token });
+			const data = await rpcClient.share.accessPublic.mutate({ token });
 			return await decryptSharedItem(data);
 		},
 		retry: false,

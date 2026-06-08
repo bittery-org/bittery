@@ -1,5 +1,4 @@
-import type { EntitlementKey } from "@bittery/api/billing/entitlements";
-import type { CloudPlanId } from "@bittery/api/billing/plans";
+import type { CloudPlanId, EntitlementKey } from "@bittery/shared/billing";
 import {
 	IconHistoryOutlineDuo18 as History,
 	IconGrid2OutlineDuo18 as Home,
@@ -31,12 +30,14 @@ export interface AppNavItem {
 	icon: NavIcon;
 	requiresMode: DeploymentMode | "any";
 	requiresEntitlements: readonly EntitlementKey[];
+	requiresBillingEnabled?: boolean;
 	requiresPlans?: readonly CloudPlanId[];
 	requiresRoles?: readonly TeamRole[];
 }
 
 export interface NavFilterInput {
 	mode: DeploymentMode;
+	billingEnabled?: boolean;
 	entitlements: Partial<Record<EntitlementKey, boolean>>;
 	plan?: CloudPlanId;
 	role?: TeamRole;
@@ -85,6 +86,7 @@ export const appNavItems: readonly AppNavItem[] = [
 		icon: Money,
 		label: "Billing",
 		requiresMode: "cloud",
+		requiresBillingEnabled: true,
 		requiresEntitlements: [],
 		requiresRoles: ["owner", "admin"],
 	},
@@ -103,6 +105,9 @@ export function filterNavItems(
 ): AppNavItem[] {
 	return items.filter((item) => {
 		if (item.requiresMode !== "any" && item.requiresMode !== input.mode) {
+			return false;
+		}
+		if (item.requiresBillingEnabled && input.billingEnabled !== true) {
 			return false;
 		}
 		if (item.requiresPlans?.length) {

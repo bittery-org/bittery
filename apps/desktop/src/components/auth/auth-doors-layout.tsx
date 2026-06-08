@@ -126,21 +126,21 @@ export function AuthDoorsLayout({
 
 	return (
 		<div className="flex h-full w-full flex-col md:flex-row">
-			<div className="relative hidden w-1/3 flex-col bg-secondary md:flex lg:w-1/3">
+			<div className="relative hidden w-1/3 flex-col bg-auth-panel md:flex lg:w-1/3 dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))]">
 				<div className="absolute top-8 left-4 sm:top-9 sm:left-6">
 					<img src="/logo.png" alt="Bittery" className="h-7 w-auto sm:h-10" />
 				</div>
 
 				<div className="absolute top-1/4 right-0 z-10 translate-x-1/2">
-					<div className="flex items-center justify-center rounded-full border border-border bg-white p-4 shadow-sm dark:bg-gray-900">
+					<div className="flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
 						<IconLockOutlineDuo18 className="size-7 text-primary" />
 					</div>
 				</div>
 
-				<div className="absolute inset-y-0 right-0 w-px bg-black/10 dark:bg-white/10" />
+				<div className="absolute inset-y-0 right-0 w-px bg-foreground/10" />
 			</div>
 
-			<div className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-white dark:bg-gray-900">
+			<div className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background">
 				<div className="flex px-5 pt-5 sm:px-8 sm:pt-6 md:hidden">
 					<img src="/logo.png" alt="Bittery" className="h-10 w-auto" />
 				</div>

@@ -94,7 +94,7 @@ All cryptographic operations are implemented in a single Rust codebase (`package
 | Platform | Binding |
 |----------|---------|
 | Web | WebAssembly (WASM) |
-| Server | NAPI (Node/Bun native addon) |
+| Server | Native Rust |
 | Desktop | Tauri commands (direct Rust calls) |
 | Mobile | Expo native module |
 

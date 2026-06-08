@@ -1,10 +1,10 @@
-import { Eye, GitFork, Github, Server, Star } from "lucide-react";
+import { Github, Server } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 
 export function OpenSourceSection() {
 	return (
-		<section className="px-4 py-20 sm:py-28">
+		<section className="px-4 pt-8 pb-16 sm:pb-28">
 			<div className="mx-auto max-w-5xl">
 				<motion.div
 					className="relative overflow-hidden rounded-2xl border border-border/60 bg-linear-to-br from-card via-card to-primary/3 p-8 sm:rounded-3xl sm:p-12 lg:p-16"
@@ -19,15 +19,15 @@ export function OpenSourceSection() {
 						<div className="flex-1">
 							<div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 font-medium text-primary text-xs">
 								<Github className="size-3.5" />
-								Open Source
+								Source-available
 							</div>
 							<h2 className="font-display text-2xl tracking-tight sm:text-3xl lg:text-4xl">
 								Trust, but verify
 							</h2>
 							<p className="mt-3 max-w-lg text-base text-muted-foreground leading-relaxed sm:text-lg">
-								Bittery is fully open source. Every line of code is public —
-								audit it, fork it, or contribute to it. Your security shouldn't
-								depend on trust alone.
+								Bittery's source code is public under the Functional Source
+								License. Audit it, self-host it, or contribute to it. Your
+								security shouldn't depend on trust alone.
 							</p>
 
 							<p className="mt-4 flex items-center gap-1.5 text-muted-foreground text-sm">
@@ -35,7 +35,8 @@ export function OpenSourceSection() {
 								Also available to self-host for free.
 							</p>
 
-							<div className="mt-6 flex items-center gap-6 text-muted-foreground text-sm">
+							{/* TODO: Enable this */}
+							{/* <div className="mt-6 flex items-center gap-6 text-muted-foreground text-sm">
 								<div className="flex items-center gap-1.5">
 									<Star className="size-4 text-amber-500" />
 									<span>2.4k stars</span>
@@ -48,7 +49,7 @@ export function OpenSourceSection() {
 									<Eye className="size-4" />
 									<span>48 watchers</span>
 								</div>
-							</div>
+							</div> */}
 						</div>
 
 						<div className="flex shrink-0 flex-col gap-3 sm:flex-row">

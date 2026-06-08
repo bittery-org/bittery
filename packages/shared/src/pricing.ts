@@ -6,9 +6,9 @@
  * platform-specific styling classes.
  */
 
-import { planAttachmentLimits } from "@bittery/api/billing/plans";
+import { planAttachmentLimits } from "./billing";
 
-export { type CloudPlanId, cloudPlanIds } from "@bittery/api/billing/plans";
+export { type CloudPlanId, cloudPlanIds } from "./billing";
 
 /* ─── Plan Metadata ──────────────────────────────────────────────── */
 

@@ -183,7 +183,7 @@ export class VaultRepositoryCoordinator {
 					// Bootstrap only when local cache has no established snapshot yet.
 					if (!repo.hasCacheSnapshot()) {
 						await repo.hydrateFromServer(
-							account.trpcClient as unknown as BootstrapItemsClient,
+							account.rpcClient as unknown as BootstrapItemsClient,
 						);
 					}
 				} finally {
@@ -201,7 +201,7 @@ export class VaultRepositoryCoordinator {
 				const normalized = this.normalizeEmail(account.email);
 				const repo = this.getOrCreate(normalized, account.serverUrl);
 				await repo.hydrateFromServer(
-					account.trpcClient as unknown as BootstrapItemsClient,
+					account.rpcClient as unknown as BootstrapItemsClient,
 				);
 			}),
 		);

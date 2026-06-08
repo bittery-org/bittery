@@ -13,7 +13,7 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useTRPC, useTRPCClient } from "@bittery/shared/trpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
 import {
@@ -105,10 +105,10 @@ export function useItemAttachments(
 	vaultId: string | undefined,
 	accountEmail?: string,
 ) {
-	const trpc = useTRPC();
-	const client = useTRPCClient();
+	const rpc = useRPC();
+	const client = useRPCClient();
 	const { storage, crypto } = usePlatform();
-	const entitlementsQuery = useQuery(trpc.billing.entitlements.queryOptions());
+	const entitlementsQuery = useQuery(rpc.billing.entitlements.queryOptions());
 
 	const {
 		rawItem,
@@ -399,9 +399,9 @@ export function useItemAttachments(
 		isLoading,
 		error,
 		attachmentMaxFileSizeBytes:
-			entitlementsQuery.data?.limits.attachment_max_file_size_bytes ?? null,
+			entitlementsQuery.data?.limits.attachmentMaxFileSizeBytes ?? null,
 		attachmentStorageBytes:
-			entitlementsQuery.data?.limits.attachment_storage_bytes ?? null,
+			entitlementsQuery.data?.limits.attachmentStorageBytes ?? null,
 		upload: uploadMutation,
 		download: downloadMutation,
 		remove: deleteMutation,

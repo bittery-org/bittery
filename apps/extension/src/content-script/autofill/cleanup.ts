@@ -1,10 +1,11 @@
 import { contentState } from "../state";
+import type { AutofillField } from "../types";
 import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon } from "./icon";
 import { hideIdentityAutofillOverlay } from "./identity";
 
-function cleanupDetachedFields<T extends { input: HTMLInputElement }>(
+function cleanupDetachedFields<T extends AutofillField>(
 	fields: Map<HTMLInputElement, T>,
 	hideOverlay: (field: T) => void,
 ) {
@@ -27,7 +28,10 @@ export function cleanupDetachedAutofillState() {
 		hideIdentityAutofillOverlay,
 	);
 
-	if (contentState.currentFocusedField && !contentState.currentFocusedField.input.isConnected) {
+	if (
+		contentState.currentFocusedField &&
+		!contentState.currentFocusedField.input.isConnected
+	) {
 		contentState.currentFocusedField = null;
 	}
 	if (

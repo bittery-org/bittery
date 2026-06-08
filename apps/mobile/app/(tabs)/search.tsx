@@ -13,6 +13,7 @@ import { EmptyItemsState } from "@/components/empty-items-state";
 import { ItemListItem } from "@/components/item-list-item";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { useFilteredItems } from "@/hooks/use-filtered-items";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Create styled icon components
 const StyledSearch = withUniwind(SearchIcon);
@@ -23,6 +24,7 @@ const RECENT_SEARCHES_KEY = "bittery_recent_searches";
 const MAX_RECENT_SEARCHES = 10;
 
 export default function SearchScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const queryClient = useQueryClient();
 	const [searchQuery, setSearchQuery] = useState("");
@@ -112,8 +114,8 @@ export default function SearchScreen() {
 			return (
 				<EmptyItemsState
 					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
-					title="Search your vault"
-					description="Find passwords, cards, notes, and more"
+					title={m.mob_search_empty_title()}
+					description={m.mob_search_empty_description()}
 				/>
 			);
 		}
@@ -122,10 +124,12 @@ export default function SearchScreen() {
 			<View className="flex-1">
 				<View className="flex-row items-center justify-between px-4 py-3">
 					<Text className="font-semibold text-muted text-sm uppercase tracking-wide">
-						Recent Searches
+						{m.mob_search_recent_title()}
 					</Text>
 					<TouchableOpacity onPress={clearRecentSearches}>
-						<Text className="text-accent text-sm">Clear all</Text>
+						<Text className="text-accent text-sm">
+							{m.mob_search_recent_clear_all()}
+						</Text>
 					</TouchableOpacity>
 				</View>
 				{recentSearches.map((query) => (
@@ -155,8 +159,8 @@ export default function SearchScreen() {
 			return (
 				<EmptyItemsState
 					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
-					title="No results found"
-					description="Try a different search term or filter"
+					title={m.mob_search_no_results()}
+					description={m.mob_search_no_results_description()}
 				/>
 			);
 		}
@@ -176,8 +180,13 @@ export default function SearchScreen() {
 				ListHeaderComponent={
 					<View className="px-4 py-2">
 						<Text className="text-muted text-sm">
-							{filteredItems.length} result
-							{filteredItems.length !== 1 ? "s" : ""}
+							{filteredItems.length !== 1
+								? m.mob_search_result_count_plural({
+										count: String(filteredItems.length),
+									})
+								: m.mob_search_result_count_singular({
+										count: String(filteredItems.length),
+									})}
 						</Text>
 					</View>
 				}
@@ -195,7 +204,7 @@ export default function SearchScreen() {
 				<TextField>
 					<View className="w-full flex-row items-center">
 						<Input
-							placeholder="Search items..."
+							placeholder={m.mob_search_placeholder()}
 							value={searchQuery}
 							onChangeText={setSearchQuery}
 							returnKeyType="search"

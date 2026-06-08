@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Shield } from "lucide-react";
 import { motion } from "motion/react";
-import { Layout } from "@/components/layout";
 
 export const Route = createFileRoute("/privacy")({
 	component: PrivacyPage,
@@ -22,7 +21,7 @@ const lastUpdated = "March 1, 2026";
 const sections = [
 	{
 		title: "1. Introduction",
-		content: `Bittery is a zero-knowledge password manager operated by qrawall GmbH ("we", "us", "our"), a company registered in Germany. This Privacy Policy explains how we collect, use, and protect information when you use our services, including the Bittery web app, desktop app, mobile app, browser extension, and this website (collectively, the "Service").
+		content: `Bittery is a zero-knowledge password manager operated by Bittery Software ("we", "us", "our"), a sole proprietorship registered in Germany. This Privacy Policy explains how we collect, use, and protect information when you use our services, including the Bittery web app, desktop app, mobile app, browser extension, and this website (collectively, the "Service").
 
 We are committed to your privacy. Bittery is designed so that we cannot access your passwords, vault data, or encryption keys — ever.`,
 	},
@@ -51,7 +50,7 @@ Device information: When you sign in, we record basic device metadata (platform,
 
 Usage metadata: We collect minimal technical data necessary to operate the Service, such as timestamps of authentication events, API request logs (without vault contents), and error reports.
 
-Payment information: If you subscribe to a paid plan, payment processing is handled by our third-party payment processor. We do not store your full credit card number or payment credentials on our servers.`,
+Waitlist information: If you join the hosted beta waitlist, we collect the email address and optional details you submit so we can send beta invitations and product updates related to Bittery.`,
 	},
 	{
 		title: "4. Information we do not collect",
@@ -84,7 +83,7 @@ We do not sell, rent, or share your personal information with third parties for 
 • TLS encryption for all data in transit
 • AES-256-GCM encryption for all vault data at rest (client-side encrypted)
 • Regular security assessments and code reviews
-• Open-source codebase allowing independent security audits
+• Public source code allowing independent security review
 • Rate limiting and abuse detection on authentication endpoints
 
 Because your vault data is encrypted with keys we never possess, even a hypothetical server breach would not expose your passwords or sensitive data in readable form.`,
@@ -98,15 +97,16 @@ Audit logs and security event records may be retained for up to 12 months for se
 	{
 		title: "8. Self-hosting",
 		content:
-			"Bittery is open-source software that you can self-host on your own infrastructure. When you self-host Bittery, your data never touches our servers. This Privacy Policy applies only to the cloud-hosted version of the Service operated by qrawall GmbH.",
+			"Bittery is source-available software that you can self-host on your own infrastructure under the Functional Source License. When you self-host Bittery, your data never touches our servers. This Privacy Policy applies only to the cloud-hosted version of the Service operated by Bittery Software.",
 	},
 	{
 		title: "9. Third-party services",
 		content: `We use a limited number of third-party services to operate Bittery:
 
-• Payment processing: For handling subscriptions and payments. These providers receive only the information necessary to process your payment.
 • Infrastructure providers: For hosting and delivering the Service. These providers process encrypted data on our behalf and are bound by data processing agreements.
 • Email delivery: For sending transactional emails (account verification, security alerts). These providers receive only your email address and message content.
+
+We are not currently selling paid hosted subscriptions during the beta. If payments are introduced later, this policy will be updated to describe the relevant payment processor and data handling.
 
 We carefully vet all third-party providers and require them to comply with applicable data protection regulations.`,
 	},
@@ -149,9 +149,9 @@ This marketing website may use minimal analytics to understand aggregate traffic
 		title: "15. Contact us",
 		content: `If you have questions or concerns about this Privacy Policy or our data practices, please contact us:
 
-qrawall GmbH
+Bittery Software
 Email: privacy@bittery.com
-Website: https://qrawall.com
+Website: https://bittery.com
 
 You also have the right to lodge a complaint with your local data protection authority.`,
 	},
@@ -159,7 +159,7 @@ You also have the right to lodge a complaint with your local data protection aut
 
 function PrivacyPage() {
 	return (
-		<Layout>
+		<>
 			{/* ─── Hero ─────────────────────────────────────────────── */}
 			<section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
 				<div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -239,6 +239,6 @@ function PrivacyPage() {
 					</div>
 				</div>
 			</section>
-		</Layout>
+		</>
 	);
 }

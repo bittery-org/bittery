@@ -13,6 +13,7 @@ import { ItemsSkeletonList } from "@/components/items-skeleton-list";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { VaultAvatar } from "@/components/vault-avatar";
 import { useFilteredItems } from "@/hooks/use-filtered-items";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Create styled icon components
 const StyledSearch = withUniwind(Search);
@@ -21,6 +22,7 @@ const StyledPlus = withUniwind(Plus);
 const StyledArrowLeft = withUniwind(ArrowLeft);
 
 export default function VaultItemsScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const { vaultId } = useLocalSearchParams<{ vaultId: string }>();
 	const [selectedCategory, setSelectedCategory] = useState<
@@ -58,7 +60,7 @@ export default function VaultItemsScreen() {
 							<StyledArrowLeft size={18} className="text-muted" />
 						</Button>
 						<Card.Title className="flex-1 text-xl" numberOfLines={1}>
-							Loading...
+							{m.mob_vault_items_loading()}
 						</Card.Title>
 						<Button isIconOnly variant="secondary" size="sm">
 							<StyledPlus size={18} className="text-muted" />
@@ -70,7 +72,7 @@ export default function VaultItemsScreen() {
 						<TextField>
 							<View className="w-full flex-row items-center">
 								<Input
-									placeholder="Search items..."
+									placeholder={m.mob_vault_items_search_placeholder()}
 									editable={false}
 									className="flex-1 pr-4 pl-12"
 								/>
@@ -139,7 +141,7 @@ export default function VaultItemsScreen() {
 						/>
 					)}
 					<Card.Title className="flex-1 text-xl" numberOfLines={1}>
-						{currentVault?.vaultName || "Items"}
+						{currentVault?.vaultName || m.mob_vault_items_fallback_title()}
 					</Card.Title>
 					<Button
 						isIconOnly
@@ -168,13 +170,21 @@ export default function VaultItemsScreen() {
 				>
 					<EmptyItemsState
 						icon={<StyledKey size={48} className="mb-4 text-muted" />}
-						title={hasFilterOrSearch ? "No items found" : "No items yet"}
+						title={
+							hasFilterOrSearch
+								? m.mob_vault_items_empty_filtered()
+								: m.mob_vault_items_empty_no_items()
+						}
 						description={
 							hasFilterOrSearch
-								? "Try a different search or filter"
-								: "Add your first password or secure item"
+								? m.mob_vault_items_empty_filtered_description()
+								: m.mob_vault_items_empty_description()
 						}
-						actionLabel={!hasFilterOrSearch ? "Add Item" : undefined}
+						actionLabel={
+							!hasFilterOrSearch
+								? m.mob_vault_items_empty_add_item()
+								: undefined
+						}
 						onAction={
 							!hasFilterOrSearch
 								? () => router.push(`/(vault)/create?vaultId=${vaultId}`)

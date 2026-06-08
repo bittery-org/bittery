@@ -20,10 +20,10 @@ Chrome extension (Manifest V3) for the Bittery password manager with secure auto
   - `/vault` - Browse and search vault items
   - `/item/:id` - View and copy item details
 
-- **Background Service Worker** (`background.ts`): 
+- **Background Service Worker** (`background/`): 
   - Manages Master Unlock Key in memory
   - Handles all cryptographic operations
-  - Proxies tRPC calls to API server
+  - Proxies RPC calls to the API server
   - Tracks autofill authentication state
 
 - **Content Script** (`content.ts`):
@@ -96,7 +96,7 @@ apps/extension/
 ├── autofill-iframe.html   # Autofill iframe entry point
 ├── src/
 │   ├── popup.tsx          # Popup app entry
-│   ├── background.ts      # Service worker
+│   ├── background/        # Service worker modules
 │   ├── content.ts         # Content script
 │   ├── autofill-iframe.tsx # Autofill UI
 │   ├── routes/            # TanStack Router routes
@@ -119,19 +119,20 @@ apps/extension/
 The extension uses shared packages:
 
 - **@bittery/ui**: shadcn components (Button, Input, Card, etc.)
-- **@bittery/shared**: Utilities (crypto wrappers, favicon, tRPC)
+- **@bittery/shared**: Utilities (crypto wrappers, favicon, RPC clients, billing metadata)
 - **@bittery/crypto**: Core cryptography (including chrome.storage adapter)
-- **@bittery/api**: tRPC router types
 
 ## Configuration
 
 ### API Server URL
 
-Update the tRPC client URL in:
-- `src/popup.tsx` (line ~20)
-- `src/background.ts` (line ~20)
+Update the RPC server URL in:
 
-Default: `http://localhost:3000/trpc`
+- `src/popup.tsx`
+- `src/pages/login.tsx`
+- `src/background/services/sync-cache-service.ts`
+
+Default: `http://localhost:3000`
 
 ## Permissions
 

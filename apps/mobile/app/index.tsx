@@ -1,12 +1,14 @@
 import { Redirect } from "expo-router";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
+import { useI18n } from "@/providers/i18n-provider";
 
 import { useAccount } from "../src/contexts/account-context";
 import { useBiometricAuth } from "../src/contexts/biometric-auth-context";
 import { storage } from "../src/services/storage";
 
 export default function Index() {
+	const { m } = useI18n();
 	const { activeAccount, activeAccountConfig, allAccounts, isLoading } =
 		useAccount();
 	const { requiresReauth, showAuthModal } = useBiometricAuth();
@@ -115,7 +117,9 @@ export default function Index() {
 			<View className="flex-1 items-center justify-center bg-background">
 				<ActivityIndicator size="large" color="#000" />
 				{showAuthModal && (
-					<Text className="mt-4 text-muted text-sm">Authenticating...</Text>
+					<Text className="mt-4 text-muted text-sm">
+						{m.mob_index_authenticating()}
+					</Text>
 				)}
 			</View>
 		);

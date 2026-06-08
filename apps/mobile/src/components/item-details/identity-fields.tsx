@@ -3,12 +3,14 @@ import { Copy, Mail } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
+import { useI18n } from "@/providers/i18n-provider";
 import { FieldRow } from "./field-row";
 import type { ItemDetailProps } from "./types";
 
 const StyledCopy = withUniwind(Copy);
 
 export function IdentityFields({ item, onCopy }: ItemDetailProps) {
+	const { m } = useI18n();
 	const [showSsn, setShowSsn] = useState(false);
 
 	return (
@@ -17,7 +19,9 @@ export function IdentityFields({ item, onCopy }: ItemDetailProps) {
 			{(item.firstName || item.lastName) && (
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
-						<Card.Description className="mb-1.5">Name</Card.Description>
+						<Card.Description className="mb-1.5">
+							{m.mob_detail_field_name()}
+						</Card.Description>
 						<Card.Title className="font-normal text-base" selectable>
 							{[item.firstName, item.middleName, item.lastName]
 								.filter(Boolean)
@@ -28,18 +32,18 @@ export function IdentityFields({ item, onCopy }: ItemDetailProps) {
 			)}
 
 			<FieldRow
-				label="Email"
+				label={m.mob_detail_field_email()}
 				value={item.email}
 				onCopy={onCopy}
 				options={{ icon: Mail }}
 			/>
 			<FieldRow
-				label="Date of Birth"
+				label={m.mob_detail_field_date_of_birth()}
 				value={item.dateOfBirth}
 				onCopy={onCopy}
 			/>
 			<FieldRow
-				label="SSN"
+				label={m.mob_detail_field_ssn()}
 				value={item.ssn}
 				onCopy={onCopy}
 				options={{
@@ -49,12 +53,12 @@ export function IdentityFields({ item, onCopy }: ItemDetailProps) {
 				}}
 			/>
 			<FieldRow
-				label="Passport Number"
+				label={m.mob_detail_field_passport_number()}
 				value={item.passportNumber}
 				onCopy={onCopy}
 			/>
 			<FieldRow
-				label="Driver's License"
+				label={m.mob_detail_field_drivers_license()}
 				value={item.driversLicense}
 				onCopy={onCopy}
 			/>

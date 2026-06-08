@@ -4,6 +4,7 @@ import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getIframeNonceFromLocation } from "@/content-script/iframe-messages";
+import { useI18n } from "@/providers/i18n-provider";
 
 export interface AutofillIframeConfig {
 	/** Message type for receiving items (e.g. "AUTOFILL_ITEMS") */
@@ -44,6 +45,7 @@ export function AutofillIframeBase({
 }: {
 	config: AutofillIframeConfig;
 }) {
+	const { m } = useI18n();
 	const nonce = getIframeNonceFromLocation() ?? "";
 	const [allItems, setAllItems] = useState<DecryptedItemWithContext[]>([]);
 	const [filteredItems, setFilteredItems] = useState<
@@ -180,7 +182,9 @@ export function AutofillIframeBase({
 			<Card className="mt-1 p-2.5">
 				<div className="flex items-center gap-2 text-sm">
 					<IconLockOutlineDuo18 size={14} className="text-primary" />
-					<span className="font-medium">Unlock Required</span>
+					<span className="font-medium">
+						{m.ext_autofill_unlock_required()}
+					</span>
 				</div>
 				<p className="mt-1.5 text-muted-foreground text-xs">
 					{config.unlockText}
@@ -204,13 +208,15 @@ export function AutofillIframeBase({
 		return (
 			<Card className="mt-1 p-2.5">
 				<div className="flex flex-col gap-1 text-sm">
-					<span className="font-medium">No matches for "{filterQuery}"</span>
+					<span className="font-medium">
+						{m.ext_autofill_no_matches({ query: filterQuery })}
+					</span>
 					<p className="text-muted-foreground text-xs">
 						{allItems.length}{" "}
 						{allItems.length === 1
 							? config.itemNounSingular
 							: config.itemNounPlural}{" "}
-						available
+						{m.ext_autofill_available()}
 					</p>
 				</div>
 			</Card>
@@ -221,8 +227,13 @@ export function AutofillIframeBase({
 		<Card className="mt-1 flex max-h-[220px] flex-col gap-0 overflow-hidden p-0.5">
 			{filterQuery && filteredItems.length < allItems.length && (
 				<div className="shrink-0 px-2.5 py-1.5 text-muted-foreground text-xs">
-					Showing {filteredItems.length} of {allItems.length}{" "}
-					{allItems.length === 1 ? "match" : "matches"}
+					{m.ext_autofill_showing({
+						shown: String(filteredItems.length),
+						total: String(allItems.length),
+					})}{" "}
+					{allItems.length === 1
+						? m.ext_autofill_match()
+						: m.ext_autofill_matches()}
 				</div>
 			)}
 			<div className="min-h-0 flex-1 overflow-y-auto">
@@ -258,7 +269,7 @@ export function AutofillIframeBase({
 
 			<div className="shrink-0 border-t px-2.5 py-1.5">
 				<p className="text-center text-[10px] text-muted-foreground">
-					Type to filter • ↑↓ navigate • Enter select • Esc close
+					{m.ext_autofill_keyboard_hint()}
 				</p>
 			</div>
 		</Card>

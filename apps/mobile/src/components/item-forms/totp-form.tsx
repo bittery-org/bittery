@@ -23,6 +23,7 @@ import { forwardRef, useImperativeHandle, useState } from "react";
 import { Pressable, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
 import { QrCodeScanner } from "../qr-code-scanner";
 import { TotpDisplay } from "../totp-display";
 
@@ -52,6 +53,7 @@ interface TotpFormProps {
 
 export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 	({ onTitleAutoFill, initialData }, ref) => {
+		const { m } = useI18n();
 		const { toast } = useToast();
 		const [totpSecret, setTotpSecret] = useState(initialData?.totpSecret || "");
 		const [totpIssuer, setTotpIssuer] = useState(initialData?.totpIssuer || "");
@@ -95,7 +97,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 
 			toast.show({
 				variant: "success",
-				label: "TOTP data imported from QR code",
+				label: m.mob_form_totp_toast_imported(),
 				placement: "bottom",
 			});
 		};
@@ -106,7 +108,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				if (!text) {
 					toast.show({
 						variant: "warning",
-						label: "No text found in clipboard",
+						label: m.mob_form_totp_toast_no_clipboard(),
 						placement: "bottom",
 					});
 					return;
@@ -131,14 +133,13 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					setTotpSecret(cleanedSecret);
 					toast.show({
 						variant: "success",
-						label: "Secret key pasted from clipboard",
+						label: m.mob_form_totp_toast_secret_pasted(),
 						placement: "bottom",
 					});
 				} else {
 					toast.show({
 						variant: "danger",
-						label:
-							"The clipboard content is not a valid TOTP secret or otpauth:// URI",
+						label: m.mob_form_totp_toast_invalid_clipboard(),
 						placement: "bottom",
 					});
 				}
@@ -146,7 +147,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				console.error("Error pasting from clipboard:", error);
 				toast.show({
 					variant: "danger",
-					label: "Failed to read from clipboard",
+					label: m.mob_form_totp_toast_clipboard_failed(),
 					placement: "bottom",
 				});
 			}
@@ -168,7 +169,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 						className="flex-1"
 					>
 						<StyledCamera size={18} className="text-accent-soft-foreground" />
-						<Button.Label>Scan QR</Button.Label>
+						<Button.Label>{m.mob_form_totp_scan_qr()}</Button.Label>
 					</Button>
 					<Button
 						onPress={handlePasteTotp}
@@ -179,7 +180,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 							size={18}
 							className="text-accent-soft-foreground"
 						/>
-						<Button.Label>Paste</Button.Label>
+						<Button.Label>{m.mob_form_totp_paste()}</Button.Label>
 					</Button>
 				</View>
 
@@ -191,9 +192,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 						totpSecret && !isValidBase32(totpSecret) ? true : undefined
 					}
 				>
-					<Label>Secret Key</Label>
+					<Label>{m.mob_form_totp_secret_label()}</Label>
 					<Input
-						placeholder="JBSWY3DPEHPK3PXP"
+						placeholder={m.mob_form_totp_secret_placeholder()}
 						value={totpSecret}
 						onChangeText={setTotpSecret}
 						autoCapitalize="characters"
@@ -201,9 +202,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 						className="font-mono"
 					/>
 					{totpSecret && !isValidBase32(totpSecret) && (
-						<FieldError>
-							Invalid base32 format. Please check the secret key.
-						</FieldError>
+						<FieldError>{m.mob_form_totp_secret_error()}</FieldError>
 					)}
 				</TextField>
 
@@ -226,18 +225,18 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 				{/* Issuer & Account */}
 				<View className="mb-4 flex-row gap-2">
 					<TextField className="flex-1">
-						<Label>Service</Label>
+						<Label>{m.mob_form_totp_service_label()}</Label>
 						<Input
-							placeholder="Google, GitHub..."
+							placeholder={m.mob_form_totp_service_placeholder()}
 							value={totpIssuer}
 							onChangeText={setTotpIssuer}
 						/>
 					</TextField>
 
 					<TextField className="flex-1">
-						<Label>Account</Label>
+						<Label>{m.mob_form_totp_account_label()}</Label>
 						<Input
-							placeholder="your@email.com"
+							placeholder={m.mob_form_totp_account_placeholder()}
 							value={totpAccountName}
 							onChangeText={setTotpAccountName}
 						/>
@@ -250,7 +249,7 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					className="mb-4 flex-row items-center justify-between rounded-lg border border-border p-3"
 				>
 					<Text className="font-medium text-foreground text-sm">
-						Advanced Settings
+						{m.mob_form_totp_advanced_label()}
 					</Text>
 					{showTotpAdvanced ? (
 						<StyledChevronDown size={16} className="text-muted" />
@@ -262,7 +261,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 					<View className="mb-4 rounded-lg bg-secondary/30 p-3">
 						<View className="mb-4 flex-row gap-2">
 							<View className="flex-1">
-								<Text className="mb-1 text-muted text-xs">Digits</Text>
+								<Text className="mb-1 text-muted text-xs">
+									{m.mob_form_totp_digits_label()}
+								</Text>
 								<View className="flex-row rounded-lg border border-input bg-background">
 									{[6, 7, 8].map((d) => (
 										<Pressable
@@ -290,7 +291,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 								</View>
 							</View>
 							<TextField className="flex-1">
-								<Label className="mb-1 text-muted text-xs">Period (sec)</Label>
+								<Label className="mb-1 text-muted text-xs">
+									{m.mob_form_totp_period_label()}
+								</Label>
 								<Input
 									value={totpPeriod.toString()}
 									onChangeText={(v: string) =>
@@ -301,7 +304,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 							</TextField>
 						</View>
 						<View>
-							<Text className="mb-1 text-muted text-xs">Algorithm</Text>
+							<Text className="mb-1 text-muted text-xs">
+								{m.mob_form_totp_algorithm_label()}
+							</Text>
 							<View className="flex-row rounded-lg border border-input bg-background">
 								{(["SHA1", "SHA256", "SHA512"] as TotpAlgorithm[]).map(
 									(algo) => (

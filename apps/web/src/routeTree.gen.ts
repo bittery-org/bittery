@@ -67,7 +67,7 @@ const AppSecurityRoute = AppSecurityRouteImport.update({
   id: '/security',
   path: '/security',
   getParentRoute: () => AppRoute,
-} as any)
+} as any).lazy(() => import('./routes/_app/security.lazy').then((d) => d.Route))
 const AppHomeRoute = AppHomeRouteImport.update({
   id: '/home',
   path: '/home',

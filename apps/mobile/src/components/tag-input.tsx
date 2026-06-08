@@ -13,6 +13,8 @@ import { withUniwind } from "uniwind";
 
 const StyledX = withUniwind(X);
 
+import { useI18n } from "@/providers/i18n-provider";
+
 interface TagInputProps {
 	tags: string[];
 	onTagsChange: (tags: string[]) => void;
@@ -24,10 +26,13 @@ interface TagInputProps {
 export function TagInput({
 	tags,
 	onTagsChange,
-	placeholder = "Add tags...",
-	label = "Tags",
+	placeholder: placeholderProp,
+	label: labelProp,
 	maxTags = 10,
 }: TagInputProps) {
+	const { m } = useI18n();
+	const label = labelProp ?? m.mob_tag_input_default_label();
+	const placeholder = placeholderProp ?? m.mob_tag_input_default_placeholder();
 	const [inputValue, setInputValue] = useState("");
 
 	const handleAddTag = () => {
@@ -102,7 +107,9 @@ export function TagInput({
 						autoCorrect={false}
 					/>
 					{tags.length >= maxTags && (
-						<Description>Maximum {maxTags} tags reached</Description>
+						<Description>
+							{m.mob_tag_input_max_reached({ count: String(maxTags) })}
+						</Description>
 					)}
 				</TextField>
 				<Button
@@ -111,7 +118,7 @@ export function TagInput({
 					size="md"
 					isDisabled={!inputValue.trim() || tags.length >= maxTags}
 				>
-					Add
+					{m.mob_tag_input_add_button()}
 				</Button>
 			</View>
 		</View>

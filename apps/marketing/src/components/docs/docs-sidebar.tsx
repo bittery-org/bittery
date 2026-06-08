@@ -5,6 +5,7 @@ import {
 	CreditCard,
 	Menu,
 	Rocket,
+	Server,
 	ShieldCheck,
 	UserCog,
 	X,
@@ -20,6 +21,7 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
 	ShieldCheck,
 	UserCog,
 	CreditCard,
+	Server,
 };
 
 // ─── Sidebar content (shared between desktop & mobile) ──────────────────────

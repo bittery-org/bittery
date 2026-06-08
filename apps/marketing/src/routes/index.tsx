@@ -2,26 +2,23 @@ import { createFileRoute } from "@tanstack/react-router";
 import { FAQSection } from "@/components/landing/faq-section";
 import { FeaturesGrid } from "@/components/landing/features-grid";
 import { HeroVault } from "@/components/landing/hero-vault";
-import { OpenSourceSection } from "@/components/landing/open-source-section";
 import { PlatformSection } from "@/components/landing/platform-section";
 import { PricingSection } from "@/components/landing/pricing-section";
 import { Testimonials } from "@/components/landing/testimonials";
-import { Layout } from "@/components/layout";
+import { WaitlistSection } from "@/components/landing/waitlist-section";
+import { billingMarketingEnabled } from "@/lib/urls";
 
 export const Route = createFileRoute("/")({ component: LandingPage });
 
 function LandingPage() {
 	return (
-		<Layout>
-			<div className="overflow-hidden">
-				<HeroVault />
-				<FeaturesGrid />
-				<PlatformSection />
-				<Testimonials />
-				<OpenSourceSection />
-				<PricingSection />
-				<FAQSection />
-			</div>
-		</Layout>
+		<div className="overflow-hidden">
+			<HeroVault />
+			<FeaturesGrid />
+			<PlatformSection />
+			<Testimonials />
+			{billingMarketingEnabled() ? <PricingSection /> : <WaitlistSection />}
+			<FAQSection />
+		</div>
 	);
 }

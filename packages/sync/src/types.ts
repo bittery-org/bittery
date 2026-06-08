@@ -152,11 +152,12 @@ export interface SyncManagerOptions {
 	getAuthToken: () => Promise<string | null>;
 	clientId: string;
 	storage?: SyncStorage;
-	onEvent?: (event: SyncEvent) => void;
 	onStatusChange?: (status: ConnectionStatus) => void;
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
+	/** Called when the server sends a sync ping — client should fetch events via getEventsSince. */
+	onSyncPing?: () => void | Promise<void>;
 	reconnectDelay?: number;
 	maxReconnectDelay?: number;
 	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */

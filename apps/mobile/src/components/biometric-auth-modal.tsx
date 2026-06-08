@@ -22,6 +22,7 @@ import {
 	View,
 } from "react-native";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
 import { resolveBiometricErrorMessage } from "../lib/biometric-error-message";
 import { type BiometricErrorType, storage } from "../services/storage";
@@ -37,6 +38,7 @@ export function BiometricAuthModal({
 	onSuccess,
 	onFallbackToPassword,
 }: BiometricAuthModalProps) {
+	const { m } = useI18n();
 	const router = useRouter();
 	const {
 		triggerBiometricAuth,
@@ -107,18 +109,17 @@ export function BiometricAuthModal({
 						<KeyRound size={40} color="#f59e0b" />
 					</View>
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
-						Password Required
+						{m.mob_biometric_modal_password_required_title()}
 					</Text>
 					<Text className="mb-6 text-center text-muted">
-						For your security, please enter your master password. This is
-						required every 30 days.
+						{m.mob_biometric_modal_password_required_description()}
 					</Text>
 					<TouchableOpacity
 						onPress={handleUsePassword}
 						className="w-full rounded-lg bg-primary py-4"
 					>
 						<Text className="text-center font-semibold text-primary-foreground">
-							Enter Password
+							{m.mob_biometric_modal_enter_password()}
 						</Text>
 					</TouchableOpacity>
 				</>
@@ -133,10 +134,12 @@ export function BiometricAuthModal({
 						{getBiometricIcon()}
 					</View>
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
-						{biometricType || "Biometric"} Required
+						{m.mob_biometric_modal_biometric_required({
+							biometricType: biometricType || "Biometric",
+						})}
 					</Text>
 					<Text className="mb-6 text-center text-muted">
-						Please authenticate to continue
+						{m.mob_biometric_modal_please_authenticate()}
 					</Text>
 					<ActivityIndicator size="large" color="#3b82f6" />
 				</>
@@ -147,7 +150,7 @@ export function BiometricAuthModal({
 		if (lastAuthResult && !lastAuthResult.success) {
 			const errorMessage =
 				lastAuthResult.message ||
-				resolveBiometricErrorMessage(lastAuthResult.error || "unknown");
+				resolveBiometricErrorMessage(lastAuthResult.error || "unknown", m);
 
 			return (
 				<>
@@ -165,7 +168,7 @@ export function BiometricAuthModal({
 						{getErrorIcon(lastAuthResult.error)}
 					</View>
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
-						Authentication Failed
+						{m.mob_biometric_modal_auth_failed()}
 					</Text>
 					<Text className="mb-6 text-center text-muted">{errorMessage}</Text>
 					<View className="w-full space-y-3">
@@ -176,7 +179,7 @@ export function BiometricAuthModal({
 							>
 								<RefreshCw size={20} color="#fff" />
 								<Text className="ml-2 font-semibold text-primary-foreground">
-									Try Again
+									{m.mob_biometric_modal_try_again()}
 								</Text>
 							</TouchableOpacity>
 						)}
@@ -185,7 +188,7 @@ export function BiometricAuthModal({
 							className="w-full rounded-lg border border-input py-4"
 						>
 							<Text className="text-center font-medium text-foreground">
-								Use Password Instead
+								{m.mob_biometric_modal_use_password()}
 							</Text>
 						</TouchableOpacity>
 					</View>
@@ -200,10 +203,14 @@ export function BiometricAuthModal({
 					{getBiometricIcon()}
 				</View>
 				<Text className="mb-2 text-center font-bold text-foreground text-xl">
-					{biometricType || "Biometric"} Required
+					{m.mob_biometric_modal_biometric_required({
+						biometricType: biometricType || "Biometric",
+					})}
 				</Text>
 				<Text className="mb-6 text-center text-muted">
-					Use {biometricType || "biometric"} to unlock your vault
+					{m.mob_biometric_modal_use_biometric({
+						biometricType: biometricType || "biometric",
+					})}
 				</Text>
 				<View className="w-full space-y-3">
 					<TouchableOpacity
@@ -212,7 +219,7 @@ export function BiometricAuthModal({
 					>
 						<Fingerprint size={20} color="#fff" />
 						<Text className="ml-2 font-semibold text-primary-foreground">
-							Authenticate
+							{m.mob_biometric_modal_authenticate()}
 						</Text>
 					</TouchableOpacity>
 					<TouchableOpacity
@@ -220,7 +227,7 @@ export function BiometricAuthModal({
 						className="w-full rounded-lg border border-input py-4"
 					>
 						<Text className="text-center font-medium text-foreground">
-							Use Password Instead
+							{m.mob_biometric_modal_use_password()}
 						</Text>
 					</TouchableOpacity>
 				</View>

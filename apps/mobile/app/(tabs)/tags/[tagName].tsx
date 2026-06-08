@@ -8,6 +8,7 @@ import { FlatList, RefreshControl, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { CategoryFilter } from "@/components/category-filter";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { useI18n } from "@/providers/i18n-provider";
 import { ItemListItem } from "../../../src/components/item-list-item";
 
 // Create styled icon components
@@ -15,6 +16,7 @@ const StyledTag = withUniwind(Tag);
 const StyledArrowLeft = withUniwind(ArrowLeft);
 
 export default function TagFilterScreen() {
+	const { m } = useI18n();
 	const router = useRouter();
 	const navigation = useNavigation();
 	const { tagName } = useLocalSearchParams<{ tagName: string }>();
@@ -23,9 +25,9 @@ export default function TagFilterScreen() {
 	// Set the header title dynamically
 	useLayoutEffect(() => {
 		navigation.setOptions({
-			title: decodedTagName || "Tag",
+			title: decodedTagName || m.mob_tag_filter_fallback_title(),
 		});
-	}, [navigation, decodedTagName]);
+	}, [navigation, decodedTagName, m.mob_tag_filter_fallback_title]);
 
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
@@ -118,7 +120,7 @@ export default function TagFilterScreen() {
 			>
 				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
 					<Card.Title className="mb-4 text-center text-danger text-lg">
-						Error loading items
+						{m.mob_tag_filter_error_loading()}
 					</Card.Title>
 					<Button onPress={handleRefresh} variant="primary">
 						Retry
@@ -166,12 +168,12 @@ export default function TagFilterScreen() {
 					>
 						<StyledTag size={48} className="mb-4 text-muted" />
 						<Card.Title className="mb-2 text-center text-lg">
-							No items found
+							{m.mob_tag_filter_empty_title()}
 						</Card.Title>
 						<Card.Description className="text-center">
 							{selectedCategory !== "all"
-								? "Try a different category filter"
-								: "No items have this tag"}
+								? m.mob_tag_filter_empty_category_description()
+								: m.mob_tag_filter_empty_no_items_description()}
 						</Card.Description>
 					</Card>
 				</View>

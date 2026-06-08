@@ -1,4 +1,18 @@
 const LOCAL_HOST_PATTERN = /^(localhost|127\.|0\.0\.0\.0|::1)(:|$)/i;
+const RPC_PATH_SUFFIXES = ["/rpc"] as const;
+
+function stripRpcPathSuffix(pathname: string): string {
+	let normalized = pathname.replace(/\/+$/, "");
+
+	for (const suffix of RPC_PATH_SUFFIXES) {
+		if (normalized.toLowerCase().endsWith(suffix)) {
+			normalized = normalized.slice(0, -suffix.length);
+			break;
+		}
+	}
+
+	return normalized.replace(/\/+$/, "");
+}
 
 function ensureProtocol(value: string): string {
 	if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(value)) {
@@ -24,11 +38,7 @@ export function normalizeServerUrl(value?: string | null): string | null {
 		return null;
 	}
 
-	let pathname = parsed.pathname.replace(/\/+$/, "");
-	if (pathname.toLowerCase().endsWith("/trpc")) {
-		pathname = pathname.slice(0, -"/trpc".length);
-	}
-	pathname = pathname.replace(/\/+$/, "");
+	const pathname = stripRpcPathSuffix(parsed.pathname);
 	parsed.pathname = pathname || "/";
 	parsed.search = "";
 	parsed.hash = "";
@@ -36,7 +46,7 @@ export function normalizeServerUrl(value?: string | null): string | null {
 	return parsed.toString().replace(/\/$/, "");
 }
 
-export function buildTrpcUrl(baseUrl: string, requestUrl: string): string {
+export function buildRpcUrl(baseUrl: string, requestUrl: string): string {
 	const normalizedBase = normalizeServerUrl(baseUrl);
 	if (!normalizedBase) {
 		return requestUrl;

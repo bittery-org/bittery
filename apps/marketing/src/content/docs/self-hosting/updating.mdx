@@ -1,0 +1,79 @@
+---
+title: Updating
+description: Keep your self-hosted Bittery instance up to date.
+category: self-hosting
+order: 5
+---
+
+# Updating
+
+Bittery publishes new Docker images to `ghcr.io/bittery-org` with every release. Database migrations run automatically on server startup — no manual migration step is needed.
+
+## Docker Compose
+
+<Steps>
+<Step title="Pull the latest images">
+```bash
+cd ~/bittery
+docker compose pull
+```
+</Step>
+<Step title="Restart the services">
+```bash
+COMPOSE_PROFILES=builtin-db docker compose up -d
+```
+
+Adjust `COMPOSE_PROFILES` to match your setup (e.g. `builtin-db,storage,cache`).
+</Step>
+<Step title="Verify">
+```bash
+docker compose ps
+```
+
+All services should show `(healthy)` within a minute.
+</Step>
+</Steps>
+
+<Callout type="tip">
+You can combine both steps into a single command:
+```bash
+docker compose pull && COMPOSE_PROFILES=builtin-db docker compose up -d
+```
+</Callout>
+
+## Railway
+
+1. Go to your Railway project dashboard
+2. Click **Redeploy** on the server and web services
+3. Railway pulls the latest images automatically
+
+## Rollback
+
+If something goes wrong after an update, you can roll back to a specific version:
+
+```bash
+# Pin a specific version in docker-compose.yml or use:
+docker compose down
+docker compose pull ghcr.io/bittery-org/bittery-server:v1.2.3
+docker compose pull ghcr.io/bittery-org/bittery-web:v1.2.3
+docker compose up -d
+```
+
+<Callout type="warning">
+Database migrations are forward-only. If you roll back to an older server version, ensure the database schema is still compatible. For major version upgrades, always back up your database first.
+</Callout>
+
+## Monitoring
+
+Check the health of your instance at any time:
+
+```bash
+# Service status
+docker compose ps
+
+# Server logs
+docker compose logs -f server
+
+# Health endpoint
+curl https://your-domain.com/healthz
+```

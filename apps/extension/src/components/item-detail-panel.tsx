@@ -26,6 +26,7 @@ import {
 	IconQrcodeOutlineDuo18,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
+import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "./favicon";
 import { QRScanner, type QRScanResult } from "./qr-scanner";
 
@@ -33,35 +34,6 @@ const getItemNotes = (item: DecryptedItem) => item.notes || item.note || "";
 
 const normalizeUrl = (url: string) =>
 	url.includes("://") ? url : `https://${url}`;
-
-const formatPasskeyLastUsed = (value?: string) => {
-	if (!value) {
-		return "never";
-	}
-
-	const timestamp = Date.parse(value);
-	if (Number.isNaN(timestamp)) {
-		return "recently";
-	}
-
-	const deltaMs = Date.now() - timestamp;
-	const deltaDays = Math.floor(deltaMs / (24 * 60 * 60 * 1000));
-
-	if (deltaDays <= 0) return "today";
-	if (deltaDays === 1) return "yesterday";
-	if (deltaDays < 30) return `${deltaDays}d ago`;
-
-	return new Date(timestamp).toLocaleDateString();
-};
-
-const handleOpenUrl = (targetUrl: string | undefined) => {
-	if (!targetUrl) {
-		toast.error("No URL to open");
-		return;
-	}
-
-	window.open(normalizeUrl(targetUrl), "_blank", "noopener,noreferrer");
-};
 
 const handleCopy = copyWithToast;
 
@@ -87,6 +59,7 @@ function InlineTotpDisplay({
 	totpDigits = 6,
 	totpPeriod = 30,
 }: InlineTotpDisplayProps) {
+	const { m } = useI18n();
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 
 	const generateCode = useCallback(async () => {
@@ -134,7 +107,7 @@ function InlineTotpDisplay({
 				type="button"
 				onClick={handleCopyCode}
 				className="group flex cursor-pointer items-center gap-3 rounded-lg transition-colors hover:bg-muted/50"
-				title="Click to copy"
+				title={m.ext_detail_click_to_copy()}
 			>
 				<div className="relative flex size-9 items-center justify-center">
 					<svg
@@ -181,7 +154,7 @@ function InlineTotpDisplay({
 							: "--- ---"}
 					</span>
 					<span className="text-muted-foreground text-xs">
-						One-time password
+						{m.ext_detail_otp()}
 					</span>
 				</div>
 			</button>
@@ -205,6 +178,7 @@ function LoginItemDetail({
 	item: DecryptedItem;
 	onItemUpdated?: () => void;
 }) {
+	const { m } = useI18n();
 	const [showPassword, setShowPassword] = useState(false);
 	const [showQRScanner, setShowQRScanner] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
@@ -214,6 +188,27 @@ function LoginItemDetail({
 		const rightTs = Date.parse(right.lastUsedAt ?? right.createdAt);
 		return rightTs - leftTs;
 	});
+
+	const handleOpenUrl = (targetUrl: string | undefined) => {
+		if (!targetUrl) {
+			toast.error(m.ext_detail_toast_no_url());
+			return;
+		}
+		window.open(normalizeUrl(targetUrl), "_blank", "noopener,noreferrer");
+	};
+
+	const formatPasskeyLastUsed = (value?: string) => {
+		if (!value) return m.ext_detail_last_used_never();
+		const timestamp = Date.parse(value);
+		if (Number.isNaN(timestamp)) return m.ext_detail_last_used_recently();
+		const deltaMs = Date.now() - timestamp;
+		const deltaDays = Math.floor(deltaMs / (24 * 60 * 60 * 1000));
+		if (deltaDays <= 0) return m.ext_detail_last_used_today();
+		if (deltaDays === 1) return m.ext_detail_last_used_yesterday();
+		if (deltaDays < 30)
+			return m.ext_detail_last_used_days_ago({ count: deltaDays });
+		return new Date(timestamp).toLocaleDateString();
+	};
 
 	const handleQRScanComplete = useCallback(
 		async (result: QRScanResult) => {
@@ -241,21 +236,26 @@ function LoginItemDetail({
 				});
 
 				if (response?.success) {
-					toast.success("TOTP added successfully!");
+					toast.success(m.ext_detail_totp_saved());
 					setShowQRScanner(false);
 					// Trigger a refresh of the item data
 					onItemUpdated?.();
 				} else {
-					toast.error(response?.error || "Failed to save TOTP");
+					toast.error(response?.error || m.ext_detail_totp_save_failed());
 				}
 			} catch (error: any) {
 				console.error("Error saving TOTP:", error);
-				toast.error("Failed to save TOTP");
+				toast.error(m.ext_detail_totp_save_failed());
 			} finally {
 				setIsSaving(false);
 			}
 		},
-		[item.id, onItemUpdated],
+		[
+			item.id,
+			onItemUpdated,
+			m.ext_detail_totp_save_failed,
+			m.ext_detail_totp_saved,
+		],
 	);
 
 	const handleCancelQRScanner = useCallback(() => {
@@ -266,7 +266,9 @@ function LoginItemDetail({
 		<div className="space-y-3">
 			{item.url && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">Website</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_website()}
+					</Label>
 					<InputGroup>
 						<InputGroupInput value={item.url} readOnly />
 						<InputGroupAddon align="inline-end">
@@ -291,7 +293,9 @@ function LoginItemDetail({
 
 			{item.username && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">Username</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_username()}
+					</Label>
 					<InputGroup>
 						<InputGroupInput value={item.username} readOnly />
 						<InputGroupAddon align="inline-end">
@@ -308,7 +312,9 @@ function LoginItemDetail({
 
 			{item.password && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">Password</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_password()}
+					</Label>
 					<InputGroup>
 						<InputGroupInput
 							type={showPassword ? "text" : "password"}
@@ -342,7 +348,9 @@ function LoginItemDetail({
 
 			{passkeys.length > 0 && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">Passkeys</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_passkeys()}
+					</Label>
 					<div className="space-y-1">
 						{passkeys.map((passkey, index) => (
 							<div
@@ -368,7 +376,7 @@ function LoginItemDetail({
 									variant="ghost"
 									size="icon"
 									className="size-7 shrink-0"
-									title="Copy passkey credential ID"
+									title={m.ext_detail_passkey_copy_id()}
 									onClick={() => handleCopy(passkey.credentialId, "Passkey ID")}
 								>
 									<IconCopyOutlineDuo18 className="size-4" />
@@ -381,7 +389,9 @@ function LoginItemDetail({
 
 			{/* TOTP Section */}
 			<div className="space-y-2">
-				<Label className="font-medium text-sm">Two-Factor Authentication</Label>
+				<Label className="font-medium text-sm">
+					{m.ext_detail_label_2fa()}
+				</Label>
 				{item.totpSecret ? (
 					<InlineTotpDisplay
 						totpSecret={item.totpSecret}
@@ -393,7 +403,7 @@ function LoginItemDetail({
 					isSaving ? (
 						<Card className="flex items-center justify-center gap-2 p-4">
 							<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin" />
-							<span className="text-sm">Saving TOTP...</span>
+							<span className="text-sm">{m.ext_detail_saving_totp()}</span>
 						</Card>
 					) : (
 						<QRScanner
@@ -408,14 +418,16 @@ function LoginItemDetail({
 						onClick={() => setShowQRScanner(true)}
 					>
 						<IconQrcodeOutlineDuo18 size={16} />
-						Scan QR Code to Add 2FA
+						{m.ext_detail_scan_qr()}
 					</Button>
 				)}
 			</div>
 
 			{notes && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">Notes</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_notes()}
+					</Label>
 					<Card>
 						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
@@ -426,14 +438,15 @@ function LoginItemDetail({
 }
 
 function SecureNoteDetail({ item }: { item: DecryptedItem }) {
+	const { m } = useI18n();
 	const notes = getItemNotes(item);
 
 	return (
 		<div className="space-y-2">
-			<Label className="font-medium text-sm">Note</Label>
+			<Label className="font-medium text-sm">{m.ext_detail_label_note()}</Label>
 			<Card>
 				<div className="whitespace-pre-wrap px-4 py-1 text-sm">
-					{notes || "No notes added yet."}
+					{notes || m.ext_detail_no_notes()}
 				</div>
 			</Card>
 		</div>
@@ -441,16 +454,19 @@ function SecureNoteDetail({ item }: { item: DecryptedItem }) {
 }
 
 function CreditCardDetail({ item }: { item: DecryptedItem }) {
+	const { m } = useI18n();
 	const notes = getItemNotes(item);
 
 	return (
 		<div className="space-y-3">
 			<div className="text-muted-foreground text-sm">
-				Credit card details coming soon
+				{m.ext_detail_credit_card_soon()}
 			</div>
 			{notes && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">Notes</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_notes()}
+					</Label>
 					<Card>
 						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
@@ -461,16 +477,19 @@ function CreditCardDetail({ item }: { item: DecryptedItem }) {
 }
 
 function IdentityDetail({ item }: { item: DecryptedItem }) {
+	const { m } = useI18n();
 	const notes = getItemNotes(item);
 
 	return (
 		<div className="space-y-3">
 			<div className="text-muted-foreground text-sm">
-				Identity details coming soon
+				{m.ext_detail_identity_soon()}
 			</div>
 			{notes && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">Notes</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_notes()}
+					</Label>
 					<Card>
 						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
@@ -481,6 +500,7 @@ function IdentityDetail({ item }: { item: DecryptedItem }) {
 }
 
 export function ItemDetailPanel({ item, onItemUpdated }: ItemDetailPanelProps) {
+	const { m } = useI18n();
 	const isSecureNote = item.category === "secure-note";
 
 	return (
@@ -499,7 +519,9 @@ export function ItemDetailPanel({ item, onItemUpdated }: ItemDetailPanelProps) {
 							{item.url}
 						</p>
 					) : isSecureNote ? (
-						<p className="mt-0.5 text-muted-foreground text-xs">Secure Note</p>
+						<p className="mt-0.5 text-muted-foreground text-xs">
+							{m.ext_detail_secure_note()}
+						</p>
 					) : null}
 				</div>
 			</div>

@@ -1,5 +1,5 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
-import { createAccountTrpcClient } from "@bittery/shared/trpc-client-factory";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import {
 	AccountAvatarGroup,
 	AccountSwitcher,
@@ -15,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 /**
  * Extension-specific account switcher wrapper
@@ -30,6 +31,7 @@ export function ExtensionAccountSwitcher() {
 	} = useAccountSwitcher();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
+	const { m } = useI18n();
 	const invalidator = useMemo(
 		() => createExtensionInvalidator(queryClient),
 		[queryClient],
@@ -89,15 +91,15 @@ export function ExtensionAccountSwitcher() {
 					const serverUrl =
 						(await storage.getServerUrl(account.email)) ||
 						"http://localhost:3000";
-					const client = createAccountTrpcClient(authToken, serverUrl);
+					const client = createAccountRpcClient(authToken, serverUrl);
 
 					const userData = await client.auth.me.query();
 
 					// Update account with team name and avatar
 					await storage.addAccount({
 						...account,
-						teamName: userData.teamName,
-						teamAvatarUrl: userData.teamAvatarUrl,
+						teamName: userData.teamName ?? undefined,
+						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 					});
 
 					// Refresh accounts list
@@ -150,7 +152,7 @@ export function ExtensionAccountSwitcher() {
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
-			toast.error("Failed to switch account");
+			toast.error(m.ext_account_switcher_toast_switch_failed());
 		}
 	};
 
@@ -163,19 +165,17 @@ export function ExtensionAccountSwitcher() {
 		try {
 			await lockAllAccounts.mutateAsync();
 			navigate({ to: "/unlock" });
-			toast.success("All accounts locked");
+			toast.success(m.ext_account_switcher_toast_all_locked());
 		} catch (error) {
 			console.error("Failed to lock all accounts:", error);
-			toast.error("Failed to lock accounts");
+			toast.error(m.ext_account_switcher_toast_lock_failed());
 		}
 	};
 
 	const handleAllAccountsSelect = async () => {
 		// Check if we have any unlocked accounts
 		if (unlockedEmailsList.length === 0) {
-			toast.error(
-				"No accounts are unlocked. Please unlock at least one account.",
-			);
+			toast.error(m.ext_account_switcher_toast_no_unlocked());
 			return;
 		}
 
@@ -190,7 +190,7 @@ export function ExtensionAccountSwitcher() {
 			]);
 		} catch (error) {
 			console.error("Failed to switch to All Accounts mode:", error);
-			toast.error("Failed to switch to All Accounts mode");
+			toast.error(m.ext_account_switcher_toast_all_accounts_failed());
 		}
 	};
 
@@ -229,10 +229,12 @@ export function ExtensionAccountSwitcher() {
 					/>
 					<div className="flex flex-col items-start overflow-hidden">
 						<span className="max-w-32 truncate font-medium text-sm">
-							All Accounts
+							{m.ext_account_switcher_all_accounts()}
 						</span>
 						<span className="text-muted-foreground text-xs">
-							{unlockedEmailsList.length} unlocked
+							{m.ext_account_switcher_unlocked_count({
+								count: unlockedEmailsList.length,
+							})}
 						</span>
 					</div>
 				</>

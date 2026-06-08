@@ -247,7 +247,7 @@ export function ItemAttachments({
 			) {
 				toast.error(
 					m.vaults_detail_items_attachments_toast_file_too_large({
-						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+						maxFileSize: formatBytes(Number(attachmentMaxFileSizeBytes)),
 					}),
 				);
 				if (fileInputRef.current) fileInputRef.current.value = "";
@@ -281,7 +281,7 @@ export function ItemAttachments({
 			) {
 				toast.error(
 					m.vaults_detail_items_attachments_toast_file_too_large({
-						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+						maxFileSize: formatBytes(Number(attachmentMaxFileSizeBytes)),
 					}),
 				);
 			} else {

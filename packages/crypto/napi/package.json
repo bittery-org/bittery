@@ -1,7 +1,7 @@
 {
 	"name": "@bittery/crypto-napi",
 	"version": "0.1.0",
-	"description": "Native NAPI bindings for Bittery crypto (Node.js/Bun server)",
+	"description": "Native NAPI bindings for Bittery crypto (Node.js/Bun runtimes)",
 	"main": "index.js",
 	"types": "index.d.ts",
 	"napi": {

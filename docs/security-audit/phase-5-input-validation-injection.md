@@ -1,5 +1,7 @@
 # Bittery Security Audit - Phase 5: Input Validation & Injection
 
+> Note: `apps/server`, `packages/api`, and `packages/auth` were removed after the Rust server cutover. Any references to those paths in this document are historical audit context, not current implementation guidance.
+
 ## 1. Summary
 
 Bittery's input-validation posture is mixed.

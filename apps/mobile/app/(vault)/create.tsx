@@ -34,17 +34,21 @@ import {
 import { SafeAreaView } from "@/components/safe-area-view";
 import { TagInput } from "@/components/tag-input";
 import { VaultAvatar } from "@/components/vault-avatar";
-import { categoryOptions as allCategoryOptions } from "@/constants/item-categories";
+import { getCategoryOptions } from "@/constants/item-categories";
+import { useI18n } from "@/providers/i18n-provider";
 
 // Create styled icon components
 const StyledArrowLeft = withUniwind(ArrowLeft);
 const StyledVault = withUniwind(Vault);
 const StyledChevronDown = withUniwind(ChevronDown);
 
-// Filter out "all" option for item creation
-const categoryOptions = allCategoryOptions.filter((opt) => opt.value !== "all");
-
 export default function CreateItemScreen() {
+	const { m } = useI18n();
+
+	// Filter out "all" option for item creation
+	const categoryOptions = getCategoryOptions(m).filter(
+		(opt) => opt.value !== "all",
+	);
 	const router = useRouter();
 	const { toast } = useToast();
 	const { vaultId: vaultIdParam } = useLocalSearchParams<{
@@ -64,7 +68,7 @@ export default function CreateItemScreen() {
 
 	const [category, setCategory] = useState<
 		{ value: ItemCategory; label: string } | undefined
-	>({ value: "login", label: "Login" });
+	>({ value: "login", label: m.mob_category_login() });
 	const [title, setTitle] = useState("");
 	const [notes, setNotes] = useState("");
 	const [tags, setTags] = useState<string[]>([]);
@@ -81,7 +85,7 @@ export default function CreateItemScreen() {
 		if (!title.trim()) {
 			toast.show({
 				variant: "danger",
-				label: "Title is required",
+				label: m.mob_create_item_toast_title_required(),
 				placement: "bottom",
 			});
 			return;
@@ -90,7 +94,7 @@ export default function CreateItemScreen() {
 		if (!selectedVaultId) {
 			toast.show({
 				variant: "danger",
-				label: "Please select a vault",
+				label: m.mob_create_item_toast_vault_required(),
 				placement: "bottom",
 			});
 			return;
@@ -118,7 +122,7 @@ export default function CreateItemScreen() {
 				if (!isValid) {
 					toast.show({
 						variant: "danger",
-						label: "Please enter a valid TOTP secret key",
+						label: m.mob_create_item_toast_totp_invalid(),
 						placement: "bottom",
 					});
 					return;
@@ -174,7 +178,7 @@ export default function CreateItemScreen() {
 
 			toast.show({
 				variant: "success",
-				label: "Item created successfully",
+				label: m.mob_create_item_toast_success(),
 				placement: "bottom",
 			});
 			router.back();
@@ -182,7 +186,10 @@ export default function CreateItemScreen() {
 			console.error("Error creating item:", error);
 			toast.show({
 				variant: "danger",
-				label: error instanceof Error ? error.message : "Failed to create item",
+				label:
+					error instanceof Error
+						? error.message
+						: m.mob_create_item_toast_failed(),
 				placement: "bottom",
 			});
 		} finally {
@@ -221,7 +228,7 @@ export default function CreateItemScreen() {
 						<StyledArrowLeft size={20} className="text-foreground" />
 					</Button>
 					<Text className="flex-1 font-bold text-foreground text-xl">
-						New Item
+						{m.mob_create_item_header()}
 					</Text>
 					<Button
 						onPress={handleSave}
@@ -229,14 +236,14 @@ export default function CreateItemScreen() {
 						variant="primary"
 						size="sm"
 					>
-						{saving ? "Saving..." : "Save"}
+						{saving ? m.mob_create_item_saving() : m.mob_create_item_save()}
 					</Button>
 				</View>
 
 				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
 					{/* Vault Selector */}
 					<View className="my-4">
-						<Label className="mb-2">Vault</Label>
+						<Label className="mb-2">{m.mob_create_item_vault_label()}</Label>
 						<Select
 							value={
 								selectedVaultId
@@ -270,7 +277,7 @@ export default function CreateItemScreen() {
 									<Button.Label className="flex-1 text-left">
 										{selectedVault
 											? getVaultLabel(selectedVault)
-											: "Select Vault"}
+											: m.mob_create_item_vault_placeholder()}
 									</Button.Label>
 									<StyledChevronDown size={16} className="text-muted" />
 								</Button>
@@ -319,7 +326,7 @@ export default function CreateItemScreen() {
 
 					{/* Category Selector */}
 					<View className="my-4">
-						<Label className="mb-2">Category</Label>
+						<Label className="mb-2">{m.mob_create_item_category_label()}</Label>
 						<Select
 							value={category}
 							onValueChange={(option) => {
@@ -349,7 +356,7 @@ export default function CreateItemScreen() {
 										</>
 									) : (
 										<Button.Label className="flex-1 text-left">
-											Select Category
+											{m.mob_create_item_category_placeholder()}
 										</Button.Label>
 									)}
 									<StyledChevronDown size={16} className="text-muted" />
@@ -390,9 +397,9 @@ export default function CreateItemScreen() {
 
 					{/* Title */}
 					<TextField className="mb-4" isRequired>
-						<Label>Title</Label>
+						<Label>{m.mob_create_item_title_label()}</Label>
 						<Input
-							placeholder="Enter title"
+							placeholder={m.mob_create_item_title_placeholder()}
 							value={title}
 							onChangeText={setTitle}
 						/>
@@ -417,16 +424,16 @@ export default function CreateItemScreen() {
 					<TagInput
 						tags={tags}
 						onTagsChange={setTags}
-						placeholder="Add a tag..."
+						placeholder={m.mob_create_item_tags_placeholder()}
 						label="Tags (optional)"
 					/>
 
 					{/* Notes (for non-secure-note items) */}
 					{category?.value !== "secure-note" && (
 						<TextField className="mb-4">
-							<Label>Notes (optional)</Label>
+							<Label>{m.mob_create_item_notes_label()}</Label>
 							<Input
-								placeholder="Add any additional notes..."
+								placeholder={m.mob_create_item_notes_placeholder()}
 								value={notes}
 								onChangeText={setNotes}
 								multiline

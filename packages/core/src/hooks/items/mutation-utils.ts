@@ -1,4 +1,4 @@
-import { useTRPCClient } from "@bittery/shared/trpc";
+import { useRPCClient } from "@bittery/shared/rpc";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import type { IPendingMutationQueue } from "@bittery/types";
 import {
@@ -151,7 +151,7 @@ export function extractDecryptedItemData(item: unknown): DecryptedItemData {
 }
 
 export function useItemMutationRuntime() {
-	const defaultClient = useTRPCClient();
+	const defaultClient = useRPCClient();
 	const core = useCoreContext();
 	const sync = usePlatformSync();
 	const invalidator = useQueryInvalidator();

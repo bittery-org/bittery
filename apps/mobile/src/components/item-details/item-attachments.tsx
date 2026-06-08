@@ -80,6 +80,7 @@ function AttachmentRow({
 	const [editValue, setEditValue] = useState("");
 	const [isRenaming, setIsRenaming] = useState(false);
 	const { toast } = useToast();
+	const { m } = useI18n();
 	const queryClient = useQueryClient();
 	const { decryptMeta, rename } = useItemAttachments(
 		attachment.itemId,
@@ -103,7 +104,9 @@ function AttachmentRow({
 	const displayName =
 		decryptedName ??
 		decryptedNameQuery.data ??
-		(decryptedNameQuery.isError ? "Encrypted file" : "Loading...");
+		(decryptedNameQuery.isError
+			? m.mob_attachments_encrypted_file()
+			: m.mob_attachments_loading_name());
 
 	function startEdit() {
 		setEditValue(decryptedName ?? "");
@@ -136,13 +139,13 @@ function AttachmentRow({
 			setIsEditing(false);
 			toast.show({
 				variant: "accent",
-				label: "Attachment renamed",
+				label: m.mob_attachments_toast_renamed(),
 				placement: "bottom",
 			});
 		} catch {
 			toast.show({
 				variant: "danger",
-				label: "Rename failed",
+				label: m.mob_attachments_toast_rename_failed(),
 				placement: "bottom",
 			});
 		} finally {
@@ -277,7 +280,7 @@ export function ItemAttachments({
 			toast.show({
 				variant: "danger",
 				label: m.vaults_detail_items_attachments_toast_file_too_large({
-					maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+					maxFileSize: formatBytes(Number(attachmentMaxFileSizeBytes)),
 				}),
 				placement: "bottom",
 			});
@@ -300,7 +303,7 @@ export function ItemAttachments({
 			);
 			toast.show({
 				variant: "accent",
-				label: "Attachment uploaded",
+				label: m.mob_attachments_toast_uploaded(),
 				placement: "bottom",
 			});
 		} catch (error) {
@@ -319,7 +322,7 @@ export function ItemAttachments({
 				toast.show({
 					variant: "danger",
 					label: m.vaults_detail_items_attachments_toast_file_too_large({
-						maxFileSize: formatBytes(attachmentMaxFileSizeBytes),
+						maxFileSize: formatBytes(Number(attachmentMaxFileSizeBytes)),
 					}),
 					placement: "bottom",
 				});
@@ -356,45 +359,52 @@ export function ItemAttachments({
 						UTI: "public.data",
 					});
 				} else {
-					Alert.alert("Error", "Sharing is not available on this device.");
+					Alert.alert("Error", m.mob_attachments_sharing_not_available());
 				}
 			} catch {
 				toast.show({
 					variant: "danger",
-					label: "Download failed",
-					description: "Failed to download attachment. Please try again.",
+					label: m.mob_attachments_toast_download_failed(),
+					description: m.mob_attachments_toast_download_failed_description(),
 					placement: "bottom",
 				});
 			} finally {
 				setIsDownloading(false);
 			}
 		},
-		[download, toast],
+		[
+			download,
+			toast,
+			m.mob_attachments_sharing_not_available,
+			m.mob_attachments_toast_download_failed,
+			m.mob_attachments_toast_download_failed_description,
+		],
 	);
 
 	const handleDelete = useCallback(
 		async (attachmentId: string) => {
 			Alert.alert(
-				"Delete Attachment",
-				"Are you sure you want to delete this attachment?",
+				m.mob_attachments_delete_dialog_title(),
+				m.mob_attachments_delete_dialog_message(),
 				[
-					{ text: "Cancel", style: "cancel" },
+					{ text: m.mob_attachments_delete_dialog_cancel(), style: "cancel" },
 					{
-						text: "Delete",
+						text: m.mob_attachments_delete_dialog_confirm(),
 						style: "destructive",
 						onPress: async () => {
 							try {
 								await remove.mutateAsync(attachmentId);
 								toast.show({
 									variant: "accent",
-									label: "Attachment deleted",
+									label: m.mob_attachments_toast_deleted(),
 									placement: "bottom",
 								});
 							} catch {
 								toast.show({
 									variant: "danger",
-									label: "Delete failed",
-									description: "Failed to delete attachment.",
+									label: m.mob_attachments_toast_delete_failed(),
+									description:
+										m.mob_attachments_toast_delete_failed_description(),
 									placement: "bottom",
 								});
 							}
@@ -403,7 +413,17 @@ export function ItemAttachments({
 				],
 			);
 		},
-		[remove, toast],
+		[
+			remove,
+			toast,
+			m.mob_attachments_delete_dialog_cancel,
+			m.mob_attachments_delete_dialog_confirm,
+			m.mob_attachments_delete_dialog_message,
+			m.mob_attachments_delete_dialog_title,
+			m.mob_attachments_toast_delete_failed,
+			m.mob_attachments_toast_delete_failed_description,
+			m.mob_attachments_toast_deleted,
+		],
 	);
 
 	return (
