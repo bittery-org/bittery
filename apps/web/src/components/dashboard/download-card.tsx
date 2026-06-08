@@ -14,20 +14,12 @@ import {
 	IconSquareTerminalOutlineDuo18 as Monitor,
 	IconStarSparkle2OutlineDuo18 as Zap,
 } from "@bittery/ui/icons";
+import {
+	detectOS,
+	getPrimaryDownloadForOS,
+	RELEASES_PAGE_URL,
+} from "@bittery/shared/releases";
 import { useI18n } from "@/providers/i18n-provider";
-
-function detectOS(): "macos" | "windows" | "linux" | "unknown" {
-	if (typeof navigator === "undefined") return "unknown";
-	const ua = navigator.userAgent.toLowerCase();
-	if (ua.includes("mac")) return "macos";
-	if (ua.includes("win")) return "windows";
-	if (ua.includes("linux")) return "linux";
-	return "unknown";
-}
-
-// Replace with your actual GitHub org/repo
-const GITHUB_REPO = "bittery-org/bittery";
-const RELEASES_URL = `https://github.com/${GITHUB_REPO}/releases`;
 
 export function DownloadCard() {
 	const { m } = useI18n();
@@ -36,32 +28,27 @@ export function DownloadCard() {
 		macos: {
 			name: m.dashboard_download_platform_macos(),
 			icon: Apple,
-			file: "Bittery.dmg",
 			hint: m.dashboard_download_platform_hint_macos(),
 		},
 		windows: {
 			name: m.dashboard_download_platform_windows(),
 			icon: Monitor,
-			file: "Bittery.exe",
 			hint: m.dashboard_download_platform_hint_windows(),
 		},
 		linux: {
 			name: m.dashboard_download_platform_linux(),
 			icon: Monitor,
-			file: "Bittery.AppImage",
 			hint: m.dashboard_download_platform_hint_linux(),
 		},
 		unknown: {
 			name: m.dashboard_download_platform_desktop(),
 			icon: Download,
-			file: "",
 			hint: m.dashboard_download_platform_hint_desktop(),
 		},
 	};
-	const { name, icon: Icon, file, hint } = osInfo[os];
-	const downloadUrl = file
-		? `${RELEASES_URL}/latest/download/${file}`
-		: RELEASES_URL;
+	const { name, icon: Icon, hint } = osInfo[os];
+	const primaryDownload = getPrimaryDownloadForOS(os);
+	const downloadUrl = primaryDownload?.url ?? RELEASES_PAGE_URL;
 	const primaryLabel =
 		os === "unknown"
 			? m.dashboard_download_button_browse_releases()
@@ -115,7 +102,7 @@ export function DownloadCard() {
 				</div>
 
 				<Button variant="outline" className="w-full" asChild>
-					<a href={RELEASES_URL} target="_blank" rel="noopener noreferrer">
+					<a href={RELEASES_PAGE_URL} target="_blank" rel="noopener noreferrer">
 						{m.dashboard_download_button_all_downloads()}
 						<ExternalLink className="ml-2 h-3.5 w-3.5" />
 					</a>

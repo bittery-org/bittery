@@ -32,6 +32,7 @@
 		"./session-refresh-fetch": "./src/session-refresh-fetch.ts",
 		"./types": "./src/types.ts",
 		"./pricing": "./src/pricing.ts",
+		"./releases": "./src/releases.ts",
 		"./rust-rpc-client": "./src/rust-rpc-client.ts",
 		"./vault-key-crypto": "./src/vault-key-crypto.ts"
 	},
