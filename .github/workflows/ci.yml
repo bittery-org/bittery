@@ -105,4 +105,4 @@ jobs:
         run: cargo test --manifest-path apps/server/Cargo.toml
 
       - name: Server lint
-        run: pnpm --filter server run check
+        run: cargo fmt --check --manifest-path apps/server/Cargo.toml && cargo clippy --manifest-path apps/server/Cargo.toml --all-targets --all-features -- -D warnings && cargo check --manifest-path apps/server/Cargo.toml
