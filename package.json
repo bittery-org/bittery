@@ -12,7 +12,8 @@
 	},
 	"scripts": {
 		"preinstall": "export $(cat .env | xargs) || true",
-		"check": "biome check --write .",
+		"check": "biome check . && pnpm --filter server check",
+		"check:fix": "biome check --write . && pnpm --filter server format",
 		"check-types": "turbo check-types",
 		"i18n:check": "pnpm --filter @bittery/i18n run check:keys",
 		"shadcn": "pnpm --filter @bittery/ui run shadcn",
