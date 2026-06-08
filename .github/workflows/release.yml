@@ -175,9 +175,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BITTERY_EXTENSION_ID: ${{ vars.BITTERY_EXTENSION_ID || 'placeholder' }}
         with:
           projectPath: apps/desktop
-          includeRelease: false
           args: --target ${{ matrix.target }}
 
       - name: Upload desktop artifacts
