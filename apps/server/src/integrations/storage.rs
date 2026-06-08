@@ -201,7 +201,7 @@ pub async fn delete_object(key: &str) -> Result<(), StorageError> {
         .key(key)
         .send()
         .await
-        .map_err(StorageError::DeleteObject)?;
+        .map_err(|error| StorageError::DeleteObject(Box::new(error)))?;
 
     Ok(())
 }
@@ -244,7 +244,7 @@ pub async fn head_object(key: &str) -> Result<Option<StorageObjectHead>, Storage
         {
             Ok(None)
         }
-        Err(error) => Err(StorageError::HeadObject(error)),
+        Err(error) => Err(StorageError::HeadObject(Box::new(error))),
     }
 }
 
@@ -359,8 +359,8 @@ pub enum StorageError {
     MissingConfig,
     MissingAttachmentUploadSecret,
     InvalidConfig(String),
-    DeleteObject(aws_sdk_s3::error::SdkError<DeleteObjectError>),
-    HeadObject(aws_sdk_s3::error::SdkError<HeadObjectError>),
+    DeleteObject(Box<aws_sdk_s3::error::SdkError<DeleteObjectError>>),
+    HeadObject(Box<aws_sdk_s3::error::SdkError<HeadObjectError>>),
     Presign(String),
 }
 
@@ -382,6 +382,8 @@ impl std::fmt::Display for StorageError {
 		}
     }
 }
+
+impl std::error::Error for StorageError {}
 
 #[cfg(test)]
 mod tests {
@@ -406,5 +408,3 @@ mod tests {
         assert!(key.ends_with("avatar_file.png"));
     }
 }
-
-impl std::error::Error for StorageError {}

@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow};
 
 use super::*;
+use crate::error::AppErrorCode;
 use crate::test_support::{
     acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
     seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
@@ -291,7 +292,7 @@ fn share_link_daily_limit_uses_positive_env_value_or_default() {
 }
 
 fn share_token(fill: char) -> String {
-    std::iter::repeat(fill).take(32).collect()
+    std::iter::repeat_n(fill, 32).collect()
 }
 
 fn unauthenticated_json_headers() -> HeaderMap {
@@ -1605,6 +1606,7 @@ async fn build_share_router_fixture(pool: &PgPool) -> ShareRouterFixture {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_share_link(
     pool: &PgPool,
     id: &str,
@@ -1684,6 +1686,7 @@ async fn seed_share_access_log(
 		.expect("share access log should seed");
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_share_email_verification(
     pool: &PgPool,
     id: &str,

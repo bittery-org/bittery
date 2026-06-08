@@ -87,6 +87,7 @@ pub async fn insert_user_account(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_team(
     transaction: &mut sqlx::Transaction<'_, Postgres>,
     team_id: &str,
@@ -313,6 +314,7 @@ pub async fn update_user_secret_key_data(
 // Recovery flow queries
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 pub async fn reset_user_password_with_recovery(
     pool: &PgPool,
     email: &str,

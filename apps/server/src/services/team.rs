@@ -1398,7 +1398,7 @@ pub(crate) mod member_handlers {
             actor.billing_plan.as_deref(),
             actor.billing_status.as_deref(),
         )?;
-        if user_id.to_string() == input.user_id {
+        if user_id == input.user_id {
             return Err(bad_request_error(
                 "You cannot remove yourself from the team",
             ));

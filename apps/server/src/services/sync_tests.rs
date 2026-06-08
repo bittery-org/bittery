@@ -12,6 +12,7 @@ use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
 use super::*;
+use crate::error::AppErrorCode;
 use crate::{
     http::sync_sse::create_sync_http_router,
     rpc_request_context_middleware,
@@ -46,19 +47,24 @@ async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
-    let previous = std::env::var("BITTERY_MODE").ok();
-
-    match value {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
-    }
+    let previous = {
+        let _guard = acquire_env_lock();
+        let previous = std::env::var("BITTERY_MODE").ok();
+        match value {
+            Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
+            None => unsafe { std::env::remove_var("BITTERY_MODE") },
+        }
+        previous
+    };
 
     let result = future.await;
 
-    match previous.as_deref() {
-        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
-        None => unsafe { std::env::remove_var("BITTERY_MODE") },
+    {
+        let _guard = acquire_env_lock();
+        match previous.as_deref() {
+            Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
+            None => unsafe { std::env::remove_var("BITTERY_MODE") },
+        }
     }
 
     result
@@ -247,7 +253,7 @@ impl SyncHttpTestApp {
 
 struct SyncRouterFixture {
     owner_user_id: String,
-    outsider_user_id: String,
+    _outsider_user_id: String,
     primary_vault_id: String,
     secondary_vault_id: String,
     hidden_vault_id: String,
@@ -467,7 +473,7 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
 
     SyncRouterFixture {
         owner_user_id,
-        outsider_user_id,
+        _outsider_user_id: outsider_user_id,
         primary_vault_id,
         secondary_vault_id,
         hidden_vault_id,
@@ -481,6 +487,7 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_sync_event(
     pool: &PgPool,
     event_id: &str,
@@ -993,7 +1000,7 @@ async fn sync_http_routes_cover_health_auth_and_revocation_paths() {
         record_session_revocations(
             &app.pool,
             &fixture.owner_user_id,
-            &[session.session_id.clone()],
+            std::slice::from_ref(&session.session_id),
             "device_revoked",
         )
         .await

@@ -321,7 +321,7 @@ pub(crate) async fn create_checkout_session(
     let base_url = web_app_url().trim_end_matches('/').to_string();
     let checkout = stripe_create_checkout_session(CheckoutSessionInput {
         team_id: &team_id,
-        user_id: user_id,
+        user_id,
         customer_id: customer_id.as_deref(),
         customer_email: &actor.email,
         plan: &target_plan,
@@ -659,6 +659,7 @@ enum StripeMockCall {
 #[derive(Clone)]
 enum StripeMockResponse<T> {
     Ok(T),
+    #[allow(dead_code)]
     Err(String),
 }
 

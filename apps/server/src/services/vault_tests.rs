@@ -31,50 +31,67 @@ async fn with_storage_env_async<T, F>(future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
-    let previous_endpoint = std::env::var("BITTERY_STORAGE_ENDPOINT").ok();
-    let previous_bucket = std::env::var("BITTERY_STORAGE_BUCKET").ok();
-    let previous_access_key = std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok();
-    let previous_secret_key = std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok();
-    let previous_region = std::env::var("BITTERY_STORAGE_REGION").ok();
-    let previous_public_url = std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok();
-    let previous_cdn_url = std::env::var("BITTERY_STORAGE_CDN_URL").ok();
-    let previous_attachment_secret = std::env::var("BITTERY_ATTACHMENT_UPLOAD_SECRET").ok();
-
-    set_env_var(
-        "BITTERY_STORAGE_ENDPOINT",
-        Some("https://storage.example.invalid"),
-    );
-    set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
-    set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
-    set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
-    set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
-    set_env_var(
-        "BITTERY_STORAGE_PUBLIC_URL",
-        Some("https://cdn.example.invalid/public"),
-    );
-    set_env_var(
-        "BITTERY_STORAGE_CDN_URL",
-        Some("https://cdn.example.invalid/assets"),
-    );
-    set_env_var(
-        "BITTERY_ATTACHMENT_UPLOAD_SECRET",
-        Some("test-attachment-secret"),
-    );
+    let previous = {
+        let _guard = acquire_env_lock();
+        let previous = (
+            std::env::var("BITTERY_STORAGE_ENDPOINT").ok(),
+            std::env::var("BITTERY_STORAGE_BUCKET").ok(),
+            std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok(),
+            std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok(),
+            std::env::var("BITTERY_STORAGE_REGION").ok(),
+            std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok(),
+            std::env::var("BITTERY_STORAGE_CDN_URL").ok(),
+            std::env::var("BITTERY_ATTACHMENT_UPLOAD_SECRET").ok(),
+        );
+        set_env_var(
+            "BITTERY_STORAGE_ENDPOINT",
+            Some("https://storage.example.invalid"),
+        );
+        set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
+        set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
+        set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
+        set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
+        set_env_var(
+            "BITTERY_STORAGE_PUBLIC_URL",
+            Some("https://cdn.example.invalid/public"),
+        );
+        set_env_var(
+            "BITTERY_STORAGE_CDN_URL",
+            Some("https://cdn.example.invalid/assets"),
+        );
+        set_env_var(
+            "BITTERY_ATTACHMENT_UPLOAD_SECRET",
+            Some("test-attachment-secret"),
+        );
+        previous
+    };
 
     let result = future.await;
 
-    restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
-    restore_env_var("BITTERY_STORAGE_BUCKET", previous_bucket);
-    restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
-    restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
-    restore_env_var("BITTERY_STORAGE_REGION", previous_region);
-    restore_env_var("BITTERY_STORAGE_PUBLIC_URL", previous_public_url);
-    restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
-    restore_env_var(
-        "BITTERY_ATTACHMENT_UPLOAD_SECRET",
-        previous_attachment_secret,
-    );
+    {
+        let _guard = acquire_env_lock();
+        let (
+            previous_endpoint,
+            previous_bucket,
+            previous_access_key,
+            previous_secret_key,
+            previous_region,
+            previous_public_url,
+            previous_cdn_url,
+            previous_attachment_secret,
+        ) = previous;
+        restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
+        restore_env_var("BITTERY_STORAGE_BUCKET", previous_bucket);
+        restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
+        restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
+        restore_env_var("BITTERY_STORAGE_REGION", previous_region);
+        restore_env_var("BITTERY_STORAGE_PUBLIC_URL", previous_public_url);
+        restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
+        restore_env_var(
+            "BITTERY_ATTACHMENT_UPLOAD_SECRET",
+            previous_attachment_secret,
+        );
+    }
 
     result
 }
@@ -83,11 +100,20 @@ async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
-    let previous = std::env::var("BITTERY_MODE").ok();
-    set_env_var("BITTERY_MODE", value);
+    let previous = {
+        let _guard = acquire_env_lock();
+        let previous = std::env::var("BITTERY_MODE").ok();
+        set_env_var("BITTERY_MODE", value);
+        previous
+    };
+
     let result = future.await;
-    restore_env_var("BITTERY_MODE", previous);
+
+    {
+        let _guard = acquire_env_lock();
+        restore_env_var("BITTERY_MODE", previous);
+    }
+
     result
 }
 

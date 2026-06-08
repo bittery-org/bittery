@@ -61,6 +61,7 @@ pub async fn insert_audit_event<'e>(
 /// Insert a sync event.
 ///
 /// The `metadata` field is optional — when `None`, the column is omitted from the insert.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_sync_event<'e>(
     executor: impl sqlx::Executor<'e, Database = Postgres>,
     event_type: &str,

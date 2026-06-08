@@ -36,6 +36,7 @@ const MAX_POSTGRES_IDENTIFIER_LEN: usize = 63;
 
 pub(crate) struct RpcTestResponse {
     pub status: StatusCode,
+    #[allow(dead_code)]
     pub headers: HeaderMap,
     pub body: Value,
 }

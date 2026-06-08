@@ -294,7 +294,7 @@ pub(crate) async fn get_events_since(
     Ok(GetEventsSinceResponse {
         events: mapped_events,
         cursor,
-        has_more: has_more,
+        has_more,
         requires_full_refresh: false,
     })
 }

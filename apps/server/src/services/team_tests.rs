@@ -48,11 +48,20 @@ async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
-    let previous = std::env::var("BITTERY_MODE").ok();
-    set_env_var("BITTERY_MODE", value);
+    let previous = {
+        let _guard = acquire_env_lock();
+        let previous = std::env::var("BITTERY_MODE").ok();
+        set_env_var("BITTERY_MODE", value);
+        previous
+    };
+
     let result = future.await;
-    restore_env_var("BITTERY_MODE", previous);
+
+    {
+        let _guard = acquire_env_lock();
+        restore_env_var("BITTERY_MODE", previous);
+    }
+
     result
 }
 
@@ -60,41 +69,57 @@ async fn with_storage_env_async<T, F>(future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
-    let previous_endpoint = std::env::var("BITTERY_STORAGE_ENDPOINT").ok();
-    let previous_bucket = std::env::var("BITTERY_STORAGE_BUCKET").ok();
-    let previous_access_key = std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok();
-    let previous_secret_key = std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok();
-    let previous_region = std::env::var("BITTERY_STORAGE_REGION").ok();
-    let previous_public_url = std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok();
-    let previous_cdn_url = std::env::var("BITTERY_STORAGE_CDN_URL").ok();
-
-    set_env_var(
-        "BITTERY_STORAGE_ENDPOINT",
-        Some("https://storage.example.invalid"),
-    );
-    set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
-    set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
-    set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
-    set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
-    set_env_var(
-        "BITTERY_STORAGE_PUBLIC_URL",
-        Some("https://cdn.example.invalid/public"),
-    );
-    set_env_var(
-        "BITTERY_STORAGE_CDN_URL",
-        Some("https://cdn.example.invalid/assets"),
-    );
+    let previous = {
+        let _guard = acquire_env_lock();
+        let previous = (
+            std::env::var("BITTERY_STORAGE_ENDPOINT").ok(),
+            std::env::var("BITTERY_STORAGE_BUCKET").ok(),
+            std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok(),
+            std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok(),
+            std::env::var("BITTERY_STORAGE_REGION").ok(),
+            std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok(),
+            std::env::var("BITTERY_STORAGE_CDN_URL").ok(),
+        );
+        set_env_var(
+            "BITTERY_STORAGE_ENDPOINT",
+            Some("https://storage.example.invalid"),
+        );
+        set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
+        set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
+        set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
+        set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
+        set_env_var(
+            "BITTERY_STORAGE_PUBLIC_URL",
+            Some("https://cdn.example.invalid/public"),
+        );
+        set_env_var(
+            "BITTERY_STORAGE_CDN_URL",
+            Some("https://cdn.example.invalid/assets"),
+        );
+        previous
+    };
 
     let result = future.await;
 
-    restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
-    restore_env_var("BITTERY_STORAGE_BUCKET", previous_bucket);
-    restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
-    restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
-    restore_env_var("BITTERY_STORAGE_REGION", previous_region);
-    restore_env_var("BITTERY_STORAGE_PUBLIC_URL", previous_public_url);
-    restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
+    {
+        let _guard = acquire_env_lock();
+        let (
+            previous_endpoint,
+            previous_bucket,
+            previous_access_key,
+            previous_secret_key,
+            previous_region,
+            previous_public_url,
+            previous_cdn_url,
+        ) = previous;
+        restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
+        restore_env_var("BITTERY_STORAGE_BUCKET", previous_bucket);
+        restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
+        restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
+        restore_env_var("BITTERY_STORAGE_REGION", previous_region);
+        restore_env_var("BITTERY_STORAGE_PUBLIC_URL", previous_public_url);
+        restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
+    }
 
     result
 }
@@ -143,12 +168,12 @@ struct TeamRouterFixture {
     no_team_user_id: String,
     outsider_user_id: String,
     team_id: String,
-    outsider_team_id: String,
+    _outsider_team_id: String,
     invitee_user_id: String,
     accept_user_id: String,
     decline_user_id: String,
     accessible_vault_id: String,
-    hidden_vault_id: String,
+    _hidden_vault_id: String,
     admin_inaccessible_vault_id: String,
     accessible_item_id: String,
     admin_inaccessible_item_id: String,
@@ -366,18 +391,19 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
         no_team_user_id,
         outsider_user_id,
         team_id,
-        outsider_team_id,
+        _outsider_team_id: outsider_team_id,
         invitee_user_id,
         accept_user_id,
         decline_user_id,
         accessible_vault_id,
-        hidden_vault_id,
+        _hidden_vault_id: hidden_vault_id,
         admin_inaccessible_vault_id,
         accessible_item_id,
         admin_inaccessible_item_id,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_team_invitation(
     pool: &PgPool,
     invitation_id: &str,

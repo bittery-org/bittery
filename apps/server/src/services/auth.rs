@@ -699,10 +699,7 @@ pub(crate) async fn signup(
         internal_handler_error("Failed to commit signup")
     })?;
 
-    let session = app_state
-        .sessions
-        .create_session(&user_id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user_id, request).await?;
     let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
 
     Ok(SignupResponse {
@@ -855,10 +852,7 @@ pub(crate) async fn signup_with_invitation(
 
     sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
 
-    let session = app_state
-        .sessions
-        .create_session(&user_id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user_id, request).await?;
     let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
 
     Ok(SignupResponse {
@@ -1009,10 +1003,7 @@ pub(crate) async fn finish_login(
             &input.client_proof,
         )
         .map_err(|_| AppError::unauthorized("Invalid credentials"))?;
-    let session = app_state
-        .sessions
-        .create_session(&user.id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user.id, request).await?;
 
     Ok(FinishLoginResponse {
         token: session.token,
@@ -1132,10 +1123,7 @@ pub(crate) async fn reset_password(
         tracing::error!(error = %e, "Failed to record session revocations");
         internal_handler_error("Failed to record session revocations")
     })?;
-    let session = app_state
-        .sessions
-        .create_session(&user_id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user_id, request).await?;
 
     insert_audit_event(
         pool,
@@ -2184,6 +2172,7 @@ async fn insert_user_account(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_team(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     team_id: &str,
@@ -2314,7 +2303,7 @@ fn validate_resource_id(value: &str) -> Result<(), AppError> {
 
 fn validate_hex_string(value: &str, message: &str) -> Result<(), AppError> {
     if value.is_empty()
-        || value.len() % 2 != 0
+        || !value.len().is_multiple_of(2)
         || !value.chars().all(|character| character.is_ascii_hexdigit())
     {
         return Err(bad_request_handler_error(message));

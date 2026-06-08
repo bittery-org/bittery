@@ -48,6 +48,12 @@ struct ControlEntry {
     ref_count: usize,
 }
 
+impl Default for SyncPubSub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SyncPubSub {
     /// Create an in-memory-only instance (no Redis).
     pub fn new() -> Self {
