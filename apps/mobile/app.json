@@ -41,11 +41,7 @@
 				"backgroundColor": "#ffffff"
 			},
 			"package": "io.bittery.app",
-			"permissions": [
-				"USE_BIOMETRIC",
-				"USE_FINGERPRINT",
-				"CAMERA"
-			],
+			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"],
 			"usesCleartextTraffic": true
 		},
 		"web": {
