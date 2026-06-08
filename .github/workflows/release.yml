@@ -168,14 +168,14 @@ jobs:
         shell: bash
         run: |
           cat > apps/desktop/.env.production <<EOF
-          BITTERY_EXTENSION_ID=${{ vars.BITTERY_EXTENSION_ID || 'placeholder' }}
+          BITTERY_EXTENSION_ID=${{ vars.BITTERY_EXTENSION_ID || 'YOUR_PRODUCTION_EXTENSION_ID_HERE' }}
           EOF
 
       - name: Build desktop app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BITTERY_EXTENSION_ID: ${{ vars.BITTERY_EXTENSION_ID || 'placeholder' }}
+          BITTERY_EXTENSION_ID: ${{ vars.BITTERY_EXTENSION_ID || 'YOUR_PRODUCTION_EXTENSION_ID_HERE' }}
         with:
           projectPath: apps/desktop
           args: --target ${{ matrix.target }}
