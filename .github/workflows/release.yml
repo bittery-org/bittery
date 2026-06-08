@@ -181,18 +181,34 @@ jobs:
           projectPath: apps/desktop
           args: --target ${{ matrix.target }}
 
+      - name: Archive desktop artifacts
+        shell: bash
+        run: |
+          mkdir -p release-upload
+          case "${{ matrix.target }}" in
+            aarch64-apple-darwin)
+              find apps/desktop/src-tauri/target -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) -exec cp {} release-upload/ \;
+              ;;
+            x86_64-pc-windows-msvc)
+              find apps/desktop/src-tauri/target -type f \( -name "*.msi" -o -name "*.exe" \) -exec cp {} release-upload/ \;
+              ;;
+            x86_64-unknown-linux-gnu)
+              find apps/desktop/src-tauri/target -type f \( -name "*.deb" -o -name "*.AppImage" \) -exec cp {} release-upload/ \;
+              ;;
+          esac
+          if [ -z "$(ls -A release-upload)" ]; then
+            echo "No desktop artifacts found for ${{ matrix.target }}"
+            exit 1
+          fi
+          tar -czf "desktop-${{ matrix.target }}.tar.gz" -C release-upload .
+
       - name: Upload desktop artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.target }}
           if-no-files-found: error
-          path: |
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.dmg
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.app.tar.gz
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.msi
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.exe
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.deb
-            apps/desktop/src-tauri/target/**/release/bundle/**/*.AppImage
+          compression-level: 0
+          path: desktop-${{ matrix.target }}.tar.gz
 
   build-extension:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -265,11 +281,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download release artifacts
+      - name: Download extension artifact
         uses: actions/download-artifact@v4
         with:
+          name: extension
           path: release-artifacts
-          merge-multiple: true
+
+      - name: Download macOS desktop artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-aarch64-apple-darwin
+          path: release-artifacts
+
+      - name: Download Windows desktop artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-x86_64-pc-windows-msvc
+          path: release-artifacts
+
+      - name: Download Linux desktop artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-x86_64-unknown-linux-gnu
+          path: release-artifacts
+
+      - name: Extract desktop archives
+        shell: bash
+        run: |
+          for archive in release-artifacts/desktop-*.tar.gz; do
+            [ -f "$archive" ] || continue
+            tar -xzf "$archive" -C release-artifacts/
+            rm "$archive"
+          done
 
       - name: Log in to GHCR
         if: startsWith(github.ref, 'refs/tags/v')
