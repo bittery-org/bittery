@@ -1825,7 +1825,7 @@ fn create_signup_verification_token(
         iat: issued_at,
     };
 
-    encode(
+    let token = encode(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(jwt_signing_secret().as_bytes()),
@@ -1833,7 +1833,16 @@ fn create_signup_verification_token(
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to create signup verification token");
         internal_handler_error("Failed to create signup verification token")
-    })
+    })?;
+    if is_dev_auth_stub_enabled() {
+        info!(
+            email = %email,
+            token = %token,
+            invitation_token = invitation_token.unwrap_or("<none>"),
+            "[auth] Signup verification token issued"
+        );
+    }
+    Ok(token)
 }
 
 fn create_recovery_token(email: &str) -> Result<String, AppError> {
@@ -1849,7 +1858,7 @@ fn create_recovery_token(email: &str) -> Result<String, AppError> {
         iat: issued_at,
     };
 
-    encode(
+    let token = encode(
         &Header::new(Algorithm::HS256),
         &claims,
         &EncodingKey::from_secret(jwt_signing_secret().as_bytes()),
@@ -1857,7 +1866,15 @@ fn create_recovery_token(email: &str) -> Result<String, AppError> {
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to create recovery token");
         internal_handler_error("Failed to create recovery token")
-    })
+    })?;
+    if is_dev_auth_stub_enabled() {
+        info!(
+            email = %email,
+            token = %token,
+            "[auth] Recovery token issued"
+        );
+    }
+    Ok(token)
 }
 
 async fn verify_recovery_token(token: &str) -> Option<String> {
@@ -2079,10 +2096,12 @@ fn send_signup_verification_code(
 			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
 		));
     }
-    let _ = email;
-    let _ = code;
-    let _ = invitation_token;
-    info!("[auth-email] Signup verification requested via enabled dev stub");
+    info!(
+        email = %email,
+        code = %code,
+        invitation_token = invitation_token.unwrap_or("<none>"),
+        "[auth-email] Signup verification code"
+    );
     Ok(())
 }
 
@@ -2092,9 +2111,11 @@ fn send_recovery_code(email: &str, code: &str) -> Result<(), AppError> {
 			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
 		));
     }
-    let _ = email;
-    let _ = code;
-    info!("[auth-email] Recovery code requested via enabled dev stub");
+    info!(
+        email = %email,
+        code = %code,
+        "[auth-email] Recovery code"
+    );
     Ok(())
 }
 

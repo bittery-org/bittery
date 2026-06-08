@@ -125,7 +125,11 @@ export function AuthDoorsLayout({
 	};
 
 	return (
-		<div className="flex h-full w-full flex-col md:flex-row">
+		<div className="relative flex h-full w-full flex-col md:flex-row">
+			<div
+				className="absolute inset-x-0 top-0 z-50 h-9"
+				data-tauri-drag-region
+			/>
 			<div className="relative hidden w-1/3 flex-col bg-auth-panel md:flex lg:w-1/3 dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))]">
 				<div className="absolute top-8 left-4 sm:top-9 sm:left-6">
 					<img src="/logo.png" alt="Bittery" className="h-7 w-auto sm:h-10" />
