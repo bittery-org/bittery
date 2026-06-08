@@ -80,6 +80,18 @@ where
     result
 }
 
+async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
+where
+    F: Future<Output = T>,
+{
+    let _guard = acquire_env_lock();
+    let previous = std::env::var("BITTERY_MODE").ok();
+    set_env_var("BITTERY_MODE", value);
+    let result = future.await;
+    restore_env_var("BITTERY_MODE", previous);
+    result
+}
+
 fn unauthenticated_json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -1443,13 +1455,15 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			);
 
 			set_team_billing(&app.pool, &fixture.paid_team_id, "free", "active").await;
-			let plan_forbidden_create_response = app
-				.rpc_call(
+			let plan_forbidden_create_response = with_bittery_mode_async(
+				Some("cloud"),
+				app.rpc_call(
 					"vault.create",
 					json!([{ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key" }]),
 					owner_headers,
-				)
-				.await;
+				),
+			)
+			.await;
 			assert_eq!(plan_forbidden_create_response.status, StatusCode::OK);
 			assert_handler_error(
 				&plan_forbidden_create_response.body,

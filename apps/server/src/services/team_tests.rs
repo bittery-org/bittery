@@ -1557,13 +1557,15 @@ async fn team_delete_paths() {
         let fixture = build_team_router_fixture(&app.pool).await;
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
-        let forbidden_delete = app
-            .rpc_call(
+        let forbidden_delete = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&member_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(forbidden_delete.status, StatusCode::OK);
         assert_handler_error(
             &forbidden_delete.body,
@@ -1588,13 +1590,15 @@ async fn team_delete_paths() {
             "Team deletion is disabled in self-hosted mode. This instance uses a single team.",
         );
 
-        let members_blocked = app
-            .rpc_call(
+        let members_blocked = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&owner_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(members_blocked.status, StatusCode::OK);
         assert_handler_error(
             &members_blocked.body,
@@ -1632,13 +1636,15 @@ async fn team_delete_paths() {
         )
         .await;
         let vault_owner_session = app.issue_session(vault_owner_id).await;
-        let vault_blocked = app
-            .rpc_call(
+        let vault_blocked = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": vault_team_id }]),
                 authenticated_json_headers(&vault_owner_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(vault_blocked.status, StatusCode::OK);
         assert_handler_error(
             &vault_blocked.body,
@@ -1667,13 +1673,15 @@ async fn team_delete_paths() {
         .await;
         assign_user_to_team(&app.pool, success_owner_id, success_team_id, "owner").await;
         let success_session = app.issue_session(success_owner_id).await;
-        let delete_success = app
-            .rpc_call(
+        let delete_success = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": success_team_id }]),
                 authenticated_json_headers(&success_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(delete_success.status, StatusCode::OK);
         assert_eq!(delete_success.body["result"]["Ok"]["success"], json!(true));
         let deleted_team_exists =

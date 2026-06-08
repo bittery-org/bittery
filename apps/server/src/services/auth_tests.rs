@@ -1244,6 +1244,10 @@ where
     }
     unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", "true") };
     unsafe { std::env::remove_var("NODE_ENV") };
+    if mode == Some("cloud") {
+        unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "true") };
+        unsafe { std::env::set_var("BITTERY_CLOUD_BILLING_ENABLED", "true") };
+    }
 
     let result = future.await;
 

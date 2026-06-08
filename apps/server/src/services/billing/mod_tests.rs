@@ -19,7 +19,6 @@ use crate::test_support::{
     seed_user, seed_vault, with_rpc_test_app,
 };
 
-#[derive(Default)]
 struct BillingTestEnv<'a> {
     bittery_mode: Option<&'a str>,
     cloud_billing_enabled: Option<&'a str>,
@@ -29,6 +28,21 @@ struct BillingTestEnv<'a> {
     stripe_price_family: Option<&'a str>,
     stripe_price_team: Option<&'a str>,
     stripe_mock: Option<StripeMockState>,
+}
+
+impl Default for BillingTestEnv<'_> {
+    fn default() -> Self {
+        Self {
+            bittery_mode: Some("cloud"),
+            cloud_billing_enabled: Some("true"),
+            stripe_secret_key: None,
+            web_app_url: None,
+            stripe_price_personal: None,
+            stripe_price_family: None,
+            stripe_price_team: None,
+            stripe_mock: None,
+        }
+    }
 }
 
 #[derive(Clone)]

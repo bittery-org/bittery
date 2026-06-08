@@ -5,6 +5,13 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+fn load_dotenv_once() {
+    static LOADED: OnceLock<()> = OnceLock::new();
+    LOADED.get_or_init(|| {
+        dotenvy::dotenv().ok();
+    });
+}
+
 use axum::{
     body::{to_bytes, Body},
     http::{
@@ -349,7 +356,7 @@ struct TestDatabase {
 
 impl TestDatabase {
     async fn create(test_name: &str) -> Self {
-        dotenvy::dotenv().ok();
+        load_dotenv_once();
         let base_database_url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to run server integration tests");
         let admin_database_url = admin_database_url(&base_database_url);
@@ -466,7 +473,7 @@ mod tests {
     }
 
     async fn count_test_databases_matching(pattern: &str) -> i64 {
-        dotenvy::dotenv().ok();
+        load_dotenv_once();
         let base_database_url = std::env::var("DATABASE_URL")
             .expect("DATABASE_URL must be set to run server integration tests");
         let admin_pool = db::connect(&admin_database_url(&base_database_url))
