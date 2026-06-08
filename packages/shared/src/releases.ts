@@ -81,7 +81,9 @@ let latestReleaseCache: {
 
 const LATEST_RELEASE_CACHE_TTL_MS = 10 * 60 * 1000;
 
-export async function resolveLatestRelease(): Promise<{ tagName: string } | null> {
+export async function resolveLatestRelease(): Promise<{
+	tagName: string;
+} | null> {
 	if (
 		latestReleaseCache &&
 		Date.now() - latestReleaseCache.fetchedAt < LATEST_RELEASE_CACHE_TTL_MS
@@ -113,8 +115,6 @@ export async function resolveLatestRelease(): Promise<{ tagName: string } | null
 		};
 		return { tagName: data.tag_name };
 	} catch {
-		return latestReleaseCache
-			? { tagName: latestReleaseCache.tagName }
-			: null;
+		return latestReleaseCache ? { tagName: latestReleaseCache.tagName } : null;
 	}
 }
