@@ -8,7 +8,6 @@ use aws_config::BehaviorVersion;
 use aws_sdk_s3::{
     config::{Credentials, Region},
     operation::delete_object::DeleteObjectError,
-    operation::get_object::GetObjectError,
     operation::head_object::HeadObjectError,
     presigning::PresigningConfig,
     Client,
@@ -361,7 +360,6 @@ pub enum StorageError {
     MissingAttachmentUploadSecret,
     InvalidConfig(String),
     DeleteObject(aws_sdk_s3::error::SdkError<DeleteObjectError>),
-    GetObject(aws_sdk_s3::error::SdkError<GetObjectError>),
     HeadObject(aws_sdk_s3::error::SdkError<HeadObjectError>),
     Presign(String),
 }
@@ -379,7 +377,6 @@ impl std::fmt::Display for StorageError {
 			),
 			Self::InvalidConfig(error) => write!(f, "invalid storage config: {error}"),
 			Self::DeleteObject(error) => write!(f, "failed to delete storage object: {error}"),
-			Self::GetObject(error) => write!(f, "failed to load storage object: {error}"),
 			Self::HeadObject(error) => write!(f, "failed to inspect storage object: {error}"),
 			Self::Presign(error) => write!(f, "failed to create presigned upload: {error}"),
 		}

@@ -1109,7 +1109,9 @@ fn assert_cloud_billing_enabled() -> Result<(), AppError> {
     }
 
     if !cloud_billing_enabled() {
-        return Err(forbidden_error("Billing is disabled during the hosted beta"));
+        return Err(forbidden_error(
+            "Billing is disabled during the hosted beta",
+        ));
     }
 
     if !is_stripe_api_configured() {

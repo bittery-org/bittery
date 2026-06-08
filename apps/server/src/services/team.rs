@@ -37,6 +37,7 @@ pub struct TeamIdInput {
     pub team_id: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
@@ -209,6 +210,7 @@ pub struct SuccessResponse {
     pub success: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]

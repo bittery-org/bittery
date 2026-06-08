@@ -1,4 +1,3 @@
-
 use super::{
     assert_optional_team_management_entitlement, assert_team_management_entitlement, bittery_mode,
     ensure_exact_rotation_vault_set, ensure_team_admin, generate_secure_token,

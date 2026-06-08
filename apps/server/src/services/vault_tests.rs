@@ -1,4 +1,3 @@
-
 use super::{
     assert_item_write_access, attachment_quota_lock_key, base64_encoded_length,
     encrypted_attachment_storage_size, pending_attachment_upload_expiry,

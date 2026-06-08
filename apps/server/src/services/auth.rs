@@ -427,7 +427,6 @@ struct DbMeRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct DbAccountMutationUserRow {
-    id: String,
     email: String,
     encrypted_master_key: Option<String>,
     team_id: Option<String>,
@@ -1313,7 +1312,7 @@ pub(crate) async fn store_recovery_key(
 ) -> Result<LogoutResponse, AppError> {
     let pool = db_pool(app_state)?;
     let user = query_as::<_, DbAccountMutationUserRow>(
-		"SELECT u.id, u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
+		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
 	.bind(&session.user_id)
 	.fetch_optional(pool)
@@ -1352,7 +1351,7 @@ pub(crate) async fn delete_account(
 ) -> Result<LogoutResponse, AppError> {
     let pool = db_pool(app_state)?;
     let user = query_as::<_, DbAccountMutationUserRow>(
-		"SELECT u.id, u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
+		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
 	.bind(&session.user_id)
 	.fetch_optional(pool)

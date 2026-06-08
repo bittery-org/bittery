@@ -12,7 +12,7 @@ pub async fn upsert_beta_waitlist_entry(
     source: Option<&str>,
 ) -> Result<DbBetaWaitlistRow, AppError> {
     query_as::<_, DbBetaWaitlistRow>(
-		r#"
+        r#"
 		INSERT INTO beta_waitlist (id, email, name, use_case, source)
 		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (lower(email))
@@ -23,17 +23,17 @@ pub async fn upsert_beta_waitlist_entry(
 			updated_at = $6
 		RETURNING id, email, name, use_case, source, created_at, updated_at
 		"#,
-	)
-	.bind(id)
-	.bind(email)
-	.bind(name)
-	.bind(use_case)
-	.bind(source)
-	.bind(OffsetDateTime::now_utc())
-	.fetch_one(pool)
-	.await
-	.map_err(|e| {
-		tracing::error!(error = %e, "Failed to upsert beta waitlist entry");
-		AppError::internal("Failed to join waitlist")
-	})
+    )
+    .bind(id)
+    .bind(email)
+    .bind(name)
+    .bind(use_case)
+    .bind(source)
+    .bind(OffsetDateTime::now_utc())
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to upsert beta waitlist entry");
+        AppError::internal("Failed to join waitlist")
+    })
 }

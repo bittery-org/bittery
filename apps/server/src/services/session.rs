@@ -129,8 +129,6 @@ pub struct RenameDeviceInput {
 #[derive(Clone, Debug)]
 pub(crate) struct SessionSnapshot {
     pub(crate) id: String,
-    pub(crate) user_id: String,
-    pub(crate) expires_at: OffsetDateTime,
     pub(crate) created_at: OffsetDateTime,
     pub(crate) last_active_at: OffsetDateTime,
     pub(crate) platform: String,
@@ -323,7 +321,7 @@ impl SessionService {
         }
     }
 
-    pub async fn create_session(
+    pub(crate) async fn create_session(
         &self,
         user_id: &str,
         request: &RequestMetadata,
@@ -1264,8 +1262,6 @@ pub(crate) fn format_rfc3339(value: OffsetDateTime) -> String {
 fn snapshot_from_db_session(row: DbSessionRecord) -> SessionSnapshot {
     SessionSnapshot {
         id: row.id,
-        user_id: row.user_id,
-        expires_at: row.expires_at,
         created_at: row.created_at,
         last_active_at: row.last_active_at,
         platform: normalize_session_platform(row.platform.as_deref()),
@@ -1282,8 +1278,6 @@ fn snapshot_from_db_session(row: DbSessionRecord) -> SessionSnapshot {
 fn snapshot_from_memory_session(record: SessionRecord) -> SessionSnapshot {
     SessionSnapshot {
         id: record.session_id,
-        user_id: record.user_id,
-        expires_at: record.expires_at,
         created_at: record.created_at,
         last_active_at: record.last_active_at,
         platform: record.platform,

@@ -11,7 +11,7 @@ use ts_rs::TS;
 use crate::{
     config::{bittery_mode, format_timestamp},
     db::models::*,
-    error::{AppError, AppErrorCode},
+    error::AppError,
     integrations::storage,
     repo::{
         common::load_scoped_item_access,
@@ -21,7 +21,6 @@ use crate::{
         },
     },
     services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
-    AppState,
 };
 
 #[derive(Debug, Clone, Deserialize, TS)]
@@ -605,7 +604,6 @@ fn sync_event_dto(event: DbSyncEventRow) -> Result<SyncEventDto, AppError> {
         timestamp: timestamp_millis(event.created_at),
     })
 }
-
 
 pub(crate) fn sse_json_event<T: Serialize>(
     event_name: &str,

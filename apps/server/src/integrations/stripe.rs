@@ -100,13 +100,6 @@ struct StripeSubscriptionResponse {
 struct StripeSubscriptionItem {
     id: String,
     quantity: Option<i64>,
-    current_period_end: Option<i64>,
-    price: Option<StripePrice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StripePrice {
-    id: String,
 }
 
 #[derive(Debug, Deserialize)]

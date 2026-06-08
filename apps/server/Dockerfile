@@ -33,7 +33,7 @@ RUN groupadd --system --gid 10001 bittery \
 	&& chown -R 10001:10001 /app /home/bittery
 
 COPY --from=builder --chown=10001:10001 /app/apps/server/target/release/bittery-server ./bittery-server
-COPY --chown=10001:10001 packages/db/src/migrations ./migrations
+COPY --chown=10001:10001 apps/server/migrations ./migrations
 
 ENV MIGRATIONS_FOLDER=/app/migrations
 ENV PORT=3000

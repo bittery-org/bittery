@@ -171,7 +171,13 @@ pub(crate) async fn resolve_connection_limit(
     }
 
     // Query DB for billing plan
-    let limit = match load_team_billing_entitlement(db_pool, user_id, "Failed to load plan for connection limit").await {
+    let limit = match load_team_billing_entitlement(
+        db_pool,
+        user_id,
+        "Failed to load plan for connection limit",
+    )
+    .await
+    {
         Ok(Some(row)) => {
             let plan = row.billing_plan.as_deref().unwrap_or("free");
             let status = row.billing_status.as_deref().unwrap_or("none");

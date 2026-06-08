@@ -1,4 +1,3 @@
-
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
 use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow};

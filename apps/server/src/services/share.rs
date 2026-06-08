@@ -8,7 +8,7 @@ use ts_rs::TS;
 use crate::{
     config::{bittery_mode, format_timestamp},
     db::models::*,
-    error::{AppError, AppErrorCode},
+    error::AppError,
     repo::{
         common::{generate_resource_id, insert_audit_event, load_scoped_item_access},
         share::{

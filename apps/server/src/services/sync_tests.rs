@@ -1,4 +1,3 @@
-
 use std::future::Future;
 
 use axum::{
@@ -180,7 +179,9 @@ async fn sync_pubsub_broadcasts_session_revocation() {
     // Give the spawned task a moment to send
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let notification = control_rx.try_recv().expect("control notification should be received");
+    let notification = control_rx
+        .try_recv()
+        .expect("control notification should be received");
     match notification {
         SyncNotification::SessionRevoked { session_id, reason } => {
             assert_eq!(session_id, "session-1");
@@ -189,7 +190,6 @@ async fn sync_pubsub_broadcasts_session_revocation() {
         _ => panic!("expected SessionRevoked notification"),
     }
 }
-
 
 #[derive(Clone)]
 struct SyncHttpTestApp {

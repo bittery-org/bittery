@@ -1,4 +1,3 @@
-
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
 use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
@@ -668,9 +667,15 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                     .rpc_call("billing.status", json!([]), headers.clone())
                     .await;
                 assert_eq!(status_response.status, StatusCode::OK);
-                assert_eq!(status_response.body["result"]["Ok"]["enabled"], json!(false));
+                assert_eq!(
+                    status_response.body["result"]["Ok"]["enabled"],
+                    json!(false)
+                );
                 assert_eq!(status_response.body["result"]["Ok"]["plan"], json!("free"));
-                assert_eq!(status_response.body["result"]["Ok"]["status"], json!("none"));
+                assert_eq!(
+                    status_response.body["result"]["Ok"]["status"],
+                    json!("none")
+                );
                 assert_eq!(
                     status_response.body["result"]["Ok"]["requiresPayment"],
                     json!(false)
