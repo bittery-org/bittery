@@ -1,4 +1,12 @@
+import {
+	DESKTOP_DOWNLOADS,
+	detectOS,
+	getPrimaryDownloadForOS,
+	RELEASES_PAGE_URL,
+	resolveLatestRelease,
+} from "@bittery/shared/releases";
 import { createFileRoute } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
 import {
 	Download,
 	ExternalLink,
@@ -12,8 +20,16 @@ import {
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
 
+const getLatestRelease = createServerFn({ method: "GET" }).handler(async () => {
+	return resolveLatestRelease();
+});
+
 export const Route = createFileRoute("/download")({
 	component: DownloadPage,
+	loader: async () => {
+		const latestRelease = await getLatestRelease();
+		return { latestRelease };
+	},
 	head: () => ({
 		meta: [
 			{ title: "Download — Bittery" },
@@ -160,29 +176,37 @@ interface DownloadOption {
 	href: string;
 	icon: React.ComponentType<{ className?: string }>;
 	badge?: string;
+	secondaryHref?: { label: string; href: string };
 }
+
+const extensionDownloadUrl = DESKTOP_DOWNLOADS.extension.url;
 
 const desktopDownloads: DownloadOption[] = [
 	{
 		label: "macOS",
-		description: "Apple Silicon & Intel",
-		href: "#",
+		description: "Apple Silicon",
+		href: DESKTOP_DOWNLOADS.macos.url,
 		icon: AppleIcon,
-		badge: "Coming soon",
 	},
 	{
 		label: "Windows",
-		description: "Windows 10 or later",
-		href: "#",
+		description: "Installer or portable .exe",
+		href: DESKTOP_DOWNLOADS.windows.url,
 		icon: WindowsIcon,
-		badge: "Coming soon",
+		secondaryHref: {
+			label: "Portable .exe",
+			href: DESKTOP_DOWNLOADS.windowsPortable.url,
+		},
 	},
 	{
 		label: "Linux",
-		description: ".deb, .rpm & AppImage",
-		href: "#",
+		description: "AppImage & .deb packages",
+		href: DESKTOP_DOWNLOADS.linuxAppImage.url,
 		icon: LinuxIcon,
-		badge: "Coming soon",
+		secondaryHref: {
+			label: ".deb package",
+			href: DESKTOP_DOWNLOADS.linuxDeb.url,
+		},
 	},
 ];
 
@@ -206,24 +230,21 @@ const mobileDownloads: DownloadOption[] = [
 const browserDownloads: DownloadOption[] = [
 	{
 		label: "Chrome",
-		description: "Chrome Web Store",
-		href: "#",
+		description: "Sideload extension (.zip)",
+		href: extensionDownloadUrl,
 		icon: ChromeIcon,
-		badge: "Coming soon",
 	},
 	{
 		label: "Firefox",
-		description: "Firefox Add-ons",
-		href: "#",
+		description: "Sideload extension (.zip)",
+		href: extensionDownloadUrl,
 		icon: FirefoxIcon,
-		badge: "Coming soon",
 	},
 	{
 		label: "Edge",
-		description: "Edge Add-ons",
-		href: "#",
+		description: "Sideload extension (.zip)",
+		href: extensionDownloadUrl,
 		icon: EdgeIcon,
-		badge: "Coming soon",
 	},
 	{
 		label: "Safari",
@@ -234,10 +255,9 @@ const browserDownloads: DownloadOption[] = [
 	},
 	{
 		label: "Brave",
-		description: "Chrome Web Store",
-		href: "#",
+		description: "Sideload extension (.zip)",
+		href: extensionDownloadUrl,
 		icon: ChromeIcon,
-		badge: "Coming soon",
 	},
 ];
 
@@ -282,11 +302,25 @@ function DownloadCard({
 				</div>
 				<span className="text-muted-foreground text-xs">
 					{option.description}
+					{option.secondaryHref && (
+						<>
+							{" · "}
+							<a
+								href={option.secondaryHref.href}
+								className="relative z-10 text-primary hover:underline"
+								onClick={(event) => event.stopPropagation()}
+							>
+								{option.secondaryHref.label}
+							</a>
+						</>
+					)}
 				</span>
 			</div>
 			{!isComingSoon && (
 				<a
 					href={option.href}
+					target="_blank"
+					rel="noopener noreferrer"
 					className="absolute inset-0 rounded-2xl"
 					aria-label={`Download Bittery for ${option.label}`}
 				>
@@ -341,6 +375,10 @@ function SectionBlock({
 /* ------------------------------------------------------------------ */
 
 function DownloadPage() {
+	const { latestRelease } = Route.useLoaderData();
+	const os = detectOS();
+	const primaryDownload = getPrimaryDownloadForOS(os);
+
 	return (
 		<>
 			{/* ─── Hero ──────────────────────────────────────────── */}
@@ -359,7 +397,9 @@ function DownloadPage() {
 					>
 						<div className="mb-5 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 font-medium text-primary text-xs">
 							<MonitorSmartphone className="size-3.5" />
-							Hosted beta
+							{latestRelease
+								? `Latest release ${latestRelease.tagName}`
+								: "Desktop apps available"}
 						</div>
 						<h1 className="font-bold font-display text-3xl tracking-tight sm:text-4xl lg:text-5xl">
 							Get Bittery for{" "}
@@ -368,12 +408,55 @@ function DownloadPage() {
 							</span>
 						</h1>
 						<p className="mx-auto mt-4 max-w-2xl text-base text-muted-foreground leading-relaxed sm:text-lg">
-							Use the web app during hosted beta, or self-host Bittery on your
-							own infrastructure. Native apps and browser extensions are coming
-							soon.
+							Download native desktop apps and the browser extension, use the web
+							app during hosted beta, or self-host Bittery on your own
+							infrastructure.
 						</p>
 
 						<div className="mt-8 flex flex-wrap items-center justify-center gap-3">
+							{primaryDownload ? (
+								<Button size="lg" className="gap-2 rounded-full px-7" asChild>
+									<a
+										href={primaryDownload.url}
+										target="_blank"
+										rel="noopener noreferrer"
+									>
+										<Download className="size-4" />
+										Download for{" "}
+										{os === "macos"
+											? "macOS"
+											: os === "windows"
+												? "Windows"
+												: "Linux"}
+									</a>
+								</Button>
+							) : (
+								<Button size="lg" className="gap-2 rounded-full px-7" asChild>
+									<a
+										href={RELEASES_PAGE_URL}
+										target="_blank"
+										rel="noopener noreferrer"
+									>
+										<Download className="size-4" />
+										Download Desktop
+									</a>
+								</Button>
+							)}
+							<Button
+								size="lg"
+								variant="outline"
+								className="gap-2 rounded-full px-7"
+								asChild
+							>
+								<a
+									href={RELEASES_PAGE_URL}
+									target="_blank"
+									rel="noopener noreferrer"
+								>
+									All downloads
+									<ExternalLink className="size-4" />
+								</a>
+							</Button>
 							<Button
 								size="lg"
 								variant="outline"

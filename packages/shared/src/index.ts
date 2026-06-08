@@ -10,6 +10,7 @@ export * from "./password";
 export * from "./password-analysis";
 export * from "./password-history";
 export * from "./pricing";
+export * from "./releases";
 export * from "./rpc";
 export * from "./rpc-client";
 export * from "./rpc-client-factory";

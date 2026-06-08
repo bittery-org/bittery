@@ -187,13 +187,13 @@ jobs:
           mkdir -p release-upload
           case "${{ matrix.target }}" in
             aarch64-apple-darwin)
-              find apps/desktop/src-tauri/target -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) -exec cp {} release-upload/ \;
+              find apps/desktop/src-tauri/target -path "*/release/bundle/*" -type f \( -name "*.dmg" -o -name "*.app.tar.gz" \) ! -name "default._*" -exec cp {} release-upload/ \;
               ;;
             x86_64-pc-windows-msvc)
-              find apps/desktop/src-tauri/target -type f \( -name "*.msi" -o -name "*.exe" \) -exec cp {} release-upload/ \;
+              find apps/desktop/src-tauri/target -path "*/release/bundle/*" -type f \( -name "*.msi" -o -name "*setup.exe" -o -name "Bittery.exe" \) -exec cp {} release-upload/ \;
               ;;
             x86_64-unknown-linux-gnu)
-              find apps/desktop/src-tauri/target -type f \( -name "*.deb" -o -name "*.AppImage" \) -exec cp {} release-upload/ \;
+              find apps/desktop/src-tauri/target -path "*/release/bundle/*" -type f \( -name "*.deb" -o -name "*.AppImage" \) -exec cp {} release-upload/ \;
               ;;
           esac
           if [ -z "$(ls -A release-upload)" ]; then
@@ -333,6 +333,53 @@ jobs:
           tar -czf "bittery-web-static-${TAG}.tar.gz" -C ./bittery-web-static .
           mv bittery-web-static-*.tar.gz release-artifacts/
 
+      - name: Prepare stable release assets
+        shell: bash
+        run: |
+          mkdir -p release-upload
+          shopt -s nullglob
+
+          mac_dmg=(release-artifacts/bittery_*_aarch64.dmg)
+          if ((${#mac_dmg[@]})); then
+            cp "${mac_dmg[0]}" release-upload/Bittery.dmg
+          fi
+
+          win_setup=(release-artifacts/bittery_*_x64-setup.exe)
+          if ((${#win_setup[@]})); then
+            cp "${win_setup[0]}" release-upload/Bittery-setup.exe
+          fi
+
+          if [ -f release-artifacts/Bittery.exe ]; then
+            cp release-artifacts/Bittery.exe release-upload/Bittery.exe
+          fi
+
+          linux_appimage=(release-artifacts/bittery_*_amd64.AppImage)
+          if ((${#linux_appimage[@]})); then
+            cp "${linux_appimage[0]}" release-upload/Bittery.AppImage
+          fi
+
+          linux_deb=(release-artifacts/bittery_*_amd64.deb)
+          if ((${#linux_deb[@]})); then
+            cp "${linux_deb[0]}" release-upload/Bittery.deb
+          fi
+
+          extension_zip=(release-artifacts/bittery-extension-*.zip)
+          if ((${#extension_zip[@]})); then
+            cp "${extension_zip[0]}" release-upload/bittery-extension.zip
+          fi
+
+          web_static=(release-artifacts/bittery-web-static-*.tar.gz)
+          if ((${#web_static[@]})); then
+            cp "${web_static[0]}" release-upload/
+          fi
+
+          if [ -z "$(ls -A release-upload)" ]; then
+            echo "No release assets prepared"
+            exit 1
+          fi
+
+          ls -la release-upload/
+
       - name: Prepare release notes
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
@@ -355,7 +402,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-artifacts/**
+          files: release-upload/**
           body_path: release-notes.md
           generate_release_notes: true
           append_body: true
