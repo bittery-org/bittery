@@ -4,6 +4,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev --port 3003",
+		"start": "node .output/server/index.mjs",
 		"build": "vite build",
 		"preview": "vite preview",
 		"format": "biome format",
