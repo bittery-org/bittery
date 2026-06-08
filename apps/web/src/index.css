@@ -19,7 +19,7 @@ html {
 	--radius: 1.25rem;
 	--background: oklch(1 0 0);
 	--foreground: oklch(0.16 0.015 280);
-	--card: oklch(0.975 0.006 290);
+	--card: oklch(0.99 0.002 290);
 	--card-foreground: oklch(0.16 0.015 280);
 	--popover: oklch(1 0 0);
 	--popover-foreground: oklch(0.16 0.015 280);

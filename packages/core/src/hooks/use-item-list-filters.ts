@@ -43,8 +43,6 @@ export function useItemListFilters<TItem extends ItemListFilterable>({
 		useState<ItemListSortDirection>(initialSortDirection);
 
 	const filteredItems = useMemo(() => {
-		console.log("filtering items");
-
 		let result = [...items];
 
 		if (categoryFilter !== "all") {
