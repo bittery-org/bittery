@@ -17,7 +17,9 @@ export function ErrorState({ error, onBack }: ErrorStateProps) {
 					{m.mob_detail_error_title()}
 				</Card.Title>
 				<Card.Description className="mb-4 text-center">
-					{error instanceof Error ? error.message : m.mob_detail_error_unknown()}
+					{error instanceof Error
+						? error.message
+						: m.mob_detail_error_unknown()}
 				</Card.Description>
 				<Button onPress={onBack} variant="primary">
 					Go Back

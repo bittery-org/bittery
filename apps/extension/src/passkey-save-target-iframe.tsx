@@ -159,7 +159,7 @@ function PasskeySaveTargetIframe() {
 						>
 							<span className="flex items-center gap-2 text-xs">
 								<IconUserOutlineDuo18 size={14} />
-							{m.ext_passkey_save_attach()}
+								{m.ext_passkey_save_attach()}
 							</span>
 							<span className="text-[10px] text-muted-foreground">
 								{data.existingItems.length}
@@ -237,15 +237,17 @@ function PasskeySaveTargetIframe() {
 						>
 							<span className="flex items-center gap-2 text-xs">
 								<IconPlusOutlineDuo18 size={14} />
-							{m.ext_passkey_save_create_new()}
-						</span>
-						<span className="text-[10px] text-muted-foreground">
-							{selectedVault?.name || m.ext_passkey_save_select_vault()}
+								{m.ext_passkey_save_create_new()}
+							</span>
+							<span className="text-[10px] text-muted-foreground">
+								{selectedVault?.name || m.ext_passkey_save_select_vault()}
 							</span>
 						</button>
 						{mode === "create-new" && (
 							<div className="space-y-1 rounded-md border p-2">
-								<p className="text-muted-foreground text-xs">{m.ext_passkey_save_to_vault()}</p>
+								<p className="text-muted-foreground text-xs">
+									{m.ext_passkey_save_to_vault()}
+								</p>
 								<div className="space-y-1">
 									{data.writableVaults.map((vault) => (
 										<button

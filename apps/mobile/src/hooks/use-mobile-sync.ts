@@ -207,13 +207,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 
 	useEffect(() => {
 		// Intentionally no per-status logging here; this hook is always mounted.
-	}, [
-		syncState.status.connectionStatus,
-		syncState.isConnected,
-		clientId,
-		serverUrl,
-		syncAccountEmail,
-	]);
+	}, []);
 
 	return {
 		...syncState,

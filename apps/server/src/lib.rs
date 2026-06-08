@@ -32,10 +32,10 @@ pub use rpc::sync::create_sync_router;
 pub use rpc::team::create_team_router;
 pub use rpc::vault::create_vault_router;
 pub use services::auth::rpc_request_context_middleware;
-pub use services::session::{SeededSession, SessionService};
 pub use services::connection_registry::ConnectionRegistry;
-pub use services::sync_pubsub::SyncPubSub;
 pub use services::redis::init_redis;
+pub use services::session::{SeededSession, SessionService};
+pub use services::sync_pubsub::SyncPubSub;
 
 #[derive(Clone)]
 pub struct AppState {

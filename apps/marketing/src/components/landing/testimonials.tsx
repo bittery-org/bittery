@@ -74,14 +74,14 @@ function EmptyState() {
 				{PLACEHOLDER_QUOTES.map((text, i) => (
 					<div
 						key={i}
-						className="flex flex-col rounded-2xl border border-dashed border-border bg-card p-6"
+						className="flex flex-col rounded-2xl border border-border border-dashed bg-card p-6"
 					>
 						<Quote className="mb-3 size-4 shrink-0 text-primary/40" />
-						<p className="flex-1 text-muted-foreground/70 text-sm leading-relaxed italic">
+						<p className="flex-1 text-muted-foreground/70 text-sm italic leading-relaxed">
 							"{text}"
 						</p>
 						<div className="mt-4 flex items-center gap-3 border-border/60 border-t pt-4">
-							<div className="size-8 animate-pulse rounded-full bg-muted/60 shrink-0" />
+							<div className="size-8 shrink-0 animate-pulse rounded-full bg-muted/60" />
 							<div className="space-y-1.5">
 								<div className="h-2 w-20 animate-pulse rounded-full bg-muted/60" />
 								<div className="h-2 w-14 animate-pulse rounded-full bg-muted/50" />

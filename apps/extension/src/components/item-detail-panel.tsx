@@ -205,7 +205,8 @@ function LoginItemDetail({
 		const deltaDays = Math.floor(deltaMs / (24 * 60 * 60 * 1000));
 		if (deltaDays <= 0) return m.ext_detail_last_used_today();
 		if (deltaDays === 1) return m.ext_detail_last_used_yesterday();
-		if (deltaDays < 30) return m.ext_detail_last_used_days_ago({ count: deltaDays });
+		if (deltaDays < 30)
+			return m.ext_detail_last_used_days_ago({ count: deltaDays });
 		return new Date(timestamp).toLocaleDateString();
 	};
 
@@ -249,7 +250,12 @@ function LoginItemDetail({
 				setIsSaving(false);
 			}
 		},
-		[item.id, onItemUpdated],
+		[
+			item.id,
+			onItemUpdated,
+			m.ext_detail_totp_save_failed,
+			m.ext_detail_totp_saved,
+		],
 	);
 
 	const handleCancelQRScanner = useCallback(() => {
@@ -260,7 +266,9 @@ function LoginItemDetail({
 		<div className="space-y-3">
 			{item.url && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">{m.ext_detail_label_website()}</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_website()}
+					</Label>
 					<InputGroup>
 						<InputGroupInput value={item.url} readOnly />
 						<InputGroupAddon align="inline-end">
@@ -285,7 +293,9 @@ function LoginItemDetail({
 
 			{item.username && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">{m.ext_detail_label_username()}</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_username()}
+					</Label>
 					<InputGroup>
 						<InputGroupInput value={item.username} readOnly />
 						<InputGroupAddon align="inline-end">
@@ -302,7 +312,9 @@ function LoginItemDetail({
 
 			{item.password && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">{m.ext_detail_label_password()}</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_password()}
+					</Label>
 					<InputGroup>
 						<InputGroupInput
 							type={showPassword ? "text" : "password"}
@@ -336,7 +348,9 @@ function LoginItemDetail({
 
 			{passkeys.length > 0 && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">{m.ext_detail_label_passkeys()}</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_passkeys()}
+					</Label>
 					<div className="space-y-1">
 						{passkeys.map((passkey, index) => (
 							<div
@@ -362,7 +376,7 @@ function LoginItemDetail({
 									variant="ghost"
 									size="icon"
 									className="size-7 shrink-0"
-							title={m.ext_detail_passkey_copy_id()}
+									title={m.ext_detail_passkey_copy_id()}
 									onClick={() => handleCopy(passkey.credentialId, "Passkey ID")}
 								>
 									<IconCopyOutlineDuo18 className="size-4" />
@@ -375,7 +389,9 @@ function LoginItemDetail({
 
 			{/* TOTP Section */}
 			<div className="space-y-2">
-				<Label className="font-medium text-sm">{m.ext_detail_label_2fa()}</Label>
+				<Label className="font-medium text-sm">
+					{m.ext_detail_label_2fa()}
+				</Label>
 				{item.totpSecret ? (
 					<InlineTotpDisplay
 						totpSecret={item.totpSecret}
@@ -409,7 +425,9 @@ function LoginItemDetail({
 
 			{notes && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">{m.ext_detail_label_notes()}</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_notes()}
+					</Label>
 					<Card>
 						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
@@ -446,7 +464,9 @@ function CreditCardDetail({ item }: { item: DecryptedItem }) {
 			</div>
 			{notes && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">{m.ext_detail_label_notes()}</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_notes()}
+					</Label>
 					<Card>
 						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
@@ -467,7 +487,9 @@ function IdentityDetail({ item }: { item: DecryptedItem }) {
 			</div>
 			{notes && (
 				<div className="space-y-2">
-					<Label className="font-medium text-sm">{m.ext_detail_label_notes()}</Label>
+					<Label className="font-medium text-sm">
+						{m.ext_detail_label_notes()}
+					</Label>
 					<Card>
 						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
 					</Card>
@@ -497,7 +519,9 @@ export function ItemDetailPanel({ item, onItemUpdated }: ItemDetailPanelProps) {
 							{item.url}
 						</p>
 					) : isSecureNote ? (
-						<p className="mt-0.5 text-muted-foreground text-xs">{m.ext_detail_secure_note()}</p>
+						<p className="mt-0.5 text-muted-foreground text-xs">
+							{m.ext_detail_secure_note()}
+						</p>
 					) : null}
 				</div>
 			</div>

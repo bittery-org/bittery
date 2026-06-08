@@ -1,11 +1,7 @@
-
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
 use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
-use std::{
-    future::Future,
-    sync::{Mutex, OnceLock},
-};
+use std::future::Future;
 use time::{macros::datetime, OffsetDateTime};
 
 use super::{
@@ -15,11 +11,10 @@ use super::{
 };
 use crate::error::AppErrorCode;
 use crate::test_support::{
-    acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, with_rpc_test_app,
+    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
+    seed_item, seed_team, seed_user, seed_vault, with_rpc_test_app,
 };
 
-#[derive(Default)]
 struct BillingTestEnv<'a> {
     bittery_mode: Option<&'a str>,
     cloud_billing_enabled: Option<&'a str>,
@@ -29,6 +24,21 @@ struct BillingTestEnv<'a> {
     stripe_price_family: Option<&'a str>,
     stripe_price_team: Option<&'a str>,
     stripe_mock: Option<StripeMockState>,
+}
+
+impl Default for BillingTestEnv<'_> {
+    fn default() -> Self {
+        Self {
+            bittery_mode: Some("cloud"),
+            cloud_billing_enabled: Some("true"),
+            stripe_secret_key: None,
+            web_app_url: None,
+            stripe_price_personal: None,
+            stripe_price_family: None,
+            stripe_price_team: None,
+            stripe_mock: None,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -44,6 +54,7 @@ struct BillingRouterFixture {
 }
 
 #[derive(FromRow)]
+#[allow(dead_code)]
 struct BillingTeamTestRow {
     billing_plan: String,
     billing_status: String,
@@ -101,16 +112,17 @@ async fn with_billing_test_env_async<T, F>(env: BillingTestEnv<'_>, future: F) -
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
-    let previous_mode = std::env::var("BITTERY_MODE").ok();
-    let previous_cloud_billing = std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok();
-    let previous_stripe_secret = std::env::var("STRIPE_SECRET_KEY").ok();
-    let previous_web_app_url = std::env::var("WEB_APP_URL").ok();
-    let previous_personal_price = std::env::var("STRIPE_PRICE_PERSONAL_MONTHLY").ok();
-    let previous_family_price = std::env::var("STRIPE_PRICE_FAMILY_MONTHLY").ok();
-    let previous_team_price = std::env::var("STRIPE_PRICE_TEAM_SEAT_MONTHLY").ok();
-    let previous_stripe_mock = replace_stripe_mock_state(env.stripe_mock);
-
+    let _guard = acquire_env_lock_async().await;
+    let previous = (
+        std::env::var("BITTERY_MODE").ok(),
+        std::env::var("BITTERY_CLOUD_BILLING_ENABLED").ok(),
+        std::env::var("STRIPE_SECRET_KEY").ok(),
+        std::env::var("WEB_APP_URL").ok(),
+        std::env::var("STRIPE_PRICE_PERSONAL_MONTHLY").ok(),
+        std::env::var("STRIPE_PRICE_FAMILY_MONTHLY").ok(),
+        std::env::var("STRIPE_PRICE_TEAM_SEAT_MONTHLY").ok(),
+        replace_stripe_mock_state(env.stripe_mock),
+    );
     set_env_var("BITTERY_MODE", env.bittery_mode);
     set_env_var("BITTERY_CLOUD_BILLING_ENABLED", env.cloud_billing_enabled);
     set_env_var("STRIPE_SECRET_KEY", env.stripe_secret_key);
@@ -121,6 +133,16 @@ where
 
     let result = future.await;
 
+    let (
+        previous_mode,
+        previous_cloud_billing,
+        previous_stripe_secret,
+        previous_web_app_url,
+        previous_personal_price,
+        previous_family_price,
+        previous_team_price,
+        previous_stripe_mock,
+    ) = previous;
     restore_env_var("BITTERY_MODE", previous_mode);
     restore_env_var("BITTERY_CLOUD_BILLING_ENABLED", previous_cloud_billing);
     restore_env_var("STRIPE_SECRET_KEY", previous_stripe_secret);
@@ -281,6 +303,7 @@ async fn seed_attachment(
 		.expect("attachment should seed");
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn update_team_billing_state(
     pool: &PgPool,
     team_id: &str,
@@ -654,9 +677,15 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                     .rpc_call("billing.status", json!([]), headers.clone())
                     .await;
                 assert_eq!(status_response.status, StatusCode::OK);
-                assert_eq!(status_response.body["result"]["Ok"]["enabled"], json!(false));
+                assert_eq!(
+                    status_response.body["result"]["Ok"]["enabled"],
+                    json!(false)
+                );
                 assert_eq!(status_response.body["result"]["Ok"]["plan"], json!("free"));
-                assert_eq!(status_response.body["result"]["Ok"]["status"], json!("none"));
+                assert_eq!(
+                    status_response.body["result"]["Ok"]["status"],
+                    json!("none")
+                );
                 assert_eq!(
                     status_response.body["result"]["Ok"]["requiresPayment"],
                     json!(false)

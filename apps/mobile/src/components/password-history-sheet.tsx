@@ -126,7 +126,7 @@ export function PasswordHistorySheet({
 					{sortedHistory.length === 0 ? (
 						<View className="rounded-lg bg-card p-4">
 							<Text className="text-center text-muted text-sm">
-							{m.mob_password_history_empty()}
+								{m.mob_password_history_empty()}
 							</Text>
 						</View>
 					) : (
@@ -158,7 +158,9 @@ export function PasswordHistorySheet({
 													}}
 												>
 													<StyledCopy size={16} className="text-current" />
-													<Button.Label>{m.mob_password_history_copy()}</Button.Label>
+													<Button.Label>
+														{m.mob_password_history_copy()}
+													</Button.Label>
 												</Button>
 												<Button
 													variant={isCurrent ? "secondary" : "primary"}

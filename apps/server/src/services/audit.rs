@@ -8,7 +8,7 @@ use ts_rs::TS;
 
 use crate::{
     config::bittery_mode,
-    error::{AppError, AppErrorCode},
+    error::AppError,
     repo::audit::{
         load_actor, load_audit_events, load_share_access_events, load_team_members,
         AuditEventFilter, AuditEventRow, ShareAccessEventRow, TeamMemberRow,

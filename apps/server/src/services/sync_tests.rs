@@ -1,4 +1,3 @@
-
 use std::future::Future;
 
 use axum::{
@@ -13,13 +12,14 @@ use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
 use super::*;
+use crate::error::AppErrorCode;
 use crate::{
     http::sync_sse::create_sync_http_router,
     rpc_request_context_middleware,
     services::session_control::record_session_revocations,
     test_support::{
-        acquire_env_lock, authenticated_json_headers, seed_item, seed_user, seed_vault,
-        seed_vault_key, with_rpc_test_app, RpcTestApp,
+        acquire_env_lock, acquire_env_lock_async, authenticated_json_headers, seed_item, seed_user,
+        seed_vault, seed_vault_key, with_rpc_test_app, RpcTestApp,
     },
     AppState,
 };
@@ -47,9 +47,8 @@ async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
+    let _guard = acquire_env_lock_async().await;
     let previous = std::env::var("BITTERY_MODE").ok();
-
     match value {
         Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
         None => unsafe { std::env::remove_var("BITTERY_MODE") },
@@ -180,7 +179,9 @@ async fn sync_pubsub_broadcasts_session_revocation() {
     // Give the spawned task a moment to send
     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-    let notification = control_rx.try_recv().expect("control notification should be received");
+    let notification = control_rx
+        .try_recv()
+        .expect("control notification should be received");
     match notification {
         SyncNotification::SessionRevoked { session_id, reason } => {
             assert_eq!(session_id, "session-1");
@@ -189,7 +190,6 @@ async fn sync_pubsub_broadcasts_session_revocation() {
         _ => panic!("expected SessionRevoked notification"),
     }
 }
-
 
 #[derive(Clone)]
 struct SyncHttpTestApp {
@@ -247,7 +247,7 @@ impl SyncHttpTestApp {
 
 struct SyncRouterFixture {
     owner_user_id: String,
-    outsider_user_id: String,
+    _outsider_user_id: String,
     primary_vault_id: String,
     secondary_vault_id: String,
     hidden_vault_id: String,
@@ -467,7 +467,7 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
 
     SyncRouterFixture {
         owner_user_id,
-        outsider_user_id,
+        _outsider_user_id: outsider_user_id,
         primary_vault_id,
         secondary_vault_id,
         hidden_vault_id,
@@ -481,6 +481,7 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_sync_event(
     pool: &PgPool,
     event_id: &str,
@@ -993,7 +994,7 @@ async fn sync_http_routes_cover_health_auth_and_revocation_paths() {
         record_session_revocations(
             &app.pool,
             &fixture.owner_user_id,
-            &[session.session_id.clone()],
+            std::slice::from_ref(&session.session_id),
             "device_revoked",
         )
         .await

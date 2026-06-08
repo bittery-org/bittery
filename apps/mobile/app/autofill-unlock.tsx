@@ -214,7 +214,8 @@ export default function AutofillUnlockScreen() {
 		onError: (error) => {
 			// Show specific error message
 			const errorMessage =
-				error.message || resolveBiometricErrorMessage(error.type || "unknown", m);
+				error.message ||
+				resolveBiometricErrorMessage(error.type || "unknown", m);
 
 			if (error.type === "master_password_required") {
 				setBiometricError(errorMessage);
@@ -293,7 +294,9 @@ export default function AutofillUnlockScreen() {
 			console.error("Unlock error:", error);
 			Alert.alert(
 				m.mob_unlock_alert_error_title(),
-				error instanceof Error ? error.message : m.mob_unlock_alert_error_unlock_failed(),
+				error instanceof Error
+					? error.message
+					: m.mob_unlock_alert_error_unlock_failed(),
 			);
 		},
 	});
@@ -324,7 +327,10 @@ export default function AutofillUnlockScreen() {
 			if (showPartialAlert) {
 				Alert.alert(
 					m.mob_autofill_unlock_alert_partial(),
-					m.mob_autofill_unlock_alert_partial_message({ unlocked: String(result.unlocked.length), total: String(allAccounts.length) }),
+					m.mob_autofill_unlock_alert_partial_message({
+						unlocked: String(result.unlocked.length),
+						total: String(allAccounts.length),
+					}),
 				);
 			}
 
@@ -345,7 +351,17 @@ export default function AutofillUnlockScreen() {
 				],
 			);
 		},
-		[allAccounts.length, refreshAccounts, router, setNativeMuksForEmails],
+		[
+			allAccounts.length,
+			refreshAccounts,
+			router,
+			setNativeMuksForEmails,
+			m.mob_autofill_unlock_alert_ok,
+			m.mob_autofill_unlock_alert_partial,
+			m.mob_autofill_unlock_alert_partial_message,
+			m.mob_autofill_unlock_alert_unlocked_message,
+			m.mob_autofill_unlock_alert_unlocked_title,
+		],
 	);
 
 	const quickUnlockAll = useQuickUnlockAll({
@@ -357,16 +373,17 @@ export default function AutofillUnlockScreen() {
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			Alert.alert(m.mob_unlock_alert_error_title(), error.message || m.mob_unlock_alert_error_unlock_failed());
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				error.message || m.mob_unlock_alert_error_unlock_failed(),
+			);
 		},
 	});
 
 	const handleBiometricUnlock = async () => {
 		if (isAllAccountsMode) {
 			if (allAccountsStatus.requiresPasswordReentry || passwordRequired) {
-				setBiometricError(
-					m.mob_unlock_password_required_description(),
-				);
+				setBiometricError(m.mob_unlock_password_required_description());
 				return;
 			}
 
@@ -395,9 +412,7 @@ export default function AutofillUnlockScreen() {
 
 		// Check if master password is required first (UI-level check for immediate feedback)
 		if (sessionState?.requiresPasswordReentry || passwordRequired) {
-			setBiometricError(
-				m.mob_unlock_password_required_description(),
-			);
+			setBiometricError(m.mob_unlock_password_required_description());
 			return;
 		}
 
@@ -408,7 +423,10 @@ export default function AutofillUnlockScreen() {
 	const handlePasswordUnlock = async () => {
 		if (isAllAccountsMode) {
 			if (!password.trim()) {
-				Alert.alert(m.mob_unlock_alert_error_title(), m.mob_unlock_alert_error_enter_password());
+				Alert.alert(
+					m.mob_unlock_alert_error_title(),
+					m.mob_unlock_alert_error_enter_password(),
+				);
 				return;
 			}
 
@@ -418,7 +436,10 @@ export default function AutofillUnlockScreen() {
 		}
 
 		if (!activeAccount || !password.trim()) {
-			Alert.alert(m.mob_unlock_alert_error_title(), m.mob_unlock_alert_error_enter_password());
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				m.mob_unlock_alert_error_enter_password(),
+			);
 			return;
 		}
 
@@ -535,13 +556,19 @@ export default function AutofillUnlockScreen() {
 										<Text className="ml-3 font-medium text-foreground">
 											{loading
 												? m.mob_unlock_authenticating()
-												: m.mob_unlock_biometric_label({ biometricType: biometricType || m.mob_unlock_biometric_fallback() })}
+												: m.mob_unlock_biometric_label({
+														biometricType:
+															biometricType ||
+															m.mob_unlock_biometric_fallback(),
+													})}
 										</Text>
 									</View>
 								</Button>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted">{m.mob_unlock_or_divider()}</Text>
+									<Text className="mx-4 text-muted">
+										{m.mob_unlock_or_divider()}
+									</Text>
 									<View className="h-px flex-1 bg-border" />
 								</View>
 							</View>
@@ -585,7 +612,9 @@ export default function AutofillUnlockScreen() {
 								variant="primary"
 								size="lg"
 							>
-								{loading ? m.mob_unlock_button_unlocking() : m.mob_unlock_button_unlock()}
+								{loading
+									? m.mob_unlock_button_unlocking()
+									: m.mob_unlock_button_unlock()}
 							</Button>
 
 							<Button

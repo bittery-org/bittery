@@ -427,7 +427,6 @@ struct DbMeRow {
 
 #[derive(Debug, sqlx::FromRow)]
 struct DbAccountMutationUserRow {
-    id: String,
     email: String,
     encrypted_master_key: Option<String>,
     team_id: Option<String>,
@@ -700,10 +699,7 @@ pub(crate) async fn signup(
         internal_handler_error("Failed to commit signup")
     })?;
 
-    let session = app_state
-        .sessions
-        .create_session(&user_id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user_id, request).await?;
     let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
 
     Ok(SignupResponse {
@@ -856,10 +852,7 @@ pub(crate) async fn signup_with_invitation(
 
     sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
 
-    let session = app_state
-        .sessions
-        .create_session(&user_id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user_id, request).await?;
     let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
 
     Ok(SignupResponse {
@@ -1010,10 +1003,7 @@ pub(crate) async fn finish_login(
             &input.client_proof,
         )
         .map_err(|_| AppError::unauthorized("Invalid credentials"))?;
-    let session = app_state
-        .sessions
-        .create_session(&user.id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user.id, request).await?;
 
     Ok(FinishLoginResponse {
         token: session.token,
@@ -1133,10 +1123,7 @@ pub(crate) async fn reset_password(
         tracing::error!(error = %e, "Failed to record session revocations");
         internal_handler_error("Failed to record session revocations")
     })?;
-    let session = app_state
-        .sessions
-        .create_session(&user_id, &request)
-        .await?;
+    let session = app_state.sessions.create_session(&user_id, request).await?;
 
     insert_audit_event(
         pool,
@@ -1313,7 +1300,7 @@ pub(crate) async fn store_recovery_key(
 ) -> Result<LogoutResponse, AppError> {
     let pool = db_pool(app_state)?;
     let user = query_as::<_, DbAccountMutationUserRow>(
-		"SELECT u.id, u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
+		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
 	.bind(&session.user_id)
 	.fetch_optional(pool)
@@ -1352,7 +1339,7 @@ pub(crate) async fn delete_account(
 ) -> Result<LogoutResponse, AppError> {
     let pool = db_pool(app_state)?;
     let user = query_as::<_, DbAccountMutationUserRow>(
-		"SELECT u.id, u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
+		"SELECT u.email, u.encrypted_master_key, u.team_id, t.owner_id AS team_owner_id, t.type::text AS team_type FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
 	.bind(&session.user_id)
 	.fetch_optional(pool)
@@ -2185,6 +2172,7 @@ async fn insert_user_account(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_team(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     team_id: &str,
@@ -2315,7 +2303,7 @@ fn validate_resource_id(value: &str) -> Result<(), AppError> {
 
 fn validate_hex_string(value: &str, message: &str) -> Result<(), AppError> {
     if value.is_empty()
-        || value.len() % 2 != 0
+        || !value.len().is_multiple_of(2)
         || !value.chars().all(|character| character.is_ascii_hexdigit())
     {
         return Err(bad_request_handler_error(message));

@@ -49,11 +49,26 @@ export function ShareItemSheet({
 
 	const EXPIRATION_OPTIONS = useMemo(
 		() => [
-			{ value: "1hour" as ShareExpirationOption, label: m.mob_share_expiry_1hour() },
-			{ value: "1day" as ShareExpirationOption, label: m.mob_share_expiry_1day() },
-			{ value: "7days" as ShareExpirationOption, label: m.mob_share_expiry_7days() },
-			{ value: "14days" as ShareExpirationOption, label: m.mob_share_expiry_14days() },
-			{ value: "30days" as ShareExpirationOption, label: m.mob_share_expiry_30days() },
+			{
+				value: "1hour" as ShareExpirationOption,
+				label: m.mob_share_expiry_1hour(),
+			},
+			{
+				value: "1day" as ShareExpirationOption,
+				label: m.mob_share_expiry_1day(),
+			},
+			{
+				value: "7days" as ShareExpirationOption,
+				label: m.mob_share_expiry_7days(),
+			},
+			{
+				value: "14days" as ShareExpirationOption,
+				label: m.mob_share_expiry_14days(),
+			},
+			{
+				value: "30days" as ShareExpirationOption,
+				label: m.mob_share_expiry_30days(),
+			},
 		],
 		[m],
 	);

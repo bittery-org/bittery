@@ -1424,7 +1424,7 @@ pub(crate) async fn delete_vault(
     )
     .await?;
     for member in member_rows {
-        if member.user_id == user_id.to_string() {
+        if member.user_id == user_id {
             continue;
         }
         insert_vault_access_revoked_sync_event(
@@ -2253,7 +2253,7 @@ pub(crate) mod member_handlers {
     ) -> Result<SuccessResponse, AppError> {
         let role = validate_vault_member_role(&input.role)?;
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
-        if input.user_id == user_id.to_string() {
+        if input.user_id == user_id {
             return Err(bad_request_error("Cannot change your own role"));
         }
         let target_access = load_vault_access(pool, &input.vault_id, &input.user_id)
@@ -2480,7 +2480,7 @@ pub(crate) mod member_handlers {
         input: RemoveVaultMemberInput,
     ) -> Result<RemoveVaultMemberResponse, AppError> {
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
-        if input.user_id == user_id.to_string() {
+        if input.user_id == user_id {
             return Err(bad_request_error("Cannot remove yourself"));
         }
         let target_access = load_vault_access(pool, &input.vault_id, &input.user_id)
@@ -2743,13 +2743,7 @@ pub(crate) mod member_handlers {
         };
         use crate::db::models::DbTeamBillingEntitlementRow;
         use crate::error::AppErrorCode;
-        use crate::test_support::{
-            acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item,
-            seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
-        };
-        use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
-        use serde_json::{json, Value};
-        use sqlx::{query, query_scalar, PgPool};
+        use crate::test_support::acquire_env_lock;
 
         fn set_env_var(key: &str, value: Option<&str>) {
             match value {
@@ -2898,6 +2892,7 @@ async fn insert_item_sync_event(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_item_sync_event_with_metadata(
     transaction: &mut Transaction<'_, Postgres>,
     event_type: &str,

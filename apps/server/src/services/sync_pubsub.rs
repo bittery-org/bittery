@@ -48,6 +48,12 @@ struct ControlEntry {
     ref_count: usize,
 }
 
+impl Default for SyncPubSub {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SyncPubSub {
     /// Create an in-memory-only instance (no Redis).
     pub fn new() -> Self {
@@ -122,9 +128,7 @@ impl SyncPubSub {
                 let pool = redis.publish_pool.clone();
                 let channel = control_channel(user_id);
                 tokio::spawn(async move {
-                    if let Err(error) =
-                        pool.next().publish::<(), _, _>(&channel, bytes).await
-                    {
+                    if let Err(error) = pool.next().publish::<(), _, _>(&channel, bytes).await {
                         warn!(error = %error, "failed to publish session revocation to Redis");
                     }
                 });
@@ -230,9 +234,7 @@ impl SyncPubSub {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    if let Ok(notification) =
-                        serde_json::from_slice::<SyncNotification>(&payload)
-                    {
+                    if let Ok(notification) = serde_json::from_slice::<SyncNotification>(&payload) {
                         let channels = pubsub.control_channels.read().await;
                         if let Some(entry) = channels.get(user_id) {
                             let _ = entry.sender.send(notification);

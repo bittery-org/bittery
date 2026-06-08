@@ -55,9 +55,7 @@ pub async fn join_beta_waitlist(
 
 fn normalize_email(email: &str) -> Result<String, AppError> {
     let normalized = email.trim().to_ascii_lowercase();
-    if normalized.is_empty()
-        || normalized.len() > MAX_EMAIL_LEN
-        || !EMAIL_RE.is_match(&normalized)
+    if normalized.is_empty() || normalized.len() > MAX_EMAIL_LEN || !EMAIL_RE.is_match(&normalized)
     {
         return Err(AppError::bad_request("Enter a valid email address"));
     }

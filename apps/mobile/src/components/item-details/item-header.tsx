@@ -140,7 +140,9 @@ export function ItemHeader({
 							>
 								<StyledShare2 size={18} className="mr-1.5 text-current" />
 								<Button.Label>
-									{isSharing ? m.mob_item_header_action_share_creating() : m.mob_item_header_action_share()}
+									{isSharing
+										? m.mob_item_header_action_share_creating()
+										: m.mob_item_header_action_share()}
 								</Button.Label>
 							</Button>
 							{item.category === "login" && onPasswordHistory && (
@@ -154,7 +156,9 @@ export function ItemHeader({
 									size="sm"
 								>
 									<StyledHistory size={18} className="mr-1.5 text-current" />
-									<Button.Label>{m.mob_item_header_action_password_history()}</Button.Label>
+									<Button.Label>
+										{m.mob_item_header_action_password_history()}
+									</Button.Label>
 								</Button>
 							)}
 							<Button
@@ -166,7 +170,9 @@ export function ItemHeader({
 							>
 								<StyledTrash2 size={18} className="mr-1.5 text-danger" />
 								<Button.Label className="text-danger">
-									{isDeleting ? m.mob_item_header_action_deleting() : m.mob_item_header_action_delete()}
+									{isDeleting
+										? m.mob_item_header_action_deleting()
+										: m.mob_item_header_action_delete()}
 								</Button.Label>
 							</Button>
 						</View>

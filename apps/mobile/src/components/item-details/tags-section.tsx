@@ -13,7 +13,9 @@ export function TagsSection({ tags }: TagsSectionProps) {
 	return (
 		<Card variant="default" className="mb-2">
 			<Card.Body className="py-3">
-				<Card.Description className="mb-2">{m.mob_detail_field_tags()}</Card.Description>
+				<Card.Description className="mb-2">
+					{m.mob_detail_field_tags()}
+				</Card.Description>
 				<View className="flex-row flex-wrap gap-2">
 					{tags.map((tag) => (
 						<Chip key={tag} size="sm" variant="secondary">

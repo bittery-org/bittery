@@ -114,7 +114,7 @@ export default function UnlockScreen() {
 				targetAccount.name ||
 				targetAccount.email.split("@")[0],
 		};
-	}, [targetAccount, unlockMode]);
+	}, [targetAccount, unlockMode, m.mob_unlock_all_accounts]);
 
 	// Get session state for the target account
 	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
@@ -236,7 +236,8 @@ export default function UnlockScreen() {
 		onError: (error) => {
 			// Show specific error message
 			const errorMessage =
-				error.message || resolveBiometricErrorMessage(error.type || "unknown", m);
+				error.message ||
+				resolveBiometricErrorMessage(error.type || "unknown", m);
 
 			if (error.type === "master_password_required") {
 				setBiometricError(errorMessage);
@@ -337,7 +338,10 @@ export default function UnlockScreen() {
 			if (showPartialToast) {
 				toast.show({
 					variant: "warning",
-					label: m.mob_unlock_partial_toast({ unlocked: String(result.unlocked.length), total: String(allAccounts.length) }),
+					label: m.mob_unlock_partial_toast({
+						unlocked: String(result.unlocked.length),
+						total: String(allAccounts.length),
+					}),
 					placement: "bottom",
 				});
 			}
@@ -350,6 +354,7 @@ export default function UnlockScreen() {
 			router,
 			setNativeMuksForEmails,
 			toast,
+			m.mob_unlock_partial_toast,
 		],
 	);
 
@@ -362,7 +367,10 @@ export default function UnlockScreen() {
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
-			Alert.alert(m.mob_unlock_alert_error_title(), error.message || m.mob_unlock_alert_error_unlock_failed());
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				error.message || m.mob_unlock_alert_error_unlock_failed(),
+			);
 		},
 	});
 
@@ -385,9 +393,9 @@ export default function UnlockScreen() {
 			try {
 				const result = await storage.unlockAllAccountsWithBiometric();
 				if (result.unlocked.length === 0) {
-				setBiometricError(m.mob_unlock_biometric_failed());
-				return;
-			}
+					setBiometricError(m.mob_unlock_biometric_failed());
+					return;
+				}
 				await finalizeAllAccountsUnlock(result, result.failed.length > 0);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);
@@ -400,9 +408,7 @@ export default function UnlockScreen() {
 
 		// Check if master password is required first (UI-level check for immediate feedback)
 		if (sessionState?.requiresPasswordReentry) {
-			setBiometricError(
-				m.mob_unlock_password_required_description(),
-			);
+			setBiometricError(m.mob_unlock_password_required_description());
 			return;
 		}
 
@@ -413,7 +419,10 @@ export default function UnlockScreen() {
 	const handlePasswordUnlock = async () => {
 		if (unlockMode === "all") {
 			if (!password.trim()) {
-				Alert.alert(m.mob_unlock_alert_error_title(), m.mob_unlock_alert_error_enter_password());
+				Alert.alert(
+					m.mob_unlock_alert_error_title(),
+					m.mob_unlock_alert_error_enter_password(),
+				);
 				return;
 			}
 
@@ -423,7 +432,10 @@ export default function UnlockScreen() {
 		}
 
 		if (!targetAccount || !password.trim()) {
-			Alert.alert(m.mob_unlock_alert_error_title(), m.mob_unlock_alert_error_enter_password());
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				m.mob_unlock_alert_error_enter_password(),
+			);
 			return;
 		}
 
@@ -564,7 +576,9 @@ export default function UnlockScreen() {
 												</Text>
 												<Text className="text-muted text-sm">
 													{unlockMode === "all"
-														? m.mob_unlock_accounts_count({ count: String(allAccounts.length) })
+														? m.mob_unlock_accounts_count({
+																count: String(allAccounts.length),
+															})
 														: targetAccount?.email}
 												</Text>
 											</View>
@@ -574,9 +588,14 @@ export default function UnlockScreen() {
 									<Select.Portal>
 										<Select.Overlay />
 										<Select.Content presentation="dialog">
-											<Select.ListLabel>{m.mob_unlock_select_account()}</Select.ListLabel>
+											<Select.ListLabel>
+												{m.mob_unlock_select_account()}
+											</Select.ListLabel>
 											{allAccounts.length > 1 && (
-												<Select.Item value="all" label={m.mob_unlock_all_accounts()}>
+												<Select.Item
+													value="all"
+													label={m.mob_unlock_all_accounts()}
+												>
 													<View className="flex-row items-center gap-3">
 														<Avatar size="md" alt={m.mob_unlock_all_accounts()}>
 															<Avatar.Fallback>
@@ -586,7 +605,9 @@ export default function UnlockScreen() {
 														<View className="flex-1">
 															<Select.ItemLabel />
 															<Text className="text-muted text-sm">
-																{m.mob_unlock_accounts_count({ count: String(allAccounts.length) })}
+																{m.mob_unlock_accounts_count({
+																	count: String(allAccounts.length),
+																})}
 															</Text>
 														</View>
 													</View>
@@ -700,13 +721,19 @@ export default function UnlockScreen() {
 										<Text className="ml-3 font-medium text-foreground">
 											{loading
 												? m.mob_unlock_authenticating()
-												: m.mob_unlock_biometric_label({ biometricType: biometricType || m.mob_unlock_biometric_fallback() })}
+												: m.mob_unlock_biometric_label({
+														biometricType:
+															biometricType ||
+															m.mob_unlock_biometric_fallback(),
+													})}
 										</Text>
 									</View>
 								</Button>
 								<View className="my-4 flex-row items-center">
 									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted">{m.mob_unlock_or_divider()}</Text>
+									<Text className="mx-4 text-muted">
+										{m.mob_unlock_or_divider()}
+									</Text>
 									<View className="h-px flex-1 bg-border" />
 								</View>
 							</View>
@@ -750,7 +777,9 @@ export default function UnlockScreen() {
 								variant="primary"
 								size="lg"
 							>
-								{loading ? m.mob_unlock_button_unlocking() : m.mob_unlock_button_unlock()}
+								{loading
+									? m.mob_unlock_button_unlocking()
+									: m.mob_unlock_button_unlock()}
 							</Button>
 
 							<Button

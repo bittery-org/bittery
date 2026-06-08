@@ -17,8 +17,8 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
-import { useI18n } from "../providers/i18n-provider";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
+import { useI18n } from "../providers/i18n-provider";
 
 interface DesktopStatus {
 	available: boolean;
@@ -135,7 +135,9 @@ export function SettingsPage() {
 				<div className="space-y-6">
 					{/* Security Section */}
 					<div className="space-y-4">
-						<h2 className="font-semibold text-lg">{m.ext_settings_section_security()}</h2>
+						<h2 className="font-semibold text-lg">
+							{m.ext_settings_section_security()}
+						</h2>
 
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
@@ -148,7 +150,11 @@ export function SettingsPage() {
 									</Label>
 									<p className="text-muted-foreground text-xs">
 										{desktopStatus?.available
-											? m.ext_settings_auto_lock_managed({ timeout: formatTimeout(desktopStatus.autolockTimeoutMs) })
+											? m.ext_settings_auto_lock_managed({
+													timeout: formatTimeout(
+														desktopStatus.autolockTimeoutMs,
+													),
+												})
 											: m.ext_settings_auto_lock_description()}
 									</p>
 								</div>
@@ -162,7 +168,9 @@ export function SettingsPage() {
 								}
 							>
 								<SelectTrigger className="w-[140px]">
-									<SelectValue placeholder={m.ext_settings_auto_lock_placeholder()} />
+									<SelectValue
+										placeholder={m.ext_settings_auto_lock_placeholder()}
+									/>
 								</SelectTrigger>
 								<SelectContent>
 									{AUTO_LOCK_OPTIONS.map((option) => (
@@ -177,7 +185,9 @@ export function SettingsPage() {
 
 					{/* Account Section */}
 					<div className="space-y-4">
-						<h2 className="font-semibold text-lg">{m.ext_settings_section_account()}</h2>
+						<h2 className="font-semibold text-lg">
+							{m.ext_settings_section_account()}
+						</h2>
 
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
@@ -185,7 +195,9 @@ export function SettingsPage() {
 									<IconArrowDoorOutOutlineDuo18 className="size-5 text-muted-foreground" />
 								</div>
 								<div>
-									<Label className="font-medium text-sm">{m.ext_settings_sign_out_label()}</Label>
+									<Label className="font-medium text-sm">
+										{m.ext_settings_sign_out_label()}
+									</Label>
 									<p className="text-muted-foreground text-xs">
 										{desktopStatus?.available
 											? m.ext_settings_sign_out_managed()

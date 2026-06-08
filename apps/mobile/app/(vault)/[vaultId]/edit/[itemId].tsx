@@ -235,7 +235,10 @@ function EditItemForm({
 			console.error("Error updating item:", error);
 			toast.show({
 				variant: "danger",
-				label: error instanceof Error ? error.message : m.mob_edit_item_toast_failed(),
+				label:
+					error instanceof Error
+						? error.message
+						: m.mob_edit_item_toast_failed(),
 				placement: "bottom",
 			});
 		} finally {

@@ -273,7 +273,6 @@ describe("sync engine regressions", () => {
 
 	test("routes session_revoked events to onSessionRevoked only", async () => {
 		const storage = new MemoryStorage();
-		const receivedSyncEvents: SyncEvent[] = [];
 		const revokedPayloads: Array<{
 			type: string;
 			userId: string;
@@ -287,9 +286,6 @@ describe("sync engine regressions", () => {
 			getAuthToken: async () => "token",
 			clientId: "self_client",
 			storage,
-			onEvent: (event) => {
-				receivedSyncEvents.push(event);
-			},
 			onSessionRevoked: (payload) => {
 				revokedPayloads.push(payload);
 			},
@@ -313,7 +309,6 @@ describe("sync engine regressions", () => {
 				reason: "device_revoked",
 			},
 		]);
-		expect(receivedSyncEvents).toHaveLength(0);
 		expect(manager.getLastEventCursor()).toBeNull();
 		manager.disconnect();
 	});

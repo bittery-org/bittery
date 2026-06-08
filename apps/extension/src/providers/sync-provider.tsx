@@ -58,9 +58,7 @@ interface SyncFullRefreshMessage {
 	type: "SYNC_FULL_REFRESH_REQUIRED";
 }
 
-type BackgroundMessage =
-	| SyncStatusMessage
-	| SyncFullRefreshMessage;
+type BackgroundMessage = SyncStatusMessage | SyncFullRefreshMessage;
 
 function isBackgroundMessage(message: unknown): message is BackgroundMessage {
 	if (!message || typeof message !== "object") {

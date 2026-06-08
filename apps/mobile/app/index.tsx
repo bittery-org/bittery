@@ -117,7 +117,9 @@ export default function Index() {
 			<View className="flex-1 items-center justify-center bg-background">
 				<ActivityIndicator size="large" color="#000" />
 				{showAuthModal && (
-					<Text className="mt-4 text-muted text-sm">{m.mob_index_authenticating()}</Text>
+					<Text className="mt-4 text-muted text-sm">
+						{m.mob_index_authenticating()}
+					</Text>
 				)}
 			</View>
 		);

@@ -502,10 +502,7 @@ function SettingsPage() {
 										{m.settings_general_appearance_description()}
 									</p>
 								</div>
-								<Select
-									value={theme}
-									onValueChange={setTheme}
-								>
+								<Select value={theme} onValueChange={setTheme}>
 									<SelectTrigger
 										aria-label={m.settings_general_appearance_title()}
 										className="h-7 min-w-28 max-w-30 border-0 bg-transparent px-1.5 text-sm shadow-none ring-0 focus:ring-0"

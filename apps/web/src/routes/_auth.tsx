@@ -23,7 +23,7 @@ function AuthLayout() {
 	return (
 		<div className="flex min-h-svh flex-col md:h-svh md:flex-row md:overflow-hidden">
 			{/* Left panel — branding sidebar */}
-			<div className="relative hidden w-1/3 flex-col bg-auth-panel dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))] md:flex lg:w-1/3">
+			<div className="relative hidden w-1/3 flex-col bg-auth-panel md:flex lg:w-1/3 dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))]">
 				<div className="absolute top-4 left-4 sm:top-5 sm:left-6">
 					<a
 						href="https://bittery.com"

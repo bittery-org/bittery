@@ -174,7 +174,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 
 				// Only call onScanComplete for success - let user retry or cancel for errors
 				if (result.status === "error") {
-				toast.error(result.error || m.ext_qr_error_scan_toast());
+					toast.error(result.error || m.ext_qr_error_scan_toast());
 				}
 			}
 		} catch (error: any) {
@@ -182,7 +182,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 			setErrorMessage(error.message || m.ext_qr_error_scan_toast());
 			toast.error(m.ext_qr_error_scan_toast());
 		}
-	}, [onScanComplete]);
+	}, [onScanComplete, m.ext_qr_error_scan_toast]);
 
 	const handleRetry = useCallback(() => {
 		setStatus("idle");
@@ -219,7 +219,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 						variant="default"
 					>
 						<IconScanOutlineDuo18 className="h-4 w-4" />
-					{m.ext_qr_scan_button()}
+						{m.ext_qr_scan_button()}
 					</Button>
 				</div>
 			)}
@@ -227,9 +227,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 			{status === "scanning" && (
 				<div className="flex flex-col items-center gap-3 py-4">
 					<IconLoader2OutlineDuo18 className="h-8 w-8 animate-spin text-primary" />
-					<p className="text-muted-foreground text-sm">
-						{m.ext_qr_scanning()}
-					</p>
+					<p className="text-muted-foreground text-sm">{m.ext_qr_scanning()}</p>
 				</div>
 			)}
 
@@ -241,13 +239,17 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 					</div>
 					{scanResult.issuer && (
 						<p className="text-sm">
-							<span className="text-muted-foreground">{m.ext_qr_service()}</span>{" "}
+							<span className="text-muted-foreground">
+								{m.ext_qr_service()}
+							</span>{" "}
 							{scanResult.issuer}
 						</p>
 					)}
 					{scanResult.accountName && (
 						<p className="text-sm">
-							<span className="text-muted-foreground">{m.ext_qr_account()}</span>{" "}
+							<span className="text-muted-foreground">
+								{m.ext_qr_account()}
+							</span>{" "}
 							{scanResult.accountName}
 						</p>
 					)}
@@ -259,7 +261,9 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 					<div className="flex items-center gap-2 text-destructive">
 						<IconCircleWarningOutlineDuo18 className="h-5 w-5" />
 						<span className="font-medium text-sm">
-							{status === "no-qr-found" ? m.ext_qr_no_qr_found() : m.ext_qr_scan_failed()}
+							{status === "no-qr-found"
+								? m.ext_qr_no_qr_found()
+								: m.ext_qr_scan_failed()}
 						</span>
 					</div>
 					<p className="text-muted-foreground text-xs">{errorMessage}</p>
@@ -270,7 +274,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 							className="flex-1 gap-2"
 						>
 							<IconCameraOutlineDuo18 className="h-4 w-4" />
-						{m.ext_qr_try_again()}
+							{m.ext_qr_try_again()}
 						</Button>
 						<Button onClick={onCancel} variant="ghost" className="flex-1">
 							{m.ext_qr_cancel()}

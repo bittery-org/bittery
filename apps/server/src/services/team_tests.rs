@@ -1,4 +1,3 @@
-
 use super::{
     assert_optional_team_management_entitlement, assert_team_management_entitlement, bittery_mode,
     ensure_exact_rotation_vault_set, ensure_team_admin, generate_secure_token,
@@ -9,8 +8,8 @@ use super::{
 use crate::error::AppErrorCode;
 use crate::services::session_control::load_session_revocation;
 use crate::test_support::{
-    acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
 };
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
 use serde_json::{json, Value};
@@ -49,11 +48,14 @@ async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
+    let _guard = acquire_env_lock_async().await;
     let previous = std::env::var("BITTERY_MODE").ok();
     set_env_var("BITTERY_MODE", value);
+
     let result = future.await;
+
     restore_env_var("BITTERY_MODE", previous);
+
     result
 }
 
@@ -61,15 +63,16 @@ async fn with_storage_env_async<T, F>(future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
-    let previous_endpoint = std::env::var("BITTERY_STORAGE_ENDPOINT").ok();
-    let previous_bucket = std::env::var("BITTERY_STORAGE_BUCKET").ok();
-    let previous_access_key = std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok();
-    let previous_secret_key = std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok();
-    let previous_region = std::env::var("BITTERY_STORAGE_REGION").ok();
-    let previous_public_url = std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok();
-    let previous_cdn_url = std::env::var("BITTERY_STORAGE_CDN_URL").ok();
-
+    let _guard = acquire_env_lock_async().await;
+    let previous = (
+        std::env::var("BITTERY_STORAGE_ENDPOINT").ok(),
+        std::env::var("BITTERY_STORAGE_BUCKET").ok(),
+        std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok(),
+        std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok(),
+        std::env::var("BITTERY_STORAGE_REGION").ok(),
+        std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok(),
+        std::env::var("BITTERY_STORAGE_CDN_URL").ok(),
+    );
     set_env_var(
         "BITTERY_STORAGE_ENDPOINT",
         Some("https://storage.example.invalid"),
@@ -89,6 +92,15 @@ where
 
     let result = future.await;
 
+    let (
+        previous_endpoint,
+        previous_bucket,
+        previous_access_key,
+        previous_secret_key,
+        previous_region,
+        previous_public_url,
+        previous_cdn_url,
+    ) = previous;
     restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
     restore_env_var("BITTERY_STORAGE_BUCKET", previous_bucket);
     restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
@@ -144,12 +156,12 @@ struct TeamRouterFixture {
     no_team_user_id: String,
     outsider_user_id: String,
     team_id: String,
-    outsider_team_id: String,
+    _outsider_team_id: String,
     invitee_user_id: String,
     accept_user_id: String,
     decline_user_id: String,
     accessible_vault_id: String,
-    hidden_vault_id: String,
+    _hidden_vault_id: String,
     admin_inaccessible_vault_id: String,
     accessible_item_id: String,
     admin_inaccessible_item_id: String,
@@ -367,18 +379,19 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
         no_team_user_id,
         outsider_user_id,
         team_id,
-        outsider_team_id,
+        _outsider_team_id: outsider_team_id,
         invitee_user_id,
         accept_user_id,
         decline_user_id,
         accessible_vault_id,
-        hidden_vault_id,
+        _hidden_vault_id: hidden_vault_id,
         admin_inaccessible_vault_id,
         accessible_item_id,
         admin_inaccessible_item_id,
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_team_invitation(
     pool: &PgPool,
     invitation_id: &str,
@@ -1557,13 +1570,15 @@ async fn team_delete_paths() {
         let fixture = build_team_router_fixture(&app.pool).await;
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
-        let forbidden_delete = app
-            .rpc_call(
+        let forbidden_delete = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&member_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(forbidden_delete.status, StatusCode::OK);
         assert_handler_error(
             &forbidden_delete.body,
@@ -1588,13 +1603,15 @@ async fn team_delete_paths() {
             "Team deletion is disabled in self-hosted mode. This instance uses a single team.",
         );
 
-        let members_blocked = app
-            .rpc_call(
+        let members_blocked = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&owner_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(members_blocked.status, StatusCode::OK);
         assert_handler_error(
             &members_blocked.body,
@@ -1632,13 +1649,15 @@ async fn team_delete_paths() {
         )
         .await;
         let vault_owner_session = app.issue_session(vault_owner_id).await;
-        let vault_blocked = app
-            .rpc_call(
+        let vault_blocked = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": vault_team_id }]),
                 authenticated_json_headers(&vault_owner_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(vault_blocked.status, StatusCode::OK);
         assert_handler_error(
             &vault_blocked.body,
@@ -1667,13 +1686,15 @@ async fn team_delete_paths() {
         .await;
         assign_user_to_team(&app.pool, success_owner_id, success_team_id, "owner").await;
         let success_session = app.issue_session(success_owner_id).await;
-        let delete_success = app
-            .rpc_call(
+        let delete_success = with_bittery_mode_async(
+            Some("cloud"),
+            app.rpc_call(
                 "team.delete",
                 json!([{ "teamId": success_team_id }]),
                 authenticated_json_headers(&success_session.token),
-            )
-            .await;
+            ),
+        )
+        .await;
         assert_eq!(delete_success.status, StatusCode::OK);
         assert_eq!(delete_success.body["result"]["Ok"]["success"], json!(true));
         let deleted_team_exists =

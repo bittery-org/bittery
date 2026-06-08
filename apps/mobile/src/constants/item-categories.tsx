@@ -28,14 +28,24 @@ export function getCategoryOptions(m: any): CategoryOption[] {
 	return [
 		{ value: "all", label: m.mob_category_all(), icon: StyledGrid3x3 },
 		{ value: "login", label: m.mob_category_login(), icon: StyledKey },
-		{ value: "credit-card", label: m.mob_category_credit_card(), icon: StyledCreditCard },
+		{
+			value: "credit-card",
+			label: m.mob_category_credit_card(),
+			icon: StyledCreditCard,
+		},
 		{ value: "identity", label: m.mob_category_identity(), icon: StyledUser },
-		{ value: "secure-note", label: m.mob_category_secure_note(), icon: StyledFileText },
+		{
+			value: "secure-note",
+			label: m.mob_category_secure_note(),
+			icon: StyledFileText,
+		},
 		{ value: "totp", label: m.mob_category_totp(), icon: StyledTimer },
 	];
 }
 
-export function getCategoryLabels(m: any): Record<ItemCategory | "all", string> {
+export function getCategoryLabels(
+	m: any,
+): Record<ItemCategory | "all", string> {
 	return {
 		all: m.mob_category_all(),
 		login: m.mob_category_login(),

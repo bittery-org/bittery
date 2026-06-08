@@ -74,25 +74,6 @@ pub async fn fetch_latest_visible_event_id(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load latest visible event"); AppError::internal("Failed to load latest visible event") })
 }
 
-pub async fn fetch_latest_visible_event_seq(
-    pool: &PgPool,
-    user_id: &str,
-    target_vault_ids: &[String],
-) -> Result<i64, AppError> {
-    let Some(latest_event_id) =
-        fetch_latest_visible_event_id(pool, user_id, target_vault_ids).await?
-    else {
-        return Ok(0);
-    };
-    let Some(cursor_event) =
-        fetch_visible_cursor_event(pool, user_id, target_vault_ids, &latest_event_id).await?
-    else {
-        return Ok(0);
-    };
-
-    Ok(cursor_event.seq)
-}
-
 pub async fn fetch_visible_events_since(
     pool: &PgPool,
     user_id: &str,

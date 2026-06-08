@@ -132,7 +132,9 @@ export default function TagsScreen() {
 					>
 						<StyledTag size={48} className="mb-4 text-muted" />
 						<Card.Title className="mb-2 text-center text-lg">
-							{searchQuery ? m.mob_tags_empty_no_results() : m.mob_tags_empty_no_tags()}
+							{searchQuery
+								? m.mob_tags_empty_no_results()
+								: m.mob_tags_empty_no_tags()}
 						</Card.Title>
 						<Card.Description className="text-center">
 							{searchQuery

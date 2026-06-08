@@ -13,9 +13,9 @@ import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
-import { useI18n } from "@/providers/i18n-provider";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 /**
  * Extension-specific account switcher wrapper
@@ -175,9 +175,7 @@ export function ExtensionAccountSwitcher() {
 	const handleAllAccountsSelect = async () => {
 		// Check if we have any unlocked accounts
 		if (unlockedEmailsList.length === 0) {
-			toast.error(
-				m.ext_account_switcher_toast_no_unlocked(),
-			);
+			toast.error(m.ext_account_switcher_toast_no_unlocked());
 			return;
 		}
 
@@ -234,7 +232,9 @@ export function ExtensionAccountSwitcher() {
 							{m.ext_account_switcher_all_accounts()}
 						</span>
 						<span className="text-muted-foreground text-xs">
-							{m.ext_account_switcher_unlocked_count({ count: unlockedEmailsList.length })}
+							{m.ext_account_switcher_unlocked_count({
+								count: unlockedEmailsList.length,
+							})}
 						</span>
 					</div>
 				</>

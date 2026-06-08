@@ -104,7 +104,9 @@ function AttachmentRow({
 	const displayName =
 		decryptedName ??
 		decryptedNameQuery.data ??
-		(decryptedNameQuery.isError ? m.mob_attachments_encrypted_file() : m.mob_attachments_loading_name());
+		(decryptedNameQuery.isError
+			? m.mob_attachments_encrypted_file()
+			: m.mob_attachments_loading_name());
 
 	function startEdit() {
 		setEditValue(decryptedName ?? "");
@@ -370,7 +372,13 @@ export function ItemAttachments({
 				setIsDownloading(false);
 			}
 		},
-		[download, toast],
+		[
+			download,
+			toast,
+			m.mob_attachments_sharing_not_available,
+			m.mob_attachments_toast_download_failed,
+			m.mob_attachments_toast_download_failed_description,
+		],
 	);
 
 	const handleDelete = useCallback(
@@ -395,7 +403,8 @@ export function ItemAttachments({
 								toast.show({
 									variant: "danger",
 									label: m.mob_attachments_toast_delete_failed(),
-									description: m.mob_attachments_toast_delete_failed_description(),
+									description:
+										m.mob_attachments_toast_delete_failed_description(),
 									placement: "bottom",
 								});
 							}
@@ -404,7 +413,17 @@ export function ItemAttachments({
 				],
 			);
 		},
-		[remove, toast],
+		[
+			remove,
+			toast,
+			m.mob_attachments_delete_dialog_cancel,
+			m.mob_attachments_delete_dialog_confirm,
+			m.mob_attachments_delete_dialog_message,
+			m.mob_attachments_delete_dialog_title,
+			m.mob_attachments_toast_delete_failed,
+			m.mob_attachments_toast_delete_failed_description,
+			m.mob_attachments_toast_deleted,
+		],
 	);
 
 	return (

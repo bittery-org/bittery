@@ -42,7 +42,8 @@ function formatDeletedAt(dateString: string, m: MessageFunctions): string {
 
 	if (diffDays === 0) return m.mob_trash_time_today();
 	if (diffDays === 1) return m.mob_trash_time_yesterday();
-	if (diffDays < 7) return m.mob_trash_time_days_ago({ count: String(diffDays) });
+	if (diffDays < 7)
+		return m.mob_trash_time_days_ago({ count: String(diffDays) });
 	if (diffDays < 30) {
 		const weeks = Math.floor(diffDays / 7);
 		return diffDays >= 14

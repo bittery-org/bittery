@@ -1,9 +1,9 @@
 /** biome-ignore-all lint/security/noDangerouslySetInnerHtml: This is required for theming */
 import { TanStackDevtools } from "@tanstack/react-devtools";
 import {
-	Outlet,
 	createRootRoute,
 	HeadContent,
+	Outlet,
 	Scripts,
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";

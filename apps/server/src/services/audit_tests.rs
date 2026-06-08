@@ -6,9 +6,10 @@ use sqlx::{query, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 
 use super::*;
+use crate::error::AppErrorCode;
 use crate::test_support::{
-    acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
 };
 
 fn with_bittery_mode<T>(value: Option<&str>, test_fn: impl FnOnce() -> T) -> T {
@@ -34,9 +35,8 @@ async fn with_bittery_mode_async<T, F>(value: Option<&str>, future: F) -> T
 where
     F: Future<Output = T>,
 {
-    let _guard = acquire_env_lock();
+    let _guard = acquire_env_lock_async().await;
     let previous = std::env::var("BITTERY_MODE").ok();
-
     match value {
         Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
         None => unsafe { std::env::remove_var("BITTERY_MODE") },
@@ -214,7 +214,7 @@ fn compare_event_order_and_cursor_logic_follow_descending_sort() {
         sample_event("evt_1", "2025-05-02T00:00:00Z", EventSource::ShareAccessLog);
     let oldest = sample_event("evt_0", "2025-05-01T00:00:00Z", EventSource::AuditLog);
 
-    let mut events = vec![
+    let mut events = [
         same_time_share.clone(),
         oldest.clone(),
         newest.clone(),
@@ -989,6 +989,7 @@ async fn seed_share_link(pool: &PgPool, share_link_id: &str, item_id: &str, user
 		.expect("share link should seed");
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_audit_event(
     pool: &PgPool,
     event_id: &str,
@@ -1018,6 +1019,7 @@ async fn seed_audit_event(
 		.expect("audit event should seed");
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn seed_share_access_event(
     pool: &PgPool,
     event_id: &str,

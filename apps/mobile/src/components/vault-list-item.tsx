@@ -40,7 +40,9 @@ export const VaultListItem = memo(function VaultListItem({
 	// Get subtitle based on vault info
 	const subtitleParts = [
 		accountLabel,
-		type === "team" ? m.mob_vault_item_type_team() : m.mob_vault_item_type_personal(),
+		type === "team"
+			? m.mob_vault_item_type_team()
+			: m.mob_vault_item_type_personal(),
 		role,
 		itemCount !== undefined
 			? `${itemCount} item${itemCount !== 1 ? "s" : ""}`
@@ -86,7 +88,9 @@ export const VaultListItem = memo(function VaultListItem({
 							{type === "team" && (
 								<View className="ml-2">
 									<Chip variant="secondary" size="sm">
-										<Chip.Label className="text-[10px]">{m.mob_vault_item_team_badge()}</Chip.Label>
+										<Chip.Label className="text-[10px]">
+											{m.mob_vault_item_team_badge()}
+										</Chip.Label>
 									</Chip>
 								</View>
 							)}

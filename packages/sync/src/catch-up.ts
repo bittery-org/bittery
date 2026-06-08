@@ -101,7 +101,8 @@ function deduplicateByEntity(events: SyncEvent[]): SyncEvent[] {
 	const seen = new Set<string>();
 	const result: SyncEvent[] = [];
 	for (let i = events.length - 1; i >= 0; i--) {
-		const event = events[i]!;
+		const event = events.at(i);
+		if (event === undefined) continue;
 		if (!seen.has(event.entityId)) {
 			seen.add(event.entityId);
 			result.unshift(event);

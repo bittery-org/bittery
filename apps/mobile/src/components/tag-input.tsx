@@ -107,7 +107,9 @@ export function TagInput({
 						autoCorrect={false}
 					/>
 					{tags.length >= maxTags && (
-						<Description>{m.mob_tag_input_max_reached({ count: String(maxTags) })}</Description>
+						<Description>
+							{m.mob_tag_input_max_reached({ count: String(maxTags) })}
+						</Description>
 					)}
 				</TextField>
 				<Button

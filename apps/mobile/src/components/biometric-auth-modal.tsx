@@ -134,7 +134,9 @@ export function BiometricAuthModal({
 						{getBiometricIcon()}
 					</View>
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
-						{m.mob_biometric_modal_biometric_required({ biometricType: biometricType || "Biometric" })}
+						{m.mob_biometric_modal_biometric_required({
+							biometricType: biometricType || "Biometric",
+						})}
 					</Text>
 					<Text className="mb-6 text-center text-muted">
 						{m.mob_biometric_modal_please_authenticate()}
@@ -177,7 +179,7 @@ export function BiometricAuthModal({
 							>
 								<RefreshCw size={20} color="#fff" />
 								<Text className="ml-2 font-semibold text-primary-foreground">
-								{m.mob_biometric_modal_try_again()}
+									{m.mob_biometric_modal_try_again()}
 								</Text>
 							</TouchableOpacity>
 						)}
@@ -201,10 +203,14 @@ export function BiometricAuthModal({
 					{getBiometricIcon()}
 				</View>
 				<Text className="mb-2 text-center font-bold text-foreground text-xl">
-					{m.mob_biometric_modal_biometric_required({ biometricType: biometricType || "Biometric" })}
+					{m.mob_biometric_modal_biometric_required({
+						biometricType: biometricType || "Biometric",
+					})}
 				</Text>
 				<Text className="mb-6 text-center text-muted">
-					{m.mob_biometric_modal_use_biometric({ biometricType: biometricType || "biometric" })}
+					{m.mob_biometric_modal_use_biometric({
+						biometricType: biometricType || "biometric",
+					})}
 				</Text>
 				<View className="w-full space-y-3">
 					<TouchableOpacity

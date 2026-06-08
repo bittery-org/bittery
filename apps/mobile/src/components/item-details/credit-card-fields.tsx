@@ -41,7 +41,9 @@ export function CreditCardFields({ item, onCopy }: ItemDetailProps) {
 				<Card variant="default" className="mb-2">
 					<Card.Body className="py-3">
 						<View className="mb-1.5 flex-row items-center justify-between">
-							<Card.Description>{m.mob_detail_field_card_number()}</Card.Description>
+							<Card.Description>
+								{m.mob_detail_field_card_number()}
+							</Card.Description>
 							{brandDisplayName && (
 								<Chip size="sm" variant="secondary">
 									<Chip.Label>{brandDisplayName}</Chip.Label>
@@ -84,7 +86,11 @@ export function CreditCardFields({ item, onCopy }: ItemDetailProps) {
 				</Card>
 			)}
 
-			<FieldRow label={m.mob_detail_field_expiry_date()} value={item.expiryDate} onCopy={onCopy} />
+			<FieldRow
+				label={m.mob_detail_field_expiry_date()}
+				value={item.expiryDate}
+				onCopy={onCopy}
+			/>
 			<FieldRow
 				label={m.mob_detail_field_cvv()}
 				value={item.cvv}

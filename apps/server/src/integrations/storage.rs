@@ -4,26 +4,25 @@ use std::{
     time::Duration,
 };
 
-use aws_config::BehaviorVersion;
-use aws_sdk_s3::{
-    config::{Credentials, Region},
-    operation::delete_object::DeleteObjectError,
-    operation::get_object::GetObjectError,
-    operation::head_object::HeadObjectError,
-    presigning::PresigningConfig,
-    Client,
-};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use hmac::{Hmac, Mac};
 use rand::random;
 use regex::Regex;
+use reqwest::{
+    header::{CONTENT_LENGTH, CONTENT_TYPE, HOST},
+    Method,
+};
 use serde::Serialize;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use ts_rs::TS;
+use url::Url;
 
 type HmacSha256 = Hmac<Sha256>;
 
 const ATTACHMENT_UPLOAD_KEY_TTL_MS: i64 = 15 * 60 * 1000;
+const AWS_ALGORITHM: &str = "AWS4-HMAC-SHA256";
+const S3_SERVICE: &str = "s3";
+const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
 
 static ATTACHMENT_UPLOAD_KEY_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^attachments/([^/]+)/([^/]+)/(\d{13})-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})-([A-Za-z0-9_-]{43})-([A-Za-z0-9._-]{1,120})$")
@@ -39,8 +38,7 @@ pub struct StorageConfig {
     pub secret_access_key: String,
 }
 
-static STORAGE_CONFIG: OnceLock<StorageConfig> = OnceLock::new();
-static STORAGE_CLIENT: OnceLock<Client> = OnceLock::new();
+static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -167,42 +165,34 @@ pub async fn create_presigned_upload(
     expires_in_seconds: Option<u64>,
 ) -> Result<PresignedUploadResult, StorageError> {
     let config = get_config()?;
-    let client = get_client()?.clone();
-    let mut request = client
-        .put_object()
-        .bucket(&config.bucket)
-        .key(key)
-        .content_type(content_type);
-    if let Some(content_length) = content_length {
-        request = request.content_length(content_length);
-    }
-
-    let presigned_request = request
-        .presigned(
-            PresigningConfig::expires_in(Duration::from_secs(expires_in_seconds.unwrap_or(300)))
-                .map_err(|error| StorageError::Presign(error.to_string()))?,
-        )
-        .await
-        .map_err(|error| StorageError::Presign(error.to_string()))?;
+    let upload_url = presigned_url(
+        &config,
+        "PUT",
+        key,
+        Some(content_type),
+        content_length,
+        Duration::from_secs(expires_in_seconds.unwrap_or(300)),
+    )?;
 
     Ok(PresignedUploadResult {
         key: key.to_string(),
-        upload_url: presigned_request.uri().to_string(),
+        upload_url,
         public_url: public_asset_url(key),
     })
 }
 
 pub async fn delete_object(key: &str) -> Result<(), StorageError> {
     let config = get_config()?;
-    let client = get_client()?.clone();
-
-    client
-        .delete_object()
-        .bucket(&config.bucket)
-        .key(key)
+    let response = signed_request(&config, Method::DELETE, key)?
         .send()
         .await
-        .map_err(StorageError::DeleteObject)?;
+        .map_err(|error| StorageError::DeleteObject(error.to_string()))?;
+    if !response.status().is_success() {
+        return Err(StorageError::DeleteObject(format!(
+            "storage returned {}",
+            response.status()
+        )));
+    }
 
     Ok(())
 }
@@ -212,76 +202,64 @@ pub async fn create_presigned_download(
     expires_in_seconds: Option<u64>,
 ) -> Result<String, StorageError> {
     let config = get_config()?;
-    let client = get_client()?.clone();
-    let presigned_request = client
-        .get_object()
-        .bucket(&config.bucket)
-        .key(key)
-        .presigned(
-            PresigningConfig::expires_in(Duration::from_secs(expires_in_seconds.unwrap_or(300)))
-                .map_err(|error| StorageError::Presign(error.to_string()))?,
-        )
-        .await
-        .map_err(|error| StorageError::Presign(error.to_string()))?;
-    Ok(presigned_request.uri().to_string())
+    presigned_url(
+        &config,
+        "GET",
+        key,
+        None,
+        None,
+        Duration::from_secs(expires_in_seconds.unwrap_or(300)),
+    )
 }
 
 pub async fn head_object(key: &str) -> Result<Option<StorageObjectHead>, StorageError> {
     let config = get_config()?;
-    let client = get_client()?.clone();
-    let response = client
-        .head_object()
-        .bucket(&config.bucket)
-        .key(key)
+    let response = signed_request(&config, Method::HEAD, key)?
         .send()
-        .await;
-    match response {
-        Ok(head) => Ok(Some(StorageObjectHead {
-            size: head.content_length().unwrap_or_default(),
-            content_type: head.content_type().map(ToOwned::to_owned),
-        })),
-        Err(aws_sdk_s3::error::SdkError::ServiceError(service_error))
-            if service_error.err().is_not_found() =>
-        {
-            Ok(None)
+        .await
+        .map_err(|error| StorageError::HeadObject(error.to_string()))?;
+    if response.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    if !response.status().is_success() {
+        return Err(StorageError::HeadObject(format!(
+            "storage returned {}",
+            response.status()
+        )));
+    }
+
+    let size = response
+        .headers()
+        .get(CONTENT_LENGTH)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or_default();
+    let content_type = response
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
+
+    Ok(Some(StorageObjectHead { size, content_type }))
+}
+
+fn object_url(config: &StorageConfig, key: &str) -> Result<Url, StorageError> {
+    let mut url = Url::parse(config.endpoint.trim())
+        .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
+    {
+        let mut segments = url.path_segments_mut().map_err(|_| {
+            StorageError::InvalidConfig("storage endpoint cannot be a base URL".into())
+        })?;
+        segments.pop_if_empty();
+        segments.push(config.bucket.trim_matches('/'));
+        for segment in key.trim_start_matches('/').split('/') {
+            segments.push(segment);
         }
-        Err(error) => Err(StorageError::HeadObject(error)),
     }
+    Ok(url)
 }
 
-fn get_client() -> Result<&'static Client, StorageError> {
-    if let Some(client) = STORAGE_CLIENT.get() {
-        return Ok(client);
-    }
-
-    let config = get_config()?.clone();
-    let client = Client::from_conf(
-        aws_sdk_s3::Config::builder()
-            .behavior_version(BehaviorVersion::latest())
-            .region(Region::new(config.region))
-            .endpoint_url(config.endpoint)
-            .credentials_provider(Credentials::new(
-                config.access_key_id,
-                config.secret_access_key,
-                None,
-                None,
-                "bittery-server",
-            ))
-            .force_path_style(true)
-            .build(),
-    );
-
-    let _ = STORAGE_CLIENT.set(client);
-    Ok(STORAGE_CLIENT
-        .get()
-        .expect("storage client should be initialized"))
-}
-
-fn get_config() -> Result<&'static StorageConfig, StorageError> {
-    if let Some(config) = STORAGE_CONFIG.get() {
-        return Ok(config);
-    }
-
+fn get_config() -> Result<StorageConfig, StorageError> {
     let endpoint = env::var("BITTERY_STORAGE_ENDPOINT").ok();
     let bucket = env::var("BITTERY_STORAGE_BUCKET").ok();
     let access_key_id = env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok();
@@ -295,19 +273,215 @@ fn get_config() -> Result<&'static StorageConfig, StorageError> {
                 && !access_key_id.trim().is_empty()
                 && !secret_access_key.trim().is_empty() =>
         {
-            let _ = STORAGE_CONFIG.set(StorageConfig {
-                endpoint,
+            Ok(StorageConfig {
+                endpoint: endpoint.trim().to_string(),
                 region,
-                bucket,
-                access_key_id,
-                secret_access_key,
-            });
-            Ok(STORAGE_CONFIG
-                .get()
-                .expect("storage config should be initialized"))
+                bucket: bucket.trim().to_string(),
+                access_key_id: access_key_id.trim().to_string(),
+                secret_access_key: secret_access_key.trim().to_string(),
+            })
         }
         _ => Err(StorageError::MissingConfig),
     }
+}
+
+fn presigned_url(
+    config: &StorageConfig,
+    method: &str,
+    key: &str,
+    content_type: Option<&str>,
+    content_length: Option<i64>,
+    expires_in: Duration,
+) -> Result<String, StorageError> {
+    let mut url = object_url(config, key)?;
+    let now = chrono::Utc::now();
+    let date = now.format("%Y%m%d").to_string();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let scope = credential_scope(&date, &config.region);
+
+    let mut headers = vec![("host".to_string(), host_header(&url)?)];
+    if let Some(content_type) = content_type {
+        headers.push(("content-type".to_string(), content_type.to_string()));
+    }
+    if let Some(content_length) = content_length {
+        headers.push(("content-length".to_string(), content_length.to_string()));
+    }
+    headers.sort_by(|left, right| left.0.cmp(&right.0));
+    let signed_headers = headers
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(";");
+
+    let mut query_params = vec![
+        ("X-Amz-Algorithm".to_string(), AWS_ALGORITHM.to_string()),
+        (
+            "X-Amz-Credential".to_string(),
+            format!("{}/{}", config.access_key_id, scope),
+        ),
+        ("X-Amz-Date".to_string(), amz_date.clone()),
+        (
+            "X-Amz-Expires".to_string(),
+            expires_in.as_secs().to_string(),
+        ),
+        ("X-Amz-SignedHeaders".to_string(), signed_headers.clone()),
+    ];
+    let canonical_query = canonical_query_string(&query_params);
+    let canonical_request = canonical_request(
+        method,
+        url.path(),
+        &canonical_query,
+        &headers,
+        &signed_headers,
+        UNSIGNED_PAYLOAD,
+    );
+    let signature = signature(
+        &config.secret_access_key,
+        &date,
+        &config.region,
+        &string_to_sign(&amz_date, &scope, &canonical_request),
+    )?;
+
+    query_params.push(("X-Amz-Signature".to_string(), signature));
+    url.set_query(Some(&canonical_query_string(&query_params)));
+    Ok(url.to_string())
+}
+
+fn signed_request(
+    config: &StorageConfig,
+    method: Method,
+    key: &str,
+) -> Result<reqwest::RequestBuilder, StorageError> {
+    let url = object_url(config, key)?;
+    let now = chrono::Utc::now();
+    let date = now.format("%Y%m%d").to_string();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let scope = credential_scope(&date, &config.region);
+    let payload_hash = hex::encode(Sha256::digest([]));
+    let headers = vec![
+        ("host".to_string(), host_header(&url)?),
+        ("x-amz-content-sha256".to_string(), payload_hash.clone()),
+        ("x-amz-date".to_string(), amz_date.clone()),
+    ];
+    let signed_headers = headers
+        .iter()
+        .map(|(name, _)| name.as_str())
+        .collect::<Vec<_>>()
+        .join(";");
+    let canonical_request = canonical_request(
+        method.as_str(),
+        url.path(),
+        url.query().unwrap_or_default(),
+        &headers,
+        &signed_headers,
+        &payload_hash,
+    );
+    let signature = signature(
+        &config.secret_access_key,
+        &date,
+        &config.region,
+        &string_to_sign(&amz_date, &scope, &canonical_request),
+    )?;
+    let authorization = format!(
+        "{AWS_ALGORITHM} Credential={}/{scope}, SignedHeaders={signed_headers}, Signature={signature}",
+        config.access_key_id,
+    );
+
+    Ok(http_client()
+        .request(method, url)
+        .header(HOST, host_header(&object_url(config, key)?)?)
+        .header("x-amz-content-sha256", payload_hash)
+        .header("x-amz-date", amz_date)
+        .header("Authorization", authorization))
+}
+
+fn http_client() -> &'static reqwest::Client {
+    HTTP_CLIENT.get_or_init(reqwest::Client::new)
+}
+
+fn credential_scope(date: &str, region: &str) -> String {
+    format!("{date}/{region}/{S3_SERVICE}/aws4_request")
+}
+
+fn canonical_request(
+    method: &str,
+    path: &str,
+    query: &str,
+    headers: &[(String, String)],
+    signed_headers: &str,
+    payload_hash: &str,
+) -> String {
+    let canonical_headers = headers
+        .iter()
+        .map(|(name, value)| format!("{name}:{}\n", value.trim()))
+        .collect::<String>();
+    format!("{method}\n{path}\n{query}\n{canonical_headers}\n{signed_headers}\n{payload_hash}")
+}
+
+fn canonical_query_string(params: &[(String, String)]) -> String {
+    let mut encoded = params
+        .iter()
+        .map(|(key, value)| (percent_encode(key), percent_encode(value)))
+        .collect::<Vec<_>>();
+    encoded.sort();
+    encoded
+        .into_iter()
+        .map(|(key, value)| format!("{key}={value}"))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+fn string_to_sign(amz_date: &str, scope: &str, canonical_request: &str) -> String {
+    let request_hash = hex::encode(Sha256::digest(canonical_request.as_bytes()));
+    format!("{AWS_ALGORITHM}\n{amz_date}\n{scope}\n{request_hash}")
+}
+
+fn signature(
+    secret_access_key: &str,
+    date: &str,
+    region: &str,
+    string_to_sign: &str,
+) -> Result<String, StorageError> {
+    let date_key = hmac_sha256(
+        format!("AWS4{secret_access_key}").as_bytes(),
+        date.as_bytes(),
+    )?;
+    let region_key = hmac_sha256(&date_key, region.as_bytes())?;
+    let service_key = hmac_sha256(&region_key, S3_SERVICE.as_bytes())?;
+    let signing_key = hmac_sha256(&service_key, b"aws4_request")?;
+    Ok(hex::encode(hmac_sha256(
+        &signing_key,
+        string_to_sign.as_bytes(),
+    )?))
+}
+
+fn hmac_sha256(key: &[u8], payload: &[u8]) -> Result<Vec<u8>, StorageError> {
+    let mut mac = HmacSha256::new_from_slice(key)
+        .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
+    mac.update(payload);
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+
+fn host_header(url: &Url) -> Result<String, StorageError> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| StorageError::InvalidConfig("storage endpoint is missing a host".into()))?;
+    match url.port() {
+        Some(port) => Ok(format!("{host}:{port}")),
+        None => Ok(host.to_string()),
+    }
+}
+
+fn percent_encode(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect(),
+        })
+        .collect()
 }
 
 fn sanitize_file_name(file_name: &str) -> String {
@@ -360,10 +534,8 @@ pub enum StorageError {
     MissingConfig,
     MissingAttachmentUploadSecret,
     InvalidConfig(String),
-    DeleteObject(aws_sdk_s3::error::SdkError<DeleteObjectError>),
-    GetObject(aws_sdk_s3::error::SdkError<GetObjectError>),
-    HeadObject(aws_sdk_s3::error::SdkError<HeadObjectError>),
-    Presign(String),
+    DeleteObject(String),
+    HeadObject(String),
 }
 
 impl std::fmt::Display for StorageError {
@@ -377,18 +549,30 @@ impl std::fmt::Display for StorageError {
 				f,
 				"Missing attachment upload signing secret. Set BITTERY_ATTACHMENT_UPLOAD_SECRET or JWT_SECRET.",
 			),
-			Self::InvalidConfig(error) => write!(f, "invalid storage config: {error}"),
-			Self::DeleteObject(error) => write!(f, "failed to delete storage object: {error}"),
-			Self::GetObject(error) => write!(f, "failed to load storage object: {error}"),
-			Self::HeadObject(error) => write!(f, "failed to inspect storage object: {error}"),
-			Self::Presign(error) => write!(f, "failed to create presigned upload: {error}"),
-		}
+            Self::InvalidConfig(error) => write!(f, "invalid storage config: {error}"),
+            Self::DeleteObject(error) => write!(f, "failed to delete storage object: {error}"),
+            Self::HeadObject(error) => write!(f, "failed to inspect storage object: {error}"),
+        }
     }
 }
 
+impl std::error::Error for StorageError {}
+
 #[cfg(test)]
 mod tests {
-    use super::{create_team_image_key, create_vault_image_key, public_asset_url};
+    use std::{
+        future::Future,
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+
+    use super::{
+        create_attachment_key, create_presigned_download, create_presigned_upload,
+        create_team_image_key, create_vault_image_key, delete_object, head_object,
+        is_valid_attachment_upload_key, public_asset_url, StorageError,
+    };
+    use crate::test_support::acquire_env_lock_async;
 
     #[test]
     fn public_asset_url_rejects_private_attachment_keys() {
@@ -408,6 +592,238 @@ mod tests {
         assert!(key.starts_with("teams/team_123/"));
         assert!(key.ends_with("avatar_file.png"));
     }
-}
 
-impl std::error::Error for StorageError {}
+    #[tokio::test]
+    async fn presigned_upload_uses_path_style_bucket_and_signed_content_type() {
+        with_storage_env_async("https://storage.example.invalid", async {
+            let result =
+                create_presigned_upload("vaults/user_123/avatar file.png", "image/png", None, None)
+                    .await
+                    .expect("presigned upload should be created");
+            let url = Url::parse(&result.upload_url).expect("upload URL should parse");
+            let params = url.query_pairs().collect::<Vec<_>>();
+
+            assert_eq!(
+                url.path(),
+                "/bittery-test/vaults/user_123/avatar%20file.png"
+            );
+            assert_eq!(
+                params
+                    .iter()
+                    .find(|(key, _)| key == "X-Amz-Expires")
+                    .map(|(_, value)| value.as_ref()),
+                Some("300"),
+            );
+            assert_eq!(
+                params
+                    .iter()
+                    .find(|(key, _)| key == "X-Amz-SignedHeaders")
+                    .map(|(_, value)| value.as_ref()),
+                Some("content-type;host"),
+            );
+            assert!(params.iter().any(|(key, _)| key == "X-Amz-Signature"));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn presigned_download_uses_custom_expiration() {
+        with_storage_env_async("https://storage.example.invalid", async {
+            let url = create_presigned_download("attachments/user/item/file.enc", Some(900))
+                .await
+                .expect("presigned download should be created");
+            let url = Url::parse(&url).expect("download URL should parse");
+
+            assert_eq!(url.path(), "/bittery-test/attachments/user/item/file.enc");
+            assert_eq!(
+                url.query_pairs()
+                    .find(|(key, _)| key == "X-Amz-Expires")
+                    .map(|(_, value)| value.into_owned()),
+                Some("900".to_string()),
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn storage_requires_config() {
+        with_missing_storage_env_async(async {
+            let error = create_presigned_download("file.txt", None)
+                .await
+                .expect_err("missing config should fail");
+            assert!(matches!(error, StorageError::MissingConfig));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn attachment_upload_key_validation_round_trips() {
+        with_storage_env_async("https://storage.example.invalid", async {
+            let key = create_attachment_key("user_123", "item_456", "secret file.enc")
+                .expect("attachment key should be created");
+
+            assert!(
+                is_valid_attachment_upload_key(&key, "user_123", "item_456", None)
+                    .expect("validation should succeed")
+            );
+            assert!(
+                !is_valid_attachment_upload_key(&key, "user_123", "other_item", None)
+                    .expect("validation should succeed")
+            );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn head_object_reads_metadata_from_storage_response() {
+        let (endpoint, request) = spawn_storage_response(
+            "HTTP/1.1 200 OK\r\nContent-Length: 42\r\nContent-Type: image/png\r\n\r\n",
+        );
+
+        with_storage_env_async(&endpoint, async {
+            let head = head_object("vaults/user/avatar.png")
+                .await
+                .expect("head request should succeed")
+                .expect("object should exist");
+
+            assert_eq!(head.size, 42);
+            assert_eq!(head.content_type.as_deref(), Some("image/png"));
+        })
+        .await;
+
+        let request = request.join().expect("mock server should finish");
+        assert!(request.starts_with("HEAD /bittery-test/vaults/user/avatar.png "));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: aws4-hmac-sha256"));
+    }
+
+    #[tokio::test]
+    async fn head_object_returns_none_for_not_found() {
+        let (endpoint, _request) = spawn_storage_response("HTTP/1.1 404 Not Found\r\n\r\n");
+
+        with_storage_env_async(&endpoint, async {
+            let head = head_object("missing.txt")
+                .await
+                .expect("not found should not be an error");
+
+            assert!(head.is_none());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn delete_object_sends_signed_delete_request() {
+        let (endpoint, request) = spawn_storage_response("HTTP/1.1 204 No Content\r\n\r\n");
+
+        with_storage_env_async(&endpoint, async {
+            delete_object("attachments/user/item/file.enc")
+                .await
+                .expect("delete request should succeed");
+        })
+        .await;
+
+        let request = request.join().expect("mock server should finish");
+        assert!(request.starts_with("DELETE /bittery-test/attachments/user/item/file.enc "));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: aws4-hmac-sha256"));
+    }
+
+    async fn with_storage_env_async<T, F>(endpoint: &str, future: F) -> T
+    where
+        F: Future<Output = T>,
+    {
+        let _guard = acquire_env_lock_async().await;
+        let previous = storage_env();
+
+        set_env_var("BITTERY_STORAGE_ENDPOINT", Some(endpoint));
+        set_env_var("BITTERY_STORAGE_BUCKET", Some("bittery-test"));
+        set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
+        set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
+        set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
+        set_env_var(
+            "BITTERY_ATTACHMENT_UPLOAD_SECRET",
+            Some("test-attachment-secret"),
+        );
+
+        let result = future.await;
+
+        restore_storage_env(previous);
+
+        result
+    }
+
+    async fn with_missing_storage_env_async<T, F>(future: F) -> T
+    where
+        F: Future<Output = T>,
+    {
+        let _guard = acquire_env_lock_async().await;
+        let previous = storage_env();
+
+        for key in STORAGE_ENV_KEYS {
+            set_env_var(key, None);
+        }
+
+        let result = future.await;
+
+        restore_storage_env(previous);
+
+        result
+    }
+
+    fn spawn_storage_response(response: &'static str) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("mock storage should bind");
+        let address = listener
+            .local_addr()
+            .expect("mock storage address should load");
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("request should connect");
+            let mut buffer = [0_u8; 8192];
+            let bytes_read = stream.read(&mut buffer).expect("request should read");
+            stream
+                .write_all(response.as_bytes())
+                .expect("response should write");
+            String::from_utf8_lossy(&buffer[..bytes_read]).into_owned()
+        });
+
+        (format!("http://{address}"), handle)
+    }
+
+    const STORAGE_ENV_KEYS: &[&str] = &[
+        "BITTERY_STORAGE_ENDPOINT",
+        "BITTERY_STORAGE_BUCKET",
+        "BITTERY_STORAGE_ACCESS_KEY_ID",
+        "BITTERY_STORAGE_SECRET_ACCESS_KEY",
+        "BITTERY_STORAGE_REGION",
+        "BITTERY_STORAGE_PUBLIC_URL",
+        "BITTERY_STORAGE_CDN_URL",
+        "BITTERY_ATTACHMENT_UPLOAD_SECRET",
+        "JWT_SECRET",
+    ];
+
+    fn storage_env() -> Vec<(&'static str, Option<String>)> {
+        STORAGE_ENV_KEYS
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect()
+    }
+
+    fn restore_storage_env(previous: Vec<(&'static str, Option<String>)>) {
+        for (key, value) in previous {
+            match value {
+                Some(value) => set_env_var(key, Some(&value)),
+                None => set_env_var(key, None),
+            }
+        }
+    }
+
+    fn set_env_var(key: &str, value: Option<&str>) {
+        match value {
+            Some(value) => unsafe { std::env::set_var(key, value) },
+            None => unsafe { std::env::remove_var(key) },
+        }
+    }
+
+    use url::Url;
+}

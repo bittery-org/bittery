@@ -9,8 +9,8 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { useI18n } from "../providers/i18n-provider";
 import { storage } from "../lib/storage";
+import { useI18n } from "../providers/i18n-provider";
 
 export function LoginPage() {
 	const navigate = useNavigate();
@@ -120,10 +120,12 @@ export function LoginPage() {
 						</div>
 						<div>
 							<h1 className="font-semibold text-xl tracking-tight">
-							{addingAccount ? m.ext_login_title_add_account() : m.ext_login_title_sign_in()}
-						</h1>
-						<p className="mt-1 text-muted-foreground text-sm">
-							{m.ext_login_description()}
+								{addingAccount
+									? m.ext_login_title_add_account()
+									: m.ext_login_title_sign_in()}
+							</h1>
+							<p className="mt-1 text-muted-foreground text-sm">
+								{m.ext_login_description()}
 							</p>
 						</div>
 					</div>
@@ -138,7 +140,7 @@ export function LoginPage() {
 						>
 							<div className="space-y-2">
 								<Label htmlFor="serverUrl" className="font-medium text-sm">
-								{m.ext_login_label_server_url()}
+									{m.ext_login_label_server_url()}
 								</Label>
 								<Input
 									id="serverUrl"
@@ -151,7 +153,7 @@ export function LoginPage() {
 									className="h-10"
 								/>
 								<p className="text-muted-foreground text-xs">
-								{m.ext_login_server_url_hint()}
+									{m.ext_login_server_url_hint()}
 								</p>
 							</div>
 
@@ -159,7 +161,7 @@ export function LoginPage() {
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name} className="font-medium text-sm">
-										{m.auth_signin_label_email()}
+											{m.auth_signin_label_email()}
 										</Label>
 										<Input
 											id={field.name}
@@ -179,7 +181,7 @@ export function LoginPage() {
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name} className="font-medium text-sm">
-										{m.auth_signin_label_password()}
+											{m.auth_signin_label_password()}
 										</Label>
 										<div className="relative">
 											<Input
@@ -214,7 +216,7 @@ export function LoginPage() {
 								{(field) => (
 									<div className="space-y-2">
 										<Label htmlFor={field.name} className="font-medium text-sm">
-										{m.auth_signin_label_secret_key()}
+											{m.auth_signin_label_secret_key()}
 										</Label>
 										<div className="relative">
 											<Input
@@ -250,7 +252,9 @@ export function LoginPage() {
 								className="h-10 w-full font-medium"
 								disabled={loginMutation.isPending}
 							>
-								{loginMutation.isPending ? m.auth_signin_button_signing_in() : m.auth_signin_button_sign_in()}
+								{loginMutation.isPending
+									? m.auth_signin_button_signing_in()
+									: m.auth_signin_button_sign_in()}
 							</Button>
 						</form>
 					</Card>

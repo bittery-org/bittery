@@ -8,7 +8,7 @@ use ts_rs::TS;
 use crate::{
     config::{bittery_mode, format_timestamp},
     db::models::*,
-    error::{AppError, AppErrorCode},
+    error::AppError,
     repo::{
         common::{generate_resource_id, insert_audit_event, load_scoped_item_access},
         share::{
@@ -331,7 +331,7 @@ pub(crate) async fn list_share_links_by_item(
     } else {
         links
             .into_iter()
-            .filter(|link| link.created_by_id == user_id.to_string())
+            .filter(|link| link.created_by_id == user_id)
             .collect()
     };
     let link_ids = visible_links
@@ -434,8 +434,7 @@ pub(crate) async fn revoke_share_link(
     .unwrap_or_else(|| "member".to_string());
 
     if visible_link.actor_role == "read-only"
-        || (visible_link.actor_role == "member"
-            && visible_link.link.created_by_id != user_id.to_string())
+        || (visible_link.actor_role == "member" && visible_link.link.created_by_id != user_id)
         || (visible_link.actor_role == "admin" && creator_role == "owner")
     {
         return Err(forbidden_error(
@@ -470,8 +469,7 @@ pub(crate) async fn update_share_link(
     };
 
     if visible_link.actor_role == "read-only"
-        || (visible_link.actor_role == "member"
-            && visible_link.link.created_by_id != user_id.to_string())
+        || (visible_link.actor_role == "member" && visible_link.link.created_by_id != user_id)
     {
         return Err(forbidden_error("Access denied"));
     }

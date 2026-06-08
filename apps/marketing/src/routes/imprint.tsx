@@ -116,7 +116,10 @@ function ImprintPage() {
 								</h2>
 								<div className="space-y-3 text-muted-foreground text-sm leading-relaxed sm:text-base">
 									{section.content.split("\n\n").map((paragraph) => (
-										<p key={paragraph.slice(0, 40)} className="whitespace-pre-line">
+										<p
+											key={paragraph.slice(0, 40)}
+											className="whitespace-pre-line"
+										>
 											{paragraph}
 										</p>
 									))}
@@ -127,5 +130,5 @@ function ImprintPage() {
 				</div>
 			</section>
 		</>
-	)
+	);
 }

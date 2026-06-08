@@ -327,6 +327,18 @@ async fn mark_fetched(
     Ok(())
 }
 
+async fn mark_failed(pool: &PgPool, domain: &str) -> Result<(), sqlx::Error> {
+    let now = OffsetDateTime::now_utc();
+    query(
+		"INSERT INTO favicon (domain, status, failed_at, fail_count, updated_at) VALUES ($1, 'failed', $2, 1, $2) ON CONFLICT (domain) DO UPDATE SET status = 'failed', failed_at = EXCLUDED.failed_at, fail_count = favicon.fail_count + 1, updated_at = EXCLUDED.updated_at",
+	)
+	.bind(domain)
+	.bind(now)
+	.execute(pool)
+	.await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::normalize_favicon_domain;
@@ -344,16 +356,4 @@ mod tests {
         assert_eq!(normalize_favicon_domain("not a domain"), None);
         assert_eq!(normalize_favicon_domain("-example.com"), None);
     }
-}
-
-async fn mark_failed(pool: &PgPool, domain: &str) -> Result<(), sqlx::Error> {
-    let now = OffsetDateTime::now_utc();
-    query(
-		"INSERT INTO favicon (domain, status, failed_at, fail_count, updated_at) VALUES ($1, 'failed', $2, 1, $2) ON CONFLICT (domain) DO UPDATE SET status = 'failed', failed_at = EXCLUDED.failed_at, fail_count = favicon.fail_count + 1, updated_at = EXCLUDED.updated_at",
-	)
-	.bind(domain)
-	.bind(now)
-	.execute(pool)
-	.await?;
-    Ok(())
 }
