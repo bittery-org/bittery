@@ -2,9 +2,9 @@ import { defineManifest } from "@crxjs/vite-plugin";
 
 export default defineManifest({
 	manifest_version: 3,
-	name: "Bittery Password Manager",
+	name: "Bittery",
 	version: "0.1.0",
-	description: "Zero-knowledge password manager with secure autofill",
+	description: "Passwords and passkeys, encrypted on your device. Zero-knowledge autofill.",
 	permissions: [
 		"storage",
 		"unlimitedStorage",
