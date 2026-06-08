@@ -1,4 +1,9 @@
 import {
+	detectOS,
+	getPrimaryDownloadForOS,
+	RELEASES_PAGE_URL,
+} from "@bittery/shared/releases";
+import {
 	Badge,
 	Button,
 	Card,
@@ -14,11 +19,6 @@ import {
 	IconSquareTerminalOutlineDuo18 as Monitor,
 	IconStarSparkle2OutlineDuo18 as Zap,
 } from "@bittery/ui/icons";
-import {
-	detectOS,
-	getPrimaryDownloadForOS,
-	RELEASES_PAGE_URL,
-} from "@bittery/shared/releases";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function DownloadCard() {

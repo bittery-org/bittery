@@ -408,8 +408,8 @@ function DownloadPage() {
 							</span>
 						</h1>
 						<p className="mx-auto mt-4 max-w-2xl text-base text-muted-foreground leading-relaxed sm:text-lg">
-							Download native desktop apps and the browser extension, use the web
-							app during hosted beta, or self-host Bittery on your own
+							Download native desktop apps and the browser extension, use the
+							web app during hosted beta, or self-host Bittery on your own
 							infrastructure.
 						</p>
 

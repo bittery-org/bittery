@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
 	detectOS,
-	getPrimaryDownloadForOS,
 	GITHUB_REPO,
+	getPrimaryDownloadForOS,
 	latestDownloadUrl,
 	RELEASE_ASSETS,
 } from "../releases";
