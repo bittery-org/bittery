@@ -388,7 +388,7 @@ fn inactive_paid_plan_keeps_only_billing_portal() {
 fn self_hosted_mode_enables_non_cloud_features() {
     let snapshot = get_billing_snapshot("self-hosted", "team", "active");
 
-    assert!(!snapshot.entitlements.sentinel);
+    assert!(snapshot.entitlements.sentinel);
     assert!(!snapshot.entitlements.billing_portal);
     assert!(snapshot.entitlements.share_links);
     assert!(snapshot.entitlements.team_management);

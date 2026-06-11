@@ -147,6 +147,7 @@ export const planEntitlementLimits: Record<CloudPlanId, EntitlementLimits> = {
 };
 
 const selfHostedEntitlements = new Set<EntitlementKey>([
+	"sentinel",
 	"team_management",
 	"vault_sharing",
 	"share_links",

@@ -28,7 +28,7 @@ use url::Url;
 
 use crate::{
     create_public_http_router, create_rpc_router, db, rpc_request_context_middleware,
-    rpc_request_guard_middleware, AppState,
+    rpc_request_guard_middleware, rpc_tracing_middleware, AppState,
 };
 
 const DATABASE_PREFIX: &str = "bittery_test_";
@@ -346,6 +346,7 @@ where
     let public_routes = create_public_http_router().with_state(state.clone());
     let rpc_routes = Router::new()
         .nest_service("/rpc", qubit_service)
+        .route_layer(middleware::from_fn(rpc_tracing_middleware))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             rpc_request_context_middleware,

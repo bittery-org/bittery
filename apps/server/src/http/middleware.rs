@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -16,7 +16,53 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use tower_http::trace::TraceLayer;
+use tracing::Span;
 use url::Url;
+
+use crate::http::rpc_tracing::RpcTraceRequest;
+
+type HttpTraceClassifier =
+    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>;
+
+type HttpTraceLayer = TraceLayer<
+    HttpTraceClassifier,
+    fn(&Request<Body>) -> Span,
+    fn(&Request<Body>, &Span),
+    fn(&Response<Body>, Duration, &Span),
+>;
+
+pub fn http_trace_layer() -> HttpTraceLayer {
+    TraceLayer::new_for_http()
+        .make_span_with(make_http_trace_span as fn(&Request<Body>) -> Span)
+        .on_request(on_http_trace_request as fn(&Request<Body>, &Span))
+        .on_response(on_http_trace_response as fn(&Response<Body>, Duration, &Span))
+}
+
+fn make_http_trace_span(request: &Request<Body>) -> Span {
+    if request.uri().path() == "/rpc" {
+        tracing::debug_span!("request", route = "/rpc")
+    } else {
+        tracing::debug_span!(
+            "request",
+            method = %request.method(),
+            uri = %request.uri(),
+            version = ?request.version(),
+        )
+    }
+}
+
+fn on_http_trace_request(request: &Request<Body>, _span: &Span) {
+    tracing::debug!(method = %request.method(), "started processing request");
+}
+
+fn on_http_trace_response(response: &Response<Body>, latency: Duration, _span: &Span) {
+    tracing::debug!(
+        latency = latency.as_millis(),
+        status = %response.status(),
+        "finished processing request"
+    );
+}
 
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
 const RPC_JSON_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
@@ -124,7 +170,9 @@ pub async fn rpc_request_guard_middleware(request: Request<Body>, next: Next) ->
         return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large");
     }
 
-    let request = Request::from_parts(parts, Body::from(bytes));
+    let trace_request = RpcTraceRequest::from_body(&bytes);
+    let mut request = Request::from_parts(parts, Body::from(bytes));
+    request.extensions_mut().insert(trace_request);
     next.run(request).await
 }
 

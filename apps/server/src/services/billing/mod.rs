@@ -976,7 +976,7 @@ fn resolve_effective_entitlements(
 ) -> BillingEntitlements {
     if mode == "self-hosted" {
         return BillingEntitlements {
-            sentinel: false,
+            sentinel: true,
             team_management: true,
             vault_sharing: true,
             share_links: true,

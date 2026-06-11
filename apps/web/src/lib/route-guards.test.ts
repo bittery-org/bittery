@@ -62,4 +62,19 @@ test.describe("Route guard access evaluation", () => {
 
 		expect(redirect).toBeNull();
 	});
+
+	test("allows self-hosted sentinel access when entitled", () => {
+		const redirect = evaluateRouteAccess({
+			routePath: "/security",
+			snapshot: {
+				mode: "self-hosted",
+				entitlements: { sentinel: true },
+			},
+			rules: {
+				requiresEntitlements: ["sentinel"],
+			},
+		});
+
+		expect(redirect).toBeNull();
+	});
 });

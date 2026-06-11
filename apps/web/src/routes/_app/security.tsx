@@ -3,7 +3,6 @@ import { createRouteGuard } from "@/lib/route-guards";
 
 export const Route = createFileRoute("/_app/security")({
 	beforeLoad: createRouteGuard({
-		requiresMode: "cloud",
 		requiresEntitlements: ["sentinel"],
 	}),
 	head: () => ({

@@ -464,65 +464,91 @@ async fn team_events_requires_authentication() {
 #[tokio::test]
 async fn team_events_enforce_access_control_and_team_not_found_paths() {
     with_rpc_test_app("audit_team_events_access_control", |app| async move {
+        with_bittery_mode_async(Some("cloud"), async {
+            let fixture = build_audit_router_fixture(&app.pool).await;
+
+            let member_session = app.issue_session(&fixture.member_user_id).await;
+            let member_response = app
+                .rpc_call(
+                    "audit.teamEvents",
+                    json!([{}]),
+                    authenticated_json_headers(&member_session.token),
+                )
+                .await;
+            assert_eq!(member_response.status, StatusCode::OK);
+            assert_handler_error(
+                &member_response.body,
+                "FORBIDDEN",
+                "Only team owner or admin can access this console",
+            );
+
+            let personal_session = app.issue_session(&fixture.personal_owner_user_id).await;
+            let personal_response = app
+                .rpc_call(
+                    "audit.teamEvents",
+                    json!([{}]),
+                    authenticated_json_headers(&personal_session.token),
+                )
+                .await;
+            assert_eq!(personal_response.status, StatusCode::OK);
+            assert_handler_error(
+                &personal_response.body,
+                "FORBIDDEN",
+                "This console is only available on Team plans",
+            );
+
+            let inactive_session = app.issue_session(&fixture.inactive_owner_user_id).await;
+            let inactive_response = app
+                .rpc_call(
+                    "audit.teamEvents",
+                    json!([{}]),
+                    authenticated_json_headers(&inactive_session.token),
+                )
+                .await;
+            assert_eq!(inactive_response.status, StatusCode::OK);
+            assert_handler_error(
+                &inactive_response.body,
+                "FORBIDDEN",
+                "Team management is unavailable until billing is active",
+            );
+
+            let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
+            let no_team_response = app
+                .rpc_call(
+                    "audit.teamEvents",
+                    json!([{}]),
+                    authenticated_json_headers(&no_team_session.token),
+                )
+                .await;
+            assert_eq!(no_team_response.status, StatusCode::OK);
+            assert_handler_error(&no_team_response.body, "NOT_FOUND", "Team not found");
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn team_events_allow_self_hosted_admins_without_team_plan() {
+    with_rpc_test_app("audit_team_events_self_hosted", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
-
-        let member_session = app.issue_session(&fixture.member_user_id).await;
-        let member_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{}]),
-                authenticated_json_headers(&member_session.token),
-            )
-            .await;
-        assert_eq!(member_response.status, StatusCode::OK);
-        assert_handler_error(
-            &member_response.body,
-            "FORBIDDEN",
-            "Only team owner or admin can access this console",
-        );
-
-        let personal_session = app.issue_session(&fixture.personal_owner_user_id).await;
-        let personal_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{}]),
-                authenticated_json_headers(&personal_session.token),
-            )
-            .await;
-        assert_eq!(personal_response.status, StatusCode::OK);
-        assert_handler_error(
-            &personal_response.body,
-            "FORBIDDEN",
-            "This console is only available on Team plans",
-        );
-
-        let inactive_session = app.issue_session(&fixture.inactive_owner_user_id).await;
-        let inactive_response = with_bittery_mode_async(
-            Some("cloud"),
+        let session = app.issue_session(&fixture.personal_owner_user_id).await;
+        let response = with_bittery_mode_async(
+            Some("self_hosted"),
             app.rpc_call(
                 "audit.teamEvents",
-                json!([{}]),
-                authenticated_json_headers(&inactive_session.token),
+                json!([{ "limit": 1 }]),
+                authenticated_json_headers(&session.token),
             ),
         )
         .await;
-        assert_eq!(inactive_response.status, StatusCode::OK);
-        assert_handler_error(
-            &inactive_response.body,
-            "FORBIDDEN",
-            "Team management is unavailable until billing is active",
-        );
 
-        let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
-        let no_team_response = app
-            .rpc_call(
-                "audit.teamEvents",
-                json!([{}]),
-                authenticated_json_headers(&no_team_session.token),
-            )
-            .await;
-        assert_eq!(no_team_response.status, StatusCode::OK);
-        assert_handler_error(&no_team_response.body, "NOT_FOUND", "Team not found");
+        assert_eq!(response.status, StatusCode::OK);
+        assert!(
+            response.body["result"]["Ok"]["events"].is_array(),
+            "expected team events payload, got {:?}",
+            response.body
+        );
     })
     .await;
 }
