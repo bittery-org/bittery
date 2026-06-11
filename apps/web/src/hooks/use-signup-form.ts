@@ -101,6 +101,8 @@ export function useSignupForm({
 	const isCloudSelfServeSignup = isCloudMode && !isInvitationSignup;
 	const isCloudBillingEnabled = registrationStatus?.billingEnabled ?? true;
 	const allowPublicSignup = registrationStatus?.allowPublicSignup ?? true;
+	const requiresEmailVerification =
+		registrationStatus?.requiresEmailVerification ?? true;
 
 	const normalizeSignupEmail = (email: string) => email.trim().toLowerCase();
 
@@ -464,6 +466,11 @@ export function useSignupForm({
 			const hasMatchingPendingVerification =
 				pendingSubmission && normalizeSignupEmail(verificationEmail) === email;
 
+			if (!requiresEmailVerification) {
+				await completeSignupSubmission(value, "");
+				return;
+			}
+
 			if (!hasMatchingVerification || !signupVerificationToken) {
 				if (hasMatchingPendingVerification) {
 					setPendingSubmission(value);
@@ -564,6 +571,7 @@ export function useSignupForm({
 		isCloudSelfServeSignup,
 		isCloudBillingEnabled,
 		allowPublicSignup,
+		requiresEmailVerification,
 		hasAllKeyMaterial,
 	};
 }

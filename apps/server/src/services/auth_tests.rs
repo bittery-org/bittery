@@ -78,6 +78,10 @@ async fn auth_public_signup_login_and_logout_flow() {
                     registration.body["result"]["Ok"]["allowPublicSignup"],
                     json!(true)
                 );
+                assert_eq!(
+                    registration.body["result"]["Ok"]["requiresEmailVerification"],
+                    json!(true)
+                );
 
                 let unknown_email = app
                     .rpc_call(
@@ -472,6 +476,10 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                     registration.body["result"]["Ok"]["reason"],
                     json!("invite_only_after_bootstrap")
                 );
+                assert_eq!(
+                    registration.body["result"]["Ok"]["requiresEmailVerification"],
+                    json!(false)
+                );
 
                 let verification = app
                     .rpc_call(
@@ -491,6 +499,100 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
         .await;
     })
     .await;
+}
+
+#[tokio::test]
+async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
+    let _guard = crate::test_support::acquire_env_lock_async().await;
+    let previous = (
+        std::env::var("BITTERY_MODE").ok(),
+        std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS").ok(),
+        std::env::var("NODE_ENV").ok(),
+    );
+    unsafe { std::env::set_var("BITTERY_MODE", "self-hosted") };
+    unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") };
+    unsafe { std::env::set_var("NODE_ENV", "production") };
+
+    with_rpc_test_app(
+        "auth_self_hosted_bootstrap_signup_skips_email_verification",
+        |app| async move {
+            let email = "admin@example.com";
+            let crypto = build_auth_crypto_fixture("self-hosted-admin", "bootstrap-password");
+
+            let registration = app
+                .rpc_call(
+                    "auth.registrationStatus",
+                    json!([]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(registration.status, StatusCode::OK);
+            assert_eq!(
+                registration.body["result"]["Ok"]["requiresEmailVerification"],
+                json!(false)
+            );
+            assert_eq!(
+                registration.body["result"]["Ok"]["allowPublicSignup"],
+                json!(true)
+            );
+
+            let request_verification = app
+                .rpc_call(
+                    "auth.requestSignupVerification",
+                    json!([{ "email": email, "invitationToken": null }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(request_verification.status, StatusCode::OK);
+            assert_eq!(
+                request_verification.body["result"]["Ok"]["success"],
+                json!(true)
+            );
+
+            let signup = app
+                .rpc_call(
+                    "auth.signup",
+                    json!([{
+                        "email": email,
+                        "signupVerificationToken": "",
+                        "name": "Self-Hosted Admin",
+                        "plan": null,
+                        "organizationName": null,
+                        "secretKeyHint": crypto.secret_key_hint,
+                        "srpSalt": crypto.srp_salt,
+                        "srpVerifier": crypto.srp_verifier,
+                        "publicKey": crypto.public_key,
+                        "encryptedPrivateKey": crypto.encrypted_private_key,
+                        "encryptedMasterKey": crypto.encrypted_master_key,
+                        "recoveryKeyHint": crypto.recovery_key_hint,
+                        "encryptedVaultKey": crypto.encrypted_vault_key,
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(signup.status, StatusCode::OK);
+            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(
+                signup.body["result"]["Ok"]["user"]["email"],
+                json!(normalize_email(email))
+            );
+        },
+    )
+    .await;
+
+    let (previous_mode, previous_stubs, previous_node_env) = previous;
+    match previous_mode.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_MODE", value) },
+        None => unsafe { std::env::remove_var("BITTERY_MODE") },
+    }
+    match previous_stubs.as_deref() {
+        Some(value) => unsafe { std::env::set_var("BITTERY_ENABLE_DEV_AUTH_STUBS", value) },
+        None => unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") },
+    }
+    match previous_node_env.as_deref() {
+        Some(value) => unsafe { std::env::set_var("NODE_ENV", value) },
+        None => unsafe { std::env::remove_var("NODE_ENV") },
+    }
 }
 
 #[tokio::test]

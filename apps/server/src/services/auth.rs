@@ -78,6 +78,7 @@ pub struct RegistrationStatusResponse {
     pub mode: String,
     pub billing_enabled: bool,
     pub allow_public_signup: bool,
+    pub requires_email_verification: bool,
     pub reason: Option<String>,
 }
 
@@ -532,6 +533,10 @@ pub(crate) async fn request_signup_verification(
         ));
     }
 
+    if !requires_signup_email_verification() {
+        return Ok(LogoutResponse { success: true });
+    }
+
     let code =
         create_signup_verification(pool, &normalized_email, input.invitation_token.as_deref())
             .await?;
@@ -601,12 +606,14 @@ pub(crate) async fn signup(
         ));
     }
 
-    assert_valid_signup_verification_token(
-        &input.signup_verification_token,
-        &normalized_email,
-        None,
-    )
-    .await?;
+    if requires_signup_email_verification() {
+        assert_valid_signup_verification_token(
+            &input.signup_verification_token,
+            &normalized_email,
+            None,
+        )
+        .await?;
+    }
     ensure_user_does_not_exist(pool, &normalized_email).await?;
 
     let selected_plan = if self_hosted_mode || !cloud_billing_enabled() {
@@ -735,12 +742,14 @@ pub(crate) async fn signup_with_invitation(
     let normalized_email = normalize_email(&input.email);
     let invitation = get_pending_signup_invitation(pool, &input.token, &normalized_email).await?;
 
-    assert_valid_signup_verification_token(
-        &input.signup_verification_token,
-        &normalized_email,
-        Some(&input.token),
-    )
-    .await?;
+    if requires_signup_email_verification() {
+        assert_valid_signup_verification_token(
+            &input.signup_verification_token,
+            &normalized_email,
+            Some(&input.token),
+        )
+        .await?;
+    }
     ensure_user_does_not_exist(pool, &normalized_email).await?;
 
     if let Some(member_limit) = invitation.member_limit {
@@ -1410,6 +1419,7 @@ pub(crate) async fn registration_status(
             mode,
             billing_enabled: cloud_billing_enabled(),
             allow_public_signup,
+            requires_email_verification: true,
             reason: if allow_public_signup {
                 None
             } else {
@@ -1427,6 +1437,7 @@ pub(crate) async fn registration_status(
         mode,
         billing_enabled: false,
         allow_public_signup,
+        requires_email_verification: false,
         reason: if allow_public_signup {
             None
         } else {
@@ -2405,6 +2416,10 @@ fn storage_public_url(key: String) -> String {
 
 async fn has_any_registered_user(pool: &PgPool) -> Result<bool, AppError> {
     repo_auth::has_any_registered_user(pool).await
+}
+
+fn requires_signup_email_verification() -> bool {
+    bittery_mode() != "self-hosted"
 }
 
 fn unauthorized_error(message: &str) -> RpcError {
