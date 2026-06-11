@@ -1,4 +1,4 @@
-use std::{cell::Cell, env, time::Duration};
+use std::{env, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -20,9 +20,7 @@ use tower_http::trace::TraceLayer;
 use tracing::Span;
 use url::Url;
 
-thread_local! {
-    static SKIP_HTTP_TRACE: Cell<bool> = const { Cell::new(false) };
-}
+use crate::http::rpc_tracing::RpcTraceRequest;
 
 type HttpTraceClassifier =
     tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>;
@@ -43,7 +41,7 @@ pub fn http_trace_layer() -> HttpTraceLayer {
 
 fn make_http_trace_span(request: &Request<Body>) -> Span {
     if request.uri().path() == "/rpc" {
-        tracing::trace_span!("http")
+        tracing::debug_span!("request", route = "/rpc")
     } else {
         tracing::debug_span!(
             "request",
@@ -55,21 +53,15 @@ fn make_http_trace_span(request: &Request<Body>) -> Span {
 }
 
 fn on_http_trace_request(request: &Request<Body>, _span: &Span) {
-    let skip = request.uri().path() == "/rpc";
-    SKIP_HTTP_TRACE.set(skip);
-    if !skip {
-        tracing::debug!("started processing request");
-    }
+    tracing::debug!(method = %request.method(), "started processing request");
 }
 
 fn on_http_trace_response(response: &Response<Body>, latency: Duration, _span: &Span) {
-    if !SKIP_HTTP_TRACE.get() {
-        tracing::debug!(
-            latency = latency.as_millis(),
-            status = %response.status(),
-            "finished processing request"
-        );
-    }
+    tracing::debug!(
+        latency = latency.as_millis(),
+        status = %response.status(),
+        "finished processing request"
+    );
 }
 
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
@@ -178,7 +170,9 @@ pub async fn rpc_request_guard_middleware(request: Request<Body>, next: Next) ->
         return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large");
     }
 
-    let request = Request::from_parts(parts, Body::from(bytes));
+    let trace_request = RpcTraceRequest::from_body(&bytes);
+    let mut request = Request::from_parts(parts, Body::from(bytes));
+    request.extensions_mut().insert(trace_request);
     next.run(request).await
 }
 

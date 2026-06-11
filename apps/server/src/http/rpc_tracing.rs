@@ -1,9 +1,9 @@
-use std::{env, time::Instant};
+use std::{collections::HashMap, env, sync::OnceLock, time::Instant};
 
 use async_stream::stream;
 use axum::{
-    body::{to_bytes, Body, Bytes},
-    http::{Request, StatusCode},
+    body::{Body, Bytes},
+    http::Request,
     middleware::Next,
     response::Response,
     Error,
@@ -11,10 +11,13 @@ use axum::{
 use serde_json::Value;
 use tracing::{info, warn, Instrument, Span};
 
-use crate::services::session::{RequestMetadata, VerifiedSession};
+use crate::services::session::VerifiedSession;
 
-const RPC_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
+const RPC_TRACE_PARSE_LIMIT_BYTES: usize = 256 * 1024;
 const DEFAULT_SLOW_RPC_MS: u64 = 500;
+const MAX_LABEL_CHARS: usize = 128;
+const MAX_METHODS_IN_LABEL: usize = 16;
+const MAX_RPC_ERRORS_IN_LABEL: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct RpcCallRef {
@@ -22,15 +25,73 @@ struct RpcCallRef {
     method: String,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct RpcTraceRequest {
+    calls: Vec<RpcCallRef>,
+    methods: String,
+    batch: usize,
+}
+
+impl RpcTraceRequest {
+    pub(crate) fn from_body(body: &[u8]) -> Self {
+        if body.len() > RPC_TRACE_PARSE_LIMIT_BYTES {
+            return Self::from_calls(vec![RpcCallRef {
+                id: None,
+                method: "body_too_large".to_string(),
+            }]);
+        }
+
+        Self::from_calls(parse_rpc_calls(body))
+    }
+
+    fn unknown() -> Self {
+        Self::from_calls(vec![RpcCallRef {
+            id: None,
+            method: "unknown".to_string(),
+        }])
+    }
+
+    fn from_calls(calls: Vec<RpcCallRef>) -> Self {
+        let methods = summarize_methods(&calls);
+        let batch = calls.len();
+        Self {
+            calls,
+            methods,
+            batch,
+        }
+    }
+}
+
 fn slow_rpc_threshold_ms() -> u64 {
-    env::var("BITTERY_RPC_SLOW_MS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(DEFAULT_SLOW_RPC_MS)
+    static THRESHOLD_MS: OnceLock<u64> = OnceLock::new();
+    *THRESHOLD_MS.get_or_init(|| {
+        env::var("BITTERY_RPC_SLOW_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(DEFAULT_SLOW_RPC_MS)
+    })
+}
+
+fn sanitize_label(value: &str) -> String {
+    let mut label = String::new();
+
+    for character in value.chars().take(MAX_LABEL_CHARS) {
+        if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-' | '/' | ':') {
+            label.push(character);
+        } else {
+            label.push('_');
+        }
+    }
+
+    if label.is_empty() {
+        "unknown".to_string()
+    } else {
+        label
+    }
 }
 
 fn parse_single_call(value: &Value) -> Option<RpcCallRef> {
-    let method = value.get("method")?.as_str()?.to_string();
+    let method = sanitize_label(value.get("method")?.as_str()?);
     let id = value.get("id").cloned();
     Some(RpcCallRef { id, method })
 }
@@ -50,20 +111,39 @@ fn parse_rpc_calls(body: &[u8]) -> Vec<RpcCallRef> {
     parse_single_call(&value).into_iter().collect()
 }
 
+fn summarize_methods(calls: &[RpcCallRef]) -> String {
+    if calls.is_empty() {
+        return "unknown".to_string();
+    }
+
+    let mut methods = calls
+        .iter()
+        .take(MAX_METHODS_IN_LABEL)
+        .map(|call| call.method.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    if calls.len() > MAX_METHODS_IN_LABEL {
+        methods.push_str(",truncated");
+    }
+
+    methods
+}
+
 fn error_label(error: &Value) -> String {
     if let Some(code) = error
         .get("data")
         .and_then(|data| data.get("code"))
         .and_then(Value::as_str)
     {
-        return code.to_string();
+        return sanitize_label(code);
     }
 
     error
-        .get("message")
-        .and_then(Value::as_str)
-        .unwrap_or("UNKNOWN")
-        .to_string()
+        .get("code")
+        .and_then(Value::as_i64)
+        .map(|code| format!("JSON_RPC_{code}"))
+        .unwrap_or_else(|| "UNKNOWN".to_string())
 }
 
 fn summarize_rpc_errors(calls: &[RpcCallRef], response_body: &[u8]) -> String {
@@ -77,22 +157,25 @@ fn summarize_rpc_errors(calls: &[RpcCallRef], response_body: &[u8]) -> String {
         vec![&value]
     };
 
-    let mut errors = Vec::new();
+    let calls_by_id = calls
+        .iter()
+        .filter_map(|call| {
+            call.id
+                .as_ref()
+                .map(|id| (id.to_string(), call.method.as_str()))
+        })
+        .collect::<HashMap<_, _>>();
 
-    for call in calls {
-        let Some(id) = &call.id else {
-            continue;
-        };
-
-        for response in &responses {
-            if response.get("id") == Some(id) {
-                if let Some(error) = response.get("error") {
-                    errors.push(format!("{}: {}", call.method, error_label(error)));
-                }
-                break;
-            }
-        }
-    }
+    let mut errors = responses
+        .iter()
+        .filter_map(|response| {
+            let error = response.get("error")?;
+            let id = response.get("id")?;
+            let method = calls_by_id.get(&id.to_string())?;
+            Some(format!("{}: {}", method, error_label(error)))
+        })
+        .take(MAX_RPC_ERRORS_IN_LABEL + 1)
+        .collect::<Vec<_>>();
 
     if errors.is_empty() && calls.len() == 1 {
         if let Some(error) = value.get("error") {
@@ -103,6 +186,10 @@ fn summarize_rpc_errors(calls: &[RpcCallRef], response_body: &[u8]) -> String {
     if errors.is_empty() {
         "none".to_string()
     } else {
+        if errors.len() > MAX_RPC_ERRORS_IN_LABEL {
+            errors.truncate(MAX_RPC_ERRORS_IN_LABEL);
+            errors.push("truncated".to_string());
+        }
         errors.join(", ")
     }
 }
@@ -146,7 +233,7 @@ fn log_rpc_body_read_failed(latency_ms: u64, threshold_ms: u64, error: &impl std
 fn traced_response_body(
     body: Body,
     calls: Vec<RpcCallRef>,
-    latency_ms: u64,
+    start: Instant,
     threshold_ms: u64,
     span: Span,
 ) -> Body {
@@ -158,15 +245,16 @@ fn traced_response_body(
             match chunk {
                 Ok(bytes) => {
                     if !response_too_large {
-                        let remaining = (RPC_BODY_LIMIT_BYTES + 1).saturating_sub(response_bytes.len());
+                        let remaining = (RPC_TRACE_PARSE_LIMIT_BYTES + 1).saturating_sub(response_bytes.len());
                         let bytes_to_copy = bytes.len().min(remaining);
                         response_bytes.extend_from_slice(&bytes[..bytes_to_copy]);
-                        response_too_large = response_bytes.len() > RPC_BODY_LIMIT_BYTES;
+                        response_too_large = response_bytes.len() > RPC_TRACE_PARSE_LIMIT_BYTES;
                     }
 
                     yield Ok::<Bytes, Error>(bytes);
                 }
                 Err(error) => {
+                    let latency_ms = start.elapsed().as_millis() as u64;
                     let _span_guard = span.enter();
                     log_rpc_body_read_failed(latency_ms, threshold_ms, &error);
                     yield Err::<Bytes, Error>(error);
@@ -180,79 +268,44 @@ fn traced_response_body(
         } else {
             summarize_rpc_errors(&calls, &response_bytes)
         };
+        let latency_ms = start.elapsed().as_millis() as u64;
         let _span_guard = span.enter();
         log_rpc_completion(latency_ms, threshold_ms, &rpc_errors);
     })
 }
 
 pub async fn rpc_tracing_middleware(request: Request<Body>, next: Next) -> Response {
-    let (parts, body) = request.into_parts();
-    let bytes = match to_bytes(body, RPC_BODY_LIMIT_BYTES + 1).await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            warn!(error = %error, "failed to read rpc request body");
-            let mut response = Response::new(Body::from("failed to read request body"));
-            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
-            return response;
-        }
-    };
-
-    let calls = parse_rpc_calls(&bytes);
-    let methods = if calls.is_empty() {
-        "unknown".to_string()
-    } else {
-        calls
-            .iter()
-            .map(|call| call.method.as_str())
-            .collect::<Vec<_>>()
-            .join(",")
-    };
-    let batch = calls.len();
-
-    let user_id = parts
-        .extensions
-        .get::<VerifiedSession>()
-        .map(|session| session.user_id.as_str())
-        .unwrap_or("anonymous");
-    let session_id = parts
-        .extensions
-        .get::<VerifiedSession>()
-        .map(|session| session.session_id.as_str())
-        .unwrap_or("-");
-    let client_id = parts
-        .extensions
-        .get::<RequestMetadata>()
-        .and_then(|metadata| metadata.client_id.as_deref())
-        .unwrap_or("-");
-    let platform = parts
-        .extensions
-        .get::<RequestMetadata>()
-        .and_then(|metadata| metadata.app_platform.as_deref())
-        .unwrap_or("-");
+    let trace_request = request
+        .extensions()
+        .get::<RpcTraceRequest>()
+        .cloned()
+        .unwrap_or_else(RpcTraceRequest::unknown);
+    let authenticated = request.extensions().get::<VerifiedSession>().is_some();
 
     let span = tracing::info_span!(
         "rpc",
-        methods = %methods,
-        batch = batch,
-        user_id = user_id,
-        session_id = session_id,
-        client_id = client_id,
-        platform = platform,
+        methods = %trace_request.methods,
+        batch = trace_request.batch,
+        authenticated = authenticated,
     );
     let response_span = span.clone();
 
-    let request = Request::from_parts(parts, Body::from(bytes));
     let start = Instant::now();
+    let threshold_ms = slow_rpc_threshold_ms();
 
     async move {
         let response = next.run(request).await;
-        let latency_ms = start.elapsed().as_millis() as u64;
-        let threshold_ms = slow_rpc_threshold_ms();
 
         let (parts, body) = response.into_parts();
         Response::from_parts(
             parts,
-            traced_response_body(body, calls, latency_ms, threshold_ms, response_span),
+            traced_response_body(
+                body,
+                trace_request.calls,
+                start,
+                threshold_ms,
+                response_span,
+            ),
         )
     }
     .instrument(span)
@@ -261,7 +314,7 @@ pub async fn rpc_tracing_middleware(request: Request<Body>, next: Next) -> Respo
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_rpc_calls, summarize_rpc_errors, RpcCallRef};
+    use super::{parse_rpc_calls, summarize_rpc_errors, RpcCallRef, RpcTraceRequest};
     use serde_json::json;
 
     #[test]
@@ -343,6 +396,33 @@ mod tests {
     }
 
     #[test]
+    fn trace_request_does_not_parse_large_body() {
+        let body = vec![b' '; super::RPC_TRACE_PARSE_LIMIT_BYTES + 1];
+        let trace_request = RpcTraceRequest::from_body(&body);
+
+        assert_eq!(trace_request.methods, "body_too_large");
+        assert_eq!(trace_request.batch, 1);
+    }
+
+    #[test]
+    fn parse_rpc_calls_sanitizes_method_labels() {
+        let body = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "vault.get\nsecret",
+            "params": []
+        });
+
+        assert_eq!(
+            parse_rpc_calls(body.to_string().as_bytes()),
+            vec![RpcCallRef {
+                id: Some(json!(1)),
+                method: "vault.get_secret".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn summarize_rpc_errors_single_success() {
         let calls = vec![RpcCallRef {
             id: Some(json!(1)),
@@ -379,6 +459,27 @@ mod tests {
         assert_eq!(
             summarize_rpc_errors(&calls, response.to_string().as_bytes()),
             "vault.get: FORBIDDEN"
+        );
+    }
+
+    #[test]
+    fn summarize_rpc_errors_does_not_log_raw_error_message() {
+        let calls = vec![RpcCallRef {
+            id: Some(json!(1)),
+            method: "vault.get".to_string(),
+        }];
+        let response = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": -32000,
+                "message": "contains user supplied details"
+            }
+        });
+
+        assert_eq!(
+            summarize_rpc_errors(&calls, response.to_string().as_bytes()),
+            "vault.get: JSON_RPC_-32000"
         );
     }
 
