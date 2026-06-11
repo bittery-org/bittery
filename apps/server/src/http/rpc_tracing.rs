@@ -1,13 +1,15 @@
 use std::{env, time::Instant};
 
+use async_stream::stream;
 use axum::{
-    body::{to_bytes, Body},
-    http::Request,
+    body::{to_bytes, Body, Bytes},
+    http::{Request, StatusCode},
     middleware::Next,
     response::Response,
+    Error,
 };
 use serde_json::Value;
-use tracing::{info, warn, Instrument};
+use tracing::{info, warn, Instrument, Span};
 
 use crate::services::session::{RequestMetadata, VerifiedSession};
 
@@ -105,12 +107,93 @@ fn summarize_rpc_errors(calls: &[RpcCallRef], response_body: &[u8]) -> String {
     }
 }
 
+fn log_rpc_completion(latency_ms: u64, threshold_ms: u64, rpc_errors: &str) {
+    if latency_ms > threshold_ms {
+        warn!(
+            latency_ms,
+            threshold_ms,
+            rpc_errors = %rpc_errors,
+            "slow rpc request"
+        );
+    } else {
+        info!(
+            latency_ms,
+            rpc_errors = %rpc_errors,
+            "rpc request completed"
+        );
+    }
+}
+
+fn log_rpc_body_read_failed(latency_ms: u64, threshold_ms: u64, error: &impl std::fmt::Display) {
+    if latency_ms > threshold_ms {
+        warn!(
+            latency_ms,
+            threshold_ms,
+            rpc_errors = "body_read_failed",
+            error = %error,
+            "slow rpc request"
+        );
+    } else {
+        warn!(
+            latency_ms,
+            rpc_errors = "body_read_failed",
+            error = %error,
+            "rpc response body read failed"
+        );
+    }
+}
+
+fn traced_response_body(
+    body: Body,
+    calls: Vec<RpcCallRef>,
+    latency_ms: u64,
+    threshold_ms: u64,
+    span: Span,
+) -> Body {
+    Body::from_stream(stream! {
+        let mut response_bytes = Vec::new();
+        let mut response_too_large = false;
+
+        for await chunk in body.into_data_stream() {
+            match chunk {
+                Ok(bytes) => {
+                    if !response_too_large {
+                        let remaining = (RPC_BODY_LIMIT_BYTES + 1).saturating_sub(response_bytes.len());
+                        let bytes_to_copy = bytes.len().min(remaining);
+                        response_bytes.extend_from_slice(&bytes[..bytes_to_copy]);
+                        response_too_large = response_bytes.len() > RPC_BODY_LIMIT_BYTES;
+                    }
+
+                    yield Ok::<Bytes, Error>(bytes);
+                }
+                Err(error) => {
+                    let _span_guard = span.enter();
+                    log_rpc_body_read_failed(latency_ms, threshold_ms, &error);
+                    yield Err::<Bytes, Error>(error);
+                    return;
+                }
+            }
+        }
+
+        let rpc_errors = if response_too_large {
+            "body_too_large".to_string()
+        } else {
+            summarize_rpc_errors(&calls, &response_bytes)
+        };
+        let _span_guard = span.enter();
+        log_rpc_completion(latency_ms, threshold_ms, &rpc_errors);
+    })
+}
+
 pub async fn rpc_tracing_middleware(request: Request<Body>, next: Next) -> Response {
     let (parts, body) = request.into_parts();
     let bytes = match to_bytes(body, RPC_BODY_LIMIT_BYTES + 1).await {
         Ok(bytes) => bytes,
-        Err(_) => {
-            return next.run(Request::from_parts(parts, Body::empty())).await;
+        Err(error) => {
+            warn!(error = %error, "failed to read rpc request body");
+            let mut response = Response::new(Body::from("failed to read request body"));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            return response;
         }
     };
 
@@ -156,6 +239,7 @@ pub async fn rpc_tracing_middleware(request: Request<Body>, next: Next) -> Respo
         client_id = client_id,
         platform = platform,
     );
+    let response_span = span.clone();
 
     let request = Request::from_parts(parts, Body::from(bytes));
     let start = Instant::now();
@@ -166,27 +250,10 @@ pub async fn rpc_tracing_middleware(request: Request<Body>, next: Next) -> Respo
         let threshold_ms = slow_rpc_threshold_ms();
 
         let (parts, body) = response.into_parts();
-        let response_bytes = to_bytes(body, RPC_BODY_LIMIT_BYTES + 1)
-            .await
-            .unwrap_or_default();
-        let rpc_errors = summarize_rpc_errors(&calls, &response_bytes);
-
-        if latency_ms > threshold_ms {
-            warn!(
-                latency_ms,
-                threshold_ms,
-                rpc_errors = %rpc_errors,
-                "slow rpc request"
-            );
-        } else {
-            info!(
-                latency_ms,
-                rpc_errors = %rpc_errors,
-                "rpc request completed"
-            );
-        }
-
-        Response::from_parts(parts, Body::from(response_bytes))
+        Response::from_parts(
+            parts,
+            traced_response_body(body, calls, latency_ms, threshold_ms, response_span),
+        )
     }
     .instrument(span)
     .await
