@@ -1,6 +1,6 @@
 {$DOMAIN} {
 	# API and RPC routes → server
-	handle /rpc/* {
+	handle /rpc {
 		reverse_proxy server:3000
 	}
 
