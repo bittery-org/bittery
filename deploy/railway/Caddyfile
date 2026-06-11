@@ -1,0 +1,48 @@
+{
+	# Railway terminates TLS at the edge; Caddy only receives plain HTTP on $PORT.
+	auto_https off
+}
+
+:{$PORT:8080} {
+	# Upstreams use Railway private networking (servicename.railway.internal).
+	# Wire these on the caddy service via reference variables — see deploy/railway/README.md
+
+	handle /rpc/* {
+		reverse_proxy {$SERVER_PRIVATE_DOMAIN:server.railway.internal}:{$SERVER_PORT:3000}
+	}
+
+	handle /sync/* {
+		reverse_proxy {$SERVER_PRIVATE_DOMAIN:server.railway.internal}:{$SERVER_PORT:3000}
+	}
+
+	handle /cdn/* {
+		reverse_proxy {$SERVER_PRIVATE_DOMAIN:server.railway.internal}:{$SERVER_PORT:3000}
+	}
+
+	handle /favicon/* {
+		reverse_proxy {$SERVER_PRIVATE_DOMAIN:server.railway.internal}:{$SERVER_PORT:3000}
+	}
+
+	handle /healthz {
+		reverse_proxy {$SERVER_PRIVATE_DOMAIN:server.railway.internal}:{$SERVER_PORT:3000}
+	}
+
+	handle /webhooks/* {
+		reverse_proxy {$SERVER_PRIVATE_DOMAIN:server.railway.internal}:{$SERVER_PORT:3000}
+	}
+
+	handle {
+		reverse_proxy {$WEB_PRIVATE_DOMAIN:web.railway.internal}:{$WEB_PORT:8080}
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		X-XSS-Protection "0"
+		X-Permitted-Cross-Domain-Policies "none"
+	}
+}
