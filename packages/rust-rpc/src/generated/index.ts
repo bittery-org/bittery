@@ -15,13 +15,11 @@ import type { AcceptInvitationResponse } from "./AcceptInvitationResponse.ts";
 import type { AcknowledgeEventsInput } from "./AcknowledgeEventsInput.ts";
 import type { AcknowledgeEventsResponse } from "./AcknowledgeEventsResponse.ts";
 import type { AddVaultMemberInput } from "./AddVaultMemberInput.ts";
+import type { AppError } from "./AppError.ts";
 import type { AttachmentDownloadResponse } from "./AttachmentDownloadResponse.ts";
 import type { AttachmentIdInput } from "./AttachmentIdInput.ts";
 import type { AttachmentUsageResponse } from "./AttachmentUsageResponse.ts";
-import type { AuditRpcError } from "./AuditRpcError.ts";
-import type { AuthRpcError } from "./AuthRpcError.ts";
 import type { BillingEntitlementsResponse } from "./BillingEntitlementsResponse.ts";
-import type { BillingRpcError } from "./BillingRpcError.ts";
 import type { BillingStatusResponse } from "./BillingStatusResponse.ts";
 import type { BootstrapItemsInput } from "./BootstrapItemsInput.ts";
 import type { BootstrapItemsResponse } from "./BootstrapItemsResponse.ts";
@@ -98,7 +96,6 @@ import type { SessionIdInput } from "./SessionIdInput.ts";
 import type { ShareAccessLogResponse } from "./ShareAccessLogResponse.ts";
 import type { ShareLinkDetailsResponse } from "./ShareLinkDetailsResponse.ts";
 import type { ShareLinkListResponse } from "./ShareLinkListResponse.ts";
-import type { ShareRpcError } from "./ShareRpcError.ts";
 import type { SignupInput } from "./SignupInput.ts";
 import type { SignupResponse } from "./SignupResponse.ts";
 import type { SignupWithInvitationInput } from "./SignupWithInvitationInput.ts";
@@ -106,7 +103,6 @@ import type { StartLoginInput } from "./StartLoginInput.ts";
 import type { StartLoginResponse } from "./StartLoginResponse.ts";
 import type { StoreRecoveryKeyInput } from "./StoreRecoveryKeyInput.ts";
 import type { SuccessResponse } from "./SuccessResponse.ts";
-import type { SyncRpcError } from "./SyncRpcError.ts";
 import type { SyncSeatsInput } from "./SyncSeatsInput.ts";
 import type { SyncSeatsResponse } from "./SyncSeatsResponse.ts";
 import type { SyncStateEntry } from "./SyncStateEntry.ts";
@@ -118,7 +114,6 @@ import type { TeamInvitationDetailsResponse } from "./TeamInvitationDetailsRespo
 import type { TeamInvitationListEntry } from "./TeamInvitationListEntry.ts";
 import type { TeamMemberResponse } from "./TeamMemberResponse.ts";
 import type { TeamRotationInput } from "./TeamRotationInput.ts";
-import type { TeamRpcError } from "./TeamRpcError.ts";
 import type { TeamSeatInvoicePreviewResponse } from "./TeamSeatInvoicePreviewResponse.ts";
 import type { TeamSummaryResponse } from "./TeamSummaryResponse.ts";
 import type { TeamVaultResponse } from "./TeamVaultResponse.ts";
@@ -144,7 +139,6 @@ import type { VaultListEntryResponse } from "./VaultListEntryResponse.ts";
 import type { VaultLookupUserResponse } from "./VaultLookupUserResponse.ts";
 import type { VaultMemberResponse } from "./VaultMemberResponse.ts";
 import type { VaultRotationDataResponse } from "./VaultRotationDataResponse.ts";
-import type { VaultRpcError } from "./VaultRpcError.ts";
 import type { VaultStatsResponse } from "./VaultStatsResponse.ts";
 import type { VerifyEmailAndAccessInput } from "./VerifyEmailAndAccessInput.ts";
 import type { VerifyRecoveryCodeInput } from "./VerifyRecoveryCodeInput.ts";
@@ -157,18 +151,17 @@ export type { AcceptInvitationResponse } from "./AcceptInvitationResponse.ts";
 export type { AcknowledgeEventsInput } from "./AcknowledgeEventsInput.ts";
 export type { AcknowledgeEventsResponse } from "./AcknowledgeEventsResponse.ts";
 export type { AddVaultMemberInput } from "./AddVaultMemberInput.ts";
+export type { AppError } from "./AppError.ts";
+export type { AppErrorCode } from "./AppErrorCode.ts";
 export type { AttachmentDownloadResponse } from "./AttachmentDownloadResponse.ts";
 export type { AttachmentIdInput } from "./AttachmentIdInput.ts";
 export type { AttachmentUsageResponse } from "./AttachmentUsageResponse.ts";
 export type { AuditActionGroupFilter } from "./AuditActionGroupFilter.ts";
 export type { AuditResultFilter } from "./AuditResultFilter.ts";
-export type { AuditRpcError } from "./AuditRpcError.ts";
-export type { AuthRpcError } from "./AuthRpcError.ts";
 export type { AuthSessionUserResponse } from "./AuthSessionUserResponse.ts";
 export type { AuthVaultKeyResponse } from "./AuthVaultKeyResponse.ts";
 export type { BillingEntitlements } from "./BillingEntitlements.ts";
 export type { BillingEntitlementsResponse } from "./BillingEntitlementsResponse.ts";
-export type { BillingRpcError } from "./BillingRpcError.ts";
 export type { BillingStatusResponse } from "./BillingStatusResponse.ts";
 export type { BootstrapItemResponse } from "./BootstrapItemResponse.ts";
 export type { BootstrapItemsInput } from "./BootstrapItemsInput.ts";
@@ -258,7 +251,6 @@ export type { ShareAllowedEmailDetails } from "./ShareAllowedEmailDetails.ts";
 export type { ShareLinkDetailsResponse } from "./ShareLinkDetailsResponse.ts";
 export type { ShareLinkListEntry } from "./ShareLinkListEntry.ts";
 export type { ShareLinkListResponse } from "./ShareLinkListResponse.ts";
-export type { ShareRpcError } from "./ShareRpcError.ts";
 export type { SignupInput } from "./SignupInput.ts";
 export type { SignupResponse } from "./SignupResponse.ts";
 export type { SignupWithInvitationInput } from "./SignupWithInvitationInput.ts";
@@ -268,7 +260,6 @@ export type { StoreRecoveryKeyInput } from "./StoreRecoveryKeyInput.ts";
 export type { SuccessResponse } from "./SuccessResponse.ts";
 export type { SyncCursorResponse } from "./SyncCursorResponse.ts";
 export type { SyncEventDto } from "./SyncEventDto.ts";
-export type { SyncRpcError } from "./SyncRpcError.ts";
 export type { SyncSeatsInput } from "./SyncSeatsInput.ts";
 export type { SyncSeatsResponse } from "./SyncSeatsResponse.ts";
 export type { SyncStateEntry } from "./SyncStateEntry.ts";
@@ -281,7 +272,6 @@ export type { TeamInvitationDetailsResponse } from "./TeamInvitationDetailsRespo
 export type { TeamInvitationListEntry } from "./TeamInvitationListEntry.ts";
 export type { TeamMemberResponse } from "./TeamMemberResponse.ts";
 export type { TeamRotationInput } from "./TeamRotationInput.ts";
-export type { TeamRpcError } from "./TeamRpcError.ts";
 export type { TeamSeatInvoicePreviewLineResponse } from "./TeamSeatInvoicePreviewLineResponse.ts";
 export type { TeamSeatInvoicePreviewResponse } from "./TeamSeatInvoicePreviewResponse.ts";
 export type { TeamSummaryResponse } from "./TeamSummaryResponse.ts";
@@ -313,7 +303,6 @@ export type { VaultMemberResponse } from "./VaultMemberResponse.ts";
 export type { VaultRotationDataResponse } from "./VaultRotationDataResponse.ts";
 export type { VaultRotationItemResponse } from "./VaultRotationItemResponse.ts";
 export type { VaultRotationMemberResponse } from "./VaultRotationMemberResponse.ts";
-export type { VaultRpcError } from "./VaultRpcError.ts";
 export type { VaultStatsResponse } from "./VaultStatsResponse.ts";
 export type { VaultSummaryResponse } from "./VaultSummaryResponse.ts";
 export type { VerifyEmailAndAccessInput } from "./VerifyEmailAndAccessInput.ts";
@@ -328,415 +317,412 @@ export type QubitServer = {
 	auth: {
 		registrationStatus: Query<
 			[],
-			{ Ok: RegistrationStatusResponse } | { Err: AuthRpcError }
+			{ Ok: RegistrationStatusResponse } | { Err: AppError }
 		>;
 		requestSignupVerification: Mutation<
 			[input: RequestSignupVerificationInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		verifySignupVerification: Mutation<
 			[input: VerifySignupVerificationInput],
-			{ Ok: VerifySignupVerificationResponse } | { Err: AuthRpcError }
+			{ Ok: VerifySignupVerificationResponse } | { Err: AppError }
 		>;
 		signup: Mutation<
 			[input: SignupInput],
-			{ Ok: SignupResponse } | { Err: AuthRpcError }
+			{ Ok: SignupResponse } | { Err: AppError }
 		>;
 		signupWithInvitation: Mutation<
 			[input: SignupWithInvitationInput],
-			{ Ok: SignupResponse } | { Err: AuthRpcError }
+			{ Ok: SignupResponse } | { Err: AppError }
 		>;
 		startLogin: Mutation<
 			[input: StartLoginInput],
-			{ Ok: StartLoginResponse } | { Err: AuthRpcError }
+			{ Ok: StartLoginResponse } | { Err: AppError }
 		>;
 		finishLogin: Mutation<
 			[input: FinishLoginInput],
-			{ Ok: FinishLoginResponse } | { Err: AuthRpcError }
+			{ Ok: FinishLoginResponse } | { Err: AppError }
 		>;
 		requestRecoveryVerification: Mutation<
 			[input: RequestRecoveryVerificationInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		verifyRecoveryCode: Mutation<
 			[input: VerifyRecoveryCodeInput],
-			{ Ok: VerifyRecoveryCodeResponse } | { Err: AuthRpcError }
+			{ Ok: VerifyRecoveryCodeResponse } | { Err: AppError }
 		>;
 		getRecoveryData: Query<
 			[input: GetRecoveryDataInput],
-			{ Ok: GetRecoveryDataResponse } | { Err: AuthRpcError }
+			{ Ok: GetRecoveryDataResponse } | { Err: AppError }
 		>;
 		resetPassword: Mutation<
 			[input: ResetPasswordInput],
-			{ Ok: ResetPasswordResponse } | { Err: AuthRpcError }
+			{ Ok: ResetPasswordResponse } | { Err: AppError }
 		>;
 		checkEmail: Query<
 			[input: CheckEmailInput],
-			{ Ok: CheckEmailResponse } | { Err: AuthRpcError }
+			{ Ok: CheckEmailResponse } | { Err: AppError }
 		>;
-		me: Query<[], { Ok: MeResponse } | { Err: AuthRpcError }>;
+		me: Query<[], { Ok: MeResponse } | { Err: AppError }>;
 		updateEmail: Mutation<
 			[input: UpdateEmailInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		changePassword: Mutation<
 			[input: ChangePasswordInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		regenerateSecretKey: Mutation<
 			[input: RegenerateSecretKeyInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		storeRecoveryKey: Mutation<
 			[input: StoreRecoveryKeyInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		deleteAccount: Mutation<
 			[input: DeleteAccountInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		listDevices: Query<
 			[],
-			{ Ok: Array<DeviceSessionResponse> } | { Err: AuthRpcError }
+			{ Ok: Array<DeviceSessionResponse> } | { Err: AppError }
 		>;
 		revokeDevice: Mutation<
 			[input: SessionIdInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		renameDevice: Mutation<
 			[input: RenameDeviceInput],
-			{ Ok: LogoutResponse } | { Err: AuthRpcError }
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
-		heartbeat: Mutation<[], { Ok: LogoutResponse } | { Err: AuthRpcError }>;
-		logout: Mutation<[], { Ok: LogoutResponse } | { Err: AuthRpcError }>;
-		logoutAll: Mutation<[], { Ok: LogoutResponse } | { Err: AuthRpcError }>;
+		heartbeat: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
+		logout: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
+		logoutAll: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
 		refreshSession: Mutation<
 			[],
-			{ Ok: RefreshSessionResponse } | { Err: AuthRpcError }
+			{ Ok: RefreshSessionResponse } | { Err: AppError }
 		>;
 	};
 	audit: {
 		teamEvents: Query<
 			[input: TeamEventsInput],
-			{ Ok: TeamEventsResponse } | { Err: AuditRpcError }
+			{ Ok: TeamEventsResponse } | { Err: AppError }
 		>;
 	};
 	billing: {
-		status: Query<[], { Ok: BillingStatusResponse } | { Err: BillingRpcError }>;
+		status: Query<[], { Ok: BillingStatusResponse } | { Err: AppError }>;
 		entitlements: Query<
 			[],
-			{ Ok: BillingEntitlementsResponse } | { Err: BillingRpcError }
+			{ Ok: BillingEntitlementsResponse } | { Err: AppError }
 		>;
 		attachmentUsage: Query<
 			[],
-			{ Ok: AttachmentUsageResponse } | { Err: BillingRpcError }
+			{ Ok: AttachmentUsageResponse } | { Err: AppError }
 		>;
 		createCheckoutSession: Mutation<
 			[input: CheckoutPlanInput],
-			{ Ok: CheckoutSessionResponse } | { Err: BillingRpcError }
+			{ Ok: CheckoutSessionResponse } | { Err: AppError }
 		>;
 		createPortalSession: Mutation<
 			[],
-			{ Ok: PortalSessionResponse } | { Err: BillingRpcError }
+			{ Ok: PortalSessionResponse } | { Err: AppError }
 		>;
 		syncSeats: Mutation<
 			[input: SyncSeatsInput],
-			{ Ok: SyncSeatsResponse } | { Err: BillingRpcError }
+			{ Ok: SyncSeatsResponse } | { Err: AppError }
 		>;
 		previewAdditionalTeamSeat: Query<
 			[],
-			{ Ok: TeamSeatInvoicePreviewResponse | null } | { Err: BillingRpcError }
+			{ Ok: TeamSeatInvoicePreviewResponse | null } | { Err: AppError }
 		>;
 	};
 	share: {
 		create: Mutation<
 			[input: CreateShareLinkInput],
-			{ Ok: CreateShareLinkResponse } | { Err: ShareRpcError }
+			{ Ok: CreateShareLinkResponse } | { Err: AppError }
 		>;
 		listByItem: Query<
 			[input: ItemIdInput],
-			{ Ok: ShareLinkListResponse } | { Err: ShareRpcError }
+			{ Ok: ShareLinkListResponse } | { Err: AppError }
 		>;
 		get: Query<
 			[input: LinkIdInput],
-			{ Ok: ShareLinkDetailsResponse } | { Err: ShareRpcError }
+			{ Ok: ShareLinkDetailsResponse } | { Err: AppError }
 		>;
 		revoke: Mutation<
 			[input: LinkIdInput],
-			{ Ok: SuccessResponse } | { Err: ShareRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		update: Mutation<
 			[input: UpdateShareLinkInput],
-			{ Ok: SuccessResponse } | { Err: ShareRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		getAccessLogs: Query<
 			[input: LinkIdInput],
-			{ Ok: Array<ShareAccessLogResponse> } | { Err: ShareRpcError }
+			{ Ok: Array<ShareAccessLogResponse> } | { Err: AppError }
 		>;
 		getPublicInfo: Query<
 			[input: PublicTokenInput],
-			{ Ok: PublicShareInfoResponse } | { Err: ShareRpcError }
+			{ Ok: PublicShareInfoResponse } | { Err: AppError }
 		>;
 		requestEmailVerification: Mutation<
 			[input: RequestEmailVerificationInput],
-			{ Ok: RequestEmailVerificationResponse } | { Err: ShareRpcError }
+			{ Ok: RequestEmailVerificationResponse } | { Err: AppError }
 		>;
 		verifyEmailAndAccess: Mutation<
 			[input: VerifyEmailAndAccessInput],
-			{ Ok: PublicShareAccessResponse } | { Err: ShareRpcError }
+			{ Ok: PublicShareAccessResponse } | { Err: AppError }
 		>;
 		accessPublic: Mutation<
 			[input: PublicTokenInput],
-			{ Ok: PublicShareAccessResponse } | { Err: ShareRpcError }
+			{ Ok: PublicShareAccessResponse } | { Err: AppError }
 		>;
 	};
 	sync: {
 		bootstrapItems: Query<
 			[input: BootstrapItemsInput],
-			{ Ok: BootstrapItemsResponse } | { Err: SyncRpcError }
+			{ Ok: BootstrapItemsResponse } | { Err: AppError }
 		>;
 		getEventsSince: Query<
 			[input: GetEventsSinceInput],
-			{ Ok: GetEventsSinceResponse } | { Err: SyncRpcError }
+			{ Ok: GetEventsSinceResponse } | { Err: AppError }
 		>;
 		acknowledgeEvents: Mutation<
 			[input: AcknowledgeEventsInput],
-			{ Ok: AcknowledgeEventsResponse } | { Err: SyncRpcError }
+			{ Ok: AcknowledgeEventsResponse } | { Err: AppError }
 		>;
 		getLastAcknowledged: Query<
 			[input: GetLastAcknowledgedInput],
-			{ Ok: LastAcknowledgedResponse | null } | { Err: SyncRpcError }
+			{ Ok: LastAcknowledgedResponse | null } | { Err: AppError }
 		>;
 		getSyncState: Query<
 			[input: GetSyncStateInput],
-			{ Ok: { [key in string]?: SyncStateEntry } } | { Err: SyncRpcError }
+			{ Ok: { [key in string]?: SyncStateEntry } } | { Err: AppError }
 		>;
 		checkConflict: Query<
 			[input: CheckConflictInput],
-			{ Ok: CheckConflictResponse } | { Err: SyncRpcError }
+			{ Ok: CheckConflictResponse } | { Err: AppError }
 		>;
 	};
 	team: {
-		list: Query<[], { Ok: TeamSummaryResponse } | { Err: TeamRpcError }>;
+		list: Query<[], { Ok: TeamSummaryResponse } | { Err: AppError }>;
 		get: Query<
 			[input: TeamIdInput],
-			{ Ok: TeamDetailsResponse } | { Err: TeamRpcError }
+			{ Ok: TeamDetailsResponse } | { Err: AppError }
 		>;
 		vaults: Query<
 			[input: TeamIdInput],
-			{ Ok: Array<TeamVaultResponse> } | { Err: TeamRpcError }
+			{ Ok: Array<TeamVaultResponse> } | { Err: AppError }
 		>;
 		create: Mutation<
-			[_input: CreateTeamInput],
-			{ Ok: SuccessResponse } | { Err: TeamRpcError }
+			[input: CreateTeamInput],
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		update: Mutation<
 			[input: UpdateTeamInput],
-			{ Ok: SuccessResponse } | { Err: TeamRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		createImageUpload: Mutation<
 			[input: CreateImageUploadInput],
-			{ Ok: PresignedUploadResult } | { Err: TeamRpcError }
+			{ Ok: PresignedUploadResult } | { Err: AppError }
 		>;
 		delete: Mutation<
 			[input: TeamIdInput],
-			{ Ok: SuccessResponse } | { Err: TeamRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		leave: Mutation<
 			[input: LeaveTeamInput],
-			{ Ok: SuccessResponse } | { Err: TeamRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		getLeaveRotationData: Query<
 			[input: TeamIdInput],
-			{ Ok: RotationDataResponse } | { Err: TeamRpcError }
+			{ Ok: RotationDataResponse } | { Err: AppError }
 		>;
 		members: {
 			list: Query<
 				[input: TeamIdInput],
-				{ Ok: Array<TeamMemberResponse> } | { Err: TeamRpcError }
+				{ Ok: Array<TeamMemberResponse> } | { Err: AppError }
 			>;
 			getTeamRotationData: Query<
 				[input: TeamRotationInput],
-				{ Ok: RotationDataResponse } | { Err: TeamRpcError }
+				{ Ok: RotationDataResponse } | { Err: AppError }
 			>;
 			remove: Mutation<
 				[input: RemoveTeamMemberInput],
-				{ Ok: RemoveTeamMemberResponse } | { Err: TeamRpcError }
+				{ Ok: RemoveTeamMemberResponse } | { Err: AppError }
 			>;
 			deleteAccount: Mutation<
 				[input: DeleteAccountInput],
-				{ Ok: SuccessResponse } | { Err: TeamRpcError }
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 		};
 		invitations: {
 			getByToken: Query<
 				[input: TokenInput],
-				{ Ok: TeamInvitationDetailsResponse } | { Err: TeamRpcError }
+				{ Ok: TeamInvitationDetailsResponse } | { Err: AppError }
 			>;
 			list: Query<
 				[input: TeamIdInput],
-				{ Ok: Array<TeamInvitationListEntry> } | { Err: TeamRpcError }
+				{ Ok: Array<TeamInvitationListEntry> } | { Err: AppError }
 			>;
 			pending: Query<
 				[],
-				{ Ok: Array<PendingTeamInvitationResponse> } | { Err: TeamRpcError }
+				{ Ok: Array<PendingTeamInvitationResponse> } | { Err: AppError }
 			>;
 			send: Mutation<
 				[input: SendInvitationInput],
-				{ Ok: SendInvitationResponse } | { Err: TeamRpcError }
+				{ Ok: SendInvitationResponse } | { Err: AppError }
 			>;
 			accept: Mutation<
 				[input: TokenInput],
-				{ Ok: AcceptInvitationResponse } | { Err: TeamRpcError }
+				{ Ok: AcceptInvitationResponse } | { Err: AppError }
 			>;
 			cancel: Mutation<
 				[input: InvitationIdInput],
-				{ Ok: SuccessResponse } | { Err: TeamRpcError }
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 			resend: Mutation<
 				[input: InvitationIdInput],
-				{ Ok: SuccessResponse } | { Err: TeamRpcError }
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 			decline: Mutation<
 				[input: TokenInput],
-				{ Ok: SuccessResponse } | { Err: TeamRpcError }
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 		};
 	};
 	vault: {
-		list: Query<
-			[],
-			{ Ok: Array<VaultListEntryResponse> } | { Err: VaultRpcError }
-		>;
+		list: Query<[], { Ok: Array<VaultListEntryResponse> } | { Err: AppError }>;
 		get: Query<
 			[input: VaultIdInput],
-			{ Ok: VaultDetailsResponse } | { Err: VaultRpcError }
+			{ Ok: VaultDetailsResponse } | { Err: AppError }
 		>;
 		create: Mutation<
 			[input: CreateVaultInput],
-			{ Ok: CreateVaultResponse } | { Err: VaultRpcError }
+			{ Ok: CreateVaultResponse } | { Err: AppError }
 		>;
 		update: Mutation<
 			[input: UpdateVaultInput],
-			{ Ok: UpdateVaultResponse } | { Err: VaultRpcError }
+			{ Ok: UpdateVaultResponse } | { Err: AppError }
 		>;
 		convertType: Mutation<
 			[input: ConvertVaultTypeInput],
-			{ Ok: ConvertVaultTypeResponse } | { Err: VaultRpcError }
+			{ Ok: ConvertVaultTypeResponse } | { Err: AppError }
 		>;
 		delete: Mutation<
 			[input: VaultIdInput],
-			{ Ok: SuccessResponse } | { Err: VaultRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		listItems: Query<
 			[input: VaultIdInput],
-			{ Ok: Array<VaultItemDetailsResponse> } | { Err: VaultRpcError }
+			{ Ok: Array<VaultItemDetailsResponse> } | { Err: AppError }
 		>;
 		listAllItems: Query<
 			[],
-			{ Ok: Array<VaultItemWithVaultResponse> } | { Err: VaultRpcError }
+			{ Ok: Array<VaultItemWithVaultResponse> } | { Err: AppError }
 		>;
 		listAllDeletedItems: Query<
 			[],
-			{ Ok: Array<DeletedVaultItemWithVaultResponse> } | { Err: VaultRpcError }
+			{ Ok: Array<DeletedVaultItemWithVaultResponse> } | { Err: AppError }
 		>;
 		listDeletedItems: Query<
 			[input: VaultIdInput],
-			{ Ok: Array<VaultItemResponse> } | { Err: VaultRpcError }
+			{ Ok: Array<VaultItemResponse> } | { Err: AppError }
 		>;
 		getItem: Query<
 			[input: ItemIdInput],
-			{ Ok: VaultItemDetailsResponse } | { Err: VaultRpcError }
+			{ Ok: VaultItemDetailsResponse } | { Err: AppError }
 		>;
 		createItem: Mutation<
 			[input: CreateItemInput],
-			{ Ok: CreateItemResponse } | { Err: VaultRpcError }
+			{ Ok: CreateItemResponse } | { Err: AppError }
 		>;
 		bulkImportItems: Mutation<
 			[input: BulkImportItemsInput],
-			{ Ok: BulkImportItemsResponse } | { Err: VaultRpcError }
+			{ Ok: BulkImportItemsResponse } | { Err: AppError }
 		>;
 		updateItem: Mutation<
 			[input: UpdateItemInput],
-			{ Ok: UpdateItemResponse } | { Err: VaultRpcError }
+			{ Ok: UpdateItemResponse } | { Err: AppError }
 		>;
 		toggleFavorite: Mutation<
 			[input: ToggleFavoriteInput],
-			{ Ok: SuccessResponse } | { Err: VaultRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		deleteItem: Mutation<
 			[input: ItemClientInput],
-			{ Ok: SuccessResponse } | { Err: VaultRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		restoreItem: Mutation<
 			[input: ItemClientInput],
-			{ Ok: SuccessResponse } | { Err: VaultRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		moveItem: Mutation<
 			[input: MoveItemInput],
-			{ Ok: UpdateItemResponse } | { Err: VaultRpcError }
+			{ Ok: UpdateItemResponse } | { Err: AppError }
 		>;
 		permanentlyDeleteItem: Mutation<
 			[input: ItemClientInput],
-			{ Ok: SuccessResponse } | { Err: VaultRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
-		stats: Query<[], { Ok: VaultStatsResponse } | { Err: VaultRpcError }>;
+		stats: Query<[], { Ok: VaultStatsResponse } | { Err: AppError }>;
 		createImageUpload: Mutation<
 			[input: CreateVaultImageUploadInput],
-			{ Ok: PresignedUploadResult } | { Err: VaultRpcError }
+			{ Ok: PresignedUploadResult } | { Err: AppError }
 		>;
 		createAttachmentUpload: Mutation<
 			[input: CreateAttachmentUploadInput],
-			{ Ok: PresignedUploadResult } | { Err: VaultRpcError }
+			{ Ok: PresignedUploadResult } | { Err: AppError }
 		>;
 		createAttachment: Mutation<
 			[input: CreateAttachmentInput],
-			{ Ok: CreateAttachmentResponse } | { Err: VaultRpcError }
+			{ Ok: CreateAttachmentResponse } | { Err: AppError }
 		>;
 		listAttachments: Query<
 			[input: ItemIdInput],
-			{ Ok: Array<VaultAttachmentResponse> } | { Err: VaultRpcError }
+			{ Ok: Array<VaultAttachmentResponse> } | { Err: AppError }
 		>;
 		getAttachmentDownloadUrl: Mutation<
 			[input: AttachmentIdInput],
-			{ Ok: AttachmentDownloadResponse } | { Err: VaultRpcError }
+			{ Ok: AttachmentDownloadResponse } | { Err: AppError }
 		>;
 		updateAttachment: Mutation<
 			[input: UpdateAttachmentInput],
-			{ Ok: SuccessResponse } | { Err: VaultRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		deleteAttachment: Mutation<
 			[input: AttachmentIdInput],
-			{ Ok: SuccessResponse } | { Err: VaultRpcError }
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		members: {
 			list: Query<
 				[input: VaultIdInput],
-				{ Ok: Array<VaultMemberResponse> } | { Err: VaultRpcError }
+				{ Ok: Array<VaultMemberResponse> } | { Err: AppError }
 			>;
 			availableTeamMembers: Query<
 				[input: VaultIdInput],
-				{ Ok: Array<VaultAvailableMemberResponse> } | { Err: VaultRpcError }
+				{ Ok: Array<VaultAvailableMemberResponse> } | { Err: AppError }
 			>;
 			updateRole: Mutation<
 				[input: UpdateVaultMemberRoleInput],
-				{ Ok: SuccessResponse } | { Err: VaultRpcError }
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 			lookupUser: Query<
 				[input: LookupVaultUserInput],
-				{ Ok: VaultLookupUserResponse } | { Err: VaultRpcError }
+				{ Ok: VaultLookupUserResponse } | { Err: AppError }
 			>;
 			add: Mutation<
 				[input: AddVaultMemberInput],
-				{ Ok: SuccessResponse } | { Err: VaultRpcError }
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 			getRotationData: Query<
 				[input: GetVaultRotationDataInput],
-				{ Ok: VaultRotationDataResponse } | { Err: VaultRpcError }
+				{ Ok: VaultRotationDataResponse } | { Err: AppError }
 			>;
 			remove: Mutation<
 				[input: RemoveVaultMemberInput],
-				{ Ok: RemoveVaultMemberResponse } | { Err: VaultRpcError }
+				{ Ok: RemoveVaultMemberResponse } | { Err: AppError }
 			>;
 		};
 	};

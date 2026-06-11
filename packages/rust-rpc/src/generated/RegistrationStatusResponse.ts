@@ -4,5 +4,6 @@ export type RegistrationStatusResponse = {
 	mode: string;
 	billingEnabled: boolean;
 	allowPublicSignup: boolean;
+	requiresEmailVerification: boolean;
 	reason: string | null;
 };
