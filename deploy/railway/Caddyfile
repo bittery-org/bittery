@@ -7,7 +7,7 @@
 	# Upstreams use Railway private networking (servicename.railway.internal).
 	# Wire these on the caddy service via reference variables — see deploy/railway/README.md
 
-	handle /rpc/* {
+	handle /rpc {
 		reverse_proxy {$SERVER_PRIVATE_DOMAIN:server.railway.internal}:{$SERVER_PORT:3000}
 	}
 
