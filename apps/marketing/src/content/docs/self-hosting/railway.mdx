@@ -7,7 +7,7 @@ order: 2
 
 # Railway Quick Start
 
-The fastest way to self-host Bittery is with Railway. The template provisions everything you need — server, web app, database, and networking — in a single click.
+The fastest way to self-host Bittery is with Railway. The template provisions everything you need — Caddy reverse proxy, server, web app, database, object storage, and networking — in a single click.
 
 ## Deploy in under 5 minutes
 
@@ -19,22 +19,13 @@ Open the Bittery Railway template:
 
 Click **Deploy Now** to start provisioning.
 </Step>
-<Step title="Configure your domain">
-Once deployed, Railway assigns a public URL to the **web** service. You can use this directly or add a custom domain:
+<Step title="Open your instance">
+The template uses Caddy as the only public entry point. Railway terminates HTTPS at the edge; Caddy reaches **server** and **web** over private networking (`server.railway.internal`, `web.railway.internal`) — not the Docker Compose hostnames `server:3000` / `web:8080`.
 
-1. Go to the **web** service in your Railway dashboard
-2. Click **Settings → Networking → Custom Domain**
-3. Add your domain and configure a CNAME record pointing to Railway
-</Step>
-<Step title="Set the server URL">
-The web app needs to know where the API server lives. In the **web** service settings:
-
-1. Go to **Variables**
-2. Set `VITE_SERVER_URL` to your server service's public URL (e.g. `https://your-server.up.railway.app`)
-3. Redeploy the web service
+Open the **caddy** service's public URL (or add a custom domain under **Settings → Networking**).
 </Step>
 <Step title="Create your account">
-Open the web app URL in your browser and create your first account. The first user on a self-hosted instance has full access.
+Create your first account in the browser. The first user on a self-hosted instance has full access.
 </Step>
 </Steps>
 
@@ -46,19 +37,25 @@ Railway's free tier includes enough resources to run a personal Bittery instance
 
 | Service | Details |
 |---------|---------|
+| **caddy** | Public reverse proxy — routes `/rpc`, `/sync`, and `/cdn` to server over private networking; everything else to web |
 | **bittery-server** | Rust API server from `ghcr.io/bittery-org/bittery-server:latest` |
 | **bittery-web** | Web vault SPA from `ghcr.io/bittery-org/bittery-web:latest` |
 | **PostgreSQL** | Managed Railway Postgres instance |
+| **Object storage** | S3-compatible bucket for file attachments |
 
 ## Environment variables
 
-The template pre-configures most variables. You may want to customize:
+The template pre-configures most variables, including `DATABASE_URL`, storage bucket credentials, and Caddy upstream reference variables (`SERVER_PRIVATE_DOMAIN`, `WEB_PRIVATE_DOMAIN`, etc.). You may want to customize:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `JWT_SECRET` | Auto-generated | Secret for signing auth tokens |
-| `CORS_ORIGIN` | Template URL | Allowed origins for API requests |
-| `SHARE_LINK_DAILY_LIMIT` | `50` | Max shared links per user per day |
+| Variable | Service | Default | Description |
+|----------|---------|---------|-------------|
+| `JWT_SECRET` | server | Auto-generated | Secret for signing auth tokens |
+| `CORS_ORIGIN` | server | Caddy public URL | Allowed origins for API requests |
+| `SHARE_LINK_DAILY_LIMIT` | server | `50` | Max shared links per user per day |
+
+<Callout type="info">
+`VITE_SERVER_URL` is not needed. Caddy serves the web app and API on the same domain, so the SPA talks to the server via the current origin.
+</Callout>
 
 See [Configuration Reference](/docs/self-hosting/configuration) for the full list.
 
