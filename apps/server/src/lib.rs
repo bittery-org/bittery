@@ -19,8 +19,9 @@ use fred::prelude::Pool as RedisPool;
 use serde::Serialize;
 
 pub use http::middleware::{
-    edge_http_middleware, load_edge_http_config, rpc_request_guard_middleware,
+    edge_http_middleware, http_trace_layer, load_edge_http_config, rpc_request_guard_middleware,
 };
+pub use http::rpc_tracing::rpc_tracing_middleware;
 pub use http::public::create_public_http_router;
 pub use http::sync_sse::create_sync_http_router;
 pub use jobs::JobRunner;

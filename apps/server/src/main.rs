@@ -3,18 +3,18 @@ use std::env;
 use axum::{middleware, routing::get, Json, Router};
 use bittery_server::{
     create_public_http_router, create_rpc_router, create_sync_http_router, db,
-    edge_http_middleware, init_redis, load_edge_http_config, rpc_request_context_middleware,
-    rpc_request_guard_middleware, AppState, JobRunner, SyncPubSub,
+    edge_http_middleware, http_trace_layer, init_redis, load_edge_http_config,
+    rpc_request_context_middleware, rpc_request_guard_middleware, rpc_tracing_middleware,
+    AppState, JobRunner, SyncPubSub,
 };
 use serde_json::json;
 use tokio::net::TcpListener;
-use tower_http::trace::TraceLayer;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 fn init_tracing() {
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info,bittery_server=debug,tower_http=debug"));
+        .unwrap_or_else(|_| EnvFilter::new("info,bittery_server=debug"));
 
     tracing_subscriber::fmt().with_env_filter(filter).init();
 }
@@ -61,6 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let (qubit_service, _server_handle) = create_rpc_router().to_service(app_state.clone());
     let rpc_routes = Router::new()
         .nest_service("/rpc", qubit_service)
+        .route_layer(middleware::from_fn(rpc_tracing_middleware))
         .route_layer(middleware::from_fn_with_state(
             app_state.clone(),
             rpc_request_context_middleware,
@@ -86,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             edge_http_config,
             edge_http_middleware,
         ))
-        .layer(TraceLayer::new_for_http());
+        .layer(http_trace_layer());
 
     let listener = TcpListener::bind(&bind_address).await?;
     info!(address = %bind_address, "rust rpc server listening");

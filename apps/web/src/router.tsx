@@ -84,8 +84,6 @@ export const queryClient = new QueryClient({
 	defaultOptions: { queries: { staleTime: 60 * 1000 } },
 });
 
-const serverUrl = getServerUrl();
-
 async function getSyncClientIdHeader(): Promise<string | null> {
 	if (typeof window === "undefined") {
 		return null;
@@ -99,8 +97,9 @@ async function getSyncClientIdHeader(): Promise<string | null> {
 }
 
 const rpcClient = createSessionRefreshingRpcClient({
-	defaultServerUrl: serverUrl,
-	getServerUrl: async () => serverUrl,
+	defaultServerUrl: getServerUrl(),
+	// Resolve at request time — prerender evaluates defaultServerUrl without `window`.
+	getServerUrl: async () => getServerUrl(),
 	getSessionSnapshot: async () => {
 		const [token, sessionData] = await Promise.all([
 			storage.getAuthToken(),

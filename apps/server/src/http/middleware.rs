@@ -1,4 +1,4 @@
-use std::env;
+use std::{cell::Cell, env, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -16,7 +16,50 @@ use axum::{
     Json,
 };
 use serde_json::json;
+use tower_http::trace::TraceLayer;
+use tracing::Span;
 use url::Url;
+
+thread_local! {
+    static SKIP_HTTP_TRACE: Cell<bool> = const { Cell::new(false) };
+}
+
+pub fn http_trace_layer() -> TraceLayer<
+    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>,
+    impl Fn(&Request<Body>) -> Span + Clone,
+    impl Fn(&Request<Body>, &Span) + Clone,
+    impl Fn(&Response<Body>, Duration, &Span) + Clone,
+> {
+    TraceLayer::new_for_http()
+        .make_span_with(|request: &Request<Body>| {
+            if request.uri().path() == "/rpc" {
+                tracing::trace_span!("http")
+            } else {
+                tracing::debug_span!(
+                    "request",
+                    method = %request.method(),
+                    uri = %request.uri(),
+                    version = ?request.version(),
+                )
+            }
+        })
+        .on_request(|request: &Request<Body>, _span: &Span| {
+            let skip = request.uri().path() == "/rpc";
+            SKIP_HTTP_TRACE.set(skip);
+            if !skip {
+                tracing::debug!("started processing request");
+            }
+        })
+        .on_response(|response: &Response<Body>, latency: Duration, _span: &Span| {
+            if !SKIP_HTTP_TRACE.get() {
+                tracing::debug!(
+                    latency = latency.as_millis(),
+                    status = %response.status(),
+                    "finished processing request"
+                );
+            }
+        })
+}
 
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
 const RPC_JSON_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
