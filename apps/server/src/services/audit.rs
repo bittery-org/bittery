@@ -158,7 +158,7 @@ pub(crate) async fn get_team_events(
         ));
     }
 
-    if actor.billing_plan.as_deref() != Some("team") {
+    if bittery_mode() != "self-hosted" && actor.billing_plan.as_deref() != Some("team") {
         return Err(forbidden_error(
             "This console is only available on Team plans",
         ));

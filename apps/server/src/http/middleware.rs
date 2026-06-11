@@ -24,41 +24,52 @@ thread_local! {
     static SKIP_HTTP_TRACE: Cell<bool> = const { Cell::new(false) };
 }
 
-pub fn http_trace_layer() -> TraceLayer<
-    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>,
-    impl Fn(&Request<Body>) -> Span + Clone,
-    impl Fn(&Request<Body>, &Span) + Clone,
-    impl Fn(&Response<Body>, Duration, &Span) + Clone,
-> {
+type HttpTraceClassifier =
+    tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>;
+
+type HttpTraceLayer = TraceLayer<
+    HttpTraceClassifier,
+    fn(&Request<Body>) -> Span,
+    fn(&Request<Body>, &Span),
+    fn(&Response<Body>, Duration, &Span),
+>;
+
+pub fn http_trace_layer() -> HttpTraceLayer {
     TraceLayer::new_for_http()
-        .make_span_with(|request: &Request<Body>| {
-            if request.uri().path() == "/rpc" {
-                tracing::trace_span!("http")
-            } else {
-                tracing::debug_span!(
-                    "request",
-                    method = %request.method(),
-                    uri = %request.uri(),
-                    version = ?request.version(),
-                )
-            }
-        })
-        .on_request(|request: &Request<Body>, _span: &Span| {
-            let skip = request.uri().path() == "/rpc";
-            SKIP_HTTP_TRACE.set(skip);
-            if !skip {
-                tracing::debug!("started processing request");
-            }
-        })
-        .on_response(|response: &Response<Body>, latency: Duration, _span: &Span| {
-            if !SKIP_HTTP_TRACE.get() {
-                tracing::debug!(
-                    latency = latency.as_millis(),
-                    status = %response.status(),
-                    "finished processing request"
-                );
-            }
-        })
+        .make_span_with(make_http_trace_span as fn(&Request<Body>) -> Span)
+        .on_request(on_http_trace_request as fn(&Request<Body>, &Span))
+        .on_response(on_http_trace_response as fn(&Response<Body>, Duration, &Span))
+}
+
+fn make_http_trace_span(request: &Request<Body>) -> Span {
+    if request.uri().path() == "/rpc" {
+        tracing::trace_span!("http")
+    } else {
+        tracing::debug_span!(
+            "request",
+            method = %request.method(),
+            uri = %request.uri(),
+            version = ?request.version(),
+        )
+    }
+}
+
+fn on_http_trace_request(request: &Request<Body>, _span: &Span) {
+    let skip = request.uri().path() == "/rpc";
+    SKIP_HTTP_TRACE.set(skip);
+    if !skip {
+        tracing::debug!("started processing request");
+    }
+}
+
+fn on_http_trace_response(response: &Response<Body>, latency: Duration, _span: &Span) {
+    if !SKIP_HTTP_TRACE.get() {
+        tracing::debug!(
+            latency = latency.as_millis(),
+            status = %response.status(),
+            "finished processing request"
+        );
+    }
 }
 
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];

@@ -528,6 +528,31 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 }
 
 #[tokio::test]
+async fn team_events_allow_self_hosted_admins_without_team_plan() {
+    with_rpc_test_app("audit_team_events_self_hosted", |app| async move {
+        let fixture = build_audit_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.personal_owner_user_id).await;
+        let response = with_bittery_mode_async(
+            Some("self_hosted"),
+            app.rpc_call(
+                "audit.teamEvents",
+                json!([{ "limit": 1 }]),
+                authenticated_json_headers(&session.token),
+            ),
+        )
+        .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert!(
+            response.body["result"]["Ok"]["events"].is_array(),
+            "expected team events payload, got {:?}",
+            response.body
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn team_events_reject_malformed_request_input() {
     with_rpc_test_app("audit_team_events_malformed_request", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;

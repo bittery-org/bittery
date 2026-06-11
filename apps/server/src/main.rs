@@ -4,8 +4,8 @@ use axum::{middleware, routing::get, Json, Router};
 use bittery_server::{
     create_public_http_router, create_rpc_router, create_sync_http_router, db,
     edge_http_middleware, http_trace_layer, init_redis, load_edge_http_config,
-    rpc_request_context_middleware, rpc_request_guard_middleware, rpc_tracing_middleware,
-    AppState, JobRunner, SyncPubSub,
+    rpc_request_context_middleware, rpc_request_guard_middleware, rpc_tracing_middleware, AppState,
+    JobRunner, SyncPubSub,
 };
 use serde_json::json;
 use tokio::net::TcpListener;

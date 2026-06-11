@@ -55,7 +55,7 @@ export const appNavItems: readonly AppNavItem[] = [
 		path: "/security",
 		icon: ShieldCheck,
 		label: "Sentinel",
-		requiresMode: "cloud",
+		requiresMode: "any",
 		requiresEntitlements: ["sentinel"],
 	},
 	{
@@ -76,7 +76,7 @@ export const appNavItems: readonly AppNavItem[] = [
 		path: "/admin",
 		icon: History,
 		label: "Admin",
-		requiresMode: "cloud",
+		requiresMode: "any",
 		requiresEntitlements: ["team_management"],
 		requiresPlans: ["team"],
 		requiresRoles: ["owner", "admin"],
@@ -110,7 +110,7 @@ export function filterNavItems(
 		if (item.requiresBillingEnabled && input.billingEnabled !== true) {
 			return false;
 		}
-		if (item.requiresPlans?.length) {
+		if (item.requiresPlans?.length && input.mode !== "self-hosted") {
 			if (!input.plan || !item.requiresPlans.includes(input.plan)) {
 				return false;
 			}

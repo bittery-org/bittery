@@ -34,18 +34,18 @@ test.describe("Navigation visibility filter", () => {
 		expect(getPaths(result)).toContain("/admin");
 	});
 
-	test("hides cloud-only nav in self-hosted mode", () => {
+	test("hides billing but keeps sentinel and admin in self-hosted mode", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "self-hosted",
 			billingEnabled: false,
-			entitlements: { sentinel: true },
-			plan: "team",
+			entitlements: { sentinel: true, team_management: true },
+			plan: "free",
 			role: "owner",
 		});
 
 		expect(getPaths(result)).not.toContain("/billing");
-		expect(getPaths(result)).not.toContain("/security");
-		expect(getPaths(result)).not.toContain("/admin");
+		expect(getPaths(result)).toContain("/security");
+		expect(getPaths(result)).toContain("/admin");
 		expect(getPaths(result)).toContain("/vaults");
 		expect(getPaths(result)).toContain("/team");
 	});

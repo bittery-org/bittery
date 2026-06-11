@@ -110,9 +110,7 @@ pub async fn rpc_tracing_middleware(request: Request<Body>, next: Next) -> Respo
     let bytes = match to_bytes(body, RPC_BODY_LIMIT_BYTES + 1).await {
         Ok(bytes) => bytes,
         Err(_) => {
-            return next
-                .run(Request::from_parts(parts, Body::empty()))
-                .await;
+            return next.run(Request::from_parts(parts, Body::empty())).await;
         }
     };
 

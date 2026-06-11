@@ -32,6 +32,10 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { formatDateTime } from "@/lib/i18n-format";
+import {
+	normalizeDeploymentMode,
+	normalizeEntitlements,
+} from "@/lib/rpc-normalizers";
 import { useI18n } from "@/providers/i18n-provider";
 
 type ActionGroup =
@@ -263,11 +267,16 @@ export const Route = createFileRoute("/_app/admin/")({
 			context.rpc.billing.entitlements.queryOptions(),
 		);
 
-		if (access.mode !== "cloud") {
-			throw redirect({ to: "/home" });
+		const mode = normalizeDeploymentMode(access.mode);
+		const entitlements = normalizeEntitlements(access.entitlements);
+
+		if (!entitlements.team_management) {
+			throw redirect({
+				to: mode === "cloud" ? "/billing" : "/home",
+			});
 		}
 
-		if (access.plan !== "team" || !access.entitlements.teamManagement) {
+		if (mode === "cloud" && access.plan !== "team") {
 			throw redirect({ to: "/billing" });
 		}
 
