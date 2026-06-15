@@ -2,6 +2,7 @@ import {
 	decryptVaultKey as decryptVaultKeyUtil,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { VaultKeyData } from "@bittery/storage/types";
@@ -98,7 +99,7 @@ export interface BootstrapItemsClient {
 
 export class VaultRepository {
 	readonly supportsItemCache = true;
-	private readonly fallbackServerUrl = "http://localhost:3000";
+	private readonly fallbackServerUrl = getDefaultServerUrl();
 
 	private readonly items = new Map<string, VaultRepositoryItem>();
 	private readonly vaults = new Map<string, CachedVaultMetadata>();

@@ -1,4 +1,7 @@
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import {
+	createAccountRpcClient,
+	getDefaultServerUrl,
+} from "@bittery/shared/rpc-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ActiveAccount } from "@bittery/storage/types";
@@ -71,10 +74,7 @@ export async function getClientForAccount(
 		return defaultClient;
 	}
 
-	return createAccountRpcClient(
-		authToken,
-		serverUrl || "http://localhost:3000",
-	);
+	return createAccountRpcClient(authToken, serverUrl);
 }
 
 /**
@@ -117,7 +117,7 @@ export class AccountResolver {
 						return null;
 					}
 
-					const resolvedServerUrl = serverUrl || "http://localhost:3000";
+					const resolvedServerUrl = serverUrl || getDefaultServerUrl();
 					const rpcClient = createAccountRpcClient(
 						authToken,
 						resolvedServerUrl,
