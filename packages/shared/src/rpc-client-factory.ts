@@ -9,12 +9,22 @@ interface IStorageAdapter {
 	getServerUrl(email: string): Promise<string | null>;
 }
 
-const DEFAULT_SERVER_URL =
-	normalizeServerUrl(
-		typeof process !== "undefined"
-			? process.env.VITE_SERVER_URL
-			: import.meta.env?.VITE_SERVER_URL,
-	) ?? "http://localhost:3000";
+export function getDefaultServerUrl(): string {
+	return (
+		normalizeServerUrl(import.meta.env?.VITE_SERVER_URL) ??
+		normalizeServerUrl(
+			typeof process !== "undefined" ? process.env.VITE_SERVER_URL : null,
+		) ??
+		(typeof window !== "undefined"
+			? normalizeServerUrl(window.location.origin)
+			: null) ??
+		"http://localhost:3000"
+	);
+}
+
+function resolveServerUrl(serverUrl?: string | null): string {
+	return normalizeServerUrl(serverUrl) ?? getDefaultServerUrl();
+}
 
 type AppRpcClient = ReturnType<typeof createAppRpcClient>;
 
@@ -71,11 +81,11 @@ function getRuntimeClientId(): string | undefined {
 
 export function createAccountRpcClient(
 	authToken: string,
-	serverUrl: string,
+	serverUrl?: string | null,
 	clientId?: string,
 	sessionRefresh?: AccountSessionRefreshOptions,
 ): AppRpcClient {
-	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
+	const normalizedUrl = resolveServerUrl(serverUrl);
 	const resolvedClientId = clientId ?? getRuntimeClientId();
 	const mode = sessionRefresh ? "session-refresh" : "static";
 	const cacheKey = getCacheKey(
@@ -121,10 +131,10 @@ export function createAccountRpcClient(
 
 export function clearAccountRpcClient(
 	authToken: string,
-	serverUrl: string,
+	serverUrl?: string | null,
 	clientId?: string,
 ) {
-	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
+	const normalizedUrl = resolveServerUrl(serverUrl);
 	const resolvedClientId = clientId ?? getRuntimeClientId();
 	const staticCacheKey = getCacheKey(
 		authToken,
@@ -147,7 +157,7 @@ export function clearRpcClientCache() {
 }
 
 export function createRpcClientForServer(serverUrl: string): AppRpcClient {
-	const normalizedUrl = normalizeServerUrl(serverUrl) ?? DEFAULT_SERVER_URL;
+	const normalizedUrl = resolveServerUrl(serverUrl);
 	const cacheKey = `unauthenticated:${normalizedUrl}`;
 
 	const cachedClient = clientCache.get(cacheKey);
@@ -188,7 +198,7 @@ export async function createAllAccountRpcClients(
 			continue;
 		}
 
-		const serverUrl = (await storage.getServerUrl(email)) ?? DEFAULT_SERVER_URL;
+		const serverUrl = await storage.getServerUrl(email);
 		const client = createAccountRpcClient(authToken, serverUrl, clientId);
 
 		clients.set(email, client);

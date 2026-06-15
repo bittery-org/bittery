@@ -4,7 +4,10 @@
  */
 
 import { useRPCClient } from "@bittery/shared/rpc";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import {
+	createAccountRpcClient,
+	getDefaultServerUrl,
+} from "@bittery/shared/rpc-client-factory";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 
@@ -150,7 +153,7 @@ export function useAccountMetadataSyncAll(options: {
 
 					// Get server URL for this account (or use default)
 					const serverUrl =
-						(await storage.getServerUrl?.(email)) || "http://localhost:3000";
+						(await storage.getServerUrl?.(email)) || getDefaultServerUrl();
 
 					// Create an account-specific RPC client.
 					const accountClient = createAccountRpcClient(authToken, serverUrl);
