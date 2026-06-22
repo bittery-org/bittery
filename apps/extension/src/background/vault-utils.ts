@@ -3,6 +3,7 @@
  * Shared helpers for vault operations.
  */
 
+import { filterItemsByTravelMode } from "@bittery/core";
 import type {
 	DecryptedItemWithContext,
 	ItemCategory,
@@ -191,6 +192,50 @@ async function getDesktopTargetEmails(): Promise<string[]> {
 	);
 }
 
+async function filterItemsForTravelMode(
+	items: MultiAccountItem[],
+): Promise<MultiAccountItem[]> {
+	const activeAccount = await storage.getActiveAccount();
+
+	if (activeAccount?.type === "single") {
+		const normalizedEmail = activeAccount.email.toLowerCase();
+		const config =
+			(await storage.getTravelModeCache?.(normalizedEmail)) ?? null;
+		if (!config?.enabled) {
+			return items;
+		}
+		return filterItemsByTravelMode(items, config);
+	}
+
+	const itemsByEmail = new Map<string, MultiAccountItem[]>();
+	const unassigned: MultiAccountItem[] = [];
+
+	for (const item of items) {
+		const email = item.account?.email;
+		if (!email) {
+			unassigned.push(item);
+			continue;
+		}
+		const normalizedEmail = email.toLowerCase();
+		const bucket = itemsByEmail.get(normalizedEmail) ?? [];
+		bucket.push(item);
+		itemsByEmail.set(normalizedEmail, bucket);
+	}
+
+	const filtered: MultiAccountItem[] = [...unassigned];
+
+	for (const [email, accountItems] of itemsByEmail) {
+		const config = (await storage.getTravelModeCache?.(email)) ?? null;
+		if (!config?.enabled) {
+			filtered.push(...accountItems);
+			continue;
+		}
+		filtered.push(...filterItemsByTravelMode(accountItems, config));
+	}
+
+	return filtered;
+}
+
 async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 	const activeAccount = await storage.getActiveAccount();
 	const targetEmails = await getDesktopTargetEmails();
@@ -216,7 +261,7 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 		)
 		.filter((item): item is MultiAccountItem => item !== null);
 
-	return normalizedItems;
+	return filterItemsForTravelMode(normalizedItems);
 }
 
 async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
@@ -224,14 +269,14 @@ async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
 		const { accountsInfo } = await core.accounts.resolveAccounts();
 		core.vaultCoordinator.setActiveAccounts(accountsInfo);
 		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
-		return items;
+		return filterItemsForTravelMode(items);
 	} catch (error) {
 		console.warn(
 			"[vault-utils] Failed to load local coordinator items for desktop merge:",
 			error,
 		);
 		const items = core.vaultCoordinator.getAll() as MultiAccountItem[];
-		return items;
+		return filterItemsForTravelMode(items);
 	}
 }
 
@@ -266,8 +311,8 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 
 	const { accountsInfo } = await core.accounts.resolveAccounts();
 	await core.vaultCoordinator.hydrate(accountsInfo);
-	const localItems = core.vaultCoordinator.getAll();
-	return localItems;
+	const localItems = core.vaultCoordinator.getAll() as MultiAccountItem[];
+	return filterItemsForTravelMode(localItems);
 }
 
 /**

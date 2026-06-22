@@ -54,6 +54,9 @@ export interface UseSyncOptions {
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
+	onEventProcessed?: (
+		event: import("./types").SyncEvent,
+	) => void | Promise<void>;
 	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
 	fetch?: (url: string, init?: any) => Promise<Response>;
 }
@@ -78,6 +81,7 @@ export function useSync(options: UseSyncOptions) {
 		itemCacheServerUrl,
 		getClientForAccount,
 		onSessionRevoked,
+		onEventProcessed,
 		fetch: fetchImpl,
 	} = options;
 
@@ -131,7 +135,10 @@ export function useSync(options: UseSyncOptions) {
 			itemCacheAccountEmail,
 			itemCacheServerUrl,
 			getClientForAccount,
-			onEventProcessed: invalidateForEvent,
+			onEventProcessed: async (event) => {
+				await invalidateForEvent(event);
+				await onEventProcessed?.(event);
+			},
 			onSessionRevoked,
 		});
 
@@ -183,6 +190,7 @@ export function useSync(options: UseSyncOptions) {
 		itemCacheServerUrl,
 		getClientForAccount,
 		onSessionRevoked,
+		onEventProcessed,
 		invalidateForEvent,
 		realtimeEnabled,
 	]);

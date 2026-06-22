@@ -4,9 +4,46 @@
  * extensions, or any other runtime.
  */
 
+import { m } from "@bittery/i18n/paraglide/messages";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
 import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
+import {
+	getTravelModeService,
+	type TravelModeRpcClient,
+	type TravelModeService,
+} from "./travel-mode-service";
+
+export interface StoreAuthSessionOptions {
+	travelModeRpcClient?: TravelModeRpcClient;
+}
+
+async function prepareTravelModeForSession(
+	email: string,
+	storage: IStorageAdapter,
+	travelModeRpcClient?: TravelModeRpcClient,
+): Promise<TravelModeService> {
+	const travelMode = getTravelModeService(storage);
+	if (travelModeRpcClient) {
+		try {
+			await travelMode.fetchFromServer(email, travelModeRpcClient);
+		} catch (error) {
+			const cached = await storage.getTravelModeCache?.(email);
+			if (cached) {
+				console.warn(
+					"[auth] Failed to fetch travel mode from server, using local cache:",
+					error,
+				);
+				await travelMode.hydrateFromStorage(email);
+			} else {
+				throw new Error(m.auth_error_travel_mode_verify_failed());
+			}
+		}
+	} else {
+		await travelMode.hydrateFromStorage(email);
+	}
+	return travelMode;
+}
 
 /**
  * Input for SRP login (full login with password + secret key)
@@ -23,6 +60,12 @@ export interface SRPLoginInput {
 export interface SRPUnlockInput {
 	email: string;
 	password: string;
+}
+
+export interface SrpLoginProof {
+	attemptId: string;
+	clientPublicKey: string;
+	clientProof: string;
 }
 
 /**
@@ -443,6 +486,7 @@ export async function storeLoginSession(
 	secretKey: string,
 	storage: IStorageAdapter,
 	email?: string,
+	options?: StoreAuthSessionOptions,
 ): Promise<void> {
 	const resolvedEmail = email ?? result.user.email;
 
@@ -451,8 +495,18 @@ export async function storeLoginSession(
 		await storage.clearItemCache(resolvedEmail);
 	}
 
+	const travelMode = await prepareTravelModeForSession(
+		resolvedEmail,
+		storage,
+		options?.travelModeRpcClient,
+	);
+
 	await storage.storeAuthToken(result.token, resolvedEmail);
-	await storage.storeVaultKeys(result.vaultKeys, resolvedEmail);
+	const vaultKeys = await travelMode.stripVaultKeysIfActive(
+		resolvedEmail,
+		result.vaultKeys,
+	);
+	await storage.storeVaultKeys(vaultKeys, resolvedEmail);
 
 	if (result.user.encryptedPrivateKey) {
 		await storage.storeEncryptedPrivateKey(
@@ -514,6 +568,79 @@ export async function storeLoginSession(
 	}
 }
 
+async function deriveSrpPasswordForEmail(
+	email: string,
+	password: string,
+	crypto: ICrypto,
+	storage: IStorageAdapter,
+): Promise<string> {
+	const storedSecretKey = await storage.getStoredSecretKey(email);
+	if (!storedSecretKey) {
+		throw new Error(m.auth_error_no_stored_secret_key());
+	}
+
+	const handleCrypto = asHandleCapableCrypto(crypto);
+	if (handleCrypto) {
+		const handles = await handleCrypto.deriveKeyHandles(
+			password,
+			storedSecretKey,
+			email,
+		);
+		try {
+			return await handleCrypto.deriveSrpPasswordFromHandle(
+				handles.authKeyHandle,
+			);
+		} finally {
+			if (handleCrypto.destroyKeyHandle) {
+				await handleCrypto.destroyKeyHandle(handles.authKeyHandle);
+			}
+		}
+	}
+
+	const derived = await crypto.deriveKeys(password, storedSecretKey, email);
+	return new TextDecoder().decode(derived.authKey);
+}
+
+/**
+ * Derives an SRP login proof for sensitive mutations that require master-password
+ * verification without creating a new session.
+ */
+export async function deriveSrpLoginProof(
+	input: SRPUnlockInput,
+	deps: SRPUnlockDeps,
+): Promise<SrpLoginProof> {
+	const { email, password } = input;
+	const { crypto, storage } = deps;
+	const authClient = resolveAuthClient(deps);
+	const srpPassword = await deriveSrpPasswordForEmail(
+		email,
+		password,
+		crypto,
+		storage,
+	);
+	const clientEphemeral = await crypto.generateClientEphemeral();
+	const startResult = await authClient.auth.startLogin.mutate({
+		email,
+		clientPublicKey: clientEphemeral.publicKey,
+	});
+	await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+	const clientSession = await crypto.deriveClientSession(
+		clientEphemeral.secret,
+		{
+			salt: startResult.salt,
+			serverPublicKey: startResult.serverPublicKey,
+			kdfParams: startResult.kdfParams,
+		},
+		srpPassword,
+	);
+
+	return {
+		attemptId: startResult.attemptId,
+		clientPublicKey: clientEphemeral.publicKey,
+		clientProof: clientSession.proof,
+	};
+}
+
 /**
  * Performs a password unlock using stored secret key.
  */
@@ -527,9 +654,7 @@ export async function performSRPUnlock(
 
 	const storedSecretKey = await storage.getStoredSecretKey(email);
 	if (!storedSecretKey) {
-		throw new Error(
-			"No stored Secret Key found. Please sign in with your full credentials.",
-		);
+		throw new Error(m.auth_error_no_stored_secret_key());
 	}
 
 	const handleCrypto = asHandleCapableCrypto(crypto);
@@ -676,12 +801,22 @@ export async function storeUnlockSession(
 	result: UnlockResult,
 	storage: IStorageAdapter,
 	email?: string,
+	options?: StoreAuthSessionOptions,
 ): Promise<void> {
 	const resolvedEmail = email ?? result.user.email;
+	const travelMode = await prepareTravelModeForSession(
+		resolvedEmail,
+		storage,
+		options?.travelModeRpcClient,
+	);
 
 	if (result.mode === "reauth") {
 		await storage.storeAuthToken(result.token, resolvedEmail);
-		await storage.storeVaultKeys(result.vaultKeys, resolvedEmail);
+		const vaultKeys = await travelMode.stripVaultKeysIfActive(
+			resolvedEmail,
+			result.vaultKeys,
+		);
+		await storage.storeVaultKeys(vaultKeys, resolvedEmail);
 
 		if (result.user.encryptedPrivateKey) {
 			await storage.storeEncryptedPrivateKey(

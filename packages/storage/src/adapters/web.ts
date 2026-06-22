@@ -23,6 +23,7 @@ import {
 	type BiometricAuthResult,
 	DEFAULT_SESSION_EXPIRY_MS,
 	type StoredSessionData,
+	type TravelModeConfig,
 	type VaultKeyData,
 } from "../types";
 
@@ -32,6 +33,7 @@ const SESSION_DATA_STORAGE = "bittery_session_data";
 const DEVICE_KEY_STORAGE = "bittery_device_key";
 const JWT_TOKEN_KEY = "bittery_jwt_token";
 const VAULT_KEYS_KEY = "bittery_vault_keys";
+const TRAVEL_MODE_CACHE_KEY = "bittery_travel_mode_cache";
 const SERVER_URL_STORAGE = "bittery_server_url";
 const ENCRYPTED_PRIVATE_KEY_STORAGE = "bittery_encrypted_private_key";
 const PINNED_KDF_PARAMS_STORAGE = "bittery_pinned_kdf_params";
@@ -705,6 +707,25 @@ export class WebStorageAdapter implements IStorageAdapter {
 		await waitForTransaction(tx);
 	}
 
+	async storeTravelModeCache(config: TravelModeConfig): Promise<void> {
+		if (typeof window !== "undefined") {
+			localStorage.setItem(TRAVEL_MODE_CACHE_KEY, JSON.stringify(config));
+		}
+	}
+
+	async getTravelModeCache(): Promise<TravelModeConfig | null> {
+		if (typeof window === "undefined") {
+			return null;
+		}
+		const stored = localStorage.getItem(TRAVEL_MODE_CACHE_KEY);
+		if (!stored) return null;
+		try {
+			return JSON.parse(stored) as TravelModeConfig;
+		} catch {
+			return null;
+		}
+	}
+
 	// ============================================================================
 	// Auth State
 	// ============================================================================
@@ -743,6 +764,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
 		localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
+		localStorage.removeItem(TRAVEL_MODE_CACHE_KEY);
 		await this.clearSession();
 		await this.clearItemCache();
 	}

@@ -29,6 +29,7 @@
 		"./services/share-service": "./src/services/share-service.ts"
 	},
 	"dependencies": {
+		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/storage": "workspace:*",
 		"@bittery/types": "workspace:*",

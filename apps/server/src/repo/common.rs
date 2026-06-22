@@ -116,6 +116,59 @@ pub async fn insert_sync_event<'e>(
     Ok(())
 }
 
+/// Insert a user-scoped sync event without a vault association.
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_user_sync_event<'e>(
+    executor: impl sqlx::Executor<'e, Database = Postgres>,
+    event_type: &str,
+    entity_id: &str,
+    entity_type: &str,
+    user_id: &str,
+    version: i32,
+    client_id: Option<&str>,
+    metadata: Option<&str>,
+) -> Result<(), AppError> {
+    let id = generate_resource_id("sync");
+    match metadata {
+        Some(metadata) => {
+            query(
+                "INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, metadata, created_at) VALUES ($1, $2::sync_event_type, $3, $4::sync_entity_type, NULL, $5, $6, $7, $8, $9)",
+            )
+            .bind(&id)
+            .bind(event_type)
+            .bind(entity_id)
+            .bind(entity_type)
+            .bind(user_id)
+            .bind(version)
+            .bind(client_id)
+            .bind(metadata)
+            .bind(OffsetDateTime::now_utc())
+            .execute(executor)
+            .await
+        }
+        None => {
+            query(
+                "INSERT INTO sync_event (id, event_type, entity_id, entity_type, vault_id, user_id, version, client_id, created_at) VALUES ($1, $2::sync_event_type, $3, $4::sync_entity_type, NULL, $5, $6, $7, $8)",
+            )
+            .bind(&id)
+            .bind(event_type)
+            .bind(entity_id)
+            .bind(entity_type)
+            .bind(user_id)
+            .bind(version)
+            .bind(client_id)
+            .bind(OffsetDateTime::now_utc())
+            .execute(executor)
+            .await
+        }
+    }
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to create sync event");
+        AppError::internal("Failed to create sync event")
+    })?;
+    Ok(())
+}
+
 /// Load a user's scoped access to a vault item (returns the item's vault_id and the user's role).
 pub async fn load_scoped_item_access(
     pool: &PgPool,

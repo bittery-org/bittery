@@ -146,7 +146,9 @@ function SignInFormContent({
 				rpcClient,
 				storage,
 			});
-			await storeLoginSession(result, input.secretKey, storage, input.email);
+			await storeLoginSession(result, input.secretKey, storage, input.email, {
+				travelModeRpcClient: rpcClient,
+			});
 			return result;
 		},
 		onSuccess: () => {

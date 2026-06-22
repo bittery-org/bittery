@@ -9,6 +9,12 @@
  * - Fall back to global cache updates when account-scoped updates cannot be applied.
  */
 
+import {
+	AccountResolver,
+	handleTravelModeSyncEvent,
+	type RpcVaultClient,
+	type VaultRepositoryCoordinator,
+} from "@bittery/core";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type {
 	DeltaSyncClient,
@@ -38,7 +44,7 @@ type VaultKeyLike = {
 export interface SyncCacheStorage {
 	supportsItemCache: boolean;
 	getActiveAccount: () => Promise<ActiveAccount>;
-	getAccountsList: () => Promise<Array<{ email: string }>>;
+	getAccountsList: () => Promise<Array<{ email: string; userId?: string }>>;
 	getAuthToken: (email?: string) => Promise<string | null>;
 	storeAuthToken: (token: string, email?: string) => Promise<void>;
 	getServerUrl: (email?: string) => Promise<string | null>;
@@ -79,6 +85,11 @@ export interface SyncCacheServiceDeps {
 		event: SyncEvent,
 		accountEmail?: string,
 	) => Promise<void>;
+	handleTravelModeSync?: (
+		event: SyncEvent,
+		email: string,
+		accountClient: SyncEventQueryClient | null,
+	) => Promise<void>;
 	logger: Pick<Console, "debug" | "info" | "warn" | "error">;
 }
 
@@ -90,6 +101,21 @@ const defaultDeps: SyncCacheServiceDeps = {
 	createAccountClient: (token, serverUrl) =>
 		createAccountRpcClient(token, serverUrl) as unknown as SyncEventQueryClient,
 	deltaSync: performDeltaSync,
+	handleTravelModeSync: async (event, email, accountClient) => {
+		const accounts = new AccountResolver(storage);
+		await handleTravelModeSyncEvent(
+			event,
+			email,
+			storage,
+			core.vaultCoordinator as VaultRepositoryCoordinator,
+			accountClient
+				? {
+						rpcClient: accountClient as unknown as RpcVaultClient,
+						accounts,
+					}
+				: undefined,
+		);
+	},
 	logger: console,
 };
 
@@ -298,8 +324,78 @@ export function createSyncCacheService(
 		return matched.length > 0 ? matched : allEmails;
 	}
 
+	async function resolveTravelModeAccountEmail(
+		event: SyncEvent,
+	): Promise<string | null> {
+		const ownerUserId = event.userId || event.entityId;
+		if (!ownerUserId) {
+			return null;
+		}
+
+		const accounts = await deps.storage.getAccountsList();
+		const matched = accounts.filter(
+			(account) => account.userId === ownerUserId,
+		);
+		const firstMatch = matched.at(0);
+		if (firstMatch) {
+			if (matched.length > 1) {
+				deps.logger.warn(
+					`[sync-cache-service] Multiple accounts matched travel_mode_updated user ${ownerUserId}`,
+				);
+			}
+			return normalizeEmail(firstMatch.email);
+		}
+
+		deps.logger.warn(
+			`[sync-cache-service] No account matched travel_mode_updated user ${ownerUserId}`,
+		);
+
+		const onlyAccount = accounts.at(0);
+		if (accounts.length === 1 && onlyAccount) {
+			return normalizeEmail(onlyAccount.email);
+		}
+
+		const metadataEmail =
+			typeof event.metadata?.email === "string" ? event.metadata.email : null;
+		if (metadataEmail) {
+			const normalizedMetadataEmail = normalizeEmail(metadataEmail);
+			const emailMatches = accounts.filter(
+				(account) => normalizeEmail(account.email) === normalizedMetadataEmail,
+			);
+			const onlyEmailMatch = emailMatches.at(0);
+			if (emailMatches.length === 1 && onlyEmailMatch) {
+				return normalizeEmail(onlyEmailMatch.email);
+			}
+		}
+
+		return null;
+	}
+
 	async function applyDeltaSyncForEvent(event: SyncEvent): Promise<void> {
+		if (event.type === "travel_mode_updated") {
+			const accountEmail = await resolveTravelModeAccountEmail(event);
+			if (!accountEmail) {
+				return;
+			}
+
+			deps.logger.debug(
+				`[sync-cache-service] Applying travel_mode_updated for account: ${accountEmail}`,
+			);
+
+			try {
+				const accountClient = await getAccountClientForEmail(accountEmail);
+				await deps.handleTravelModeSync?.(event, accountEmail, accountClient);
+			} catch (error) {
+				deps.logger.warn(
+					`[sync-cache-service] Travel mode sync failed for ${accountEmail}`,
+					error,
+				);
+			}
+			return;
+		}
+
 		const candidateEmails = await resolveCandidateEmailsForEvent(event);
+
 		deps.logger.debug(
 			`[sync-cache-service] Applying ${event.type} for candidate accounts: ${
 				candidateEmails.join(", ") || "(global)"

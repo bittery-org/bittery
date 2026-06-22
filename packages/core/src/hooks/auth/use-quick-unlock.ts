@@ -79,7 +79,9 @@ export function useQuickUnlock(
 			);
 
 			// Store unlock session data
-			await storeUnlockSession(result, storage, input.email);
+			await storeUnlockSession(result, storage, input.email, {
+				travelModeRpcClient: rpcClient,
+			});
 
 			// For multi-account platforms, set this as the active account
 			if (storage.supportsMultiAccount) {

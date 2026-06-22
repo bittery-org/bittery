@@ -442,6 +442,21 @@ export interface IStorageAdapter {
 	clearItemCache?(email?: string): Promise<void>;
 
 	// ============================================================================
+	// Travel Mode (optional)
+	// ============================================================================
+
+	/** Store cached travel mode config for an account */
+	storeTravelModeCache?(
+		config: import("./types").TravelModeConfig,
+		email?: string,
+	): Promise<void>;
+
+	/** Get cached travel mode config for an account */
+	getTravelModeCache?(
+		email?: string,
+	): Promise<import("./types").TravelModeConfig | null>;
+
+	// ============================================================================
 	// Mobile-Specific (optional, check platform first)
 	// ============================================================================
 

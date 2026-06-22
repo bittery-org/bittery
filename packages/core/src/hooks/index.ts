@@ -54,6 +54,7 @@ export {
 	type SRPLoginInput,
 	type SRPUnlockDeps,
 	type SRPUnlockInput,
+	type StoreAuthSessionOptions,
 	storeLoginSession,
 	storeUnlockSession,
 	type UnlockResult,
@@ -196,6 +197,7 @@ export {
 	useItems,
 	useItemsUnified,
 } from "./use-items";
+export { useTravelMode } from "./use-travel-mode";
 export {
 	type UseVaultInfoOptions,
 	useVaultInfo,

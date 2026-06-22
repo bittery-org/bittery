@@ -23,6 +23,7 @@ import type {
 	ActiveAccount,
 	BiometricAuthResult,
 	StoredSessionData,
+	TravelModeConfig,
 	VaultKeyData,
 } from "../types";
 
@@ -40,6 +41,7 @@ const ITEM_CACHE_META_KEY = "item_cache_meta";
 const CACHED_ITEMS_SUFFIX = "cached_items";
 const CACHED_VAULTS_SUFFIX = "cached_vaults";
 const ITEM_CACHE_META_SUFFIX = "item_cache_meta";
+const TRAVEL_MODE_CACHE_SUFFIX = "travel_mode_cache";
 
 // Helper to generate namespaced keys for each account
 function getAccountKey(email: string, suffix: string): string {
@@ -708,6 +710,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX),
 			getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX),
 			getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX),
+			getAccountKey(resolvedEmail, TRAVEL_MODE_CACHE_SUFFIX),
 		];
 
 		await chrome.storage.local.remove(keysToRemove);
@@ -1388,6 +1391,36 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX),
 			getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX),
 		]);
+	}
+
+	async storeTravelModeCache(
+		config: TravelModeConfig,
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		await chrome.storage.local.set({
+			[getAccountKey(resolvedEmail, TRAVEL_MODE_CACHE_SUFFIX)]:
+				JSON.stringify(config),
+		});
+	}
+
+	async getTravelModeCache(email?: string): Promise<TravelModeConfig | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const result = await chrome.storage.local.get(
+			getAccountKey(resolvedEmail, TRAVEL_MODE_CACHE_SUFFIX),
+		);
+		const stored =
+			result[getAccountKey(resolvedEmail, TRAVEL_MODE_CACHE_SUFFIX)];
+		if (typeof stored !== "string") return null;
+		try {
+			return JSON.parse(stored) as TravelModeConfig;
+		} catch {
+			return null;
+		}
 	}
 }
 

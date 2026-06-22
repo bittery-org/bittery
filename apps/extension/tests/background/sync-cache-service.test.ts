@@ -38,7 +38,7 @@ function createClientStub(): SyncEventQueryClient {
 
 function createStorageStub(input: {
 	activeAccount: ActiveAccount;
-	accounts: string[];
+	accounts: Array<string | { email: string; userId?: string }>;
 	tokensByEmail: Record<string, string | undefined>;
 	serverUrlsByEmail?: Record<string, string | undefined>;
 	vaultIdsByEmail?: Record<string, string[] | undefined>;
@@ -67,9 +67,9 @@ function createStorageStub(input: {
 		clearedEmails,
 		getActiveAccount: async () => input.activeAccount,
 		getAccountsList: async () =>
-			input.accounts.map((email) => ({
-				email,
-			})),
+			input.accounts.map((account) =>
+				typeof account === "string" ? { email: account } : account,
+			),
 		getAuthToken: async (email?: string) => {
 			if (email) {
 				return tokenMap.get(email.toLowerCase()) ?? null;
@@ -245,5 +245,53 @@ describe("sync-cache-service", () => {
 		// Both account-scoped attempts fail token resolution, then one global fallback run.
 		expect(deltaCalls).toEqual([undefined]);
 		expect(storage.clearedEmails).toEqual(["b@example.com", "a@example.com"]);
+	});
+
+	test("travel_mode_updated invokes travel mode handler only for matching account", async () => {
+		const deltaCalls: string[] = [];
+		const travelModeCalls: string[] = [];
+
+		const storage = createStorageStub({
+			activeAccount: { type: "all" },
+			accounts: [
+				{ email: "alice@example.com", userId: "user_alice" },
+				{ email: "team@example.com", userId: "user_team" },
+			],
+			tokensByEmail: {
+				"alice@example.com": "alice-token",
+				"team@example.com": "team-token",
+			},
+		});
+
+		const service = createSyncCacheService({
+			storage,
+			desktopClient: {
+				getAuthToken: async () => null,
+				clearCache: () => {},
+			},
+			defaultClient: createClientStub(),
+			createAccountClient: () => createClientStub(),
+			deltaSync: async (_client, _cache, event, accountEmail) => {
+				deltaCalls.push(`${event.type}:${accountEmail ?? "global"}`);
+			},
+			handleTravelModeSync: async (_event, email) => {
+				travelModeCalls.push(email);
+			},
+			logger: console,
+		});
+
+		await service.applyDeltaSyncForEvent(
+			createSyncEvent({
+				type: "travel_mode_updated",
+				entityType: "user",
+				entityId: "user_alice",
+				userId: "user_alice",
+				vaultId: null,
+				metadata: { enabled: true, hiddenVaultIds: ["vault_hidden"] },
+			}),
+		);
+
+		expect(travelModeCalls).toEqual(["alice@example.com"]);
+		expect(deltaCalls).toEqual([]);
 	});
 });

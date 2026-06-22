@@ -49,6 +49,8 @@ import type { CreateVaultResponse } from "./CreateVaultResponse.ts";
 import type { DeleteAccountInput } from "./DeleteAccountInput.ts";
 import type { DeletedVaultItemWithVaultResponse } from "./DeletedVaultItemWithVaultResponse.ts";
 import type { DeviceSessionResponse } from "./DeviceSessionResponse.ts";
+import type { DisableTravelModeInput } from "./DisableTravelModeInput.ts";
+import type { EnableTravelModeInput } from "./EnableTravelModeInput.ts";
 import type { FinishLoginInput } from "./FinishLoginInput.ts";
 import type { FinishLoginResponse } from "./FinishLoginResponse.ts";
 import type { GetEventsSinceInput } from "./GetEventsSinceInput.ts";
@@ -93,6 +95,7 @@ import type { RotationDataResponse } from "./RotationDataResponse.ts";
 import type { SendInvitationInput } from "./SendInvitationInput.ts";
 import type { SendInvitationResponse } from "./SendInvitationResponse.ts";
 import type { SessionIdInput } from "./SessionIdInput.ts";
+import type { SetTravelModeHiddenVaultsInput } from "./SetTravelModeHiddenVaultsInput.ts";
 import type { ShareAccessLogResponse } from "./ShareAccessLogResponse.ts";
 import type { ShareLinkDetailsResponse } from "./ShareLinkDetailsResponse.ts";
 import type { ShareLinkListResponse } from "./ShareLinkListResponse.ts";
@@ -119,6 +122,7 @@ import type { TeamSummaryResponse } from "./TeamSummaryResponse.ts";
 import type { TeamVaultResponse } from "./TeamVaultResponse.ts";
 import type { ToggleFavoriteInput } from "./ToggleFavoriteInput.ts";
 import type { TokenInput } from "./TokenInput.ts";
+import type { TravelModeResponse } from "./TravelModeResponse.ts";
 import type { UpdateAttachmentInput } from "./UpdateAttachmentInput.ts";
 import type { UpdateEmailInput } from "./UpdateEmailInput.ts";
 import type { UpdateItemInput } from "./UpdateItemInput.ts";
@@ -193,6 +197,8 @@ export type { CreateVaultResponse } from "./CreateVaultResponse.ts";
 export type { DeleteAccountInput } from "./DeleteAccountInput.ts";
 export type { DeletedVaultItemWithVaultResponse } from "./DeletedVaultItemWithVaultResponse.ts";
 export type { DeviceSessionResponse } from "./DeviceSessionResponse.ts";
+export type { DisableTravelModeInput } from "./DisableTravelModeInput.ts";
+export type { EnableTravelModeInput } from "./EnableTravelModeInput.ts";
 export type { EncryptedVaultKeyInput } from "./EncryptedVaultKeyInput.ts";
 export type { EntitlementLimits } from "./EntitlementLimits.ts";
 export type { FinishLoginInput } from "./FinishLoginInput.ts";
@@ -246,6 +252,7 @@ export type { RotationVaultResponse } from "./RotationVaultResponse.ts";
 export type { SendInvitationInput } from "./SendInvitationInput.ts";
 export type { SendInvitationResponse } from "./SendInvitationResponse.ts";
 export type { SessionIdInput } from "./SessionIdInput.ts";
+export type { SetTravelModeHiddenVaultsInput } from "./SetTravelModeHiddenVaultsInput.ts";
 export type { ShareAccessLogResponse } from "./ShareAccessLogResponse.ts";
 export type { ShareAllowedEmailDetails } from "./ShareAllowedEmailDetails.ts";
 export type { ShareLinkDetailsResponse } from "./ShareLinkDetailsResponse.ts";
@@ -279,6 +286,7 @@ export type { TeamVaultResponse } from "./TeamVaultResponse.ts";
 export type { TeamVaultRotationResult } from "./TeamVaultRotationResult.ts";
 export type { ToggleFavoriteInput } from "./ToggleFavoriteInput.ts";
 export type { TokenInput } from "./TokenInput.ts";
+export type { TravelModeResponse } from "./TravelModeResponse.ts";
 export type { UpdateAttachmentInput } from "./UpdateAttachmentInput.ts";
 export type { UpdateEmailInput } from "./UpdateEmailInput.ts";
 export type { UpdateItemInput } from "./UpdateItemInput.ts";
@@ -591,6 +599,21 @@ export type QubitServer = {
 				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 		};
+	};
+	travelMode: {
+		getTravelMode: Query<[], { Ok: TravelModeResponse } | { Err: AppError }>;
+		setTravelModeHiddenVaults: Mutation<
+			[input: SetTravelModeHiddenVaultsInput],
+			{ Ok: TravelModeResponse } | { Err: AppError }
+		>;
+		enableTravelMode: Mutation<
+			[input: EnableTravelModeInput],
+			{ Ok: TravelModeResponse } | { Err: AppError }
+		>;
+		disableTravelMode: Mutation<
+			[input: DisableTravelModeInput],
+			{ Ok: TravelModeResponse } | { Err: AppError }
+		>;
 	};
 	vault: {
 		list: Query<[], { Ok: Array<VaultListEntryResponse> } | { Err: AppError }>;

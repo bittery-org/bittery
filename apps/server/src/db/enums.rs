@@ -366,6 +366,9 @@ pub enum SyncEventType {
     #[sqlx(rename = "vault_key_rotated")]
     #[serde(rename = "vault_key_rotated")]
     VaultKeyRotated,
+    #[sqlx(rename = "travel_mode_updated")]
+    #[serde(rename = "travel_mode_updated")]
+    TravelModeUpdated,
 }
 
 impl SyncEventType {
@@ -384,6 +387,7 @@ impl SyncEventType {
             Self::VaultMemberAdded => "vault_member_added",
             Self::VaultMemberRemoved => "vault_member_removed",
             Self::VaultKeyRotated => "vault_key_rotated",
+            Self::TravelModeUpdated => "travel_mode_updated",
         }
     }
 }
@@ -410,6 +414,9 @@ pub enum SyncEntityType {
     #[sqlx(rename = "vault_key")]
     #[serde(rename = "vault_key")]
     VaultKey,
+    #[sqlx(rename = "user")]
+    #[serde(rename = "user")]
+    User,
 }
 
 impl SyncEntityType {
@@ -419,6 +426,7 @@ impl SyncEntityType {
             Self::Vault => "vault",
             Self::VaultMember => "vault_member",
             Self::VaultKey => "vault_key",
+            Self::User => "user",
         }
     }
 }

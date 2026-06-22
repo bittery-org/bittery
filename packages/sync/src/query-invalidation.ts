@@ -6,6 +6,9 @@ import type { SyncEvent, SyncEventType } from "./types";
  * This allows the sync package to be decoupled from the specific tRPC implementation
  */
 export interface QueryKeyHelpers {
+	travelMode: {
+		getTravelMode: { queryKey: () => unknown[] };
+	};
 	vault: {
 		listItems: { queryKey: (input: { vaultId: string }) => unknown[] };
 		listAllItems: { queryKey: () => unknown[] };
@@ -93,6 +96,13 @@ export function getQueryKeysForEvent(
 
 		case "vault_key_rotated":
 			keys.push(["vault-keys"]);
+			keys.push(rpc.vault.list.queryKey());
+			break;
+
+		case "travel_mode_updated":
+			keys.push(["travel-mode"]);
+			keys.push(["all-vault-keys"]);
+			keys.push(rpc.travelMode.getTravelMode.queryKey());
 			keys.push(rpc.vault.list.queryKey());
 			break;
 	}
@@ -291,7 +301,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
  */
 function getEntityTypeForEventType(
 	type: SyncEventType,
-): "item" | "vault" | "vault_member" | "vault_key" {
+): "item" | "vault" | "vault_member" | "vault_key" | "user" {
 	if (type.startsWith("item_")) {
 		return "item";
 	}
@@ -300,6 +310,9 @@ function getEntityTypeForEventType(
 	}
 	if (type === "vault_key_rotated") {
 		return "vault_key";
+	}
+	if (type === "travel_mode_updated") {
+		return "user";
 	}
 	return "vault";
 }
