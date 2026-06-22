@@ -66,17 +66,19 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 
 		return accountsInfo.flatMap((account) =>
 			vaultCoordinator
-				.getRepositoryForEmail(account.email)
+				.getRepositoryForAccount(account.accountId)
 				.getVaultKeys()
 				.map((vaultKey) => ({
 					...vaultKey,
-					accountEmail: account.email,
-					accountName: account.name,
-					accountTeamName: account.teamName,
-					accountTeamAvatarUrl: account.teamAvatarUrl,
+					accountEmail: isAllAccountsMode ? account.email : undefined,
+					accountName: isAllAccountsMode ? account.name : undefined,
+					accountTeamName: isAllAccountsMode ? account.teamName : undefined,
+					accountTeamAvatarUrl: isAllAccountsMode
+						? account.teamAvatarUrl
+						: undefined,
 				})),
 		);
-	}, [accountsInfo, snapshot, vaultCoordinator]);
+	}, [accountsInfo, isAllAccountsMode, snapshot, vaultCoordinator]);
 
 	return {
 		vaultKeys,

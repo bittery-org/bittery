@@ -11,6 +11,7 @@ export {
 export {
 	type AccountInfo,
 	AccountResolver,
+	createStoredAccountRpcClient,
 	type DefaultRpcClient,
 	findAccountForItem,
 	getClientForAccount,

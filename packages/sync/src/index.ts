@@ -35,5 +35,5 @@ export {
 } from "./sync-orchestrator";
 export * from "./types";
 // React hooks
-export type { UseSyncOptions } from "./use-sync";
+export type { SyncEventContext, SyncSource, UseSyncOptions } from "./use-sync";
 export { generateClientId, getOrCreateClientId, useSync } from "./use-sync";

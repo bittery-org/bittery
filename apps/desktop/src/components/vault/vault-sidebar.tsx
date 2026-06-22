@@ -98,14 +98,19 @@ function DroppableVaultEntry({
 	const isValidTarget = isDragging && !isSameVault && !isReadOnly;
 	const isInvalidTarget = isDragging && (isSameVault || isReadOnly);
 
-	// Visual feedback styles
-	let ringStyle = "";
+	// Keep drop feedback inside the row; outer rings get clipped by the sidebar scroller.
+	let dropBackgroundStyle = "";
+	let dropIndicatorStyle = "";
 	if (isOver && isValidTarget) {
-		ringStyle = "ring-2 ring-green-500 bg-green-500/10";
+		dropBackgroundStyle = "bg-emerald-500/10";
+		dropIndicatorStyle =
+			"border-emerald-500/70 shadow-[inset_0_0_0_1px_rgba(16,185,129,0.55)]";
 	} else if (isOver && isInvalidTarget) {
-		ringStyle = "ring-2 ring-red-500 bg-red-500/10";
+		dropBackgroundStyle = "bg-destructive/10";
+		dropIndicatorStyle =
+			"border-destructive/70 shadow-[inset_0_0_0_1px_rgba(239,68,68,0.55)]";
 	} else if (isDragging && isValidTarget) {
-		ringStyle = "ring-1 ring-muted-foreground/30";
+		dropIndicatorStyle = "border-dashed border-muted-foreground/25";
 	}
 
 	return (
@@ -121,9 +126,22 @@ function DroppableVaultEntry({
 				"text-sm",
 				"transition-colors",
 				isActive ? "bg-primary/10" : "hover:bg-muted/30",
-				ringStyle,
+				dropBackgroundStyle,
 			)}
 		>
+			{dropIndicatorStyle && (
+				<div
+					className={cn(
+						"pointer-events-none",
+						"absolute",
+						"inset-px",
+						"rounded-md",
+						"border",
+						"transition-[border-color,box-shadow]",
+						dropIndicatorStyle,
+					)}
+				/>
+			)}
 			<Link
 				to="/vault/$id"
 				params={{ id: vault.vaultId }}

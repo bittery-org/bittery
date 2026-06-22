@@ -20,6 +20,7 @@ export interface SyncOrchestratorOptions {
 	rpcClient: DeltaSyncClient & CatchUpClient;
 	itemCache: MutableItemCacheAdapter;
 	outboundQueue: OutboundQueue;
+	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;
 	getClientForAccount?: (
@@ -29,12 +30,14 @@ export interface SyncOrchestratorOptions {
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
+	drainOutboundQueue?: boolean;
 }
 
 export class SyncOrchestrator {
 	private readonly syncManager: SyncManager;
 	private readonly listeners = new Set<(status: SyncStatus) => void>();
 	private readonly itemCacheAccountEmail?: string | null;
+	private readonly itemCacheAccountId?: string | null;
 	private readonly itemCacheServerUrl?: string | null;
 	private readonly getClientForAccount?: (
 		email: string,
@@ -53,6 +56,7 @@ export class SyncOrchestrator {
 	private drainingInFlight = false;
 
 	constructor(private readonly options: SyncOrchestratorOptions) {
+		this.itemCacheAccountId = options.itemCacheAccountId;
 		this.itemCacheAccountEmail = options.itemCacheAccountEmail;
 		this.itemCacheServerUrl = options.itemCacheServerUrl;
 		this.getClientForAccount = options.getClientForAccount;
@@ -76,7 +80,11 @@ export class SyncOrchestrator {
 			this.setStatus({ pendingChanges });
 
 			// Drain newly enqueued mutations immediately when already connected.
-			if (pendingChanges > 0 && this.status.connectionStatus === "connected") {
+			if (
+				this.shouldDrainOutboundQueue() &&
+				pendingChanges > 0 &&
+				this.status.connectionStatus === "connected"
+			) {
 				void this.drainQueue().catch((error) => {
 					console.error(
 						"[SyncOrchestrator] Queue drain failed while connected:",
@@ -117,8 +125,20 @@ export class SyncOrchestrator {
 		return this.itemCacheAccountEmail ?? undefined;
 	}
 
+	private getDeltaSyncAccountScope(): string | undefined {
+		return (
+			this.itemCacheAccountId ??
+			this.itemCacheAccountEmail ??
+			undefined
+		);
+	}
+
 	private getDeltaSyncServerUrl(): string | undefined {
 		return this.itemCacheServerUrl ?? undefined;
+	}
+
+	private shouldDrainOutboundQueue(): boolean {
+		return this.options.drainOutboundQueue !== false;
 	}
 
 	private async acknowledgeEvent(event: SyncEvent): Promise<void> {
@@ -138,8 +158,9 @@ export class SyncOrchestrator {
 			this.options.rpcClient,
 			this.options.itemCache,
 			event,
-			this.getDeltaSyncAccountEmail(),
+			this.getDeltaSyncAccountScope(),
 			this.getDeltaSyncServerUrl(),
+			this.getDeltaSyncAccountEmail(),
 		);
 		await this.onEventProcessed?.(event);
 		await this.acknowledgeEvent(event);
@@ -148,7 +169,9 @@ export class SyncOrchestrator {
 	private async handleSyncPing(): Promise<void> {
 		try {
 			await this.runCatchUp();
-			await this.drainQueue();
+			if (this.shouldDrainOutboundQueue()) {
+				await this.drainQueue();
+			}
 		} catch (error) {
 			console.error("[SyncOrchestrator] Sync ping handling failed:", error);
 		}
@@ -178,7 +201,7 @@ export class SyncOrchestrator {
 						return;
 					}
 					await this.options.itemCache.clearItemCache(
-						this.getDeltaSyncAccountEmail(),
+						this.getDeltaSyncAccountScope(),
 					);
 					fullRefreshHandled = true;
 				},
@@ -234,7 +257,9 @@ export class SyncOrchestrator {
 		if (connectionStatus === "connected") {
 			try {
 				await this.runCatchUp();
-				await this.drainQueue();
+				if (this.shouldDrainOutboundQueue()) {
+					await this.drainQueue();
+				}
 			} catch (error) {
 				console.error("[SyncOrchestrator] Reconnect flow failed:", error);
 			}

@@ -411,6 +411,7 @@ export function ItemDetailPage({
 						<ItemAttachments
 							itemId={rawItem.id}
 							vaultId={rawItem.vaultId}
+							accountEmail={rawItem.accountEmail ?? rawItem.account?.email}
 							canEdit
 						/>
 					)}

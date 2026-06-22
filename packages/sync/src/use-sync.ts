@@ -14,6 +14,7 @@ import {
 import type {
 	ItemCacheAdapter,
 	SessionRevokedControlPayload,
+	SyncEvent,
 	SyncStatus,
 	SyncStorage,
 } from "./types";
@@ -34,6 +35,89 @@ class MemorySyncStorage implements SyncStorage {
 	}
 }
 
+class NamespacedSyncStorage implements SyncStorage {
+	constructor(
+		private readonly storage: SyncStorage,
+		private readonly namespace: string,
+	) {}
+
+	private key(key: string): string {
+		return `${this.namespace}:${key}`;
+	}
+
+	get<T>(key: string): Promise<T | null> {
+		return this.storage.get<T>(this.key(key));
+	}
+
+	set<T>(key: string, value: T): Promise<void> {
+		return this.storage.set(this.key(key), value);
+	}
+
+	remove(key: string): Promise<void> {
+		return this.storage.remove(this.key(key));
+	}
+}
+
+export interface SyncSource {
+	id: string;
+	serverUrl: string;
+	getAuthToken: () => Promise<string | null>;
+	rpcClient: SyncOrchestratorOptions["rpcClient"];
+	itemCacheAccountId?: string | null;
+	itemCacheAccountEmail?: string | null;
+	itemCacheServerUrl?: string | null;
+}
+
+export interface SyncEventContext {
+	sourceId: string;
+	accountId?: string | null;
+	accountEmail?: string | null;
+	serverUrl?: string | null;
+}
+
+function aggregateStatuses(
+	statuses: Iterable<SyncStatus>,
+	pendingChanges: number,
+): SyncStatus {
+	const list = Array.from(statuses);
+	if (list.length === 0) {
+		return {
+			connectionStatus: "disconnected",
+			lastSyncTime: null,
+			pendingChanges,
+			error: null,
+		};
+	}
+
+	const connectionStatus = list.every(
+		(status) => status.connectionStatus === "connected",
+	)
+		? "connected"
+		: list.some((status) => status.connectionStatus === "error")
+			? "error"
+			: list.some((status) => status.connectionStatus === "connecting")
+				? "connecting"
+				: list.some((status) => status.connectionStatus === "reconnecting")
+					? "reconnecting"
+					: "disconnected";
+
+	const lastSyncTime = list.reduce<number | null>((latest, current) => {
+		if (current.lastSyncTime === null) {
+			return latest;
+		}
+		return latest === null
+			? current.lastSyncTime
+			: Math.max(latest, current.lastSyncTime);
+	}, null);
+
+	return {
+		connectionStatus,
+		lastSyncTime,
+		pendingChanges,
+		error: list.find((status) => status.error)?.error ?? null,
+	};
+}
+
 /**
  * Options for useSync hook
  */
@@ -46,8 +130,10 @@ export interface UseSyncOptions {
 	enabled?: boolean;
 	realtimeEnabled?: boolean;
 	itemCacheAdapter?: ItemCacheAdapter;
+	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;
+	sources?: SyncSource[];
 	getClientForAccount?: (
 		email: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
@@ -55,7 +141,8 @@ export interface UseSyncOptions {
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
 	onEventProcessed?: (
-		event: import("./types").SyncEvent,
+		event: SyncEvent,
+		context: SyncEventContext,
 	) => void | Promise<void>;
 	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
 	fetch?: (url: string, init?: any) => Promise<Response>;
@@ -77,8 +164,10 @@ export function useSync(options: UseSyncOptions) {
 		enabled = true,
 		realtimeEnabled = true,
 		itemCacheAdapter,
+		itemCacheAccountId,
 		itemCacheAccountEmail,
 		itemCacheServerUrl,
+		sources,
 		getClientForAccount,
 		onSessionRevoked,
 		onEventProcessed,
@@ -93,7 +182,8 @@ export function useSync(options: UseSyncOptions) {
 		() => new OutboundQueue(syncStorage, clientId),
 		[syncStorage, clientId],
 	);
-	const orchestratorRef = useRef<SyncOrchestrator | null>(null);
+	const orchestratorsRef = useRef<Map<string, SyncOrchestrator>>(new Map());
+	const sourceStatusesRef = useRef<Map<string, SyncStatus>>(new Map());
 
 	const [status, setStatus] = useState<SyncStatus>({
 		connectionStatus: "disconnected",
@@ -113,45 +203,97 @@ export function useSync(options: UseSyncOptions) {
 		[queryClient, rpc],
 	);
 
+	const syncSources = useMemo<SyncSource[]>(() => {
+		if (sources && sources.length > 0) {
+			return sources;
+		}
+
+		return [
+			{
+				id: "default",
+				serverUrl,
+				getAuthToken,
+				rpcClient: rpcClient as unknown as SyncOrchestratorOptions["rpcClient"],
+				itemCacheAccountId,
+				itemCacheAccountEmail,
+				itemCacheServerUrl,
+			},
+		];
+	}, [
+		sources,
+		serverUrl,
+		getAuthToken,
+		rpcClient,
+		itemCacheAccountId,
+		itemCacheAccountEmail,
+		itemCacheServerUrl,
+	]);
+
 	useEffect(() => {
-		if (!enabled || !itemCacheAdapter || !serverUrl) {
+		if (!enabled || !itemCacheAdapter || syncSources.length === 0) {
 			return;
 		}
 
 		let disposed = false;
-		let unsubscribeStatus: (() => void) | undefined;
+		const unsubscribers: Array<() => void> = [];
+		const orchestrators = new Map<string, SyncOrchestrator>();
+		sourceStatusesRef.current = new Map();
 
-		const orchestrator = new SyncOrchestrator({
-			syncManager: {
-				serverUrl,
-				getAuthToken,
-				clientId,
-				storage: syncStorage,
-				fetch: fetchImpl,
-			},
-			rpcClient: rpcClient as unknown as SyncOrchestratorOptions["rpcClient"],
-			itemCache: itemCacheAdapter,
-			outboundQueue,
-			itemCacheAccountEmail,
-			itemCacheServerUrl,
-			getClientForAccount,
-			onEventProcessed: async (event) => {
-				await invalidateForEvent(event);
-				await onEventProcessed?.(event);
-			},
-			onSessionRevoked,
-		});
-
-		orchestratorRef.current = orchestrator;
-		unsubscribeStatus = orchestrator.subscribe((nextStatus) => {
+		const updateStatus = () => {
 			if (disposed) {
 				return;
 			}
-			setStatus({
-				...nextStatus,
-				pendingChanges: outboundQueue.getPendingCount(),
+			setStatus(
+				aggregateStatuses(
+					sourceStatusesRef.current.values(),
+					outboundQueue.getPendingCount(),
+				),
+			);
+		};
+
+		for (const [index, source] of syncSources.entries()) {
+			const sourceStorage = new NamespacedSyncStorage(
+				syncStorage,
+				`sync_source_${encodeURIComponent(source.id)}`,
+			);
+			const orchestrator = new SyncOrchestrator({
+				syncManager: {
+					serverUrl: source.serverUrl,
+					getAuthToken: source.getAuthToken,
+					clientId,
+					storage: sourceStorage,
+					fetch: fetchImpl,
+				},
+				rpcClient: source.rpcClient,
+				itemCache: itemCacheAdapter,
+				outboundQueue,
+				itemCacheAccountId: source.itemCacheAccountId,
+				itemCacheAccountEmail: source.itemCacheAccountEmail,
+				itemCacheServerUrl: source.itemCacheServerUrl,
+				getClientForAccount,
+				drainOutboundQueue: index === 0,
+				onEventProcessed: async (event) => {
+					await invalidateForEvent(event);
+					await onEventProcessed?.(event, {
+						sourceId: source.id,
+						accountId: source.itemCacheAccountId,
+						accountEmail: source.itemCacheAccountEmail,
+						serverUrl: source.itemCacheServerUrl ?? source.serverUrl,
+					});
+				},
+				onSessionRevoked,
 			});
-		});
+
+			orchestrators.set(source.id, orchestrator);
+			unsubscribers.push(
+				orchestrator.subscribe((nextStatus) => {
+					sourceStatusesRef.current.set(source.id, nextStatus);
+					updateStatus();
+				}),
+			);
+		}
+
+		orchestratorsRef.current = orchestrators;
 
 		(async () => {
 			await outboundQueue.restore();
@@ -163,31 +305,32 @@ export function useSync(options: UseSyncOptions) {
 				pendingChanges: outboundQueue.getPendingCount(),
 			}));
 
-			if (realtimeEnabled) {
-				await orchestrator.connect();
-			} else {
-				await orchestrator.reconnect();
-			}
+			await Promise.all(
+				Array.from(orchestrators.values()).map((orchestrator) =>
+					realtimeEnabled ? orchestrator.connect() : orchestrator.reconnect(),
+				),
+			);
 		})();
 
 		return () => {
 			disposed = true;
-			unsubscribeStatus?.();
-			orchestrator.dispose();
-			orchestratorRef.current = null;
+			for (const unsubscribe of unsubscribers) {
+				unsubscribe();
+			}
+			for (const orchestrator of orchestrators.values()) {
+				orchestrator.dispose();
+			}
+			orchestratorsRef.current = new Map();
+			sourceStatusesRef.current = new Map();
 		};
 	}, [
 		enabled,
 		itemCacheAdapter,
-		serverUrl,
-		getAuthToken,
+		syncSources,
 		clientId,
 		syncStorage,
 		fetchImpl,
-		rpcClient,
 		outboundQueue,
-		itemCacheAccountEmail,
-		itemCacheServerUrl,
 		getClientForAccount,
 		onSessionRevoked,
 		onEventProcessed,
@@ -199,16 +342,20 @@ export function useSync(options: UseSyncOptions) {
 	 * Manually trigger reconnection
 	 */
 	const reconnect = useCallback(async () => {
-		if (orchestratorRef.current) {
-			await orchestratorRef.current.reconnect();
-		}
+		await Promise.all(
+			Array.from(orchestratorsRef.current.values()).map((orchestrator) =>
+				orchestrator.reconnect(),
+			),
+		);
 	}, []);
 
 	/**
 	 * Disconnect from sync
 	 */
 	const disconnect = useCallback(() => {
-		orchestratorRef.current?.disconnect();
+		for (const orchestrator of orchestratorsRef.current.values()) {
+			orchestrator.disconnect();
+		}
 		setStatus((prev) => ({
 			...prev,
 			connectionStatus: "disconnected",

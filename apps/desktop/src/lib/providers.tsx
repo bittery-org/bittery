@@ -5,7 +5,7 @@ import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
 import {
-	invalidateDesktopAccountSession,
+	handleDesktopUnauthorizedError,
 	isUnauthorizedRpcError,
 } from "@/lib/session-invalidation";
 import { storage } from "@/lib/storage";
@@ -21,45 +21,37 @@ function isUnauthorizedError(error: unknown): boolean {
 	return isUnauthorizedRpcError(error);
 }
 
-function handleUnauthorizedError() {
+function handleUnauthorizedError(error: unknown) {
 	if (isHandlingAuthError) return;
 
-	// Don't handle unauthorized errors on public routes — avoids infinite reload loop
-	// when sync or other background queries fire without a valid token
 	const path = window.location.pathname;
 	if (path === "/login" || path === "/unlock") return;
 
 	isHandlingAuthError = true;
 
-	queryClient.clear();
+	void handleDesktopUnauthorizedError(error).then(
+		({ prefillEmail, shouldRedirect }) => {
+			if (!shouldRedirect) {
+				isHandlingAuthError = false;
+				return;
+			}
 
-	// Get active account email before clearing session so login page can prefill
-	storage.getActiveAccount().then(async (activeAccount) => {
-		const prefillEmail =
-			activeAccount?.type === "single" ? activeAccount.email : undefined;
-
-		if (activeAccount?.type === "single") {
-			await invalidateDesktopAccountSession(activeAccount.email);
-		} else {
-			// In all-accounts mode we cannot reliably determine the failing account
-			// from generic query/mutation errors.
-			await storage.lockAllAccounts?.();
-		}
-
-		toast.error("Session expired. Please sign in again.");
-		if (prefillEmail) {
-			window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
-		} else {
-			window.location.href = "/";
-		}
-	});
+			queryClient.clear();
+			toast.error("Session expired. Please sign in again.");
+			if (prefillEmail) {
+				window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
+			} else {
+				window.location.href = "/";
+			}
+		},
+	);
 }
 
 const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
 			if (isUnauthorizedError(error)) {
-				handleUnauthorizedError();
+				handleUnauthorizedError(error);
 				return;
 			}
 			toast.error(error.message, {
@@ -75,7 +67,7 @@ const queryClient = new QueryClient({
 	mutationCache: new MutationCache({
 		onError: (error) => {
 			if (isUnauthorizedError(error)) {
-				handleUnauthorizedError();
+				handleUnauthorizedError(error);
 			}
 		},
 	}),
@@ -86,7 +78,7 @@ async function resolveDesktopServerUrl(): Promise<string> {
 	const activeAccount = await storage.getActiveAccount();
 	const accountServerUrl =
 		activeAccount?.type === "single"
-			? await storage.getServerUrl(activeAccount.email)
+			? await storage.getServerUrl(activeAccount.accountId)
 			: null;
 	const activeAuthServerUrl = await resolveActiveAuthServerUrl();
 	return (
@@ -107,8 +99,8 @@ const rpcClient = createSessionRefreshingRpcClient({
 		}
 
 		const [token, sessionData] = await Promise.all([
-			storage.getAuthToken(activeAccount.email),
-			storage.getStoredSessionData(activeAccount.email),
+			storage.getAuthToken(activeAccount.accountId),
+			storage.getStoredSessionData(activeAccount.accountId),
 		]);
 
 		return {
@@ -122,13 +114,13 @@ const rpcClient = createSessionRefreshingRpcClient({
 		if (activeAccount?.type !== "single") {
 			return null;
 		}
-		return storage.getAuthToken(activeAccount.email);
+		return storage.getAuthToken(activeAccount.accountId);
 	},
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		const activeAccount = await storage.getActiveAccount();
 		if (activeAccount?.type === "single") {
-			await storage.storeAuthToken(token, activeAccount.email);
-			await storage.updateStoredSessionMetadata?.(activeAccount.email, {
+			await storage.storeAuthToken(token, activeAccount.accountId);
+			await storage.updateStoredSessionMetadata?.(activeAccount.accountId, {
 				sessionId,
 				expiresAt,
 			});

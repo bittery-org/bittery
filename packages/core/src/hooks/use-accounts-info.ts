@@ -4,11 +4,13 @@
  */
 
 import { useQuery } from "@tanstack/react-query";
+import { useMemo, useSyncExternalStore } from "react";
 import {
 	useCoreContext,
 	usePlatformStorage,
 } from "../context/platform-context";
 import type { AccountInfo as CoreAccountInfo } from "../services/account-resolver";
+import { peekAccountSessionManager } from "../services/account-session-manager";
 
 /**
  * Complete account information including metadata, credentials, and tRPC client
@@ -27,33 +29,56 @@ export interface UseAccountsInfoOptions {
 export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 	const storage = usePlatformStorage();
 	const core = useCoreContext();
+	const manager = peekAccountSessionManager();
+
+	useSyncExternalStore(
+		manager?.subscribe ?? (() => () => {}),
+		manager?.getSnapshot ?? (() => 0),
+		manager?.getSnapshot ?? (() => 0),
+	);
 
 	const { data: activeAccount, isLoading: isLoadingActive } = useQuery({
 		queryKey: ["accounts", "active"],
 		queryFn: () => storage.getActiveAccount(),
 		staleTime: 5000,
-		enabled: options.enabled !== false,
+		enabled: options.enabled !== false && !manager,
 	});
+
+	const effectiveActiveAccount = manager
+		? manager.getActiveAccount()
+		: activeAccount;
+
+	const activeAccountKey = useMemo(
+		() =>
+			effectiveActiveAccount?.type === "single"
+				? `single:${effectiveActiveAccount.accountId}`
+				: (effectiveActiveAccount?.type ?? "none"),
+		[effectiveActiveAccount],
+	);
 
 	const {
 		data: accountsInfo = [],
 		isLoading: isLoadingInfo,
 		error,
 	} = useQuery({
-		queryKey: ["accounts", "info", activeAccount],
+		queryKey: ["accounts", "info", activeAccountKey],
 		queryFn: async (): Promise<AccountInfo[]> => {
-			const resolved = await core.accounts.resolveAccounts(activeAccount);
+			const resolved = await core.accounts.resolveAccounts(effectiveActiveAccount);
 			return resolved.accountsInfo;
 		},
-		enabled: !!activeAccount && options.enabled !== false,
-		staleTime: 5000,
+		enabled: !!effectiveActiveAccount && options.enabled !== false,
+		staleTime: 0,
+		// AccountInfo carries a live RPC client (a Proxy), which is not
+		// JSON-serializable. React Query's default structural sharing throws on
+		// proxies, so it must be disabled for this query.
+		structuralSharing: false,
 	});
 
 	return {
-		activeAccount,
+		activeAccount: effectiveActiveAccount,
 		accountsInfo,
-		isLoading: isLoadingActive || isLoadingInfo,
+		isLoading: (!manager && isLoadingActive) || isLoadingInfo,
 		error,
-		isAllAccountsMode: activeAccount?.type === "all",
+		isAllAccountsMode: effectiveActiveAccount?.type === "all",
 	};
 }

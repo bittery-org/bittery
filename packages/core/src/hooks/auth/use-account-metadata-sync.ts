@@ -3,13 +3,13 @@
  * Updates team avatar URLs and other account data that may change on the server
  */
 
-import { useRPCClient } from "@bittery/shared/rpc";
-import {
-	createAccountRpcClient,
-	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
+import { createStoredAccountRpcClient } from "../../services/account-resolver";
+
+const ACCOUNT_METADATA_STALE_TIME_MS = 10 * 60 * 1000;
+const ACCOUNT_METADATA_REFETCH_INTERVAL_MS = 10 * 60 * 1000;
 
 export interface UseAccountMetadataSyncOptions {
 	/** Email of the account to sync (optional - defaults to current active account) */
@@ -37,17 +37,25 @@ export interface UseAccountMetadataSyncOptions {
 export function useAccountMetadataSync(
 	options: UseAccountMetadataSyncOptions = {},
 ) {
-	const { email, enabled = true, refetchInterval = 60000 } = options;
-	const rpcClient = useRPCClient();
+	const {
+		email,
+		enabled = true,
+		refetchInterval = ACCOUNT_METADATA_REFETCH_INTERVAL_MS,
+	} = options;
 	const storage = usePlatformStorage();
 
 	return useQuery({
 		queryKey: ["account-metadata-sync", email],
 		queryFn: async () => {
-			// Only sync if we have an email
 			if (!email) return null;
 
+			const accountId = await resolveAccountScopeId(storage, email);
+			if (!accountId) return null;
+
 			try {
+				const rpcClient = await createStoredAccountRpcClient(storage, accountId);
+				if (!rpcClient) return null;
+
 				// Fetch current user data from server
 				const userData = await rpcClient.auth.me.query();
 
@@ -104,8 +112,9 @@ export function useAccountMetadataSync(
 		},
 		enabled: enabled && !!email,
 		refetchInterval,
-		// Refetch on window focus to catch changes when user returns to the app
-		refetchOnWindowFocus: true,
+		staleTime: ACCOUNT_METADATA_STALE_TIME_MS,
+		refetchOnWindowFocus: false,
+		refetchOnMount: false,
 		// Keep previous data while fetching to avoid flicker
 		placeholderData: (previousData) => previousData,
 		// Retry with exponential backoff
@@ -134,7 +143,11 @@ export function useAccountMetadataSyncAll(options: {
 	/** Refetch interval in milliseconds (default: 60000 = 1 minute) */
 	refetchInterval?: number;
 }) {
-	const { emails = [], enabled = true, refetchInterval = 60000 } = options;
+	const {
+		emails = [],
+		enabled = true,
+		refetchInterval = ACCOUNT_METADATA_REFETCH_INTERVAL_MS,
+	} = options;
 	const storage = usePlatformStorage();
 
 	return useQueries({
@@ -142,21 +155,21 @@ export function useAccountMetadataSyncAll(options: {
 			queryKey: ["account-metadata-sync", email],
 			queryFn: async () => {
 				try {
-					// Get auth token for this specific account
-					const authToken = await storage.getAuthToken(email);
-					if (!authToken) {
-						console.log(
-							`[account-metadata-sync-all] No auth token found for ${email}`,
-						);
+					const accountId = await resolveAccountScopeId(storage, email);
+					if (!accountId) {
 						return null;
 					}
 
-					// Get server URL for this account (or use default)
-					const serverUrl =
-						(await storage.getServerUrl?.(email)) || getDefaultServerUrl();
-
-					// Create an account-specific RPC client.
-					const accountClient = createAccountRpcClient(authToken, serverUrl);
+					const accountClient = await createStoredAccountRpcClient(
+						storage,
+						accountId,
+					);
+					if (!accountClient) {
+						console.log(
+							`[account-metadata-sync-all] No auth session found for ${email}`,
+						);
+						return null;
+					}
 
 					// Fetch current user data from server using account-specific client
 					const userData = await accountClient.auth.me.query();
@@ -214,7 +227,9 @@ export function useAccountMetadataSyncAll(options: {
 			},
 			enabled: enabled && !!email,
 			refetchInterval,
-			refetchOnWindowFocus: true,
+			staleTime: ACCOUNT_METADATA_STALE_TIME_MS,
+			refetchOnWindowFocus: false,
+			refetchOnMount: false,
 			placeholderData: (previousData: unknown) => previousData,
 			retry: 3,
 			retryDelay: (attemptIndex: number) =>
