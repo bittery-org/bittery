@@ -6,6 +6,9 @@ import type { SyncEvent, SyncEventType } from "./types";
  * This allows the sync package to be decoupled from the specific tRPC implementation
  */
 export interface QueryKeyHelpers {
+	travelMode: {
+		getTravelMode: { queryKey: () => unknown[] };
+	};
 	vault: {
 		listItems: { queryKey: (input: { vaultId: string }) => unknown[] };
 		listAllItems: { queryKey: () => unknown[] };
