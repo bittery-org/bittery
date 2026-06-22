@@ -33,7 +33,10 @@ import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { desktopSync } from "./desktop-sync";
 import { rpcClient } from "./rpc-client";
-import { resolveAccountEmailForVault } from "./services/account-resolution";
+import {
+	resolveAccountEmailForVault,
+	resolveEmailFromAccountId,
+} from "./services/account-resolution";
 import {
 	onLocalItemCreated,
 	onLocalItemUpdated,
@@ -295,7 +298,9 @@ async function resolveAccountEmailForItem(
 
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type !== "all") {
-		return activeAccount?.type === "single" ? activeAccount.email : undefined;
+		return activeAccount?.type === "single"
+			? await resolveEmailFromAccountId(activeAccount.accountId)
+			: undefined;
 	}
 
 	return undefined;

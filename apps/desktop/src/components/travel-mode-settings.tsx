@@ -32,11 +32,14 @@ export function TravelModeSettings() {
 	const activeAccountQuery = useQuery({
 		queryKey: ["activeAccountEmail"],
 		queryFn: async () => {
+			const accounts = await storage.getAccountsList();
 			const active = await storage.getActiveAccount();
 			if (active?.type === "single") {
-				return active.email;
+				return (
+					accounts.find((account) => account.accountId === active.accountId)
+						?.email ?? null
+				);
 			}
-			const accounts = await storage.getAccountsList();
 			return accounts[0]?.email ?? null;
 		},
 	});

@@ -43,12 +43,15 @@ export interface StoredSessionData {
 }
 
 /**
- * Account metadata for multi-account support
+ * Account metadata for multi-account support.
+ * accountId is the stable local primary key; email is display/login metadata only.
  */
 export interface AccountMetadata {
+	accountId: string;
 	email: string;
 	userId: string;
 	name: string;
+	serverUrl?: string;
 	teamName?: string;
 	teamAvatarUrl?: string | null;
 	secretKeyHint: string;
@@ -59,12 +62,12 @@ export interface AccountMetadata {
 
 /**
  * Active account configuration
- * - { type: "single", email: string } - A specific account is active
+ * - { type: "single", accountId: string } - A specific account is active
  * - { type: "all" } - All unlocked accounts are active (multi-account mode)
  * - null - No account is active (logged out)
  */
 export type ActiveAccount =
-	| { type: "single"; email: string }
+	| { type: "single"; accountId: string }
 	| { type: "all" }
 	| null;
 

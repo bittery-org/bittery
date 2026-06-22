@@ -39,7 +39,7 @@ const LAST_SELECTED_ITEM_BY_SCOPE_KEY =
 function getSelectionScope(activeAccount: PopupActiveAccount): string {
 	if (!activeAccount) return "none";
 	if (activeAccount.type === "all") return "all";
-	return `single:${activeAccount.email.toLowerCase()}`;
+	return `single:${activeAccount.accountId}`;
 }
 
 function readSelectedItemForScope(scope: string): string | null {

@@ -272,13 +272,13 @@ export function useCredentialProviderSync(
 				return;
 			}
 
-			for (const email of unlockedEmails) {
-				const muk = await storage.getMasterUnlockKey(email);
-				const sessionData = await storage.getStoredSessionData(email);
+			for (const accountId of unlockedEmails) {
+				const muk = await storage.getMasterUnlockKey(accountId);
+				const sessionData = await storage.getStoredSessionData(accountId);
 				const autoLockTimeoutMs =
-					await storage.getAutoLockTimeoutOrDefault(email);
+					await storage.getAutoLockTimeoutOrDefault(accountId);
 				debugLog(
-					`[CredentialProviderSync] ensureNativeMukSet: email=${email}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`,
+					`[CredentialProviderSync] ensureNativeMukSet: accountId=${accountId}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`,
 				);
 				if (muk && sessionData?.userId) {
 					const mukBase64 = arrayBufferToBase64(muk);
@@ -292,7 +292,7 @@ export function useCredentialProviderSync(
 					);
 				} else {
 					console.warn(
-						`[CredentialProviderSync] ensureNativeMukSet: SKIPPING email=${email} (muk=${!!muk}, userId=${sessionData?.userId ?? "null"})`,
+						`[CredentialProviderSync] ensureNativeMukSet: SKIPPING accountId=${accountId} (muk=${!!muk}, userId=${sessionData?.userId ?? "null"})`,
 					);
 				}
 			}
@@ -342,7 +342,7 @@ export function useCredentialProviderSync(
 
 			for (const account of accountsInfo) {
 				seenAccountIds.add(account.userId);
-				const vaultKeys = await storage.getVaultKeys(account.email);
+				const vaultKeys = await storage.getVaultKeys(account.accountId);
 				if (!vaultKeys || vaultKeys.length === 0) {
 					lastVaultSyncSignatureByAccountRef.current.delete(account.userId);
 					continue;

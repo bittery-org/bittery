@@ -11,6 +11,9 @@
 		"./adapter": {
 			"default": "./src/adapter.ts"
 		},
+		"./account-id": {
+			"default": "./src/account-id.ts"
+		},
 		"./crypto-provider": {
 			"default": "./src/crypto-provider.ts"
 		},

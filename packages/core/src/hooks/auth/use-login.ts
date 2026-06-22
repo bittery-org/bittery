@@ -18,6 +18,7 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../../context/platform-context";
+import { peekAccountSessionManager } from "../../services/account-session-manager";
 
 /**
  * Options for useLogin hook
@@ -101,26 +102,34 @@ export function useLogin(
 				{ crypto, rpcClient: rpcClientForRequest, storage },
 			);
 
-			// Enable biometric if requested and supported
 			const shouldEnableBiometric =
 				input.enableBiometric ?? options.enableBiometric;
+
+			// Store session data
+			await storeLoginSession(result, input.secretKey, storage, input.email, {
+				travelModeRpcClient: rpcClientForRequest,
+				serverUrl: input.serverUrl,
+			});
+
 			if (
 				shouldEnableBiometric &&
 				storage.supportsBiometric &&
 				storage.enableBiometric
 			) {
-				await storage.enableBiometric(input.email);
+				const accounts = await storage.getAccountsList();
+				const account = accounts.find(
+					(a) => a.email.toLowerCase() === input.email.toLowerCase(),
+				);
+				if (account) {
+					await storage.enableBiometric(account.accountId);
+				}
 			}
 
-			// Store session data
-			await storeLoginSession(result, input.secretKey, storage, input.email, {
-				travelModeRpcClient: rpcClientForRequest,
-			});
-
-			// For multi-account platforms, set this as the active account
-			if (storage.supportsMultiAccount) {
-				await storage.setActiveAccount({ type: "single", email: input.email });
-			}
+			// storeLoginSession writes the new account + active selection directly
+			// to storage, bypassing the in-memory AccountSessionManager. Refresh it
+			// so the account switcher reflects the new account without requiring a
+			// lock/unlock cycle.
+			await peekAccountSessionManager()?.refresh();
 
 			return result;
 		},

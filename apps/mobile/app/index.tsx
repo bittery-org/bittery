@@ -38,18 +38,23 @@ export default function Index() {
 					}
 
 					const sessionChecks = await Promise.all(
-						accounts.map((account) => storage.isSessionValid(account.email)),
+						accounts.map((account) =>
+							storage.isSessionValid(account.accountId),
+						),
 					);
 					setHasValidSession(sessionChecks.some(Boolean));
 
-					const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
-					setMukAvailable(unlockedEmails.length > 0);
+					const unlockedAccountIds =
+						(await storage.getUnlockedAccounts?.()) ?? [];
+					setMukAvailable(unlockedAccountIds.length > 0);
 				} else if (activeAccount) {
-					const isValid = await storage.isSessionValid(activeAccount.email);
+					const isValid = await storage.isSessionValid(activeAccount.accountId);
 					setHasValidSession(isValid);
 
 					if (isValid) {
-						const muk = await storage.getMasterUnlockKey(activeAccount.email);
+						const muk = await storage.getMasterUnlockKey(
+							activeAccount.accountId,
+						);
 						setMukAvailable(muk !== null);
 					}
 				}
@@ -74,7 +79,7 @@ export default function Index() {
 			} else if (activeAccount) {
 				// Biometric auth just completed, check if MUK is now available
 				storage
-					.getMasterUnlockKey(activeAccount.email)
+					.getMasterUnlockKey(activeAccount.accountId)
 					.then((muk) => setMukAvailable(muk !== null));
 			}
 		}

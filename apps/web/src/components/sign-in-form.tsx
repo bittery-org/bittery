@@ -34,7 +34,7 @@ export default function SignInForm({
 	const storedSecretKeyQuery = useQuery({
 		queryKey: ["auth", "stored-secret-key", sessionState?.email],
 		enabled: isQuickUnlock && !!sessionState?.email,
-		queryFn: () => storage.getStoredSecretKey(sessionState?.email ?? undefined),
+		queryFn: () => storage.getStoredSecretKey(),
 	});
 	const registrationStatusQuery = useQuery(
 		rpc.auth.registrationStatus.queryOptions(),

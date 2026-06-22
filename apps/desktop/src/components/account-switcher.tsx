@@ -20,7 +20,7 @@ import {
 } from "@bittery/ui";
 import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -36,11 +36,10 @@ export function AccountSwitcher() {
 	const {
 		accounts,
 		activeAccount: activeAccountQuery,
-		unlockedEmails,
+		unlockedAccountIds,
 		switchAccount,
 		removeAccount,
 	} = useAccountSwitcher();
-	// Use AccountContext's lockAllAccounts (has broadcast) instead of hook's version
 	const { lockAllAccounts: lockAllAccountsWithBroadcast } = useAccount();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
@@ -51,61 +50,62 @@ export function AccountSwitcher() {
 	const [showManageAccounts, setShowManageAccounts] = useState(false);
 
 	const accountsData = accounts.data ?? [];
-	const unlockedEmailsList = unlockedEmails.data ?? [];
+	const unlockedAccountIdsList = unlockedAccountIds.data ?? [];
 	const isAllAccountsMode = activeAccountQuery.data?.type === "all";
-	const activeAccountEmail =
+	const activeAccountId =
 		activeAccountQuery.data?.type === "single"
-			? activeAccountQuery.data.email
+			? activeAccountQuery.data.accountId
 			: null;
 	const activeAccount = accountsData.find(
-		(a) => a.email === activeAccountEmail,
+		(a) => a.accountId === activeAccountId,
 	);
-	const isGerman = locale === "de";
-	const manageAccountsLabel = isGerman ? "Konten verwalten" : "Manage Accounts";
-	const manageAccountsDescription = isGerman
-		? "Alle Konten auf diesem Gerät anzeigen, Details prüfen und neue Konten hinzufügen."
-		: "View every account on this device, review details, and add new ones.";
-	const activeBadgeLabel = isGerman ? "Aktiv" : "Active";
-	const unlockedBadgeLabel = isGerman ? "Entsperrt" : "Unlocked";
-	const lockedBadgeLabel = isGerman ? "Gesperrt" : "Locked";
-	const userIdLabel = isGerman ? "Benutzer-ID" : "User ID";
-	const addedLabel = isGerman ? "Hinzugefügt" : "Added";
-	const lastActiveLabel = isGerman ? "Zuletzt aktiv" : "Last active";
-	const teamLabel = isGerman ? "Team" : "Team";
-	const secretKeyHintLabel = isGerman
-		? "Secret-Key-Hinweis"
-		: "Secret key hint";
-	const switchLabel = isGerman ? "Wechseln" : "Switch";
-	const emptyManageAccountsLabel = isGerman
-		? "Noch keine Konten hinzugefügt."
-		: "No accounts added yet.";
-	const dateTimeFormatter = new Intl.DateTimeFormat(
-		isGerman ? "de-DE" : "en-US",
-		{
-			dateStyle: "medium",
-			timeStyle: "short",
-		},
+	const activeAccountEmail = activeAccount?.email ?? null;
+
+	const accountEmailById = useMemo(
+		() =>
+			new Map(
+				accountsData.map((account) => [account.accountId, account.email]),
+			),
+		[accountsData],
 	);
+
+	const unlockedEmailsList = useMemo(
+		() =>
+			unlockedAccountIdsList
+				.map((accountId) => accountEmailById.get(accountId))
+				.filter((email): email is string => Boolean(email)),
+		[accountEmailById, unlockedAccountIdsList],
+	);
+
+	const dateTimeFormatter = useMemo(
+		() =>
+			new Intl.DateTimeFormat(locale === "de" ? "de-DE" : "en-US", {
+				dateStyle: "medium",
+				timeStyle: "short",
+			}),
+		[locale],
+	);
+
 	const formatTimestamp = (value?: number) => {
 		if (!value || Number.isNaN(value)) {
 			return "—";
 		}
-
 		return dateTimeFormatter.format(value);
 	};
 
-	const handleAccountSelect = async (email: string) => {
-		if (email === activeAccountEmail) return;
+	const handleAccountSelect = async (accountId: string) => {
+		if (accountId === activeAccountId) return;
+
+		const account = accountsData.find((item) => item.accountId === accountId);
+		if (!account) return;
 
 		try {
-			await switchAccount.mutateAsync({ type: "single", email });
+			await switchAccount.mutateAsync({ type: "single", accountId });
 
-			// Check if session is valid for the switched account
-			const sessionValid = await storage.isSessionValid(email);
+			const sessionValid = await storage.isSessionValid(accountId);
 			if (!sessionValid) {
-				navigate({ to: "/unlock", search: { email } });
+				navigate({ to: "/unlock", search: { email: account.email } });
 			} else {
-				// Invalidate all account-related data to clear cache from previous account
 				await invalidator.invalidateAllAccountData();
 				navigate({ to: "/vault" });
 			}
@@ -116,15 +116,13 @@ export function AccountSwitcher() {
 	};
 
 	const handleAllAccountsSelect = async () => {
-		// Check if we have any unlocked accounts
-		if (unlockedEmailsList.length === 0) {
+		if (unlockedAccountIdsList.length === 0) {
 			toast.error(m.toast_account_switcher_no_unlocked_accounts());
 			return;
 		}
 
 		try {
 			await switchAccount.mutateAsync({ type: "all" });
-			// Invalidate all account-related data to refresh multi-account view
 			await invalidator.invalidateAllAccountData();
 			navigate({ to: "/vault" });
 		} catch (error) {
@@ -143,7 +141,6 @@ export function AccountSwitcher() {
 
 	const handleLockAll = async () => {
 		try {
-			// Use AccountContext's version which broadcasts to extension
 			await lockAllAccountsWithBroadcast();
 			navigate({ to: "/unlock" });
 			toast.success(m.toast_account_switcher_lock_all_success());
@@ -165,33 +162,35 @@ export function AccountSwitcher() {
 		setShowManageAccounts(true);
 	};
 
-	const handleRemoveAccountClick = (email: string) => {
-		setAccountToRemove(email);
+	const handleRemoveAccountClick = (accountId: string) => {
+		setAccountToRemove(accountId);
 	};
 
-	const handleRemoveAccount = async (email: string) => {
+	const handleRemoveAccount = async (accountId: string) => {
 		try {
-			const wasActive =
-				activeAccountEmail?.toLowerCase() === email.toLowerCase();
+			const wasActive = activeAccountId === accountId;
 
-			await removeAccount.mutateAsync(email);
+			await removeAccount.mutateAsync(accountId);
 
 			const accountsList = await storage.getAccountsList();
 			if (accountsList.length === 0) {
-				// No accounts left — go to login
 				await storage.setActiveAccount(null);
 				navigate({ to: "/login" });
 			} else if (wasActive) {
-				// Removed the active account — switch to another one
 				const nextAccount = accountsList[0];
 				await switchAccount.mutateAsync({
 					type: "single",
-					email: nextAccount.email,
+					accountId: nextAccount.accountId,
 				});
 
-				const sessionValid = await storage.isSessionValid(nextAccount.email);
+				const sessionValid = await storage.isSessionValid(
+					nextAccount.accountId,
+				);
 				if (!sessionValid) {
-					navigate({ to: "/unlock", search: { email: nextAccount.email } });
+					navigate({
+						to: "/unlock",
+						search: { email: nextAccount.email },
+					});
 				} else {
 					await invalidator.invalidateAllAccountData();
 					navigate({ to: "/vault" });
@@ -207,12 +206,29 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleAccountSelectFromManageDialog = (email: string) => {
+	const handleAccountSelectFromManageDialog = (accountId: string) => {
 		setShowManageAccounts(false);
-		void handleAccountSelect(email);
+		void handleAccountSelect(accountId);
 	};
 
-	// Custom trigger for desktop
+	const handleSharedAccountSelect = (email: string) => {
+		const account = accountsData.find(
+			(item) => item.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (account) {
+			void handleAccountSelect(account.accountId);
+		}
+	};
+
+	const handleSharedRemoveAccountClick = (email: string) => {
+		const account = accountsData.find(
+			(item) => item.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (account) {
+			handleRemoveAccountClick(account.accountId);
+		}
+	};
+
 	const trigger = (
 		<Button
 			variant="ghost"
@@ -224,7 +240,7 @@ export function AccountSwitcher() {
 				<>
 					<AccountAvatarGroup
 						accounts={accountsData.filter((a) =>
-							unlockedEmailsList.includes(a.email),
+							unlockedAccountIdsList.includes(a.accountId),
 						)}
 						maxVisible={2}
 						size="sm"
@@ -250,6 +266,10 @@ export function AccountSwitcher() {
 			<IconChevronDownOutlineDuo18 className="ml-auto h-4 w-4 opacity-50" />
 		</Button>
 	);
+
+	const removeAccountEmail = accountToRemove
+		? (accountEmailById.get(accountToRemove) ?? null)
+		: null;
 
 	return (
 		<>
@@ -280,9 +300,10 @@ export function AccountSwitcher() {
 						m.vaults_sidebar_account_switcher_menu_lock_all_accounts(),
 					removeAccountLabel:
 						m.vaults_sidebar_account_switcher_menu_remove_account(),
-					manageAccountsLabel: manageAccountsLabel,
+					manageAccountsLabel:
+						m.vaults_sidebar_account_switcher_manage_accounts_title(),
 				}}
-				onAccountSelect={handleAccountSelect}
+				onAccountSelect={handleSharedAccountSelect}
 				onAddAccount={handleAddAccount}
 				onLockAll={handleLockAll}
 				showManageAccounts={true}
@@ -295,7 +316,7 @@ export function AccountSwitcher() {
 				showSetupAnotherDevice={true}
 				onSetupAnotherDevice={handleSetupAnotherDevice}
 				showRemoveAccount={true}
-				onRemoveAccount={handleRemoveAccountClick}
+				onRemoveAccount={handleSharedRemoveAccountClick}
 				trigger={trigger}
 				align="start"
 			/>
@@ -305,9 +326,11 @@ export function AccountSwitcher() {
 					<DialogHeader className="gap-3 border-b bg-background px-6 py-5">
 						<div className="flex flex-wrap items-start justify-between gap-3">
 							<div className="space-y-1">
-								<DialogTitle>{manageAccountsLabel}</DialogTitle>
+								<DialogTitle>
+									{m.vaults_sidebar_account_switcher_manage_accounts_title()}
+								</DialogTitle>
 								<DialogDescription>
-									{manageAccountsDescription}
+									{m.vaults_sidebar_account_switcher_manage_accounts_description()}
 								</DialogDescription>
 							</div>
 							<Button size="sm" onClick={handleAddAccountFromManageDialog}>
@@ -319,17 +342,15 @@ export function AccountSwitcher() {
 					<div className="px-6 py-4">
 						{accountsData.length === 0 ? (
 							<div className="rounded-xl border border-dashed px-4 py-8 text-center text-muted-foreground text-sm">
-								{emptyManageAccountsLabel}
+								{m.vaults_sidebar_account_switcher_manage_accounts_empty()}
 							</div>
 						) : (
 							<ScrollArea className="max-h-[420px] pr-4">
 								<div className="space-y-3 pb-1">
 									{accountsData.map((account) => {
-										const isActive =
-											activeAccountEmail?.toLowerCase() ===
-											account.email.toLowerCase();
-										const isUnlocked = unlockedEmailsList.includes(
-											account.email,
+										const isActive = activeAccountId === account.accountId;
+										const isUnlocked = unlockedAccountIdsList.includes(
+											account.accountId,
 										);
 										const accountDisplayName =
 											account.teamName ||
@@ -338,7 +359,7 @@ export function AccountSwitcher() {
 
 										return (
 											<div
-												key={account.email}
+												key={account.accountId}
 												className={cn(
 													"rounded-xl border bg-card/70 p-4 shadow-xs transition-colors",
 													isActive && "border-primary/40 bg-primary/5",
@@ -354,7 +375,7 @@ export function AccountSwitcher() {
 															</span>
 															{isActive && (
 																<Badge className="h-5 px-2 font-semibold text-[10px] uppercase tracking-wide">
-																	{activeBadgeLabel}
+																	{m.vaults_sidebar_account_switcher_badge_active()}
 																</Badge>
 															)}
 															<Badge
@@ -366,8 +387,8 @@ export function AccountSwitcher() {
 																)}
 															>
 																{isUnlocked
-																	? unlockedBadgeLabel
-																	: lockedBadgeLabel}
+																	? m.vaults_sidebar_account_switcher_badge_unlocked()
+																	: m.vaults_sidebar_account_switcher_badge_locked()}
 															</Badge>
 														</div>
 														<p className="truncate text-muted-foreground text-xs">
@@ -381,12 +402,12 @@ export function AccountSwitcher() {
 															variant="outline"
 															onClick={() =>
 																handleAccountSelectFromManageDialog(
-																	account.email,
+																	account.accountId,
 																)
 															}
 															disabled={switchAccount.isPending}
 														>
-															{switchLabel}
+															{m.vaults_sidebar_account_switcher_action_switch()}
 														</Button>
 													)}
 												</div>
@@ -395,7 +416,7 @@ export function AccountSwitcher() {
 													{account.teamName && (
 														<div className="flex items-center justify-between gap-2">
 															<span className="text-muted-foreground">
-																{teamLabel}
+																{m.vaults_sidebar_account_switcher_label_team()}
 															</span>
 															<span className="max-w-[220px] truncate font-medium">
 																{account.teamName}
@@ -404,7 +425,7 @@ export function AccountSwitcher() {
 													)}
 													<div className="flex items-center justify-between gap-2">
 														<span className="text-muted-foreground">
-															{userIdLabel}
+															{m.vaults_sidebar_account_switcher_label_user_id()}
 														</span>
 														<span className="max-w-[220px] truncate font-mono text-[11px]">
 															{account.userId}
@@ -413,7 +434,7 @@ export function AccountSwitcher() {
 													{"secretKeyHint" in account && (
 														<div className="flex items-center justify-between gap-2">
 															<span className="text-muted-foreground">
-																{secretKeyHintLabel}
+																{m.vaults_sidebar_account_switcher_label_secret_key_hint()}
 															</span>
 															<span className="font-mono text-[11px]">
 																{account.secretKeyHint || "—"}
@@ -423,7 +444,7 @@ export function AccountSwitcher() {
 													{"addedAt" in account && (
 														<div className="flex items-center justify-between gap-2">
 															<span className="text-muted-foreground">
-																{addedLabel}
+																{m.vaults_sidebar_account_switcher_label_added()}
 															</span>
 															<span>{formatTimestamp(account.addedAt)}</span>
 														</div>
@@ -431,7 +452,7 @@ export function AccountSwitcher() {
 													{"lastActiveAt" in account && (
 														<div className="flex items-center justify-between gap-2">
 															<span className="text-muted-foreground">
-																{lastActiveLabel}
+																{m.vaults_sidebar_account_switcher_label_last_active()}
 															</span>
 															<span>
 																{formatTimestamp(account.lastActiveAt)}
@@ -450,8 +471,15 @@ export function AccountSwitcher() {
 			</Dialog>
 
 			<RemoveAccountDialog
-				email={accountToRemove}
-				onConfirm={handleRemoveAccount}
+				email={removeAccountEmail}
+				onConfirm={(email) => {
+					const account = accountsData.find(
+						(item) => item.email.toLowerCase() === email.toLowerCase(),
+					);
+					if (account) {
+						void handleRemoveAccount(account.accountId);
+					}
+				}}
 				onCancel={() => setAccountToRemove(null)}
 			/>
 

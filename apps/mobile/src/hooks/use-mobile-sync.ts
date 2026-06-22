@@ -33,7 +33,7 @@ import {
 import { storage } from "../services/storage";
 
 interface SyncConnectionContext {
-	email: string | null;
+	accountId: string | null;
 	serverUrl: string;
 }
 
@@ -91,27 +91,35 @@ const crypto: ICrypto = {
  * back to other known accounts.
  */
 async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null> {
-	const activeAccount = await storage.getActiveAccount();
-	const accounts = await storage.getAccountsList();
+	const [activeAccount, accounts, unlocked] = await Promise.all([
+		storage.getActiveAccount(),
+		storage.getAccountsList(),
+		storage.getUnlockedAccounts?.(),
+	]);
 
-	const candidates: string[] = [];
+	const candidateIds: string[] = [];
 	if (activeAccount?.type === "single") {
-		candidates.push(activeAccount.email.toLowerCase());
+		candidateIds.push(activeAccount.accountId);
+	} else if (activeAccount?.type === "all") {
+		for (const accountId of unlocked ?? []) {
+			if (!candidateIds.includes(accountId)) {
+				candidateIds.push(accountId);
+			}
+		}
 	}
 	for (const account of accounts) {
-		const email = account.email.toLowerCase();
-		if (!candidates.includes(email)) {
-			candidates.push(email);
+		if (!candidateIds.includes(account.accountId)) {
+			candidateIds.push(account.accountId);
 		}
 	}
 
-	for (const email of candidates) {
+	for (const accountId of candidateIds) {
 		const [token, url] = await Promise.all([
-			storage.getAuthToken(email),
-			storage.getServerUrl(email),
+			storage.getAuthToken(accountId),
+			storage.getServerUrl(accountId),
 		]);
 		if (token && url) {
-			return { email, serverUrl: url };
+			return { accountId, serverUrl: url };
 		}
 	}
 
@@ -121,7 +129,7 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
 		storage.getServerUrl(),
 	]);
 	if (fallbackToken && fallbackUrl) {
-		return { email: null, serverUrl: fallbackUrl };
+		return { accountId: null, serverUrl: fallbackUrl };
 	}
 
 	return null;
@@ -133,7 +141,7 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
 export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	const [clientId, setClientId] = useState<string>("");
 	const [serverUrl, setServerUrl] = useState<string>("");
-	const [syncAccountEmail, setSyncAccountEmail] = useState<string | null>(null);
+	const [syncAccountId, setSyncAccountId] = useState<string | null>(null);
 	const [isInitialized, setIsInitialized] = useState(false);
 
 	// Initialize and keep sync connection context fresh.
@@ -156,7 +164,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				}
 				setClientId(id);
 				setServerUrl(context?.serverUrl ?? "");
-				setSyncAccountEmail(context?.email ?? null);
+				setSyncAccountId(context?.accountId ?? null);
 				setIsInitialized(true);
 			} finally {
 				resolving = false;
@@ -188,8 +196,8 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	}, []);
 
 	const getAuthToken = useCallback(async () => {
-		return storage.getAuthToken(syncAccountEmail ?? undefined);
-	}, [syncAccountEmail]);
+		return storage.getAuthToken(syncAccountId ?? undefined);
+	}, [syncAccountId]);
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const vaultCoordinator = useMemo(
@@ -199,12 +207,12 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 
 	const onTravelModeEvent = useCallback(
 		async (event: { type: string; metadata?: Record<string, unknown> }) => {
-			if (!syncAccountEmail || event.type !== "travel_mode_updated") {
+			if (!syncAccountId || event.type !== "travel_mode_updated") {
 				return;
 			}
 			const [token, accountServerUrl] = await Promise.all([
-				storage.getAuthToken(syncAccountEmail),
-				storage.getServerUrl(syncAccountEmail),
+				storage.getAuthToken(syncAccountId),
+				storage.getServerUrl(syncAccountId),
 			]);
 			if (!token) {
 				return;
@@ -216,7 +224,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 			const accounts = new AccountResolver(storage);
 			await handleTravelModeSyncEvent(
 				event,
-				syncAccountEmail,
+				syncAccountId,
 				storage,
 				vaultCoordinator,
 				{
@@ -225,7 +233,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				},
 			);
 		},
-		[serverUrl, syncAccountEmail, vaultCoordinator],
+		[serverUrl, syncAccountId, vaultCoordinator],
 	);
 
 	const syncState = useSync({
@@ -237,8 +245,8 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
 		realtimeEnabled: true,
 		itemCacheAdapter: vaultCoordinator,
-		itemCacheAccountEmail: syncAccountEmail,
-		itemCacheServerUrl: syncAccountEmail ? serverUrl : null,
+		itemCacheAccountEmail: syncAccountId,
+		itemCacheServerUrl: syncAccountId ? serverUrl : null,
 		fetch: expoFetch,
 		onEventProcessed: onTravelModeEvent,
 	});

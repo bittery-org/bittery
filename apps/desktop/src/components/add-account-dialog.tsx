@@ -24,7 +24,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { type AccountMetadata, storage } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface AddAccountDialogProps {
@@ -86,31 +86,17 @@ function AddAccountDialogForm({
 
 	const loginMutation = useLogin({
 		enableBiometric: enableBiometric && !!biometricAvailable,
-		onSuccess: async (result, input) => {
-			const normalizedEmail = input.email.toLowerCase();
+		onSuccess: async (_result) => {
 			const normalizedServerUrl = normalizeServerUrl(serverUrl);
 
 			if (normalizedServerUrl) {
-				await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
-			}
-
-			const secretKeyHint = `${input.secretKey.substring(0, 5)}...`;
-			const accountMetadata: AccountMetadata = {
-				email: normalizedEmail,
-				userId: result.user.id,
-				name: result.user.name || normalizedEmail.split("@")[0],
-				teamName: result.user.teamName,
-				secretKeyHint,
-				addedAt: Date.now(),
-				lastActiveAt: Date.now(),
-				biometricEnabled: enableBiometric && !!biometricAvailable,
-			};
-
-			await storage.addAccountToList(accountMetadata);
-
-			// Clear stale item cache for this account (e.g. from a previous session)
-			if (storage.clearItemCache) {
-				await storage.clearItemCache(normalizedEmail);
+				const activeAccount = await storage.getActiveAccount();
+				if (activeAccount?.type === "single") {
+					await storage.storeServerUrl(
+						normalizedServerUrl,
+						activeAccount.accountId,
+					);
+				}
 			}
 
 			await Promise.all([

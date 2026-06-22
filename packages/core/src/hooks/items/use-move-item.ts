@@ -58,15 +58,15 @@ export function useMoveItem() {
 				);
 			}
 
-			const resolvedAccounts = await core.accounts.resolveAccounts({
-				type: "single",
-				email: sourceContext.accountEmail,
-			});
+			const resolvedAccounts = await core.accounts.resolveAccounts();
 			const sourceAccount = resolvedAccounts.accountsInfo.find(
 				(account) =>
 					account.email.toLowerCase() ===
 					sourceContext.accountEmail.toLowerCase(),
 			);
+			if (!sourceAccount) {
+				throw new Error("Source account not found");
+			}
 			const contextUserId =
 				sourceAccount?.userId ??
 				sourceContext.item.lastModifiedBy ??

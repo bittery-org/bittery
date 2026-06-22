@@ -118,7 +118,7 @@ export default function UnlockScreen() {
 
 	// Get session state for the target account
 	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
-		targetAccount?.email,
+		targetAccount?.accountId,
 		{ enabled: unlockMode === "single" && !!targetAccount },
 	);
 	const biometricTypeQuery = useQuery({
@@ -136,8 +136,7 @@ export default function UnlockScreen() {
 			allAccounts.map((account) => account.email).join("|"),
 		],
 		queryFn: async () => {
-			const emails = allAccounts.map((account) => account.email);
-			if (emails.length === 0) {
+			if (allAccounts.length === 0) {
 				return {
 					canBiometricUnlock: false,
 					requiresPasswordReentry: false,
@@ -146,9 +145,15 @@ export default function UnlockScreen() {
 			}
 
 			const [biometricFlags, reentryFlags] = await Promise.all([
-				Promise.all(emails.map((email) => storage.canBiometricUnlock(email))),
 				Promise.all(
-					emails.map((email) => storage.isMasterPasswordReentryRequired(email)),
+					allAccounts.map((account) =>
+						storage.canBiometricUnlock(account.accountId),
+					),
+				),
+				Promise.all(
+					allAccounts.map((account) =>
+						storage.isMasterPasswordReentryRequired(account.accountId),
+					),
 				),
 			]);
 
@@ -166,24 +171,28 @@ export default function UnlockScreen() {
 		isLoading: allAccountsStatusQuery.isLoading,
 	};
 
-	const setNativeMuksForEmails = useCallback(async (emails: string[]) => {
-		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) return;
+	const setNativeMuksForAccountIds = useCallback(
+		async (accountIds: string[]) => {
+			if (Platform.OS !== "android" || !CredentialProvider.isAvailable())
+				return;
 
-		for (const email of emails) {
-			const muk = await storage.getMasterUnlockKey(email);
-			const sessionData = await storage.getStoredSessionData(email);
-			const autoLockTimeoutMs =
-				await storage.getAutoLockTimeoutOrDefault(email);
-			if (muk && sessionData?.userId) {
-				const mukBase64 = arrayBufferToBase64(muk);
-				CredentialProvider.setMasterUnlockKey(
-					mukBase64,
-					sessionData.userId,
-					autoLockTimeoutMs,
-				);
+			for (const accountId of accountIds) {
+				const muk = await storage.getMasterUnlockKey(accountId);
+				const sessionData = await storage.getStoredSessionData(accountId);
+				const autoLockTimeoutMs =
+					await storage.getAutoLockTimeoutOrDefault(accountId);
+				if (muk && sessionData?.userId) {
+					const mukBase64 = arrayBufferToBase64(muk);
+					CredentialProvider.setMasterUnlockKey(
+						mukBase64,
+						sessionData.userId,
+						autoLockTimeoutMs,
+					);
+				}
 			}
-		}
-	}, []);
+		},
+		[],
+	);
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
@@ -191,27 +200,27 @@ export default function UnlockScreen() {
 			if (!targetAccount) return;
 
 			// Restore auth token and vault keys
-			const token = await storage.getAuthToken(targetAccount.email);
-			const vaultKeys = await storage.getVaultKeys(targetAccount.email);
+			const token = await storage.getAuthToken(targetAccount.accountId);
+			const vaultKeys = await storage.getVaultKeys(targetAccount.accountId);
 
 			if (token && vaultKeys) {
 				// Decrypt and store master unlock key
 				const masterUnlockKey = await storage.decryptStoredMasterUnlockKey(
-					targetAccount.email,
+					targetAccount.accountId,
 					true, // Skip biometric since we just authenticated
 				);
 
 				if (masterUnlockKey) {
 					await storage.storeMasterUnlockKey(
 						masterUnlockKey,
-						targetAccount.email,
+						targetAccount.accountId,
 					);
 
-					await setNativeMuksForEmails([targetAccount.email]);
+					await setNativeMuksForAccountIds([targetAccount.accountId]);
 				}
 
 				// Load server URL for this account
-				const serverUrl = await storage.getServerUrl(targetAccount.email);
+				const serverUrl = await storage.getServerUrl(targetAccount.accountId);
 				if (serverUrl) {
 					setGlobalServerUrl(serverUrl);
 				}
@@ -219,7 +228,7 @@ export default function UnlockScreen() {
 				// Set as active account
 				await storage.setActiveAccount({
 					type: "single",
-					email: targetAccount.email,
+					accountId: targetAccount.accountId,
 				});
 				await refreshAccounts();
 
@@ -229,7 +238,7 @@ export default function UnlockScreen() {
 					m.mob_unlock_alert_session_expired_title(),
 					m.mob_unlock_alert_session_expired_message(),
 				);
-				await storage.clearAllStoredData(targetAccount.email);
+				await storage.clearAllStoredData(targetAccount.accountId);
 				router.replace("/(auth)/login");
 			}
 		},
@@ -259,14 +268,14 @@ export default function UnlockScreen() {
 			if (!targetAccount) return;
 
 			// Load server URL for this account
-			const serverUrl = await storage.getServerUrl(targetAccount.email);
+			const serverUrl = await storage.getServerUrl(targetAccount.accountId);
 			if (serverUrl) {
 				setGlobalServerUrl(serverUrl);
 			}
 
 			// Set MUK in native CredentialProvider for autofill decryption
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForEmails([targetAccount.email]);
+				await setNativeMuksForAccountIds([targetAccount.accountId]);
 
 				// Update 30-day master password entry timestamp in native
 				CredentialProvider.updateLastMasterPasswordEntry();
@@ -275,7 +284,7 @@ export default function UnlockScreen() {
 				const biometricAvailable =
 					await platformStorage.isBiometricAvailable?.();
 				const biometricEnabled = await platformStorage.isBiometricEnabled?.(
-					targetAccount.email,
+					targetAccount.accountId,
 				);
 				if (biometricAvailable && biometricEnabled) {
 					try {
@@ -312,24 +321,37 @@ export default function UnlockScreen() {
 		},
 	});
 
+	const resolveUnlockedAccountIds = useCallback(
+		(identifiers: string[]) =>
+			identifiers.map((identifier) => {
+				const byId = allAccounts.find(
+					(account) => account.accountId === identifier,
+				);
+				if (byId) {
+					return byId.accountId;
+				}
+				const byEmail = allAccounts.find(
+					(account) => account.email === identifier,
+				);
+				return byEmail?.accountId ?? identifier;
+			}),
+		[allAccounts],
+	);
+
 	const finalizeAllAccountsUnlock = useCallback(
-		async (
-			result: {
-				unlocked: string[];
-				failed: Array<{ email: string; error: string }>;
-			},
-			showPartialToast: boolean,
-		) => {
+		async (unlockedIdentifiers: string[], showPartialToast: boolean) => {
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForEmails(result.unlocked);
+				await setNativeMuksForAccountIds(
+					resolveUnlockedAccountIds(unlockedIdentifiers),
+				);
 			}
 
 			if (allAccounts.length > 1) {
 				await storage.setActiveAccount({ type: "all" });
-			} else if (result.unlocked.length === 1) {
+			} else if (allAccounts.length === 1) {
 				await storage.setActiveAccount({
 					type: "single",
-					email: result.unlocked[0],
+					accountId: allAccounts[0].accountId,
 				});
 			}
 
@@ -339,7 +361,7 @@ export default function UnlockScreen() {
 				toast.show({
 					variant: "warning",
 					label: m.mob_unlock_partial_toast({
-						unlocked: String(result.unlocked.length),
+						unlocked: String(unlockedIdentifiers.length),
 						total: String(allAccounts.length),
 					}),
 					placement: "bottom",
@@ -349,10 +371,11 @@ export default function UnlockScreen() {
 			router.replace("/(vault)");
 		},
 		[
-			allAccounts.length,
+			allAccounts,
 			refreshAccounts,
+			resolveUnlockedAccountIds,
 			router,
-			setNativeMuksForEmails,
+			setNativeMuksForAccountIds,
 			toast,
 			m.mob_unlock_partial_toast,
 		],
@@ -360,10 +383,10 @@ export default function UnlockScreen() {
 
 	const quickUnlockAll = useQuickUnlockAll({
 		onSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result, false);
+			await finalizeAllAccountsUnlock(result.unlocked, false);
 		},
 		onPartialSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result, true);
+			await finalizeAllAccountsUnlock(result.unlocked, true);
 		},
 		onError: (error) => {
 			console.error("Unlock all error:", error);
@@ -396,7 +419,10 @@ export default function UnlockScreen() {
 					setBiometricError(m.mob_unlock_biometric_failed());
 					return;
 				}
-				await finalizeAllAccountsUnlock(result, result.failed.length > 0);
+				await finalizeAllAccountsUnlock(
+					result.unlocked,
+					result.failed.length > 0,
+				);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);
 				setBiometricError(m.mob_unlock_biometric_failed());
@@ -413,7 +439,7 @@ export default function UnlockScreen() {
 		}
 
 		setBiometricError(null);
-		biometricUnlock.mutate({ email: targetAccount.email });
+		biometricUnlock.mutate({ email: targetAccount.accountId });
 	};
 
 	const handlePasswordUnlock = async () => {
@@ -442,7 +468,7 @@ export default function UnlockScreen() {
 		setBiometricError(null);
 
 		// Load server URL for this account before making the request
-		const serverUrl = await storage.getServerUrl(targetAccount.email);
+		const serverUrl = await storage.getServerUrl(targetAccount.accountId);
 		if (serverUrl) {
 			setGlobalServerUrl(serverUrl);
 		}

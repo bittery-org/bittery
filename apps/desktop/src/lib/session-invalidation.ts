@@ -13,29 +13,87 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
 }
 
 export async function invalidateDesktopAccountSession(
-	email: string,
+	accountId: string,
 ): Promise<void> {
-	const normalizedEmail = email.toLowerCase();
-
-	// Keep secret key/account metadata but clear session-bearing local state.
-	await storage.clearSession(normalizedEmail);
-	await storage.clearStoredSession(normalizedEmail);
-	await storage.storeAuthToken("", normalizedEmail);
-	await storage.storeVaultKeys([], normalizedEmail);
-	await storage.storeEncryptedPrivateKey("", normalizedEmail);
+	await storage.clearSession(accountId);
+	await storage.clearStoredSession(accountId);
+	await storage.storeAuthToken("", accountId);
+	await storage.storeVaultKeys([], accountId);
+	await storage.storeEncryptedPrivateKey("", accountId);
 }
 
-export async function findAccountEmailBySessionId(
+export async function findAccountIdBySessionId(
 	sessionId: string,
 ): Promise<string | null> {
 	const accounts = await storage.getAccountsList();
 
 	for (const account of accounts) {
-		const sessionData = await storage.getStoredSessionData(account.email);
+		const sessionData = await storage.getStoredSessionData(account.accountId);
 		if (sessionData?.sessionId === sessionId) {
-			return account.email.toLowerCase();
+			return account.accountId;
 		}
 	}
 
 	return null;
+}
+
+/** @deprecated Use findAccountIdBySessionId */
+export async function findAccountEmailBySessionId(
+	sessionId: string,
+): Promise<string | null> {
+	const accountId = await findAccountIdBySessionId(sessionId);
+	if (!accountId) {
+		return null;
+	}
+	const accounts = await storage.getAccountsList();
+	return (
+		accounts.find((account) => account.accountId === accountId)?.email ?? null
+	);
+}
+
+async function resolveUnauthorizedAccountId(
+	error: unknown,
+): Promise<string | null> {
+	if (
+		error &&
+		typeof error === "object" &&
+		"data" in error &&
+		typeof (error as { data?: { sessionId?: string } }).data?.sessionId ===
+			"string"
+	) {
+		const sessionId = (error as { data: { sessionId: string } }).data.sessionId;
+		return findAccountIdBySessionId(sessionId);
+	}
+	return null;
+}
+
+export async function handleDesktopUnauthorizedError(
+	error: unknown,
+): Promise<{ prefillEmail?: string; shouldRedirect: boolean }> {
+	const activeAccount = await storage.getActiveAccount();
+
+	if (activeAccount?.type === "single") {
+		const accounts = await storage.getAccountsList();
+		const meta = accounts.find(
+			(account) => account.accountId === activeAccount.accountId,
+		);
+		await invalidateDesktopAccountSession(activeAccount.accountId);
+		return {
+			prefillEmail: meta?.email,
+			shouldRedirect: true,
+		};
+	}
+
+	if (activeAccount?.type === "all") {
+		const failingAccountId = await resolveUnauthorizedAccountId(error);
+		if (failingAccountId) {
+			await invalidateDesktopAccountSession(failingAccountId);
+			const unlockedAccounts = await storage.getUnlockedAccounts?.();
+			return {
+				shouldRedirect: !unlockedAccounts || unlockedAccounts.length === 0,
+			};
+		}
+	}
+
+	return { shouldRedirect: false };
 }

@@ -93,7 +93,8 @@ export default function SettingsScreen() {
 	const loadSettings = useCallback(async () => {
 		if (allAccounts.length === 0) return;
 
-		const fallbackEmail = activeAccount?.email || allAccounts[0]?.email;
+		const fallbackAccountId =
+			activeAccount?.accountId || allAccounts[0]?.accountId;
 
 		const details = await storage.getBiometricAvailabilityDetails();
 		setBiometricDetails({
@@ -109,14 +110,15 @@ export default function SettingsScreen() {
 			setBiometricType(type);
 		}
 
-		const enabled = await storage.isBiometricEnabled(fallbackEmail);
+		const enabled = await storage.isBiometricEnabled(fallbackAccountId);
 		setBiometricEnabled(enabled);
 
-		const timeout = await storage.getAutoLockTimeoutOrDefault(fallbackEmail);
+		const timeout =
+			await storage.getAutoLockTimeoutOrDefault(fallbackAccountId);
 		setAutoLockTimeout(timeout);
 
 		if (!isAllAccountsMode && activeAccount) {
-			const url = await storage.getServerUrl(activeAccount.email);
+			const url = await storage.getServerUrl(activeAccount.accountId);
 			setServerUrl(url);
 		} else {
 			setServerUrl(null);
@@ -126,7 +128,9 @@ export default function SettingsScreen() {
 		if (isAllAccountsMode) {
 			const daysRemainingList = await Promise.all(
 				allAccounts.map(async (account) => {
-					const sessionData = await storage.getStoredSessionData(account.email);
+					const sessionData = await storage.getStoredSessionData(
+						account.accountId,
+					);
 					if (!sessionData) return null;
 					const lastEntry =
 						sessionData.lastMasterPasswordEntry || sessionData.createdAt;
@@ -145,7 +149,7 @@ export default function SettingsScreen() {
 			);
 		} else if (activeAccount) {
 			const sessionData = await storage.getStoredSessionData(
-				activeAccount.email,
+				activeAccount.accountId,
 			);
 			if (sessionData) {
 				const lastEntry =
@@ -165,22 +169,23 @@ export default function SettingsScreen() {
 
 	const handleBiometricToggle = async (value: boolean) => {
 		if (allAccounts.length === 0) return;
-		const fallbackEmail = activeAccount?.email || allAccounts[0]?.email;
+		const fallbackAccountId =
+			activeAccount?.accountId || allAccounts[0]?.accountId;
 
 		try {
 			if (value) {
 				// Verify biometric before enabling
 				const success = await storage.authenticateWithBiometric(
 					m.mob_settings_biometric_verify_prompt(),
-					fallbackEmail,
+					fallbackAccountId,
 				);
 				if (!success) {
 					Alert.alert("Error", m.mob_settings_biometric_error());
 					return;
 				}
-				await storage.enableBiometric(fallbackEmail);
+				await storage.enableBiometric(fallbackAccountId);
 			} else {
-				await storage.disableBiometric(fallbackEmail);
+				await storage.disableBiometric(fallbackAccountId);
 			}
 			setBiometricEnabled(value);
 		} catch (error) {
@@ -209,7 +214,7 @@ export default function SettingsScreen() {
 
 						for (const account of accountsToUpdate) {
 							const sessionData = await storage.getStoredSessionData(
-								account.email,
+								account.accountId,
 							);
 							if (sessionData?.userId) {
 								CredentialProvider.setMukAutoLockTimeout(
@@ -281,10 +286,10 @@ export default function SettingsScreen() {
 				onPress: async () => {
 					if (isAllAccountsMode) {
 						for (const account of allAccounts) {
-							await removeAccount(account.email);
+							await removeAccount(account.accountId);
 						}
 					} else if (activeAccount) {
-						await removeAccount(activeAccount.email);
+						await removeAccount(activeAccount.accountId);
 					}
 					await refreshAccounts();
 					router.replace("/(auth)/login");
@@ -303,7 +308,10 @@ export default function SettingsScreen() {
 					text: m.mob_settings_remove_account_confirm(),
 					style: "destructive",
 					onPress: async () => {
-						await removeAccount(email);
+						const account = allAccounts.find((a) => a.email === email);
+						if (account) {
+							await removeAccount(account.accountId);
+						}
 						if (allAccounts.length <= 1) {
 							router.replace("/(auth)/login");
 						}

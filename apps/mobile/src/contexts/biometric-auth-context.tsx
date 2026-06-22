@@ -52,16 +52,16 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 		useState<BiometricAuthResult | null>(null);
 	const [requiresMasterPassword, setRequiresMasterPassword] = useState(false);
 
-	const setNativeMuksForAccounts = useCallback(async (emails: string[]) => {
+	const setNativeMuksForAccounts = useCallback(async (accountIds: string[]) => {
 		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) {
 			return;
 		}
 
-		for (const email of emails) {
-			const muk = await storage.getMasterUnlockKey(email);
-			const sessionData = await storage.getStoredSessionData(email);
+		for (const accountId of accountIds) {
+			const muk = await storage.getMasterUnlockKey(accountId);
+			const sessionData = await storage.getStoredSessionData(accountId);
 			const autoLockTimeoutMs =
-				await storage.getAutoLockTimeoutOrDefault(email);
+				await storage.getAutoLockTimeoutOrDefault(accountId);
 			if (muk && sessionData?.userId) {
 				const mukBase64 = arrayBufferToBase64(muk);
 				CredentialProvider.setMasterUnlockKey(
@@ -72,7 +72,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			} else {
 				if (__DEV__) {
 					console.warn(
-						`[BiometricAuth] setNativeMuksForAccounts skipped for ${email} (no muk or no userId)`,
+						`[BiometricAuth] setNativeMuksForAccounts skipped for ${accountId} (no muk or no userId)`,
 					);
 				}
 			}
@@ -92,7 +92,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				if (isAllAccountsMode) {
 					await storage.storeBackgroundTimestampGlobal?.();
 				} else if (activeAccount) {
-					await storage.storeBackgroundTimestamp(activeAccount.email);
+					await storage.storeBackgroundTimestamp(activeAccount.accountId);
 				}
 			}
 
@@ -107,7 +107,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					? await storage.shouldRequireAuthAfterBackgroundGlobal?.()
 					: activeAccount
 						? await storage.shouldRequireAuthAfterBackground(
-								activeAccount.email,
+								activeAccount.accountId,
 							)
 						: false;
 
@@ -121,25 +121,26 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					if (storage.lockAllAccounts) {
 						await storage.lockAllAccounts();
 					} else if (activeAccount) {
-						await storage.clearSession(activeAccount.email);
+						await storage.clearSession(activeAccount.accountId);
 					}
 
-					const accountEmails = allAccounts.map((account) => account.email);
-					const fallbackEmail = accountEmails[0];
+					const fallbackAccountId =
+						activeAccount?.accountId ?? allAccounts[0]?.accountId;
 
 					// Check if biometric is enabled globally
-					const biometricEnabled =
-						await storage.isBiometricEnabled(fallbackEmail);
+					const biometricEnabled = fallbackAccountId
+						? await storage.isBiometricEnabled(fallbackAccountId)
+						: false;
 					const canUseBiometric = isAllAccountsMode
 						? (
 								await Promise.all(
-									accountEmails.map((email) =>
-										storage.canBiometricUnlock(email),
+									allAccounts.map((account) =>
+										storage.canBiometricUnlock(account.accountId),
 									),
 								)
 							).some(Boolean)
 						: activeAccount
-							? await storage.canBiometricUnlock(activeAccount.email)
+							? await storage.canBiometricUnlock(activeAccount.accountId)
 							: false;
 
 					if (biometricEnabled && canUseBiometric) {
@@ -147,14 +148,16 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						const masterPasswordRequired = isAllAccountsMode
 							? (
 									await Promise.all(
-										accountEmails.map((email) =>
-											storage.isMasterPasswordReentryRequired(email),
+										allAccounts.map((account) =>
+											storage.isMasterPasswordReentryRequired(
+												account.accountId,
+											),
 										),
 									)
 								).some(Boolean)
 							: activeAccount
 								? await storage.isMasterPasswordReentryRequired(
-										activeAccount.email,
+										activeAccount.accountId,
 									)
 								: false;
 
@@ -179,7 +182,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				if (isAllAccountsMode) {
 					await storage.clearBackgroundTimestampGlobal?.();
 				} else if (activeAccount) {
-					await storage.clearBackgroundTimestamp(activeAccount.email);
+					await storage.clearBackgroundTimestamp(activeAccount.accountId);
 				}
 			}
 
@@ -253,7 +256,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 			const result = await storage.authenticateWithBiometricEnhanced(
 				"Unlock Bittery",
-				activeAccount.email,
+				activeAccount.accountId,
 			);
 
 			setLastAuthResult(result);
@@ -263,13 +266,13 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				// This ensures decryption queries can run immediately without polling
 				try {
 					const muk = await storage.decryptStoredMasterUnlockKeyPublic(
-						activeAccount.email,
+						activeAccount.accountId,
 						true, // Skip biometric since we just authenticated
 					);
 					if (muk) {
 						// Store in React Native memory cache
-						await storage.storeMasterUnlockKey(muk, activeAccount.email);
-						await setNativeMuksForAccounts([activeAccount.email]);
+						await storage.storeMasterUnlockKey(muk, activeAccount.accountId);
+						await setNativeMuksForAccounts([activeAccount.accountId]);
 					} else {
 						if (__DEV__) {
 							console.warn(
@@ -298,11 +301,9 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 	const checkAndRequireAuth = useCallback(async (): Promise<boolean> => {
 		if (!activeAccountConfig) return false;
 
-		const accountEmails = allAccounts.map((account) => account.email);
-
 		if (isAllAccountsMode) {
 			const sessionResults = await Promise.all(
-				accountEmails.map((email) => storage.isSessionValid(email)),
+				allAccounts.map((account) => storage.isSessionValid(account.accountId)),
 			);
 			const anySessionValid = sessionResults.some(Boolean);
 			if (!anySessionValid) {
@@ -311,8 +312,8 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			}
 
 			const biometricRequiredResults = await Promise.all(
-				accountEmails.map((email) =>
-					storage.isBiometricAuthRequiredPublic?.(email),
+				allAccounts.map((account) =>
+					storage.isBiometricAuthRequiredPublic?.(account.accountId),
 				),
 			);
 			const biometricRequired = biometricRequiredResults.some(Boolean);
@@ -320,7 +321,9 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			if (biometricRequired) {
 				const canUseBiometric = (
 					await Promise.all(
-						accountEmails.map((email) => storage.canBiometricUnlock(email)),
+						allAccounts.map((account) =>
+							storage.canBiometricUnlock(account.accountId),
+						),
 					)
 				).some(Boolean);
 
@@ -333,8 +336,8 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 			const masterPasswordRequired = (
 				await Promise.all(
-					accountEmails.map((email) =>
-						storage.isMasterPasswordReentryRequired(email),
+					allAccounts.map((account) =>
+						storage.isMasterPasswordReentryRequired(account.accountId),
 					),
 				)
 			).some(Boolean);
@@ -352,7 +355,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 		if (!activeAccount) return false;
 
 		// Check session validity
-		const sessionValid = await storage.isSessionValid(activeAccount.email);
+		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
 		if (!sessionValid) {
 			router.replace("/(auth)/unlock");
 			return true;
@@ -360,12 +363,12 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 		// Check biometric auth requirement
 		const biometricRequired = await storage.isBiometricAuthRequiredPublic(
-			activeAccount.email,
+			activeAccount.accountId,
 		);
 
 		if (biometricRequired) {
 			const canUseBiometric = await storage.canBiometricUnlock(
-				activeAccount.email,
+				activeAccount.accountId,
 			);
 			if (canUseBiometric) {
 				setRequiresReauth(true);
@@ -376,7 +379,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 		// Check master password re-entry requirement
 		const masterPasswordRequired =
-			await storage.isMasterPasswordReentryRequired(activeAccount.email);
+			await storage.isMasterPasswordReentryRequired(activeAccount.accountId);
 
 		if (masterPasswordRequired) {
 			setRequiresMasterPassword(true);

@@ -28,7 +28,7 @@ enum LockEvent {
         timestamp: i64,
     },
     ActiveAccountChanged {
-        email: String,
+        account_id: String,
         timestamp: i64,
     },
 }
@@ -61,6 +61,85 @@ fn sanitize_email_for_key(email: &str) -> String {
 
 fn account_key(email: &str, suffix: &str) -> String {
     format!("bittery_account_{}_{}", sanitize_email_for_key(email), suffix)
+}
+
+/// Build a namespaced storage key using the stable accountId (a UUID).
+/// Mirrors `getAccountKey` in the TypeScript storage layer; the accountId is
+/// NOT sanitized so it matches the keys written by the adapter exactly.
+fn account_id_key(account_id: &str, suffix: &str) -> String {
+    format!("bittery_account_{}_{}", account_id, suffix)
+}
+
+fn read_store_string<R: Runtime>(store: &Store<R>, key: &str) -> Option<String> {
+    store
+        .get(key)
+        .and_then(|value| value.as_str().map(|s| s.to_string()))
+}
+
+/// Resolve the stable accountId for an email from the persisted accounts list.
+fn resolve_account_id_for_email<R: Runtime>(store: &Store<R>, email: &str) -> Option<String> {
+    let accounts_str = read_store_string(store, "bittery_accounts_list")?;
+    let accounts_json: serde_json::Value = serde_json::from_str(&accounts_str).ok()?;
+    let accounts = accounts_json.get("accounts").and_then(|v| v.as_array())?;
+    let needle = email.to_lowercase();
+    accounts.iter().find_map(|account| {
+        let acc_email = account.get("email").and_then(|v| v.as_str())?.to_lowercase();
+        if acc_email == needle {
+            account
+                .get("accountId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Resolve the email for a given stable accountId.
+fn resolve_email_for_account_id<R: Runtime>(
+    store: &Store<R>,
+    account_id: &str,
+) -> Option<String> {
+    let accounts_str = read_store_string(store, "bittery_accounts_list")?;
+    let accounts_json: serde_json::Value = serde_json::from_str(&accounts_str).ok()?;
+    let accounts = accounts_json.get("accounts").and_then(|v| v.as_array())?;
+    accounts.iter().find_map(|account| {
+        let acc_id = account.get("accountId").and_then(|v| v.as_str())?;
+        if acc_id == account_id {
+            account
+                .get("email")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_lowercase())
+        } else {
+            None
+        }
+    })
+}
+
+/// Read an account-scoped store string, preferring the accountId-namespaced key
+/// (written after the accountId migration) and falling back to the legacy
+/// email-namespaced key for installs that have not migrated yet.
+fn read_account_scoped_string<R: Runtime>(
+    store: &Store<R>,
+    email: &str,
+    suffix: &str,
+) -> Option<String> {
+    if let Some(account_id) = resolve_account_id_for_email(store, email) {
+        if let Some(value) = read_store_string(store, &account_id_key(&account_id, suffix)) {
+            return Some(value);
+        }
+    }
+    read_store_string(store, &account_key(email, suffix))
+}
+
+/// Map the unlocked accountIds (lock-state marker) to their emails so they can
+/// be reported over the email-based extension protocol. Falls back to the raw
+/// value when it cannot be resolved (e.g. legacy email markers).
+fn get_unlocked_emails<R: Runtime>(store: &Store<R>) -> Vec<String> {
+    get_unlocked_accounts(store)
+        .into_iter()
+        .map(|id| resolve_email_for_account_id(store, &id).unwrap_or(id))
+        .collect()
 }
 
 fn normalize_item_version(version: Option<u64>) -> u64 {
@@ -301,9 +380,24 @@ fn build_snapshot_item_payload(
 }
 
 fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
-    store
-        .get(ACTIVE_ACCOUNT_KEY)
-        .and_then(|value| value.as_str().map(|s| s.to_lowercase()))
+    let raw = read_store_string(store, ACTIVE_ACCOUNT_KEY)?;
+
+    // New format: a JSON object { type: "single" | "all", accountId? }.
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
+        if let Some(obj) = parsed.as_object() {
+            match obj.get("type").and_then(|v| v.as_str()) {
+                Some("single") => {
+                    let account_id = obj.get("accountId").and_then(|v| v.as_str())?;
+                    return resolve_email_for_account_id(store, account_id);
+                }
+                Some("all") => return Some("all".to_string()),
+                _ => {}
+            }
+        }
+    }
+
+    // Legacy format: a plain email string.
+    Some(raw.to_lowercase())
 }
 
 fn lookup_store_string_with_fallback<F>(
@@ -323,47 +417,47 @@ fn get_account_store_string_with_legacy_fallback<R: Runtime>(
     suffix: &str,
     legacy_key: &str,
 ) -> Option<String> {
-    let scoped_key = account_key(email, suffix);
-
-    lookup_store_string_with_fallback(
-        |key| {
-            store
-                .get(key)
-                .and_then(|value| value.as_str().map(|s| s.to_string()))
-        },
-        &scoped_key,
-        legacy_key,
-    )
+    read_account_scoped_string(store, email, suffix)
+        .or_else(|| read_store_string(store, legacy_key))
 }
 
 fn get_bearer_token_for_account<R: Runtime>(store: &Store<R>, email: &str) -> Option<String> {
-    let jwt_key = account_key(email, "jwt_token");
+    // Prefer the accountId-scoped keychain key (post-migration), then fall back
+    // to the legacy email-scoped key.
+    let account_id = resolve_account_id_for_email(store, email);
+    let primary_jwt_key = account_id
+        .as_ref()
+        .map(|id| account_id_key(id, "jwt_token"))
+        .unwrap_or_else(|| account_key(email, "jwt_token"));
+    let legacy_jwt_key = account_key(email, "jwt_token");
 
-    match keychain::keychain_get(&jwt_key) {
-        Ok(Some(token)) => return Some(token),
-        Ok(None) => {}
-        Err(error) => {
-            eprintln!(
-                "[desktop-ipc] Failed reading bearer token from keychain for {}: {}",
-                email, error
-            );
-            return None;
+    let mut keychain_keys = vec![primary_jwt_key.clone()];
+    if legacy_jwt_key != primary_jwt_key {
+        keychain_keys.push(legacy_jwt_key.clone());
+    }
+
+    for jwt_key in &keychain_keys {
+        match keychain::keychain_get(jwt_key) {
+            Ok(Some(token)) => return Some(token),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!(
+                    "[desktop-ipc] Failed reading bearer token from keychain for {}: {}",
+                    email, error
+                );
+            }
         }
     }
 
-    let legacy_token = store
-        .get(&jwt_key)
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .or_else(|| {
-            store
-                .get(LEGACY_JWT_TOKEN_KEY)
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-        });
+    let legacy_token = read_store_string(store, &primary_jwt_key)
+        .or_else(|| read_store_string(store, &legacy_jwt_key))
+        .or_else(|| read_store_string(store, LEGACY_JWT_TOKEN_KEY));
 
     if let Some(token) = legacy_token {
-        match keychain::keychain_set(&jwt_key, &token) {
+        match keychain::keychain_set(&primary_jwt_key, &token) {
             Ok(()) => {
-                let _ = store.delete(&jwt_key);
+                let _ = store.delete(&primary_jwt_key);
+                let _ = store.delete(&legacy_jwt_key);
                 let _ = store.delete(LEGACY_JWT_TOKEN_KEY);
                 let _ = store.save();
                 Some(token)
@@ -412,10 +506,10 @@ fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
             event: DesktopEventKind::DesktopClose,
             payload: serde_json::json!({ "timestamp": timestamp }),
         },
-        LockEvent::ActiveAccountChanged { email, timestamp } => DesktopResponse::DesktopEvent {
+        LockEvent::ActiveAccountChanged { account_id, timestamp } => DesktopResponse::DesktopEvent {
             event: DesktopEventKind::ActiveAccountChanged,
             payload: serde_json::json!({
-                "email": email,
+                "accountId": account_id,
                 "timestamp": timestamp,
             }),
         },
@@ -589,11 +683,9 @@ fn load_decrypted_vault_keys<R: Runtime>(
                 .map_err(|e| format!("Failed to decrypt vault key: {}", e))?
             }
         } else {
-            let encrypted_private_key_key = account_key(email, "encrypted_private_key");
-            let encrypted_private_key_str = store
-                .get(&encrypted_private_key_key)
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-                .ok_or("Encrypted private key not found for RSA decryption")?;
+            let encrypted_private_key_str =
+                read_account_scoped_string(store, email, "encrypted_private_key")
+                    .ok_or("Encrypted private key not found for RSA decryption")?;
             let epk: serde_json::Value = serde_json::from_str(&encrypted_private_key_str)
                 .map_err(|e| format!("Failed to parse encrypted private key: {}", e))?;
             let epk_ciphertext = epk
@@ -665,13 +757,14 @@ async fn get_items_snapshot_internal(
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
+    // Lock-state marker holds accountIds (post-migration) or legacy emails.
     let unlocked_accounts = get_unlocked_accounts(&store);
     let target_emails = match emails {
         Some(values) if !values.is_empty() => values
             .into_iter()
             .map(|email| email.to_lowercase())
             .collect::<Vec<_>>(),
-        _ => unlocked_accounts.clone(),
+        _ => get_unlocked_emails(&store),
     };
 
     let include_account_context = target_emails.len() > 1;
@@ -680,28 +773,29 @@ async fn get_items_snapshot_internal(
     let mut skipped_items = 0usize;
 
     for email in target_emails {
-        if !unlocked_accounts.iter().any(|value| value.eq_ignore_ascii_case(&email)) {
+        let account_id = resolve_account_id_for_email(&store, &email);
+        let is_unlocked = unlocked_accounts.iter().any(|value| {
+            value.eq_ignore_ascii_case(&email)
+                || account_id.as_deref().is_some_and(|id| value.as_str() == id)
+        });
+        if !is_unlocked {
             continue;
         }
 
         let decrypted_vault_keys = load_decrypted_vault_keys(&store, &email)?;
-        let cached_items_key = account_key(&email, "cached_items");
-        let cached_vaults_key = account_key(&email, "cached_vaults");
 
-        let cached_items: Vec<CachedItemRecord> = store
-            .get(&cached_items_key)
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .map(|value| serde_json::from_str(&value))
-            .transpose()
-            .map_err(|e| format!("Failed to parse cached items: {}", e))?
-            .unwrap_or_default();
-        let cached_vaults: Vec<CachedVaultRecord> = store
-            .get(&cached_vaults_key)
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .map(|value| serde_json::from_str(&value))
-            .transpose()
-            .map_err(|e| format!("Failed to parse cached vaults: {}", e))?
-            .unwrap_or_default();
+        let cached_items: Vec<CachedItemRecord> =
+            read_account_scoped_string(&store, &email, "cached_items")
+                .map(|value| serde_json::from_str(&value))
+                .transpose()
+                .map_err(|e| format!("Failed to parse cached items: {}", e))?
+                .unwrap_or_default();
+        let cached_vaults: Vec<CachedVaultRecord> =
+            read_account_scoped_string(&store, &email, "cached_vaults")
+                .map(|value| serde_json::from_str(&value))
+                .transpose()
+                .map_err(|e| format!("Failed to parse cached vaults: {}", e))?
+                .unwrap_or_default();
         let vault_map = cached_vaults
             .into_iter()
             .map(|vault| (vault.id.clone(), vault))
@@ -1169,8 +1263,8 @@ async fn check_extension_biometric_status(
                         // Check if any account has session data
                         accounts_array.iter().any(|account| {
                             if let Some(email) = account.get("email").and_then(|e| e.as_str()) {
-                                let session_key = account_key(email, "session_data");
-                                store.get(&session_key).is_some()
+                                read_account_scoped_string(&store, email, "session_data")
+                                    .is_some()
                             } else {
                                 false
                             }
@@ -1189,27 +1283,30 @@ async fn check_extension_biometric_status(
         }
     } else {
         // Single account mode - check specific account or legacy
-        let (session_key, biometric_key) = if let Some(email) = &active_email {
-            (
-                account_key(email, "session_data"),
-                account_key(email, "biometric_enabled"),
-            )
+        let session_data = if let Some(email) = &active_email {
+            read_account_scoped_string(&store, email, "session_data")
+                .or_else(|| read_store_string(&store, LEGACY_SESSION_DATA_KEY))
         } else {
-            (
-                LEGACY_SESSION_DATA_KEY.to_string(),
-                LEGACY_BIOMETRIC_ENABLED_KEY.to_string(),
-            )
+            read_store_string(&store, LEGACY_SESSION_DATA_KEY)
         };
 
-        let mut session_data = store.get(&session_key);
-        let mut biometric_enabled = store.get(&biometric_key);
-        if session_data.is_none() && active_email.is_some() {
-            session_data = store.get(LEGACY_SESSION_DATA_KEY);
-            biometric_enabled = store.get(LEGACY_BIOMETRIC_ENABLED_KEY);
-        }
+        // biometric_enabled is persisted as a JSON boolean; default to true.
+        let is_enabled = if let Some(email) = &active_email {
+            let account_id = resolve_account_id_for_email(&store, email);
+            account_id
+                .as_ref()
+                .and_then(|id| store.get(&account_id_key(id, "biometric_enabled")))
+                .or_else(|| store.get(&account_key(email, "biometric_enabled")))
+                .or_else(|| store.get(LEGACY_BIOMETRIC_ENABLED_KEY))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true)
+        } else {
+            store
+                .get(LEGACY_BIOMETRIC_ENABLED_KEY)
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true)
+        };
 
-        // Check biometric_enabled flag for single account
-        let is_enabled = biometric_enabled.and_then(|v| v.as_bool()).unwrap_or(true);
         session_data.is_some() && is_enabled
     };
 
@@ -1264,29 +1361,15 @@ async fn extension_biometric_unlock(
 
     eprintln!("[Biometric Unlock] Target email: {:?}", target_email);
 
-    let (session_key, vault_key) = if let Some(email) = &target_email {
-        (
-            account_key(email, "session_data"),
-            account_key(email, "vault_keys"),
-        )
+    let session_data_str = if let Some(email) = &target_email {
+        read_account_scoped_string(&store, email, "session_data")
+            .or_else(|| read_store_string(&store, LEGACY_SESSION_DATA_KEY))
     } else {
-        (
-            LEGACY_SESSION_DATA_KEY.to_string(),
-            LEGACY_VAULT_KEYS_KEY.to_string(),
-        )
-    };
-
-    eprintln!("[Biometric Unlock] Looking for session key: {}", session_key);
-    let mut session_data_value = store.get(&session_key);
-    eprintln!("[Biometric Unlock] Session data found: {}", session_data_value.is_some());
-    if session_data_value.is_none() && target_email.is_some() {
-        session_data_value = store.get(LEGACY_SESSION_DATA_KEY);
+        read_store_string(&store, LEGACY_SESSION_DATA_KEY)
     }
-    let session_data_value = session_data_value.ok_or("No session data found")?;
-    
-    let session_data_str = session_data_value.as_str()
-        .ok_or("Invalid session data format")?;
-    
+    .ok_or("No session data found")?;
+    eprintln!("[Biometric Unlock] Session data found");
+
     let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
         .map_err(|e| format!("Failed to parse session data: {}", e))?;
     
@@ -1322,9 +1405,9 @@ async fn extension_biometric_unlock(
     let mut auth_token = target_email
         .as_deref()
         .and_then(|email| get_bearer_token_for_account(&store, email));
-    let mut vault_keys = store
-        .get(&vault_key)
-        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    let mut vault_keys = target_email
+        .as_deref()
+        .and_then(|email| read_account_scoped_string(&store, email, "vault_keys"));
     if target_email.is_some() {
         if auth_token.is_none() {
             auth_token = store
@@ -1447,12 +1530,9 @@ async fn biometric_unlock_all_internal(
 
         eprintln!("[Biometric Unlock All] Processing account: {}", email);
 
-        // Get session data for this account
-        let session_key = account_key(&email, "session_data");
-        let vault_key = account_key(&email, "vault_keys");
-
-        let session_data_value = match store.get(&session_key) {
-            Some(v) => v,
+        // Get session data for this account (accountId key with legacy fallback)
+        let session_data_str = match read_account_scoped_string(&store, &email, "session_data") {
+            Some(s) => s,
             None => {
                 eprintln!("[Biometric Unlock All] No session data for {}", email);
                 failed_emails.push(email);
@@ -1460,16 +1540,7 @@ async fn biometric_unlock_all_internal(
             }
         };
 
-        let session_data_str = match session_data_value.as_str() {
-            Some(s) => s,
-            None => {
-                eprintln!("[Biometric Unlock All] Invalid session data format for {}", email);
-                failed_emails.push(email);
-                continue;
-            }
-        };
-
-        let session_data: serde_json::Value = match serde_json::from_str(session_data_str) {
+        let session_data: serde_json::Value = match serde_json::from_str(&session_data_str) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("[Biometric Unlock All] Failed to parse session data for {}: {}", email, e);
@@ -1495,8 +1566,7 @@ async fn biometric_unlock_all_internal(
 
         // Get auth token and vault keys for this account
         let auth_token = get_bearer_token_for_account(&store, &email);
-        let vault_keys = store.get(&vault_key)
-            .and_then(|v| v.as_str().map(|s| s.to_string()));
+        let vault_keys = read_account_scoped_string(&store, &email, "vault_keys");
 
         // Build account data
         let mut account_data = serde_json::json!({
@@ -1549,19 +1619,16 @@ async fn get_lock_status_internal(
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
     // Read lock state marker (maintained by storage adapter based on MUKs in memory)
-    // This is the source of truth for which accounts are unlocked
+    // This is the source of truth for which accounts are unlocked. It holds
+    // accountIds, which we map to emails for the email-based extension protocol.
     let unlocked_accounts = get_unlocked_accounts(&store);
+    let unlocked_emails = get_unlocked_emails(&store);
 
-    // Get autolock timeout from first account (they should all be the same, but use first as default)
-    let autolock_timeout_ms = if let Some(first_email) = unlocked_accounts.first() {
-        let timeout_key = account_key(first_email, "autolock_timeout");
-        store
-            .get(&timeout_key)
-            .and_then(|v| v.as_i64())
-            .unwrap_or(600000) // Default 10 minutes
-    } else {
-        600000
-    };
+    // Auto-lock timeout is an app-wide preference (not account-scoped).
+    let autolock_timeout_ms = store
+        .get("bittery_auto_lock_timeout")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(600000); // Default 10 minutes
 
     let locked = unlocked_accounts.is_empty();
     let timestamp = std::time::SystemTime::now()
@@ -1571,7 +1638,7 @@ async fn get_lock_status_internal(
 
     Ok(serde_json::json!({
         "locked": locked,
-        "unlocked_accounts": unlocked_accounts,
+        "unlocked_accounts": unlocked_emails,
         "timestamp": timestamp,
         "autolock_timeout_ms": autolock_timeout_ms,
     }))
@@ -1626,20 +1693,16 @@ async fn get_accounts_list_internal(
         .and_then(|a| a.as_array())
         .ok_or("No accounts array found")?;
 
-    // Get active account
+    // Get active account (email for single mode, or "all")
     let active_email = get_active_account_email(&store);
 
-    // Get unlocked accounts
-    let unlocked_accounts: Vec<String> = store
-        .get("bittery_unlocked_accounts")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(Vec::new);
+    // Get unlocked accounts as emails for the email-based extension protocol.
+    let unlocked_emails = get_unlocked_emails(&store);
 
     Ok(serde_json::json!({
         "accounts": accounts_array,
         "active_account": active_email,
-        "unlocked_accounts": unlocked_accounts,
+        "unlocked_accounts": unlocked_emails,
     }))
 }
 
@@ -1711,15 +1774,21 @@ fn broadcast_unlock_event(
 #[tauri::command]
 fn broadcast_active_account_changed(
     state: tauri::State<Arc<DesktopIpcState>>,
-    email: String,
+    account_id: String,
 ) -> Result<(), String> {
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::ActiveAccountChanged { email: email.clone(), timestamp };
+    let event = LockEvent::ActiveAccountChanged {
+        account_id: account_id.clone(),
+        timestamp,
+    };
 
     let _ = state.lock_events.send(event);
 
-    eprintln!("[Active Account Changed] Broadcast active account changed event (email: {})", email);
+    eprintln!(
+        "[Active Account Changed] Broadcast active account changed event (accountId: {})",
+        account_id
+    );
     Ok(())
 }
 

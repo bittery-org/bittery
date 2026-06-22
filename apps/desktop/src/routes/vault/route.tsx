@@ -50,18 +50,34 @@ export const Route = createFileRoute("/vault")({
 		}
 
 		// Single account mode: validate session for specific account
+		const accountsList = await storage.getAccountsList();
+		const activeAccountEmail = accountsList.find(
+			(account) => account.accountId === activeAccount.accountId,
+		)?.email;
+
 		// Check if user has stored credentials for active account
-		const hasSecretKey = await storage.getStoredSecretKey(activeAccount.email);
-		const sessionValid = await storage.isSessionValid(activeAccount.email);
+		const hasSecretKey = await storage.getStoredSecretKey(
+			activeAccount.accountId,
+		);
+		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
 
 		if (!hasSecretKey || !sessionValid) {
-			throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
+			throw redirect({
+				to: "/unlock",
+				search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
+			});
 		}
 
-		const restored = await storage.tryRestoreSession(true, activeAccount.email);
+		const restored = await storage.tryRestoreSession(
+			true,
+			activeAccount.accountId,
+		);
 
 		if (!restored) {
-			throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
+			throw redirect({
+				to: "/unlock",
+				search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
+			});
 		}
 	},
 });
@@ -101,16 +117,16 @@ function RouteComponent() {
 		queryKey: ["vault-route", "available-accounts", isAllAccountsMode],
 		enabled: isAllAccountsMode,
 		queryFn: async (): Promise<AccountOption[]> => {
-			const emails = await storage.getUnlockedAccounts?.();
-			if (!emails?.length) {
+			const accountIds = await storage.getUnlockedAccounts?.();
+			if (!accountIds?.length) {
 				return [];
 			}
 
 			return await Promise.all(
-				emails.map(async (email) => {
-					const metadata = await storage.getAccountMetadata?.(email);
+				accountIds.map(async (accountId) => {
+					const metadata = await storage.getAccountMetadata?.(accountId);
 					return {
-						email,
+						email: metadata?.email ?? accountId,
 						name: metadata?.name,
 						teamName: metadata?.teamName,
 					};
@@ -127,11 +143,24 @@ function RouteComponent() {
 				return [];
 			}
 
+			const accounts = await storage.getAccountsList();
+
 			if (activeAccount.type === "all") {
-				return (await storage.getUnlockedAccounts?.()) ?? [];
+				const unlockedAccountIds =
+					(await storage.getUnlockedAccounts?.()) ?? [];
+				return unlockedAccountIds
+					.map(
+						(accountId) =>
+							accounts.find((account) => account.accountId === accountId)
+								?.email,
+					)
+					.filter((email): email is string => Boolean(email));
 			}
 
-			return [activeAccount.email];
+			const email = accounts.find(
+				(account) => account.accountId === activeAccount.accountId,
+			)?.email;
+			return email ? [email] : [];
 		},
 	});
 	const accountEmails = accountEmailsQuery.data ?? [];
@@ -155,7 +184,10 @@ function RouteComponent() {
 			if (!accountEmail && !isAllAccountsMode) {
 				const activeAccount = await storage.getActiveAccount();
 				if (activeAccount?.type === "single") {
-					accountEmail = activeAccount.email;
+					const accounts = await storage.getAccountsList();
+					accountEmail = accounts.find(
+						(account) => account.accountId === activeAccount.accountId,
+					)?.email;
 				}
 			}
 

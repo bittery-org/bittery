@@ -6,6 +6,7 @@
  */
 
 import type { BiometricAuthResult } from "@bittery/storage";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 
@@ -99,6 +100,8 @@ export function useBiometricUnlock(
 
 	return useMutation({
 		mutationFn: async (input: BiometricUnlockInput) => {
+			const accountId = await resolveAccountScopeId(storage, input.email);
+
 			// Check if biometric is supported
 			if (!storage.supportsBiometric) {
 				throw {
@@ -110,9 +113,8 @@ export function useBiometricUnlock(
 			// Check if master password re-entry is required by policy
 			// This check happens before biometric auth for better UX
 			if (storage.isMasterPasswordReentryRequired) {
-				const requiresReentry = await storage.isMasterPasswordReentryRequired(
-					input.email,
-				);
+				const requiresReentry =
+					await storage.isMasterPasswordReentryRequired(accountId);
 				if (requiresReentry) {
 					throw {
 						type: "master_password_required",
@@ -127,7 +129,7 @@ export function useBiometricUnlock(
 				const result: BiometricAuthResult =
 					await storage.authenticateWithBiometricEnhanced(
 						options.promptMessage ?? "Unlock Bittery",
-						input.email,
+						accountId,
 					);
 
 				if (!result.success) {
@@ -139,7 +141,7 @@ export function useBiometricUnlock(
 
 				// Now try to restore the MUK using biometric unlock
 				if (storage.unlockWithBiometric) {
-					const unlocked = await storage.unlockWithBiometric(input.email);
+					const unlocked = await storage.unlockWithBiometric(accountId);
 					if (!unlocked) {
 						throw {
 							type: "authentication_failed",
@@ -153,7 +155,7 @@ export function useBiometricUnlock(
 
 			// Fallback to simple biometric unlock
 			if (storage.unlockWithBiometric) {
-				const success = await storage.unlockWithBiometric(input.email);
+				const success = await storage.unlockWithBiometric(accountId);
 				if (!success) {
 					throw {
 						type: "authentication_failed",

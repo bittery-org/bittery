@@ -7,6 +7,23 @@ import {
 } from "../desktop-key-material";
 import { desktopSync } from "../desktop-sync";
 
+export async function resolveEmailFromAccountId(
+	accountId: string,
+): Promise<string | undefined> {
+	const metadata = await storage.getAccountMetadata?.(accountId);
+	return metadata?.email;
+}
+
+export async function resolveAccountIdFromEmail(
+	email: string,
+): Promise<string | undefined> {
+	const normalizedEmail = email.toLowerCase();
+	const accounts = await storage.getAccountsList();
+	return accounts.find(
+		(account) => account.email.toLowerCase() === normalizedEmail,
+	)?.accountId;
+}
+
 export function getItemAccountEmail(
 	item: Pick<DecryptedItemWithContext, "accountEmail" | "account">,
 ): string | undefined {
@@ -18,32 +35,41 @@ export async function resolveAccountEmailForVault(
 ): Promise<string | undefined> {
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
-		return activeAccount.email;
+		return await resolveEmailFromAccountId(activeAccount.accountId);
 	}
 
 	const cached = core.vaultCoordinator.findAccountForVault(vaultId);
-	if (cached?.email) {
-		return cached.email;
+	if (cached) {
+		return await resolveEmailFromAccountId(cached.accountId);
 	}
 
-	const localUnlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+	const localUnlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
 	const desktopStatus = desktopSync.getLastStatus();
 	const desktopUnlockedEmails =
 		desktopStatus?.available && !desktopStatus.locked
 			? (desktopStatus.unlockedAccounts ?? [])
 			: [];
+	const desktopUnlockedAccountIds = (
+		await Promise.all(
+			desktopUnlockedEmails.map((email) => resolveAccountIdFromEmail(email)),
+		)
+	).filter((accountId): accountId is string => Boolean(accountId));
 
-	const candidateEmails = Array.from(
-		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
+	const candidateAccountIds = Array.from(
+		new Set([...localUnlockedAccountIds, ...desktopUnlockedAccountIds]),
 	);
 
-	for (const email of candidateEmails) {
+	for (const accountId of candidateAccountIds) {
+		const email = await resolveEmailFromAccountId(accountId);
+		if (!email) {
+			continue;
+		}
 		await hydrateDesktopAccountMaterial(email);
-		let vaultKeys = await storage.getVaultKeys(email);
+		let vaultKeys = await storage.getVaultKeys(accountId);
 		if (!vaultKeys || vaultKeys.length === 0) {
 			const hydrated = await ensureDesktopWriteCapability(email);
 			if (hydrated) {
-				vaultKeys = await storage.getVaultKeys(email);
+				vaultKeys = await storage.getVaultKeys(accountId);
 			}
 		}
 		if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
@@ -68,7 +94,7 @@ export async function resolveAccountEmailForItemId(
 
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
-		return activeAccount.email;
+		return await resolveEmailFromAccountId(activeAccount.accountId);
 	}
 	if (activeAccount?.type !== "all") {
 		return undefined;

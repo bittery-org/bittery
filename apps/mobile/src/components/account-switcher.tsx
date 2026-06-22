@@ -63,7 +63,7 @@ export function AccountSwitcher() {
 			await switchAccount(account.email);
 
 			// Check if the new account has a valid session
-			const isValid = await storage.isSessionValid(account.email);
+			const isValid = await storage.isSessionValid(account.accountId);
 
 			setIsOpen(false);
 

@@ -18,8 +18,19 @@ import * as CryptoType from "expo-crypto";
 import * as LocalAuthenticationType from "expo-local-authentication";
 import * as SecureStoreType from "expo-secure-store";
 import * as SQLiteType from "expo-sqlite";
+import {
+	findAccountById,
+	findAccountByServerUser,
+	generateAccountId,
+} from "../account-id";
+import { getAccountKey, getLegacyAccountKey } from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import {
+	migrateEmailKeysToAccountIds,
+	parseStoredActiveAccount,
+	serializeActiveAccount,
+} from "../migrate-to-account-ids";
 import { resolveStoredSessionExpiryTimestamp } from "../session";
 import {
 	type AccountMetadata,
@@ -40,12 +51,6 @@ const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
 const AUTO_LOCK_TIMEOUT_GLOBAL_KEY = "bittery_auto_lock_timeout_global";
 const BIOMETRIC_ENABLED_GLOBAL_KEY = "bittery_biometric_enabled_global";
 const BACKGROUND_TIMESTAMP_GLOBAL_KEY = "bittery_background_timestamp_global";
-
-// Helper to generate namespaced keys for each account
-function getAccountKey(email: string, suffix: string): string {
-	const sanitized = email.toLowerCase().replace(/[^a-z0-9]/g, "_");
-	return `bittery_account_${sanitized}_${suffix}`;
-}
 
 function isSecureStoreOnlyKey(key: string): boolean {
 	return (
@@ -68,7 +73,7 @@ interface AccountCache {
 	cachedVaults: CachedVaultMetadata[] | null;
 }
 
-// In-memory caches - keyed by email
+// In-memory caches - keyed by accountId
 const accountCaches: Map<string, AccountCache> = new Map();
 
 /**
@@ -99,6 +104,41 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		this.initializePromise = (async () => {
 			try {
 				await this.openAndInitDatabase();
+
+				// Migrate legacy email-keyed storage to accountId keys
+				await migrateEmailKeysToAccountIds({
+					store: {
+						get: async <T>(key: string) => {
+							const value = await this.getItem(key);
+							if (value === null) return undefined;
+							if (value === "true") return true as T;
+							if (value === "false") return false as T;
+							return value as T;
+						},
+						set: async (key, value) => {
+							if (typeof value === "boolean") {
+								await this.setItem(key, value ? "true" : "false");
+							} else if (typeof value === "number") {
+								await this.setItem(key, value.toString());
+							} else if (typeof value === "string") {
+								await this.setItem(key, value);
+							} else {
+								await this.setItem(key, JSON.stringify(value));
+							}
+						},
+						delete: async (key) => {
+							await this.deleteItem(key);
+						},
+					},
+					activeAccountKey: ACTIVE_ACCOUNT_KEY,
+					accountsListKey: ACCOUNTS_LIST_KEY,
+					getAccountsList: async () =>
+						(await this.getAccountsListInternal()).accounts,
+					saveAccountsList: async (accounts) => {
+						await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify({ accounts }));
+					},
+				});
+
 				this.initialized = true;
 			} catch (error) {
 				this.initializePromise = null;
@@ -245,17 +285,16 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	private async resolveEmail(email?: string): Promise<string | null> {
-		if (email) return email.toLowerCase();
+	private async resolveAccountId(accountId?: string): Promise<string | null> {
+		if (accountId) return accountId;
 
 		const account = await this.getActiveAccount();
 		if (!account || account.type === "all") return null;
-		return account.email;
+		return account.accountId;
 	}
 
-	private getAccountCache(email: string): AccountCache {
-		const key = email.toLowerCase();
-		let cache = accountCaches.get(key);
+	private getAccountCache(accountId: string): AccountCache {
+		let cache = accountCaches.get(accountId);
 		if (!cache) {
 			cache = {
 				authToken: null,
@@ -264,13 +303,13 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 				cachedItems: null,
 				cachedVaults: null,
 			};
-			accountCaches.set(key, cache);
+			accountCaches.set(accountId, cache);
 		}
 		return cache;
 	}
 
-	private clearAccountCache(email: string): void {
-		accountCaches.delete(email.toLowerCase());
+	private clearAccountCache(accountId: string): void {
+		accountCaches.delete(accountId);
 	}
 
 	private async getDeviceKey(): Promise<Uint8Array> {
@@ -293,19 +332,19 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// Session Management
 	// ============================================================================
 
-	async getMasterUnlockKey(email?: string): Promise<Uint8Array | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.masterUnlockKey) {
 			return cache.masterUnlockKey;
 		}
 
 		// Try to restore from persistent storage if session is still valid
-		if (await this.isSessionValid(resolvedEmail)) {
+		if (await this.isSessionValid(resolvedAccountId)) {
 			const restored = await this.decryptStoredMasterUnlockKeyInternal(
-				resolvedEmail,
+				resolvedAccountId,
 				false,
 			);
 			if (restored) {
@@ -317,30 +356,30 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return null;
 	}
 
-	async setMasterUnlockKey(key: Uint8Array, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async setMasterUnlockKey(key: Uint8Array, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.masterUnlockKey = key;
 	}
 
-	async clearMasterUnlockKey(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearMasterUnlockKey(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.masterUnlockKey = null;
 	}
 
 	async storeSessionData(
 		masterUnlockKey: Uint8Array,
+		accountId: string,
 		email: string,
 		userId: string,
 		expiresAt?: string | Date | number,
 		sessionId?: string,
 	): Promise<void> {
-		const resolvedEmail = email.toLowerCase();
 		const deviceKey = await this.getDeviceKey();
 		const now = Date.now();
 
@@ -349,11 +388,11 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		const encryptedMUK = await this.crypto.encrypt(mukBase64, deviceKey);
 
 		const biometricEnabled =
-			(await this.isBiometricEnabled?.(resolvedEmail)) ?? false;
+			(await this.isBiometricEnabled?.(accountId)) ?? false;
 
 		const sessionData: StoredSessionData = {
 			encryptedMasterUnlockKey: encryptedMUK,
-			email: resolvedEmail,
+			email: email.toLowerCase(),
 			userId,
 			sessionId,
 			expiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
@@ -362,23 +401,23 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			lastMasterPasswordEntry: now,
 		};
 
-		const key = getAccountKey(resolvedEmail, "session_data");
+		const key = getAccountKey(accountId, "session_data");
 		await this.setItem(key, JSON.stringify(sessionData));
 	}
 
 	async tryRestoreSession(
 		skipBiometric = false,
-		email?: string,
+		accountId?: string,
 	): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
-		if (!(await this.isSessionValid(resolvedEmail))) {
+		if (!(await this.isSessionValid(resolvedAccountId))) {
 			return false;
 		}
 
 		// First check if MUK is already in memory cache (e.g., after login)
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.masterUnlockKey) {
 			console.log("[storage-react-native] Session restored from memory cache");
 			return true;
@@ -386,23 +425,23 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 		// Otherwise, try to decrypt from persistent storage
 		const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
-			resolvedEmail,
+			resolvedAccountId,
 			skipBiometric,
 		);
 		if (!masterUnlockKey) {
 			return false;
 		}
 
-		await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
+		await this.setMasterUnlockKey(masterUnlockKey, resolvedAccountId);
 		return true;
 	}
 
-	async isSessionValid(email?: string): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+	async isSessionValid(accountId?: string): Promise<boolean> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
-		const sessionData = await this.getStoredSessionData(resolvedEmail);
-		const token = await this.getAuthToken(resolvedEmail);
+		const sessionData = await this.getStoredSessionData(resolvedAccountId);
+		const token = await this.getAuthToken(resolvedAccountId);
 		if (!sessionData || !token) return false;
 
 		const now = Date.now();
@@ -413,43 +452,43 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// Credentials
 	// ============================================================================
 
-	async storeSecretKey(secretKey: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storeSecretKey(secretKey: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const key = getAccountKey(resolvedEmail, "secret_key");
+		const key = getAccountKey(resolvedAccountId, "secret_key");
 		await this.setItem(key, secretKey);
 	}
 
-	async getStoredSecretKey(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getStoredSecretKey(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "secret_key");
+		const key = getAccountKey(resolvedAccountId, "secret_key");
 		return this.getItem(key);
 	}
 
-	async storeAuthToken(token: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storeAuthToken(token: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.authToken = token;
 
-		const key = getAccountKey(resolvedEmail, "jwt_token");
+		const key = getAccountKey(resolvedAccountId, "jwt_token");
 		await this.setItem(key, token);
 	}
 
-	async getAuthToken(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getAuthToken(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.authToken) {
 			return cache.authToken;
 		}
 
-		const key = getAccountKey(resolvedEmail, "jwt_token");
+		const key = getAccountKey(resolvedAccountId, "jwt_token");
 		const token = await this.getItem(key);
 		if (token) {
 			cache.authToken = token;
@@ -459,10 +498,10 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async storeVaultKeys(
 		vaultKeys: VaultKeyData[],
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		console.log(
 			"[storage-react-native] Storing vault keys:",
@@ -470,23 +509,23 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			"keys",
 		);
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.vaultKeys = vaultKeys;
 
-		const key = getAccountKey(resolvedEmail, "vault_keys");
+		const key = getAccountKey(resolvedAccountId, "vault_keys");
 		await this.setItem(key, JSON.stringify(vaultKeys));
 	}
 
-	async getVaultKeys(email?: string): Promise<VaultKeyData[] | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getVaultKeys(accountId?: string): Promise<VaultKeyData[] | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.vaultKeys) {
 			return cache.vaultKeys;
 		}
 
-		const key = getAccountKey(resolvedEmail, "vault_keys");
+		const key = getAccountKey(resolvedAccountId, "vault_keys");
 		const stored = await this.getItem(key);
 		if (stored) {
 			cache.vaultKeys = JSON.parse(stored);
@@ -496,36 +535,39 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async storeEncryptedPrivateKey(
 		encryptedPrivateKey: string,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const key = getAccountKey(resolvedEmail, "encrypted_private_key");
+		const key = getAccountKey(resolvedAccountId, "encrypted_private_key");
 		await this.setItem(key, encryptedPrivateKey);
 	}
 
-	async getEncryptedPrivateKey(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getEncryptedPrivateKey(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "encrypted_private_key");
+		const key = getAccountKey(resolvedAccountId, "encrypted_private_key");
 		return this.getItem(key);
 	}
 
-	async storePinnedKdfParams(params: KdfParams, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storePinnedKdfParams(
+		params: KdfParams,
+		accountId?: string,
+	): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
 		await this.setItem(key, JSON.stringify(params));
 	}
 
-	async getPinnedKdfParams(email?: string): Promise<KdfParams | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getPinnedKdfParams(accountId?: string): Promise<KdfParams | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
 		const stored = await this.getItem(key);
 		if (!stored) return null;
 		try {
@@ -536,19 +578,18 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	async updateStoredSessionMetadata(
-		email: string,
+		accountId: string,
 		metadata: {
 			sessionId?: string;
 			expiresAt: string | Date | number;
 		},
 	): Promise<void> {
-		const resolvedEmail = email.toLowerCase();
-		const existing = await this.getStoredSessionData(resolvedEmail);
+		const existing = await this.getStoredSessionData(accountId);
 		if (!existing) {
 			return;
 		}
 
-		const key = getAccountKey(resolvedEmail, "session_data");
+		const key = getAccountKey(accountId, "session_data");
 		const next: StoredSessionData = {
 			...existing,
 			sessionId: metadata.sessionId ?? existing.sessionId,
@@ -566,25 +607,19 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async getActiveAccount(): Promise<ActiveAccount> {
 		const stored = await this.getItem(ACTIVE_ACCOUNT_KEY);
-		if (!stored) return null;
-		if (stored === "all") return { type: "all" };
-		return { type: "single", email: stored };
+		return parseStoredActiveAccount(stored);
 	}
 
 	async getActiveAccountUserId(): Promise<string | null> {
 		const account = await this.getActiveAccount();
 		if (!account || account.type === "all") return null;
 
-		const sessionData = await this.getStoredSessionData(account.email);
+		const sessionData = await this.getStoredSessionData(account.accountId);
 		return sessionData?.userId ?? null;
 	}
 
 	async setActiveAccount(account: ActiveAccount): Promise<void> {
-		const normalizedValue = !account
-			? null
-			: account.type === "all"
-				? "all"
-				: account.email.toLowerCase();
+		const normalizedValue = serializeActiveAccount(account);
 
 		if (normalizedValue) {
 			await this.setItem(ACTIVE_ACCOUNT_KEY, normalizedValue);
@@ -595,8 +630,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		// Update lastActiveAt if single account
 		if (account?.type === "single") {
 			const accountsList = await this.getAccountsListInternal();
-			const accountMeta = accountsList.accounts.find(
-				(a) => a.email.toLowerCase() === account.email.toLowerCase(),
+			const accountMeta = findAccountById(
+				accountsList.accounts,
+				account.accountId,
 			);
 			if (accountMeta) {
 				accountMeta.lastActiveAt = Date.now();
@@ -625,44 +661,65 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	async addAccount(metadata: AccountMetadata): Promise<void> {
 		const accountsList = await this.getAccountsListInternal();
 
-		const existingIndex = accountsList.accounts.findIndex(
-			(a) => a.email.toLowerCase() === metadata.email.toLowerCase(),
+		const accountWithId: AccountMetadata = metadata.accountId
+			? metadata
+			: { ...metadata, accountId: generateAccountId() };
+
+		const existingByServerUser =
+			accountWithId.serverUrl && accountWithId.userId
+				? findAccountByServerUser(
+						accountsList.accounts,
+						accountWithId.serverUrl,
+						accountWithId.userId,
+					)
+				: undefined;
+
+		const existingById = findAccountById(
+			accountsList.accounts,
+			accountWithId.accountId,
 		);
 
-		if (existingIndex >= 0) {
-			accountsList.accounts[existingIndex] = metadata;
+		const existing = existingById ?? existingByServerUser;
+
+		if (existing) {
+			const existingIndex = accountsList.accounts.findIndex(
+				(a) => a.accountId === existing.accountId,
+			);
+			accountsList.accounts[existingIndex] = {
+				...accountWithId,
+				accountId: existing.accountId,
+			};
 		} else {
-			accountsList.accounts.push(metadata);
+			accountsList.accounts.push(accountWithId);
 		}
 
 		await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
 	}
 
-	async removeAccount(email: string): Promise<void> {
-		const resolvedEmail = email.toLowerCase();
-
+	async removeAccount(accountId: string): Promise<void> {
 		// Delete all namespaced keys for this account
-		await this.deleteItem(getAccountKey(resolvedEmail, "secret_key"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "session_data"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "jwt_token"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "vault_keys"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "pinned_kdf_params"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "biometric_enabled"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "last_biometric_auth"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "server_url"));
-		await this.deleteItem(
-			getAccountKey(resolvedEmail, "encrypted_private_key"),
-		);
-		await this.deleteItem(getAccountKey(resolvedEmail, "auto_lock_timeout"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "background_timestamp"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "travel_mode_cache"));
+		await this.deleteItem(getAccountKey(accountId, "secret_key"));
+		await this.deleteItem(getAccountKey(accountId, "session_data"));
+		await this.deleteItem(getAccountKey(accountId, "jwt_token"));
+		await this.deleteItem(getAccountKey(accountId, "vault_keys"));
+		await this.deleteItem(getAccountKey(accountId, "pinned_kdf_params"));
+		await this.deleteItem(getAccountKey(accountId, "biometric_enabled"));
+		await this.deleteItem(getAccountKey(accountId, "last_biometric_auth"));
+		await this.deleteItem(getAccountKey(accountId, "server_url"));
+		await this.deleteItem(getAccountKey(accountId, "encrypted_private_key"));
+		await this.deleteItem(getAccountKey(accountId, "cached_items"));
+		await this.deleteItem(getAccountKey(accountId, "cached_vaults"));
+		await this.deleteItem(getAccountKey(accountId, "item_cache_meta"));
+		await this.deleteItem(getAccountKey(accountId, "auto_lock_timeout"));
+		await this.deleteItem(getAccountKey(accountId, "background_timestamp"));
+		await this.deleteItem(getAccountKey(accountId, "travel_mode_cache"));
 
-		this.clearAccountCache(resolvedEmail);
+		this.clearAccountCache(accountId);
 
 		// Remove from accounts list
 		const accountsList = await this.getAccountsListInternal();
 		accountsList.accounts = accountsList.accounts.filter(
-			(a) => a.email.toLowerCase() !== resolvedEmail,
+			(a) => a.accountId !== accountId,
 		);
 		await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
 	}
@@ -673,47 +730,65 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async storeAutoLockTimeout(
 		timeoutMs: number,
-		_email?: string,
+		_accountId?: string,
 	): Promise<void> {
 		await this.storeGlobalAutoLockTimeout(timeoutMs);
 
 		const accountsList = await this.getAccountsListInternal();
 		for (const account of accountsList.accounts) {
-			const key = getAccountKey(account.email, "auto_lock_timeout");
+			const key = getAccountKey(account.accountId, "auto_lock_timeout");
 			await this.setItem(key, timeoutMs.toString());
 		}
 	}
 
-	async getAutoLockTimeout(email?: string): Promise<number | null> {
+	async getAutoLockTimeout(accountId?: string): Promise<number | null> {
 		const globalValue = await this.getGlobalAutoLockTimeout();
 		if (globalValue !== null) return globalValue;
 
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "auto_lock_timeout");
+		const key = getAccountKey(resolvedAccountId, "auto_lock_timeout");
 		const stored = await this.getItem(key);
-		return stored ? Number.parseInt(stored, 10) : null;
+		if (stored) {
+			return Number.parseInt(stored, 10);
+		}
+
+		// Legacy migration: account-scoped email-keyed timeout
+		const accountsList = await this.getAccountsListInternal();
+		const account = findAccountById(accountsList.accounts, resolvedAccountId);
+		if (account) {
+			const legacyKey = getLegacyAccountKey(
+				account.email.toLowerCase(),
+				"auto_lock_timeout",
+			);
+			const legacyStored = await this.getItem(legacyKey);
+			if (legacyStored) {
+				return Number.parseInt(legacyStored, 10);
+			}
+		}
+
+		return null;
 	}
 
-	async getAutoLockTimeoutOrDefault(email?: string): Promise<number> {
-		const timeout = await this.getAutoLockTimeout(email);
+	async getAutoLockTimeoutOrDefault(accountId?: string): Promise<number> {
+		const timeout = await this.getAutoLockTimeout(accountId);
 		return timeout ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS;
 	}
 
-	async storeServerUrl(serverUrl: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storeServerUrl(serverUrl: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const key = getAccountKey(resolvedEmail, "server_url");
+		const key = getAccountKey(resolvedAccountId, "server_url");
 		await this.setItem(key, serverUrl);
 	}
 
-	async getServerUrl(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getServerUrl(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "server_url");
+		const key = getAccountKey(resolvedAccountId, "server_url");
 		return this.getItem(key);
 	}
 
@@ -721,14 +796,14 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// Auth State
 	// ============================================================================
 
-	async isAuthenticated(email?: string): Promise<boolean> {
-		const token = await this.getAuthToken(email);
+	async isAuthenticated(accountId?: string): Promise<boolean> {
+		const token = await this.getAuthToken(accountId);
 		return token != null;
 	}
 
-	async canQuickUnlock(email?: string): Promise<boolean> {
-		const hasSecretKey = (await this.getStoredSecretKey(email)) !== null;
-		const sessionValid = await this.isSessionValid(email);
+	async canQuickUnlock(accountId?: string): Promise<boolean> {
+		const hasSecretKey = (await this.getStoredSecretKey(accountId)) !== null;
+		const sessionValid = await this.isSessionValid(accountId);
 		return hasSecretKey && sessionValid;
 	}
 
@@ -736,21 +811,21 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	// Clear
 	// ============================================================================
 
-	async clearSession(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearSession(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		this.clearAccountCache(resolvedEmail);
+		this.clearAccountCache(resolvedAccountId);
 
 		// Clear last biometric auth timestamp so biometric is required on next unlock
-		const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+		const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
 		await this.deleteItem(key);
 	}
 
-	async clearAllStoredData(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (resolvedEmail) {
-			await this.removeAccount(resolvedEmail);
+	async clearAllStoredData(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (resolvedAccountId) {
+			await this.removeAccount(resolvedAccountId);
 		}
 	}
 
@@ -771,45 +846,45 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async isBiometricEnabled(email?: string): Promise<boolean> {
+	async isBiometricEnabled(accountId?: string): Promise<boolean> {
 		const globalEnabled = await this.getGlobalBiometricEnabled();
 		if (globalEnabled !== null) return globalEnabled;
 
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
-		const key = getAccountKey(resolvedEmail, "biometric_enabled");
+		const key = getAccountKey(resolvedAccountId, "biometric_enabled");
 		const enabled = await this.getItem(key);
 		return enabled === "true";
 	}
 
-	async enableBiometric(email?: string): Promise<void> {
+	async enableBiometric(accountId?: string): Promise<void> {
 		await this.setGlobalBiometricEnabled(true);
 		await this.updateBiometricEnabledForAllAccounts(true);
-		if (email) {
-			const key = getAccountKey(email, "biometric_enabled");
+		if (accountId) {
+			const key = getAccountKey(accountId, "biometric_enabled");
 			await this.setItem(key, "true");
 		}
 	}
 
-	async disableBiometric(email?: string): Promise<void> {
+	async disableBiometric(accountId?: string): Promise<void> {
 		await this.setGlobalBiometricEnabled(false);
 		await this.updateBiometricEnabledForAllAccounts(false);
-		if (email) {
-			const key = getAccountKey(email, "biometric_enabled");
+		if (accountId) {
+			const key = getAccountKey(accountId, "biometric_enabled");
 			await this.setItem(key, "false");
 		}
 	}
 
 	async authenticateWithBiometric(
 		reason = "Unlock Bittery",
-		email?: string,
+		accountId?: string,
 	): Promise<boolean> {
 		if (!this.LocalAuthentication) return false;
 
 		try {
-			const resolvedEmail = await this.resolveEmail(email);
-			if (!resolvedEmail) return false;
+			const resolvedAccountId = await this.resolveAccountId(accountId);
+			if (!resolvedAccountId) return false;
 
 			const result = await this.LocalAuthentication.authenticateAsync({
 				promptMessage: reason,
@@ -820,7 +895,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 			if (result.success) {
 				// Update last biometric auth timestamp
-				const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+				const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
 				await this.setItem(key, Date.now().toString());
 				return true;
 			}
@@ -835,21 +910,21 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async canBiometricUnlock(email?: string): Promise<boolean> {
+	async canBiometricUnlock(accountId?: string): Promise<boolean> {
 		const available = await this.isBiometricAvailable();
-		const enabled = await this.isBiometricEnabled(email);
-		const sessionValid = await this.isSessionValid(email);
+		const enabled = await this.isBiometricEnabled(accountId);
+		const sessionValid = await this.isSessionValid(accountId);
 		return available && enabled && sessionValid;
 	}
 
 	async getStoredSessionData(
-		email?: string,
+		accountId?: string,
 	): Promise<StoredSessionData | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		try {
-			const key = getAccountKey(resolvedEmail, "session_data");
+			const key = getAccountKey(resolvedAccountId, "session_data");
 			const stored = await this.getItem(key);
 
 			if (!stored) return null;
@@ -899,7 +974,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		let metadataChanged = false;
 
 		for (const account of accountsList.accounts) {
-			const key = getAccountKey(account.email, "biometric_enabled");
+			const key = getAccountKey(account.accountId, "biometric_enabled");
 			await this.setItem(key, enabled ? "true" : "false");
 
 			if (account.biometricEnabled !== enabled) {
@@ -907,7 +982,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 				metadataChanged = true;
 			}
 
-			const sessionKey = getAccountKey(account.email, "session_data");
+			const sessionKey = getAccountKey(account.accountId, "session_data");
 			const storedSession = await this.getItem(sessionKey);
 			if (storedSession) {
 				try {
@@ -926,14 +1001,14 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	private async isBiometricAuthRequiredInternal(
-		email: string,
+		accountId: string,
 	): Promise<boolean> {
-		const sessionData = await this.getStoredSessionData(email);
+		const sessionData = await this.getStoredSessionData(accountId);
 		if (!sessionData || !sessionData.biometricEnabled) {
 			return false;
 		}
 
-		const key = getAccountKey(email, "last_biometric_auth");
+		const key = getAccountKey(accountId, "last_biometric_auth");
 		const lastAuthStr = await this.getItem(key);
 
 		if (!lastAuthStr) {
@@ -946,9 +1021,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	private async isMasterPasswordReentryRequiredInternal(
-		email: string,
+		accountId: string,
 	): Promise<boolean> {
-		const sessionData = await this.getStoredSessionData(email);
+		const sessionData = await this.getStoredSessionData(accountId);
 		if (!sessionData) return true;
 
 		const lastPasswordEntry =
@@ -958,24 +1033,25 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	private async decryptStoredMasterUnlockKeyInternal(
-		email: string,
+		accountId: string,
 		skipBiometric = false,
 	): Promise<Uint8Array | null> {
-		const sessionData = await this.getStoredSessionData(email);
+		const sessionData = await this.getStoredSessionData(accountId);
 		if (!sessionData) return null;
 
 		// Check if master password re-entry is required (periodic security measure)
-		if (await this.isMasterPasswordReentryRequiredInternal(email)) {
+		if (await this.isMasterPasswordReentryRequiredInternal(accountId)) {
 			return null;
 		}
 
 		// Check if biometric authentication is required
 		if (!skipBiometric && sessionData.biometricEnabled) {
-			const authRequired = await this.isBiometricAuthRequiredInternal(email);
+			const authRequired =
+				await this.isBiometricAuthRequiredInternal(accountId);
 			if (authRequired) {
 				const authenticated = await this.authenticateWithBiometric(
 					"Unlock your vault",
-					email,
+					accountId,
 				);
 				if (!authenticated) {
 					return null;
@@ -1001,28 +1077,30 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async setCachedItems(
 		items: CachedEncryptedItem[],
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.cachedItems = items;
 
-		const key = getAccountKey(resolvedEmail, "cached_items");
+		const key = getAccountKey(resolvedAccountId, "cached_items");
 		await this.setItem(key, JSON.stringify(items));
 	}
 
-	async getCachedItems(email?: string): Promise<CachedEncryptedItem[] | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getCachedItems(
+		accountId?: string,
+	): Promise<CachedEncryptedItem[] | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.cachedItems) {
 			return cache.cachedItems;
 		}
 
-		const key = getAccountKey(resolvedEmail, "cached_items");
+		const key = getAccountKey(resolvedAccountId, "cached_items");
 		const stored = await this.getItem(key);
 		if (stored) {
 			try {
@@ -1036,12 +1114,12 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		let items = await this.getCachedItems(resolvedEmail);
+		let items = await this.getCachedItems(resolvedAccountId);
 		if (!items) {
 			items = [];
 		}
@@ -1053,44 +1131,46 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			items.push(item);
 		}
 
-		await this.setCachedItems(items, resolvedEmail);
+		await this.setCachedItems(items, resolvedAccountId);
 	}
 
-	async removeCachedItem(itemId: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const items = await this.getCachedItems(resolvedEmail);
+		const items = await this.getCachedItems(resolvedAccountId);
 		if (!items) return;
 
 		const filtered = items.filter((i) => i.id !== itemId);
-		await this.setCachedItems(filtered, resolvedEmail);
+		await this.setCachedItems(filtered, resolvedAccountId);
 	}
 
 	async setCachedVaults(
 		vaults: CachedVaultMetadata[],
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.cachedVaults = vaults;
 
-		const key = getAccountKey(resolvedEmail, "cached_vaults");
+		const key = getAccountKey(resolvedAccountId, "cached_vaults");
 		await this.setItem(key, JSON.stringify(vaults));
 	}
 
-	async getCachedVaults(email?: string): Promise<CachedVaultMetadata[] | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getCachedVaults(
+		accountId?: string,
+	): Promise<CachedVaultMetadata[] | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.cachedVaults) {
 			return cache.cachedVaults;
 		}
 
-		const key = getAccountKey(resolvedEmail, "cached_vaults");
+		const key = getAccountKey(resolvedAccountId, "cached_vaults");
 		const stored = await this.getItem(key);
 		if (stored) {
 			try {
@@ -1104,12 +1184,12 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async upsertCachedVault(
 		vault: CachedVaultMetadata,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		let vaults = await this.getCachedVaults(resolvedEmail);
+		let vaults = await this.getCachedVaults(resolvedAccountId);
 		if (!vaults) {
 			vaults = [];
 		}
@@ -1121,35 +1201,35 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			vaults.push(vault);
 		}
 
-		await this.setCachedVaults(vaults, resolvedEmail);
+		await this.setCachedVaults(vaults, resolvedAccountId);
 	}
 
-	async removeCachedVault(vaultId: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
 		// Remove the vault metadata
-		const vaults = await this.getCachedVaults(resolvedEmail);
+		const vaults = await this.getCachedVaults(resolvedAccountId);
 		if (vaults) {
 			const filtered = vaults.filter((v) => v.id !== vaultId);
-			await this.setCachedVaults(filtered, resolvedEmail);
+			await this.setCachedVaults(filtered, resolvedAccountId);
 		}
 
 		// Also remove all items belonging to this vault
-		const items = await this.getCachedItems(resolvedEmail);
+		const items = await this.getCachedItems(resolvedAccountId);
 		if (items) {
 			const filtered = items.filter((i) => i.vaultId !== vaultId);
-			await this.setCachedItems(filtered, resolvedEmail);
+			await this.setCachedItems(filtered, resolvedAccountId);
 		}
 	}
 
 	async getItemCacheMetadata(
-		email?: string,
+		accountId?: string,
 	): Promise<ItemCacheMetadata | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "item_cache_meta");
+		const key = getAccountKey(resolvedAccountId, "item_cache_meta");
 		const stored = await this.getItem(key);
 		if (!stored) return null;
 
@@ -1162,44 +1242,46 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async setItemCacheMetadata(
 		metadata: ItemCacheMetadata,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const key = getAccountKey(resolvedEmail, "item_cache_meta");
+		const key = getAccountKey(resolvedAccountId, "item_cache_meta");
 		await this.setItem(key, JSON.stringify(metadata));
 	}
 
-	async clearItemCache(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearItemCache(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.cachedItems = null;
 		cache.cachedVaults = null;
 
-		await this.deleteItem(getAccountKey(resolvedEmail, "cached_items"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "cached_vaults"));
-		await this.deleteItem(getAccountKey(resolvedEmail, "item_cache_meta"));
+		await this.deleteItem(getAccountKey(resolvedAccountId, "cached_items"));
+		await this.deleteItem(getAccountKey(resolvedAccountId, "cached_vaults"));
+		await this.deleteItem(getAccountKey(resolvedAccountId, "item_cache_meta"));
 	}
 
 	async storeTravelModeCache(
 		config: TravelModeConfig,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const key = getAccountKey(resolvedEmail, "travel_mode_cache");
+		const key = getAccountKey(resolvedAccountId, "travel_mode_cache");
 		await this.setItem(key, JSON.stringify(config));
 	}
 
-	async getTravelModeCache(email?: string): Promise<TravelModeConfig | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getTravelModeCache(
+		accountId?: string,
+	): Promise<TravelModeConfig | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "travel_mode_cache");
+		const key = getAccountKey(resolvedAccountId, "travel_mode_cache");
 		const stored = await this.getItem(key);
 		if (!stored) return null;
 		try {
@@ -1267,7 +1349,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		// Clear last biometric auth timestamp for all accounts so biometric is required on next unlock
 		const accountsList = await this.getAccountsList();
 		for (const account of accountsList) {
-			const key = getAccountKey(account.email, "last_biometric_auth");
+			const key = getAccountKey(account.accountId, "last_biometric_auth");
 			await this.deleteItem(key);
 		}
 	}
@@ -1275,33 +1357,33 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Unlock all accounts with biometric authentication
 	 * Shows ONE biometric prompt and unlocks all accounts that support biometric
-	 * Returns { unlocked: string[], failed: Array<{email: string, error: string}> }
+	 * Returns { unlocked: string[], failed: Array<{accountId: string, error: string}> }
 	 */
 	async unlockAllAccountsWithBiometric(): Promise<{
 		unlocked: string[];
-		failed: Array<{ email: string; error: string }>;
+		failed: Array<{ accountId: string; error: string }>;
 	}> {
 		const accountsList = await this.getAccountsList();
 		const unlocked: string[] = [];
-		const failed: Array<{ email: string; error: string }> = [];
+		const failed: Array<{ accountId: string; error: string }> = [];
 
 		if (accountsList.length === 0) {
 			return { unlocked, failed };
 		}
 
 		// Find first account that supports biometric
-		let firstAccountEmail: string | null = null;
+		let firstAccountId: string | null = null;
 		for (const account of accountsList) {
-			if (await this.canBiometricUnlock(account.email)) {
-				firstAccountEmail = account.email;
+			if (await this.canBiometricUnlock(account.accountId)) {
+				firstAccountId = account.accountId;
 				break;
 			}
 		}
 
-		if (!firstAccountEmail) {
+		if (!firstAccountId) {
 			for (const account of accountsList) {
 				failed.push({
-					email: account.email,
+					accountId: account.accountId,
 					error: "Biometric authentication not available",
 				});
 			}
@@ -1310,13 +1392,13 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 		const authenticated = await this.authenticateWithBiometric(
 			"Unlock all accounts",
-			firstAccountEmail,
+			firstAccountId,
 		);
 
 		if (!authenticated) {
 			for (const account of accountsList) {
 				failed.push({
-					email: account.email,
+					accountId: account.accountId,
 					error: "Biometric authentication failed or cancelled",
 				});
 			}
@@ -1326,21 +1408,21 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		for (const account of accountsList) {
 			try {
 				const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
-					account.email,
+					account.accountId,
 					true,
 				);
 				if (masterUnlockKey) {
-					await this.setMasterUnlockKey(masterUnlockKey, account.email);
-					unlocked.push(account.email);
+					await this.setMasterUnlockKey(masterUnlockKey, account.accountId);
+					unlocked.push(account.accountId);
 				} else {
 					failed.push({
-						email: account.email,
+						accountId: account.accountId,
 						error: "Could not decrypt session data",
 					});
 				}
 			} catch (error) {
 				failed.push({
-					email: account.email,
+					accountId: account.accountId,
 					error: error instanceof Error ? error.message : "Unknown error",
 				});
 			}
@@ -1352,43 +1434,40 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Check if Secret Key is stored
 	 */
-	async hasStoredSecretKey(email?: string): Promise<boolean> {
-		const secretKey = await this.getStoredSecretKey(email);
+	async hasStoredSecretKey(accountId?: string): Promise<boolean> {
+		const secretKey = await this.getStoredSecretKey(accountId);
 		return secretKey != null;
 	}
 
 	/**
 	 * Get metadata for a specific account
 	 */
-	async getAccountMetadata(email: string): Promise<AccountMetadata | null> {
+	async getAccountMetadata(accountId: string): Promise<AccountMetadata | null> {
 		const accountsList = await this.getAccountsList();
-		return (
-			accountsList.find((a) => a.email.toLowerCase() === email.toLowerCase()) ??
-			null
-		);
+		return findAccountById(accountsList, accountId) ?? null;
 	}
 
 	/**
-	 * Get list of unlocked account emails (accounts with MUK currently in memory)
+	 * Get list of unlocked account IDs (accounts with MUK currently in memory)
 	 */
 	async getUnlockedAccounts(): Promise<string[]> {
-		const unlockedEmails: string[] = [];
-		for (const [email, cache] of accountCaches.entries()) {
+		const unlockedAccountIds: string[] = [];
+		for (const [accountId, cache] of accountCaches.entries()) {
 			if (cache.masterUnlockKey) {
-				unlockedEmails.push(email);
+				unlockedAccountIds.push(accountId);
 			}
 		}
-		return unlockedEmails;
+		return unlockedAccountIds;
 	}
 
 	/**
 	 * Check if master password re-entry is required (periodic security measure)
 	 */
-	async isMasterPasswordReentryRequired(email?: string): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return true;
+	async isMasterPasswordReentryRequired(accountId?: string): Promise<boolean> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return true;
 
-		const sessionData = await this.getStoredSessionData(resolvedEmail);
+		const sessionData = await this.getStoredSessionData(resolvedAccountId);
 		if (!sessionData) return true;
 
 		const lastPasswordEntry =
@@ -1400,24 +1479,24 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Unlock with biometric authentication
 	 */
-	async unlockWithBiometric(email?: string): Promise<boolean> {
+	async unlockWithBiometric(accountId?: string): Promise<boolean> {
 		try {
-			const resolvedEmail = await this.resolveEmail(email);
-			if (!resolvedEmail) return false;
+			const resolvedAccountId = await this.resolveAccountId(accountId);
+			if (!resolvedAccountId) return false;
 
-			if (!(await this.canBiometricUnlock(resolvedEmail))) {
+			if (!(await this.canBiometricUnlock(resolvedAccountId))) {
 				return false;
 			}
 
 			const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
-				resolvedEmail,
+				resolvedAccountId,
 				false,
 			);
 			if (!masterUnlockKey) {
 				return false;
 			}
 
-			await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
+			await this.setMasterUnlockKey(masterUnlockKey, resolvedAccountId);
 			return true;
 		} catch (error) {
 			console.error("[storage-react-native] Biometric unlock failed:", error);
@@ -1426,35 +1505,38 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	// Aliases for backward compatibility
-	async storeMasterUnlockKey(key: Uint8Array, email?: string): Promise<void> {
-		return this.setMasterUnlockKey(key, email);
+	async storeMasterUnlockKey(
+		key: Uint8Array,
+		accountId?: string,
+	): Promise<void> {
+		return this.setMasterUnlockKey(key, accountId);
 	}
 
 	async addAccountToList(metadata: AccountMetadata): Promise<void> {
 		return this.addAccount(metadata);
 	}
 
-	async removeAccountFromList(email: string): Promise<void> {
+	async removeAccountFromList(accountId: string): Promise<void> {
 		// Note: This only removes from list, not all account data
 		const accountsList = await this.getAccountsListInternal();
 		accountsList.accounts = accountsList.accounts.filter(
-			(a) => a.email.toLowerCase() !== email.toLowerCase(),
+			(a) => a.accountId !== accountId,
 		);
 		await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
 	}
 
-	async clearAccountData(email: string): Promise<void> {
-		await this.removeAccount(email);
+	async clearAccountData(accountId: string): Promise<void> {
+		await this.removeAccount(accountId);
 	}
 
 	/**
 	 * Store the timestamp when app went to background
 	 */
-	async storeBackgroundTimestamp(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async storeBackgroundTimestamp(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const key = getAccountKey(resolvedEmail, "background_timestamp");
+		const key = getAccountKey(resolvedAccountId, "background_timestamp");
 		await this.setItem(key, Date.now().toString());
 	}
 
@@ -1468,11 +1550,11 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Get the timestamp when app went to background
 	 */
-	async getBackgroundTimestamp(email?: string): Promise<number | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getBackgroundTimestamp(accountId?: string): Promise<number | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const key = getAccountKey(resolvedEmail, "background_timestamp");
+		const key = getAccountKey(resolvedAccountId, "background_timestamp");
 		const timestamp = await this.getItem(key);
 		return timestamp ? Number.parseInt(timestamp, 10) : null;
 	}
@@ -1488,11 +1570,11 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Clear the background timestamp
 	 */
-	async clearBackgroundTimestamp(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearBackgroundTimestamp(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const key = getAccountKey(resolvedEmail, "background_timestamp");
+		const key = getAccountKey(resolvedAccountId, "background_timestamp");
 		await this.deleteItem(key);
 	}
 
@@ -1506,16 +1588,16 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Check if app should require re-authentication after returning from background
 	 */
-	async shouldRequireAuthAfterBackground(email?: string): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+	async shouldRequireAuthAfterBackground(accountId?: string): Promise<boolean> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
 		const backgroundTimestamp =
-			await this.getBackgroundTimestamp(resolvedEmail);
+			await this.getBackgroundTimestamp(resolvedAccountId);
 		if (!backgroundTimestamp) return false;
 
 		const autoLockTimeout =
-			await this.getAutoLockTimeoutOrDefault(resolvedEmail);
+			await this.getAutoLockTimeoutOrDefault(resolvedAccountId);
 
 		// If auto-lock is set to "Never" (-1), don't require re-auth
 		if (autoLockTimeout === -1) return false;
@@ -1541,23 +1623,23 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	/**
 	 * Check if biometric authentication is required (public wrapper)
 	 */
-	async isBiometricAuthRequiredPublic(email?: string): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
-		return this.isBiometricAuthRequiredInternal(resolvedEmail);
+	async isBiometricAuthRequiredPublic(accountId?: string): Promise<boolean> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
+		return this.isBiometricAuthRequiredInternal(resolvedAccountId);
 	}
 
 	/**
 	 * Decrypt stored master unlock key (interface method)
 	 */
 	async decryptStoredMasterUnlockKey(
-		email?: string,
+		accountId?: string,
 		skipBiometric = false,
 	): Promise<Uint8Array | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 		return this.decryptStoredMasterUnlockKeyInternal(
-			resolvedEmail,
+			resolvedAccountId,
 			skipBiometric,
 		);
 	}
@@ -1566,25 +1648,25 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	 * @deprecated Use decryptStoredMasterUnlockKey instead
 	 */
 	async decryptStoredMasterUnlockKeyPublic(
-		email?: string,
+		accountId?: string,
 		skipBiometric = false,
 	): Promise<Uint8Array | null> {
-		return this.decryptStoredMasterUnlockKey(email, skipBiometric);
+		return this.decryptStoredMasterUnlockKey(accountId, skipBiometric);
 	}
 
 	/**
 	 * Update the last master password entry timestamp (for 30-day re-entry requirement)
 	 */
-	async updateLastMasterPasswordEntry(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async updateLastMasterPasswordEntry(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const sessionData = await this.getStoredSessionData(resolvedEmail);
+		const sessionData = await this.getStoredSessionData(resolvedAccountId);
 		if (!sessionData) return;
 
 		sessionData.lastMasterPasswordEntry = Date.now();
 
-		const key = getAccountKey(resolvedEmail, "session_data");
+		const key = getAccountKey(resolvedAccountId, "session_data");
 		await this.setItem(key, JSON.stringify(sessionData));
 	}
 
@@ -1593,11 +1675,11 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	 */
 	async authenticateWithBiometricEnhanced(
 		reason = "Unlock Bittery",
-		email?: string,
+		accountId?: string,
 	): Promise<BiometricAuthResult> {
 		try {
-			const resolvedEmail = await this.resolveEmail(email);
-			if (!resolvedEmail) {
+			const resolvedAccountId = await this.resolveAccountId(accountId);
+			if (!resolvedAccountId) {
 				return {
 					success: false,
 					error: "unknown",
@@ -1635,7 +1717,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			}
 
 			// Check if biometric is enabled for this account
-			const isEnabled = await this.isBiometricEnabled(resolvedEmail);
+			const isEnabled = await this.isBiometricEnabled(resolvedAccountId);
 			if (!isEnabled) {
 				return {
 					success: false,
@@ -1645,7 +1727,9 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			}
 
 			// Check if master password re-entry is required
-			if (await this.isMasterPasswordReentryRequiredInternal(resolvedEmail)) {
+			if (
+				await this.isMasterPasswordReentryRequiredInternal(resolvedAccountId)
+			) {
 				return {
 					success: false,
 					error: "master_password_required",
@@ -1655,7 +1739,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			}
 
 			// Check if session is valid
-			if (!(await this.isSessionValid(resolvedEmail))) {
+			if (!(await this.isSessionValid(resolvedAccountId))) {
 				return {
 					success: false,
 					error: "session_expired",
@@ -1672,11 +1756,11 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 			if (result.success) {
 				// Update last biometric auth timestamp
-				const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+				const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
 				await this.setItem(key, Date.now().toString());
 
 				// Clear background timestamp on successful auth
-				await this.clearBackgroundTimestamp(resolvedEmail);
+				await this.clearBackgroundTimestamp(resolvedAccountId);
 
 				return { success: true };
 			}

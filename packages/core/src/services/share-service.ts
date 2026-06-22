@@ -3,6 +3,7 @@ import {
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
 import type { DecryptedItem } from "@bittery/shared/types";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
@@ -73,9 +74,11 @@ export class ShareService {
 			accountEmail,
 		} = input;
 
+		const accountId = await resolveAccountScopeId(this.storage, accountEmail);
+
 		const vaultKey = await getDecryptedVaultKeyUtil({
 			vaultId: item.vaultId,
-			email: accountEmail,
+			accountId,
 			storage: this.storage,
 			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
 		});

@@ -320,6 +320,7 @@ export function useSignupForm({
 				encryptedVaultKey: JSON.stringify(encryptedVaultKey),
 			});
 
+			const accountId = crypto.randomUUID();
 			await storage.setMasterUnlockKey(masterUnlockKey);
 			await storage.storeEncryptedPrivateKey(
 				JSON.stringify(encryptedPrivateKey),
@@ -327,6 +328,7 @@ export function useSignupForm({
 			await storage.storeSecretKey(secretKey);
 			await storage.storeSessionData(
 				masterUnlockKey,
+				accountId,
 				email,
 				result.userId,
 				result.expiresAt,

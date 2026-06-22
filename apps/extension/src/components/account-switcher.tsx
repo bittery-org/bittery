@@ -25,7 +25,7 @@ export function ExtensionAccountSwitcher() {
 	const {
 		accounts,
 		activeAccount: activeAccountQuery,
-		unlockedEmails,
+		unlockedAccountIds,
 		switchAccount,
 		lockAllAccounts,
 	} = useAccountSwitcher();
@@ -55,7 +55,23 @@ export function ExtensionAccountSwitcher() {
 	});
 
 	const accountsData = accounts.data ?? [];
-	const localUnlockedEmails = unlockedEmails.data ?? [];
+	const localUnlockedAccountIds = unlockedAccountIds.data ?? [];
+
+	const accountEmailById = useMemo(
+		() =>
+			new Map(
+				accountsData.map((account) => [account.accountId, account.email]),
+			),
+		[accountsData],
+	);
+
+	const localUnlockedEmails = useMemo(
+		() =>
+			localUnlockedAccountIds
+				.map((accountId) => accountEmailById.get(accountId))
+				.filter((email): email is string => Boolean(email)),
+		[accountEmailById, localUnlockedAccountIds],
+	);
 
 	// Merge local unlocked emails with desktop unlocked accounts
 	const desktopUnlockedEmails =
@@ -68,12 +84,16 @@ export function ExtensionAccountSwitcher() {
 		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
 	);
 
-	const activeAccountEmail =
+	const activeAccountId =
 		activeAccountQuery.data?.type === "single"
-			? activeAccountQuery.data.email
+			? activeAccountQuery.data.accountId
 			: activeAccountQuery.data?.type === "all"
 				? "all"
 				: null;
+	const activeAccountEmail =
+		activeAccountId && activeAccountId !== "all"
+			? (accountEmailById.get(activeAccountId) ?? null)
+			: activeAccountId;
 
 	// Update team names for accounts that don't have them
 	useEffect(() => {
@@ -84,12 +104,11 @@ export function ExtensionAccountSwitcher() {
 
 				try {
 					// Get auth token for this account
-					const authToken = await storage.getAuthToken(account.email);
+					const authToken = await storage.getAuthToken(account.accountId);
 					if (!authToken) continue;
 
-					// Fetch user data from server
 					const serverUrl =
-						(await storage.getServerUrl(account.email)) ||
+						(await storage.getServerUrl(account.accountId)) ||
 						"http://localhost:3000";
 					const client = createAccountRpcClient(authToken, serverUrl);
 
@@ -121,8 +140,16 @@ export function ExtensionAccountSwitcher() {
 	const handleSwitchAccount = async (email: string) => {
 		if (email === activeAccountEmail) return;
 
+		const account = accountsData.find(
+			(item) => item.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (!account) return;
+
 		try {
-			await switchAccount.mutateAsync({ type: "single", email });
+			await switchAccount.mutateAsync({
+				type: "single",
+				accountId: account.accountId,
+			});
 
 			// Check if desktop is available and has this account unlocked
 			const desktopStatus = await chrome.runtime.sendMessage({
@@ -135,7 +162,7 @@ export function ExtensionAccountSwitcher() {
 				desktopStatus?.unlockedAccounts?.includes(email);
 
 			// Check local session validity
-			const sessionValid = await storage.isSessionValid(email);
+			const sessionValid = await storage.isSessionValid(account.accountId);
 
 			// If account is unlocked in desktop OR has valid local session, just switch
 			if (isUnlockedInDesktop || sessionValid) {

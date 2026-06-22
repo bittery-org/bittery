@@ -1,4 +1,5 @@
 import { useRPCClient } from "@bittery/shared/rpc";
+import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { TravelModeConfig } from "@bittery/storage/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { deriveSrpLoginProof, type IAuthClient } from "../auth";
@@ -7,12 +8,27 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../context/platform-context";
+import { getTravelModeEnforcer } from "../services/travel-mode-enforcer";
 import {
 	getTravelModeService,
 	type TravelModeRpcClient,
 } from "../services/travel-mode-service";
 import { restoreAfterTravelModeDisabled } from "../services/travel-mode-sync";
 import type { RpcVaultClient } from "../services/vault-service";
+
+async function resolveAccountIdByEmail(
+	storage: IStorageAdapter,
+	email: string,
+): Promise<string> {
+	const accounts = await storage.getAccountsList();
+	const match = accounts.find(
+		(account) => account.email.toLowerCase() === email.toLowerCase(),
+	);
+	if (!match) {
+		throw new Error("No active account");
+	}
+	return match.accountId;
+}
 
 export function useTravelMode(email?: string) {
 	const queryClient = useQueryClient();
@@ -29,14 +45,11 @@ export function useTravelMode(email?: string) {
 			if (!email) {
 				return null;
 			}
-			const config = await travelModeService.fetchFromServer(email, rpcClient);
-			if (config.enabled) {
-				vaultCoordinator.purgeHiddenVaultsForEmail(
-					email,
-					config.hiddenVaultIds,
-				);
-			} else {
-				const localKeys = await storage.getVaultKeys(email);
+			const accountId = await resolveAccountIdByEmail(storage, email);
+			const enforcer = getTravelModeEnforcer(storage, vaultCoordinator);
+			const config = await enforcer.fetchFromServer(accountId, rpcClient);
+			if (!config.enabled) {
+				const localKeys = await storage.getVaultKeys(accountId);
 				const serverVaults = await (
 					rpcClient as unknown as RpcVaultClient
 				).vault.list.query();
@@ -49,7 +62,7 @@ export function useTravelMode(email?: string) {
 					[...localVaultIds].some((vaultId) => !serverVaultIds.has(vaultId));
 				if (vaultIdsMismatch) {
 					await restoreAfterTravelModeDisabled(
-						email,
+						accountId,
 						storage,
 						vaultCoordinator,
 						{
@@ -68,8 +81,9 @@ export function useTravelMode(email?: string) {
 			if (!email) {
 				throw new Error("No active account");
 			}
+			const accountId = await resolveAccountIdByEmail(storage, email);
 			return travelModeService.setHiddenVaults(
-				email,
+				accountId,
 				hiddenVaultIds,
 				rpcClient,
 			);
@@ -85,13 +99,9 @@ export function useTravelMode(email?: string) {
 			if (!email) {
 				throw new Error("No active account");
 			}
-			const config = await travelModeService.enable(
-				email,
-				hiddenVaultIds,
-				rpcClient,
-			);
-			vaultCoordinator.purgeHiddenVaultsForEmail(email, config.hiddenVaultIds);
-			return config;
+			const accountId = await resolveAccountIdByEmail(storage, email);
+			const enforcer = getTravelModeEnforcer(storage, vaultCoordinator);
+			return enforcer.enable(accountId, hiddenVaultIds, rpcClient);
 		},
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({ queryKey: ["travel-mode"] });
@@ -104,16 +114,23 @@ export function useTravelMode(email?: string) {
 			if (!email) {
 				throw new Error("No active account");
 			}
+			const accountId = await resolveAccountIdByEmail(storage, email);
 			const proof = await deriveSrpLoginProof(
 				{ email, password: input.password },
 				{ crypto, rpcClient: rpcClient as unknown as IAuthClient, storage },
 			);
-			const config = await travelModeService.disable(email, rpcClient, proof);
+			const enforcer = getTravelModeEnforcer(storage, vaultCoordinator);
+			const config = await enforcer.disable(accountId, rpcClient, proof);
 			if (!config.enabled) {
-				await restoreAfterTravelModeDisabled(email, storage, vaultCoordinator, {
-					rpcClient: rpcClient as unknown as RpcVaultClient,
-					accounts,
-				});
+				await restoreAfterTravelModeDisabled(
+					accountId,
+					storage,
+					vaultCoordinator,
+					{
+						rpcClient: rpcClient as unknown as RpcVaultClient,
+						accounts,
+					},
+				);
 			}
 			return config;
 		},

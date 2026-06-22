@@ -48,10 +48,6 @@ const DEFAULT_CONFIG: TravelModeConfig = {
 	hiddenVaultIds: [],
 };
 
-function normalizeEmail(email: string): string {
-	return email.toLowerCase();
-}
-
 export function mapTravelModeResponse(
 	response: TravelModeServerResponse,
 ): TravelModeConfig {
@@ -107,52 +103,48 @@ export class TravelModeService {
 
 	constructor(private readonly storage: IStorageAdapter) {}
 
-	private cacheKey(email: string): string {
-		return normalizeEmail(email);
-	}
-
-	getConfig(email: string): TravelModeConfig {
+	getConfig(accountId: string): TravelModeConfig {
 		return (
-			this.memoryCache.get(this.cacheKey(email)) ?? {
+			this.memoryCache.get(accountId) ?? {
 				...DEFAULT_CONFIG,
 			}
 		);
 	}
 
-	isEnabled(email: string): boolean {
-		return this.getConfig(email).enabled;
+	isEnabled(accountId: string): boolean {
+		return this.getConfig(accountId).enabled;
 	}
 
-	async hydrateFromStorage(email: string): Promise<TravelModeConfig> {
-		const cached = (await this.storage.getTravelModeCache?.(email)) ?? null;
+	async hydrateFromStorage(accountId: string): Promise<TravelModeConfig> {
+		const cached = (await this.storage.getTravelModeCache?.(accountId)) ?? null;
 		const config = cached ?? DEFAULT_CONFIG;
-		this.memoryCache.set(this.cacheKey(email), config);
+		this.memoryCache.set(accountId, config);
 		return config;
 	}
 
 	private async persistConfig(
-		email: string,
+		accountId: string,
 		config: TravelModeConfig,
 	): Promise<void> {
-		this.memoryCache.set(this.cacheKey(email), config);
-		await this.storage.storeTravelModeCache?.(config, email);
+		this.memoryCache.set(accountId, config);
+		await this.storage.storeTravelModeCache?.(config, accountId);
 	}
 
 	async fetchFromServer(
-		email: string,
+		accountId: string,
 		rpcClient: TravelModeRpcClient,
 	): Promise<TravelModeConfig> {
 		const response = await rpcClient.travelMode.getTravelMode.query();
 		const config = mapTravelModeResponse(response);
-		await this.persistConfig(email, config);
+		await this.persistConfig(accountId, config);
 		if (config.enabled) {
-			await this.purgeHiddenVaultData(email, config.hiddenVaultIds);
+			await this.purgeHiddenVaultData(accountId, config.hiddenVaultIds);
 		}
 		return config;
 	}
 
 	async setHiddenVaults(
-		email: string,
+		accountId: string,
 		hiddenVaultIds: string[],
 		rpcClient: TravelModeRpcClient,
 	): Promise<TravelModeConfig> {
@@ -161,12 +153,12 @@ export class TravelModeService {
 				hiddenVaultIds,
 			});
 		const config = mapTravelModeResponse(response);
-		await this.persistConfig(email, config);
+		await this.persistConfig(accountId, config);
 		return config;
 	}
 
 	async enable(
-		email: string,
+		accountId: string,
 		hiddenVaultIds: string[],
 		rpcClient: TravelModeRpcClient,
 	): Promise<TravelModeConfig> {
@@ -174,13 +166,13 @@ export class TravelModeService {
 			hiddenVaultIds,
 		});
 		const config = mapTravelModeResponse(response);
-		await this.persistConfig(email, config);
-		await this.purgeHiddenVaultData(email, config.hiddenVaultIds);
+		await this.persistConfig(accountId, config);
+		await this.purgeHiddenVaultData(accountId, config.hiddenVaultIds);
 		return config;
 	}
 
 	async disable(
-		email: string,
+		accountId: string,
 		rpcClient: TravelModeRpcClient,
 		proof: TravelModeDisableProof,
 	): Promise<TravelModeConfig> {
@@ -190,22 +182,22 @@ export class TravelModeService {
 			clientProof: proof.clientProof,
 		});
 		const config = mapTravelModeResponse(response);
-		await this.persistConfig(email, config);
+		await this.persistConfig(accountId, config);
 		return config;
 	}
 
 	async applyRemoteUpdate(
-		email: string,
+		accountId: string,
 		config: TravelModeConfig,
 	): Promise<void> {
-		await this.persistConfig(email, config);
+		await this.persistConfig(accountId, config);
 		if (config.enabled) {
-			await this.purgeHiddenVaultData(email, config.hiddenVaultIds);
+			await this.purgeHiddenVaultData(accountId, config.hiddenVaultIds);
 		}
 	}
 
 	async applySyncEventMetadata(
-		email: string,
+		accountId: string,
 		metadata: Record<string, unknown> | undefined,
 	): Promise<void> {
 		if (!metadata) {
@@ -215,14 +207,14 @@ export class TravelModeService {
 		const enabled =
 			typeof metadata.enabled === "boolean"
 				? metadata.enabled
-				: this.getConfig(email).enabled;
+				: this.getConfig(accountId).enabled;
 		const hiddenVaultIds = Array.isArray(metadata.hiddenVaultIds)
 			? metadata.hiddenVaultIds.filter(
 					(value): value is string => typeof value === "string",
 				)
-			: this.getConfig(email).hiddenVaultIds;
+			: this.getConfig(accountId).hiddenVaultIds;
 
-		await this.applyRemoteUpdate(email, {
+		await this.applyRemoteUpdate(accountId, {
 			enabled,
 			hiddenVaultIds,
 			enabledAt: enabled ? Date.now() : null,
@@ -230,20 +222,23 @@ export class TravelModeService {
 		});
 	}
 
-	filterVaultKeys<T extends VaultKeyData>(email: string, vaultKeys: T[]): T[] {
-		return filterVaultKeys(vaultKeys, this.getConfig(email));
+	filterVaultKeys<T extends VaultKeyData>(
+		accountId: string,
+		vaultKeys: T[],
+	): T[] {
+		return filterVaultKeys(vaultKeys, this.getConfig(accountId));
 	}
 
-	filterItems<T extends TravelModeItem>(email: string, items: T[]): T[] {
-		return filterItemsByTravelMode(items, this.getConfig(email));
+	filterItems<T extends TravelModeItem>(accountId: string, items: T[]): T[] {
+		return filterItemsByTravelMode(items, this.getConfig(accountId));
 	}
 
-	shouldCacheVault(email: string, vaultId: string): boolean {
-		return shouldCacheVaultForTravelMode(vaultId, this.getConfig(email));
+	shouldCacheVault(accountId: string, vaultId: string): boolean {
+		return shouldCacheVaultForTravelMode(vaultId, this.getConfig(accountId));
 	}
 
 	async purgeHiddenVaultData(
-		email: string,
+		accountId: string,
 		hiddenVaultIds: string[],
 	): Promise<void> {
 		if (hiddenVaultIds.length === 0) {
@@ -251,39 +246,39 @@ export class TravelModeService {
 		}
 
 		const hidden = new Set(hiddenVaultIds);
-		const vaultKeys = await this.storage.getVaultKeys(email);
+		const vaultKeys = await this.storage.getVaultKeys(accountId);
 		if (vaultKeys) {
 			const filtered = vaultKeys.filter(
 				(vaultKey) => !hidden.has(vaultKey.vaultId),
 			);
-			await this.storage.storeVaultKeys(filtered, email);
+			await this.storage.storeVaultKeys(filtered, accountId);
 		}
 
-		const cachedItems = await this.storage.getCachedItems?.(email);
+		const cachedItems = await this.storage.getCachedItems?.(accountId);
 		if (cachedItems) {
 			const filteredItems = cachedItems.filter(
 				(item) => !hidden.has(item.vaultId),
 			);
-			await this.storage.setCachedItems?.(filteredItems, email);
+			await this.storage.setCachedItems?.(filteredItems, accountId);
 		}
 
-		const cachedVaults = await this.storage.getCachedVaults?.(email);
+		const cachedVaults = await this.storage.getCachedVaults?.(accountId);
 		if (cachedVaults) {
 			const filteredVaults = cachedVaults.filter(
 				(vault) => !hidden.has(vault.id),
 			);
-			await this.storage.setCachedVaults?.(filteredVaults, email);
+			await this.storage.setCachedVaults?.(filteredVaults, accountId);
 		}
 	}
 
 	async stripVaultKeysIfActive(
-		email: string,
+		accountId: string,
 		vaultKeys: VaultKeyData[],
 	): Promise<VaultKeyData[]> {
-		const config = this.getConfig(email);
+		const config = this.getConfig(accountId);
 		const filtered = filterVaultKeys(vaultKeys, config);
 		if (filtered.length !== vaultKeys.length) {
-			await this.storage.storeVaultKeys(filtered, email);
+			await this.storage.storeVaultKeys(filtered, accountId);
 		}
 		return filtered;
 	}

@@ -8,6 +8,7 @@ import type {
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
 	CachedAttachment,
@@ -208,14 +209,16 @@ export class ItemService {
 		return `item_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 	}
 
-	private async resolveUserId(email?: string): Promise<string> {
-		const sessionUserId = await this.storage.getStoredSessionData?.(email);
+	private async resolveUserId(scope?: string): Promise<string> {
+		const accountId = await resolveAccountScopeId(this.storage, scope);
+		const sessionUserId = await this.storage.getStoredSessionData?.(accountId);
 		if (sessionUserId?.userId) {
 			return sessionUserId.userId;
 		}
 
-		if (email) {
-			const accountMetadata = await this.storage.getAccountMetadata?.(email);
+		if (accountId) {
+			const accountMetadata =
+				await this.storage.getAccountMetadata?.(accountId);
 			if (accountMetadata?.userId) {
 				return accountMetadata.userId;
 			}
@@ -326,11 +329,12 @@ export class ItemService {
 
 	private async getVaultKey(
 		vaultId: string,
-		email?: string,
+		scope?: string,
 	): Promise<Uint8Array | null> {
+		const accountId = await resolveAccountScopeId(this.storage, scope);
 		return getDecryptedVaultKeyUtil({
 			vaultId,
-			email,
+			accountId,
 			storage: this.storage,
 			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
 		});
@@ -471,8 +475,8 @@ export class ItemService {
 					let rawItems: RawEncryptedItemWithVault[];
 
 					const [cachedItems, cachedVaults] = await Promise.all([
-						this.storage.getCachedItems?.(account.email),
-						this.storage.getCachedVaults?.(account.email),
+						this.storage.getCachedItems?.(account.accountId),
+						this.storage.getCachedVaults?.(account.accountId),
 					]);
 
 					if (cachedItems && cachedVaults && cachedItems.length > 0) {
@@ -486,15 +490,15 @@ export class ItemService {
 						const cachedItems = this.toCachedItems(rawItems, account);
 						const cachedVaults = this.toCachedVaults(rawItems, account);
 						await Promise.all([
-							this.storage.setCachedItems?.(cachedItems, account.email),
-							this.storage.setCachedVaults?.(cachedVaults, account.email),
+							this.storage.setCachedItems?.(cachedItems, account.accountId),
+							this.storage.setCachedVaults?.(cachedVaults, account.accountId),
 							this.storage.setItemCacheMetadata?.(
 								{
 									lastFullSyncAt: Date.now(),
 									itemCount: cachedItems.length,
 									cacheVersion: 1,
 								},
-								account.email,
+								account.accountId,
 							),
 						]);
 					}
@@ -507,7 +511,7 @@ export class ItemService {
 								if (!vaultKey) {
 									const fetchedKey = await this.getVaultKey(
 										rawItem.vaultId,
-										account.email,
+										account.accountId,
 									);
 									if (fetchedKey) {
 										vaultKey = fetchedKey;
@@ -594,7 +598,7 @@ export class ItemService {
 
 		let ownerAccount: AccountInfo | null = null;
 		for (const account of accounts) {
-			const vaultKeys = await this.storage.getVaultKeys(account.email);
+			const vaultKeys = await this.storage.getVaultKeys(account.accountId);
 			if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
 				ownerAccount = account;
 				break;
@@ -606,7 +610,9 @@ export class ItemService {
 		}
 
 		let rawItems: RawEncryptedItem[];
-		const cachedItems = await this.storage.getCachedItems?.(ownerAccount.email);
+		const cachedItems = await this.storage.getCachedItems?.(
+			ownerAccount.accountId,
+		);
 		if (cachedItems && cachedItems.length > 0) {
 			const vaultItems = cachedItems.filter(
 				(item) => item.vaultId === vaultId && !item.deletedAt,
@@ -640,7 +646,7 @@ export class ItemService {
 			return [];
 		}
 
-		const vaultKey = await this.getVaultKey(vaultId, ownerAccount.email);
+		const vaultKey = await this.getVaultKey(vaultId, ownerAccount.accountId);
 		if (!vaultKey) {
 			throw new Error(`No vault key found for vault ${vaultId}`);
 		}
@@ -696,7 +702,8 @@ export class ItemService {
 
 		let rawItem: RawEncryptedItemWithVersion | null = null;
 
-		const cachedItems = await this.storage.getCachedItems?.(accountEmail);
+		const accountId = await resolveAccountScopeId(this.storage, accountEmail);
+		const cachedItems = await this.storage.getCachedItems?.(accountId);
 		const cached = cachedItems?.find((item) => item.id === itemId);
 		if (cached) {
 			rawItem = {
@@ -774,8 +781,8 @@ export class ItemService {
 					let rawItems: RawEncryptedItemWithVault[];
 
 					const [cachedItems, cachedVaults] = await Promise.all([
-						this.storage.getCachedItems?.(account.email),
-						this.storage.getCachedVaults?.(account.email),
+						this.storage.getCachedItems?.(account.accountId),
+						this.storage.getCachedVaults?.(account.accountId),
 					]);
 
 					if (cachedItems && cachedVaults) {
@@ -806,7 +813,7 @@ export class ItemService {
 									if (!vaultKey) {
 										const fetchedKey = await this.getVaultKey(
 											rawItem.vaultId,
-											account.email,
+											account.accountId,
 										);
 										if (fetchedKey) {
 											vaultKey = fetchedKey;
@@ -1014,8 +1021,11 @@ export class ItemService {
 		let targetAccountEmail = input.targetAccountEmail ?? sourceAccountEmail;
 
 		if (!input.targetAccountEmail) {
-			const sourceVaultKeys =
-				await this.storage.getVaultKeys(sourceAccountEmail);
+			const sourceAccountId = await resolveAccountScopeId(
+				this.storage,
+				sourceAccountEmail,
+			);
+			const sourceVaultKeys = await this.storage.getVaultKeys(sourceAccountId);
 			const targetInSource = sourceVaultKeys?.some(
 				(vaultKey) => vaultKey.vaultId === input.targetVaultId,
 			);
@@ -1028,7 +1038,7 @@ export class ItemService {
 					if (account.email === sourceAccountEmail) {
 						continue;
 					}
-					const vaultKeys = await this.storage.getVaultKeys(account.email);
+					const vaultKeys = await this.storage.getVaultKeys(account.accountId);
 					if (
 						vaultKeys?.some(
 							(vaultKey) => vaultKey.vaultId === input.targetVaultId,

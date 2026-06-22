@@ -18,9 +18,12 @@ export const Route = createFileRoute("/")({
 			// Has accounts but none active, set first as active
 			await storage.setActiveAccount({
 				type: "single",
-				email: accountsList[0].email,
+				accountId: accountsList[0].accountId,
 			});
-			activeAccount = { type: "single", email: accountsList[0].email };
+			activeAccount = {
+				type: "single",
+				accountId: accountsList[0].accountId,
+			};
 		}
 
 		// Handle "All Accounts" mode specially
@@ -36,13 +39,16 @@ export const Route = createFileRoute("/")({
 		}
 
 		// Single account mode: check if active account has valid session
-		const sessionValid = await storage.isSessionValid(activeAccount.email);
+		const activeAccountEmail = accountsList.find(
+			(account) => account.accountId === activeAccount.accountId,
+		)?.email;
+		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
 
 		if (sessionValid) {
 			// Try to restore session
 			const restored = await storage.tryRestoreSession(
 				true,
-				activeAccount.email,
+				activeAccount.accountId,
 			);
 			if (restored) {
 				throw redirect({ to: "/vault" });
@@ -50,6 +56,9 @@ export const Route = createFileRoute("/")({
 		}
 
 		// Session not valid or restore failed, go to unlock
-		throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
+		throw redirect({
+			to: "/unlock",
+			search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
+		});
 	},
 });

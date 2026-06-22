@@ -7,7 +7,29 @@ import {
 	type SyncEventQueryClient,
 } from "../../src/background/services/sync-cache-service";
 
-type ActiveAccount = { type: "single"; email: string } | { type: "all" } | null;
+type ActiveAccount =
+	| { type: "single"; accountId: string }
+	| { type: "all" }
+	| null;
+
+type AccountInput =
+	| string
+	| { accountId: string; email: string; userId?: string };
+
+function resolveAccount(input: AccountInput): {
+	accountId: string;
+	email: string;
+	userId?: string;
+} {
+	if (typeof input === "string") {
+		const email = input;
+		return {
+			accountId: `acc_${email.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+			email,
+		};
+	}
+	return input;
+}
 
 function createClientStub(): SyncEventQueryClient {
 	return {
@@ -38,73 +60,76 @@ function createClientStub(): SyncEventQueryClient {
 
 function createStorageStub(input: {
 	activeAccount: ActiveAccount;
-	accounts: Array<string | { email: string; userId?: string }>;
-	tokensByEmail: Record<string, string | undefined>;
-	serverUrlsByEmail?: Record<string, string | undefined>;
-	vaultIdsByEmail?: Record<string, string[] | undefined>;
+	accounts: AccountInput[];
+	tokensByAccountId: Record<string, string | undefined>;
+	serverUrlsByAccountId?: Record<string, string | undefined>;
+	vaultIdsByAccountId?: Record<string, string[] | undefined>;
 	fallbackToken?: string | null;
-}): SyncCacheStorage & { clearedEmails: string[] } {
+}): SyncCacheStorage & { clearedAccountIds: string[] } {
+	const resolvedAccounts = input.accounts.map(resolveAccount);
 	const tokenMap = new Map<string, string>(
-		Object.entries(input.tokensByEmail)
+		Object.entries(input.tokensByAccountId)
 			.filter(([, token]) => !!token)
-			.map(([email, token]) => [email.toLowerCase(), token as string]),
+			.map(([accountId, token]) => [accountId, token as string]),
 	);
 	const serverUrlMap = new Map<string, string>(
-		Object.entries(input.serverUrlsByEmail ?? {})
+		Object.entries(input.serverUrlsByAccountId ?? {})
 			.filter(([, serverUrl]) => !!serverUrl)
-			.map(([email, serverUrl]) => [email.toLowerCase(), serverUrl as string]),
+			.map(([accountId, serverUrl]) => [accountId, serverUrl as string]),
 	);
 	const vaultIdMap = new Map<string, string[]>(
-		Object.entries(input.vaultIdsByEmail ?? {}).map(([email, vaultIds]) => [
-			email.toLowerCase(),
-			vaultIds ?? [],
-		]),
+		Object.entries(input.vaultIdsByAccountId ?? {}).map(
+			([accountId, vaultIds]) => [accountId, vaultIds ?? []],
+		),
 	);
-	const clearedEmails: string[] = [];
+	const clearedAccountIds: string[] = [];
 
 	return {
 		supportsItemCache: true,
-		clearedEmails,
+		clearedAccountIds,
 		getActiveAccount: async () => input.activeAccount,
-		getAccountsList: async () =>
-			input.accounts.map((account) =>
-				typeof account === "string" ? { email: account } : account,
-			),
-		getAuthToken: async (email?: string) => {
-			if (email) {
-				return tokenMap.get(email.toLowerCase()) ?? null;
+		getAccountsList: async () => resolvedAccounts,
+		getAuthToken: async (accountId?: string) => {
+			if (accountId) {
+				return tokenMap.get(accountId) ?? null;
 			}
 
 			const active = input.activeAccount;
 			if (active && active.type === "single") {
-				return tokenMap.get(active.email.toLowerCase()) ?? null;
+				return tokenMap.get(active.accountId) ?? null;
 			}
 			return input.fallbackToken ?? null;
 		},
-		storeAuthToken: async (token: string, email?: string) => {
-			if (!email) {
+		storeAuthToken: async (token: string, accountId?: string) => {
+			if (!accountId) {
 				return;
 			}
-			tokenMap.set(email.toLowerCase(), token);
+			tokenMap.set(accountId, token);
 		},
-		getServerUrl: async (email?: string) => {
-			if (!email) {
+		getServerUrl: async (accountId?: string) => {
+			if (!accountId) {
 				return null;
 			}
-			return serverUrlMap.get(email.toLowerCase()) ?? null;
+			return serverUrlMap.get(accountId) ?? null;
 		},
-		getVaultKeys: async (email?: string) => {
-			if (!email) {
+		getVaultKeys: async (accountId?: string) => {
+			if (!accountId) {
 				return null;
 			}
-			return (vaultIdMap.get(email.toLowerCase()) ?? []).map((vaultId) => ({
+			return (vaultIdMap.get(accountId) ?? []).map((vaultId) => ({
 				vaultId,
 			}));
 		},
-		clearItemCache: async (email?: string) => {
-			if (email) {
-				clearedEmails.push(email.toLowerCase());
+		clearItemCache: async (accountId?: string) => {
+			if (accountId) {
+				clearedAccountIds.push(accountId);
 			}
+		},
+		getAccountMetadata: async (accountId: string) => {
+			const account = resolvedAccounts.find(
+				(candidate) => candidate.accountId === accountId,
+			);
+			return account ? { email: account.email } : undefined;
 		},
 	};
 }
@@ -132,16 +157,22 @@ describe("sync-cache-service", () => {
 		}> = [];
 		let desktopCacheClearCount = 0;
 
+		const aliceAccountId = "acc_alice_example_com";
+		const teamAccountId = "acc_team_example_com";
+
 		const storage = createStorageStub({
 			activeAccount: { type: "all" },
-			accounts: ["team@example.com", "alice@example.com"],
-			tokensByEmail: {
-				"alice@example.com": "alice-token",
-				"team@example.com": "team-token",
+			accounts: [
+				{ accountId: teamAccountId, email: "team@example.com" },
+				{ accountId: aliceAccountId, email: "alice@example.com" },
+			],
+			tokensByAccountId: {
+				[aliceAccountId]: "alice-token",
+				[teamAccountId]: "team-token",
 			},
-			vaultIdsByEmail: {
-				"alice@example.com": ["vault_1"],
-				"team@example.com": ["vault_9"],
+			vaultIdsByAccountId: {
+				[aliceAccountId]: ["vault_1"],
+				[teamAccountId]: ["vault_9"],
 			},
 		});
 
@@ -182,14 +213,19 @@ describe("sync-cache-service", () => {
 	});
 
 	test("non-desktop mode resolves connection context from local token deterministically", async () => {
+		const bobAccountId = "acc_bob_example_com";
+
 		const storage = createStorageStub({
-			activeAccount: { type: "single", email: "Bob@example.com" },
-			accounts: ["z@example.com", "bob@example.com"],
-			tokensByEmail: {
-				"bob@example.com": "local-token",
+			activeAccount: { type: "single", accountId: bobAccountId },
+			accounts: [
+				{ accountId: "acc_z_example_com", email: "z@example.com" },
+				{ accountId: bobAccountId, email: "bob@example.com" },
+			],
+			tokensByAccountId: {
+				[bobAccountId]: "local-token",
 			},
-			serverUrlsByEmail: {
-				"bob@example.com": "https://api.example.com",
+			serverUrlsByAccountId: {
+				[bobAccountId]: "https://api.example.com",
 			},
 		});
 
@@ -215,13 +251,19 @@ describe("sync-cache-service", () => {
 
 	test("falls back to global cache update when account-scoped clients are unavailable", async () => {
 		const deltaCalls: Array<string | undefined> = [];
+		const accountAId = "acc_a_example_com";
+		const accountBId = "acc_b_example_com";
+
 		const storage = createStorageStub({
 			activeAccount: { type: "all" },
-			accounts: ["b@example.com", "a@example.com"],
-			tokensByEmail: {},
-			vaultIdsByEmail: {
-				"a@example.com": ["vault_1"],
-				"b@example.com": ["vault_1"],
+			accounts: [
+				{ accountId: accountBId, email: "b@example.com" },
+				{ accountId: accountAId, email: "a@example.com" },
+			],
+			tokensByAccountId: {},
+			vaultIdsByAccountId: {
+				[accountAId]: ["vault_1"],
+				[accountBId]: ["vault_1"],
 			},
 			fallbackToken: "fallback-token",
 		});
@@ -244,22 +286,33 @@ describe("sync-cache-service", () => {
 
 		// Both account-scoped attempts fail token resolution, then one global fallback run.
 		expect(deltaCalls).toEqual([undefined]);
-		expect(storage.clearedEmails).toEqual(["b@example.com", "a@example.com"]);
+		expect(storage.clearedAccountIds).toEqual([accountBId, accountAId]);
 	});
 
 	test("travel_mode_updated invokes travel mode handler only for matching account", async () => {
 		const deltaCalls: string[] = [];
 		const travelModeCalls: string[] = [];
 
+		const aliceAccountId = "acc_alice";
+		const teamAccountId = "acc_team";
+
 		const storage = createStorageStub({
 			activeAccount: { type: "all" },
 			accounts: [
-				{ email: "alice@example.com", userId: "user_alice" },
-				{ email: "team@example.com", userId: "user_team" },
+				{
+					accountId: aliceAccountId,
+					email: "alice@example.com",
+					userId: "user_alice",
+				},
+				{
+					accountId: teamAccountId,
+					email: "team@example.com",
+					userId: "user_team",
+				},
 			],
-			tokensByEmail: {
-				"alice@example.com": "alice-token",
-				"team@example.com": "team-token",
+			tokensByAccountId: {
+				[aliceAccountId]: "alice-token",
+				[teamAccountId]: "team-token",
 			},
 		});
 
@@ -274,8 +327,8 @@ describe("sync-cache-service", () => {
 			deltaSync: async (_client, _cache, event, accountEmail) => {
 				deltaCalls.push(`${event.type}:${accountEmail ?? "global"}`);
 			},
-			handleTravelModeSync: async (_event, email) => {
-				travelModeCalls.push(email);
+			handleTravelModeSync: async (_event, accountId) => {
+				travelModeCalls.push(accountId);
 			},
 			logger: console,
 		});
@@ -291,7 +344,7 @@ describe("sync-cache-service", () => {
 			}),
 		);
 
-		expect(travelModeCalls).toEqual(["alice@example.com"]);
+		expect(travelModeCalls).toEqual([aliceAccountId]);
 		expect(deltaCalls).toEqual([]);
 	});
 });

@@ -6,6 +6,7 @@ import type {
 	ICrypto,
 } from "@bittery/types";
 import type { AccountInfo } from "./account-resolver";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import {
 	type BootstrapItemsClient,
 	type VaultRepository,
@@ -14,6 +15,7 @@ import {
 } from "./vault-repository";
 
 export interface CoordinatedItemAccount {
+	accountId: string;
 	email: string;
 	userId: string;
 	name: string;
@@ -36,50 +38,18 @@ export class VaultRepositoryCoordinator {
 
 	private readonly repos = new Map<string, RepoEntry>();
 	private readonly listeners = new Set<() => void>();
-	private readonly accountInfoByEmail = new Map<
+	private readonly accountInfoByAccountId = new Map<
 		string,
 		CoordinatedItemAccount
 	>();
-	private readonly activeEmails = new Set<string>();
-	private readonly hydratingEmails = new Set<string>();
+	private readonly activeAccountIds = new Set<string>();
+	private readonly hydratingAccountIds = new Set<string>();
 	private snapshot = 0;
 
 	constructor(
 		private readonly crypto: ICrypto,
 		private readonly storage: IStorageAdapter,
 	) {}
-
-	private normalizeEmail(email: string): string {
-		return email.toLowerCase();
-	}
-
-	private resolvePreferredEmail(email?: string): string | undefined {
-		if (email) {
-			const normalized = this.normalizeEmail(email);
-			if (this.activeEmails.size === 0) {
-				return normalized;
-			}
-			if (this.activeEmails.has(normalized)) {
-				return normalized;
-			}
-			// If sync context points to a stale account while the UI has exactly one
-			// active account, prefer the active account to keep cache updates visible.
-			if (this.activeEmails.size === 1) {
-				return Array.from(this.activeEmails)[0];
-			}
-			return normalized;
-		}
-
-		if (this.activeEmails.size === 1) {
-			return Array.from(this.activeEmails)[0];
-		}
-
-		if (this.activeEmails.size === 0 && this.repos.size === 1) {
-			return Array.from(this.repos.keys())[0];
-		}
-
-		return undefined;
-	}
 
 	private emit(): void {
 		this.snapshot++;
@@ -88,16 +58,19 @@ export class VaultRepositoryCoordinator {
 		}
 	}
 
-	private attachRepo(email: string, repo: VaultRepository): void {
+	private attachRepo(accountId: string, repo: VaultRepository): void {
 		const unsubscribe = repo.subscribe(() => {
 			this.emit();
 		});
-		this.repos.set(email, { repo, unsubscribe });
+		this.repos.set(accountId, { repo, unsubscribe });
 	}
 
-	getOrCreate(email: string, serverUrl?: string): VaultRepository {
-		const normalized = this.normalizeEmail(email);
-		const existing = this.repos.get(normalized);
+	getOrCreate(
+		accountId: string,
+		serverUrl?: string,
+		accountEmail?: string,
+	): VaultRepository {
+		const existing = this.repos.get(accountId);
 		if (existing) {
 			if (serverUrl) {
 				existing.repo.setServerUrl(serverUrl);
@@ -108,52 +81,52 @@ export class VaultRepositoryCoordinator {
 		const repo = new VaultRepositoryImpl(
 			this.crypto,
 			this.storage,
-			normalized,
+			accountId,
 			serverUrl,
+			accountEmail,
 		);
-		this.attachRepo(normalized, repo);
+		this.attachRepo(accountId, repo);
 		return repo;
 	}
 
-	remove(email: string): void {
-		const normalized = this.normalizeEmail(email);
-		const entry = this.repos.get(normalized);
+	remove(accountId: string): void {
+		const entry = this.repos.get(accountId);
 		if (!entry) {
 			return;
 		}
 		entry.unsubscribe();
 		entry.repo.clear();
-		this.repos.delete(normalized);
-		this.accountInfoByEmail.delete(normalized);
-		this.activeEmails.delete(normalized);
+		this.repos.delete(accountId);
+		this.accountInfoByAccountId.delete(accountId);
+		this.activeAccountIds.delete(accountId);
 		this.emit();
 	}
 
 	private getActiveRepoEntries(): Array<[string, RepoEntry]> {
-		if (this.activeEmails.size === 0) {
+		if (this.activeAccountIds.size === 0) {
 			return Array.from(this.repos.entries());
 		}
-		return Array.from(this.repos.entries()).filter(([email]) =>
-			this.activeEmails.has(email),
+		return Array.from(this.repos.entries()).filter(([accountId]) =>
+			this.activeAccountIds.has(accountId),
 		);
 	}
 
 	setActiveAccounts(accounts: AccountInfo[]): void {
-		this.activeEmails.clear();
-		this.accountInfoByEmail.clear();
+		this.activeAccountIds.clear();
+		this.accountInfoByAccountId.clear();
 
 		for (const account of accounts) {
-			const normalized = this.normalizeEmail(account.email);
-			this.activeEmails.add(normalized);
-			this.accountInfoByEmail.set(normalized, {
-				email: normalized,
+			this.activeAccountIds.add(account.accountId);
+			this.accountInfoByAccountId.set(account.accountId, {
+				accountId: account.accountId,
+				email: account.email,
 				userId: account.userId,
 				name: account.name,
 				serverUrl: account.serverUrl,
 				teamName: account.teamName,
 				teamAvatarUrl: account.teamAvatarUrl,
 			});
-			this.getOrCreate(normalized, account.serverUrl);
+			this.getOrCreate(account.accountId, account.serverUrl, account.email);
 		}
 
 		this.emit();
@@ -164,17 +137,20 @@ export class VaultRepositoryCoordinator {
 
 		await Promise.all(
 			accounts.map(async (account) => {
-				const normalized = this.normalizeEmail(account.email);
-				const repo = this.getOrCreate(normalized, account.serverUrl);
+				const repo = this.getOrCreate(
+					account.accountId,
+					account.serverUrl,
+					account.email,
+				);
 
 				if (
 					(repo.isHydrated() && repo.hasCacheSnapshot()) ||
-					this.hydratingEmails.has(normalized)
+					this.hydratingAccountIds.has(account.accountId)
 				) {
 					return;
 				}
 
-				this.hydratingEmails.add(normalized);
+				this.hydratingAccountIds.add(account.accountId);
 				this.emit();
 
 				try {
@@ -187,7 +163,7 @@ export class VaultRepositoryCoordinator {
 						);
 					}
 				} finally {
-					this.hydratingEmails.delete(normalized);
+					this.hydratingAccountIds.delete(account.accountId);
 					this.emit();
 				}
 			}),
@@ -198,8 +174,11 @@ export class VaultRepositoryCoordinator {
 		this.setActiveAccounts(accounts);
 		await Promise.all(
 			accounts.map(async (account) => {
-				const normalized = this.normalizeEmail(account.email);
-				const repo = this.getOrCreate(normalized, account.serverUrl);
+				const repo = this.getOrCreate(
+					account.accountId,
+					account.serverUrl,
+					account.email,
+				);
 				await repo.hydrateFromServer(
 					account.rpcClient as unknown as BootstrapItemsClient,
 				);
@@ -208,14 +187,14 @@ export class VaultRepositoryCoordinator {
 	}
 
 	isHydrating(): boolean {
-		return this.hydratingEmails.size > 0;
+		return this.hydratingAccountIds.size > 0;
 	}
 
 	private withAccount(
 		item: VaultRepositoryItem,
-		email: string,
+		accountId: string,
 	): CoordinatedItem {
-		const account = this.accountInfoByEmail.get(email);
+		const account = this.accountInfoByAccountId.get(accountId);
 		if (!account) {
 			return item;
 		}
@@ -225,11 +204,24 @@ export class VaultRepositoryCoordinator {
 		};
 	}
 
+	private filterItemsForAccount(
+		accountId: string,
+		items: VaultRepositoryItem[],
+	): VaultRepositoryItem[] {
+		return getTravelModeEnforcer(this.storage, this).filterItems(
+			accountId,
+			items,
+		);
+	}
+
 	getAll(): CoordinatedItem[] {
 		const items: CoordinatedItem[] = [];
-		for (const [email, entry] of this.getActiveRepoEntries()) {
-			for (const item of entry.repo.getAll()) {
-				items.push(this.withAccount(item, email));
+		for (const [accountId, entry] of this.getActiveRepoEntries()) {
+			for (const item of this.filterItemsForAccount(
+				accountId,
+				entry.repo.getAll(),
+			)) {
+				items.push(this.withAccount(item, accountId));
 			}
 		}
 		return items;
@@ -237,19 +229,26 @@ export class VaultRepositoryCoordinator {
 
 	getByVault(vaultId: string): CoordinatedItem[] {
 		const items: CoordinatedItem[] = [];
-		for (const [email, entry] of this.getActiveRepoEntries()) {
-			for (const item of entry.repo.getByVault(vaultId)) {
-				items.push(this.withAccount(item, email));
+		for (const [accountId, entry] of this.getActiveRepoEntries()) {
+			for (const item of this.filterItemsForAccount(
+				accountId,
+				entry.repo.getByVault(vaultId),
+			)) {
+				items.push(this.withAccount(item, accountId));
 			}
 		}
 		return items;
 	}
 
 	getById(id: string): CoordinatedItem | undefined {
-		for (const [email, entry] of this.getActiveRepoEntries()) {
+		for (const [accountId, entry] of this.getActiveRepoEntries()) {
 			const item = entry.repo.getById(id);
 			if (item) {
-				return this.withAccount(item, email);
+				const filtered = this.filterItemsForAccount(accountId, [item]);
+				if (filtered.length === 0) {
+					return undefined;
+				}
+				return this.withAccount(item, accountId);
 			}
 		}
 		return undefined;
@@ -257,9 +256,12 @@ export class VaultRepositoryCoordinator {
 
 	getDeleted(): CoordinatedItem[] {
 		const items: CoordinatedItem[] = [];
-		for (const [email, entry] of this.getActiveRepoEntries()) {
-			for (const item of entry.repo.getDeleted()) {
-				items.push(this.withAccount(item, email));
+		for (const [accountId, entry] of this.getActiveRepoEntries()) {
+			for (const item of this.filterItemsForAccount(
+				accountId,
+				entry.repo.getDeleted(),
+			)) {
+				items.push(this.withAccount(item, accountId));
 			}
 		}
 		return items;
@@ -267,26 +269,34 @@ export class VaultRepositoryCoordinator {
 
 	findAccountForItem(
 		itemId: string,
-	): { email: string; repo: VaultRepository } | undefined {
-		for (const [email, entry] of this.repos.entries()) {
+	): { accountId: string; repo: VaultRepository } | undefined {
+		for (const [accountId, entry] of this.repos.entries()) {
 			const item = entry.repo.getById(itemId);
 			if (!item) {
 				continue;
 			}
 			if (item.accountEmail) {
-				return {
-					email: this.normalizeEmail(item.accountEmail),
-					repo: this.getOrCreate(item.accountEmail),
-				};
+				const accountInfo = Array.from(
+					this.accountInfoByAccountId.values(),
+				).find(
+					(info) =>
+						info.email.toLowerCase() === item.accountEmail?.toLowerCase(),
+				);
+				if (accountInfo) {
+					return {
+						accountId: accountInfo.accountId,
+						repo: this.getOrCreate(accountInfo.accountId),
+					};
+				}
 			}
-			return { email, repo: entry.repo };
+			return { accountId, repo: entry.repo };
 		}
 		return undefined;
 	}
 
-	replaceItemId(tempId: string, realId: string, email?: string): void {
-		if (email) {
-			this.getOrCreate(email).replaceItemId(tempId, realId);
+	replaceItemId(tempId: string, realId: string, accountId?: string): void {
+		if (accountId) {
+			this.getOrCreate(accountId).replaceItemId(tempId, realId);
 			return;
 		}
 
@@ -299,25 +309,47 @@ export class VaultRepositoryCoordinator {
 
 	findAccountForVault(
 		vaultId: string,
-	): { email: string; repo: VaultRepository } | undefined {
-		for (const [email, entry] of this.repos.entries()) {
+	): { accountId: string; repo: VaultRepository } | undefined {
+		for (const [accountId, entry] of this.repos.entries()) {
 			if (!entry.repo.hasVault(vaultId)) {
 				continue;
 			}
 			const vault = entry.repo.getVaultById(vaultId);
 			if (vault?.accountEmail) {
-				return {
-					email: this.normalizeEmail(vault.accountEmail),
-					repo: this.getOrCreate(vault.accountEmail),
-				};
+				const accountInfo = Array.from(
+					this.accountInfoByAccountId.values(),
+				).find(
+					(info) =>
+						info.email.toLowerCase() === vault.accountEmail?.toLowerCase(),
+				);
+				if (accountInfo) {
+					return {
+						accountId: accountInfo.accountId,
+						repo: this.getOrCreate(accountInfo.accountId),
+					};
+				}
 			}
-			return { email, repo: entry.repo };
+			return { accountId, repo: entry.repo };
 		}
 		return undefined;
 	}
 
-	getRepositoryForEmail(email: string): VaultRepository {
-		return this.getOrCreate(email);
+	private findAccountIdByEmail(email: string): string | undefined {
+		const normalized = email.toLowerCase();
+		for (const info of this.accountInfoByAccountId.values()) {
+			if (info.email.toLowerCase() === normalized) {
+				return info.accountId;
+			}
+		}
+		return undefined;
+	}
+
+	resolveAccountIdByEmail(email: string): string | undefined {
+		return this.findAccountIdByEmail(email);
+	}
+
+	getRepositoryForAccount(accountId: string): VaultRepository {
+		return this.getOrCreate(accountId);
 	}
 
 	subscribe = (listener: () => void): (() => void) => {
@@ -330,9 +362,9 @@ export class VaultRepositoryCoordinator {
 	getSnapshot = (): number => this.snapshot;
 
 	clear(): void {
-		this.hydratingEmails.clear();
-		this.activeEmails.clear();
-		this.accountInfoByEmail.clear();
+		this.hydratingAccountIds.clear();
+		this.activeAccountIds.clear();
+		this.accountInfoByAccountId.clear();
 		for (const entry of this.repos.values()) {
 			entry.unsubscribe();
 			entry.repo.clear();
@@ -344,26 +376,22 @@ export class VaultRepositoryCoordinator {
 	// ItemCacheAdapter compatibility for useSync delta updates.
 	async upsertEncrypted(
 		item: CachedEncryptedItem,
-		email?: string,
+		accountId: string,
 	): Promise<void> {
-		const targetEmail = this.resolvePreferredEmail(email);
-		if (!targetEmail) {
-			return;
-		}
-		const repo = this.getOrCreate(targetEmail);
-		await repo.upsertEncrypted(item, targetEmail);
+		const repo = this.getOrCreate(accountId);
+		await repo.upsertEncrypted(item, accountId);
 	}
 
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
-		email?: string,
+		accountId: string,
 	): Promise<void> {
-		await this.upsertEncrypted(item, email);
+		await this.upsertEncrypted(item, accountId);
 	}
 
-	async removeItem(itemId: string, email?: string): Promise<void> {
-		if (email) {
-			await this.getOrCreate(email).removeItem(itemId);
+	async removeItem(itemId: string, accountId?: string): Promise<void> {
+		if (accountId) {
+			await this.getOrCreate(accountId).removeItem(itemId);
 			return;
 		}
 		for (const entry of this.repos.values()) {
@@ -374,28 +402,27 @@ export class VaultRepositoryCoordinator {
 		}
 	}
 
-	async removeCachedItem(itemId: string, email?: string): Promise<void> {
-		await this.removeItem(itemId, email);
+	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
+		await this.removeItem(itemId, accountId);
 	}
 
-	async upsertVault(vault: CachedVaultMetadata, email?: string): Promise<void> {
-		const targetEmail = this.resolvePreferredEmail(email);
-		if (!targetEmail) {
-			return;
-		}
-		await this.getOrCreate(targetEmail).upsertCachedVault(vault, targetEmail);
+	async upsertVault(
+		vault: CachedVaultMetadata,
+		accountId: string,
+	): Promise<void> {
+		await this.getOrCreate(accountId).upsertCachedVault(vault, accountId);
 	}
 
 	async upsertCachedVault(
 		vault: CachedVaultMetadata,
-		email?: string,
+		accountId: string,
 	): Promise<void> {
-		await this.upsertVault(vault, email);
+		await this.upsertVault(vault, accountId);
 	}
 
-	async removeVault(vaultId: string, email?: string): Promise<void> {
-		if (email) {
-			await this.getOrCreate(email).removeCachedVault(vaultId, email);
+	async removeVault(vaultId: string, accountId?: string): Promise<void> {
+		if (accountId) {
+			await this.getOrCreate(accountId).removeCachedVault(vaultId, accountId);
 			return;
 		}
 		for (const entry of this.repos.values()) {
@@ -405,34 +432,32 @@ export class VaultRepositoryCoordinator {
 		}
 	}
 
-	async removeCachedVault(vaultId: string, email?: string): Promise<void> {
-		await this.removeVault(vaultId, email);
+	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
+		await this.removeVault(vaultId, accountId);
 	}
 
 	async syncVaultKeys(
 		vaultKeys: VaultKeyData[],
-		email?: string,
+		accountId: string,
 	): Promise<void> {
-		const targetEmail = this.resolvePreferredEmail(email);
-		if (!targetEmail) {
-			return;
-		}
-		await this.getOrCreate(targetEmail).syncVaultKeys(vaultKeys, targetEmail);
+		await this.getOrCreate(accountId).syncVaultKeys(vaultKeys, accountId);
 	}
 
-	async clearItemCache(email?: string): Promise<void> {
-		if (email) {
-			await this.getOrCreate(email).clearItemCache(email);
+	async clearItemCache(accountId?: string): Promise<void> {
+		if (accountId) {
+			await this.getOrCreate(accountId).clearItemCache(accountId);
 			return;
 		}
-		for (const [repoEmail, entry] of this.repos.entries()) {
-			await entry.repo.clearItemCache(repoEmail);
+		for (const [repoAccountId, entry] of this.repos.entries()) {
+			await entry.repo.clearItemCache(repoAccountId);
 		}
 	}
 
-	purgeHiddenVaultsForEmail(email: string, hiddenVaultIds: string[]): void {
-		const normalized = this.normalizeEmail(email);
-		const entry = this.repos.get(normalized);
+	purgeHiddenVaultsForAccount(
+		accountId: string,
+		hiddenVaultIds: string[],
+	): void {
+		const entry = this.repos.get(accountId);
 		entry?.repo.purgeHiddenVaults(hiddenVaultIds);
 		this.emit();
 	}

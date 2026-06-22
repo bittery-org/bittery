@@ -469,7 +469,11 @@ export function useVaultImport() {
 
 				const activeAccount = await storage.getActiveAccount();
 				const defaultAccountEmail =
-					activeAccount?.type === "single" ? activeAccount.email : undefined;
+					activeAccount?.type === "single"
+						? (await storage.getAccountsList()).find(
+								(a) => a.accountId === activeAccount.accountId,
+							)?.email
+						: undefined;
 
 				for (const sourceVault of sourceVaults) {
 					const mapping = mappings[sourceVault.id];
@@ -543,7 +547,6 @@ export function useVaultImport() {
 					try {
 						const vaultKey = await getDecryptedVaultKey({
 							vaultId: resolvedTarget.vaultId,
-							email: resolvedTarget.accountEmail,
 							storage,
 							crypto: vaultKeyCrypto,
 						});

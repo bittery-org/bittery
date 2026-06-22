@@ -3,6 +3,7 @@ import {
 	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	AccountAvatarGroup as AvatarGroup,
 	ButtonGroup,
@@ -114,7 +115,7 @@ export function UnlockPage() {
 			} else if (allAccounts.length === 1) {
 				await storage.setActiveAccount({
 					type: "single",
-					email: allAccounts[0].email,
+					accountId: allAccounts[0].accountId,
 				});
 			}
 
@@ -123,6 +124,7 @@ export function UnlockPage() {
 				failedCount: result.failed.length,
 			});
 
+			await peekAccountSessionManager()?.refresh();
 			triggerAuthRevealToVault();
 		},
 		onPartialSuccess: async (result) => {
@@ -132,6 +134,7 @@ export function UnlockPage() {
 				await storage.setActiveAccount({ type: "all" });
 			}
 			toast.warning(getPartialUnlockMessage(result.unlocked.length));
+			await peekAccountSessionManager()?.refresh();
 			triggerAuthRevealToVault();
 		},
 		onError: (error) => {
@@ -161,7 +164,7 @@ export function UnlockPage() {
 			} else {
 				await storage.setActiveAccount({
 					type: "single",
-					email: allAccounts[0].email,
+					accountId: allAccounts[0].accountId,
 				});
 			}
 
@@ -173,6 +176,7 @@ export function UnlockPage() {
 				biometric: true,
 			});
 
+			await peekAccountSessionManager()?.refresh();
 			triggerAuthRevealToVault();
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
@@ -242,7 +246,7 @@ export function UnlockPage() {
 					} else {
 						await storage.setActiveAccount({
 							type: "single",
-							email: allAccounts[0].email,
+							accountId: allAccounts[0].accountId,
 						});
 					}
 
@@ -254,6 +258,7 @@ export function UnlockPage() {
 						biometric: true,
 					});
 
+					await peekAccountSessionManager()?.refresh();
 					triggerAuthRevealToVault();
 				} catch (error) {
 					console.error("Biometric unlock error:", error);

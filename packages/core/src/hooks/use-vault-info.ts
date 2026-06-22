@@ -61,7 +61,9 @@ export function useVaultInfo(
 
 		for (const account of accountsInfo) {
 			try {
-				const repo = vaultCoordinator.getRepositoryForEmail(account.email);
+				const repo = vaultCoordinator.getRepositoryForAccount(
+					account.accountId,
+				);
 				const vaultKey = repo
 					.getVaultKeys()
 					.find((candidate) => candidate.vaultId === vaultId);

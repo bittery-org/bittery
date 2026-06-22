@@ -48,6 +48,21 @@ const defaultDeps: LocalItemCacheServiceDeps = {
 	desktopClient,
 };
 
+function resolveAccountFromEmail(
+	vaultCoordinator: NonNullable<LocalItemCacheServiceDeps["vaultCoordinator"]>,
+	accountEmail: string,
+) {
+	const accountId = vaultCoordinator.resolveAccountIdByEmail(accountEmail);
+	if (!accountId) {
+		return undefined;
+	}
+	return {
+		accountId,
+		email: accountEmail,
+		repo: vaultCoordinator.getRepositoryForAccount(accountId),
+	};
+}
+
 export function createLocalItemCacheService(
 	inputDeps: LocalItemCacheServiceDeps = defaultDeps,
 ) {
@@ -73,7 +88,14 @@ export function createLocalItemCacheService(
 			if (!accountEmail) {
 				return;
 			}
-			const repo = vaultCoordinator.getRepositoryForEmail(accountEmail);
+			const resolvedAccount = resolveAccountFromEmail(
+				vaultCoordinator,
+				accountEmail,
+			);
+			if (!resolvedAccount) {
+				return;
+			}
+			const repo = resolvedAccount.repo;
 			const now = new Date().toISOString();
 			const item: CachedEncryptedItem = {
 				id: input.itemId,
@@ -91,7 +113,7 @@ export function createLocalItemCacheService(
 				updatedAt: now,
 				deletedAt: null,
 			};
-			await vaultCoordinator.upsertEncrypted(item, accountEmail);
+			await vaultCoordinator.upsertEncrypted(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},
 
@@ -108,10 +130,7 @@ export function createLocalItemCacheService(
 			}
 
 			const resolvedAccount = input.accountEmail
-				? {
-						email: input.accountEmail,
-						repo: vaultCoordinator.getRepositoryForEmail(input.accountEmail),
-					}
+				? resolveAccountFromEmail(vaultCoordinator, input.accountEmail)
 				: existingItemAccount(vaultCoordinator, input.itemId);
 			if (!resolvedAccount) {
 				return;
@@ -137,7 +156,7 @@ export function createLocalItemCacheService(
 				deletedAt: existing.deletedAt,
 				attachments: existing.attachments,
 			};
-			await vaultCoordinator.upsertEncrypted(item, resolvedAccount.email);
+			await vaultCoordinator.upsertEncrypted(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},
 	};
@@ -149,10 +168,7 @@ function existingItemAccount(
 ) {
 	const item = vaultCoordinator.getById(itemId);
 	if (item?.accountEmail) {
-		return {
-			email: item.accountEmail,
-			repo: vaultCoordinator.getRepositoryForEmail(item.accountEmail),
-		};
+		return resolveAccountFromEmail(vaultCoordinator, item.accountEmail);
 	}
 	return undefined;
 }

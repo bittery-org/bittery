@@ -9,6 +9,7 @@ import {
 	clearAccountRpcClient,
 	clearRpcClientCache,
 } from "@bittery/shared/rpc-client-factory";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import {
 	type UseMutationResult,
 	useMutation,
@@ -96,15 +97,14 @@ export function useLogout(
 				}
 			}
 
-			// Clear local session data
-			await clearSession(storage, email, clearSecretKey);
+			const resolvedAccountId = await resolveAccountScopeId(storage, email);
 
-			// Clear account RPC client cache
-			// If email is provided, clear only that account's client
-			// Otherwise, clear all clients (full logout)
-			if (email) {
-				const authToken = await storage.getAuthToken(email);
-				const serverUrl = await storage.getServerUrl(email);
+			// Clear local session data
+			await clearSession(storage, resolvedAccountId, clearSecretKey);
+
+			if (resolvedAccountId) {
+				const authToken = await storage.getAuthToken(resolvedAccountId);
+				const serverUrl = await storage.getServerUrl(resolvedAccountId);
 				if (authToken && serverUrl) {
 					clearAccountRpcClient(authToken, serverUrl);
 				}

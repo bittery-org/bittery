@@ -371,9 +371,15 @@ function RecoverRouteComponent() {
 			await storage.storeEncryptedPrivateKey(
 				JSON.stringify(newEncryptedPrivateKey),
 			);
+			const activeAccount = await storage.getActiveAccount();
+			const accountId =
+				activeAccount?.type === "single"
+					? activeAccount.accountId
+					: crypto.randomUUID();
 			await storage.storeSecretKey(newSecretKey);
 			await storage.storeSessionData(
 				newMasterUnlockKey,
+				accountId,
 				email,
 				resetResult.userId,
 				resetResult.expiresAt,

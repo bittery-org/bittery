@@ -7,6 +7,7 @@ import {
 	decryptStoredVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { storage } from "../lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "../lib/wasm-crypto";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
@@ -180,9 +181,10 @@ export async function handleUpdateItemTotp(payload: {
 		}
 
 		// Decrypt vault key
+		const accountId = await resolveAccountScopeId(storage, accountEmail);
 		const vaultKey = await decryptStoredVaultKey({
 			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-			email: accountEmail,
+			accountId,
 			storage,
 			crypto: {
 				decrypt,

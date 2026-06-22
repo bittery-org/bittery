@@ -28,7 +28,7 @@ export type DesktopEventPayload =
 	| { event: "desktop_close"; payload: { timestamp: number } }
 	| {
 			event: "active_account_changed";
-			payload: { email: string; timestamp: number };
+			payload: { accountId: string; timestamp: number };
 	  };
 
 export type DesktopResponse =

@@ -12,9 +12,14 @@ export function resolveRepositoryForVault(
 	accountEmailHint?: string,
 ): ResolvedAccountRepository | undefined {
 	if (accountEmailHint) {
+		const accountId =
+			core.vaultCoordinator.resolveAccountIdByEmail(accountEmailHint);
+		if (!accountId) {
+			return undefined;
+		}
 		return {
 			accountEmail: accountEmailHint,
-			repo: core.vaultCoordinator.getRepositoryForEmail(accountEmailHint),
+			repo: core.vaultCoordinator.getRepositoryForAccount(accountId),
 		};
 	}
 
@@ -24,7 +29,7 @@ export function resolveRepositoryForVault(
 	}
 
 	return {
-		accountEmail: located.email,
+		accountEmail: located.repo.getAccountEmail() ?? "",
 		repo: located.repo,
 	};
 }
@@ -38,9 +43,15 @@ export function resolveRepositoryForItem(
 		coordinatedItem?.accountEmail ?? coordinatedItem?.account?.email;
 
 	if (contextualAccountEmail) {
+		const accountId =
+			coordinatedItem?.account?.accountId ??
+			core.vaultCoordinator.resolveAccountIdByEmail(contextualAccountEmail);
+		if (!accountId) {
+			return undefined;
+		}
 		return {
 			accountEmail: contextualAccountEmail,
-			repo: core.vaultCoordinator.getRepositoryForEmail(contextualAccountEmail),
+			repo: core.vaultCoordinator.getRepositoryForAccount(accountId),
 		};
 	}
 
@@ -50,7 +61,7 @@ export function resolveRepositoryForItem(
 	}
 
 	return {
-		accountEmail: located.email,
+		accountEmail: located.repo.getAccountEmail() ?? "",
 		repo: located.repo,
 	};
 }

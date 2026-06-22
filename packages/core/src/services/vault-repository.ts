@@ -14,7 +14,8 @@ import type {
 	ICrypto,
 } from "@bittery/types";
 import { buildItemEncryptionContext } from "./encryption-context";
-import { getTravelModeService, isVaultHidden } from "./travel-mode-service";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
+import { isVaultHidden } from "./travel-mode-service";
 
 export interface VaultView {
 	id: string;
@@ -116,14 +117,19 @@ export class VaultRepository {
 	constructor(
 		private readonly crypto: ICrypto,
 		private readonly storage: IStorageAdapter,
-		private readonly email?: string,
+		private readonly accountId?: string,
 		serverUrl?: string,
+		private readonly accountEmail?: string,
 	) {
 		this.serverUrl = serverUrl;
 	}
 
-	getEmail(): string | undefined {
-		return this.email;
+	getAccountId(): string | undefined {
+		return this.accountId;
+	}
+
+	getAccountEmail(): string | undefined {
+		return this.accountEmail;
 	}
 
 	getServerUrl(): string | undefined {
@@ -182,10 +188,12 @@ export class VaultRepository {
 
 	getVaults(): CachedVaultMetadata[] {
 		const vaults = Array.from(this.vaults.values());
-		if (!this.email) {
+		if (!this.accountId) {
 			return vaults;
 		}
-		const config = getTravelModeService(this.storage).getConfig(this.email);
+		const config = getTravelModeEnforcer(this.storage).getConfig(
+			this.accountId,
+		);
 		if (!config.enabled) {
 			return vaults;
 		}
@@ -201,11 +209,11 @@ export class VaultRepository {
 
 	getVaultKeys(): VaultKeyData[] {
 		const vaultKeys = Array.from(this.vaultKeyEntries.values());
-		if (!this.email) {
+		if (!this.accountId) {
 			return vaultKeys;
 		}
-		return getTravelModeService(this.storage).filterVaultKeys(
-			this.email,
+		return getTravelModeEnforcer(this.storage).filterVaultKeys(
+			this.accountId,
 			vaultKeys,
 		);
 	}
@@ -230,19 +238,19 @@ export class VaultRepository {
 		}
 	}
 
-	private shouldHandleEmail(email?: string): boolean {
-		if (!email || !this.email) {
+	private shouldHandleAccountId(accountId?: string): boolean {
+		if (!accountId || !this.accountId) {
 			return true;
 		}
-		return this.email.toLowerCase() === email.toLowerCase();
+		return this.accountId === accountId;
 	}
 
 	private isTravelModeVaultHidden(vaultId: string): boolean {
-		if (!this.email) {
+		if (!this.accountId) {
 			return false;
 		}
 		return isVaultHidden(
-			getTravelModeService(this.storage).getConfig(this.email),
+			getTravelModeEnforcer(this.storage).getConfig(this.accountId),
 			vaultId,
 		);
 	}
@@ -250,10 +258,13 @@ export class VaultRepository {
 	private applyTravelModeItemFilter(
 		items: VaultRepositoryItem[],
 	): VaultRepositoryItem[] {
-		if (!this.email) {
+		if (!this.accountId) {
 			return items;
 		}
-		return getTravelModeService(this.storage).filterItems(this.email, items);
+		return getTravelModeEnforcer(this.storage).filterItems(
+			this.accountId,
+			items,
+		);
 	}
 
 	purgeHiddenVaults(hiddenVaultIds: string[]): void {
@@ -295,14 +306,16 @@ export class VaultRepository {
 	}
 
 	private async resolveUserId(): Promise<string> {
-		const sessionData = await this.storage.getStoredSessionData?.(this.email);
+		const sessionData = await this.storage.getStoredSessionData?.(
+			this.accountId,
+		);
 		if (sessionData?.userId) {
 			return sessionData.userId;
 		}
 
-		if (this.email) {
+		if (this.accountId) {
 			const accountMetadata = await this.storage.getAccountMetadata?.(
-				this.email,
+				this.accountId,
 			);
 			if (accountMetadata?.userId) {
 				return accountMetadata.userId;
@@ -371,7 +384,7 @@ export class VaultRepository {
 		return {
 			id: item.id,
 			vaultId: item.vaultId,
-			accountEmail: item.accountEmail ?? this.email,
+			accountEmail: item.accountEmail ?? this.accountEmail,
 			serverUrl: item.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			category: item.category,
 			favorite: item.favorite,
@@ -404,7 +417,7 @@ export class VaultRepository {
 
 			this.vaults.set(vaultKey.vaultId, {
 				id: vaultKey.vaultId,
-				accountEmail: this.email,
+				accountEmail: this.accountEmail,
 				serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 				name: vaultKey.vaultName,
 				type: vaultKey.vaultType,
@@ -442,18 +455,19 @@ export class VaultRepository {
 		if (this.serverUrl) {
 			return;
 		}
-		if (!this.email) {
+		if (!this.accountId) {
 			return;
 		}
 		this.serverUrl =
-			(await this.storage.getServerUrl(this.email)) ?? this.fallbackServerUrl;
+			(await this.storage.getServerUrl(this.accountId)) ??
+			this.fallbackServerUrl;
 	}
 
 	private async persistItem(item: CachedEncryptedItem): Promise<void> {
 		if (!this.storage.upsertCachedItem) {
 			return;
 		}
-		await this.storage.upsertCachedItem(item, this.email);
+		await this.storage.upsertCachedItem(item, this.accountId);
 	}
 
 	private buildItem(
@@ -463,7 +477,7 @@ export class VaultRepository {
 		return {
 			id: cached.id,
 			vaultId: cached.vaultId,
-			accountEmail: cached.accountEmail ?? this.email,
+			accountEmail: cached.accountEmail ?? this.accountEmail,
 			serverUrl: cached.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			category: cached.category as DecryptedItem["category"],
 			favorite: cached.favorite,
@@ -489,7 +503,7 @@ export class VaultRepository {
 			return cached;
 		}
 
-		const vaultKeys = await this.storage.getVaultKeys(this.email);
+		const vaultKeys = await this.storage.getVaultKeys(this.accountId);
 		if (!vaultKeys) {
 			throw new Error(`No vault key found for vault ${vaultId}.`);
 		}
@@ -501,14 +515,14 @@ export class VaultRepository {
 			throw new Error(`No vault key found for vault ${vaultId}.`);
 		}
 
-		const muk = await this.storage.getMasterUnlockKey(this.email);
+		const muk = await this.storage.getMasterUnlockKey(this.accountId);
 		if (!muk) {
 			throw new Error("Master Unlock Key not available. Please log in again.");
 		}
 		const userId = await this.resolveUserId();
 
 		const encryptedPrivateKey = await this.storage.getEncryptedPrivateKey(
-			this.email,
+			this.accountId,
 		);
 
 		let decrypted: Uint8Array;
@@ -552,9 +566,9 @@ export class VaultRepository {
 
 	async upsertEncrypted(
 		item: CachedEncryptedItem,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		if (!this.shouldHandleEmail(email)) {
+		if (!this.shouldHandleAccountId(accountId)) {
 			return;
 		}
 		const decrypted = await this.decryptItem(item);
@@ -572,7 +586,7 @@ export class VaultRepository {
 		const next: VaultRepositoryItem = {
 			...existing,
 			...item,
-			accountEmail: existing?.accountEmail ?? this.email,
+			accountEmail: existing?.accountEmail ?? this.accountEmail,
 			serverUrl:
 				existing?.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			updatedAt: existing ? now : item.updatedAt,
@@ -634,7 +648,7 @@ export class VaultRepository {
 
 	async removeItem(itemId: string): Promise<void> {
 		this.items.delete(itemId);
-		await this.storage.removeCachedItem?.(itemId, this.email);
+		await this.storage.removeCachedItem?.(itemId, this.accountId);
 		this.emit();
 	}
 
@@ -649,7 +663,7 @@ export class VaultRepository {
 			id: realId,
 		};
 		this.items.set(realId, migrated);
-		void this.storage.removeCachedItem?.(tempId, this.email);
+		void this.storage.removeCachedItem?.(tempId, this.accountId);
 		void this.persistItem(this.toCachedItem(migrated));
 		this.emit();
 	}
@@ -728,10 +742,10 @@ export class VaultRepository {
 			await this.ensureServerUrl();
 			const [cachedItems, cachedVaults, cacheMeta, storedVaultKeys] =
 				await Promise.all([
-					this.storage.getCachedItems?.(this.email),
-					this.storage.getCachedVaults?.(this.email),
-					this.storage.getItemCacheMetadata?.(this.email),
-					this.storage.getVaultKeys(this.email),
+					this.storage.getCachedItems?.(this.accountId),
+					this.storage.getCachedVaults?.(this.accountId),
+					this.storage.getItemCacheMetadata?.(this.accountId),
+					this.storage.getVaultKeys(this.accountId),
 				]);
 
 			this.items.clear();
@@ -789,7 +803,7 @@ export class VaultRepository {
 				const cachedItem: CachedEncryptedItem = {
 					id: rawItem.id,
 					vaultId: rawItem.vaultId,
-					accountEmail: this.email,
+					accountEmail: this.accountEmail,
 					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 					category: rawItem.category,
 					favorite: rawItem.favorite,
@@ -807,7 +821,7 @@ export class VaultRepository {
 
 				vaults.set(rawItem.vault.id, {
 					id: rawItem.vault.id,
-					accountEmail: this.email,
+					accountEmail: this.accountEmail,
 					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 					name: rawItem.vault.name,
 					type: rawItem.vault.type,
@@ -824,7 +838,7 @@ export class VaultRepository {
 
 		const refreshedVaultKeys = await this.fetchVaultKeysFromServer(client);
 		const vaultKeys =
-			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.email));
+			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.accountId));
 
 		this.vaults.clear();
 		for (const vault of vaults.values()) {
@@ -832,7 +846,7 @@ export class VaultRepository {
 		}
 
 		if (refreshedVaultKeys) {
-			await this.storage.storeVaultKeys(refreshedVaultKeys, this.email);
+			await this.storage.storeVaultKeys(refreshedVaultKeys, this.accountId);
 		}
 		this.mergeVaultKeyEntries(vaultKeys);
 
@@ -850,10 +864,10 @@ export class VaultRepository {
 		}
 
 		await Promise.all([
-			this.storage.setCachedItems?.(cachedItems, this.email),
+			this.storage.setCachedItems?.(cachedItems, this.accountId),
 			this.storage.setCachedVaults?.(
 				Array.from(this.vaults.values()),
-				this.email,
+				this.accountId,
 			),
 			this.storage.setItemCacheMetadata?.(
 				{
@@ -861,7 +875,7 @@ export class VaultRepository {
 					itemCount: cachedItems.length,
 					cacheVersion: 1,
 				},
-				this.email,
+				this.accountId,
 			),
 		]);
 
@@ -884,13 +898,13 @@ export class VaultRepository {
 	// ItemCacheAdapter compatibility for incremental migration.
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		await this.upsertEncrypted(item, email);
+		await this.upsertEncrypted(item, accountId);
 	}
 
-	async removeCachedItem(itemId: string, email?: string): Promise<void> {
-		if (!this.shouldHandleEmail(email)) {
+	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
+		if (!this.shouldHandleAccountId(accountId)) {
 			return;
 		}
 		await this.removeItem(itemId);
@@ -898,14 +912,14 @@ export class VaultRepository {
 
 	async upsertCachedVault(
 		vault: CachedVaultMetadata,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		if (!this.shouldHandleEmail(email)) {
+		if (!this.shouldHandleAccountId(accountId)) {
 			return;
 		}
 		this.vaults.set(vault.id, {
 			...vault,
-			accountEmail: vault.accountEmail ?? this.email,
+			accountEmail: vault.accountEmail ?? this.accountEmail,
 			serverUrl: vault.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 		});
 		const existingVaultKey = this.vaultKeyEntries.get(vault.id);
@@ -918,32 +932,32 @@ export class VaultRepository {
 				vaultImageUrl: vault.imageUrl,
 			});
 		}
-		await this.storage.upsertCachedVault?.(vault, this.email);
+		await this.storage.upsertCachedVault?.(vault, this.accountId);
 		this.emit();
 	}
 
 	async syncVaultKeys(
 		vaultKeys: VaultKeyData[],
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		if (!this.shouldHandleEmail(email)) {
+		if (!this.shouldHandleAccountId(accountId)) {
 			return;
 		}
 
-		const filteredVaultKeys = this.email
-			? getTravelModeService(this.storage).filterVaultKeys(
-					this.email,
+		const filteredVaultKeys = this.accountId
+			? getTravelModeEnforcer(this.storage).filterVaultKeys(
+					this.accountId,
 					vaultKeys,
 				)
 			: vaultKeys;
 
 		this.mergeVaultKeyEntries(filteredVaultKeys);
-		await this.storage.storeVaultKeys(filteredVaultKeys, this.email);
+		await this.storage.storeVaultKeys(filteredVaultKeys, this.accountId);
 		this.emit();
 	}
 
-	async removeCachedVault(vaultId: string, email?: string): Promise<void> {
-		if (!this.shouldHandleEmail(email)) {
+	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
+		if (!this.shouldHandleAccountId(accountId)) {
 			return;
 		}
 		this.vaults.delete(vaultId);
@@ -953,15 +967,15 @@ export class VaultRepository {
 				this.items.delete(itemId);
 			}
 		}
-		await this.storage.removeCachedVault?.(vaultId, this.email);
+		await this.storage.removeCachedVault?.(vaultId, this.accountId);
 		this.emit();
 	}
 
-	async clearItemCache(email?: string): Promise<void> {
-		if (!this.shouldHandleEmail(email)) {
+	async clearItemCache(accountId?: string): Promise<void> {
+		if (!this.shouldHandleAccountId(accountId)) {
 			return;
 		}
-		await this.storage.clearItemCache?.(this.email);
+		await this.storage.clearItemCache?.(this.accountId);
 		this.clear();
 	}
 

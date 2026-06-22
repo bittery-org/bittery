@@ -83,11 +83,6 @@ export function useQuickUnlock(
 				travelModeRpcClient: rpcClient,
 			});
 
-			// For multi-account platforms, set this as the active account
-			if (storage.supportsMultiAccount) {
-				await storage.setActiveAccount({ type: "single", email: input.email });
-			}
-
 			return result;
 		},
 		onSuccess: (result, input) => {

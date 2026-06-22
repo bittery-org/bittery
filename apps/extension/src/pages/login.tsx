@@ -34,13 +34,12 @@ export function LoginPage() {
 		};
 	}, []);
 
-	const persistServerUrl = async (email?: string) => {
+	const persistServerUrl = async () => {
 		const normalized = normalizeServerUrl(serverUrl);
 		if (!normalized) {
 			toast.error(m.ext_login_toast_invalid_server_url());
 			return null;
 		}
-		await storage.storeServerUrl(normalized, email);
 		if (normalized !== serverUrl) {
 			setServerUrl(normalized);
 		}
@@ -54,7 +53,7 @@ export function LoginPage() {
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
-			const persisted = await persistServerUrl(value.email);
+			const persisted = await persistServerUrl();
 			if (!persisted) {
 				return;
 			}

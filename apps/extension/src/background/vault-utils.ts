@@ -3,7 +3,8 @@
  * Shared helpers for vault operations.
  */
 
-import { filterItemsByTravelMode } from "@bittery/core";
+import type { MultiAccountItem } from "@bittery/core/services/item-service";
+import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import type {
 	DecryptedItemWithContext,
 	ItemCategory,
@@ -13,21 +14,6 @@ import { storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
-
-type MultiAccountItem = DecryptedItemWithContext & {
-	vault: {
-		id: string;
-		name: string;
-		type: string;
-		icon: string | null;
-		imageUrl: string | null;
-	};
-	account?: {
-		email: string;
-		userId: string;
-		name: string;
-	};
-};
 
 export function mergeItemCollections(
 	desktopItems: MultiAccountItem[],
@@ -172,7 +158,11 @@ export function normalizeDesktopSnapshotItem(
 async function getDesktopTargetEmails(): Promise<string[]> {
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
-		return [activeAccount.email.toLowerCase()];
+		const accounts = await storage.getAccountsList();
+		const meta = accounts.find(
+			(account) => account.accountId === activeAccount.accountId,
+		);
+		return meta ? [meta.email.toLowerCase()] : [];
 	}
 
 	const statusEmails = desktopSync
@@ -192,45 +182,51 @@ async function getDesktopTargetEmails(): Promise<string[]> {
 	);
 }
 
+async function resolveAccountIdForItem(
+	item: MultiAccountItem,
+	accountsByEmail: Map<string, string>,
+): Promise<string | null> {
+	const email = item.account?.email?.toLowerCase();
+	if (!email) {
+		return null;
+	}
+	return accountsByEmail.get(email) ?? null;
+}
+
 async function filterItemsForTravelMode(
 	items: MultiAccountItem[],
 ): Promise<MultiAccountItem[]> {
+	const enforcer = getTravelModeEnforcer(storage);
 	const activeAccount = await storage.getActiveAccount();
+	const accounts = await storage.getAccountsList();
+	const accountsByEmail = new Map(
+		accounts.map((account) => [account.email.toLowerCase(), account.accountId]),
+	);
 
 	if (activeAccount?.type === "single") {
-		const normalizedEmail = activeAccount.email.toLowerCase();
-		const config =
-			(await storage.getTravelModeCache?.(normalizedEmail)) ?? null;
-		if (!config?.enabled) {
-			return items;
-		}
-		return filterItemsByTravelMode(items, config);
+		await enforcer.hydrateFromStorage(activeAccount.accountId);
+		return enforcer.filterItems(activeAccount.accountId, items);
 	}
 
-	const itemsByEmail = new Map<string, MultiAccountItem[]>();
+	const itemsByAccountId = new Map<string, MultiAccountItem[]>();
 	const unassigned: MultiAccountItem[] = [];
 
 	for (const item of items) {
-		const email = item.account?.email;
-		if (!email) {
+		const accountId = await resolveAccountIdForItem(item, accountsByEmail);
+		if (!accountId) {
 			unassigned.push(item);
 			continue;
 		}
-		const normalizedEmail = email.toLowerCase();
-		const bucket = itemsByEmail.get(normalizedEmail) ?? [];
+		const bucket = itemsByAccountId.get(accountId) ?? [];
 		bucket.push(item);
-		itemsByEmail.set(normalizedEmail, bucket);
+		itemsByAccountId.set(accountId, bucket);
 	}
 
 	const filtered: MultiAccountItem[] = [...unassigned];
 
-	for (const [email, accountItems] of itemsByEmail) {
-		const config = (await storage.getTravelModeCache?.(email)) ?? null;
-		if (!config?.enabled) {
-			filtered.push(...accountItems);
-			continue;
-		}
-		filtered.push(...filterItemsByTravelMode(accountItems, config));
+	for (const [accountId, accountItems] of itemsByAccountId) {
+		await enforcer.hydrateFromStorage(accountId);
+		filtered.push(...enforcer.filterItems(accountId, accountItems));
 	}
 
 	return filtered;
@@ -280,10 +276,6 @@ async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
 	}
 }
 
-/**
- * Get decrypted items for current runtime mode.
- * Uses desktop snapshots in desktop mode and falls back to core/local decryption.
- */
 export async function getDecryptedItemsForCurrentMode(): Promise<
 	Array<DecryptedItemWithContext | null>
 > {
@@ -315,18 +307,12 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 	return filterItemsForTravelMode(localItems);
 }
 
-/**
- * Helper function to get base domain from hostname
- */
 export function getBaseDomain(host: string): string {
 	const parts = host.split(".");
 	if (parts.length <= 2) return host;
 	return parts.slice(-2).join(".");
 }
 
-/**
- * Helper function to check if hostname matches
- */
 export function hostnameMatches(
 	itemUrl: string,
 	targetHostname: string,

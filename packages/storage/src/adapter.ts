@@ -22,7 +22,8 @@ import type {
 /**
  * IStorageAdapter defines the contract for platform-specific storage implementations.
  * All methods are async to accommodate Chrome extension storage, SecureStore, Tauri Store, etc.
- * Optional email parameter supports multi-account platforms (desktop/mobile).
+ * Optional accountId parameter supports multi-account platforms (desktop/mobile).
+ * accountId is the stable local identifier; email is display metadata only.
  */
 export interface IStorageAdapter {
 	// ============================================================================
@@ -57,29 +58,32 @@ export interface IStorageAdapter {
 	 * Get Master Unlock Key from memory cache.
 	 * If not in memory but session is valid, may restore from encrypted storage.
 	 */
-	getMasterUnlockKey(email?: string): Promise<Uint8Array | null>;
+	getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null>;
 
 	/**
 	 * Store Master Unlock Key in memory cache.
 	 * Note: This does NOT persist to disk; use storeSessionData for persistence.
 	 */
-	setMasterUnlockKey(key: Uint8Array, email?: string): Promise<void>;
+	setMasterUnlockKey(key: Uint8Array, accountId?: string): Promise<void>;
 
 	/**
 	 * Store Master Unlock Key as an opaque crypto handle when supported.
 	 */
-	setMasterUnlockKeyHandle?(keyHandle: number, email?: string): Promise<void>;
+	setMasterUnlockKeyHandle?(
+		keyHandle: number,
+		accountId?: string,
+	): Promise<void>;
 
 	/**
 	 * Clear Master Unlock Key from memory.
 	 * Called when locking the app.
 	 */
-	clearMasterUnlockKey(email?: string): Promise<void>;
+	clearMasterUnlockKey(accountId?: string): Promise<void>;
 
 	/**
 	 * Get Master Unlock Key handle from memory cache.
 	 */
-	getMasterUnlockKeyHandle?(email?: string): Promise<number | null>;
+	getMasterUnlockKeyHandle?(accountId?: string): Promise<number | null>;
 
 	/**
 	 * Store encrypted session data for persistence.
@@ -87,6 +91,7 @@ export interface IStorageAdapter {
 	 */
 	storeSessionData(
 		muk: Uint8Array,
+		accountId: string,
 		email: string,
 		userId: string,
 		expiresAt?: SessionExpiryInput,
@@ -98,6 +103,7 @@ export interface IStorageAdapter {
 	 */
 	storeSessionDataWithMasterUnlockKeyHandle?(
 		keyHandle: number,
+		accountId: string,
 		email: string,
 		userId: string,
 		expiresAt?: SessionExpiryInput,
@@ -105,7 +111,7 @@ export interface IStorageAdapter {
 	): Promise<void>;
 
 	updateStoredSessionMetadata?(
-		email: string,
+		accountId: string,
 		metadata: {
 			sessionId?: string;
 			expiresAt: SessionExpiryInput;
@@ -117,12 +123,15 @@ export interface IStorageAdapter {
 	 * Returns true if successfully restored MUK to memory.
 	 * @param skipBiometric - If true, skip biometric prompt even if enabled
 	 */
-	tryRestoreSession(skipBiometric?: boolean, email?: string): Promise<boolean>;
+	tryRestoreSession(
+		skipBiometric?: boolean,
+		accountId?: string,
+	): Promise<boolean>;
 
 	/**
 	 * Check if stored session is still valid (not expired).
 	 */
-	isSessionValid(email?: string): Promise<boolean>;
+	isSessionValid(accountId?: string): Promise<boolean>;
 
 	// ============================================================================
 	// Credentials
@@ -131,52 +140,52 @@ export interface IStorageAdapter {
 	/**
 	 * Store Secret Key (plaintext - safe because useless without password).
 	 */
-	storeSecretKey(key: string, email?: string): Promise<void>;
+	storeSecretKey(key: string, accountId?: string): Promise<void>;
 
 	/**
 	 * Get stored Secret Key.
 	 */
-	getStoredSecretKey(email?: string): Promise<string | null>;
+	getStoredSecretKey(accountId?: string): Promise<string | null>;
 
 	/**
 	 * Store JWT auth token.
 	 */
-	storeAuthToken(token: string, email?: string): Promise<void>;
+	storeAuthToken(token: string, accountId?: string): Promise<void>;
 
 	/**
 	 * Get stored JWT auth token.
 	 */
-	getAuthToken(email?: string): Promise<string | null>;
+	getAuthToken(accountId?: string): Promise<string | null>;
 
 	/**
 	 * Store encrypted vault keys.
 	 */
-	storeVaultKeys(keys: VaultKeyData[], email?: string): Promise<void>;
+	storeVaultKeys(keys: VaultKeyData[], accountId?: string): Promise<void>;
 
 	/**
 	 * Get encrypted vault keys.
 	 */
-	getVaultKeys(email?: string): Promise<VaultKeyData[] | null>;
+	getVaultKeys(accountId?: string): Promise<VaultKeyData[] | null>;
 
 	/**
 	 * Store encrypted private key (for RSA operations / vault sharing).
 	 */
-	storeEncryptedPrivateKey(key: string, email?: string): Promise<void>;
+	storeEncryptedPrivateKey(key: string, accountId?: string): Promise<void>;
 
 	/**
 	 * Get encrypted private key.
 	 */
-	getEncryptedPrivateKey(email?: string): Promise<string | null>;
+	getEncryptedPrivateKey(accountId?: string): Promise<string | null>;
 
 	/**
 	 * Store pinned login KDF parameters for downgrade/tamper detection.
 	 */
-	storePinnedKdfParams(params: KdfParams, email?: string): Promise<void>;
+	storePinnedKdfParams(params: KdfParams, accountId?: string): Promise<void>;
 
 	/**
 	 * Get pinned login KDF parameters.
 	 */
-	getPinnedKdfParams(email?: string): Promise<KdfParams | null>;
+	getPinnedKdfParams(accountId?: string): Promise<KdfParams | null>;
 
 	// ============================================================================
 	// Multi-Account (desktop/mobile)
@@ -185,7 +194,7 @@ export interface IStorageAdapter {
 	/**
 	 * Get the currently active account configuration.
 	 * Returns:
-	 * - { type: "single", email: string } - A specific account is active
+	 * - { type: "single", accountId: string } - A specific account is active
 	 * - { type: "all" } - All unlocked accounts are active (multi-account mode)
 	 * - null - No account is active (logged out)
 	 */
@@ -216,7 +225,7 @@ export interface IStorageAdapter {
 	/**
 	 * Remove an account and all its data.
 	 */
-	removeAccount(email: string): Promise<void>;
+	removeAccount(accountId: string): Promise<void>;
 
 	// ============================================================================
 	// Settings
@@ -226,28 +235,28 @@ export interface IStorageAdapter {
 	 * Store auto-lock timeout preference.
 	 * @param ms - Timeout in milliseconds, or -1 for never
 	 */
-	storeAutoLockTimeout(ms: number, email?: string): Promise<void>;
+	storeAutoLockTimeout(ms: number, accountId?: string): Promise<void>;
 
 	/**
 	 * Get auto-lock timeout preference.
 	 * Returns null if not explicitly set.
 	 */
-	getAutoLockTimeout(email?: string): Promise<number | null>;
+	getAutoLockTimeout(accountId?: string): Promise<number | null>;
 
 	/**
 	 * Get auto-lock timeout, returning default if not set.
 	 */
-	getAutoLockTimeoutOrDefault(email?: string): Promise<number>;
+	getAutoLockTimeoutOrDefault(accountId?: string): Promise<number>;
 
 	/**
 	 * Store custom server URL (for self-hosted instances).
 	 */
-	storeServerUrl(url: string, email?: string): Promise<void>;
+	storeServerUrl(url: string, accountId?: string): Promise<void>;
 
 	/**
 	 * Get stored server URL.
 	 */
-	getServerUrl(email?: string): Promise<string | null>;
+	getServerUrl(accountId?: string): Promise<string | null>;
 
 	// ============================================================================
 	// Auth State
@@ -256,13 +265,13 @@ export interface IStorageAdapter {
 	/**
 	 * Check if user is authenticated (has valid auth token).
 	 */
-	isAuthenticated(email?: string): Promise<boolean>;
+	isAuthenticated(accountId?: string): Promise<boolean>;
 
 	/**
 	 * Check if quick unlock is available.
 	 * Requires: stored secret key + valid session
 	 */
-	canQuickUnlock(email?: string): Promise<boolean>;
+	canQuickUnlock(accountId?: string): Promise<boolean>;
 
 	// ============================================================================
 	// Clear
@@ -271,12 +280,12 @@ export interface IStorageAdapter {
 	/**
 	 * Clear session data (logout but keep secret key for quick unlock).
 	 */
-	clearSession(email?: string): Promise<void>;
+	clearSession(accountId?: string): Promise<void>;
 
 	/**
 	 * Clear all stored data including secret key (complete logout).
 	 */
-	clearAllStoredData(email?: string): Promise<void>;
+	clearAllStoredData(accountId?: string): Promise<void>;
 
 	// ============================================================================
 	// Biometric (optional, check supportsBiometric first)
@@ -290,29 +299,32 @@ export interface IStorageAdapter {
 	/**
 	 * Check if biometric unlock is enabled for this account.
 	 */
-	isBiometricEnabled?(email?: string): Promise<boolean>;
+	isBiometricEnabled?(accountId?: string): Promise<boolean>;
 
 	/**
 	 * Enable biometric unlock for this account.
 	 */
-	enableBiometric?(email?: string): Promise<void>;
+	enableBiometric?(accountId?: string): Promise<void>;
 
 	/**
 	 * Disable biometric unlock for this account.
 	 */
-	disableBiometric?(email?: string): Promise<void>;
+	disableBiometric?(accountId?: string): Promise<void>;
 
 	/**
 	 * Authenticate using biometric (Touch ID / Face ID / Windows Hello).
 	 * Returns true if authentication succeeded.
 	 */
-	authenticateWithBiometric?(reason?: string, email?: string): Promise<boolean>;
+	authenticateWithBiometric?(
+		reason?: string,
+		accountId?: string,
+	): Promise<boolean>;
 
 	/**
 	 * Check if biometric unlock is available.
 	 * Requires: biometric hardware + enabled by user + valid session
 	 */
-	canBiometricUnlock?(email?: string): Promise<boolean>;
+	canBiometricUnlock?(accountId?: string): Promise<boolean>;
 
 	// ============================================================================
 	// Extended Session Management (unified interface for all platforms)
@@ -322,12 +334,12 @@ export interface IStorageAdapter {
 	 * Get stored session data (for checking expiry, biometric status, etc.)
 	 * Returns session metadata without decrypting the Master Unlock Key.
 	 */
-	getStoredSessionData?(email?: string): Promise<StoredSessionData | null>;
+	getStoredSessionData?(accountId?: string): Promise<StoredSessionData | null>;
 
 	/**
 	 * Check if secret key is stored for an account.
 	 */
-	hasStoredSecretKey?(email?: string): Promise<boolean>;
+	hasStoredSecretKey?(accountId?: string): Promise<boolean>;
 
 	/**
 	 * Lock all accounts (clear MUK from memory, require re-auth).
@@ -338,10 +350,10 @@ export interface IStorageAdapter {
 	/**
 	 * Get metadata for a specific account.
 	 */
-	getAccountMetadata?(email: string): Promise<AccountMetadata | null>;
+	getAccountMetadata?(accountId: string): Promise<AccountMetadata | null>;
 
 	/**
-	 * Get list of unlocked account emails (accounts with MUK currently in memory).
+	 * Get list of unlocked account IDs (accounts with MUK currently in memory).
 	 * Used for multi-account operations and "All Accounts" view.
 	 */
 	getUnlockedAccounts?(): Promise<string[]>;
@@ -369,7 +381,7 @@ export interface IStorageAdapter {
 	 * Unlock with biometric (authenticates + restores MUK to memory).
 	 * Combines biometric authentication with MUK restoration in one operation.
 	 */
-	unlockWithBiometric?(email?: string): Promise<boolean>;
+	unlockWithBiometric?(accountId?: string): Promise<boolean>;
 
 	/**
 	 * Unlock all accounts with biometric authentication.
@@ -379,7 +391,7 @@ export interface IStorageAdapter {
 	 */
 	unlockAllAccountsWithBiometric?(): Promise<{
 		unlocked: string[];
-		failed: Array<{ email: string; error: string }>;
+		failed: Array<{ accountId: string; error: string }>;
 	}>;
 
 	/**
@@ -388,7 +400,7 @@ export interface IStorageAdapter {
 	 */
 	authenticateWithBiometricEnhanced?(
 		reason?: string,
-		email?: string,
+		accountId?: string,
 	): Promise<BiometricAuthResult>;
 
 	// ============================================================================
@@ -403,43 +415,52 @@ export interface IStorageAdapter {
 	readonly supportsItemCache: boolean;
 
 	/** Store all cached items (bulk, for initial sync) */
-	setCachedItems?(items: CachedEncryptedItem[], email?: string): Promise<void>;
+	setCachedItems?(
+		items: CachedEncryptedItem[],
+		accountId?: string,
+	): Promise<void>;
 
 	/** Get all cached items */
-	getCachedItems?(email?: string): Promise<CachedEncryptedItem[] | null>;
+	getCachedItems?(accountId?: string): Promise<CachedEncryptedItem[] | null>;
 
 	/** Insert or update a single cached item */
-	upsertCachedItem?(item: CachedEncryptedItem, email?: string): Promise<void>;
+	upsertCachedItem?(
+		item: CachedEncryptedItem,
+		accountId?: string,
+	): Promise<void>;
 
 	/** Remove a single cached item */
-	removeCachedItem?(itemId: string, email?: string): Promise<void>;
+	removeCachedItem?(itemId: string, accountId?: string): Promise<void>;
 
 	/** Store all cached vault metadata (bulk) */
 	setCachedVaults?(
 		vaults: CachedVaultMetadata[],
-		email?: string,
+		accountId?: string,
 	): Promise<void>;
 
 	/** Get all cached vault metadata */
-	getCachedVaults?(email?: string): Promise<CachedVaultMetadata[] | null>;
+	getCachedVaults?(accountId?: string): Promise<CachedVaultMetadata[] | null>;
 
 	/** Insert or update a single cached vault */
-	upsertCachedVault?(vault: CachedVaultMetadata, email?: string): Promise<void>;
+	upsertCachedVault?(
+		vault: CachedVaultMetadata,
+		accountId?: string,
+	): Promise<void>;
 
 	/** Remove a cached vault and its items */
-	removeCachedVault?(vaultId: string, email?: string): Promise<void>;
+	removeCachedVault?(vaultId: string, accountId?: string): Promise<void>;
 
 	/** Get item cache metadata */
-	getItemCacheMetadata?(email?: string): Promise<ItemCacheMetadata | null>;
+	getItemCacheMetadata?(accountId?: string): Promise<ItemCacheMetadata | null>;
 
 	/** Set item cache metadata */
 	setItemCacheMetadata?(
 		metadata: ItemCacheMetadata,
-		email?: string,
+		accountId?: string,
 	): Promise<void>;
 
 	/** Clear all item cache data */
-	clearItemCache?(email?: string): Promise<void>;
+	clearItemCache?(accountId?: string): Promise<void>;
 
 	// ============================================================================
 	// Travel Mode (optional)
@@ -448,12 +469,12 @@ export interface IStorageAdapter {
 	/** Store cached travel mode config for an account */
 	storeTravelModeCache?(
 		config: import("./types").TravelModeConfig,
-		email?: string,
+		accountId?: string,
 	): Promise<void>;
 
 	/** Get cached travel mode config for an account */
 	getTravelModeCache?(
-		email?: string,
+		accountId?: string,
 	): Promise<import("./types").TravelModeConfig | null>;
 
 	// ============================================================================
@@ -464,13 +485,13 @@ export interface IStorageAdapter {
 	 * Check if master password re-entry is required by security policy.
 	 * Platform-specific security feature.
 	 */
-	isMasterPasswordReentryRequired?(email?: string): Promise<boolean>;
+	isMasterPasswordReentryRequired?(accountId?: string): Promise<boolean>;
 
 	/**
 	 * Update last master password entry timestamp.
 	 * Called after user successfully authenticates with password.
 	 */
-	updateLastMasterPasswordEntry?(email?: string): Promise<void>;
+	updateLastMasterPasswordEntry?(accountId?: string): Promise<void>;
 
 	/**
 	 * Decrypt stored MUK (public wrapper for unlock flows).
@@ -478,7 +499,7 @@ export interface IStorageAdapter {
 	 * @param skipBiometric - If true, skip biometric prompt even if enabled
 	 */
 	decryptStoredMasterUnlockKey?(
-		email?: string,
+		accountId?: string,
 		skipBiometric?: boolean,
 	): Promise<Uint8Array | null>;
 }

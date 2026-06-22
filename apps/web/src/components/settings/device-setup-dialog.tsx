@@ -59,7 +59,7 @@ function WebDeviceSetupDialogContent({
 		queryKey: ["web-device-setup", email],
 		enabled: !!email,
 		queryFn: async () => {
-			const secretKey = await storage.getStoredSecretKey(email || undefined);
+			const secretKey = await storage.getStoredSecretKey();
 			return { secretKey };
 		},
 	});

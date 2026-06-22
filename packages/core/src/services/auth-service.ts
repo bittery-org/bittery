@@ -6,43 +6,65 @@
 
 import { m } from "@bittery/i18n/paraglide/messages";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
-import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
 import {
-	getTravelModeService,
-	type TravelModeRpcClient,
-	type TravelModeService,
-} from "./travel-mode-service";
+	resolveAccountScopeId,
+	resolveOrCreateAccountId,
+} from "@bittery/storage/account-id";
+import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
+import type { TravelModeRpcClient } from "./travel-mode-service";
 
 export interface StoreAuthSessionOptions {
 	travelModeRpcClient?: TravelModeRpcClient;
+	serverUrl?: string;
+}
+
+async function resolveAccountIdForLogin(
+	storage: IStorageAdapter,
+	_email: string,
+	userId: string,
+	serverUrl: string,
+): Promise<string> {
+	const accounts = (await storage.getAccountsList?.()) ?? [];
+	return resolveOrCreateAccountId(accounts, serverUrl, userId);
+}
+
+async function resolveAccountIdByEmail(
+	storage: IStorageAdapter,
+	email: string,
+): Promise<string | undefined> {
+	const accounts = (await storage.getAccountsList?.()) ?? [];
+	return accounts.find(
+		(account) => account.email.toLowerCase() === email.toLowerCase(),
+	)?.accountId;
 }
 
 async function prepareTravelModeForSession(
-	email: string,
+	accountId: string,
 	storage: IStorageAdapter,
 	travelModeRpcClient?: TravelModeRpcClient,
-): Promise<TravelModeService> {
-	const travelMode = getTravelModeService(storage);
+): Promise<void> {
+	const travelMode = getTravelModeEnforcer(storage);
 	if (travelModeRpcClient) {
 		try {
-			await travelMode.fetchFromServer(email, travelModeRpcClient);
+			await travelMode.fetchFromServer(accountId, travelModeRpcClient);
 		} catch (error) {
-			const cached = await storage.getTravelModeCache?.(email);
+			const cached = await storage.getTravelModeCache?.(accountId);
 			if (cached) {
 				console.warn(
 					"[auth] Failed to fetch travel mode from server, using local cache:",
 					error,
 				);
-				await travelMode.hydrateFromStorage(email);
+				await travelMode.hydrateFromStorage(accountId);
 			} else {
 				throw new Error(m.auth_error_travel_mode_verify_failed());
 			}
 		}
 	} else {
-		await travelMode.hydrateFromStorage(email);
+		await travelMode.hydrateFromStorage(accountId);
 	}
-	return travelMode;
 }
 
 /**
@@ -306,13 +328,13 @@ async function fetchVaultKeys(
 async function validateDerivedUnlockKey(input: {
 	crypto: ICrypto;
 	storage: IStorageAdapter;
-	email: string;
+	accountId: string;
 	masterUnlockKey?: Uint8Array;
 	masterUnlockKeyHandle?: number;
 	handleCrypto: HandleCapableCrypto | null;
 }): Promise<void> {
 	const encryptedPrivateKey = await input.storage.getEncryptedPrivateKey(
-		input.email,
+		input.accountId,
 	);
 	const parsedEncryptedPrivateKey = parseEncryptedData(encryptedPrivateKey);
 	if (!parsedEncryptedPrivateKey) {
@@ -342,7 +364,10 @@ async function validateAndPinServerKdfParams(
 	serverParams: KdfParams,
 	deps: SRPLoginDeps | SRPUnlockDeps,
 ): Promise<void> {
-	const pinnedParams = await deps.storage.getPinnedKdfParams(email);
+	const accountId = await resolveAccountIdByEmail(deps.storage, email);
+	const pinnedParams = accountId
+		? await deps.storage.getPinnedKdfParams(accountId)
+		: null;
 
 	if (deps.crypto.validateServerKdfParams) {
 		await deps.crypto.validateServerKdfParams(serverParams, pinnedParams);
@@ -352,11 +377,11 @@ async function validateAndPinServerKdfParams(
 }
 
 async function persistPinnedKdfParamsIfNeeded(
-	email: string,
+	accountId: string,
 	params: KdfParams,
 	storage: IStorageAdapter,
 ): Promise<void> {
-	const pinned = await storage.getPinnedKdfParams(email);
+	const pinned = await storage.getPinnedKdfParams(accountId);
 	if (
 		!pinned ||
 		pinned.schemaVersion !== params.schemaVersion ||
@@ -365,7 +390,7 @@ async function persistPinnedKdfParamsIfNeeded(
 		pinned.salt !== params.salt
 	) {
 		console.log("storing pinned kdf params", pinned);
-		await storage.storePinnedKdfParams(params, email);
+		await storage.storePinnedKdfParams(params, accountId);
 	}
 }
 
@@ -439,12 +464,21 @@ export async function performSRPLogin(
 		});
 
 		// Store token before fetchVaultKeys so the auth header is available
-		await deps.storage.storeAuthToken(finishResult.token, email);
+		const serverUrl =
+			(await deps.storage.getServerUrl()) ?? getDefaultServerUrl();
+		const accountId = await resolveAccountIdForLogin(
+			deps.storage,
+			email,
+			finishResult.user.id,
+			serverUrl,
+		);
+		await deps.storage.storeAuthToken(finishResult.token, accountId);
+		await deps.storage.storeServerUrl(serverUrl, accountId);
 
 		// On multi-account platforms (desktop), set active account before fetchVaultKeys
 		// so the session-refresh client can resolve the token
 		if (deps.storage.supportsMultiAccount) {
-			await deps.storage.setActiveAccount({ type: "single", email });
+			await deps.storage.setActiveAccount({ type: "single", accountId });
 		}
 
 		const vaultKeys = await fetchVaultKeys(authClient);
@@ -456,7 +490,7 @@ export async function performSRPLogin(
 		);
 
 		await persistPinnedKdfParamsIfNeeded(
-			email,
+			accountId,
 			startResult.kdfParams,
 			deps.storage,
 		);
@@ -489,33 +523,46 @@ export async function storeLoginSession(
 	options?: StoreAuthSessionOptions,
 ): Promise<void> {
 	const resolvedEmail = email ?? result.user.email;
+	const serverUrl =
+		options?.serverUrl ??
+		(await storage.getServerUrl()) ??
+		getDefaultServerUrl();
+	const accountId = await resolveAccountIdForLogin(
+		storage,
+		resolvedEmail,
+		result.user.id,
+		serverUrl,
+	);
 
-	// Clear stale cached data from a previous account with the same email.
+	// Clear stale cached data from a previous account with the same identity.
 	if (storage.clearItemCache) {
-		await storage.clearItemCache(resolvedEmail);
+		await storage.clearItemCache(accountId);
 	}
 
-	const travelMode = await prepareTravelModeForSession(
-		resolvedEmail,
+	await prepareTravelModeForSession(
+		accountId,
 		storage,
 		options?.travelModeRpcClient,
 	);
 
-	await storage.storeAuthToken(result.token, resolvedEmail);
+	const travelMode = getTravelModeEnforcer(storage);
+
+	await storage.storeAuthToken(result.token, accountId);
+	await storage.storeServerUrl(serverUrl, accountId);
 	const vaultKeys = await travelMode.stripVaultKeysIfActive(
-		resolvedEmail,
+		accountId,
 		result.vaultKeys,
 	);
-	await storage.storeVaultKeys(vaultKeys, resolvedEmail);
+	await storage.storeVaultKeys(vaultKeys, accountId);
 
 	if (result.user.encryptedPrivateKey) {
 		await storage.storeEncryptedPrivateKey(
 			result.user.encryptedPrivateKey,
-			resolvedEmail,
+			accountId,
 		);
 	}
 
-	await storage.storeSecretKey(secretKey, resolvedEmail);
+	await storage.storeSecretKey(secretKey, accountId);
 
 	if (
 		result.masterUnlockKeyHandle &&
@@ -524,6 +571,7 @@ export async function storeLoginSession(
 	) {
 		await storage.storeSessionDataWithMasterUnlockKeyHandle(
 			result.masterUnlockKeyHandle,
+			accountId,
 			resolvedEmail,
 			result.user.id,
 			result.expiresAt,
@@ -531,18 +579,19 @@ export async function storeLoginSession(
 		);
 		await storage.setMasterUnlockKeyHandle(
 			result.masterUnlockKeyHandle,
-			resolvedEmail,
+			accountId,
 		);
 	} else if (result.masterUnlockKey) {
 		await storage.storeSessionData(
 			result.masterUnlockKey,
+			accountId,
 			resolvedEmail,
 			result.user.id,
 			result.expiresAt,
 			result.sessionId,
 		);
 
-		await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
 	} else {
 		throw new Error(
 			"Master Unlock Key unavailable for session storage on this platform.",
@@ -551,20 +600,22 @@ export async function storeLoginSession(
 
 	if (storage.supportsMultiAccount && storage.addAccount) {
 		await storage.addAccount({
+			accountId,
 			email: resolvedEmail,
 			userId: result.user.id,
 			name: result.user.name || resolvedEmail.split("@")[0] || "User",
+			serverUrl,
 			teamName: result.user.teamName,
 			teamAvatarUrl: result.user.teamAvatarUrl,
 			addedAt: Date.now(),
 			lastActiveAt: Date.now(),
 			secretKeyHint: `${secretKey.slice(0, 4)}••••`,
 			biometricEnabled: storage.isBiometricEnabled
-				? await storage.isBiometricEnabled(resolvedEmail)
+				? await storage.isBiometricEnabled(accountId)
 				: false,
 		});
 
-		await storage.setActiveAccount({ type: "single", email: resolvedEmail });
+		await storage.setActiveAccount({ type: "single", accountId });
 	}
 }
 
@@ -574,7 +625,11 @@ async function deriveSrpPasswordForEmail(
 	crypto: ICrypto,
 	storage: IStorageAdapter,
 ): Promise<string> {
-	const storedSecretKey = await storage.getStoredSecretKey(email);
+	const accountId = await resolveAccountIdByEmail(storage, email);
+	if (!accountId) {
+		throw new Error(m.auth_error_no_stored_secret_key());
+	}
+	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
 		throw new Error(m.auth_error_no_stored_secret_key());
 	}
@@ -652,7 +707,12 @@ export async function performSRPUnlock(
 	const { crypto, storage } = deps;
 	const authClient = resolveAuthClient(deps);
 
-	const storedSecretKey = await storage.getStoredSecretKey(email);
+	const accountId = await resolveAccountIdByEmail(storage, email);
+	if (!accountId) {
+		throw new Error(m.auth_error_no_stored_secret_key());
+	}
+
+	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
 		throw new Error(m.auth_error_no_stored_secret_key());
 	}
@@ -688,7 +748,7 @@ export async function performSRPUnlock(
 		await validateDerivedUnlockKey({
 			crypto,
 			storage,
-			email,
+			accountId,
 			masterUnlockKey,
 			masterUnlockKeyHandle,
 			handleCrypto,
@@ -696,18 +756,18 @@ export async function performSRPUnlock(
 
 		const [storedSessionData, storedToken, storedVaultKeys, storedPrivateKey] =
 			await Promise.all([
-				storage.getStoredSessionData?.(email) ?? Promise.resolve(null),
-				storage.getAuthToken(email),
-				storage.getVaultKeys(email),
-				storage.getEncryptedPrivateKey(email),
+				storage.getStoredSessionData?.(accountId) ?? Promise.resolve(null),
+				storage.getAuthToken(accountId),
+				storage.getVaultKeys(accountId),
+				storage.getEncryptedPrivateKey(accountId),
 			]);
 
 		if (
 			storedSessionData &&
 			storedToken &&
-			(await storage.isSessionValid(email))
+			(await storage.isSessionValid(accountId))
 		) {
-			const accountMetadata = await storage.getAccountMetadata?.(email);
+			const accountMetadata = await storage.getAccountMetadata?.(accountId);
 
 			return {
 				mode: "local",
@@ -754,12 +814,23 @@ export async function performSRPUnlock(
 		});
 
 		// Store token before fetchVaultKeys so the auth header is available
-		await deps.storage.storeAuthToken(finishResult.token, email);
+		const serverUrl =
+			(await deps.storage.getServerUrl(accountId)) ?? getDefaultServerUrl();
+		const resolvedAccountId = await resolveAccountIdForLogin(
+			deps.storage,
+			email,
+			finishResult.user.id,
+			serverUrl,
+		);
+		await deps.storage.storeAuthToken(finishResult.token, resolvedAccountId);
 
 		// On multi-account platforms (desktop), set active account before fetchVaultKeys
 		// so the session-refresh client can resolve the token
 		if (deps.storage.supportsMultiAccount) {
-			await deps.storage.setActiveAccount({ type: "single", email });
+			await deps.storage.setActiveAccount({
+				type: "single",
+				accountId: resolvedAccountId,
+			});
 		}
 
 		const vaultKeys = await fetchVaultKeys(authClient);
@@ -771,7 +842,7 @@ export async function performSRPUnlock(
 		);
 
 		await persistPinnedKdfParamsIfNeeded(
-			email,
+			resolvedAccountId,
 			startResult.kdfParams,
 			deps.storage,
 		);
@@ -804,24 +875,38 @@ export async function storeUnlockSession(
 	options?: StoreAuthSessionOptions,
 ): Promise<void> {
 	const resolvedEmail = email ?? result.user.email;
-	const travelMode = await prepareTravelModeForSession(
+	const serverUrl =
+		options?.serverUrl ??
+		(await storage.getServerUrl()) ??
+		getDefaultServerUrl();
+	const accountId = await resolveAccountIdForLogin(
+		storage,
 		resolvedEmail,
+		result.user.id,
+		serverUrl,
+	);
+
+	await prepareTravelModeForSession(
+		accountId,
 		storage,
 		options?.travelModeRpcClient,
 	);
 
+	const travelMode = getTravelModeEnforcer(storage);
+
 	if (result.mode === "reauth") {
-		await storage.storeAuthToken(result.token, resolvedEmail);
+		await storage.storeAuthToken(result.token, accountId);
+		await storage.storeServerUrl(serverUrl, accountId);
 		const vaultKeys = await travelMode.stripVaultKeysIfActive(
-			resolvedEmail,
+			accountId,
 			result.vaultKeys,
 		);
-		await storage.storeVaultKeys(vaultKeys, resolvedEmail);
+		await storage.storeVaultKeys(vaultKeys, accountId);
 
 		if (result.user.encryptedPrivateKey) {
 			await storage.storeEncryptedPrivateKey(
 				result.user.encryptedPrivateKey,
-				resolvedEmail,
+				accountId,
 			);
 		}
 
@@ -832,6 +917,7 @@ export async function storeUnlockSession(
 		) {
 			await storage.storeSessionDataWithMasterUnlockKeyHandle(
 				result.masterUnlockKeyHandle,
+				accountId,
 				resolvedEmail,
 				result.user.id,
 				result.expiresAt,
@@ -839,18 +925,19 @@ export async function storeUnlockSession(
 			);
 			await storage.setMasterUnlockKeyHandle(
 				result.masterUnlockKeyHandle,
-				resolvedEmail,
+				accountId,
 			);
 		} else if (result.masterUnlockKey) {
 			await storage.storeSessionData(
 				result.masterUnlockKey,
+				accountId,
 				resolvedEmail,
 				result.user.id,
 				result.expiresAt,
 				result.sessionId,
 			);
 
-			await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+			await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
 		} else {
 			throw new Error(
 				"Master Unlock Key unavailable for session storage on this platform.",
@@ -859,10 +946,10 @@ export async function storeUnlockSession(
 	} else if (result.masterUnlockKeyHandle && storage.setMasterUnlockKeyHandle) {
 		await storage.setMasterUnlockKeyHandle(
 			result.masterUnlockKeyHandle,
-			resolvedEmail,
+			accountId,
 		);
 	} else if (result.masterUnlockKey) {
-		await storage.setMasterUnlockKey(result.masterUnlockKey, resolvedEmail);
+		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
 	} else {
 		throw new Error(
 			"Master Unlock Key unavailable for session storage on this platform.",
@@ -874,14 +961,14 @@ export async function storeUnlockSession(
 		if (
 			!currentActive ||
 			currentActive.type !== "single" ||
-			currentActive.email.toLowerCase() !== resolvedEmail.toLowerCase()
+			currentActive.accountId !== accountId
 		) {
-			await storage.setActiveAccount({ type: "single", email: resolvedEmail });
+			await storage.setActiveAccount({ type: "single", accountId });
 		}
 	}
 
 	if (storage.updateLastMasterPasswordEntry) {
-		await storage.updateLastMasterPasswordEntry(resolvedEmail);
+		await storage.updateLastMasterPasswordEntry(accountId);
 	}
 }
 
@@ -890,31 +977,40 @@ export async function storeUnlockSession(
  */
 export async function getSessionState(
 	storage: IStorageAdapter,
-	email?: string,
+	accountIdOrEmail?: string,
 ): Promise<SessionState> {
-	let resolvedEmail = email;
-	if (!resolvedEmail) {
+	// Callers may pass either an accountId or a legacy email (the unlock screen
+	// still resolves accounts by email). Normalize to an accountId so the
+	// session/biometric lookups below hit the correct account-scoped keys.
+	let resolvedAccountId = await resolveAccountScopeId(storage, accountIdOrEmail);
+	if (!resolvedAccountId) {
 		const activeAccount = await storage.getActiveAccount();
-		resolvedEmail =
-			activeAccount?.type === "single" ? activeAccount.email : undefined;
+		resolvedAccountId =
+			activeAccount?.type === "single" ? activeAccount.accountId : undefined;
 	}
 
-	const isValid = await storage.isSessionValid(resolvedEmail ?? undefined);
+	let resolvedEmail: string | null = null;
+	if (resolvedAccountId) {
+		const metadata = await storage.getAccountMetadata?.(resolvedAccountId);
+		resolvedEmail = metadata?.email ?? null;
+	}
+
+	const isValid = await storage.isSessionValid(resolvedAccountId ?? undefined);
 	const canQuickUnlock = await storage.canQuickUnlock(
-		resolvedEmail ?? undefined,
+		resolvedAccountId ?? undefined,
 	);
 
 	let canBiometricUnlock = false;
 	if (storage.supportsBiometric && storage.canBiometricUnlock) {
 		canBiometricUnlock = await storage.canBiometricUnlock(
-			resolvedEmail ?? undefined,
+			resolvedAccountId ?? undefined,
 		);
 	}
 
 	let requiresPasswordReentry = false;
 	if (storage.isMasterPasswordReentryRequired) {
 		requiresPasswordReentry = await storage.isMasterPasswordReentryRequired(
-			resolvedEmail ?? undefined,
+			resolvedAccountId ?? undefined,
 		);
 	}
 
@@ -922,11 +1018,14 @@ export async function getSessionState(
 	let userId: string | null = null;
 	if (storage.getStoredSessionData) {
 		const sessionData = await storage.getStoredSessionData(
-			resolvedEmail ?? undefined,
+			resolvedAccountId ?? undefined,
 		);
 		if (sessionData) {
 			expiresAt = sessionData.expiresAt;
 			userId = sessionData.userId;
+			if (!resolvedEmail) {
+				resolvedEmail = sessionData.email;
+			}
 		}
 	}
 
@@ -935,7 +1034,7 @@ export async function getSessionState(
 		canQuickUnlock,
 		canBiometricUnlock,
 		requiresPasswordReentry,
-		email: resolvedEmail ?? null,
+		email: resolvedEmail,
 		userId,
 		expiresAt,
 	};
@@ -946,13 +1045,14 @@ export async function getSessionState(
  */
 export async function clearSession(
 	storage: IStorageAdapter,
-	email?: string,
+	accountId?: string,
 	clearSecretKey = false,
 ): Promise<void> {
+	const resolvedAccountId = await resolveAccountScopeId(storage, accountId);
 	if (clearSecretKey) {
-		await storage.clearAllStoredData(email);
+		await storage.clearAllStoredData(resolvedAccountId);
 	} else {
-		await storage.clearSession(email);
+		await storage.clearSession(resolvedAccountId);
 	}
 }
 

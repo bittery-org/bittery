@@ -35,7 +35,7 @@ export interface DesktopCloseEvent {
 }
 
 export interface ActiveAccountChangedEvent {
-	email: string;
+	accountId: string;
 	timestamp: number;
 }
 
@@ -92,10 +92,19 @@ class DesktopSyncService {
 						if (previousState.activeAccount === "all") {
 							await storage.setActiveAccount({ type: "all" });
 						} else {
-							await storage.setActiveAccount({
-								type: "single",
-								email: previousState.activeAccount,
-							});
+							const accounts = await storage.getAccountsList();
+							const account = accounts.find(
+								(item) =>
+									item.accountId === previousState.activeAccount ||
+									item.email.toLowerCase() ===
+										previousState.activeAccount?.toLowerCase(),
+							);
+							if (account) {
+								await storage.setActiveAccount({
+									type: "single",
+									accountId: account.accountId,
+								});
+							}
 						}
 					} catch (error) {
 						console.error(
@@ -152,13 +161,23 @@ class DesktopSyncService {
 			// Add or update accounts from desktop
 			for (const desktopAccount of accountsData.accounts) {
 				const email = desktopAccount.email.toLowerCase();
+				const desktopAccountId =
+					"accountId" in desktopAccount &&
+					typeof desktopAccount.accountId === "string"
+						? desktopAccount.accountId
+						: undefined;
 				const existingAccount = currentAccounts.find(
-					(a) => a.email.toLowerCase() === email,
+					(a) =>
+						a.email.toLowerCase() === email ||
+						(desktopAccountId !== undefined &&
+							a.accountId === desktopAccountId),
 				);
 
 				if (!existingAccount) {
-					// Add new account
 					await storage.addAccount({
+						...(desktopAccountId !== undefined
+							? { accountId: desktopAccountId }
+							: {}),
 						email: desktopAccount.email,
 						userId: desktopAccount.userId,
 						name: desktopAccount.name,
@@ -168,7 +187,7 @@ class DesktopSyncService {
 						addedAt: desktopAccount.addedAt ?? Date.now(),
 						lastActiveAt: desktopAccount.lastActiveAt ?? Date.now(),
 						biometricEnabled: desktopAccount.biometricEnabled ?? false,
-					});
+					} as import("../lib/storage").AccountMetadata);
 				} else {
 					// Update existing account with latest data from desktop
 					// This ensures teamAvatarUrl and other fields stay in sync
@@ -188,14 +207,22 @@ class DesktopSyncService {
 
 			// Update active account if desktop has one set
 			if (accountsData.activeAccount) {
-				// Check if active account is "all" or a specific email
 				if (accountsData.activeAccount === "all") {
 					await storage.setActiveAccount({ type: "all" });
 				} else {
-					await storage.setActiveAccount({
-						type: "single",
-						email: accountsData.activeAccount,
-					});
+					const refreshedAccounts = await storage.getAccountsList();
+					const active = refreshedAccounts.find(
+						(item) =>
+							item.accountId === accountsData.activeAccount ||
+							item.email.toLowerCase() ===
+								accountsData.activeAccount?.toLowerCase(),
+					);
+					if (active) {
+						await storage.setActiveAccount({
+							type: "single",
+							accountId: active.accountId,
+						});
+					}
 				}
 			}
 		} catch (error) {
@@ -341,7 +368,10 @@ class DesktopSyncService {
 
 		// Update active account in extension storage to match desktop
 		try {
-			await storage.setActiveAccount({ type: "single", email: event.email });
+			await storage.setActiveAccount({
+				type: "single",
+				accountId: event.accountId,
+			});
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
 		}
@@ -449,7 +479,7 @@ class DesktopSyncService {
 				lastConnectedAt: Date.now(),
 				activeAccount:
 					activeAccount?.type === "single"
-						? activeAccount.email
+						? activeAccount.accountId
 						: activeAccount?.type === "all"
 							? "all"
 							: null,

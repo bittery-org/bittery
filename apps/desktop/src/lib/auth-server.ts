@@ -128,7 +128,7 @@ export async function setActiveAuthServerUrl(
 
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
-		await storage.storeServerUrl(normalized, activeAccount.email);
+		await storage.storeServerUrl(normalized, activeAccount.accountId);
 	}
 
 	storeActiveServerUrl(normalized);
@@ -140,7 +140,7 @@ export async function resolveActiveAuthServerUrl(): Promise<string> {
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
 		const activeAccountServerUrl = normalizeServerUrl(
-			(await storage.getServerUrl(activeAccount.email)) ?? "",
+			(await storage.getServerUrl(activeAccount.accountId)) ?? "",
 		);
 
 		if (activeAccountServerUrl) {

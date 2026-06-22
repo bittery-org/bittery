@@ -1,12 +1,7 @@
 /**
  * useAccountSwitcher Hook
  *
- * React hook for managing multi-account operations:
- * - Get list of all added accounts
- * - Get currently active account
- * - Switch between accounts
- * - Remove accounts from device
- * - Get list of unlocked accounts (with MUKs in memory)
+ * React hook for managing multi-account operations via AccountSessionManager.
  */
 
 import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
@@ -14,155 +9,120 @@ import {
 	type UseMutationResult,
 	type UseQueryResult,
 	useMutation,
-	useQuery,
 	useQueryClient,
 } from "@tanstack/react-query";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { usePlatformStorage } from "../../context/platform-context";
+import {
+	type AccountSessionManager,
+	getAccountSessionManager,
+} from "../../services/account-session-manager";
 
-/**
- * Options for useAccountSwitcher hook
- */
 export interface UseAccountSwitcherOptions {
-	/**
-	 * Whether to enable the queries.
-	 */
 	enabled?: boolean;
 }
 
-/**
- * Result type for the account switcher hook
- */
 export interface UseAccountSwitcherResult {
-	/** List of all added accounts */
 	accounts: UseQueryResult<AccountMetadata[], Error>;
-
-	/** Currently active account configuration */
 	activeAccount: UseQueryResult<ActiveAccount, Error>;
-
-	/** List of unlocked account emails (with MUKs in memory) */
-	unlockedEmails: UseQueryResult<string[], Error>;
-
-	/** Mutation to switch to a different account */
+	unlockedAccountIds: UseQueryResult<string[], Error>;
 	switchAccount: UseMutationResult<void, Error, ActiveAccount, unknown>;
-
-	/** Mutation to remove an account from this device */
 	removeAccount: UseMutationResult<void, Error, string, unknown>;
-
-	/** Mutation to lock all accounts (clear all MUKs from memory) */
 	lockAllAccounts: UseMutationResult<void, Error, void, unknown>;
 }
 
-/**
- * Hook for managing multi-account operations.
- *
- * @param options - Query options
- * @returns Account switcher result with queries and mutations
- *
- * @example
- * ```tsx
- * const { accounts, activeAccount, unlockedEmails, switchAccount, removeAccount } = useAccountSwitcher();
- *
- * // Display account list
- * accounts.data?.map(account => (
- *   <AccountItem
- *     key={account.email}
- *     account={account}
- *     isActive={activeAccount.data?.type === "single" && activeAccount.data.email === account.email}
- *     isUnlocked={unlockedEmails.data?.includes(account.email)}
- *     onSwitch={() => switchAccount.mutate({ type: "single", email: account.email })}
- *     onRemove={() => removeAccount.mutate(account.email)}
- *   />
- * ))
- * ```
- */
+function useAccountSessionManager(): AccountSessionManager {
+	const storage = usePlatformStorage();
+	const queryClient = useQueryClient();
+
+	return useMemo(
+		() =>
+			getAccountSessionManager({
+				storage,
+				invalidateQueries: async (keys) => {
+					await Promise.all(
+						keys.map((key) => queryClient.invalidateQueries({ queryKey: key })),
+					);
+				},
+			}),
+		[storage, queryClient],
+	);
+}
+
+function toSuccessQuery<T>(
+	data: T,
+	enabled: boolean,
+): UseQueryResult<T, Error> {
+	return {
+		data,
+		error: null,
+		isError: false,
+		isPending: false,
+		isLoading: false,
+		isSuccess: enabled,
+		status: enabled ? "success" : "pending",
+		fetchStatus: "idle",
+		isFetching: false,
+		isRefetching: false,
+		isLoadingError: false,
+		isRefetchError: false,
+		isPlaceholderData: false,
+		isStale: false,
+		dataUpdatedAt: Date.now(),
+		errorUpdatedAt: 0,
+		failureCount: 0,
+		failureReason: null,
+		errorUpdateCount: 0,
+		isFetched: enabled,
+		isFetchedAfterMount: enabled,
+		isInitialLoading: false,
+		isPaused: false,
+		promise: Promise.resolve(data),
+		refetch: () => Promise.resolve(toSuccessQuery(data, enabled)),
+	} as UseQueryResult<T, Error>;
+}
+
 export function useAccountSwitcher(
 	options: UseAccountSwitcherOptions = {},
 ): UseAccountSwitcherResult {
 	const storage = usePlatformStorage();
-	const queryClient = useQueryClient();
+	const manager = useAccountSessionManager();
+	const enabled = options.enabled !== false && storage.supportsMultiAccount;
 
-	// Query: Get list of all accounts
-	const accounts = useQuery({
-		queryKey: ["accounts", "list"],
-		queryFn: async () => {
-			return storage.getAccountsList();
-		},
-		enabled: options.enabled !== false && storage.supportsMultiAccount,
-		staleTime: 30 * 1000, // Cache for 30 seconds
-	});
+	useSyncExternalStore(manager.subscribe, manager.getSnapshot);
 
-	// Query: Get active account configuration
-	const activeAccount = useQuery({
-		queryKey: ["accounts", "active"],
-		queryFn: async () => {
-			return storage.getActiveAccount();
-		},
-		enabled: options.enabled !== false,
-		staleTime: 10 * 1000, // Cache for 10 seconds
-	});
+	useEffect(() => {
+		if (enabled) {
+			void manager.initialize();
+		}
+	}, [manager, enabled]);
 
-	// Query: Get list of unlocked accounts
-	const unlockedEmails = useQuery({
-		queryKey: ["accounts", "unlocked"],
-		queryFn: async () => {
-			if (storage.getUnlockedAccounts) {
-				return storage.getUnlockedAccounts();
-			}
-			// Fallback for adapters that don't implement getUnlockedAccounts
-			return [];
-		},
-		enabled: options.enabled !== false && storage.supportsMultiAccount,
-		staleTime: 5 * 1000, // Cache for 5 seconds
-		refetchInterval: 10 * 1000, // Refetch every 10 seconds to stay in sync
-	});
+	const accountsData = manager.getAccounts();
+	const activeAccountData = manager.getActiveAccount();
+	const unlockedAccountIdsData = manager.getUnlockedAccountIds();
 
-	// Mutation: Switch to a different account
 	const switchAccount = useMutation({
 		mutationFn: async (account: ActiveAccount) => {
-			await storage.setActiveAccount(account);
-		},
-		onSuccess: () => {
-			// Invalidate all account-related queries
-			queryClient.invalidateQueries({ queryKey: ["accounts"] });
-			queryClient.invalidateQueries({ queryKey: ["auth"] });
-			queryClient.invalidateQueries({ queryKey: ["vaults"] });
-			queryClient.invalidateQueries({ queryKey: ["items"] });
+			await manager.switchAccount(account);
 		},
 	});
 
-	// Mutation: Remove an account from this device
 	const removeAccount = useMutation({
-		mutationFn: async (email: string) => {
-			await storage.removeAccount(email);
-		},
-		onSuccess: () => {
-			// Invalidate account-related queries
-			queryClient.invalidateQueries({ queryKey: ["accounts"] });
+		mutationFn: async (accountId: string) => {
+			await manager.removeAccount(accountId);
 		},
 	});
 
-	// Mutation: Lock all accounts (clear all MUKs from memory)
 	const lockAllAccounts = useMutation({
 		mutationFn: async () => {
-			if (storage.lockAllAccounts) {
-				await storage.lockAllAccounts();
-			} else {
-				// Fallback: just clear the current account's MUK
-				await storage.clearMasterUnlockKey();
-			}
-		},
-		onSuccess: () => {
-			// Invalidate session-related queries
-			queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] });
-			queryClient.invalidateQueries({ queryKey: ["auth", "sessionState"] });
-			queryClient.invalidateQueries({ queryKey: ["items"] });
+			await manager.lockAll();
 		},
 	});
 
 	return {
-		accounts,
-		activeAccount,
-		unlockedEmails,
+		accounts: toSuccessQuery(accountsData, enabled),
+		activeAccount: toSuccessQuery(activeAccountData, options.enabled !== false),
+		unlockedAccountIds: toSuccessQuery(unlockedAccountIdsData, enabled),
 		switchAccount,
 		removeAccount,
 		lockAllAccounts,

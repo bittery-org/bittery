@@ -133,7 +133,7 @@ export function useQuickUnlockAll(
 				try {
 					// Check if account has stored secret key
 					const hasSecretKey = await storage.hasStoredSecretKey?.(
-						account.email,
+						account.accountId,
 					);
 					if (!hasSecretKey) {
 						failed.push({
@@ -144,7 +144,7 @@ export function useQuickUnlockAll(
 						continue;
 					}
 
-					const authToken = await storage.getAuthToken(account.email);
+					const authToken = await storage.getAuthToken(account.accountId);
 					if (!authToken) {
 						failed.push({
 							email: account.email,
@@ -154,7 +154,7 @@ export function useQuickUnlockAll(
 					}
 
 					const serverUrl =
-						(await storage.getServerUrl?.(account.email)) ||
+						(await storage.getServerUrl?.(account.accountId)) ||
 						getDefaultServerUrl();
 					const accountRpcClient = createAccountRpcClient(authToken, serverUrl);
 
@@ -170,6 +170,7 @@ export function useQuickUnlockAll(
 					// Store unlock session data
 					await storeUnlockSession(result, storage, account.email, {
 						travelModeRpcClient: accountRpcClient,
+						serverUrl,
 					});
 
 					unlocked.push(account.email);
