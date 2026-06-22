@@ -1,4 +1,10 @@
-import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
+import {
+	AccountResolver,
+	getOrCreateVaultRepositoryCoordinator,
+	handleTravelModeSyncEvent,
+	type RpcVaultClient,
+} from "@bittery/core";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
@@ -191,6 +197,37 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		[],
 	);
 
+	const onTravelModeEvent = useCallback(
+		async (event: { type: string; metadata?: Record<string, unknown> }) => {
+			if (!syncAccountEmail || event.type !== "travel_mode_updated") {
+				return;
+			}
+			const [token, accountServerUrl] = await Promise.all([
+				storage.getAuthToken(syncAccountEmail),
+				storage.getServerUrl(syncAccountEmail),
+			]);
+			if (!token) {
+				return;
+			}
+			const rpcClient = createAccountRpcClient(
+				token,
+				accountServerUrl || serverUrl || "http://localhost:3000",
+			);
+			const accounts = new AccountResolver(storage);
+			await handleTravelModeSyncEvent(
+				event,
+				syncAccountEmail,
+				storage,
+				vaultCoordinator,
+				{
+					rpcClient: rpcClient as unknown as RpcVaultClient,
+					accounts,
+				},
+			);
+		},
+		[serverUrl, syncAccountEmail, vaultCoordinator],
+	);
+
 	const syncState = useSync({
 		serverUrl,
 		getAuthToken,
@@ -203,6 +240,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAccountEmail: syncAccountEmail,
 		itemCacheServerUrl: syncAccountEmail ? serverUrl : null,
 		fetch: expoFetch,
+		onEventProcessed: onTravelModeEvent,
 	});
 
 	useEffect(() => {

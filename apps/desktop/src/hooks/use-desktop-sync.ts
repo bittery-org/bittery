@@ -1,4 +1,9 @@
-import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
+import {
+	AccountResolver,
+	getOrCreateVaultRepositoryCoordinator,
+	handleTravelModeSyncEvent,
+	type RpcVaultClient,
+} from "@bittery/core";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
@@ -298,6 +303,27 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		[],
 	);
 
+	const onTravelModeEvent = useCallback(
+		async (event: { type: string; metadata?: Record<string, unknown> }) => {
+			if (!syncAccountEmail || event.type !== "travel_mode_updated") {
+				return;
+			}
+			const rpcClient = await getClientForAccount(syncAccountEmail);
+			const accounts = new AccountResolver(storage);
+			await handleTravelModeSyncEvent(
+				event,
+				syncAccountEmail,
+				storage,
+				vaultCoordinator,
+				{
+					rpcClient: rpcClient as unknown as RpcVaultClient,
+					accounts,
+				},
+			);
+		},
+		[getClientForAccount, syncAccountEmail, vaultCoordinator],
+	);
+
 	const syncState = useSync({
 		serverUrl,
 		getAuthToken,
@@ -310,6 +336,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		itemCacheServerUrl: syncAccountEmail ? serverUrl : null,
 		getClientForAccount,
 		onSessionRevoked,
+		onEventProcessed: onTravelModeEvent,
 	});
 
 	return {

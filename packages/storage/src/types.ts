@@ -18,6 +18,16 @@ export interface VaultKeyData {
 }
 
 /**
+ * Cached travel mode configuration mirrored from the server.
+ */
+export interface TravelModeConfig {
+	enabled: boolean;
+	hiddenVaultIds: string[];
+	enabledAt?: number | null;
+	updatedAt?: number;
+}
+
+/**
  * Encrypted session data persisted to storage
  */
 export interface StoredSessionData {

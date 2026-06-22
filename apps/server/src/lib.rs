@@ -31,6 +31,7 @@ pub use rpc::billing::create_billing_router;
 pub use rpc::share::create_share_router;
 pub use rpc::sync::create_sync_router;
 pub use rpc::team::create_team_router;
+pub use rpc::travel_mode::create_travel_mode_router;
 pub use rpc::vault::create_vault_router;
 pub use services::auth::rpc_request_context_middleware;
 pub use services::connection_registry::ConnectionRegistry;
@@ -163,5 +164,6 @@ pub fn create_rpc_router() -> Router<AppState> {
         .nest("share", create_share_router())
         .nest("sync", create_sync_router())
         .nest("team", create_team_router())
+        .nest("travelMode", create_travel_mode_router())
         .nest("vault", create_vault_router())
 }

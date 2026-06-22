@@ -429,6 +429,13 @@ export class VaultRepositoryCoordinator {
 			await entry.repo.clearItemCache(repoEmail);
 		}
 	}
+
+	purgeHiddenVaultsForEmail(email: string, hiddenVaultIds: string[]): void {
+		const normalized = this.normalizeEmail(email);
+		const entry = this.repos.get(normalized);
+		entry?.repo.purgeHiddenVaults(hiddenVaultIds);
+		this.emit();
+	}
 }
 
 const coordinatorRegistry = new WeakMap<

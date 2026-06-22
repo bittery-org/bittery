@@ -14,12 +14,18 @@ export type SyncEventType =
 	| "vault_access_revoked"
 	| "vault_member_added"
 	| "vault_member_removed"
-	| "vault_key_rotated";
+	| "vault_key_rotated"
+	| "travel_mode_updated";
 
 /**
  * Entity types that can be synced
  */
-export type SyncEntityType = "item" | "vault" | "vault_member" | "vault_key";
+export type SyncEntityType =
+	| "item"
+	| "vault"
+	| "vault_member"
+	| "vault_key"
+	| "user";
 
 /**
  * Typed metadata per event type.
@@ -48,6 +54,11 @@ export interface VaultKeyRotatedMetadata extends SyncMetadataBase {
 	keyRotationId: string;
 }
 
+export interface TravelModeUpdatedMetadata extends SyncMetadataBase {
+	enabled: boolean;
+	hiddenVaultIds: string[];
+}
+
 /** Default metadata for events that carry no extra fields */
 export interface DefaultSyncMetadata extends SyncMetadataBase {
 	[key: string]: unknown;
@@ -68,6 +79,7 @@ export interface SyncMetadataMap {
 	vault_member_added: VaultMemberAddedMetadata;
 	vault_member_removed: VaultMemberRemovedMetadata;
 	vault_key_rotated: VaultKeyRotatedMetadata;
+	travel_mode_updated: TravelModeUpdatedMetadata;
 }
 
 /**

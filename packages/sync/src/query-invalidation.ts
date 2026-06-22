@@ -95,6 +95,13 @@ export function getQueryKeysForEvent(
 			keys.push(["vault-keys"]);
 			keys.push(rpc.vault.list.queryKey());
 			break;
+
+		case "travel_mode_updated":
+			keys.push(["travel-mode"]);
+			keys.push(["all-vault-keys"]);
+			keys.push(rpc.travelMode.getTravelMode.queryKey());
+			keys.push(rpc.vault.list.queryKey());
+			break;
 	}
 
 	return keys;
@@ -291,7 +298,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
  */
 function getEntityTypeForEventType(
 	type: SyncEventType,
-): "item" | "vault" | "vault_member" | "vault_key" {
+): "item" | "vault" | "vault_member" | "vault_key" | "user" {
 	if (type.startsWith("item_")) {
 		return "item";
 	}
@@ -300,6 +307,9 @@ function getEntityTypeForEventType(
 	}
 	if (type === "vault_key_rotated") {
 		return "vault_key";
+	}
+	if (type === "travel_mode_updated") {
+		return "user";
 	}
 	return "vault";
 }

@@ -27,6 +27,7 @@ import {
 	BIOMETRIC_GRACE_PERIOD_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
 	type StoredSessionData,
+	type TravelModeConfig,
 	type VaultKeyData,
 } from "../types";
 
@@ -1518,6 +1519,33 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.delete(getAccountKey(resolvedEmail, "cached_vaults"));
 		await store.delete(getAccountKey(resolvedEmail, "item_cache_meta"));
 		await store.save();
+	}
+
+	async storeTravelModeCache(
+		config: TravelModeConfig,
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const store = await this.getStore();
+		await store.set(
+			getAccountKey(resolvedEmail, "travel_mode_cache"),
+			JSON.stringify(config),
+		);
+		await store.save();
+	}
+
+	async getTravelModeCache(email?: string): Promise<TravelModeConfig | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const store = await this.getStore();
+		const stored = await store.get<string>(
+			getAccountKey(resolvedEmail, "travel_mode_cache"),
+		);
+		if (!stored) return null;
+		return JSON.parse(stored) as TravelModeConfig;
 	}
 
 	// ============================================================================

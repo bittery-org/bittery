@@ -27,7 +27,7 @@ pub async fn fetch_visible_cursor_event(
 ) -> Result<Option<DbSyncEventCursorRow>, AppError> {
     if target_vault_ids.is_empty() {
         return query_as::<_, DbSyncEventCursorRow>(
-			"SELECT id, seq FROM sync_event WHERE id = $1 AND user_id = $2 AND event_type = 'vault_access_revoked'::sync_event_type LIMIT 1",
+			"SELECT id, seq FROM sync_event WHERE id = $1 AND user_id = $2 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) LIMIT 1",
 		)
 		.bind(since_id)
 		.bind(user_id)
@@ -37,7 +37,7 @@ pub async fn fetch_visible_cursor_event(
     }
 
     query_as::<_, DbSyncEventCursorRow>(
-		"SELECT id, seq FROM sync_event WHERE id = $1 AND (vault_id = ANY($2) OR (user_id = $3 AND event_type = 'vault_access_revoked'::sync_event_type)) LIMIT 1",
+		"SELECT id, seq FROM sync_event WHERE id = $1 AND (vault_id = ANY($2) OR (user_id = $3 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type))) LIMIT 1",
 	)
 	.bind(since_id)
 	.bind(target_vault_ids)
@@ -54,7 +54,7 @@ pub async fn fetch_latest_visible_event_id(
 ) -> Result<Option<String>, AppError> {
     if target_vault_ids.is_empty() {
         return query_as::<_, DbSyncEventIdRow>(
-			"SELECT id FROM sync_event WHERE user_id = $1 AND event_type = 'vault_access_revoked'::sync_event_type ORDER BY seq DESC LIMIT 1",
+			"SELECT id FROM sync_event WHERE user_id = $1 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) ORDER BY seq DESC LIMIT 1",
 		)
 		.bind(user_id)
 		.fetch_optional(pool)
@@ -64,7 +64,7 @@ pub async fn fetch_latest_visible_event_id(
     }
 
     query_as::<_, DbSyncEventIdRow>(
-		"SELECT id FROM sync_event WHERE vault_id = ANY($1) OR (user_id = $2 AND event_type = 'vault_access_revoked'::sync_event_type) ORDER BY seq DESC LIMIT 1",
+		"SELECT id FROM sync_event WHERE vault_id = ANY($1) OR (user_id = $2 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) ORDER BY seq DESC LIMIT 1",
 	)
 	.bind(target_vault_ids)
 	.bind(user_id)
@@ -83,7 +83,7 @@ pub async fn fetch_visible_events_since(
 ) -> Result<Vec<DbSyncEventRow>, AppError> {
     if target_vault_ids.is_empty() {
         return query_as::<_, DbSyncEventRow>(
-			"SELECT id, seq, event_type::text AS event_type, entity_id, entity_type::text AS entity_type, vault_id, version, client_id, user_id, metadata, created_at FROM sync_event WHERE user_id = $1 AND event_type = 'vault_access_revoked'::sync_event_type AND seq > $2 ORDER BY seq ASC LIMIT $3",
+			"SELECT id, seq, event_type::text AS event_type, entity_id, entity_type::text AS entity_type, vault_id, version, client_id, user_id, metadata, created_at FROM sync_event WHERE user_id = $1 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type) AND seq > $2 ORDER BY seq ASC LIMIT $3",
 		)
 		.bind(user_id)
 		.bind(cursor_seq)
@@ -94,7 +94,7 @@ pub async fn fetch_visible_events_since(
     }
 
     query_as::<_, DbSyncEventRow>(
-		"SELECT id, seq, event_type::text AS event_type, entity_id, entity_type::text AS entity_type, vault_id, version, client_id, user_id, metadata, created_at FROM sync_event WHERE (vault_id = ANY($1) OR (user_id = $2 AND event_type = 'vault_access_revoked'::sync_event_type)) AND seq > $3 ORDER BY seq ASC LIMIT $4",
+		"SELECT id, seq, event_type::text AS event_type, entity_id, entity_type::text AS entity_type, vault_id, version, client_id, user_id, metadata, created_at FROM sync_event WHERE (vault_id = ANY($1) OR (user_id = $2 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type))) AND seq > $3 ORDER BY seq ASC LIMIT $4",
 	)
 	.bind(target_vault_ids)
 	.bind(user_id)

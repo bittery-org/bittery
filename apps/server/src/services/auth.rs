@@ -958,15 +958,18 @@ pub(crate) async fn start_login(
     })
 }
 
-pub(crate) async fn finish_login(
-    app_state: &AppState,
-    request: &RequestMetadata,
-    input: FinishLoginInput,
-) -> Result<FinishLoginResponse, AppError> {
+struct VerifiedLoginProof {
+    user: DbLoginUserRow,
+    server_proof: String,
+}
+
+async fn verify_login_proof_and_get_user(
+    pool: &PgPool,
+    input: &FinishLoginInput,
+) -> Result<VerifiedLoginProof, AppError> {
     validate_login_attempt_id(&input.attempt_id)?;
     validate_hex_string(&input.client_public_key, "Invalid client public key")?;
     validate_hex_string(&input.client_proof, "Invalid client proof")?;
-    let pool = db_pool(app_state)?;
     let attempt = query_as::<_, DbLoginAttemptRow>(
 		"SELECT id, user_id, normalized_email_hash, client_public_key, server_ephemeral_secret, expires_at FROM login_attempt WHERE id = $1 LIMIT 1",
 	)
@@ -1012,20 +1015,49 @@ pub(crate) async fn finish_login(
             &input.client_proof,
         )
         .map_err(|_| AppError::unauthorized("Invalid credentials"))?;
-    let session = app_state.sessions.create_session(&user.id, request).await?;
+
+    Ok(VerifiedLoginProof {
+        user,
+        server_proof: session_result.proof.clone(),
+    })
+}
+
+pub(crate) async fn verify_login_proof_for_user(
+    pool: &PgPool,
+    expected_user_id: &str,
+    input: &FinishLoginInput,
+) -> Result<(), AppError> {
+    let verified = verify_login_proof_and_get_user(pool, input).await?;
+    if verified.user.id != expected_user_id {
+        return Err(AppError::unauthorized("Invalid credentials"));
+    }
+    Ok(())
+}
+
+pub(crate) async fn finish_login(
+    app_state: &AppState,
+    request: &RequestMetadata,
+    input: FinishLoginInput,
+) -> Result<FinishLoginResponse, AppError> {
+    let pool = db_pool(app_state)?;
+    let verified = verify_login_proof_and_get_user(pool, &input).await?;
+    let session = app_state
+        .sessions
+        .create_session(&verified.user.id, request)
+        .await?;
 
     Ok(FinishLoginResponse {
         token: session.token,
         session_id: session.session_id,
         expires_at: format_rfc3339(session.expires_at),
-        server_proof: session_result.proof.clone(),
+        server_proof: verified.server_proof,
         user: LoginUserResponse {
-            id: user.id,
-            email: user.email,
-            name: user.name,
-            secret_key_hint: user.secret_key_hint.unwrap_or_default(),
-            public_key: user.public_key,
-            encrypted_private_key: user.encrypted_private_key,
+            id: verified.user.id,
+            email: verified.user.email,
+            name: verified.user.name,
+            secret_key_hint: verified.user.secret_key_hint.unwrap_or_default(),
+            public_key: verified.user.public_key,
+            encrypted_private_key: verified.user.encrypted_private_key,
         },
     })
 }

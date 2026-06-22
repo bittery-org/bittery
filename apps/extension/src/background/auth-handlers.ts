@@ -11,6 +11,7 @@ import {
 	storeLoginSession,
 	storeUnlockSession,
 } from "@bittery/core";
+import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
 import { desktopSync } from "./desktop-sync";
@@ -23,6 +24,20 @@ import {
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
+
+const DEFAULT_SERVER_URL = "http://localhost:3000";
+
+async function getAccountRpcClient(email: string) {
+	const token = await storage.getAuthToken(email);
+	if (!token) {
+		return rpcClient;
+	}
+	const serverUrl =
+		(await storage.getServerUrl(email)) ??
+		(await storage.getServerUrl()) ??
+		DEFAULT_SERVER_URL;
+	return createAccountRpcClient(token, serverUrl);
+}
 
 async function isDesktopUnlockedNow(): Promise<boolean> {
 	const status =
@@ -52,7 +67,9 @@ export async function handleLogin(payload: {
 	);
 
 	// Store session data using shared utility
-	await storeLoginSession(result, secretKey, storage, email);
+	await storeLoginSession(result, secretKey, storage, email, {
+		travelModeRpcClient: rpcClient,
+	});
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
 	if (result.masterUnlockKey) {
@@ -89,7 +106,9 @@ export async function handleQuickUnlock(payload: {
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(result, storage, email);
+	await storeUnlockSession(result, storage, email, {
+		travelModeRpcClient: rpcClient,
+	});
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
 	if (result.masterUnlockKey) {
@@ -331,7 +350,10 @@ export async function handleQuickUnlockAll(payload: {
 			);
 
 			// Store unlock session data
-			await storeUnlockSession(result, storage, account.email);
+			const accountRpcClient = await getAccountRpcClient(account.email);
+			await storeUnlockSession(result, storage, account.email, {
+				travelModeRpcClient: accountRpcClient,
+			});
 
 			unlocked.push(account.email);
 		} catch (error) {

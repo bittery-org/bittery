@@ -113,7 +113,9 @@ export function useLogin(
 			}
 
 			// Store session data
-			await storeLoginSession(result, input.secretKey, storage, input.email);
+			await storeLoginSession(result, input.secretKey, storage, input.email, {
+				travelModeRpcClient: rpcClientForRequest,
+			});
 
 			// For multi-account platforms, set this as the active account
 			if (storage.supportsMultiAccount) {

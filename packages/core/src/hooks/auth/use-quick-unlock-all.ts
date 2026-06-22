@@ -152,7 +152,9 @@ export function useQuickUnlockAll(
 					);
 
 					// Store unlock session data
-					await storeUnlockSession(result, storage, account.email);
+					await storeUnlockSession(result, storage, account.email, {
+						travelModeRpcClient: rpcClient,
+					});
 
 					unlocked.push(account.email);
 				} catch (error) {

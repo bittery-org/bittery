@@ -5,5 +5,6 @@ pub mod common;
 pub mod share;
 pub mod sync;
 pub mod team;
+pub mod travel_mode;
 pub mod vault;
 pub mod waitlist;

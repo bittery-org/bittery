@@ -22,6 +22,7 @@ export {
 	type CheckEmailResult,
 	checkEmailExists,
 	clearSession,
+	deriveSrpLoginProof,
 	type FinishLoginResponse,
 	getSessionState,
 	type IAuthClient,
@@ -34,7 +35,9 @@ export {
 	type SRPLoginInput,
 	type SRPUnlockDeps,
 	type SRPUnlockInput,
+	type SrpLoginProof,
 	type StartLoginResponse,
+	type StoreAuthSessionOptions,
 	storeLoginSession,
 	storeUnlockSession,
 	type UnlockResult,
@@ -63,6 +66,20 @@ export {
 	type ShareExpirationOption,
 	ShareService,
 } from "./services/share-service";
+export {
+	filterItemsByTravelMode,
+	filterVaultKeys,
+	getTravelModeService,
+	isVaultHidden,
+	type TravelModeRpcClient,
+	type TravelModeServerResponse,
+	TravelModeService,
+} from "./services/travel-mode-service";
+export {
+	handleTravelModeSyncEvent,
+	restoreAfterTravelModeDisabled,
+	type TravelModeSyncRestoreOptions,
+} from "./services/travel-mode-sync";
 export {
 	type BootstrapItemsClient,
 	type EncryptedPayload as RepositoryEncryptedPayload,

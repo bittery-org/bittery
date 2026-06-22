@@ -88,6 +88,10 @@ export async function performDeltaSync(
 	accountEmail?: string,
 	serverUrl?: string,
 ): Promise<void> {
+	if (event.type === "travel_mode_updated") {
+		return;
+	}
+
 	const upsertItem = async (item: CachedEncryptedItem) => {
 		if (cache.upsertEncrypted) {
 			await cache.upsertEncrypted(item, accountEmail);

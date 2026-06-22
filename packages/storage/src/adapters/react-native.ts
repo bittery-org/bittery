@@ -29,6 +29,7 @@ import {
 	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
 	MASTER_PASSWORD_REENTRY_PERIOD_MS,
 	type StoredSessionData,
+	type TravelModeConfig,
 	type VaultKeyData,
 } from "../types";
 
@@ -1180,6 +1181,27 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		await this.deleteItem(getAccountKey(resolvedEmail, "cached_items"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "cached_vaults"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "item_cache_meta"));
+	}
+
+	async storeTravelModeCache(
+		config: TravelModeConfig,
+		email?: string,
+	): Promise<void> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return;
+
+		const key = getAccountKey(resolvedEmail, "travel_mode_cache");
+		await this.setItem(key, JSON.stringify(config));
+	}
+
+	async getTravelModeCache(email?: string): Promise<TravelModeConfig | null> {
+		const resolvedEmail = await this.resolveEmail(email);
+		if (!resolvedEmail) return null;
+
+		const key = getAccountKey(resolvedEmail, "travel_mode_cache");
+		const stored = await this.getItem(key);
+		if (!stored) return null;
+		return JSON.parse(stored) as TravelModeConfig;
 	}
 
 	// ============================================================================

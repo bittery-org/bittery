@@ -14,6 +14,7 @@ import type {
 	ICrypto,
 } from "@bittery/types";
 import { buildItemEncryptionContext } from "./encryption-context";
+import { getTravelModeService, isVaultHidden } from "./travel-mode-service";
 
 export interface VaultView {
 	id: string;
@@ -146,33 +147,67 @@ export class VaultRepository {
 	}
 
 	getAll(): VaultRepositoryItem[] {
-		return Array.from(this.items.values()).filter((item) => !item.deletedAt);
-	}
-
-	getById(id: string): VaultRepositoryItem | undefined {
-		return this.items.get(id);
+		const items = Array.from(this.items.values()).filter(
+			(item) => !item.deletedAt,
+		);
+		return this.applyTravelModeItemFilter(items);
 	}
 
 	getByVault(vaultId: string): VaultRepositoryItem[] {
+		if (this.isTravelModeVaultHidden(vaultId)) {
+			return [];
+		}
 		return Array.from(this.items.values()).filter(
 			(item) => item.vaultId === vaultId && !item.deletedAt,
 		);
 	}
 
+	getById(id: string): VaultRepositoryItem | undefined {
+		const item = this.items.get(id);
+		if (!item || item.deletedAt) {
+			return undefined;
+		}
+		if (this.isTravelModeVaultHidden(item.vaultId)) {
+			return undefined;
+		}
+		return item;
+	}
+
 	getDeleted(): VaultRepositoryItem[] {
-		return Array.from(this.items.values()).filter((item) => !!item.deletedAt);
+		const items = Array.from(this.items.values()).filter(
+			(item) => !!item.deletedAt,
+		);
+		return this.applyTravelModeItemFilter(items);
 	}
 
 	getVaults(): CachedVaultMetadata[] {
-		return Array.from(this.vaults.values());
+		const vaults = Array.from(this.vaults.values());
+		if (!this.email) {
+			return vaults;
+		}
+		const config = getTravelModeService(this.storage).getConfig(this.email);
+		if (!config.enabled) {
+			return vaults;
+		}
+		return vaults.filter((vault) => !isVaultHidden(config, vault.id));
 	}
 
 	getVaultById(vaultId: string): CachedVaultMetadata | undefined {
+		if (this.isTravelModeVaultHidden(vaultId)) {
+			return undefined;
+		}
 		return this.vaults.get(vaultId);
 	}
 
 	getVaultKeys(): VaultKeyData[] {
-		return Array.from(this.vaultKeyEntries.values());
+		const vaultKeys = Array.from(this.vaultKeyEntries.values());
+		if (!this.email) {
+			return vaultKeys;
+		}
+		return getTravelModeService(this.storage).filterVaultKeys(
+			this.email,
+			vaultKeys,
+		);
 	}
 
 	hasVault(vaultId: string): boolean {
@@ -200,6 +235,43 @@ export class VaultRepository {
 			return true;
 		}
 		return this.email.toLowerCase() === email.toLowerCase();
+	}
+
+	private isTravelModeVaultHidden(vaultId: string): boolean {
+		if (!this.email) {
+			return false;
+		}
+		return isVaultHidden(
+			getTravelModeService(this.storage).getConfig(this.email),
+			vaultId,
+		);
+	}
+
+	private applyTravelModeItemFilter(
+		items: VaultRepositoryItem[],
+	): VaultRepositoryItem[] {
+		if (!this.email) {
+			return items;
+		}
+		return getTravelModeService(this.storage).filterItems(this.email, items);
+	}
+
+	purgeHiddenVaults(hiddenVaultIds: string[]): void {
+		if (hiddenVaultIds.length === 0) {
+			return;
+		}
+		const hidden = new Set(hiddenVaultIds);
+		for (const vaultId of hidden) {
+			this.vaults.delete(vaultId);
+			this.vaultKeys.delete(vaultId);
+			this.vaultKeyEntries.delete(vaultId);
+		}
+		for (const [itemId, item] of this.items) {
+			if (hidden.has(item.vaultId)) {
+				this.items.delete(itemId);
+			}
+		}
+		this.emit();
 	}
 
 	private getVaultView(vaultId: string): VaultView {
@@ -858,8 +930,15 @@ export class VaultRepository {
 			return;
 		}
 
-		this.mergeVaultKeyEntries(vaultKeys);
-		await this.storage.storeVaultKeys(vaultKeys, this.email);
+		const filteredVaultKeys = this.email
+			? getTravelModeService(this.storage).filterVaultKeys(
+					this.email,
+					vaultKeys,
+				)
+			: vaultKeys;
+
+		this.mergeVaultKeyEntries(filteredVaultKeys);
+		await this.storage.storeVaultKeys(filteredVaultKeys, this.email);
 		this.emit();
 	}
 
