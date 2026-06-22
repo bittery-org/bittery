@@ -28,6 +28,7 @@ export interface UseAccountSwitcherResult {
 	unlockedAccountIds: UseQueryResult<string[], Error>;
 	switchAccount: UseMutationResult<void, Error, ActiveAccount, unknown>;
 	removeAccount: UseMutationResult<void, Error, string, unknown>;
+	updateAccount: UseMutationResult<void, Error, AccountMetadata, unknown>;
 	lockAllAccounts: UseMutationResult<void, Error, void, unknown>;
 }
 
@@ -113,6 +114,12 @@ export function useAccountSwitcher(
 		},
 	});
 
+	const updateAccount = useMutation({
+		mutationFn: async (metadata: AccountMetadata) => {
+			await manager.addAccount(metadata);
+		},
+	});
+
 	const lockAllAccounts = useMutation({
 		mutationFn: async () => {
 			await manager.lockAll();
@@ -125,6 +132,7 @@ export function useAccountSwitcher(
 		unlockedAccountIds: toSuccessQuery(unlockedAccountIdsData, enabled),
 		switchAccount,
 		removeAccount,
+		updateAccount,
 		lockAllAccounts,
 	};
 }

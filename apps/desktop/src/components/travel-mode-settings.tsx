@@ -1,4 +1,5 @@
 import { useCoreContext, useTravelMode } from "@bittery/core/hooks";
+import type { AccountInfo } from "@bittery/core/services/account-resolver";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -18,10 +19,17 @@ import { IconLoader2OutlineDuo18 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { SettingsSection } from "@/components/settings/settings-field";
-import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
-export function TravelModeSettings() {
+interface TravelModeAccountSettingsProps {
+	account: AccountInfo;
+	showAccountHeading: boolean;
+}
+
+function TravelModeAccountSettings({
+	account,
+	showAccountHeading,
+}: TravelModeAccountSettingsProps) {
 	const { m } = useI18n();
 	const [selectedVaultIds, setSelectedVaultIds] = useState<string[] | null>(
 		null,
@@ -29,34 +37,9 @@ export function TravelModeSettings() {
 	const [isDisableDialogOpen, setIsDisableDialogOpen] = useState(false);
 	const [disablePassword, setDisablePassword] = useState("");
 
-	const activeAccountQuery = useQuery({
-		queryKey: ["activeAccountEmail"],
-		queryFn: async () => {
-			const accounts = await storage.getAccountsList();
-			const active = await storage.getActiveAccount();
-			if (active?.type === "single") {
-				return (
-					accounts.find((account) => account.accountId === active.accountId)
-						?.email ?? null
-				);
-			}
-			return accounts[0]?.email ?? null;
-		},
-	});
-
-	const email = activeAccountQuery.data ?? undefined;
-	const core = useCoreContext();
 	const vaultListQuery = useQuery({
-		queryKey: ["travel-mode-vault-picker", email],
-		enabled: Boolean(email),
+		queryKey: ["travel-mode-vault-picker", account.accountId],
 		queryFn: async () => {
-			const { accountsInfo } = await core.accounts.resolveAccounts();
-			const account = accountsInfo.find(
-				(candidate) => candidate.email.toLowerCase() === email?.toLowerCase(),
-			);
-			if (!account) {
-				return [];
-			}
 			const vaults = await account.rpcClient.vault.list.query();
 			return vaults.map((vault) => ({
 				vaultId: vault.id,
@@ -72,16 +55,13 @@ export function TravelModeSettings() {
 		setHiddenVaults,
 		enable,
 		disable,
-	} = useTravelMode(email);
+	} = useTravelMode(account.email);
 
 	const effectiveSelection = useMemo(() => {
 		return selectedVaultIds ?? hiddenVaultIds;
 	}, [hiddenVaultIds, selectedVaultIds]);
 
 	const handleDisable = async () => {
-		if (!email) {
-			return;
-		}
 		try {
 			await disable.mutateAsync({ password: disablePassword });
 			toast.success(m.travel_mode_toast_disabled());
@@ -125,15 +105,21 @@ export function TravelModeSettings() {
 		}
 	};
 
-	if (!email) {
-		return null;
-	}
-
 	return (
-		<SettingsSection
-			title={m.travel_mode_title()}
-			description={m.travel_mode_description()}
+		<div
+			className={
+				showAccountHeading
+					? "space-y-4 border-t pt-6 first:border-t-0 first:pt-0"
+					: "space-y-4"
+			}
 		>
+			{showAccountHeading ? (
+				<div>
+					<p className="font-medium text-sm">{account.name}</p>
+					<p className="text-muted-foreground text-sm">{account.email}</p>
+				</div>
+			) : null}
+
 			{isEnabled ? (
 				<p className="font-medium text-amber-600 text-sm dark:text-amber-400">
 					{m.travel_mode_active_banner({
@@ -150,7 +136,7 @@ export function TravelModeSettings() {
 				<div className="space-y-2">
 					<Label>{m.travel_mode_vault_picker_label()}</Label>
 					<div className="max-h-48 space-y-2 overflow-y-auto rounded-lg border bg-muted/20 p-4">
-						{(vaultKeys ?? []).length === 0 ? (
+						{vaultKeys.length === 0 ? (
 							<p className="text-muted-foreground text-sm">
 								{isEnabled
 									? m.travel_mode_empty_all_hidden()
@@ -221,11 +207,13 @@ export function TravelModeSettings() {
 						</AlertDialogDescription>
 					</AlertDialogHeader>
 					<div className="space-y-2">
-						<Label htmlFor="travel-mode-disable-password">
+						<Label
+							htmlFor={`travel-mode-disable-password-${account.accountId}`}
+						>
 							{m.travel_mode_disable_password_label()}
 						</Label>
 						<Input
-							id="travel-mode-disable-password"
+							id={`travel-mode-disable-password-${account.accountId}`}
 							type="password"
 							value={disablePassword}
 							onChange={(event) => setDisablePassword(event.target.value)}
@@ -254,6 +242,50 @@ export function TravelModeSettings() {
 					</AlertDialogFooter>
 				</AlertDialogContent>
 			</AlertDialog>
+		</div>
+	);
+}
+
+export function TravelModeSettings() {
+	const { m } = useI18n();
+	const core = useCoreContext();
+	const accountsQuery = useQuery({
+		queryKey: ["travel-mode-settings-accounts"],
+		queryFn: () => core.accounts.resolveAccounts(),
+	});
+
+	const accounts = accountsQuery.data?.accountsInfo ?? [];
+	const isAllAccountsMode = accountsQuery.data?.isAllAccountsMode ?? false;
+
+	if (accountsQuery.isLoading) {
+		return (
+			<SettingsSection
+				title={m.travel_mode_title()}
+				description={m.travel_mode_description()}
+			>
+				<p className="text-muted-foreground text-sm">
+					{m.auth_invite_loading_auth()}
+				</p>
+			</SettingsSection>
+		);
+	}
+
+	if (accounts.length === 0) {
+		return null;
+	}
+
+	return (
+		<SettingsSection
+			title={m.travel_mode_title()}
+			description={m.travel_mode_description()}
+		>
+			{accounts.map((account) => (
+				<TravelModeAccountSettings
+					key={account.accountId}
+					account={account}
+					showAccountHeading={isAllAccountsMode}
+				/>
+			))}
 		</SettingsSection>
 	);
 }

@@ -63,7 +63,9 @@ export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 	} = useQuery({
 		queryKey: ["accounts", "info", activeAccountKey],
 		queryFn: async (): Promise<AccountInfo[]> => {
-			const resolved = await core.accounts.resolveAccounts(effectiveActiveAccount);
+			const resolved = await core.accounts.resolveAccounts(
+				effectiveActiveAccount,
+			);
 			return resolved.accountsInfo;
 		},
 		enabled: !!effectiveActiveAccount && options.enabled !== false,

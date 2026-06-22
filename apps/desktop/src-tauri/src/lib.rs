@@ -382,7 +382,12 @@ fn build_snapshot_item_payload(
 fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
     let raw = read_store_string(store, ACTIVE_ACCOUNT_KEY)?;
 
-    // New format: a JSON object { type: "single" | "all", accountId? }.
+    // Current format: plain "all" or accountId (see serializeActiveAccount).
+    if raw == "all" {
+        return Some("all".to_string());
+    }
+
+    // Intermediate JSON format: { type: "single" | "all", accountId? }.
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
         if let Some(obj) = parsed.as_object() {
             match obj.get("type").and_then(|v| v.as_str()) {
@@ -397,7 +402,12 @@ fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
     }
 
     // Legacy format: a plain email string.
-    Some(raw.to_lowercase())
+    if raw.contains('@') {
+        return Some(raw.to_lowercase());
+    }
+
+    // Plain accountId stored by serializeActiveAccount.
+    resolve_email_for_account_id(store, &raw).or_else(|| Some(raw.to_lowercase()))
 }
 
 fn lookup_store_string_with_fallback<F>(

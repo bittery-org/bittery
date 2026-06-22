@@ -982,7 +982,10 @@ export async function getSessionState(
 	// Callers may pass either an accountId or a legacy email (the unlock screen
 	// still resolves accounts by email). Normalize to an accountId so the
 	// session/biometric lookups below hit the correct account-scoped keys.
-	let resolvedAccountId = await resolveAccountScopeId(storage, accountIdOrEmail);
+	let resolvedAccountId = await resolveAccountScopeId(
+		storage,
+		accountIdOrEmail,
+	);
 	if (!resolvedAccountId) {
 		const activeAccount = await storage.getActiveAccount();
 		resolvedAccountId =

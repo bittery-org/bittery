@@ -126,11 +126,7 @@ export class SyncOrchestrator {
 	}
 
 	private getDeltaSyncAccountScope(): string | undefined {
-		return (
-			this.itemCacheAccountId ??
-			this.itemCacheAccountEmail ??
-			undefined
-		);
+		return this.itemCacheAccountId ?? this.itemCacheAccountEmail ?? undefined;
 	}
 
 	private getDeltaSyncServerUrl(): string | undefined {

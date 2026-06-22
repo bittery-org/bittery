@@ -5,6 +5,7 @@
  * for real-time lock/unlock synchronization.
  */
 
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { storage } from "../lib/storage";
 import { type DesktopStatus, desktopClient } from "./desktop-client";
 import type { DesktopEventPayload } from "./desktop-protocol";
@@ -372,8 +373,19 @@ class DesktopSyncService {
 				type: "single",
 				accountId: event.accountId,
 			});
+			await getAccountSessionManager({ storage }).refresh();
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
+			return;
+		}
+
+		try {
+			chrome.runtime.sendMessage({
+				type: "ACTIVE_ACCOUNT_CHANGED",
+				accountId: event.accountId,
+			});
+		} catch (_error) {
+			// Ignore if no listeners
 		}
 	}
 

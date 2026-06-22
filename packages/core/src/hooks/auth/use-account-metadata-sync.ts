@@ -53,7 +53,10 @@ export function useAccountMetadataSync(
 			if (!accountId) return null;
 
 			try {
-				const rpcClient = await createStoredAccountRpcClient(storage, accountId);
+				const rpcClient = await createStoredAccountRpcClient(
+					storage,
+					accountId,
+				);
 				if (!rpcClient) return null;
 
 				// Fetch current user data from server

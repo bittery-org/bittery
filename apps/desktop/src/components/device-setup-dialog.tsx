@@ -31,9 +31,11 @@ import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface DeviceSetupAccount {
+	accountId: string;
 	email: string;
 	name: string;
 	teamName?: string;
+	serverUrl?: string;
 }
 
 interface DeviceSetupDialogProps {
@@ -55,22 +57,22 @@ export function DeviceSetupDialog({
 	accounts,
 	initialAccountEmail,
 }: DeviceSetupDialogProps) {
-	const initialSelectedEmail =
+	const initialSelectedAccountId =
 		accounts.find(
 			(account) =>
 				initialAccountEmail &&
 				account.email.toLowerCase() === initialAccountEmail.toLowerCase(),
-		)?.email ??
-		accounts[0]?.email ??
+		)?.accountId ??
+		accounts[0]?.accountId ??
 		"";
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			{open ? (
 				<DeviceSetupDialogContent
-					key={`${open ? "open" : "closed"}:${initialSelectedEmail}`}
+					key={`${open ? "open" : "closed"}:${initialSelectedAccountId}`}
 					accounts={accounts}
-					initialSelectedEmail={initialSelectedEmail}
+					initialSelectedAccountId={initialSelectedAccountId}
 					onOpenChange={onOpenChange}
 				/>
 			) : null}
@@ -80,37 +82,38 @@ export function DeviceSetupDialog({
 
 function DeviceSetupDialogContent({
 	accounts,
-	initialSelectedEmail,
+	initialSelectedAccountId,
 	onOpenChange,
 }: Pick<DeviceSetupDialogProps, "accounts" | "onOpenChange"> & {
-	initialSelectedEmail: string;
+	initialSelectedAccountId: string;
 }) {
 	const { m } = useI18n();
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ?? null;
-	const [selectedEmail, setSelectedEmail] = useState(initialSelectedEmail);
+	const [selectedAccountId, setSelectedAccountId] = useState(
+		initialSelectedAccountId,
+	);
 
 	const selectedAccount = useMemo(
 		() =>
-			accounts.find(
-				(account) =>
-					account.email.toLowerCase() === selectedEmail.toLowerCase(),
-			) ?? null,
-		[accounts, selectedEmail],
+			accounts.find((account) => account.accountId === selectedAccountId) ??
+			null,
+		[accounts, selectedAccountId],
 	);
 
 	const setupDataQuery = useQuery({
-		queryKey: ["device-setup", selectedEmail],
-		enabled: !!selectedEmail,
+		queryKey: ["device-setup", selectedAccountId],
+		enabled: !!selectedAccountId,
 		queryFn: async () => {
 			const [storedServerUrl, legacyServerUrl, secretKey] = await Promise.all([
-				storage.getServerUrl(selectedEmail),
+				storage.getServerUrl(selectedAccountId),
 				storage.getLegacyServerUrl(),
-				storage.getStoredSecretKey(selectedEmail),
+				storage.getStoredSecretKey(selectedAccountId),
 			]);
 
 			const serverUrl =
 				normalizeServerUrl(storedServerUrl) ??
+				normalizeServerUrl(selectedAccount?.serverUrl) ??
 				normalizeServerUrl(legacyServerUrl) ??
 				fallbackServerUrl;
 
@@ -215,7 +218,10 @@ function DeviceSetupDialogContent({
 					<Label htmlFor="device-setup-account" className="text-xs">
 						{m.vaults_sidebar_account_switcher_device_setup_dialog_field_account()}
 					</Label>
-					<Select value={selectedEmail} onValueChange={setSelectedEmail}>
+					<Select
+						value={selectedAccountId}
+						onValueChange={setSelectedAccountId}
+					>
 						<SelectTrigger id="device-setup-account">
 							<SelectValue
 								placeholder={m.vaults_sidebar_account_switcher_device_setup_dialog_placeholder_select_account()}
@@ -223,7 +229,7 @@ function DeviceSetupDialogContent({
 						</SelectTrigger>
 						<SelectContent>
 							{accounts.map((account) => (
-								<SelectItem key={account.email} value={account.email}>
+								<SelectItem key={account.accountId} value={account.accountId}>
 									{account.teamName || account.name || account.email}
 								</SelectItem>
 							))}
