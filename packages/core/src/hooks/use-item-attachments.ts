@@ -16,12 +16,12 @@ import {
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
+import { createStoredAccountRpcClient } from "../services/account-resolver";
 import {
 	buildAttachmentBlobEncryptionContext,
 	buildAttachmentContentTypeEncryptionContext,
 	buildAttachmentNameEncryptionContext,
 } from "../services/encryption-context";
-import { createStoredAccountRpcClient } from "../services/account-resolver";
 import { useItem } from "./use-item";
 
 export interface AttachmentMeta {
@@ -123,7 +123,10 @@ export function useItemAttachments(
 		if (!accountId) {
 			throw new Error("Account context is required for attachment operations");
 		}
-		const accountClient = await createStoredAccountRpcClient(storage, accountId);
+		const accountClient = await createStoredAccountRpcClient(
+			storage,
+			accountId,
+		);
 		if (!accountClient) {
 			throw new Error("Account session is not available");
 		}
@@ -143,6 +146,9 @@ export function useItemAttachments(
 	async function getVaultKey(): Promise<Uint8Array> {
 		if (!vaultId) throw new Error("vaultId is required");
 		const accountId = await resolveAccountScopeId(storage, accountScope);
+		if (!accountId) {
+			throw new Error("Account context is required");
+		}
 		const key = await getDecryptedVaultKey({
 			vaultId,
 			accountId,
@@ -327,7 +333,9 @@ export function useItemAttachments(
 
 			// Get presigned download URL + encrypted metadata from server
 			const { downloadUrl, encryptionIv, encryptionAlgorithm, encryptedName } =
-				await (await getAccountRpcClient()).vault.getAttachmentDownloadUrl.mutate({
+				await (
+					await getAccountRpcClient()
+				).vault.getAttachmentDownloadUrl.mutate({
 					attachmentId: attachment.id,
 				});
 

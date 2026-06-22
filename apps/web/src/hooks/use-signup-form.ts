@@ -1,3 +1,4 @@
+import { m } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
@@ -197,7 +198,7 @@ export function useSignupForm({
 			await storage.storeAuthToken(data.token);
 			await storage.storeVaultKeys(data.vaultKeys.map(normalizeAuthVaultKey));
 
-			toast.success("Account created successfully!");
+			toast.success(m.auth_signup_toast_account_created());
 
 			if (
 				isCloudSelfServeSignup &&
@@ -340,7 +341,7 @@ export function useSignupForm({
 			);
 
 			toast.success(
-				`Account created! Quick unlock available for ${daysUntil} days.`,
+				m.auth_signup_toast_quick_unlock_days({ daysUntil: String(daysUntil) }),
 			);
 		} catch (error: any) {
 			console.error("Signup error:", error);

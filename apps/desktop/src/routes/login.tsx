@@ -227,6 +227,7 @@ export function LoginPage() {
 			email,
 			password,
 			secretKey,
+			serverUrl: nextServerUrl,
 			enableBiometric: enableBiometric && !!biometricAvailable,
 		});
 	};

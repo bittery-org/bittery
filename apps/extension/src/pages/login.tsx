@@ -110,7 +110,7 @@ export function LoginPage() {
 							className="absolute top-4 left-4"
 						>
 							<IconArrowLeftOutlineDuo18 className="mr-2 size-4" />
-							Back
+							{m.ext_login_back()}
 						</Button>
 					)}
 					<div className="flex flex-col items-center space-y-3 text-center">

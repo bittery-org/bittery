@@ -36,10 +36,10 @@ export interface UseBiometricUnlockOptions {
  */
 export interface BiometricUnlockInput {
 	/**
-	 * Email for multi-account platforms.
+	 * Account ID or email for multi-account platforms.
 	 * Optional - uses active account if not provided.
 	 */
-	email?: string;
+	accountIdOrEmail?: string;
 }
 
 /**
@@ -100,7 +100,16 @@ export function useBiometricUnlock(
 
 	return useMutation({
 		mutationFn: async (input: BiometricUnlockInput) => {
-			const accountId = await resolveAccountScopeId(storage, input.email);
+			const accountId = await resolveAccountScopeId(
+				storage,
+				input.accountIdOrEmail,
+			);
+			if (!accountId) {
+				throw {
+					type: "unknown",
+					message: "No account found for biometric unlock",
+				} as BiometricUnlockError;
+			}
 
 			// Check if biometric is supported
 			if (!storage.supportsBiometric) {

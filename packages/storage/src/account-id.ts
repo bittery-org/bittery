@@ -3,7 +3,7 @@ import type { AccountMetadata } from "./types";
 
 /** Generate a new stable local account identifier. */
 export function generateAccountId(): string {
-	return crypto.randomUUID();
+	return globalThis?.crypto?.randomUUID?.() ?? String(Date.now());
 }
 
 /** Find account metadata by accountId. */

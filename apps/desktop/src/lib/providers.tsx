@@ -1,3 +1,4 @@
+import { m } from "@bittery/i18n/paraglide/messages";
 import { createAppRpcOptionsProxy } from "@bittery/shared/rpc-client";
 import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
@@ -29,22 +30,24 @@ function handleUnauthorizedError(error: unknown) {
 
 	isHandlingAuthError = true;
 
-	void handleDesktopUnauthorizedError(error).then(
-		({ prefillEmail, shouldRedirect }) => {
+	void handleDesktopUnauthorizedError(error)
+		.then(({ prefillEmail, shouldRedirect }) => {
 			if (!shouldRedirect) {
 				isHandlingAuthError = false;
 				return;
 			}
 
 			queryClient.clear();
-			toast.error("Session expired. Please sign in again.");
+			toast.error(m.toast_auth_session_expired());
 			if (prefillEmail) {
 				window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
 			} else {
 				window.location.href = "/";
 			}
-		},
-	);
+		})
+		.catch(() => {
+			isHandlingAuthError = false;
+		});
 }
 
 const queryClient = new QueryClient({

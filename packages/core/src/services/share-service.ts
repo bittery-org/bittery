@@ -75,6 +75,9 @@ export class ShareService {
 		} = input;
 
 		const accountId = await resolveAccountScopeId(this.storage, accountEmail);
+		if (!accountId) {
+			throw new Error("Account not found for the provided email address");
+		}
 
 		const vaultKey = await getDecryptedVaultKeyUtil({
 			vaultId: item.vaultId,

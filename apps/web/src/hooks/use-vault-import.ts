@@ -12,6 +12,7 @@ import {
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "@/lib/wasm-crypto";
@@ -545,8 +546,13 @@ export function useVaultImport() {
 					let importedItemsInVault = 0;
 
 					try {
+						const accountId = await resolveAccountScopeId(
+							storage,
+							resolvedTarget.accountEmail,
+						);
 						const vaultKey = await getDecryptedVaultKey({
 							vaultId: resolvedTarget.vaultId,
+							accountId,
 							storage,
 							crypto: vaultKeyCrypto,
 						});

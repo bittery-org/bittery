@@ -74,7 +74,7 @@ export function createMobileAutolockService(
 	let appStateSubscription: { remove: () => void } | null = null;
 	const lockCallbacks: Set<() => void> = new Set();
 
-	// Get the email to use for storage operations
+	// Get the account scope to use for storage operations
 	const getAccountId = async (): Promise<string | undefined> => {
 		if (getActiveAccountId) {
 			return getActiveAccountId();
@@ -83,18 +83,59 @@ export function createMobileAutolockService(
 		return active?.type === "single" ? active.accountId : undefined;
 	};
 
+	const lockAllUnlockedAccounts = async (): Promise<void> => {
+		if (storage.lockAllAccounts) {
+			await storage.lockAllAccounts();
+			return;
+		}
+
+		const unlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
+		await Promise.all(
+			unlockedAccountIds.map((accountId) =>
+				storage.clearMasterUnlockKey(accountId),
+			),
+		);
+	};
+
+	const clearBackgroundTimestamps = async (): Promise<void> => {
+		const active = await storage.getActiveAccount();
+		if (active?.type === "all") {
+			const unlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
+			await Promise.all(
+				unlockedAccountIds.map((accountId) =>
+					storage.clearBackgroundTimestamp(accountId),
+				),
+			);
+			return;
+		}
+
+		const accountId = await getAccountId();
+		await storage.clearBackgroundTimestamp(accountId);
+	};
+
 	// Handle app state changes
 	const handleAppStateChange = async (nextAppState: AppStateStatus) => {
 		if (isDisposed) return;
 
-		const accountId = await getAccountId();
+		const active = await storage.getActiveAccount();
 
 		// App is going to background
 		if (
 			currentAppState === "active" &&
 			(nextAppState === "background" || nextAppState === "inactive")
 		) {
-			await storage.storeBackgroundTimestamp(accountId);
+			if (active?.type === "all") {
+				const unlockedAccountIds =
+					(await storage.getUnlockedAccounts?.()) ?? [];
+				await Promise.all(
+					unlockedAccountIds.map((accountId) =>
+						storage.storeBackgroundTimestamp(accountId),
+					),
+				);
+			} else {
+				const accountId = await getAccountId();
+				await storage.storeBackgroundTimestamp(accountId);
+			}
 		}
 
 		// App is coming back to foreground
@@ -107,7 +148,7 @@ export function createMobileAutolockService(
 				await lock();
 			}
 			// Clear the background timestamp after handling
-			await storage.clearBackgroundTimestamp(accountId);
+			await clearBackgroundTimestamps();
 		}
 
 		currentAppState = nextAppState;
@@ -116,6 +157,17 @@ export function createMobileAutolockService(
 	// Check if lock is required
 	const shouldLock = async (): Promise<boolean> => {
 		if (isDisposed) return false;
+		const active = await storage.getActiveAccount();
+		if (active?.type === "all") {
+			const unlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
+			for (const accountId of unlockedAccountIds) {
+				if (await storage.shouldRequireAuthAfterBackground(accountId)) {
+					return true;
+				}
+			}
+			return false;
+		}
+
 		const accountId = await getAccountId();
 		return storage.shouldRequireAuthAfterBackground(accountId);
 	};
@@ -124,13 +176,15 @@ export function createMobileAutolockService(
 	const lock = async (): Promise<void> => {
 		if (isDisposed) return;
 
-		const accountId = await getAccountId();
-
-		// Clear MUK from storage
-		await storage.clearMasterUnlockKey(accountId);
-
-		// Clear background timestamp
-		await storage.clearBackgroundTimestamp(accountId);
+		const active = await storage.getActiveAccount();
+		if (active?.type === "all") {
+			await lockAllUnlockedAccounts();
+			await clearBackgroundTimestamps();
+		} else {
+			const accountId = await getAccountId();
+			await storage.clearMasterUnlockKey(accountId);
+			await storage.clearBackgroundTimestamp(accountId);
+		}
 
 		// Notify all callbacks
 		for (const callback of lockCallbacks) {

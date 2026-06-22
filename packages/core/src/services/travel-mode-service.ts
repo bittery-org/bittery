@@ -208,11 +208,13 @@ export class TravelModeService {
 			typeof metadata.enabled === "boolean"
 				? metadata.enabled
 				: this.getConfig(accountId).enabled;
-		const hiddenVaultIds = Array.isArray(metadata.hiddenVaultIds)
-			? metadata.hiddenVaultIds.filter(
-					(value): value is string => typeof value === "string",
-				)
-			: this.getConfig(accountId).hiddenVaultIds;
+		const hiddenVaultIds =
+			Array.isArray(metadata.hiddenVaultIds) &&
+			metadata.hiddenVaultIds.every(
+				(value): value is string => typeof value === "string",
+			)
+				? metadata.hiddenVaultIds
+				: this.getConfig(accountId).hiddenVaultIds;
 
 		await this.applyRemoteUpdate(accountId, {
 			enabled,

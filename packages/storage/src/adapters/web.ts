@@ -311,7 +311,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async tryRestoreSession(
 		_skipBiometric?: boolean,
-		_email?: string,
+		_accountId?: string,
 	): Promise<boolean> {
 		if (!(await this.isSessionValid())) {
 			return false;
@@ -338,7 +338,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		return true;
 	}
 
-	async isSessionValid(_email?: string): Promise<boolean> {
+	async isSessionValid(_accountId?: string): Promise<boolean> {
 		const sessionData = await this.getStoredSessionData();
 		const token = await this.getAuthToken();
 		if (!sessionData || !token) return false;
@@ -403,7 +403,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async storeVaultKeys(
 		vaultKeys: VaultKeyData[],
-		_email?: string,
+		_accountId?: string,
 	): Promise<void> {
 		if (typeof window !== "undefined") {
 			sessionStorage.setItem(VAULT_KEYS_KEY, JSON.stringify(vaultKeys));

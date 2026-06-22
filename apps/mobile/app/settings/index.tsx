@@ -180,7 +180,10 @@ export default function SettingsScreen() {
 					fallbackAccountId,
 				);
 				if (!success) {
-					Alert.alert("Error", m.mob_settings_biometric_error());
+					Alert.alert(
+						m.mob_unlock_alert_error_title(),
+						m.mob_settings_biometric_error(),
+					);
 					return;
 				}
 				await storage.enableBiometric(fallbackAccountId);
@@ -190,7 +193,10 @@ export default function SettingsScreen() {
 			setBiometricEnabled(value);
 		} catch (error) {
 			console.error("Error toggling biometric:", error);
-			Alert.alert("Error", m.mob_settings_biometric_settings_error());
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				m.mob_settings_biometric_settings_error(),
+			);
 		}
 	};
 

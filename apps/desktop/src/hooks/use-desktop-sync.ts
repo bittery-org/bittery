@@ -6,7 +6,11 @@ import {
 	type RpcVaultClient,
 } from "@bittery/core";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
-import type { OutboundQueueClient, SyncSource, SyncStorage } from "@bittery/sync";
+import type {
+	OutboundQueueClient,
+	SyncSource,
+	SyncStorage,
+} from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
@@ -69,12 +73,6 @@ async function resolveDesktopSyncContexts(
 			if (!candidateIds.includes(accountId)) {
 				candidateIds.push(accountId);
 			}
-		}
-	}
-
-	for (const account of accounts) {
-		if (!candidateIds.includes(account.accountId)) {
-			candidateIds.push(account.accountId);
 		}
 	}
 
@@ -356,9 +354,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 
 					await handleAccountSessionInvalidation(email);
 					setSyncContexts((current) =>
-						current.filter(
-							(context) => context.email?.toLowerCase() !== email,
-						),
+						current.filter((context) => context.email?.toLowerCase() !== email),
 					);
 				}
 			}
@@ -373,11 +369,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			cancelled = true;
 			clearInterval(interval);
 		};
-	}, [
-		enabled,
-		handleAccountSessionInvalidation,
-		isInitialized,
-	]);
+	}, [enabled, handleAccountSessionInvalidation, isInitialized]);
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const vaultCoordinator = useMemo(
@@ -402,7 +394,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			const accounts = new AccountResolver(storage);
 			await handleTravelModeSyncEvent(
 				event,
-				accountEmail,
+				accountId,
 				storage,
 				vaultCoordinator,
 				{
@@ -419,7 +411,8 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			syncContexts.map((context) => ({
 				id: context.accountId ?? "legacy",
 				serverUrl: context.serverUrl,
-				getAuthToken: () => storage.getAuthToken(context.accountId ?? undefined),
+				getAuthToken: () =>
+					storage.getAuthToken(context.accountId ?? undefined),
 				rpcClient: context.rpcClient,
 				itemCacheAccountId: context.accountId,
 				itemCacheAccountEmail: context.email,
@@ -434,11 +427,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		clientId,
 		queryClient,
 		storage: syncStorage,
-		enabled:
-			enabled &&
-			isInitialized &&
-			!!clientId &&
-			syncSources.length > 0,
+		enabled: enabled && isInitialized && !!clientId && syncSources.length > 0,
 		itemCacheAdapter: vaultCoordinator,
 		sources: syncSources,
 		getClientForAccount,

@@ -439,7 +439,7 @@ export default function UnlockScreen() {
 		}
 
 		setBiometricError(null);
-		biometricUnlock.mutate({ email: targetAccount.accountId });
+		biometricUnlock.mutate({ accountIdOrEmail: targetAccount.accountId });
 	};
 
 	const handlePasswordUnlock = async () => {
