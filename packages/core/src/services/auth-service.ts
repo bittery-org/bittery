@@ -4,6 +4,7 @@
  * extensions, or any other runtime.
  */
 
+import { m } from "@bittery/i18n/paraglide/messages";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
 import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
@@ -35,9 +36,7 @@ async function prepareTravelModeForSession(
 				);
 				await travelMode.hydrateFromStorage(email);
 			} else {
-				throw new Error(
-					"Unable to verify travel mode settings. Check your connection and try again.",
-				);
+				throw new Error(m.auth_error_travel_mode_verify_failed());
 			}
 		}
 	} else {
@@ -577,9 +576,7 @@ async function deriveSrpPasswordForEmail(
 ): Promise<string> {
 	const storedSecretKey = await storage.getStoredSecretKey(email);
 	if (!storedSecretKey) {
-		throw new Error(
-			"No stored Secret Key found. Please sign in with your full credentials.",
-		);
+		throw new Error(m.auth_error_no_stored_secret_key());
 	}
 
 	const handleCrypto = asHandleCapableCrypto(crypto);
@@ -657,9 +654,7 @@ export async function performSRPUnlock(
 
 	const storedSecretKey = await storage.getStoredSecretKey(email);
 	if (!storedSecretKey) {
-		throw new Error(
-			"No stored Secret Key found. Please sign in with your full credentials.",
-		);
+		throw new Error(m.auth_error_no_stored_secret_key());
 	}
 
 	const handleCrypto = asHandleCapableCrypto(crypto);

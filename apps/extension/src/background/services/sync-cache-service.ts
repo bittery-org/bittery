@@ -349,6 +349,23 @@ export function createSyncCacheService(
 		deps.logger.warn(
 			`[sync-cache-service] No account matched travel_mode_updated user ${ownerUserId}`,
 		);
+
+		if (accounts.length === 1) {
+			return normalizeEmail(accounts[0].email);
+		}
+
+		const metadataEmail =
+			typeof event.metadata?.email === "string" ? event.metadata.email : null;
+		if (metadataEmail) {
+			const normalizedMetadataEmail = normalizeEmail(metadataEmail);
+			const emailMatches = accounts.filter(
+				(account) => normalizeEmail(account.email) === normalizedMetadataEmail,
+			);
+			if (emailMatches.length === 1) {
+				return normalizeEmail(emailMatches[0].email);
+			}
+		}
+
 		return null;
 	}
 

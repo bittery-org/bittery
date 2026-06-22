@@ -718,7 +718,12 @@ export class WebStorageAdapter implements IStorageAdapter {
 			return null;
 		}
 		const stored = localStorage.getItem(TRAVEL_MODE_CACHE_KEY);
-		return stored ? (JSON.parse(stored) as TravelModeConfig) : null;
+		if (!stored) return null;
+		try {
+			return JSON.parse(stored) as TravelModeConfig;
+		} catch {
+			return null;
+		}
 	}
 
 	// ============================================================================
@@ -759,6 +764,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
 		localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
+		localStorage.removeItem(TRAVEL_MODE_CACHE_KEY);
 		await this.clearSession();
 		await this.clearItemCache();
 	}

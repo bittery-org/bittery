@@ -39,27 +39,29 @@ export function SettingsAdvancedPanel({
 			syncContext.disconnect();
 			syncContext.outboundQueue.clear();
 
-			const accounts = await storage.getAccountsList();
-			if (accounts.length === 0) {
-				await storage.clearItemCache();
-			} else {
-				await Promise.all(
-					accounts.map((account) => storage.clearItemCache(account.email)),
-				);
-			}
+			try {
+				const accounts = await storage.getAccountsList();
+				if (accounts.length === 0) {
+					await storage.clearItemCache();
+				} else {
+					await Promise.all(
+						accounts.map((account) => storage.clearItemCache(account.email)),
+					);
+				}
 
-			await clearDesktopSyncState({ preserveClientId: true });
+				await clearDesktopSyncState({ preserveClientId: true });
 
-			core.vaultCoordinator.clear();
-			queryClient.clear();
+				core.vaultCoordinator.clear();
+				queryClient.clear();
 
-			const { accountsInfo } = await core.accounts.resolveAccounts();
-			if (accountsInfo.length > 0) {
-				await core.vaultCoordinator.hydrate(accountsInfo);
-			}
-
-			if (wasConnected) {
-				void syncContext.reconnect();
+				const { accountsInfo } = await core.accounts.resolveAccounts();
+				if (accountsInfo.length > 0) {
+					await core.vaultCoordinator.hydrate(accountsInfo);
+				}
+			} finally {
+				if (wasConnected) {
+					void syncContext.reconnect();
+				}
 			}
 		},
 		onSuccess: () => {

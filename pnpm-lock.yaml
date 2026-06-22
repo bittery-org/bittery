@@ -688,6 +688,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@bittery/i18n':
+        specifier: workspace:*
+        version: link:../i18n
       '@bittery/shared':
         specifier: workspace:*
         version: link:../shared

@@ -63,8 +63,8 @@ fn default_travel_mode_response() -> TravelModeResponse {
     }
 }
 
-async fn insert_travel_mode_sync_event(
-    pool: &PgPool,
+async fn insert_travel_mode_sync_event<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
     user_id: &str,
     client_id: Option<&str>,
     enabled: bool,
@@ -76,7 +76,7 @@ async fn insert_travel_mode_sync_event(
     });
 
     insert_user_sync_event(
-        pool,
+        executor,
         "travel_mode_updated",
         user_id,
         "user",
@@ -95,6 +95,45 @@ pub async fn get_travel_mode(pool: &PgPool, user_id: &str) -> Result<TravelModeR
         .unwrap_or_else(default_travel_mode_response))
 }
 
+async fn persist_travel_mode_with_sync_event(
+    pool: &PgPool,
+    user_id: &str,
+    client_id: Option<&str>,
+    enabled: bool,
+    hidden_vault_ids: &[String],
+    enabled_at: Option<OffsetDateTime>,
+) -> Result<TravelModeResponse, AppError> {
+    let mut transaction = pool.begin().await.map_err(|e| {
+        tracing::error!(error = %e, "Failed to start travel mode transaction");
+        AppError::internal("Failed to save travel mode config")
+    })?;
+
+    let row = upsert_user_travel_mode(
+        &mut *transaction,
+        user_id,
+        enabled,
+        hidden_vault_ids,
+        enabled_at,
+    )
+    .await?;
+
+    insert_travel_mode_sync_event(
+        &mut *transaction,
+        user_id,
+        client_id,
+        enabled,
+        &row.hidden_vault_ids,
+    )
+    .await?;
+
+    transaction.commit().await.map_err(|e| {
+        tracing::error!(error = %e, "Failed to commit travel mode transaction");
+        AppError::internal("Failed to save travel mode config")
+    })?;
+
+    Ok(map_travel_mode_row(row))
+}
+
 pub async fn set_travel_mode_hidden_vaults(
     pool: &PgPool,
     user_id: &str,
@@ -110,11 +149,15 @@ pub async fn set_travel_mode_hidden_vaults(
 
     validate_vault_access(pool, user_id, &input.hidden_vault_ids).await?;
 
-    let row = upsert_user_travel_mode(pool, user_id, false, &input.hidden_vault_ids, None).await?;
-
-    insert_travel_mode_sync_event(pool, user_id, client_id, false, &row.hidden_vault_ids).await?;
-
-    Ok(map_travel_mode_row(row))
+    persist_travel_mode_with_sync_event(
+        pool,
+        user_id,
+        client_id,
+        false,
+        &input.hidden_vault_ids,
+        None,
+    )
+    .await
 }
 
 pub async fn enable_travel_mode(
@@ -126,12 +169,15 @@ pub async fn enable_travel_mode(
     validate_vault_access(pool, user_id, &input.hidden_vault_ids).await?;
 
     let now = OffsetDateTime::now_utc();
-    let row =
-        upsert_user_travel_mode(pool, user_id, true, &input.hidden_vault_ids, Some(now)).await?;
-
-    insert_travel_mode_sync_event(pool, user_id, client_id, true, &row.hidden_vault_ids).await?;
-
-    Ok(map_travel_mode_row(row))
+    persist_travel_mode_with_sync_event(
+        pool,
+        user_id,
+        client_id,
+        true,
+        &input.hidden_vault_ids,
+        Some(now),
+    )
+    .await
 }
 
 pub async fn disable_travel_mode(
@@ -145,11 +191,8 @@ pub async fn disable_travel_mode(
         .map(|row| row.hidden_vault_ids.clone())
         .unwrap_or_default();
 
-    let row = upsert_user_travel_mode(pool, user_id, false, &hidden_vault_ids, None).await?;
-
-    insert_travel_mode_sync_event(pool, user_id, client_id, false, &row.hidden_vault_ids).await?;
-
-    Ok(map_travel_mode_row(row))
+    persist_travel_mode_with_sync_event(pool, user_id, client_id, false, &hidden_vault_ids, None)
+        .await
 }
 
 #[cfg(test)]
@@ -178,7 +221,7 @@ mod tests {
         .await;
         let vault_key_id = format!("vk_{vault_id}");
         seed_vault_key(
-            &pool,
+            pool,
             &vault_key_id,
             &vault_id,
             &user_id,

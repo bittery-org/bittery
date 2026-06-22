@@ -212,7 +212,10 @@ export class TravelModeService {
 			return;
 		}
 
-		const enabled = Boolean(metadata.enabled);
+		const enabled =
+			typeof metadata.enabled === "boolean"
+				? metadata.enabled
+				: this.getConfig(email).enabled;
 		const hiddenVaultIds = Array.isArray(metadata.hiddenVaultIds)
 			? metadata.hiddenVaultIds.filter(
 					(value): value is string => typeof value === "string",

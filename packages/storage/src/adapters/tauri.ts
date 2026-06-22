@@ -805,6 +805,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.delete(getAccountKey(resolvedEmail, "cached_items"));
 		await store.delete(getAccountKey(resolvedEmail, "cached_vaults"));
 		await store.delete(getAccountKey(resolvedEmail, "item_cache_meta"));
+		await store.delete(getAccountKey(resolvedEmail, "travel_mode_cache"));
 		await store.save();
 		await this.deleteBearerTokenFromKeychain(resolvedEmail);
 
@@ -1545,7 +1546,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			getAccountKey(resolvedEmail, "travel_mode_cache"),
 		);
 		if (!stored) return null;
-		return JSON.parse(stored) as TravelModeConfig;
+		try {
+			return JSON.parse(stored) as TravelModeConfig;
+		} catch {
+			return null;
+		}
 	}
 
 	// ============================================================================

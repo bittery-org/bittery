@@ -971,22 +971,13 @@ async fn verify_login_proof_and_get_user(
     validate_hex_string(&input.client_public_key, "Invalid client public key")?;
     validate_hex_string(&input.client_proof, "Invalid client proof")?;
     let attempt = query_as::<_, DbLoginAttemptRow>(
-		"SELECT id, user_id, normalized_email_hash, client_public_key, server_ephemeral_secret, expires_at FROM login_attempt WHERE id = $1 LIMIT 1",
+		"DELETE FROM login_attempt WHERE id = $1 RETURNING id, user_id, normalized_email_hash, client_public_key, server_ephemeral_secret, expires_at",
 	)
 	.bind(&input.attempt_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load login attempt"); internal_handler_error("Failed to load login attempt") })?
+	.map_err(|e| { tracing::error!(error = %e, "Failed to consume login attempt"); internal_handler_error("Failed to consume login attempt") })?
 	.ok_or_else(|| AppError::unauthorized("Invalid credentials"))?;
-
-    query("DELETE FROM login_attempt WHERE id = $1")
-        .bind(&attempt.id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to consume login attempt");
-            internal_handler_error("Failed to consume login attempt")
-        })?;
 
     if attempt.expires_at <= now_utc() || attempt.client_public_key != input.client_public_key {
         return Err(AppError::unauthorized("Invalid credentials"));

@@ -18,6 +18,8 @@
 	"auth_signin_label_secret_key": "Secret Key",
 	"auth_signin_placeholder_secret_key": "A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX",
 	"auth_signin_secret_key_help": "Your Secret Key was provided when you created your account.",
+	"auth_error_travel_mode_verify_failed": "Unable to verify travel mode settings. Check your connection and try again.",
+	"auth_error_no_stored_secret_key": "No stored Secret Key found. Please sign in with your full credentials.",
 	"auth_signin_label_password": "Password",
 	"auth_signin_placeholder_password": "Enter your password",
 	"auth_signin_biometric_enable": "Enable biometric unlock",

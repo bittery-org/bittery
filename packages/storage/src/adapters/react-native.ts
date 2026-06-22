@@ -655,6 +655,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		);
 		await this.deleteItem(getAccountKey(resolvedEmail, "auto_lock_timeout"));
 		await this.deleteItem(getAccountKey(resolvedEmail, "background_timestamp"));
+		await this.deleteItem(getAccountKey(resolvedEmail, "travel_mode_cache"));
 
 		this.clearAccountCache(resolvedEmail);
 
@@ -1201,7 +1202,11 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		const key = getAccountKey(resolvedEmail, "travel_mode_cache");
 		const stored = await this.getItem(key);
 		if (!stored) return null;
-		return JSON.parse(stored) as TravelModeConfig;
+		try {
+			return JSON.parse(stored) as TravelModeConfig;
+		} catch {
+			return null;
+		}
 	}
 
 	// ============================================================================

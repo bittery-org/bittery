@@ -1,6 +1,6 @@
+import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { VaultKeyData } from "@bittery/storage/types";
-import { describe, expect, it, vi } from "vitest";
 import type { AccountResolver } from "./account-resolver";
 import {
 	getTravelModeService,
@@ -14,31 +14,37 @@ import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator"
 import type { RpcVaultClient } from "./vault-service";
 
 describe("travel-mode-sync", () => {
+	beforeEach(() => {
+		resetTravelModeServiceForTests();
+	});
+
 	it("restores vault keys and refreshes coordinator after travel mode is disabled", async () => {
 		const vaultKeys: VaultKeyData[] = [
 			{
 				vaultId: "vault-1",
 				vaultName: "Private",
 				vaultType: "personal",
+				vaultIcon: null,
+				vaultImageUrl: null,
 				encryptedVaultKey: "encrypted",
 				role: "owner",
 			},
 		];
 
 		const storage = {
-			storeVaultKeys: vi.fn().mockResolvedValue(undefined),
-			getVaultKeys: vi.fn().mockResolvedValue(vaultKeys),
-			storeTravelModeCache: vi.fn().mockResolvedValue(undefined),
-			getTravelModeCache: vi.fn().mockResolvedValue({
+			storeVaultKeys: mock(async () => undefined),
+			getVaultKeys: mock(async () => vaultKeys),
+			storeTravelModeCache: mock(async () => undefined),
+			getTravelModeCache: mock(async () => ({
 				enabled: false,
 				hiddenVaultIds: ["vault-1"],
-			}),
+			})),
 		} as unknown as IStorageAdapter;
 
 		const rpcClient = {
 			vault: {
 				list: {
-					query: vi.fn().mockResolvedValue([
+					query: mock(async () => [
 						{
 							id: "vault-1",
 							name: "Private",
@@ -54,19 +60,19 @@ describe("travel-mode-sync", () => {
 		} as unknown as RpcVaultClient;
 
 		const coordinator = {
-			syncVaultKeys: vi.fn().mockResolvedValue(undefined),
-			refreshFromServer: vi.fn().mockResolvedValue(undefined),
+			syncVaultKeys: mock(async () => undefined),
+			refreshFromServer: mock(async () => undefined),
 		} as unknown as VaultRepositoryCoordinator;
 
 		const accounts = {
-			resolveAccounts: vi.fn().mockResolvedValue({
+			resolveAccounts: mock(async () => ({
 				accountsInfo: [
 					{
 						email: "user@example.com",
 						rpcClient,
 					},
 				],
-			}),
+			})),
 		} as unknown as AccountResolver;
 
 		await restoreAfterTravelModeDisabled(
@@ -89,32 +95,32 @@ describe("travel-mode-sync", () => {
 	});
 
 	it("restores vault access when a sync event disables travel mode", async () => {
-		resetTravelModeServiceForTests();
-
 		const vaultKeys: VaultKeyData[] = [
 			{
 				vaultId: "vault-1",
 				vaultName: "Private",
 				vaultType: "personal",
+				vaultIcon: null,
+				vaultImageUrl: null,
 				encryptedVaultKey: "encrypted",
 				role: "owner",
 			},
 		];
 
 		const storage = {
-			storeVaultKeys: vi.fn().mockResolvedValue(undefined),
-			getVaultKeys: vi.fn().mockResolvedValue(vaultKeys),
-			storeTravelModeCache: vi.fn().mockResolvedValue(undefined),
-			getTravelModeCache: vi.fn().mockResolvedValue({
+			storeVaultKeys: mock(async () => undefined),
+			getVaultKeys: mock(async () => vaultKeys),
+			storeTravelModeCache: mock(async () => undefined),
+			getTravelModeCache: mock(async () => ({
 				enabled: true,
 				hiddenVaultIds: ["vault-1"],
-			}),
+			})),
 		} as unknown as IStorageAdapter;
 
 		const rpcClient = {
 			vault: {
 				list: {
-					query: vi.fn().mockResolvedValue([
+					query: mock(async () => [
 						{
 							id: "vault-1",
 							name: "Private",
@@ -130,20 +136,20 @@ describe("travel-mode-sync", () => {
 		} as unknown as RpcVaultClient;
 
 		const coordinator = {
-			purgeHiddenVaultsForEmail: vi.fn(),
-			syncVaultKeys: vi.fn().mockResolvedValue(undefined),
-			refreshFromServer: vi.fn().mockResolvedValue(undefined),
+			purgeHiddenVaultsForEmail: mock(() => undefined),
+			syncVaultKeys: mock(async () => undefined),
+			refreshFromServer: mock(async () => undefined),
 		} as unknown as VaultRepositoryCoordinator;
 
 		const accounts = {
-			resolveAccounts: vi.fn().mockResolvedValue({
+			resolveAccounts: mock(async () => ({
 				accountsInfo: [
 					{
 						email: "user@example.com",
 						rpcClient,
 					},
 				],
-			}),
+			})),
 		} as unknown as AccountResolver;
 
 		const travelMode = getTravelModeService(storage);
@@ -171,5 +177,49 @@ describe("travel-mode-sync", () => {
 		expect(coordinator.purgeHiddenVaultsForEmail).not.toHaveBeenCalled();
 		expect(coordinator.syncVaultKeys).toHaveBeenCalled();
 		expect(coordinator.refreshFromServer).toHaveBeenCalled();
+	});
+
+	it("preserves enabled state when sync metadata omits enabled", async () => {
+		const storage = {
+			storeVaultKeys: mock(async () => undefined),
+			getVaultKeys: mock(async () => []),
+			storeTravelModeCache: mock(async () => undefined),
+			getTravelModeCache: mock(async () => ({
+				enabled: true,
+				hiddenVaultIds: ["vault-1"],
+			})),
+		} as unknown as IStorageAdapter;
+
+		const coordinator = {
+			purgeHiddenVaultsForEmail: mock(() => undefined),
+			syncVaultKeys: mock(async () => undefined),
+			refreshFromServer: mock(async () => undefined),
+		} as unknown as VaultRepositoryCoordinator;
+
+		const travelMode = getTravelModeService(storage);
+		await travelMode.applyRemoteUpdate("user@example.com", {
+			enabled: true,
+			hiddenVaultIds: ["vault-1"],
+			enabledAt: Date.now(),
+			updatedAt: Date.now(),
+		});
+
+		await handleTravelModeSyncEvent(
+			{
+				type: "travel_mode_updated",
+				metadata: {
+					hiddenVaultIds: ["vault-2"],
+				},
+			},
+			"user@example.com",
+			storage,
+			coordinator,
+		);
+
+		expect(coordinator.purgeHiddenVaultsForEmail).toHaveBeenCalledWith(
+			"user@example.com",
+			["vault-2"],
+		);
+		expect(travelMode.getConfig("user@example.com").enabled).toBe(true);
 	});
 });

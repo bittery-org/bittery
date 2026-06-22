@@ -23,7 +23,9 @@ import { useI18n } from "@/providers/i18n-provider";
 
 export function TravelModeSettings() {
 	const { m } = useI18n();
-	const [selectedVaultIds, setSelectedVaultIds] = useState<string[]>([]);
+	const [selectedVaultIds, setSelectedVaultIds] = useState<string[] | null>(
+		null,
+	);
 	const [isDisableDialogOpen, setIsDisableDialogOpen] = useState(false);
 	const [disablePassword, setDisablePassword] = useState("");
 
@@ -70,10 +72,7 @@ export function TravelModeSettings() {
 	} = useTravelMode(email);
 
 	const effectiveSelection = useMemo(() => {
-		if (selectedVaultIds.length > 0) {
-			return selectedVaultIds;
-		}
-		return hiddenVaultIds;
+		return selectedVaultIds ?? hiddenVaultIds;
 	}, [hiddenVaultIds, selectedVaultIds]);
 
 	const handleDisable = async () => {
@@ -95,7 +94,7 @@ export function TravelModeSettings() {
 
 	const handleToggleVault = (vaultId: string, checked: boolean) => {
 		setSelectedVaultIds((current) => {
-			const base = current.length > 0 ? current : [...hiddenVaultIds];
+			const base = current ?? [...hiddenVaultIds];
 			if (checked) {
 				return base.includes(vaultId) ? base : [...base, vaultId];
 			}

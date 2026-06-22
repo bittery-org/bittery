@@ -198,8 +198,9 @@ async function filterItemsForTravelMode(
 	const activeAccount = await storage.getActiveAccount();
 
 	if (activeAccount?.type === "single") {
+		const normalizedEmail = activeAccount.email.toLowerCase();
 		const config =
-			(await storage.getTravelModeCache?.(activeAccount.email)) ?? null;
+			(await storage.getTravelModeCache?.(normalizedEmail)) ?? null;
 		if (!config?.enabled) {
 			return items;
 		}

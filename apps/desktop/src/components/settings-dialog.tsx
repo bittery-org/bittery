@@ -111,10 +111,10 @@ function SettingsDialogContent({
 				storage.storeMasterPasswordReentryPeriodMs(reentryPeriodMs),
 			]);
 		},
-		onSuccess: () => {
+		onSuccess: (_data, variables) => {
 			toast.success(m.settings_dialog_toast_saved());
-			setSavedAutoLockTimeout(autoLockTimeout);
-			setSavedMasterPasswordReentry(masterPasswordReentry);
+			setSavedAutoLockTimeout(variables.timeout);
+			setSavedMasterPasswordReentry(variables.reentryPeriod);
 			queryClient.invalidateQueries({ queryKey: ["desktopSettings"] });
 			queryClient.invalidateQueries({ queryKey: ["sessionState"] });
 		},

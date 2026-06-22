@@ -5,6 +5,7 @@ use crate::{db::models::*, error::AppError};
 
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct DbUserTravelModeRow {
+    #[allow(dead_code)]
     pub user_id: String,
     pub enabled: bool,
     pub hidden_vault_ids: Vec<String>,
@@ -28,8 +29,8 @@ pub async fn fetch_user_travel_mode(
     })
 }
 
-pub async fn upsert_user_travel_mode(
-    pool: &PgPool,
+pub async fn upsert_user_travel_mode<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
     user_id: &str,
     enabled: bool,
     hidden_vault_ids: &[String],
@@ -44,7 +45,7 @@ pub async fn upsert_user_travel_mode(
     .bind(hidden_vault_ids)
     .bind(enabled_at)
     .bind(now)
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to save travel mode config");

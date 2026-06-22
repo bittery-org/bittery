@@ -710,6 +710,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			getAccountKey(resolvedEmail, CACHED_ITEMS_SUFFIX),
 			getAccountKey(resolvedEmail, CACHED_VAULTS_SUFFIX),
 			getAccountKey(resolvedEmail, ITEM_CACHE_META_SUFFIX),
+			getAccountKey(resolvedEmail, TRAVEL_MODE_CACHE_SUFFIX),
 		];
 
 		await chrome.storage.local.remove(keysToRemove);
@@ -1415,7 +1416,11 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		const stored =
 			result[getAccountKey(resolvedEmail, TRAVEL_MODE_CACHE_SUFFIX)];
 		if (typeof stored !== "string") return null;
-		return JSON.parse(stored) as TravelModeConfig;
+		try {
+			return JSON.parse(stored) as TravelModeConfig;
+		} catch {
+			return null;
+		}
 	}
 }
 

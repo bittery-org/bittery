@@ -1,7 +1,7 @@
 import { useRPCClient } from "@bittery/shared/rpc";
 import type { TravelModeConfig } from "@bittery/storage/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deriveSrpLoginProof } from "../auth";
+import { deriveSrpLoginProof, type IAuthClient } from "../auth";
 import {
 	useCoreContext,
 	usePlatformCrypto,
@@ -40,7 +40,14 @@ export function useTravelMode(email?: string) {
 				const serverVaults = await (
 					rpcClient as unknown as RpcVaultClient
 				).vault.list.query();
-				if ((localKeys?.length ?? 0) < serverVaults.length) {
+				const localVaultIds = new Set(
+					(localKeys ?? []).map((vaultKey) => vaultKey.vaultId),
+				);
+				const serverVaultIds = new Set(serverVaults.map((vault) => vault.id));
+				const vaultIdsMismatch =
+					localVaultIds.size !== serverVaultIds.size ||
+					[...localVaultIds].some((vaultId) => !serverVaultIds.has(vaultId));
+				if (vaultIdsMismatch) {
 					await restoreAfterTravelModeDisabled(
 						email,
 						storage,
@@ -99,7 +106,7 @@ export function useTravelMode(email?: string) {
 			}
 			const proof = await deriveSrpLoginProof(
 				{ email, password: input.password },
-				{ crypto, rpcClient, storage },
+				{ crypto, rpcClient: rpcClient as unknown as IAuthClient, storage },
 			);
 			const config = await travelModeService.disable(email, rpcClient, proof);
 			if (!config.enabled) {
