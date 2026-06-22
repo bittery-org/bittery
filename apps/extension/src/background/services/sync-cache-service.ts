@@ -350,8 +350,9 @@ export function createSyncCacheService(
 			`[sync-cache-service] No account matched travel_mode_updated user ${ownerUserId}`,
 		);
 
-		if (accounts.length === 1) {
-			return normalizeEmail(accounts[0].email);
+		const onlyAccount = accounts.at(0);
+		if (accounts.length === 1 && onlyAccount) {
+			return normalizeEmail(onlyAccount.email);
 		}
 
 		const metadataEmail =
@@ -361,8 +362,9 @@ export function createSyncCacheService(
 			const emailMatches = accounts.filter(
 				(account) => normalizeEmail(account.email) === normalizedMetadataEmail,
 			);
-			if (emailMatches.length === 1) {
-				return normalizeEmail(emailMatches[0].email);
+			const onlyEmailMatch = emailMatches.at(0);
+			if (emailMatches.length === 1 && onlyEmailMatch) {
+				return normalizeEmail(onlyEmailMatch.email);
 			}
 		}
 
