@@ -9,8 +9,8 @@ import {
 	usePlatformStorage,
 } from "../context/platform-context";
 import {
-	getClientForAccount,
 	type DefaultRpcClient,
+	getClientForAccount,
 } from "../services/account-resolver";
 import { getTravelModeEnforcer } from "../services/travel-mode-enforcer";
 import {
@@ -58,7 +58,11 @@ async function resolveAccountRpcClient(
 	email: string,
 ): Promise<{ accountId: string; rpcClient: TravelModeRpcClient }> {
 	const accountId = await resolveAccountIdByEmail(storage, email);
-	const rpcClient = await getClientForAccount(storage, defaultClient, accountId);
+	const rpcClient = await getClientForAccount(
+		storage,
+		defaultClient,
+		accountId,
+	);
 	return { accountId, rpcClient: rpcClient as TravelModeRpcClient };
 }
 
