@@ -8,7 +8,10 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../context/platform-context";
-import { getClientForAccount } from "../services/account-resolver";
+import {
+	getClientForAccount,
+	type DefaultRpcClient,
+} from "../services/account-resolver";
 import { getTravelModeEnforcer } from "../services/travel-mode-enforcer";
 import {
 	getTravelModeService,
@@ -51,21 +54,17 @@ async function resolveAccountIdByEmail(
 
 async function resolveAccountRpcClient(
 	storage: IStorageAdapter,
-	defaultClient: TravelModeRpcClient,
+	defaultClient: DefaultRpcClient,
 	email: string,
 ): Promise<{ accountId: string; rpcClient: TravelModeRpcClient }> {
 	const accountId = await resolveAccountIdByEmail(storage, email);
-	const rpcClient = (await getClientForAccount(
-		storage,
-		defaultClient,
-		accountId,
-	)) as TravelModeRpcClient;
-	return { accountId, rpcClient };
+	const rpcClient = await getClientForAccount(storage, defaultClient, accountId);
+	return { accountId, rpcClient: rpcClient as TravelModeRpcClient };
 }
 
 export function useTravelMode(email?: string) {
 	const queryClient = useQueryClient();
-	const rpcClient = useRPCClient() as TravelModeRpcClient;
+	const rpcClient = useRPCClient() as DefaultRpcClient;
 	const storage = usePlatformStorage();
 	const crypto = usePlatformCrypto();
 	const { vaultCoordinator, accounts } = useCoreContext();

@@ -27,7 +27,10 @@ export function useRestoreItem() {
 
 	return useMutation({
 		mutationFn: async (input: RestoreItemInput) => {
-			const context = requireLocalItemMutationContext(core, input.itemId);
+			const context = requireLocalItemMutationContext(core, input.itemId, {
+				vaultId: input.vaultId,
+				includeDeleted: true,
+			});
 			await context.repo.restore(input.itemId);
 			enqueueItemMutation(queue, context, {
 				type: "restore",

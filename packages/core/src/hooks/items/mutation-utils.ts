@@ -48,6 +48,11 @@ export interface LocalItemMutationContext {
 	baseVersion: number;
 }
 
+interface LocalItemMutationContextOptions {
+	vaultId?: string;
+	includeDeleted?: boolean;
+}
+
 interface EncryptedPayloadLike {
 	ciphertext: string;
 	iv: string;
@@ -99,13 +104,20 @@ export function requireRepositoryForVault(
 export function requireLocalItemMutationContext(
 	core: CoreContext,
 	itemId: string,
+	options: LocalItemMutationContextOptions = {},
 ): LocalItemMutationContext {
-	const resolved = resolveRepositoryForItem(core, itemId);
+	const resolved = options.vaultId
+		? resolveRepositoryForVault(core, options.vaultId)
+		: resolveRepositoryForItem(core, itemId);
 	if (!resolved) {
 		throw new Error(`No account repository found for item ${itemId}`);
 	}
 
-	const existing = resolved.repo.getById(itemId);
+	const existing =
+		resolved.repo.getById(itemId) ??
+		(options.includeDeleted
+			? resolved.repo.getDeleted().find((item) => item.id === itemId)
+			: undefined);
 	if (!existing) {
 		throw new Error(`Item ${itemId} was not found in local repository`);
 	}
