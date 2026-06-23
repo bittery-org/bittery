@@ -127,7 +127,7 @@ const roadmapCategories: RoadmapCategory[] = [
 				title: "Travel Mode",
 				description:
 					"Hide specific vaults during border crossings to protect sensitive data.",
-				status: "planned",
+				status: "done",
 			},
 			{
 				title: "Secure File Storage",
