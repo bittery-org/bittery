@@ -55,6 +55,7 @@ export interface BiometricUnlockError {
 		| "user_cancelled"
 		| "lockout"
 		| "authentication_failed"
+		| "account_not_found"
 		| "unknown";
 	message: string;
 }
@@ -106,8 +107,8 @@ export function useBiometricUnlock(
 			);
 			if (!accountId) {
 				throw {
-					type: "unknown",
-					message: "No account found for biometric unlock",
+					type: "account_not_found",
+					message: "",
 				} as BiometricUnlockError;
 			}
 

@@ -1,3 +1,4 @@
+import { getClientForAccount } from "@bittery/core";
 import { useAllVaultKeys, useCoreContext } from "@bittery/core/hooks";
 import {
 	getDecryptedVaultKey,
@@ -388,22 +389,21 @@ export function useVaultImport() {
 			const userIdByAccount = new Map<string, string>();
 
 			const resolveUserIdForContext = async (
-				accountEmail?: string,
+				accountId: string,
 			): Promise<string> => {
-				const cacheKey = accountEmail ?? "__active__";
-				const cachedUserId = userIdByAccount.get(cacheKey);
+				const cachedUserId = userIdByAccount.get(accountId);
 				if (cachedUserId) {
 					return cachedUserId;
 				}
 
-				const sessionData = await storage.getStoredSessionData?.(accountEmail);
+				const sessionData = await storage.getStoredSessionData?.(accountId);
 				const userId =
 					sessionData?.userId ?? (await storage.getActiveAccountUserId());
 				if (!userId) {
 					throw new Error("User ID not available for encryption context");
 				}
 
-				userIdByAccount.set(cacheKey, userId);
+				userIdByAccount.set(accountId, userId);
 				return userId;
 			};
 
@@ -550,6 +550,17 @@ export function useVaultImport() {
 							storage,
 							resolvedTarget.accountEmail,
 						);
+						if (!accountId) {
+							throw new VaultImportError("vault-import-failed", {
+								targetVaultName: resolvedTarget.vaultName,
+							});
+						}
+						const vaultRpcClient = await getClientForAccount(
+							storage,
+							rpcClient,
+							accountId,
+						);
+						const userId = await resolveUserIdForContext(accountId);
 						const vaultKey = await getDecryptedVaultKey({
 							vaultId: resolvedTarget.vaultId,
 							accountId,
@@ -562,9 +573,6 @@ export function useVaultImport() {
 								targetVaultName: resolvedTarget.vaultName,
 							});
 						}
-						const userId = await resolveUserIdForContext(
-							resolvedTarget.accountEmail,
-						);
 
 						const encryptedItems = [];
 						for (const sourceItem of sourceItems) {
@@ -617,7 +625,7 @@ export function useVaultImport() {
 								index,
 								index + IMPORT_BATCH_SIZE,
 							);
-							const result = await rpcClient.vault.bulkImportItems.mutate({
+							const result = await vaultRpcClient.vault.bulkImportItems.mutate({
 								vaultId: resolvedTarget.vaultId,
 								clientId: clientId ?? null,
 								items: batch,

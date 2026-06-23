@@ -122,6 +122,12 @@ export function requireLocalItemMutationContext(
 		throw new Error(`Item ${itemId} was not found in local repository`);
 	}
 
+	if (options.vaultId && existing.vaultId !== options.vaultId) {
+		throw new Error(
+			`Item ${itemId} does not belong to vault ${options.vaultId}`,
+		);
+	}
+
 	return {
 		accountEmail: resolved.accountEmail,
 		repo: resolved.repo,

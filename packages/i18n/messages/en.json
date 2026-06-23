@@ -2239,6 +2239,7 @@
 	"mob_biometric_error_lockout": "Too many failed attempts. Please use your master password to unlock.",
 	"mob_biometric_error_master_password_required": "For security, please enter your master password. This is required periodically based on your settings.",
 	"mob_biometric_error_session_expired": "Your session has expired. Please log in with your credentials.",
+	"mob_biometric_error_account_not_found": "No account found for biometric unlock.",
 	"mob_biometric_error_unknown": "An error occurred during authentication. Please try again.",
 
 	"mob_biometric_modal_password_required_title": "Password Required",

@@ -94,7 +94,17 @@ function Popup() {
 				// Navigate to vault screen
 				router.navigate({ to: "/vault" });
 			} else if (message.type === "ACTIVE_ACCOUNT_CHANGED") {
-				void peekAccountSessionManager()?.refresh();
+				void peekAccountSessionManager()
+					?.refresh()
+					.then(() =>
+						Promise.all([
+							queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+							queryClient.invalidateQueries({ queryKey: ["items"] }),
+							queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+							queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+							queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
+						]),
+					);
 			}
 		};
 

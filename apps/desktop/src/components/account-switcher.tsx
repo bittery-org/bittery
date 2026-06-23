@@ -464,7 +464,7 @@ export function AccountSwitcher() {
 				open={showDeviceSetup}
 				onOpenChange={setShowDeviceSetup}
 				accounts={accountsData}
-				initialAccountEmail={activeAccountEmail}
+				initialAccountId={activeAccountId}
 			/>
 		</>
 	);

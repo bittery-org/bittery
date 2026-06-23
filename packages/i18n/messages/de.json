@@ -2239,6 +2239,7 @@
 	"mob_biometric_error_lockout": "Zu viele fehlgeschlagene Versuche. Bitte verwenden Sie Ihr Master-Passwort zum Entsperren.",
 	"mob_biometric_error_master_password_required": "Zu Ihrer Sicherheit geben Sie bitte Ihr Master-Passwort ein. Dies ist regelmäßig gemäß Ihren Einstellungen erforderlich.",
 	"mob_biometric_error_session_expired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich mit Ihren Zugangsdaten an.",
+	"mob_biometric_error_account_not_found": "Kein Konto für biometrisches Entsperren gefunden.",
 	"mob_biometric_error_unknown": "Bei der Authentifizierung ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.",
 
 	"mob_biometric_modal_password_required_title": "Passwort erforderlich",

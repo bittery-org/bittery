@@ -42,7 +42,7 @@ interface DeviceSetupDialogProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
 	accounts: DeviceSetupAccount[];
-	initialAccountEmail?: string | null;
+	initialAccountId?: string | null;
 }
 
 type SetupPreviewErrorKey =
@@ -55,14 +55,13 @@ export function DeviceSetupDialog({
 	open,
 	onOpenChange,
 	accounts,
-	initialAccountEmail,
+	initialAccountId,
 }: DeviceSetupDialogProps) {
 	const initialSelectedAccountId =
-		accounts.find(
-			(account) =>
-				initialAccountEmail &&
-				account.email.toLowerCase() === initialAccountEmail.toLowerCase(),
-		)?.accountId ??
+		(initialAccountId
+			? accounts.find((account) => account.accountId === initialAccountId)
+					?.accountId
+			: undefined) ??
 		accounts[0]?.accountId ??
 		"";
 
