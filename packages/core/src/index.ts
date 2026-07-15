@@ -70,11 +70,9 @@ export {
 export {
 	filterItemsByTravelMode,
 	filterVaultKeys,
-	getTravelModeService,
 	isVaultHidden,
 	type TravelModeRpcClient,
 	type TravelModeServerResponse,
-	TravelModeService,
 } from "./services/travel-mode-service";
 export {
 	handleTravelModeSyncEvent,

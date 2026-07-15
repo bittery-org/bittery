@@ -13,10 +13,7 @@ import {
 	getClientForAccount,
 } from "../services/account-resolver";
 import { getTravelModeEnforcer } from "../services/travel-mode-enforcer";
-import {
-	getTravelModeService,
-	type TravelModeRpcClient,
-} from "../services/travel-mode-service";
+import type { TravelModeRpcClient } from "../services/travel-mode-service";
 import { restoreAfterTravelModeDisabled } from "../services/travel-mode-sync";
 import type { RpcVaultClient } from "../services/vault-service";
 
@@ -39,7 +36,6 @@ export function useTravelMode(accountId?: string) {
 	const storage = usePlatformStorage();
 	const crypto = usePlatformCrypto();
 	const { vaultCoordinator, accounts } = useCoreContext();
-	const travelModeService = getTravelModeService(storage);
 
 	const query = useQuery({
 		queryKey: ["travel-mode", accountId],
@@ -90,7 +86,8 @@ export function useTravelMode(accountId?: string) {
 			}
 			const { accountId: resolvedAccountId, rpcClient: accountRpcClient } =
 				await resolveAccountRpcClient(storage, rpcClient, accountId);
-			return travelModeService.setHiddenVaults(
+			const enforcer = getTravelModeEnforcer(storage, vaultCoordinator);
+			return enforcer.setHiddenVaults(
 				resolvedAccountId,
 				hiddenVaultIds,
 				accountRpcClient,
