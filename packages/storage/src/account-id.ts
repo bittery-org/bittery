@@ -19,8 +19,13 @@ export function resolveAccountIdFromEmailInList(
 	accounts: AccountMetadata[],
 	email: string,
 ): string | undefined {
-	return accounts.find((a) => a.email.toLowerCase() === email.toLowerCase())
-		?.accountId;
+	const matches = accounts.filter(
+		(a) => a.email.toLowerCase() === email.toLowerCase(),
+	);
+	if (matches.length > 1) {
+		throw new Error(`Ambiguous account email: ${email}`);
+	}
+	return matches[0]?.accountId;
 }
 
 /**
@@ -82,6 +87,20 @@ export function resolveOrCreateAccountId(
 	const existing = findAccountByServerUser(accounts, serverUrl, userId);
 	if (existing) {
 		return existing.accountId;
+	}
+
+	const legacyCandidates = accounts.filter(
+		(account) => account.userId === userId && !account.serverUrl,
+	);
+	if (legacyCandidates.length > 1) {
+		throw new Error(
+			`Ambiguous legacy accounts without server URL for user ${userId}`,
+		);
+	}
+	const legacyCandidate = legacyCandidates[0];
+	if (legacyCandidate) {
+		legacyCandidate.serverUrl = serverUrl.replace(/\/$/, "");
+		return legacyCandidate.accountId;
 	}
 	return generateAccountId();
 }

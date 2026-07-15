@@ -24,11 +24,24 @@ export interface AccountIdMigrationContext {
 	accountsListKey: string;
 	getAccountsList(): Promise<AccountMetadata[]>;
 	saveAccountsList(accounts: AccountMetadata[]): Promise<void>;
-	migrateKeychainKey?(
+	copyKeychainKey?(
 		fromAccountId: string,
 		toAccountId: string,
 		suffix: string,
 	): Promise<void>;
+	deleteLegacyKeychainKey?(
+		fromAccountId: string,
+		suffix: string,
+	): Promise<void>;
+}
+
+function valuesEqual(left: unknown, right: unknown): boolean {
+	if (Object.is(left, right)) return true;
+	try {
+		return JSON.stringify(left) === JSON.stringify(right);
+	} catch {
+		return false;
+	}
 }
 
 /**
@@ -45,10 +58,51 @@ export async function migrateEmailKeysToAccountIds(
 		return;
 	}
 
+	const storedActive = await ctx.store.get<string>(ctx.activeAccountKey);
 	let accounts = await ctx.getAccountsList();
 	accounts = ensureAccountIds(accounts);
 
-	// Rewrite per-account storage keys from email namespace to accountId namespace
+	// Backfill immutable server identity before the account-ID checkpoint.
+	for (const account of accounts) {
+		if (account.serverUrl) continue;
+		const legacyServerUrl = await ctx.store.get<string>(
+			getLegacyAccountKey(account.email.toLowerCase(), "server_url"),
+		);
+		if (legacyServerUrl) {
+			account.serverUrl = legacyServerUrl.replace(/\/$/, "");
+		}
+	}
+
+	let convertedActive = storedActive;
+	if (storedActive && storedActive !== "all") {
+		const alreadyAccountId = accounts.some(
+			(account) => account.accountId === storedActive,
+		);
+		if (!alreadyAccountId) {
+			const matches = accounts.filter(
+				(account) =>
+					account.email.toLowerCase() === storedActive.toLowerCase(),
+			);
+			if (matches.length > 1) {
+				throw new Error(
+					`Ambiguous legacy active account for email ${storedActive}`,
+				);
+			}
+			const match = matches[0];
+			if (match) {
+				convertedActive = match.accountId;
+			}
+		}
+	}
+
+	// Durable identity checkpoint. No legacy source is touched before this save.
+	await ctx.saveAccountsList(accounts);
+	if (convertedActive !== undefined) {
+		await ctx.store.set(ctx.activeAccountKey, convertedActive);
+	}
+	await ctx.store.save?.();
+
+	// Copy all store and keychain values non-destructively.
 	for (const account of accounts) {
 		const legacyEmail = account.email.toLowerCase();
 		for (const suffix of ACCOUNT_STORAGE_SUFFIXES) {
@@ -58,25 +112,29 @@ export async function migrateEmailKeysToAccountIds(
 			const value = await ctx.store.get<unknown>(legacyKey);
 			if (value !== undefined) {
 				await ctx.store.set(newKey, value);
-				await ctx.store.delete(legacyKey);
+				const copied = await ctx.store.get<unknown>(newKey);
+				if (!valuesEqual(value, copied)) {
+					throw new Error(`Failed to verify migrated value for ${newKey}`);
+				}
 			}
 
-			if (suffix === "jwt_token" && ctx.migrateKeychainKey) {
-				await ctx.migrateKeychainKey(legacyEmail, account.accountId, suffix);
+			if (suffix === "jwt_token" && ctx.copyKeychainKey) {
+				await ctx.copyKeychainKey(legacyEmail, account.accountId, suffix);
 			}
 		}
 	}
 
-	await ctx.saveAccountsList(accounts);
-
-	// Migrate active account pointer
-	const storedActive = await ctx.store.get<string>(ctx.activeAccountKey);
-	if (storedActive && storedActive !== "all") {
-		const match = accounts.find(
-			(a) => a.email.toLowerCase() === storedActive.toLowerCase(),
-		);
-		if (match) {
-			await ctx.store.set(ctx.activeAccountKey, match.accountId);
+	// Cleanup is last. A crash here is safe because every destination exists.
+	for (const account of accounts) {
+		const legacyEmail = account.email.toLowerCase();
+		for (const suffix of ACCOUNT_STORAGE_SUFFIXES) {
+			const legacyKey = getLegacyAccountKey(legacyEmail, suffix);
+			if ((await ctx.store.get(legacyKey)) !== undefined) {
+				await ctx.store.delete(legacyKey);
+			}
+			if (suffix === "jwt_token" && ctx.deleteLegacyKeychainKey) {
+				await ctx.deleteLegacyKeychainKey(legacyEmail, suffix);
+			}
 		}
 	}
 

@@ -18,6 +18,8 @@ export const ACCOUNT_STORAGE_SUFFIXES = [
 	"item_cache_meta",
 	"travel_mode_cache",
 	"jwt_token",
+	"auto_lock_timeout",
+	"background_timestamp",
 ] as const;
 
 export type AccountStorageSuffix = (typeof ACCOUNT_STORAGE_SUFFIXES)[number];

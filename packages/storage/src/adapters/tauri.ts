@@ -151,7 +151,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 					const s = await this.getStore();
 					await s.set(ACCOUNTS_LIST_KEY, JSON.stringify({ accounts }));
 				},
-				migrateKeychainKey: async (legacyEmail, accountId, suffix) => {
+				copyKeychainKey: async (legacyEmail, accountId, suffix) => {
 					if (!this.invoke) return;
 					const legacyKey = getLegacyAccountKey(legacyEmail, suffix);
 					const newKey = getAccountKey(accountId, suffix);
@@ -160,8 +160,17 @@ export class TauriStorageAdapter implements IStorageAdapter {
 					});
 					if (value) {
 						await this.invoke("keychain_set", { key: newKey, value });
-						await this.invoke("keychain_delete", { key: legacyKey });
+						const copied = await this.invoke("keychain_get", { key: newKey });
+						if (copied !== value) {
+							throw new Error(`Failed to verify keychain migration for ${newKey}`);
+						}
 					}
+				},
+				deleteLegacyKeychainKey: async (legacyEmail, suffix) => {
+					if (!this.invoke) return;
+					await this.invoke("keychain_delete", {
+						key: getLegacyAccountKey(legacyEmail, suffix),
+					});
 				},
 			});
 
