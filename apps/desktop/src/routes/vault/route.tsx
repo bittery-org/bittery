@@ -8,6 +8,7 @@ import {
 	useDeleteVault,
 	useUpdateVault,
 } from "@bittery/core/hooks";
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { CreateItemSheet, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -68,9 +69,9 @@ export const Route = createFileRoute("/vault")({
 			});
 		}
 
-		const restored = await storage.tryRestoreSession(
-			true,
+		const restored = await getAccountSessionManager({ storage }).unlockAccount(
 			activeAccount.accountId,
+			true,
 		);
 
 		if (!restored) {

@@ -9,12 +9,15 @@ import {
 } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import { createStoredAccountRpcClient } from "./account-resolver";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export interface AccountSessionManagerOptions {
 	storage: IStorageAdapter;
 	onActiveChanged?: (active: ActiveAccount) => void | Promise<void>;
 	onLockBroadcast?: (reason: string) => void | Promise<void>;
 	invalidateQueries?: (keys: string[][]) => void | Promise<void>;
+	verifyUnlockPolicy?: (accountId: string) => void | Promise<void>;
 }
 
 export interface LoginSessionInput {
@@ -56,6 +59,27 @@ export class AccountSessionManager {
 		}
 	}
 
+	private async verifyUnlockPolicy(accountId: string): Promise<boolean> {
+		try {
+			if (this.options.verifyUnlockPolicy) {
+				await this.options.verifyUnlockPolicy(accountId);
+			} else {
+				const enforcer = getTravelModeEnforcer(this.storage);
+				if (!enforcer.isVerified(accountId)) {
+					const client = await createStoredAccountRpcClient(
+						this.storage,
+						accountId,
+					).catch(() => null);
+					await enforcer.verifyForUnlock(accountId, client);
+				}
+			}
+			return true;
+		} catch {
+			await this.storage.clearSession(accountId);
+			return false;
+		}
+	}
+
 	async initialize(): Promise<void> {
 		await this.refresh();
 	}
@@ -70,10 +94,19 @@ export class AccountSessionManager {
 		this.accounts = accounts;
 		this.active = active;
 		this.lockState.clear();
+		const verifiedUnlocked = new Set(
+			(
+				await Promise.all(
+					unlocked.map(async (accountId) =>
+						(await this.verifyUnlockPolicy(accountId)) ? accountId : null,
+					),
+				)
+			).filter((accountId): accountId is string => accountId !== null),
+		);
 		for (const account of accounts) {
 			this.lockState.set(
 				account.accountId,
-				unlocked.includes(account.accountId) ? "unlocked" : "locked",
+				verifiedUnlocked.has(account.accountId) ? "unlocked" : "locked",
 			);
 		}
 		this.emit();
@@ -114,10 +147,11 @@ export class AccountSessionManager {
 				meta.lastActiveAt = Date.now();
 			}
 			if (!this.isUnlocked(account.accountId)) {
-				const restored = await this.storage.tryRestoreSession(
+				let restored = await this.storage.tryRestoreSession(
 					true,
 					account.accountId,
 				);
+				if (restored) restored = await this.verifyUnlockPolicy(account.accountId);
 				this.lockState.set(
 					account.accountId,
 					restored ? "unlocked" : "locked",
@@ -234,10 +268,11 @@ export class AccountSessionManager {
 		accountId: string,
 		skipBiometric = false,
 	): Promise<boolean> {
-		const restored = await this.storage.tryRestoreSession(
+		let restored = await this.storage.tryRestoreSession(
 			skipBiometric,
 			accountId,
 		);
+		if (restored) restored = await this.verifyUnlockPolicy(accountId);
 		this.lockState.set(accountId, restored ? "unlocked" : "locked");
 		this.emit();
 		return restored;

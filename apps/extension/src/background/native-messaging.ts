@@ -5,6 +5,8 @@
 
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
+import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
 import { sendNativeMessage } from "./native-messaging-client";
@@ -126,10 +128,6 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				muk[i] = mukStr.charCodeAt(i);
 			}
 
-			// Store the MUK in memory
-			setMasterUnlockKey(muk);
-			await storage.setMasterUnlockKey(muk, activeAccount.accountId);
-
 			// Get auth token and vault keys from response (desktop app provides them) or storage
 			let token: string;
 			let vaultKeys: any[];
@@ -145,8 +143,23 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				token = storedToken;
 			}
 
+			const enforcer = getTravelModeEnforcer(storage);
+			const client = await createStoredAccountRpcClient(
+				storage,
+				activeAccount.accountId,
+			).catch(() => null);
+			try {
+				await enforcer.verifyForUnlock(activeAccount.accountId, client);
+			} catch (error) {
+				await storage.clearSession(activeAccount.accountId);
+				throw error;
+			}
+
 			if (responseData.vault_keys) {
-				vaultKeys = JSON.parse(responseData.vault_keys);
+				vaultKeys = enforcer.filterVaultKeys(
+					activeAccount.accountId,
+					JSON.parse(responseData.vault_keys),
+				);
 				await storage.storeVaultKeys(vaultKeys, activeAccount.accountId);
 			} else {
 				const storedVaultKeys = await storage.getVaultKeys(
@@ -157,6 +170,9 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				}
 				vaultKeys = storedVaultKeys;
 			}
+
+			setMasterUnlockKey(muk);
+			await storage.setMasterUnlockKey(muk, activeAccount.accountId);
 
 			// Update activity tracking
 			await updateActivity();
@@ -399,23 +415,34 @@ export async function handleNativeBiometricUnlockAll(options?: {
 					muk[i] = mukStr.charCodeAt(i);
 				}
 
-				// Store the MUK for this account
 				if (!accountId) throw new Error(`Missing account ID for ${email}`);
-				await storage.setMasterUnlockKey(muk, accountId);
 
 				// Store auth token if provided
 				if (accountData.auth_token) {
 					await storage.storeAuthToken(accountData.auth_token, accountId);
 				}
 
-				// Store vault keys if provided
+				const enforcer = getTravelModeEnforcer(storage);
+				const client = await createStoredAccountRpcClient(
+					storage,
+					accountId,
+				).catch(() => null);
+				await enforcer.verifyForUnlock(accountId, client);
+
+				// Store only policy-visible vault keys after verification.
 				if (accountData.vault_keys) {
-					const vaultKeys = JSON.parse(accountData.vault_keys);
+					const vaultKeys = enforcer.filterVaultKeys(
+						accountId,
+						JSON.parse(accountData.vault_keys),
+					);
 					await storage.storeVaultKeys(vaultKeys, accountId);
 				}
 
+				await storage.setMasterUnlockKey(muk, accountId);
+
 				unlocked.push(accountId);
 			} catch (error) {
+				if (accountId) await storage.clearSession(accountId);
 				failed.push({
 					accountId,
 					email,

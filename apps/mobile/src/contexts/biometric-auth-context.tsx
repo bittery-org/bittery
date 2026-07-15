@@ -4,6 +4,8 @@
  */
 
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
+import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { useRouter } from "expo-router";
 import {
 	createContext,
@@ -262,17 +264,23 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			setLastAuthResult(result);
 
 			if (result.success) {
+				const accountId = activeAccount.accountId;
 				// Restore MUK to memory after successful biometric auth
 				// This ensures decryption queries can run immediately without polling
 				try {
+					const client = await createStoredAccountRpcClient(
+						storage,
+						accountId,
+					).catch(() => null);
+					await getTravelModeEnforcer(storage).verifyForUnlock(accountId, client);
 					const muk = await storage.decryptStoredMasterUnlockKeyPublic(
-						activeAccount.accountId,
+						accountId,
 						true, // Skip biometric since we just authenticated
 					);
 					if (muk) {
 						// Store in React Native memory cache
-						await storage.storeMasterUnlockKey(muk, activeAccount.accountId);
-						await setNativeMuksForAccounts([activeAccount.accountId]);
+						await storage.storeMasterUnlockKey(muk, accountId);
+						await setNativeMuksForAccounts([accountId]);
 					} else {
 						if (__DEV__) {
 							console.warn(
@@ -281,6 +289,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						}
 					}
 				} catch (error) {
+					await storage.clearSession(accountId);
 					console.error(
 						"[BiometricAuth] Failed to restore MUK after biometric auth:",
 						error,

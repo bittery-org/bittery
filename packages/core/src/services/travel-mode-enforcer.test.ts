@@ -7,8 +7,11 @@ import {
 } from "./travel-mode-enforcer";
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 
-function createMockStorage(): IStorageAdapter {
-	let travelConfig: TravelModeConfig | null = null;
+function createMockStorage(
+	initialTravelConfig: TravelModeConfig | null = null,
+	events: string[] = [],
+): IStorageAdapter {
+	let travelConfig: TravelModeConfig | null = initialTravelConfig;
 	let vaultKeys = [{ vaultId: "v1", vaultName: "V1" }] as never[];
 	let items = [{ id: "i1", vaultId: "v1" }] as never[];
 	let vaults = [{ id: "v1", name: "V1" }] as never[];
@@ -30,6 +33,7 @@ function createMockStorage(): IStorageAdapter {
 		storeAuthToken: mock(async () => {}),
 		getAuthToken: mock(async () => null),
 		storeVaultKeys: mock(async (keys: unknown) => {
+			events.push("purge:vault-keys");
 			vaultKeys = keys as never[];
 		}),
 		getVaultKeys: mock(async () => vaultKeys),
@@ -61,6 +65,7 @@ function createMockStorage(): IStorageAdapter {
 		}),
 		getCachedVaults: mock(async () => vaults),
 		storeTravelModeCache: mock(async (config: TravelModeConfig) => {
+			events.push("persist:config");
 			travelConfig = config;
 		}),
 		getTravelModeCache: mock(async () => travelConfig),
@@ -107,5 +112,65 @@ describe("TravelModeEnforcer", () => {
 		});
 
 		expect(enforcer.isEnabled("acc-1")).toBe(false);
+	});
+
+	it("restores a verified cached policy while offline", async () => {
+		const cached = { enabled: true, hiddenVaultIds: ["v1"] };
+		const storage = createMockStorage(cached);
+		const enforcer = new TravelModeEnforcer({ storage });
+
+		const config = await enforcer.verifyForUnlock("acc-1");
+
+		expect(config).toEqual(cached);
+		expect(enforcer.isVerified("acc-1")).toBe(true);
+		expect(storage.storeVaultKeys).toHaveBeenCalled();
+	});
+
+	it("fails closed while offline when no cached policy exists", async () => {
+		const storage = createMockStorage();
+		const enforcer = new TravelModeEnforcer({ storage });
+
+		await expect(enforcer.verifyForUnlock("acc-1")).rejects.toThrow(
+			"No verified travel mode policy",
+		);
+		expect(enforcer.isVerified("acc-1")).toBe(false);
+	});
+
+	it("replaces stale cached policy with verified server state", async () => {
+		const storage = createMockStorage({ enabled: false, hiddenVaultIds: [] });
+		const enforcer = new TravelModeEnforcer({ storage });
+		const rpcClient = {
+			travelMode: {
+				getTravelMode: {
+					query: mock(async () => ({
+						enabled: true,
+						hiddenVaultIds: ["v1"],
+						enabledAt: "2026-01-01T00:00:00.000Z",
+						updatedAt: "2026-01-01T00:00:00.000Z",
+					})),
+				},
+			},
+		} as never;
+
+		const config = await enforcer.verifyForUnlock("acc-1", rpcClient);
+
+		expect(config.enabled).toBe(true);
+		expect(config.hiddenVaultIds).toEqual(["v1"]);
+		expect(storage.storeTravelModeCache).toHaveBeenCalled();
+	});
+
+	it("purges hidden data before committing an enabled policy", async () => {
+		const events: string[] = [];
+		const storage = createMockStorage(null, events);
+		const enforcer = new TravelModeEnforcer({ storage });
+
+		await enforcer.applyConfig("acc-1", {
+			enabled: true,
+			hiddenVaultIds: ["v1"],
+		});
+
+		expect(events.indexOf("purge:vault-keys")).toBeLessThan(
+			events.indexOf("persist:config"),
+		);
 	});
 });

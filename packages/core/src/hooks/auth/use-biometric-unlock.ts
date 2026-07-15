@@ -8,6 +8,8 @@
 import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
+import { createStoredAccountRpcClient } from "../../services/account-resolver";
+import { getTravelModeEnforcer } from "../../services/travel-mode-enforcer";
 
 /**
  * Options for useBiometricUnlock hook
@@ -88,6 +90,21 @@ export function useBiometricUnlock(
 > {
 	const storage = usePlatformStorage();
 
+	const verifyTravelMode = async (accountId: string): Promise<void> => {
+		const client = await createStoredAccountRpcClient(storage, accountId).catch(
+			() => null,
+		);
+		try {
+			await getTravelModeEnforcer(storage).verifyForUnlock(accountId, client);
+		} catch {
+			await storage.clearSession(accountId);
+			throw {
+				type: "authentication_failed",
+				message: "Travel mode policy could not be verified",
+			} as BiometricUnlockError;
+		}
+	};
+
 	return useMutation({
 		mutationFn: async (input: BiometricUnlockInput) => {
 			const accountId = input.accountId;
@@ -145,6 +162,7 @@ export function useBiometricUnlock(
 						} as BiometricUnlockError;
 					}
 				}
+				await verifyTravelMode(accountId);
 
 				return { success: true };
 			}
@@ -158,6 +176,7 @@ export function useBiometricUnlock(
 						message: "Biometric unlock failed",
 					} as BiometricUnlockError;
 				}
+				await verifyTravelMode(accountId);
 				return { success: true };
 			}
 

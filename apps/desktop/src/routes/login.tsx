@@ -18,6 +18,7 @@ import {
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { useEffect, useState } from "react";
 import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
 import { triggerAuthRevealToVault } from "@/lib/auth-reveal-transition";
@@ -71,9 +72,9 @@ export const Route = createFileRoute("/login")({
 		);
 		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
 		if (sessionValid) {
-			const restored = await storage.tryRestoreSession(
-				true,
+			const restored = await getAccountSessionManager({ storage }).unlockAccount(
 				activeAccount.accountId,
+				true,
 			);
 			if (restored) {
 				throw redirect({ to: "/vault" });

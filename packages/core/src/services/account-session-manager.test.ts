@@ -97,7 +97,7 @@ describe("AccountSessionManager", () => {
 	it("switching A to B leaves A unlocked", async () => {
 		const storage = createMockStorage();
 		const onActiveChanged = mock(async () => {});
-		const manager = new AccountSessionManager({ storage, onActiveChanged });
+		const manager = new AccountSessionManager({ storage, onActiveChanged, verifyUnlockPolicy: async () => {} });
 
 		await manager.initialize();
 		await manager.switchAccount({ type: "single", accountId: "acc-2" });
@@ -123,7 +123,7 @@ describe("AccountSessionManager", () => {
 		const storage = createMockStorage({
 			getUnlockedAccounts: mock(async () => ["acc-1", "acc-2"]),
 		});
-		const manager = new AccountSessionManager({ storage });
+		const manager = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 
 		await manager.initialize();
 		await manager.switchAccount({ type: "single", accountId: "acc-2" });
@@ -136,7 +136,7 @@ describe("AccountSessionManager", () => {
 		const storage = createMockStorage({
 			tryRestoreSession: mock(async (_skip, accountId) => accountId === "acc-2"),
 		});
-		const manager = new AccountSessionManager({ storage });
+		const manager = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 
 		await manager.initialize();
 		await manager.switchAccount({ type: "single", accountId: "acc-2" });
@@ -149,7 +149,7 @@ describe("AccountSessionManager", () => {
 
 	it("lockAll clears unlocked state for all accounts", async () => {
 		const storage = createMockStorage();
-		const manager = new AccountSessionManager({ storage });
+		const manager = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 
 		await manager.initialize();
 		await manager.lockAll("manual");
@@ -160,7 +160,7 @@ describe("AccountSessionManager", () => {
 
 	it("removeAccount switches to remaining account when active is removed", async () => {
 		const storage = createMockStorage();
-		const manager = new AccountSessionManager({ storage });
+		const manager = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 
 		await manager.initialize();
 		await manager.removeAccount("acc-1");
@@ -180,7 +180,7 @@ describe("AccountSessionManager", () => {
 	it("removing the only active account persists null", async () => {
 		const storage = createMockStorage();
 		await storage.removeAccount("acc-2");
-		const manager = new AccountSessionManager({ storage });
+		const manager = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 
 		await manager.initialize();
 		await manager.removeAccount("acc-1");
@@ -193,11 +193,11 @@ describe("AccountSessionManager", () => {
 	it("reconstruction after final-account removal does not restore a stale ID", async () => {
 		const storage = createMockStorage();
 		await storage.removeAccount("acc-2");
-		const manager = new AccountSessionManager({ storage });
+		const manager = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 		await manager.initialize();
 		await manager.removeAccount("acc-1");
 
-		const reconstructed = new AccountSessionManager({ storage });
+		const reconstructed = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 		await reconstructed.initialize();
 
 		expect(reconstructed.getAccounts()).toEqual([]);
@@ -206,7 +206,7 @@ describe("AccountSessionManager", () => {
 
 	it("removing a non-active account does not alter the active account", async () => {
 		const storage = createMockStorage();
-		const manager = new AccountSessionManager({ storage });
+		const manager = new AccountSessionManager({ storage, verifyUnlockPolicy: async () => {} });
 
 		await manager.initialize();
 		await manager.removeAccount("acc-2");
@@ -216,5 +216,22 @@ describe("AccountSessionManager", () => {
 			type: "single",
 			accountId: "acc-1",
 		});
+	});
+
+	it("clears a restored session when travel mode cannot be verified", async () => {
+		const storage = createMockStorage();
+		const manager = new AccountSessionManager({
+			storage,
+			verifyUnlockPolicy: async () => {
+				throw new Error("policy unavailable");
+			},
+		});
+
+		await manager.initialize();
+		const restored = await manager.unlockAccount("acc-2", true);
+
+		expect(restored).toBe(false);
+		expect(storage.clearSession).toHaveBeenCalledWith("acc-2");
+		expect(manager.isUnlocked("acc-2")).toBe(false);
 	});
 });

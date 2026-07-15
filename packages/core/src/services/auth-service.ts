@@ -42,23 +42,10 @@ async function prepareTravelModeForSession(
 	travelModeRpcClient?: TravelModeRpcClient,
 ): Promise<void> {
 	const travelMode = getTravelModeEnforcer(storage);
-	if (travelModeRpcClient) {
-		try {
-			await travelMode.fetchFromServer(accountId, travelModeRpcClient);
-		} catch (error) {
-			const cached = await storage.getTravelModeCache?.(accountId);
-			if (cached) {
-				console.warn(
-					"[auth] Failed to fetch travel mode from server, using local cache:",
-					error,
-				);
-				await travelMode.hydrateFromStorage(accountId);
-			} else {
-				throw new Error(m.auth_error_travel_mode_verify_failed());
-			}
-		}
-	} else {
-		await travelMode.hydrateFromStorage(accountId);
+	try {
+		await travelMode.verifyForUnlock(accountId, travelModeRpcClient);
+	} catch {
+		throw new Error(m.auth_error_travel_mode_verify_failed());
 	}
 }
 

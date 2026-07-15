@@ -192,9 +192,9 @@ export class VaultRepository {
 		if (!this.accountId) {
 			return vaults;
 		}
-		const config = getTravelModeEnforcer(this.storage).getConfig(
-			this.accountId,
-		);
+		const enforcer = getTravelModeEnforcer(this.storage);
+		if (!enforcer.isVerified(this.accountId)) return [];
+		const config = enforcer.getConfig(this.accountId);
 		if (!config.enabled) {
 			return vaults;
 		}
@@ -213,7 +213,9 @@ export class VaultRepository {
 		if (!this.accountId) {
 			return vaultKeys;
 		}
-		return getTravelModeEnforcer(this.storage).filterVaultKeys(
+		const enforcer = getTravelModeEnforcer(this.storage);
+		if (!enforcer.isVerified(this.accountId)) return [];
+		return enforcer.filterVaultKeys(
 			this.accountId,
 			vaultKeys,
 		);
@@ -250,8 +252,10 @@ export class VaultRepository {
 		if (!this.accountId) {
 			return false;
 		}
+		const enforcer = getTravelModeEnforcer(this.storage);
+		if (!enforcer.isVerified(this.accountId)) return true;
 		return isVaultHidden(
-			getTravelModeEnforcer(this.storage).getConfig(this.accountId),
+			enforcer.getConfig(this.accountId),
 			vaultId,
 		);
 	}
@@ -262,7 +266,9 @@ export class VaultRepository {
 		if (!this.accountId) {
 			return items;
 		}
-		return getTravelModeEnforcer(this.storage).filterItems(
+		const enforcer = getTravelModeEnforcer(this.storage);
+		if (!enforcer.isVerified(this.accountId)) return [];
+		return enforcer.filterItems(
 			this.accountId,
 			items,
 		);
@@ -744,6 +750,9 @@ export class VaultRepository {
 		this.emit();
 
 		try {
+			if (this.accountId) {
+				getTravelModeEnforcer(this.storage).assertVerified(this.accountId);
+			}
 			await this.ensureServerUrl();
 			const [cachedItems, cachedVaults, cacheMeta, storedVaultKeys] =
 				await Promise.all([
@@ -792,6 +801,9 @@ export class VaultRepository {
 	}
 
 	async hydrateFromServer(client: BootstrapItemsClient): Promise<void> {
+		if (this.accountId) {
+			getTravelModeEnforcer(this.storage).assertVerified(this.accountId);
+		}
 		await this.ensureServerUrl();
 
 		let cursor: string | undefined;

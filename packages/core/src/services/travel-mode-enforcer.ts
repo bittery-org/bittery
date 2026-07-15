@@ -28,6 +28,7 @@ const DEFAULT_CONFIG: TravelModeConfig = {
 
 export class TravelModeEnforcer {
 	private readonly memoryCache = new Map<string, TravelModeConfig>();
+	private readonly verifiedAccounts = new Set<string>();
 
 	constructor(private options: TravelModeEnforcerOptions) {}
 
@@ -41,6 +42,16 @@ export class TravelModeEnforcer {
 
 	getConfig(accountId: string): TravelModeConfig {
 		return this.memoryCache.get(accountId) ?? { ...DEFAULT_CONFIG };
+	}
+
+	isVerified(accountId: string): boolean {
+		return this.verifiedAccounts.has(accountId);
+	}
+
+	assertVerified(accountId: string): void {
+		if (!this.isVerified(accountId)) {
+			throw new Error(`Travel mode policy is not verified for account ${accountId}`);
+		}
 	}
 
 	isEnabled(accountId: string): boolean {
@@ -67,8 +78,15 @@ export class TravelModeEnforcer {
 
 	async hydrateFromStorage(accountId: string): Promise<TravelModeConfig> {
 		const cached = (await this.storage.getTravelModeCache?.(accountId)) ?? null;
-		const config = cached ?? DEFAULT_CONFIG;
+		if (!cached) {
+			throw new Error(`No verified travel mode policy for account ${accountId}`);
+		}
+		const config = cached;
+		if (config.enabled) {
+			await this.purgeAllLayers(accountId, config.hiddenVaultIds);
+		}
 		this.memoryCache.set(accountId, config);
+		this.verifiedAccounts.add(accountId);
 		return config;
 	}
 
@@ -76,28 +94,22 @@ export class TravelModeEnforcer {
 		accountId: string,
 		config: TravelModeConfig,
 	): Promise<void> {
-		this.memoryCache.set(accountId, config);
 		await this.storage.storeTravelModeCache?.(config, accountId);
+		this.memoryCache.set(accountId, config);
+		this.verifiedAccounts.add(accountId);
 	}
 
 	/**
-	 * Single apply path: persist config, purge storage, and purge in-memory repos.
+	 * Single apply path: purge first, then expose and persist the committed policy.
 	 */
 	async applyConfig(
 		accountId: string,
 		config: TravelModeConfig,
 	): Promise<void> {
-		const previous = this.getConfig(accountId);
-		await this.persistConfig(accountId, config);
-
 		if (config.enabled) {
 			await this.purgeAllLayers(accountId, config.hiddenVaultIds);
-			return;
 		}
-
-		if (previous.enabled) {
-			// Disabled — caller should trigger server refetch via restoreAfterDisable
-		}
+		await this.persistConfig(accountId, config);
 	}
 
 	async purgeAllLayers(
@@ -141,6 +153,39 @@ export class TravelModeEnforcer {
 		rpcClient: TravelModeRpcClient,
 	): Promise<TravelModeConfig> {
 		const response = await rpcClient.travelMode.getTravelMode.query();
+		const config = mapTravelModeResponse(response);
+		await this.applyConfig(accountId, config);
+		return config;
+	}
+
+	async verifyForUnlock(
+		accountId: string,
+		rpcClient?: TravelModeRpcClient | null,
+	): Promise<TravelModeConfig> {
+		if (rpcClient) {
+			try {
+				return await this.fetchFromServer(accountId, rpcClient);
+			} catch (serverError) {
+				try {
+					return await this.hydrateFromStorage(accountId);
+				} catch {
+					throw new Error(
+						`Unable to verify travel mode policy for account ${accountId}: ${String(serverError)}`,
+					);
+				}
+			}
+		}
+		return this.hydrateFromStorage(accountId);
+	}
+
+	async setHiddenVaults(
+		accountId: string,
+		hiddenVaultIds: string[],
+		rpcClient: TravelModeRpcClient,
+	): Promise<TravelModeConfig> {
+		const response = await rpcClient.travelMode.setTravelModeHiddenVaults.mutate({
+			hiddenVaultIds,
+		});
 		const config = mapTravelModeResponse(response);
 		await this.applyConfig(accountId, config);
 		return config;

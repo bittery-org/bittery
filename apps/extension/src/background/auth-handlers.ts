@@ -11,6 +11,7 @@ import {
 	storeLoginSession,
 	storeUnlockSession,
 } from "@bittery/core";
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
@@ -226,9 +227,9 @@ async function tryRestoreAllSessions(): Promise<void> {
 		// Try to restore each account's session
 		for (const account of accounts) {
 			try {
-				const restored = await storage.tryRestoreSession(
-					false,
+				const restored = await getAccountSessionManager({ storage }).unlockAccount(
 					account.accountId,
+					false,
 				);
 				if (restored) {
 					restoredAccountIds.push(account.accountId);
