@@ -155,21 +155,17 @@ export function normalizeDesktopSnapshotItem(
 	return normalized;
 }
 
-async function getDesktopTargetEmails(): Promise<string[]> {
+async function getDesktopTargetAccountIds(): Promise<string[]> {
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
-		const accounts = await storage.getAccountsList();
-		const meta = accounts.find(
-			(account) => account.accountId === activeAccount.accountId,
-		);
-		return meta ? [meta.email.toLowerCase()] : [];
+		return [activeAccount.accountId];
 	}
 
-	const statusEmails = desktopSync
+	const statusAccountIds = desktopSync
 		.getLastStatus()
-		?.unlockedAccounts?.map((email) => email.toLowerCase());
-	if (statusEmails && statusEmails.length > 0) {
-		return Array.from(new Set(statusEmails));
+		?.unlockedAccounts;
+	if (statusAccountIds && statusAccountIds.length > 0) {
+		return Array.from(new Set(statusAccountIds));
 	}
 
 	const accounts = await desktopClient.getAccounts();
@@ -178,7 +174,7 @@ async function getDesktopTargetEmails(): Promise<string[]> {
 	}
 
 	return Array.from(
-		new Set(accounts.unlockedAccounts.map((email) => email.toLowerCase())),
+		new Set(accounts.unlockedAccounts),
 	);
 }
 
@@ -234,16 +230,16 @@ async function filterItemsForTravelMode(
 
 async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 	const activeAccount = await storage.getActiveAccount();
-	const targetEmails = await getDesktopTargetEmails();
-	if (targetEmails.length === 0) {
+	const targetAccountIds = await getDesktopTargetAccountIds();
+	if (targetAccountIds.length === 0) {
 		return [];
 	}
 
 	const includeAccountContext = activeAccount?.type === "all";
-	const snapshot = await desktopClient.getItemsSnapshot(targetEmails);
+	const snapshot = await desktopClient.getItemsSnapshot(targetAccountIds);
 	if (!snapshot) {
 		console.warn("[vault-utils] desktop snapshot unavailable", {
-			targetEmails,
+			targetAccountIds,
 		});
 		return [];
 	}

@@ -38,15 +38,15 @@ fn summarize_message(message: &DesktopRequest) -> String {
         DesktopRequest::Ping => "PING".to_string(),
         DesktopRequest::GetDesktopStatus => "GET_DESKTOP_STATUS".to_string(),
         DesktopRequest::GetDesktopAccounts => "GET_DESKTOP_ACCOUNTS".to_string(),
-        DesktopRequest::GetDesktopAuthToken { email } => {
-            format!("GET_DESKTOP_AUTH_TOKEN email={}", email)
+		DesktopRequest::GetDesktopAuthToken { account_id } => {
+			format!("GET_DESKTOP_AUTH_TOKEN account_id={}", account_id)
         }
-        DesktopRequest::GetDesktopVaultKeys { email } => {
-            format!("GET_DESKTOP_VAULT_KEYS email={}", email)
+		DesktopRequest::GetDesktopVaultKeys { account_id } => {
+			format!("GET_DESKTOP_VAULT_KEYS account_id={}", account_id)
         }
-        DesktopRequest::GetDesktopItemsSnapshot { emails } => format!(
-            "GET_DESKTOP_ITEMS_SNAPSHOT emails={}",
-            emails.as_ref().map(|values| values.len()).unwrap_or_default()
+		DesktopRequest::GetDesktopItemsSnapshot { account_ids } => format!(
+			"GET_DESKTOP_ITEMS_SNAPSHOT account_ids={}",
+			account_ids.as_ref().map(|values| values.len()).unwrap_or_default()
         ),
         DesktopRequest::SubscribeDesktopEvents => "SUBSCRIBE_DESKTOP_EVENTS".to_string(),
         DesktopRequest::UnsubscribeDesktopEvents => "UNSUBSCRIBE_DESKTOP_EVENTS".to_string(),
@@ -55,12 +55,12 @@ fn summarize_message(message: &DesktopRequest) -> String {
         }
         DesktopRequest::BiometricUnlockRequest {
             extension_id,
-            email,
+			account_id,
             ..
         } => format!(
-            "BIOMETRIC_UNLOCK_REQUEST extension_id={} email_present={}",
+			"BIOMETRIC_UNLOCK_REQUEST extension_id={} account_id_present={}",
             extension_id,
-            email.is_some()
+			account_id.is_some()
         ),
         DesktopRequest::BiometricUnlockAllRequest { extension_id, .. } => format!(
             "BIOMETRIC_UNLOCK_ALL_REQUEST extension_id={}",

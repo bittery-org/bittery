@@ -223,9 +223,7 @@ export function createSyncCacheService(
 				return null;
 			}
 
-			const desktopToken = await deps.desktopClient.getAuthToken(
-				normalizeEmail(email),
-			);
+			const desktopToken = await deps.desktopClient.getAuthToken(accountId);
 			if (!desktopToken) {
 				return null;
 			}

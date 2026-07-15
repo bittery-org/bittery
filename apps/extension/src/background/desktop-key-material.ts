@@ -1,6 +1,6 @@
 /**
  * Hydrate extension local account material from desktop while desktop mode is active.
- * Storage is scoped by accountId; desktop IPC APIs still use email.
+ * Storage and desktop IPC are both scoped by accountId.
  */
 
 import type { VaultKeyData } from "../lib/storage";
@@ -71,7 +71,7 @@ export async function hydrateDesktopAccountMaterial(
 
 	const localToken = await storage.getAuthToken(accountId);
 	if (!localToken) {
-		const desktopToken = await desktopClient.getAuthToken(normalizedEmail);
+		const desktopToken = await desktopClient.getAuthToken(accountId);
 		if (desktopToken) {
 			await storage.storeAuthToken(desktopToken, accountId);
 		}
@@ -79,7 +79,7 @@ export async function hydrateDesktopAccountMaterial(
 
 	const localVaultKeys = await storage.getVaultKeys(accountId);
 	if (!localVaultKeys || localVaultKeys.length === 0) {
-		const vaultKeysResponse = await desktopClient.getVaultKeys(normalizedEmail);
+		const vaultKeysResponse = await desktopClient.getVaultKeys(accountId);
 		const rawVaultKeys = vaultKeysResponse?.vaultKeys;
 		if (rawVaultKeys) {
 			try {

@@ -25,13 +25,20 @@ pub enum DesktopRequest {
     #[serde(rename = "GET_DESKTOP_ACCOUNTS")]
     GetDesktopAccounts,
     #[serde(rename = "GET_DESKTOP_AUTH_TOKEN")]
-    GetDesktopAuthToken { email: String },
+	GetDesktopAuthToken {
+		#[serde(rename = "accountId")]
+		account_id: String,
+	},
     #[serde(rename = "GET_DESKTOP_VAULT_KEYS")]
-    GetDesktopVaultKeys { email: String },
+	GetDesktopVaultKeys {
+		#[serde(rename = "accountId")]
+		account_id: String,
+	},
     #[serde(rename = "GET_DESKTOP_ITEMS_SNAPSHOT")]
     GetDesktopItemsSnapshot {
         #[serde(skip_serializing_if = "Option::is_none")]
-        emails: Option<Vec<String>>,
+		#[serde(rename = "accountIds")]
+		account_ids: Option<Vec<String>>,
     },
     #[serde(rename = "SUBSCRIBE_DESKTOP_EVENTS")]
     SubscribeDesktopEvents,
@@ -44,7 +51,8 @@ pub enum DesktopRequest {
         challenge: String,
         extension_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-        email: Option<String>,
+		#[serde(rename = "accountId")]
+		account_id: Option<String>,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_ALL_REQUEST")]
     BiometricUnlockAllRequest {
@@ -83,8 +91,10 @@ pub enum DesktopResponse {
         unlocked_accounts: Vec<String>,
     },
     #[serde(rename = "DESKTOP_AUTH_TOKEN")]
-    DesktopAuthToken {
-        email: String,
+	DesktopAuthToken {
+		#[serde(rename = "accountId")]
+		account_id: String,
+		email: String,
         #[serde(rename = "authToken")]
         auth_token: String,
         #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
@@ -93,8 +103,10 @@ pub enum DesktopResponse {
         user_id: Option<String>,
     },
     #[serde(rename = "DESKTOP_VAULT_KEYS")]
-    DesktopVaultKeys {
-        email: String,
+	DesktopVaultKeys {
+		#[serde(rename = "accountId")]
+		account_id: String,
+		email: String,
         #[serde(rename = "vaultKeys")]
         vault_keys: String,
     },
@@ -121,7 +133,10 @@ pub enum DesktopResponse {
         app_running: bool,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_SUCCESS")]
-    BiometricUnlockSuccess {
+	BiometricUnlockSuccess {
+		#[serde(rename = "accountId")]
+		account_id: String,
+		email: String,
         encrypted_session: String,
         device_key: String,
         signature: String,
@@ -166,7 +181,9 @@ pub enum DesktopResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AccountUnlockData {
-    pub email: String,
+	#[serde(rename = "accountId")]
+	pub account_id: String,
+	pub email: String,
     pub encrypted_session: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
@@ -236,7 +253,7 @@ mod tests {
         let message = DesktopEnvelope {
             request_id: Some("req-1".to_string()),
             payload: DesktopRequest::GetDesktopItemsSnapshot {
-                emails: Some(vec!["alice@example.com".to_string()]),
+				account_ids: Some(vec!["account-1".to_string()]),
             },
         };
 

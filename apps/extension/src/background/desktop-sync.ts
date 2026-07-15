@@ -89,16 +89,13 @@ class DesktopSyncService {
 				// Restore active account if available
 				if (previousState.activeAccount) {
 					try {
-						// Check if active account is "all" or a specific email
+						// Active account is either "all" or a stable account ID.
 						if (previousState.activeAccount === "all") {
 							await storage.setActiveAccount({ type: "all" });
 						} else {
 							const accounts = await storage.getAccountsList();
 							const account = accounts.find(
-								(item) =>
-									item.accountId === previousState.activeAccount ||
-									item.email.toLowerCase() ===
-										previousState.activeAccount?.toLowerCase(),
+								(item) => item.accountId === previousState.activeAccount,
 							);
 							if (account) {
 								await storage.setActiveAccount({
@@ -161,24 +158,14 @@ class DesktopSyncService {
 
 			// Add or update accounts from desktop
 			for (const desktopAccount of accountsData.accounts) {
-				const email = desktopAccount.email.toLowerCase();
-				const desktopAccountId =
-					"accountId" in desktopAccount &&
-					typeof desktopAccount.accountId === "string"
-						? desktopAccount.accountId
-						: undefined;
+				const desktopAccountId = desktopAccount.accountId;
 				const existingAccount = currentAccounts.find(
-					(a) =>
-						a.email.toLowerCase() === email ||
-						(desktopAccountId !== undefined &&
-							a.accountId === desktopAccountId),
+					(a) => a.accountId === desktopAccountId,
 				);
 
 				if (!existingAccount) {
 					await storage.addAccount({
-						...(desktopAccountId !== undefined
-							? { accountId: desktopAccountId }
-							: {}),
+						accountId: desktopAccountId,
 						email: desktopAccount.email,
 						userId: desktopAccount.userId,
 						name: desktopAccount.name,
@@ -213,10 +200,7 @@ class DesktopSyncService {
 				} else {
 					const refreshedAccounts = await storage.getAccountsList();
 					const active = refreshedAccounts.find(
-						(item) =>
-							item.accountId === accountsData.activeAccount ||
-							item.email.toLowerCase() ===
-								accountsData.activeAccount?.toLowerCase(),
+						(item) => item.accountId === accountsData.activeAccount,
 					);
 					if (active) {
 						await storage.setActiveAccount({

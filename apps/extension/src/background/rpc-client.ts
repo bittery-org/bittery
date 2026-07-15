@@ -3,7 +3,6 @@ import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
-import { resolveEmailFromAccountId } from "./services/account-resolution";
 
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
@@ -35,16 +34,12 @@ async function getOrCreateSyncClientId(): Promise<string> {
 
 async function getAuthToken(): Promise<string | null> {
 	const activeAccount = await storage.getActiveAccount();
-	const email =
-		activeAccount?.type === "single"
-			? await resolveEmailFromAccountId(activeAccount.accountId)
-			: null;
 	const accountId =
 		activeAccount?.type === "single" ? activeAccount.accountId : undefined;
 
-	if (email && accountId && desktopSync.isDesktopAvailable()) {
+	if (accountId && desktopSync.isDesktopAvailable()) {
 		try {
-			const desktopToken = await desktopClient.getAuthToken(email);
+			const desktopToken = await desktopClient.getAuthToken(accountId);
 			if (desktopToken) {
 				await storage.storeAuthToken(desktopToken, accountId);
 				return desktopToken;
