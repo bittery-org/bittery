@@ -6,15 +6,20 @@
 
 import { m } from "@bittery/i18n/paraglide/messages";
 import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import {
+	createAccountRpcClient,
+	getDefaultServerUrl,
+} from "@bittery/shared/rpc-client-factory";
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
 import {
-	resolveAccountScopeId,
+	findAccountById,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
 import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { TravelModeRpcClient } from "./travel-mode-service";
+import { createStoredAccountRpcClient } from "./account-resolver";
+import { peekAccountSessionManager } from "./account-session-manager";
 
 export interface StoreAuthSessionOptions {
 	travelModeRpcClient?: TravelModeRpcClient;
@@ -29,16 +34,6 @@ async function resolveAccountIdForLogin(
 ): Promise<string> {
 	const accounts = (await storage.getAccountsList?.()) ?? [];
 	return resolveOrCreateAccountId(accounts, serverUrl, userId);
-}
-
-async function resolveAccountIdByEmail(
-	storage: IStorageAdapter,
-	email: string,
-): Promise<string | undefined> {
-	const accounts = (await storage.getAccountsList?.()) ?? [];
-	return accounts.find(
-		(account) => account.email.toLowerCase() === email.toLowerCase(),
-	)?.accountId;
 }
 
 async function prepareTravelModeForSession(
@@ -74,13 +69,14 @@ export interface SRPLoginInput {
 	email: string;
 	password: string;
 	secretKey: string;
+	serverUrl: string;
 }
 
 /**
  * Input for SRP unlock (password unlock with stored secret key)
  */
 export interface SRPUnlockInput {
-	email: string;
+	accountId: string;
 	password: string;
 }
 
@@ -113,6 +109,8 @@ export interface LoginResult {
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey?: Uint8Array;
 	masterUnlockKeyHandle?: number;
+	kdfParams: KdfParams;
+	serverUrl: string;
 }
 
 /**
@@ -127,6 +125,7 @@ export interface UnlockResult {
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey?: Uint8Array;
 	masterUnlockKeyHandle?: number;
+	kdfParams?: KdfParams;
 }
 
 /**
@@ -236,6 +235,7 @@ export interface SRPLoginDeps {
 	authClient?: IAuthClient;
 	rpcClient?: IAuthClient;
 	storage: IStorageAdapter;
+	createAuthenticatedClient?: (token: string, serverUrl: string) => IAuthClient;
 }
 
 /**
@@ -246,6 +246,21 @@ export interface SRPUnlockDeps {
 	authClient?: IAuthClient;
 	rpcClient?: IAuthClient;
 	storage: IStorageAdapter;
+	createAuthClientForAccount?: (accountId: string) => Promise<IAuthClient>;
+	createAuthenticatedClient?: (token: string, serverUrl: string) => IAuthClient;
+}
+
+async function resolveAccountAuthClient(
+	accountId: string,
+	deps: SRPUnlockDeps,
+): Promise<IAuthClient> {
+	if (deps.createAuthClientForAccount) {
+		return deps.createAuthClientForAccount(accountId);
+	}
+	return (
+		(await createStoredAccountRpcClient(deps.storage, accountId)) ??
+		resolveAuthClient(deps)
+	) as IAuthClient;
 }
 
 function resolveAuthClient(deps: {
@@ -359,12 +374,11 @@ async function validateDerivedUnlockKey(input: {
 	await input.crypto.decrypt(parsedEncryptedPrivateKey, validationKey);
 }
 
-async function validateAndPinServerKdfParams(
-	email: string,
+async function validateServerKdfParamsForAccount(
+	accountId: string | undefined,
 	serverParams: KdfParams,
 	deps: SRPLoginDeps | SRPUnlockDeps,
 ): Promise<void> {
-	const accountId = await resolveAccountIdByEmail(deps.storage, email);
 	const pinnedParams = accountId
 		? await deps.storage.getPinnedKdfParams(accountId)
 		: null;
@@ -402,6 +416,7 @@ export async function performSRPLogin(
 	deps: SRPLoginDeps,
 ): Promise<LoginResult> {
 	const { email, password, secretKey } = input;
+	const serverUrl = input.serverUrl.replace(/\/$/, "");
 	const { crypto } = deps;
 	const authClient = resolveAuthClient(deps);
 
@@ -445,7 +460,7 @@ export async function performSRPLogin(
 			clientPublicKey: clientEphemeral.publicKey,
 		});
 
-		await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+		await validateServerKdfParamsForAccount(undefined, startResult.kdfParams, deps);
 
 		const clientSession = await crypto.deriveClientSession(
 			clientEphemeral.secret,
@@ -463,37 +478,19 @@ export async function performSRPLogin(
 			clientProof: clientSession.proof,
 		});
 
-		// Store token before fetchVaultKeys so the auth header is available
-		const serverUrl =
-			(await deps.storage.getServerUrl()) ?? getDefaultServerUrl();
-		const accountId = await resolveAccountIdForLogin(
-			deps.storage,
-			email,
-			finishResult.user.id,
-			serverUrl,
-		);
-		await deps.storage.storeAuthToken(finishResult.token, accountId);
-		await deps.storage.storeServerUrl(serverUrl, accountId);
-
-		// On multi-account platforms (desktop), set active account before fetchVaultKeys
-		// so the session-refresh client can resolve the token
-		if (deps.storage.supportsMultiAccount) {
-			await deps.storage.setActiveAccount({ type: "single", accountId });
-		}
-
-		const vaultKeys = await fetchVaultKeys(authClient);
-
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
 			clientSession,
 			finishResult.serverProof,
 		);
 
-		await persistPinnedKdfParamsIfNeeded(
-			accountId,
-			startResult.kdfParams,
-			deps.storage,
-		);
+		const authenticatedClient = deps.createAuthenticatedClient
+			? deps.createAuthenticatedClient(finishResult.token, serverUrl)
+			: (createAccountRpcClient(
+					finishResult.token,
+					serverUrl,
+				) as unknown as IAuthClient);
+		const vaultKeys = await fetchVaultKeys(authenticatedClient);
 
 		return {
 			token: finishResult.token,
@@ -503,6 +500,8 @@ export async function performSRPLogin(
 			vaultKeys,
 			masterUnlockKey,
 			masterUnlockKeyHandle,
+			kdfParams: startResult.kdfParams,
+			serverUrl,
 		};
 	} catch (error) {
 		if (masterUnlockKeyHandle && handleCrypto?.destroyKeyHandle) {
@@ -521,12 +520,9 @@ export async function storeLoginSession(
 	storage: IStorageAdapter,
 	email?: string,
 	options?: StoreAuthSessionOptions,
-): Promise<void> {
+): Promise<string> {
 	const resolvedEmail = email ?? result.user.email;
-	const serverUrl =
-		options?.serverUrl ??
-		(await storage.getServerUrl()) ??
-		getDefaultServerUrl();
+	const serverUrl = (options?.serverUrl ?? result.serverUrl).replace(/\/$/, "");
 	const accountId = await resolveAccountIdForLogin(
 		storage,
 		resolvedEmail,
@@ -549,6 +545,7 @@ export async function storeLoginSession(
 
 	await storage.storeAuthToken(result.token, accountId);
 	await storage.storeServerUrl(serverUrl, accountId);
+	await persistPinnedKdfParamsIfNeeded(accountId, result.kdfParams, storage);
 	const vaultKeys = await travelMode.stripVaultKeysIfActive(
 		accountId,
 		result.vaultKeys,
@@ -617,18 +614,29 @@ export async function storeLoginSession(
 
 		await storage.setActiveAccount({ type: "single", accountId });
 	}
+
+	await peekAccountSessionManager()?.refresh();
+	return accountId;
 }
 
-async function deriveSrpPasswordForEmail(
+async function resolveUnlockAccount(
+	accountId: string,
+	storage: IStorageAdapter,
+): Promise<{ accountId: string; email: string }> {
+	const account = findAccountById(await storage.getAccountsList(), accountId);
+	if (!account) {
+		throw new Error(m.auth_error_no_stored_secret_key());
+	}
+	return { accountId, email: account.email };
+}
+
+async function deriveSrpPasswordForAccount(
+	accountId: string,
 	email: string,
 	password: string,
 	crypto: ICrypto,
 	storage: IStorageAdapter,
 ): Promise<string> {
-	const accountId = await resolveAccountIdByEmail(storage, email);
-	if (!accountId) {
-		throw new Error(m.auth_error_no_stored_secret_key());
-	}
 	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
 		throw new Error(m.auth_error_no_stored_secret_key());
@@ -664,10 +672,12 @@ export async function deriveSrpLoginProof(
 	input: SRPUnlockInput,
 	deps: SRPUnlockDeps,
 ): Promise<SrpLoginProof> {
-	const { email, password } = input;
+	const { accountId, password } = input;
 	const { crypto, storage } = deps;
-	const authClient = resolveAuthClient(deps);
-	const srpPassword = await deriveSrpPasswordForEmail(
+	const { email } = await resolveUnlockAccount(accountId, storage);
+	const authClient = await resolveAccountAuthClient(accountId, deps);
+	const srpPassword = await deriveSrpPasswordForAccount(
+		accountId,
 		email,
 		password,
 		crypto,
@@ -678,7 +688,7 @@ export async function deriveSrpLoginProof(
 		email,
 		clientPublicKey: clientEphemeral.publicKey,
 	});
-	await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+	await validateServerKdfParamsForAccount(accountId, startResult.kdfParams, deps);
 	const clientSession = await crypto.deriveClientSession(
 		clientEphemeral.secret,
 		{
@@ -703,14 +713,10 @@ export async function performSRPUnlock(
 	input: SRPUnlockInput,
 	deps: SRPUnlockDeps,
 ): Promise<UnlockResult> {
-	const { email, password } = input;
+	const { accountId, password } = input;
 	const { crypto, storage } = deps;
-	const authClient = resolveAuthClient(deps);
-
-	const accountId = await resolveAccountIdByEmail(storage, email);
-	if (!accountId) {
-		throw new Error(m.auth_error_no_stored_secret_key());
-	}
+	const { email } = await resolveUnlockAccount(accountId, storage);
+	const authClient = await resolveAccountAuthClient(accountId, deps);
 
 	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
@@ -795,7 +801,7 @@ export async function performSRPUnlock(
 			clientPublicKey: clientEphemeral.publicKey,
 		});
 
-		await validateAndPinServerKdfParams(email, startResult.kdfParams, deps);
+		await validateServerKdfParamsForAccount(accountId, startResult.kdfParams, deps);
 
 		const clientSession = await crypto.deriveClientSession(
 			clientEphemeral.secret,
@@ -813,39 +819,21 @@ export async function performSRPUnlock(
 			clientProof: clientSession.proof,
 		});
 
-		// Store token before fetchVaultKeys so the auth header is available
 		const serverUrl =
 			(await deps.storage.getServerUrl(accountId)) ?? getDefaultServerUrl();
-		const resolvedAccountId = await resolveAccountIdForLogin(
-			deps.storage,
-			email,
-			finishResult.user.id,
-			serverUrl,
-		);
-		await deps.storage.storeAuthToken(finishResult.token, resolvedAccountId);
-
-		// On multi-account platforms (desktop), set active account before fetchVaultKeys
-		// so the session-refresh client can resolve the token
-		if (deps.storage.supportsMultiAccount) {
-			await deps.storage.setActiveAccount({
-				type: "single",
-				accountId: resolvedAccountId,
-			});
-		}
-
-		const vaultKeys = await fetchVaultKeys(authClient);
-
 		await crypto.verifyServerSession(
 			clientEphemeral.publicKey,
 			clientSession,
 			finishResult.serverProof,
 		);
 
-		await persistPinnedKdfParamsIfNeeded(
-			resolvedAccountId,
-			startResult.kdfParams,
-			deps.storage,
-		);
+		const authenticatedClient = deps.createAuthenticatedClient
+			? deps.createAuthenticatedClient(finishResult.token, serverUrl)
+			: (createAccountRpcClient(
+					finishResult.token,
+					serverUrl,
+				) as unknown as IAuthClient);
+		const vaultKeys = await fetchVaultKeys(authenticatedClient);
 
 		return {
 			mode: "reauth",
@@ -856,6 +844,7 @@ export async function performSRPUnlock(
 			vaultKeys,
 			masterUnlockKey,
 			masterUnlockKeyHandle,
+			kdfParams: startResult.kdfParams,
 		};
 	} catch (error) {
 		if (masterUnlockKeyHandle && handleCrypto?.destroyKeyHandle) {
@@ -871,20 +860,14 @@ export async function performSRPUnlock(
 export async function storeUnlockSession(
 	result: UnlockResult,
 	storage: IStorageAdapter,
-	email?: string,
+	accountId: string,
 	options?: StoreAuthSessionOptions,
 ): Promise<void> {
-	const resolvedEmail = email ?? result.user.email;
+	const resolvedEmail = result.user.email;
 	const serverUrl =
 		options?.serverUrl ??
-		(await storage.getServerUrl()) ??
+		(await storage.getServerUrl(accountId)) ??
 		getDefaultServerUrl();
-	const accountId = await resolveAccountIdForLogin(
-		storage,
-		resolvedEmail,
-		result.user.id,
-		serverUrl,
-	);
 
 	await prepareTravelModeForSession(
 		accountId,
@@ -897,6 +880,9 @@ export async function storeUnlockSession(
 	if (result.mode === "reauth") {
 		await storage.storeAuthToken(result.token, accountId);
 		await storage.storeServerUrl(serverUrl, accountId);
+		if (result.kdfParams) {
+			await persistPinnedKdfParamsIfNeeded(accountId, result.kdfParams, storage);
+		}
 		const vaultKeys = await travelMode.stripVaultKeysIfActive(
 			accountId,
 			result.vaultKeys,
@@ -977,15 +963,9 @@ export async function storeUnlockSession(
  */
 export async function getSessionState(
 	storage: IStorageAdapter,
-	accountIdOrEmail?: string,
+	accountId?: string,
 ): Promise<SessionState> {
-	// Callers may pass either an accountId or a legacy email (the unlock screen
-	// still resolves accounts by email). Normalize to an accountId so the
-	// session/biometric lookups below hit the correct account-scoped keys.
-	let resolvedAccountId = await resolveAccountScopeId(
-		storage,
-		accountIdOrEmail,
-	);
+	let resolvedAccountId = accountId;
 	if (!resolvedAccountId) {
 		const activeAccount = await storage.getActiveAccount();
 		resolvedAccountId =
@@ -1051,11 +1031,10 @@ export async function clearSession(
 	accountId?: string,
 	clearSecretKey = false,
 ): Promise<void> {
-	const resolvedAccountId = await resolveAccountScopeId(storage, accountId);
 	if (clearSecretKey) {
-		await storage.clearAllStoredData(resolvedAccountId);
+		await storage.clearAllStoredData(accountId);
 	} else {
-		await storage.clearSession(resolvedAccountId);
+		await storage.clearSession(accountId);
 	}
 }
 

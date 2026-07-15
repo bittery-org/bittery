@@ -87,18 +87,6 @@ function AddAccountDialogForm({
 	const loginMutation = useLogin({
 		enableBiometric: enableBiometric && !!biometricAvailable,
 		onSuccess: async (_result) => {
-			const normalizedServerUrl = normalizeServerUrl(serverUrl);
-
-			if (normalizedServerUrl) {
-				const activeAccount = await storage.getActiveAccount();
-				if (activeAccount?.type === "single") {
-					await storage.storeServerUrl(
-						normalizedServerUrl,
-						activeAccount.accountId,
-					);
-				}
-			}
-
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 				queryClient.invalidateQueries({ queryKey: ["items"] }),
@@ -132,6 +120,7 @@ function AddAccountDialogForm({
 			email,
 			password,
 			secretKey,
+			serverUrl: normalizedServerUrl,
 			enableBiometric: enableBiometric && !!biometricAvailable,
 		});
 	};

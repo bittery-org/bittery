@@ -161,14 +161,14 @@ export function useQuickUnlockAll(
 					// Perform SRP unlock for this account
 					const result = await performSRPUnlock(
 						{
-							email: account.email,
+							accountId: account.accountId,
 							password,
 						},
 						{ crypto, rpcClient: accountRpcClient, storage },
 					);
 
 					// Store unlock session data
-					await storeUnlockSession(result, storage, account.email, {
+					await storeUnlockSession(result, storage, account.accountId, {
 						travelModeRpcClient: accountRpcClient,
 						serverUrl,
 					});

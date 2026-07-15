@@ -220,6 +220,7 @@ export interface ValidationResult {
 export interface CachedEncryptedItem {
 	id: string;
 	vaultId: string;
+	accountId?: string;
 	accountEmail?: string;
 	serverUrl?: string;
 	category: string;
@@ -241,6 +242,7 @@ export interface CachedEncryptedItem {
  */
 export interface CachedVaultMetadata {
 	id: string;
+	accountId?: string;
 	accountEmail?: string;
 	serverUrl?: string;
 	name: string;

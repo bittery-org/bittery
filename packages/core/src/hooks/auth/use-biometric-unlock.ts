@@ -6,7 +6,6 @@
  */
 
 import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
-import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 
@@ -39,7 +38,7 @@ export interface BiometricUnlockInput {
 	 * Account ID or email for multi-account platforms.
 	 * Optional - uses active account if not provided.
 	 */
-	accountIdOrEmail?: string;
+	accountId?: string;
 }
 
 /**
@@ -91,10 +90,7 @@ export function useBiometricUnlock(
 
 	return useMutation({
 		mutationFn: async (input: BiometricUnlockInput) => {
-			const accountId = await resolveAccountScopeId(
-				storage,
-				input.accountIdOrEmail,
-			);
+			const accountId = input.accountId;
 			if (!accountId) {
 				throw {
 					type: "account_not_found",

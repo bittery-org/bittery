@@ -47,11 +47,11 @@ export function findAccountEmailForItem(
 export async function getTRPCClientForAccount(
 	storage: IStorageAdapter,
 	defaultClient: ReturnType<typeof useRPCClient>,
-	accountEmail?: string,
+	accountId: string,
 ) {
 	return getClientForAccountCore(
 		storage,
 		defaultClient as Parameters<typeof getClientForAccountCore>[1],
-		accountEmail,
+		accountId,
 	);
 }

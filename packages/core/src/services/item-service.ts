@@ -724,9 +724,10 @@ export class ItemService {
 		}
 
 		if (!rawItem) {
+			if (!accountId) throw new Error("Account identity is required");
 			const client = await this.accounts.getClientForAccount(
 				defaultClient,
-				accountEmail,
+				accountId,
 			);
 			const fetched = await client.vault.getItem.query({ itemId });
 			rawItem = {
@@ -918,9 +919,14 @@ export class ItemService {
 			context,
 		);
 
+		const accountId = await resolveAccountScopeId(
+			this.storage,
+			input.accountEmail,
+		);
+		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		const result = (await client.vault.createItem.mutate({
@@ -996,9 +1002,14 @@ export class ItemService {
 			context,
 		);
 
+		const accountId = await resolveAccountScopeId(
+			this.storage,
+			input.accountEmail,
+		);
+		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		await client.vault.updateItem.mutate({
@@ -1019,12 +1030,13 @@ export class ItemService {
 	): Promise<MoveItemResult> {
 		const sourceAccountEmail = input.sourceAccountEmail;
 		let targetAccountEmail = input.targetAccountEmail ?? sourceAccountEmail;
+		const sourceAccountId = await resolveAccountScopeId(
+			this.storage,
+			sourceAccountEmail,
+		);
+		if (!sourceAccountId) throw new Error("Source account identity is required");
 
 		if (!input.targetAccountEmail) {
-			const sourceAccountId = await resolveAccountScopeId(
-				this.storage,
-				sourceAccountEmail,
-			);
 			const sourceVaultKeys = await this.storage.getVaultKeys(sourceAccountId);
 			const targetInSource = sourceVaultKeys?.some(
 				(vaultKey) => vaultKey.vaultId === input.targetVaultId,
@@ -1052,6 +1064,11 @@ export class ItemService {
 		}
 
 		const isCrossAccount = sourceAccountEmail !== targetAccountEmail;
+		const targetAccountId = await resolveAccountScopeId(
+			this.storage,
+			targetAccountEmail,
+		);
+		if (!targetAccountId) throw new Error("Target account identity is required");
 		const targetVaultKey = await this.getVaultKey(
 			input.targetVaultId,
 			targetAccountEmail,
@@ -1092,7 +1109,7 @@ export class ItemService {
 		if (isCrossAccount) {
 			const targetClient = await this.accounts.getClientForAccount(
 				defaultClient,
-				targetAccountEmail,
+				targetAccountId,
 			);
 			const createResult = (await targetClient.vault.createItem.mutate({
 				itemId: targetItemId,
@@ -1122,7 +1139,7 @@ export class ItemService {
 			try {
 				const sourceClient = await this.accounts.getClientForAccount(
 					defaultClient,
-					sourceAccountEmail,
+					sourceAccountId,
 				);
 				await sourceClient.vault.deleteItem.mutate({
 					itemId: input.itemId,
@@ -1153,7 +1170,7 @@ export class ItemService {
 
 		const sourceClient = await this.accounts.getClientForAccount(
 			defaultClient,
-			sourceAccountEmail,
+			sourceAccountId,
 		);
 		await sourceClient.vault.moveItem.mutate({
 			itemId: input.itemId,

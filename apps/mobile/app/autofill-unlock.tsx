@@ -443,7 +443,7 @@ export default function AutofillUnlockScreen() {
 		}
 
 		setBiometricError(null);
-		biometricUnlock.mutate({ accountIdOrEmail: activeAccount.accountId });
+		biometricUnlock.mutate({ accountId: activeAccount.accountId });
 	};
 
 	const handlePasswordUnlock = async () => {
@@ -478,7 +478,7 @@ export default function AutofillUnlockScreen() {
 		}
 
 		quickUnlock.mutate({
-			email: activeAccount.email,
+			accountId: activeAccount.accountId,
 			password,
 		});
 	};

@@ -24,6 +24,7 @@ export interface MoveItemInput {
 	targetVaultId: string;
 	category: ItemCategory;
 	decryptedData: DecryptedItemData;
+	targetAccountId?: string;
 	targetAccountEmail?: string;
 }
 
@@ -41,13 +42,14 @@ export function useMoveItem() {
 			);
 			const targetAccountHint =
 				input.targetAccountEmail ?? sourceRepoTargetVault?.accountEmail;
-			const { accountEmail: targetAccountEmail } = requireRepositoryForVault(
+			const { accountId: targetAccountId, accountEmail: targetAccountEmail } = requireRepositoryForVault(
 				core,
 				input.targetVaultId,
+				input.targetAccountId ?? sourceRepoTargetVault?.accountId,
 				targetAccountHint,
 			);
 
-			if (sourceContext.accountEmail !== targetAccountEmail) {
+			if (sourceContext.accountId !== targetAccountId) {
 				return core.items.moveItem(
 					{
 						...input,

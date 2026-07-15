@@ -3,7 +3,6 @@ import {
 	getDefaultServerUrl,
 } from "@bittery/shared/rpc-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
-import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ActiveAccount } from "@bittery/storage/types";
 
@@ -60,24 +59,12 @@ export function findAccountForItem(
  */
 export async function getClientForAccount(
 	storage: IStorageAdapter,
-	defaultClient: DefaultRpcClient,
-	accountIdOrEmail?: string,
+	_defaultClient: DefaultRpcClient,
+	accountId: string,
 ): Promise<DefaultRpcClient> {
-	if (!accountIdOrEmail) {
-		return defaultClient;
-	}
-
-	// Callers may pass an email (legacy account identifier) or an accountId.
-	// Resolve to the stable accountId so the account-scoped auth token/server URL
-	// lookups hit the correct storage keys.
-	const accountId = await resolveAccountScopeId(storage, accountIdOrEmail);
-	if (!accountId) {
-		return defaultClient;
-	}
-
 	const client = await createStoredAccountRpcClient(storage, accountId);
 	if (!client) {
-		return defaultClient;
+		throw new Error(`No authenticated RPC client for account ${accountId}`);
 	}
 
 	return client;
@@ -203,6 +190,7 @@ export class AccountResolver {
 		defaultClient: DefaultRpcClient,
 		accountId?: string,
 	): Promise<DefaultRpcClient> {
+		if (!accountId) return defaultClient;
 		return getClientForAccount(this.storage, defaultClient, accountId);
 	}
 

@@ -5,7 +5,6 @@
  * Wraps the core performSRPUnlock utility with React Query mutation.
  */
 
-import { useRPCClient } from "@bittery/shared/rpc";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	performSRPUnlock,
@@ -63,7 +62,6 @@ export interface QuickUnlockInput extends SRPUnlockInput {
 export function useQuickUnlock(
 	options: UseQuickUnlockOptions = {},
 ): UseMutationResult<UnlockResult, Error, QuickUnlockInput> {
-	const rpcClient = useRPCClient();
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
 
@@ -72,16 +70,14 @@ export function useQuickUnlock(
 			// Perform SRP unlock
 			const result = await performSRPUnlock(
 				{
-					email: input.email,
+					accountId: input.accountId,
 					password: input.password,
 				},
-				{ crypto, rpcClient, storage },
+				{ crypto, storage },
 			);
 
 			// Store unlock session data
-			await storeUnlockSession(result, storage, input.email, {
-				travelModeRpcClient: rpcClient,
-			});
+			await storeUnlockSession(result, storage, input.accountId);
 
 			return result;
 		},

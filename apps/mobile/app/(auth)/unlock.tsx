@@ -439,7 +439,7 @@ export default function UnlockScreen() {
 		}
 
 		setBiometricError(null);
-		biometricUnlock.mutate({ accountIdOrEmail: targetAccount.accountId });
+		biometricUnlock.mutate({ accountId: targetAccount.accountId });
 	};
 
 	const handlePasswordUnlock = async () => {
@@ -474,7 +474,7 @@ export default function UnlockScreen() {
 		}
 
 		quickUnlock.mutate({
-			email: targetAccount.email,
+			accountId: targetAccount.accountId,
 			password,
 		});
 	};

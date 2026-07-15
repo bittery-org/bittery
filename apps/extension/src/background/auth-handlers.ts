@@ -66,13 +66,14 @@ export async function handleLogin(payload: {
 
 	// Perform SRP login using shared utility
 	const result = await performSRPLogin(
-		{ email, password, secretKey },
+		{ email, password, secretKey, serverUrl: DEFAULT_SERVER_URL },
 		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
 	await storeLoginSession(result, secretKey, storage, email, {
 		travelModeRpcClient: rpcClient,
+		serverUrl: DEFAULT_SERVER_URL,
 	});
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
@@ -101,19 +102,14 @@ export async function handleQuickUnlock(payload: {
 		throw new Error("Quick unlock not available - no active account");
 	}
 
-	const email = await resolveEmailFromAccountId(activeAccount.accountId);
-	if (!email) {
-		throw new Error("Quick unlock not available - account not found");
-	}
-
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
-		{ email, password },
+		{ accountId: activeAccount.accountId, password },
 		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(result, storage, email, {
+	await storeUnlockSession(result, storage, activeAccount.accountId, {
 		travelModeRpcClient: rpcClient,
 	});
 
@@ -354,29 +350,29 @@ export async function handleQuickUnlockAll(payload: {
 				account.accountId,
 			);
 			if (!hasSecretKey) {
-				failed.push(account.email);
+				failed.push(account.accountId);
 				continue;
 			}
 
 			// Perform SRP unlock for this account
 			const result = await performSRPUnlock(
-				{ email: account.email, password },
+				{ accountId: account.accountId, password },
 				{ crypto: cryptoAdapter, rpcClient, storage },
 			);
 
 			// Store unlock session data
 			const accountRpcClient = await getAccountRpcClient(account.accountId);
-			await storeUnlockSession(result, storage, account.email, {
+			await storeUnlockSession(result, storage, account.accountId, {
 				travelModeRpcClient: accountRpcClient,
 			});
 
-			unlocked.push(account.email);
+			unlocked.push(account.accountId);
 		} catch (error) {
 			console.error(
 				`[QUICK_UNLOCK_ALL] Failed to unlock ${account.email}:`,
 				error,
 			);
-			failed.push(account.email);
+			failed.push(account.accountId);
 		}
 	}
 

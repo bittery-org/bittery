@@ -1,6 +1,7 @@
 import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
 import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Input, Label, toast } from "@bittery/ui";
 import {
@@ -141,13 +142,15 @@ function SignInFormContent({
 			password: string;
 			secretKey: string;
 		}) => {
-			const result = await performSRPLogin(input, {
+			const serverUrl = getDefaultServerUrl();
+			const result = await performSRPLogin({ ...input, serverUrl }, {
 				crypto: wasmCrypto,
 				rpcClient,
 				storage,
 			});
 			await storeLoginSession(result, input.secretKey, storage, input.email, {
 				travelModeRpcClient: rpcClient,
+				serverUrl,
 			});
 			return result;
 		},

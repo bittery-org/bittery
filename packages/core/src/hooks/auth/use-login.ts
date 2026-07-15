@@ -6,7 +6,10 @@
  */
 
 import { useRPCClient } from "@bittery/shared/rpc";
-import { createRpcClientForServer } from "@bittery/shared/rpc-client-factory";
+import {
+	createRpcClientForServer,
+	getDefaultServerUrl,
+} from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	type LoginResult,
@@ -18,7 +21,6 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../../context/platform-context";
-import { peekAccountSessionManager } from "../../services/account-session-manager";
 
 /**
  * Options for useLogin hook
@@ -61,7 +63,7 @@ export interface LoginInput extends SRPLoginInput {
 	 * instead of using the default client. Use this when the user can configure
 	 * a custom server URL (e.g. self-hosted instances).
 	 */
-	serverUrl?: string;
+	serverUrl: string;
 }
 
 /**
@@ -88,8 +90,12 @@ export function useLogin(
 
 	return useMutation({
 		mutationFn: async (input: LoginInput) => {
+			const serverUrl = (input.serverUrl || getDefaultServerUrl()).replace(
+				/\/$/,
+				"",
+			);
 			const rpcClientForRequest = input.serverUrl
-				? createRpcClientForServer(input.serverUrl)
+				? createRpcClientForServer(serverUrl)
 				: rpcClient;
 
 			// Perform SRP login
@@ -98,6 +104,7 @@ export function useLogin(
 					email: input.email,
 					password: input.password,
 					secretKey: input.secretKey,
+					serverUrl,
 				},
 				{ crypto, rpcClient: rpcClientForRequest, storage },
 			);
@@ -106,9 +113,9 @@ export function useLogin(
 				input.enableBiometric ?? options.enableBiometric;
 
 			// Store session data
-			await storeLoginSession(result, input.secretKey, storage, input.email, {
+			const accountId = await storeLoginSession(result, input.secretKey, storage, input.email, {
 				travelModeRpcClient: rpcClientForRequest,
-				serverUrl: input.serverUrl,
+				serverUrl,
 			});
 
 			if (
@@ -116,21 +123,13 @@ export function useLogin(
 				storage.supportsBiometric &&
 				storage.enableBiometric
 			) {
-				const accounts = await storage.getAccountsList();
-				const account = accounts.find(
-					(a) => a.email.toLowerCase() === input.email.toLowerCase(),
-				);
-				if (account) {
-					await storage.enableBiometric(account.accountId);
-				}
+				await storage.enableBiometric(accountId);
 			}
 
 			// storeLoginSession writes the new account + active selection directly
 			// to storage, bypassing the in-memory AccountSessionManager. Refresh it
 			// so the account switcher reflects the new account without requiring a
 			// lock/unlock cycle.
-			await peekAccountSessionManager()?.refresh();
-
 			return result;
 		},
 		onSuccess: (result, input) => {

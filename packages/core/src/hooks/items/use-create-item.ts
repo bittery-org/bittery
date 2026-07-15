@@ -20,6 +20,7 @@ export interface CreateItemInput {
 	vaultId: string;
 	category: ItemCategory;
 	data: DecryptedItemData;
+	accountId?: string;
 	accountEmail?: string;
 }
 
@@ -44,9 +45,10 @@ export function useCreateItem() {
 
 	return useMutation({
 		mutationFn: async (input: CreateItemInput): Promise<CreateItemResult> => {
-			const { accountEmail, repo } = requireRepositoryForVault(
+			const { accountId, accountEmail, repo } = requireRepositoryForVault(
 				core,
 				input.vaultId,
+				input.accountId,
 				input.accountEmail,
 			);
 			const localItemId = await core.items.generateItemId();
@@ -73,6 +75,7 @@ export function useCreateItem() {
 			enqueueItemMutation(
 				queue,
 				{
+					accountId,
 					accountEmail,
 					baseVersion: 0,
 				},

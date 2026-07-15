@@ -91,7 +91,7 @@ export class ShareService {
 
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			accountEmail,
+			accountId,
 		);
 
 		const shareKey = await this.crypto.generateEncryptionKey();

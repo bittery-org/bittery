@@ -1,4 +1,5 @@
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
@@ -88,7 +89,7 @@ function normalizeVaultRole(
 export async function refreshVaultKeys(
 	rpcClient: RpcVaultClient,
 	storage: IStorageAdapter,
-	accountEmail?: string,
+	accountId?: string,
 ): Promise<void> {
 	const vaultList = await rpcClient.vault.list.query();
 	await storage.storeVaultKeys(
@@ -101,7 +102,7 @@ export async function refreshVaultKeys(
 			encryptedVaultKey: vault.encryptedVaultKey,
 			role: normalizeVaultRole(vault.role),
 		})),
-		accountEmail,
+		accountId,
 	);
 }
 
@@ -122,6 +123,15 @@ export class VaultService {
 		this.accounts = deps.accounts;
 	}
 
+	private async requireAccountId(accountIdOrLegacyEmail?: string): Promise<string> {
+		const accountId = await resolveAccountScopeId(
+			this.storage,
+			accountIdOrLegacyEmail,
+		);
+		if (!accountId) throw new Error("Account identity is required");
+		return accountId;
+	}
+
 	async createVault(
 		input: CreateVaultInput,
 		defaultClient: DefaultRpcClient,
@@ -134,9 +144,10 @@ export class VaultService {
 			throw new Error("Vault name must be at least 2 characters");
 		}
 
+		const accountId = await this.requireAccountId(input.accountEmail);
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		let imageKey = input.imageKey;
@@ -172,14 +183,14 @@ export class VaultService {
 
 		const vaultKey = await this.crypto.generateEncryptionKey();
 		const masterUnlockKey = await this.storage.getMasterUnlockKey(
-			input.accountEmail,
+			accountId,
 		);
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}
 		const currentUserId =
 			(input.accountEmail
-				? (await this.storage.getAccountMetadata?.(input.accountEmail))?.userId
+				? (await this.storage.getAccountMetadata?.(accountId))?.userId
 				: null) ?? (await this.storage.getActiveAccountUserId());
 		if (!currentUserId) {
 			throw new Error("Session data missing. Please sign in again.");
@@ -216,9 +227,10 @@ export class VaultService {
 		input: UpdateVaultInput,
 		defaultClient: DefaultRpcClient,
 	): Promise<void> {
+		const accountId = await this.requireAccountId(input.accountEmail);
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		if (input.name !== undefined) {
@@ -269,9 +281,10 @@ export class VaultService {
 		input: ConvertVaultTypeInput,
 		defaultClient: DefaultRpcClient,
 	): Promise<ConvertVaultTypeResult> {
+		const accountId = await this.requireAccountId(input.accountEmail);
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 		const result = await client.vault.convertType.mutate({
 			vaultId: input.vaultId,
@@ -297,9 +310,10 @@ export class VaultService {
 		defaultClient: DefaultRpcClient,
 		accountEmail?: string,
 	): Promise<void> {
+		const accountId = await this.requireAccountId(accountEmail);
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			accountEmail,
+			accountId,
 		);
 		await client.vault.delete.mutate({ vaultId });
 	}
@@ -308,10 +322,11 @@ export class VaultService {
 		defaultClient: DefaultRpcClient,
 		accountEmail?: string,
 	): Promise<void> {
+		const accountId = await this.requireAccountId(accountEmail);
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			accountEmail,
+			accountId,
 		);
-		await refreshVaultKeys(client, this.storage, accountEmail);
+		await refreshVaultKeys(client, this.storage, accountId);
 	}
 }

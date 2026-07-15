@@ -26,6 +26,7 @@ export interface VaultView {
 }
 
 export interface VaultRepositoryItem extends DecryptedItem {
+	accountId?: string;
 	accountEmail?: string;
 	serverUrl?: string;
 	deletedAt: string | null;
@@ -384,6 +385,7 @@ export class VaultRepository {
 		return {
 			id: item.id,
 			vaultId: item.vaultId,
+			accountId: item.accountId ?? this.accountId,
 			accountEmail: item.accountEmail ?? this.accountEmail,
 			serverUrl: item.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			category: item.category,
@@ -417,6 +419,7 @@ export class VaultRepository {
 
 			this.vaults.set(vaultKey.vaultId, {
 				id: vaultKey.vaultId,
+				accountId: this.accountId,
 				accountEmail: this.accountEmail,
 				serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 				name: vaultKey.vaultName,
@@ -477,6 +480,7 @@ export class VaultRepository {
 		return {
 			id: cached.id,
 			vaultId: cached.vaultId,
+			accountId: cached.accountId ?? this.accountId,
 			accountEmail: cached.accountEmail ?? this.accountEmail,
 			serverUrl: cached.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 			category: cached.category as DecryptedItem["category"],
@@ -586,6 +590,7 @@ export class VaultRepository {
 		const next: VaultRepositoryItem = {
 			...existing,
 			...item,
+			accountId: existing?.accountId ?? this.accountId,
 			accountEmail: existing?.accountEmail ?? this.accountEmail,
 			serverUrl:
 				existing?.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
@@ -803,6 +808,7 @@ export class VaultRepository {
 				const cachedItem: CachedEncryptedItem = {
 					id: rawItem.id,
 					vaultId: rawItem.vaultId,
+					accountId: this.accountId,
 					accountEmail: this.accountEmail,
 					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 					category: rawItem.category,
@@ -821,6 +827,7 @@ export class VaultRepository {
 
 				vaults.set(rawItem.vault.id, {
 					id: rawItem.vault.id,
+					accountId: this.accountId,
 					accountEmail: this.accountEmail,
 					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 					name: rawItem.vault.name,
@@ -919,6 +926,7 @@ export class VaultRepository {
 		}
 		this.vaults.set(vault.id, {
 			...vault,
+			accountId: vault.accountId ?? this.accountId,
 			accountEmail: vault.accountEmail ?? this.accountEmail,
 			serverUrl: vault.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
 		});

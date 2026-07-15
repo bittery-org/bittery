@@ -2,6 +2,7 @@ import type { CoreContext } from "../core-context";
 import type { VaultRepository } from "./vault-repository";
 
 export interface ResolvedAccountRepository {
+	accountId: string;
 	accountEmail: string;
 	repo: VaultRepository;
 }
@@ -9,8 +10,17 @@ export interface ResolvedAccountRepository {
 export function resolveRepositoryForVault(
 	core: CoreContext,
 	vaultId: string,
+	accountIdHint?: string,
 	accountEmailHint?: string,
 ): ResolvedAccountRepository | undefined {
+	if (accountIdHint) {
+		const repo = core.vaultCoordinator.getRepositoryForAccount(accountIdHint);
+		return {
+			accountId: accountIdHint,
+			accountEmail: repo.getAccountEmail() ?? accountEmailHint ?? "",
+			repo,
+		};
+	}
 	if (accountEmailHint) {
 		const accountId =
 			core.vaultCoordinator.resolveAccountIdByEmail(accountEmailHint);
@@ -18,6 +28,7 @@ export function resolveRepositoryForVault(
 			return undefined;
 		}
 		return {
+			accountId,
 			accountEmail: accountEmailHint,
 			repo: core.vaultCoordinator.getRepositoryForAccount(accountId),
 		};
@@ -29,6 +40,7 @@ export function resolveRepositoryForVault(
 	}
 
 	return {
+		accountId: located.accountId,
 		accountEmail: located.repo.getAccountEmail() ?? "",
 		repo: located.repo,
 	};
@@ -50,6 +62,7 @@ export function resolveRepositoryForItem(
 			return undefined;
 		}
 		return {
+			accountId,
 			accountEmail: contextualAccountEmail,
 			repo: core.vaultCoordinator.getRepositoryForAccount(accountId),
 		};
@@ -61,6 +74,7 @@ export function resolveRepositoryForItem(
 	}
 
 	return {
+		accountId: located.accountId,
 		accountEmail: located.repo.getAccountEmail() ?? "",
 		repo: located.repo,
 	};
