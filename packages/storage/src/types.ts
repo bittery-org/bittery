@@ -109,6 +109,7 @@ export type BiometricErrorType =
 	| "lockout" // Too many failed attempts
 	| "master_password_required" // Periodic re-entry required
 	| "session_expired" // Session has expired
+	| "account_not_found" // Requested account does not exist
 	| "unknown"; // Unknown error
 
 /**

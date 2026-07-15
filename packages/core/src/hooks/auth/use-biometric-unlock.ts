@@ -5,7 +5,7 @@
  * Desktop and mobile only - web/extension don't support biometric.
  */
 
-import type { BiometricAuthResult } from "@bittery/storage";
+import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
@@ -46,17 +46,7 @@ export interface BiometricUnlockInput {
  * Biometric unlock error with structured error type
  */
 export interface BiometricUnlockError {
-	type:
-		| "not_available"
-		| "not_enrolled"
-		| "not_enabled"
-		| "master_password_required"
-		| "session_expired"
-		| "user_cancelled"
-		| "lockout"
-		| "authentication_failed"
-		| "account_not_found"
-		| "unknown";
+	type: BiometricErrorType;
 	message: string;
 }
 

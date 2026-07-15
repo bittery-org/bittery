@@ -105,17 +105,6 @@ export class AccountSessionManager {
 	}
 
 	async switchAccount(account: ActiveAccount): Promise<void> {
-		const previousActive =
-			this.active?.type === "single" ? this.active.accountId : null;
-
-		if (
-			previousActive &&
-			account?.type === "single" &&
-			previousActive !== account.accountId
-		) {
-			await this.storage.clearSession(previousActive);
-		}
-
 		await this.storage.setActiveAccount(account);
 		this.active = account;
 
@@ -124,11 +113,16 @@ export class AccountSessionManager {
 			if (meta) {
 				meta.lastActiveAt = Date.now();
 			}
-			const restored = await this.storage.tryRestoreSession(
-				true,
-				account.accountId,
-			);
-			this.lockState.set(account.accountId, restored ? "unlocked" : "locked");
+			if (!this.isUnlocked(account.accountId)) {
+				const restored = await this.storage.tryRestoreSession(
+					true,
+					account.accountId,
+				);
+				this.lockState.set(
+					account.accountId,
+					restored ? "unlocked" : "locked",
+				);
+			}
 		}
 
 		await this.options.onActiveChanged?.(account);
@@ -207,21 +201,32 @@ export class AccountSessionManager {
 	async removeAccount(accountId: string): Promise<void> {
 		const wasActive =
 			this.active?.type === "single" && this.active.accountId === accountId;
-
-		await this.storage.removeAccount(accountId);
-		await this.refresh();
+		const nextAccount = wasActive
+			? this.accounts.find((account) => account.accountId !== accountId)
+			: undefined;
 
 		if (wasActive) {
-			const nextAccount = this.accounts[0];
+			await this.storage.setActiveAccount(null);
+			this.active = null;
+		}
+
+		await this.storage.removeAccount(accountId);
+
+		if (wasActive) {
 			if (nextAccount) {
+				this.accounts = this.accounts.filter(
+					(account) => account.accountId !== accountId,
+				);
+				this.lockState.delete(accountId);
 				await this.switchAccount({
 					type: "single",
 					accountId: nextAccount.accountId,
 				});
 			} else {
-				this.active = null;
-				this.emit();
+				await this.refresh();
 			}
+		} else {
+			await this.refresh();
 		}
 	}
 

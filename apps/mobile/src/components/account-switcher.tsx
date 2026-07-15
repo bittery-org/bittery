@@ -48,7 +48,7 @@ export function AccountSwitcher() {
 	const handleAccountSwitch = async (account: AccountMetadata) => {
 		if (
 			activeAccountConfig?.type === "single" &&
-			account.email === activeAccount?.email
+			account.accountId === activeAccountConfig.accountId
 		) {
 			setIsOpen(false);
 			return;
@@ -60,7 +60,7 @@ export function AccountSwitcher() {
 			queryClient.clear();
 
 			// Switch account
-			await switchAccount(account.email);
+			await switchAccount(account.accountId);
 
 			// Check if the new account has a valid session
 			const isValid = await storage.isSessionValid(account.accountId);
@@ -250,11 +250,10 @@ export function AccountSwitcher() {
 						{allAccounts.map((account) => {
 							const isActive =
 								activeAccountConfig?.type === "single" &&
-								account.email.toLowerCase() ===
-									activeAccount?.email.toLowerCase();
+								account.accountId === activeAccountConfig.accountId;
 							return (
 								<PressableFeedback
-									key={account.email}
+									key={account.accountId}
 									onPress={() => handleAccountSwitch(account)}
 									isDisabled={switching}
 									className={cn(

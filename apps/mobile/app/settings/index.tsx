@@ -257,7 +257,7 @@ export default function SettingsScreen() {
 		: serverUrl || m.mob_settings_server_not_set();
 	const accountsForList = isAllAccountsMode
 		? allAccounts
-		: allAccounts.filter((a) => a.email !== activeAccount?.email);
+		: allAccounts.filter((a) => a.accountId !== activeAccount?.accountId);
 
 	const handleLock = async () => {
 		// Clear React Native session (in-memory cache)
@@ -304,7 +304,7 @@ export default function SettingsScreen() {
 		]);
 	};
 
-	const handleRemoveAccount = (email: string) => {
+	const handleRemoveAccount = (accountId: string, email: string) => {
 		Alert.alert(
 			m.mob_settings_remove_account_title(),
 			m.mob_settings_remove_account_message({ email }),
@@ -314,10 +314,7 @@ export default function SettingsScreen() {
 					text: m.mob_settings_remove_account_confirm(),
 					style: "destructive",
 					onPress: async () => {
-						const account = allAccounts.find((a) => a.email === email);
-						if (account) {
-							await removeAccount(account.accountId);
-						}
+						await removeAccount(accountId);
 						if (allAccounts.length <= 1) {
 							router.replace("/(auth)/login");
 						}
@@ -615,13 +612,17 @@ export default function SettingsScreen() {
 									icon={StyledUser}
 									label={account.name || account.email.split("@")[0]}
 									value={account.email}
-									onPress={() => handleRemoveAccount(account.email)}
+									onPress={() =>
+										handleRemoveAccount(account.accountId, account.email)
+									}
 									rightElement={
 										<Button
 											isIconOnly
 											variant="ghost"
 											size="sm"
-											onPress={() => handleRemoveAccount(account.email)}
+											onPress={() =>
+												handleRemoveAccount(account.accountId, account.email)
+											}
 										>
 											<StyledTrash2 size={18} className="text-danger" />
 										</Button>

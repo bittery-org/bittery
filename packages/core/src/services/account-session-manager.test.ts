@@ -94,7 +94,7 @@ describe("AccountSessionManager", () => {
 		resetAccountSessionManagerForTests();
 	});
 
-	it("switchAccount clears previous session and sets active accountId", async () => {
+	it("switching A to B leaves A unlocked", async () => {
 		const storage = createMockStorage();
 		const onActiveChanged = mock(async () => {});
 		const manager = new AccountSessionManager({ storage, onActiveChanged });
@@ -102,7 +102,7 @@ describe("AccountSessionManager", () => {
 		await manager.initialize();
 		await manager.switchAccount({ type: "single", accountId: "acc-2" });
 
-		expect(storage.clearSession).toHaveBeenCalledWith("acc-1");
+		expect(storage.clearSession).not.toHaveBeenCalled();
 		expect(storage.setActiveAccount).toHaveBeenCalledWith({
 			type: "single",
 			accountId: "acc-2",
@@ -115,6 +115,36 @@ describe("AccountSessionManager", () => {
 			type: "single",
 			accountId: "acc-2",
 		});
+		expect(manager.isUnlocked("acc-1")).toBe(true);
+		expect(manager.isUnlocked("acc-2")).toBe(true);
+	});
+
+	it("switching to an already-unlocked account does not restore it again", async () => {
+		const storage = createMockStorage({
+			getUnlockedAccounts: mock(async () => ["acc-1", "acc-2"]),
+		});
+		const manager = new AccountSessionManager({ storage });
+
+		await manager.initialize();
+		await manager.switchAccount({ type: "single", accountId: "acc-2" });
+
+		expect(storage.tryRestoreSession).not.toHaveBeenCalled();
+		expect(manager.getUnlockedAccountIds().sort()).toEqual(["acc-1", "acc-2"]);
+	});
+
+	it("switching to a locked account restores only the target", async () => {
+		const storage = createMockStorage({
+			tryRestoreSession: mock(async (_skip, accountId) => accountId === "acc-2"),
+		});
+		const manager = new AccountSessionManager({ storage });
+
+		await manager.initialize();
+		await manager.switchAccount({ type: "single", accountId: "acc-2" });
+
+		expect(storage.tryRestoreSession).toHaveBeenCalledWith(true, "acc-2");
+		expect(storage.clearSession).not.toHaveBeenCalled();
+		expect(manager.isUnlocked("acc-1")).toBe(true);
+		expect(manager.isUnlocked("acc-2")).toBe(true);
 	});
 
 	it("lockAll clears unlocked state for all accounts", async () => {
@@ -136,9 +166,55 @@ describe("AccountSessionManager", () => {
 		await manager.removeAccount("acc-1");
 
 		expect(storage.removeAccount).toHaveBeenCalledWith("acc-1");
+		expect(storage.setActiveAccount).toHaveBeenNthCalledWith(1, null);
+		expect(storage.setActiveAccount).toHaveBeenNthCalledWith(2, {
+			type: "single",
+			accountId: "acc-2",
+		});
 		expect(manager.getActiveAccount()).toEqual({
 			type: "single",
 			accountId: "acc-2",
+		});
+	});
+
+	it("removing the only active account persists null", async () => {
+		const storage = createMockStorage();
+		await storage.removeAccount("acc-2");
+		const manager = new AccountSessionManager({ storage });
+
+		await manager.initialize();
+		await manager.removeAccount("acc-1");
+
+		expect(storage.setActiveAccount).toHaveBeenLastCalledWith(null);
+		expect(await storage.getActiveAccount()).toBeNull();
+		expect(manager.getActiveAccount()).toBeNull();
+	});
+
+	it("reconstruction after final-account removal does not restore a stale ID", async () => {
+		const storage = createMockStorage();
+		await storage.removeAccount("acc-2");
+		const manager = new AccountSessionManager({ storage });
+		await manager.initialize();
+		await manager.removeAccount("acc-1");
+
+		const reconstructed = new AccountSessionManager({ storage });
+		await reconstructed.initialize();
+
+		expect(reconstructed.getAccounts()).toEqual([]);
+		expect(reconstructed.getActiveAccount()).toBeNull();
+	});
+
+	it("removing a non-active account does not alter the active account", async () => {
+		const storage = createMockStorage();
+		const manager = new AccountSessionManager({ storage });
+
+		await manager.initialize();
+		await manager.removeAccount("acc-2");
+
+		expect(storage.setActiveAccount).not.toHaveBeenCalled();
+		expect(manager.getActiveAccount()).toEqual({
+			type: "single",
+			accountId: "acc-1",
 		});
 	});
 });
