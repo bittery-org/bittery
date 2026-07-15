@@ -20,13 +20,13 @@ export {
 	type ResolveAccountsResult,
 } from "./services/account-resolver";
 export {
-	type CheckEmailResult,
 	type BiometricUnlockAvailability,
-	getBiometricUnlockAvailability,
+	type CheckEmailResult,
 	checkEmailExists,
 	clearSession,
 	deriveSrpLoginProof,
 	type FinishLoginResponse,
+	getBiometricUnlockAvailability,
 	getSessionState,
 	type IAuthClient,
 	type LoginResult,

@@ -143,11 +143,14 @@ function SignInFormContent({
 			secretKey: string;
 		}) => {
 			const serverUrl = getDefaultServerUrl();
-			const result = await performSRPLogin({ ...input, serverUrl }, {
-				crypto: wasmCrypto,
-				rpcClient,
-				storage,
-			});
+			const result = await performSRPLogin(
+				{ ...input, serverUrl },
+				{
+					crypto: wasmCrypto,
+					rpcClient,
+					storage,
+				},
+			);
 			await storeLoginSession(result, input.secretKey, storage, input.email, {
 				travelModeRpcClient: rpcClient,
 				serverUrl,

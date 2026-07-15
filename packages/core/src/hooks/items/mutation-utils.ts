@@ -97,7 +97,12 @@ export function requireRepositoryForVault(
 	accountId?: string,
 	accountEmail?: string,
 ): { accountId: string; accountEmail: string; repo: VaultRepository } {
-	const resolved = resolveRepositoryForVault(core, vaultId, accountId, accountEmail);
+	const resolved = resolveRepositoryForVault(
+		core,
+		vaultId,
+		accountId,
+		accountEmail,
+	);
 	if (!resolved) {
 		throw new Error(`No account repository found for vault ${vaultId}`);
 	}
@@ -142,8 +147,14 @@ export function requireLocalItemMutationContext(
 
 export function enqueueItemMutation(
 	queue: IPendingMutationQueue,
-	context: Pick<LocalItemMutationContext, "accountId" | "accountEmail" | "baseVersion">,
-	mutation: Omit<BasePendingMutation, "baseVersion" | "accountId" | "accountEmail">,
+	context: Pick<
+		LocalItemMutationContext,
+		"accountId" | "accountEmail" | "baseVersion"
+	>,
+	mutation: Omit<
+		BasePendingMutation,
+		"baseVersion" | "accountId" | "accountEmail"
+	>,
 ): void {
 	enqueuePendingMutation(queue, {
 		...mutation,

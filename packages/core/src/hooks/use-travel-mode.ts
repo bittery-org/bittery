@@ -107,7 +107,11 @@ export function useTravelMode(accountId?: string) {
 			const { accountId: resolvedAccountId, rpcClient: accountRpcClient } =
 				await resolveAccountRpcClient(storage, rpcClient, accountId);
 			const enforcer = getTravelModeEnforcer(storage, vaultCoordinator);
-			return enforcer.enable(resolvedAccountId, hiddenVaultIds, accountRpcClient);
+			return enforcer.enable(
+				resolvedAccountId,
+				hiddenVaultIds,
+				accountRpcClient,
+			);
 		},
 		onSuccess: async () => {
 			await queryClient.invalidateQueries({ queryKey: ["travel-mode"] });
@@ -131,7 +135,11 @@ export function useTravelMode(accountId?: string) {
 				},
 			);
 			const enforcer = getTravelModeEnforcer(storage, vaultCoordinator);
-			const config = await enforcer.disable(resolvedAccountId, accountRpcClient, proof);
+			const config = await enforcer.disable(
+				resolvedAccountId,
+				accountRpcClient,
+				proof,
+			);
 			if (!config.enabled) {
 				await restoreAfterTravelModeDisabled(
 					resolvedAccountId,

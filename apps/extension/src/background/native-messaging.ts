@@ -3,10 +3,10 @@
  * Handles communication with the desktop app for biometric unlock
  */
 
-import { storage } from "../lib/storage";
-import { decrypt } from "../lib/wasm-crypto";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
+import { storage } from "../lib/storage";
+import { decrypt } from "../lib/wasm-crypto";
 import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
 import { sendNativeMessage } from "./native-messaging-client";
@@ -393,7 +393,8 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		const unlocked: string[] = [];
-		const failed: Array<{ accountId: string; email: string; error: string }> = [];
+		const failed: Array<{ accountId: string; email: string; error: string }> =
+			[];
 
 		// Process each account from response
 		for (const accountData of responseData.accounts || []) {

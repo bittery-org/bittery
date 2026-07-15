@@ -147,7 +147,9 @@ export class DesktopClient {
 		}
 	}
 
-	async getVaultKeys(accountId: string): Promise<DesktopVaultKeysResponse | null> {
+	async getVaultKeys(
+		accountId: string,
+	): Promise<DesktopVaultKeysResponse | null> {
 		const cacheKey = accountId;
 		const cached = this.vaultKeysCache.get(cacheKey);
 		if (cached && this.isFresh(cached.timestamp)) {

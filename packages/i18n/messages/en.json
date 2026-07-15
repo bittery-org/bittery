@@ -725,6 +725,7 @@
 	"vaults_import_error_unsupported_item_provider": "Unsupported import item provider: {providerId}.",
 	"vaults_import_error_parse_failed": "Could not parse that export file. Try a different file.",
 	"vaults_import_error_execution_failed": "Import failed unexpectedly.",
+	"vaults_import_error_create_vault_account_required": "Switch to a specific account before importing into new vaults, or map every vault to an existing one.",
 	"settings_general_language_title": "Language",
 	"settings_general_language_description": "Choose your preferred display language for this browser.",
 	"settings_general_appearance_title": "Appearance",

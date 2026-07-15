@@ -23,8 +23,8 @@ import {
 	EditVaultDialog,
 	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
-import { useI18n } from "@/providers/i18n-provider";
 import { storage } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
 export const Route = createFileRoute("/_app/vaults")({
@@ -80,7 +80,9 @@ function VaultsLayout() {
 	};
 
 	const handleUpdateVault = async (vaultId: string, data: UpdateVaultData) => {
-		const accountId = vaultKeys.find((vault) => vault.vaultId === vaultId)?.accountId;
+		const accountId = vaultKeys.find(
+			(vault) => vault.vaultId === vaultId,
+		)?.accountId;
 		if (!accountId) throw new Error();
 		await updateVault.mutateAsync({
 			vaultId,
@@ -99,7 +101,9 @@ function VaultsLayout() {
 	};
 
 	const handleDeleteVault = async (vaultId: string) => {
-		const accountId = vaultKeys.find((vault) => vault.vaultId === vaultId)?.accountId;
+		const accountId = vaultKeys.find(
+			(vault) => vault.vaultId === vaultId,
+		)?.accountId;
 		if (!accountId) throw new Error();
 		await deleteVault.mutateAsync({ vaultId, accountId });
 		setDeletingVault(null);

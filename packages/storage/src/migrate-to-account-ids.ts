@@ -80,8 +80,7 @@ export async function migrateEmailKeysToAccountIds(
 		);
 		if (!alreadyAccountId) {
 			const matches = accounts.filter(
-				(account) =>
-					account.email.toLowerCase() === storedActive.toLowerCase(),
+				(account) => account.email.toLowerCase() === storedActive.toLowerCase(),
 			);
 			if (matches.length > 1) {
 				throw new Error(
@@ -102,9 +101,26 @@ export async function migrateEmailKeysToAccountIds(
 	}
 	await ctx.store.save?.();
 
+	// Legacy storage is keyed purely by email, so multiple accounts sharing the
+	// same email (the same user signed in to different servers) all resolve to
+	// the SAME legacy keys. That data was already blended in the legacy scheme
+	// and cannot be disambiguated per-server. Copying the single shared legacy
+	// value into every account would cross-contaminate secrets/sessions (M2), so
+	// we skip the per-email copy for ambiguous accounts and let them
+	// re-authenticate. The orphaned legacy keys are still cleaned up below.
+	const accountsPerEmail = new Map<string, number>();
+	for (const account of accounts) {
+		const email = account.email.toLowerCase();
+		accountsPerEmail.set(email, (accountsPerEmail.get(email) ?? 0) + 1);
+	}
+
 	// Copy all store and keychain values non-destructively.
 	for (const account of accounts) {
 		const legacyEmail = account.email.toLowerCase();
+		if ((accountsPerEmail.get(legacyEmail) ?? 0) > 1) {
+			// Ambiguous same-email account: do not inherit shared legacy secrets.
+			continue;
+		}
 		for (const suffix of ACCOUNT_STORAGE_SUFFIXES) {
 			const legacyKey = getLegacyAccountKey(legacyEmail, suffix);
 			const newKey = getAccountKey(account.accountId, suffix);

@@ -215,10 +215,7 @@ export class VaultRepository {
 		}
 		const enforcer = getTravelModeEnforcer(this.storage);
 		if (!enforcer.isVerified(this.accountId)) return [];
-		return enforcer.filterVaultKeys(
-			this.accountId,
-			vaultKeys,
-		);
+		return enforcer.filterVaultKeys(this.accountId, vaultKeys);
 	}
 
 	hasVault(vaultId: string): boolean {
@@ -254,10 +251,7 @@ export class VaultRepository {
 		}
 		const enforcer = getTravelModeEnforcer(this.storage);
 		if (!enforcer.isVerified(this.accountId)) return true;
-		return isVaultHidden(
-			enforcer.getConfig(this.accountId),
-			vaultId,
-		);
+		return isVaultHidden(enforcer.getConfig(this.accountId), vaultId);
 	}
 
 	private applyTravelModeItemFilter(
@@ -268,10 +262,7 @@ export class VaultRepository {
 		}
 		const enforcer = getTravelModeEnforcer(this.storage);
 		if (!enforcer.isVerified(this.accountId)) return [];
-		return enforcer.filterItems(
-			this.accountId,
-			items,
-		);
+		return enforcer.filterItems(this.accountId, items);
 	}
 
 	purgeHiddenVaults(hiddenVaultIds: string[]): void {

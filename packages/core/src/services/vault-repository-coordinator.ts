@@ -135,6 +135,9 @@ export class VaultRepositoryCoordinator {
 	async hydrate(accounts: AccountInfo[]): Promise<void> {
 		this.setActiveAccounts(accounts);
 
+		// Per-account failures are isolated: one account throwing (e.g. an
+		// unverified travel-mode policy) must not abort hydration of the others.
+		// A failed account simply yields no in-memory data (fail-closed).
 		await Promise.all(
 			accounts.map(async (account) => {
 				const repo = this.getOrCreate(
@@ -162,6 +165,13 @@ export class VaultRepositoryCoordinator {
 							account.rpcClient as unknown as BootstrapItemsClient,
 						);
 					}
+				} catch (error) {
+					// Log only the accountId, never the underlying data, so an
+					// unverified/failed account cannot leak hidden-vault contents.
+					console.error(
+						`[VaultRepositoryCoordinator] hydrate failed for account ${account.accountId}:`,
+						error,
+					);
 				} finally {
 					this.hydratingAccountIds.delete(account.accountId);
 					this.emit();
@@ -275,7 +285,12 @@ export class VaultRepositoryCoordinator {
 			if (!item) {
 				continue;
 			}
-			if (item.accountEmail) {
+			// The repo that actually held the item is authoritative. Prefer its
+			// accountId directly; only fall back to legacy email canonicalization
+			// when this account's info is unknown (so we never override a
+			// known-correct accountId — which matters for two accounts sharing an
+			// email across different servers).
+			if (!this.accountInfoByAccountId.has(accountId) && item.accountEmail) {
 				const accountInfo = Array.from(
 					this.accountInfoByAccountId.values(),
 				).find(
@@ -315,7 +330,11 @@ export class VaultRepositoryCoordinator {
 				continue;
 			}
 			const vault = entry.repo.getVaultById(vaultId);
-			if (vault?.accountEmail) {
+			// The repo that actually held the vault is authoritative. Prefer its
+			// accountId directly; only fall back to legacy email canonicalization
+			// when this account's info is unknown, so a shared email across
+			// servers can't redirect to the wrong account's repo.
+			if (!this.accountInfoByAccountId.has(accountId) && vault?.accountEmail) {
 				const accountInfo = Array.from(
 					this.accountInfoByAccountId.values(),
 				).find(

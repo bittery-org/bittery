@@ -156,17 +156,18 @@ export class AccountSessionManager {
 			const meta = findAccountById(this.accounts, account.accountId);
 			if (meta) {
 				meta.lastActiveAt = Date.now();
+				// Persist so storage-backed sorting sees the real value after
+				// reload. addAccount upserts an existing account by accountId.
+				await this.storage.addAccount(meta);
 			}
 			if (!this.isUnlocked(account.accountId)) {
 				let restored = await this.storage.tryRestoreSession(
 					true,
 					account.accountId,
 				);
-				if (restored) restored = await this.verifyUnlockPolicy(account.accountId);
-				this.lockState.set(
-					account.accountId,
-					restored ? "unlocked" : "locked",
-				);
+				if (restored)
+					restored = await this.verifyUnlockPolicy(account.accountId);
+				this.lockState.set(account.accountId, restored ? "unlocked" : "locked");
 			}
 		}
 

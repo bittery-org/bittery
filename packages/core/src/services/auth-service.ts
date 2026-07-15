@@ -16,10 +16,10 @@ import {
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
 import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
-import { getTravelModeEnforcer } from "./travel-mode-enforcer";
-import type { TravelModeRpcClient } from "./travel-mode-service";
 import { createStoredAccountRpcClient } from "./account-resolver";
 import { peekAccountSessionManager } from "./account-session-manager";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
+import type { TravelModeRpcClient } from "./travel-mode-service";
 
 export interface StoreAuthSessionOptions {
 	travelModeRpcClient?: TravelModeRpcClient;
@@ -244,10 +244,8 @@ async function resolveAccountAuthClient(
 	if (deps.createAuthClientForAccount) {
 		return deps.createAuthClientForAccount(accountId);
 	}
-	return (
-		(await createStoredAccountRpcClient(deps.storage, accountId)) ??
-		resolveAuthClient(deps)
-	) as IAuthClient;
+	return ((await createStoredAccountRpcClient(deps.storage, accountId)) ??
+		resolveAuthClient(deps)) as IAuthClient;
 }
 
 function resolveAuthClient(deps: {
@@ -447,7 +445,11 @@ export async function performSRPLogin(
 			clientPublicKey: clientEphemeral.publicKey,
 		});
 
-		await validateServerKdfParamsForAccount(undefined, startResult.kdfParams, deps);
+		await validateServerKdfParamsForAccount(
+			undefined,
+			startResult.kdfParams,
+			deps,
+		);
 
 		const clientSession = await crypto.deriveClientSession(
 			clientEphemeral.secret,
@@ -675,7 +677,11 @@ export async function deriveSrpLoginProof(
 		email,
 		clientPublicKey: clientEphemeral.publicKey,
 	});
-	await validateServerKdfParamsForAccount(accountId, startResult.kdfParams, deps);
+	await validateServerKdfParamsForAccount(
+		accountId,
+		startResult.kdfParams,
+		deps,
+	);
 	const clientSession = await crypto.deriveClientSession(
 		clientEphemeral.secret,
 		{
@@ -788,7 +794,11 @@ export async function performSRPUnlock(
 			clientPublicKey: clientEphemeral.publicKey,
 		});
 
-		await validateServerKdfParamsForAccount(accountId, startResult.kdfParams, deps);
+		await validateServerKdfParamsForAccount(
+			accountId,
+			startResult.kdfParams,
+			deps,
+		);
 
 		const clientSession = await crypto.deriveClientSession(
 			clientEphemeral.secret,
@@ -868,7 +878,11 @@ export async function storeUnlockSession(
 		await storage.storeAuthToken(result.token, accountId);
 		await storage.storeServerUrl(serverUrl, accountId);
 		if (result.kdfParams) {
-			await persistPinnedKdfParamsIfNeeded(accountId, result.kdfParams, storage);
+			await persistPinnedKdfParamsIfNeeded(
+				accountId,
+				result.kdfParams,
+				storage,
+			);
 		}
 		const vaultKeys = await travelMode.stripVaultKeysIfActive(
 			accountId,

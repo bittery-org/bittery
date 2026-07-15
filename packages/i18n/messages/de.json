@@ -725,6 +725,7 @@
 	"vaults_import_error_unsupported_item_provider": "Nicht unterstützter Importanbieter für Einträge: {providerId}.",
 	"vaults_import_error_parse_failed": "Diese Exportdatei konnte nicht verarbeitet werden. Versuche eine andere Datei.",
 	"vaults_import_error_execution_failed": "Der Import ist unerwartet fehlgeschlagen.",
+	"vaults_import_error_create_vault_account_required": "Wechsle zu einem bestimmten Konto, bevor du in neue Tresore importierst, oder ordne jeden Tresor einem bestehenden zu.",
 	"settings_general_language_title": "Sprache",
 	"settings_general_language_description": "Wähle deine bevorzugte Anzeigesprache für diesen Browser.",
 	"settings_general_appearance_title": "Erscheinungsbild",

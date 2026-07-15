@@ -161,9 +161,7 @@ async function getDesktopTargetAccountIds(): Promise<string[]> {
 		return [activeAccount.accountId];
 	}
 
-	const statusAccountIds = desktopSync
-		.getLastStatus()
-		?.unlockedAccounts;
+	const statusAccountIds = desktopSync.getLastStatus()?.unlockedAccounts;
 	if (statusAccountIds && statusAccountIds.length > 0) {
 		return Array.from(new Set(statusAccountIds));
 	}
@@ -173,9 +171,7 @@ async function getDesktopTargetAccountIds(): Promise<string[]> {
 		return [];
 	}
 
-	return Array.from(
-		new Set(accounts.unlockedAccounts),
-	);
+	return Array.from(new Set(accounts.unlockedAccounts));
 }
 
 async function resolveAccountIdForItem(

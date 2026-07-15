@@ -255,7 +255,7 @@ export function useSync(options: UseSyncOptions) {
 			);
 		};
 
-		for (const [index, source] of syncSources.entries()) {
+		for (const source of syncSources) {
 			const sourceStorage = new NamespacedSyncStorage(
 				syncStorage,
 				`sync_source_${encodeURIComponent(source.id)}`,
@@ -275,7 +275,11 @@ export function useSync(options: UseSyncOptions) {
 				itemCacheAccountEmail: source.itemCacheAccountEmail,
 				itemCacheServerUrl: source.itemCacheServerUrl,
 				getClientForAccount,
-				drainOutboundQueue: index === 0,
+				// Any connected source may drain the shared outbound queue; the
+				// queue serializes concurrent drains internally. Gating on a single
+				// source (e.g. index === 0) would starve every account's outbound
+				// sync whenever that one source failed to connect.
+				drainOutboundQueue: true,
 				onEventProcessed: async (event) => {
 					await invalidateForEvent(event);
 					await onEventProcessed?.(event, {

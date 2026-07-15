@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { OutboundQueue } from "../outbound-queue";
+import {
+	OutboundQueue,
+	type OutboundQueueClient,
+	type PendingMutation,
+} from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
 import { SyncOrchestrator } from "../sync-orchestrator";
 import type { SyncEvent, SyncStorage } from "../types";
@@ -535,8 +539,108 @@ describe("sync engine regressions", () => {
 		});
 		await queue.restore();
 		expect(await storage.get(legacyKey)).not.toBeNull();
-		expect(queue.drain(async () => {
-			throw new Error("must not resolve a client");
-		})).rejects.toThrow("Cannot drain ambiguous legacy queues");
+		expect(
+			queue.drain(async () => {
+				throw new Error("must not resolve a client");
+			}),
+		).rejects.toThrow("Cannot drain ambiguous legacy queues");
+	});
+});
+
+function buildDeleteMutation(
+	accountId: string,
+	entityId: string,
+	overrides: Partial<PendingMutation> = {},
+): PendingMutation {
+	return {
+		accountId,
+		id: `m_${accountId}_${entityId}`,
+		type: "delete",
+		entityId,
+		vaultId: "vault_1",
+		baseVersion: 1,
+		timestamp: 1,
+		retryCount: 0,
+		...overrides,
+	};
+}
+
+function networkError(): Error {
+	const error = new Error("network down") as Error & { status: number };
+	error.status = 503;
+	return error;
+}
+
+describe("outbound queue multi-account drain isolation", () => {
+	test("one account's failure does not starve other accounts' queues", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+
+		// account_a sorts before account_b, so it is drained first.
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		queue.enqueue(buildDeleteMutation("account_b", "item_b"));
+
+		const deletedByAccount = new Map<string, string[]>();
+		const makeClient = (accountId: string, shouldFail: boolean) =>
+			({
+				vault: {
+					deleteItem: {
+						mutate: async ({ itemId }: { itemId: string }) => {
+							if (shouldFail) {
+								throw networkError();
+							}
+							const done = deletedByAccount.get(accountId) ?? [];
+							done.push(itemId);
+							deletedByAccount.set(accountId, done);
+							return {};
+						},
+					},
+				},
+			}) as unknown as OutboundQueueClient;
+
+		await queue.drain((accountId) =>
+			makeClient(accountId, accountId === "account_a"),
+		);
+
+		// account_a hit a network error and was retained for retry, but the
+		// failure must NOT prevent account_b from draining.
+		expect(deletedByAccount.get("account_b")).toEqual(["item_b"]);
+		expect(queue.hasPendingForItem("item_a")).toBe(true);
+		expect(queue.hasPendingForItem("item_b")).toBe(false);
+		expect(queue.getPendingCount()).toBe(1);
+	});
+
+	test("serializes concurrent drains so mutations are not double-sent", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		queue.enqueue(buildDeleteMutation("account_b", "item_b"));
+
+		const deleteCalls: string[] = [];
+		let inFlight = 0;
+		let observedConcurrency = 0;
+		const client = {
+			vault: {
+				deleteItem: {
+					mutate: async ({ itemId }: { itemId: string }) => {
+						inFlight += 1;
+						observedConcurrency = Math.max(observedConcurrency, inFlight);
+						await new Promise((resolve) => setTimeout(resolve, 5));
+						deleteCalls.push(itemId);
+						inFlight -= 1;
+						return {};
+					},
+				},
+			},
+		} as unknown as OutboundQueueClient;
+
+		// Kick off two overlapping drains against the shared queue.
+		await Promise.all([queue.drain(() => client), queue.drain(() => client)]);
+
+		// Each mutation is processed exactly once and never concurrently.
+		expect(deleteCalls.sort()).toEqual(["item_a", "item_b"]);
+		expect(observedConcurrency).toBe(1);
+		expect(queue.getPendingCount()).toBe(0);
 	});
 });

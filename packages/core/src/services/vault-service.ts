@@ -172,9 +172,7 @@ export class VaultService {
 		}
 
 		const vaultKey = await this.crypto.generateEncryptionKey();
-		const masterUnlockKey = await this.storage.getMasterUnlockKey(
-			accountId,
-		);
+		const masterUnlockKey = await this.storage.getMasterUnlockKey(accountId);
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}

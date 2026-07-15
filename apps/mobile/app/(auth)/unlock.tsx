@@ -58,6 +58,7 @@ import { useAccount } from "../../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../../src/lib/biometric-error-message";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/rpc";
+import { enforceTravelModeForUnlockedAccounts } from "../../src/lib/travel-mode-unlock";
 import { useI18n } from "../../src/providers/i18n-provider";
 import { type AccountMetadata, storage } from "../../src/services/storage";
 
@@ -419,9 +420,19 @@ export default function UnlockScreen() {
 					setBiometricError(m.mob_unlock_biometric_failed());
 					return;
 				}
+				// Travel mode MUST fail closed: re-verify each unlocked account
+				// against the server before treating it as unlocked.
+				const verifiedAccountIds = await enforceTravelModeForUnlockedAccounts(
+					resolveUnlockedAccountIds(result.unlocked),
+				);
+				if (verifiedAccountIds.length === 0) {
+					setBiometricError(m.mob_unlock_biometric_failed());
+					return;
+				}
 				await finalizeAllAccountsUnlock(
-					result.unlocked,
-					result.failed.length > 0,
+					verifiedAccountIds,
+					result.failed.length > 0 ||
+						verifiedAccountIds.length < result.unlocked.length,
 				);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);

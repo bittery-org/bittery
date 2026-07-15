@@ -42,12 +42,13 @@ export function useMoveItem() {
 			);
 			const targetAccountHint =
 				input.targetAccountEmail ?? sourceRepoTargetVault?.accountEmail;
-			const { accountId: targetAccountId, accountEmail: targetAccountEmail } = requireRepositoryForVault(
-				core,
-				input.targetVaultId,
-				input.targetAccountId ?? sourceRepoTargetVault?.accountId,
-				targetAccountHint,
-			);
+			const { accountId: targetAccountId, accountEmail: targetAccountEmail } =
+				requireRepositoryForVault(
+					core,
+					input.targetVaultId,
+					input.targetAccountId ?? sourceRepoTargetVault?.accountId,
+					targetAccountHint,
+				);
 
 			if (sourceContext.accountId !== targetAccountId) {
 				return core.items.moveItem(

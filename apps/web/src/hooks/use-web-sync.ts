@@ -99,7 +99,8 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		const matches = (await storage.getAccountsList()).filter(
 			(account) => account.email.toLowerCase() === email.toLowerCase(),
 		);
-		if (matches.length !== 1) throw new Error(`Ambiguous legacy account queue for ${email}`);
+		if (matches.length !== 1)
+			throw new Error(`Ambiguous legacy account queue for ${email}`);
 		return matches[0]?.accountId;
 	}, []);
 

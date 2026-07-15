@@ -66,9 +66,7 @@ export function AccountSwitcher() {
 	const unlockedAccountIdsList = unlockedAccountIds;
 	const isAllAccountsMode = activeSelection?.type === "all";
 	const activeAccountId =
-		activeSelection?.type === "single"
-			? activeSelection.accountId
-			: null;
+		activeSelection?.type === "single" ? activeSelection.accountId : null;
 	const activeAccount = accountsData.find(
 		(a) => a.accountId === activeAccountId,
 	);

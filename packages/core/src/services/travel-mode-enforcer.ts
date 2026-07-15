@@ -50,7 +50,9 @@ export class TravelModeEnforcer {
 
 	assertVerified(accountId: string): void {
 		if (!this.isVerified(accountId)) {
-			throw new Error(`Travel mode policy is not verified for account ${accountId}`);
+			throw new Error(
+				`Travel mode policy is not verified for account ${accountId}`,
+			);
 		}
 	}
 
@@ -79,7 +81,9 @@ export class TravelModeEnforcer {
 	async hydrateFromStorage(accountId: string): Promise<TravelModeConfig> {
 		const cached = (await this.storage.getTravelModeCache?.(accountId)) ?? null;
 		if (!cached) {
-			throw new Error(`No verified travel mode policy for account ${accountId}`);
+			throw new Error(
+				`No verified travel mode policy for account ${accountId}`,
+			);
 		}
 		const config = cached;
 		if (config.enabled) {
@@ -183,9 +187,10 @@ export class TravelModeEnforcer {
 		hiddenVaultIds: string[],
 		rpcClient: TravelModeRpcClient,
 	): Promise<TravelModeConfig> {
-		const response = await rpcClient.travelMode.setTravelModeHiddenVaults.mutate({
-			hiddenVaultIds,
-		});
+		const response =
+			await rpcClient.travelMode.setTravelModeHiddenVaults.mutate({
+				hiddenVaultIds,
+			});
 		const config = mapTravelModeResponse(response);
 		await this.applyConfig(accountId, config);
 		return config;

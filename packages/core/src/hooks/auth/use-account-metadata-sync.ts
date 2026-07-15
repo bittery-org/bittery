@@ -37,7 +37,7 @@ export function useAccountMetadataSync(
 	options: UseAccountMetadataSyncOptions = {},
 ) {
 	const {
-			accountId,
+		accountId,
 		enabled = true,
 		refetchInterval = ACCOUNT_METADATA_REFETCH_INTERVAL_MS,
 	} = options;

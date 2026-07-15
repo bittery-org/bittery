@@ -65,6 +65,7 @@ type HookImportErrorCode =
 	| "target-vault-name-required"
 	| "target-vault-missing"
 	| "target-vault-read-only"
+	| "create-vault-account-required"
 	| "missing-target-mapping"
 	| "target-vault-key-decrypt-failed"
 	| "vault-import-failed"
@@ -470,21 +471,35 @@ export function useVaultImport() {
 				}
 
 				const activeAccount = await storage.getActiveAccount();
-					const defaultAccountId =
-						activeAccount?.type === "single"
-							? activeAccount.accountId
-							: undefined;
-					const defaultAccountEmail = defaultAccountId
-						? (await storage.getAccountsList()).find(
-								(a) => a.accountId === defaultAccountId,
-							)?.email
+				const defaultAccountId =
+					activeAccount?.type === "single"
+						? activeAccount.accountId
 						: undefined;
-					if (!defaultAccountId) throw new Error();
+				const defaultAccountEmail = defaultAccountId
+					? (await storage.getAccountsList()).find(
+							(a) => a.accountId === defaultAccountId,
+						)?.email
+					: undefined;
+
+				// A default account is only required to CREATE new vaults.
+				// Existing-vault mappings resolve their own account later via
+				// resolveAccountScopeId, so imports that only reuse existing
+				// vaults must be allowed to proceed in "All Accounts" mode.
+				const requiresVaultCreation = sourceVaults.some(
+					(sourceVault) => mappings[sourceVault.id]?.mode === "create",
+				);
+				if (requiresVaultCreation && !defaultAccountId) {
+					throw new VaultImportError("create-vault-account-required");
+				}
 
 				for (const sourceVault of sourceVaults) {
 					const mapping = mappings[sourceVault.id];
 					if (!mapping || mapping.mode !== "create") {
 						continue;
+					}
+
+					if (!defaultAccountId) {
+						throw new VaultImportError("create-vault-account-required");
 					}
 
 					const targetVaultName = mapping.targetVaultName.trim();
@@ -506,20 +521,19 @@ export function useVaultImport() {
 
 					const resolvedTarget: ResolvedTargetVault = {
 						vaultId: createdVault.vaultId,
-							vaultName: targetVaultName,
-							accountId: defaultAccountId,
-							accountEmail: defaultAccountEmail,
+						vaultName: targetVaultName,
+						accountId: defaultAccountId,
+						accountEmail: defaultAccountEmail,
 					};
 
 					createdVaults.push(resolvedTarget);
 					resolvedTargets.set(sourceVault.id, resolvedTarget);
 				}
 
-				if (createdVaults.length > 0) {
-					await core.vaults.refreshVaultKeys(
-						rpcClient,
-						createdVaults[0].accountId ?? defaultAccountId,
-					);
+				const refreshAccountId =
+					createdVaults[0]?.accountId ?? defaultAccountId;
+				if (createdVaults.length > 0 && refreshAccountId) {
+					await core.vaults.refreshVaultKeys(rpcClient, refreshAccountId);
 					await invalidator.invalidateVaultKeys();
 				}
 

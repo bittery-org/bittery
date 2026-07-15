@@ -20,7 +20,12 @@ import {
 	findAccountByServerUser,
 	generateAccountId,
 } from "../account-id";
-import { getAccountKey, getLegacyAccountKey } from "../account-keys";
+import {
+	ACCOUNT_ID_MIGRATION_FLAG,
+	ACCOUNT_STORAGE_SUFFIXES,
+	getAccountKey,
+	getLegacyAccountKey,
+} from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
@@ -126,6 +131,17 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	constructor(private crypto: CryptoProvider) {}
 
 	async initialize(): Promise<void> {
+		// Capture whether the account-id migration has already run before we
+		// invoke it below (the migration sets the flag on completion). The
+		// legacy session-key migration is a one-time step and must be gated on
+		// this so it doesn't re-scan session storage on every service-worker
+		// start.
+		const migrationFlagResult = await chrome.storage.local.get(
+			ACCOUNT_ID_MIGRATION_FLAG,
+		);
+		const accountIdMigrationAlreadyRan =
+			migrationFlagResult[ACCOUNT_ID_MIGRATION_FLAG] === true;
+
 		// Migrate legacy email-keyed storage to accountId keys
 		await migrateEmailKeysToAccountIds({
 			store: {
@@ -151,19 +167,23 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 			},
 		});
 
-		// Migrate legacy session-scoped keys (encrypted_private_key, jwt_token)
-		const accountsList = await this.getAccountsListInternal();
-		for (const account of accountsList.accounts) {
-			for (const suffix of ["jwt_token", "encrypted_private_key"] as const) {
-				const legacyKey = getLegacyAccountKey(
-					account.email.toLowerCase(),
-					suffix,
-				);
-				const newKey = getAccountKey(account.accountId, suffix);
-				const result = await chrome.storage.session.get(legacyKey);
-				if (result[legacyKey] !== undefined) {
-					await chrome.storage.session.set({ [newKey]: result[legacyKey] });
-					await chrome.storage.session.remove(legacyKey);
+		// Migrate legacy session-scoped keys (encrypted_private_key, jwt_token).
+		// Only needed once, on the first run that performs the account-id
+		// migration; skip the session-storage scan on subsequent starts.
+		if (!accountIdMigrationAlreadyRan) {
+			const accountsList = await this.getAccountsListInternal();
+			for (const account of accountsList.accounts) {
+				for (const suffix of ["jwt_token", "encrypted_private_key"] as const) {
+					const legacyKey = getLegacyAccountKey(
+						account.email.toLowerCase(),
+						suffix,
+					);
+					const newKey = getAccountKey(account.accountId, suffix);
+					const result = await chrome.storage.session.get(legacyKey);
+					if (result[legacyKey] !== undefined) {
+						await chrome.storage.session.set({ [newKey]: result[legacyKey] });
+						await chrome.storage.session.remove(legacyKey);
+					}
 				}
 			}
 		}
@@ -807,31 +827,19 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 	async removeAccount(accountId: string): Promise<void> {
 		await this.clearItemCache(accountId);
 
-		// Delete all namespaced keys for this account
-		const keysToRemove = [
-			getAccountKey(accountId, "secret_key"),
-			getAccountKey(accountId, "session_data"),
-			getAccountKey(accountId, "jwt_token"),
-			getAccountKey(accountId, "vault_keys"),
-			getAccountKey(accountId, "pinned_kdf_params"),
-			getAccountKey(accountId, "server_url"),
-			getAccountKey(accountId, "encrypted_private_key"),
-			getAccountKey(accountId, "auto_lock_timeout"),
-			getAccountKey(accountId, CACHED_ITEMS_SUFFIX),
-			getAccountKey(accountId, CACHED_VAULTS_SUFFIX),
-			getAccountKey(accountId, ITEM_CACHE_META_SUFFIX),
-			getAccountKey(accountId, TRAVEL_MODE_CACHE_SUFFIX),
-		];
+		// Delete every namespaced key for this account. Iterate the shared
+		// suffix list so new per-account suffixes are cleaned up automatically
+		// instead of silently leaking when someone forgets to update this list.
+		const keysToRemove = ACCOUNT_STORAGE_SUFFIXES.map((suffix) =>
+			getAccountKey(accountId, suffix),
+		);
 
 		await chrome.storage.local.remove(keysToRemove);
-		// Remove JWT and encrypted private key from session storage
+		// jwt_token and encrypted_private_key are also held in session storage.
 		await chrome.storage.session.remove([
 			getAccountKey(accountId, "jwt_token"),
 			getAccountKey(accountId, "encrypted_private_key"),
 		]);
-
-		// Remove vault keys from local storage
-		await chrome.storage.local.remove([getAccountKey(accountId, "vault_keys")]);
 
 		this.clearAccountCache(accountId);
 

@@ -1,9 +1,8 @@
-import {
-	useAccountSwitcher,
-	useQuickUnlockAll,
-} from "@bittery/core/hooks";
 import { getBiometricUnlockAvailability } from "@bittery/core";
+import { useAccountSwitcher, useQuickUnlockAll } from "@bittery/core/hooks";
+import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import {
 	AccountAvatarGroup as AvatarGroup,
 	ButtonGroup,
@@ -146,41 +145,68 @@ export function UnlockPage() {
 		},
 	});
 
-	// Biometric unlock all accounts with ONE prompt
+	// Biometric unlock all accounts with ONE prompt.
+	// Travel mode is a SECURITY feature and MUST fail closed: after the
+	// biometric MUK restore we verify the server-side travel mode policy for
+	// every unlocked account (mirroring the single-account biometric path) and
+	// tear down the session for any account whose policy cannot be verified so
+	// its hidden vaults are never exposed.
+	const performBiometricUnlockAll = useCallback(async () => {
+		// Use the unified biometric unlock method that shows ONE prompt for all accounts
+		if (!storage.unlockAllAccountsWithBiometric) {
+			throw new Error(m.toast_auth_unlock_error_biometric_not_supported());
+		}
+
+		const { unlocked, failed } = await storage.unlockAllAccountsWithBiometric();
+
+		// Enforce travel mode per unlocked accountId. verifyForUnlock fetches
+		// (or, offline, hydrates the verified) policy and purges hidden vaults.
+		const verified: string[] = [];
+		let travelModeFailures = 0;
+		for (const accountId of unlocked) {
+			const client = await createStoredAccountRpcClient(
+				storage,
+				accountId,
+			).catch(() => null);
+			try {
+				await getTravelModeEnforcer(storage).verifyForUnlock(accountId, client);
+				verified.push(accountId);
+			} catch {
+				// Fail closed: never leave this account's hidden vaults exposed.
+				await storage.clearSession(accountId);
+				travelModeFailures += 1;
+			}
+		}
+
+		if (verified.length === 0) {
+			throw new Error(m.toast_auth_unlock_error_biometric_none_unlocked());
+		}
+
+		// Set active mode based on accounts that passed policy verification.
+		if (verified.length > 1) {
+			await storage.setActiveAccount({ type: "all" });
+		} else {
+			await storage.setActiveAccount({
+				type: "single",
+				accountId: verified[0],
+			});
+		}
+
+		await queryClient.invalidateQueries({ queryKey: ["accounts"] });
+
+		showUnlockToast({
+			unlockedCount: verified.length,
+			failedCount: failed.length + travelModeFailures,
+			biometric: true,
+		});
+
+		await peekAccountSessionManager()?.refresh();
+		triggerAuthRevealToVault();
+	}, [m, queryClient, showUnlockToast]);
+
 	const handleBiometricUnlockAll = async () => {
 		try {
-			// Use the unified biometric unlock method that shows ONE prompt for all accounts
-			if (!storage.unlockAllAccountsWithBiometric) {
-				throw new Error(m.toast_auth_unlock_error_biometric_not_supported());
-			}
-
-			const { unlocked, failed } =
-				await storage.unlockAllAccountsWithBiometric();
-
-			if (unlocked.length === 0) {
-				throw new Error(m.toast_auth_unlock_error_biometric_none_unlocked());
-			}
-
-			// Set active mode
-			if (allAccounts.length > 1) {
-				await storage.setActiveAccount({ type: "all" });
-			} else {
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: allAccounts[0].accountId,
-				});
-			}
-
-			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
-
-			showUnlockToast({
-				unlockedCount: unlocked.length,
-				failedCount: failed.length,
-				biometric: true,
-			});
-
-			await peekAccountSessionManager()?.refresh();
-			triggerAuthRevealToVault();
+			await performBiometricUnlockAll();
 		} catch (error) {
 			console.error("Biometric unlock error:", error);
 			toast.error(
@@ -227,41 +253,7 @@ export function UnlockPage() {
 			// Small delay to ensure everything is initialized
 			const timeout = setTimeout(async () => {
 				try {
-					if (!storage.unlockAllAccountsWithBiometric) {
-						throw new Error(
-							m.toast_auth_unlock_error_biometric_not_supported(),
-						);
-					}
-
-					const { unlocked, failed } =
-						await storage.unlockAllAccountsWithBiometric();
-
-					if (unlocked.length === 0) {
-						throw new Error(
-							m.toast_auth_unlock_error_biometric_none_unlocked(),
-						);
-					}
-
-					// Set active mode
-					if (allAccounts.length > 1) {
-						await storage.setActiveAccount({ type: "all" });
-					} else {
-						await storage.setActiveAccount({
-							type: "single",
-							accountId: allAccounts[0].accountId,
-						});
-					}
-
-					await queryClient.invalidateQueries({ queryKey: ["accounts"] });
-
-					showUnlockToast({
-						unlockedCount: unlocked.length,
-						failedCount: failed.length,
-						biometric: true,
-					});
-
-					await peekAccountSessionManager()?.refresh();
-					triggerAuthRevealToVault();
+					await performBiometricUnlockAll();
 				} catch (error) {
 					console.error("Biometric unlock error:", error);
 					// Don't show toast on auto-trigger failure - user can manually try
@@ -270,7 +262,7 @@ export function UnlockPage() {
 
 			return () => clearTimeout(timeout);
 		}
-	}, [autoTrigger, allAccounts, queryClient, m, showUnlockToast]);
+	}, [autoTrigger, allAccounts, performBiometricUnlockAll]);
 
 	// Show loading state while accounts are being fetched
 	if (!isInitialized) {

@@ -242,7 +242,9 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				) as unknown as OutboundQueueClient;
 			}
 
-			throw new Error(`No auth token available for account queue drain (${accountId})`);
+			throw new Error(
+				`No auth token available for account queue drain (${accountId})`,
+			);
 		},
 		[clientId, serverUrl],
 	);

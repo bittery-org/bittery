@@ -3,8 +3,8 @@ import type { IStorageAdapter } from "@bittery/storage";
 import type { AccountMetadata } from "@bittery/storage/types";
 import type { ICrypto, KdfParams } from "@bittery/types";
 import {
-	getBiometricUnlockAvailability,
 	deriveSrpLoginProof,
+	getBiometricUnlockAvailability,
 	type IAuthClient,
 	performSRPLogin,
 } from "./auth-service";
@@ -16,7 +16,11 @@ const kdfParams: KdfParams = {
 	salt: "server-salt",
 };
 
-function account(accountId: string, userId: string, serverUrl: string): AccountMetadata {
+function account(
+	accountId: string,
+	userId: string,
+	serverUrl: string,
+): AccountMetadata {
 	return {
 		accountId,
 		email: "same@example.com",
@@ -50,7 +54,10 @@ function createCrypto(secretReads: string[]): ICrypto {
 	} as unknown as ICrypto;
 }
 
-function createAuthClient(startedEmails: string[], token = "token"): IAuthClient {
+function createAuthClient(
+	startedEmails: string[],
+	token = "token",
+): IAuthClient {
 	return {
 		auth: {
 			checkEmail: { query: mock(async () => ({ exists: true })) },
@@ -127,7 +134,9 @@ describe("account-routed authentication", () => {
 		const startedEmails: string[] = [];
 		const storage = {
 			getAccountsList: mock(async () => accounts),
-			getStoredSecretKey: mock(async (accountId: string) => `secret-${accountId}`),
+			getStoredSecretKey: mock(
+				async (accountId: string) => `secret-${accountId}`,
+			),
 			getPinnedKdfParams: mock(async (accountId: string) => {
 				pinnedReads.push(accountId);
 				return { ...kdfParams, salt: `pin-${accountId}` };
@@ -170,7 +179,10 @@ describe("account-routed authentication", () => {
 			getAccountsList: mock(async () => [
 				account("cloud", "cloud-user", "https://cloud.example"),
 			]),
-			getActiveAccount: mock(async () => ({ type: "single", accountId: "cloud" })),
+			getActiveAccount: mock(async () => ({
+				type: "single",
+				accountId: "cloud",
+			})),
 		} as unknown as IStorageAdapter;
 		const startedEmails: string[] = [];
 		const handshakeClient = createAuthClient(startedEmails, "self-token");

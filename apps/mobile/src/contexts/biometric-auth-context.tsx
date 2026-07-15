@@ -3,9 +3,9 @@
  * Handles app state changes and biometric re-authentication when returning from background
  */
 
-import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useRouter } from "expo-router";
 import {
 	createContext,
@@ -18,6 +18,7 @@ import {
 } from "react";
 import { AppState, type AppStateStatus, Platform } from "react-native";
 import CredentialProvider from "../../modules/credential-provider";
+import { enforceTravelModeForUnlockedAccounts } from "../lib/travel-mode-unlock";
 import { type BiometricAuthResult, storage } from "../services/storage";
 import { useAccount } from "./account-context";
 
@@ -226,7 +227,17 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				}
 
 				const unlockResult = await storage.unlockAllAccountsWithBiometric();
-				const success = unlockResult.unlocked.length > 0;
+
+				// Enforce travel mode per unlocked account. The storage adapter's
+				// "unlock all" path does NOT verify travel mode against the server,
+				// so we must do it here at the caller level (fail closed). Any
+				// account that fails verification has its session cleared and is
+				// dropped from the unlocked set.
+				const verifiedAccountIds = await enforceTravelModeForUnlockedAccounts(
+					unlockResult.unlocked,
+				);
+
+				const success = verifiedAccountIds.length > 0;
 				const result: BiometricAuthResult = success
 					? { success: true }
 					: {
@@ -236,7 +247,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						};
 
 				if (success) {
-					await setNativeMuksForAccounts(unlockResult.unlocked);
+					await setNativeMuksForAccounts(verifiedAccountIds);
 					setRequiresReauth(false);
 					setShowAuthModal(false);
 					setRequiresMasterPassword(false);
@@ -272,7 +283,10 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						storage,
 						accountId,
 					).catch(() => null);
-					await getTravelModeEnforcer(storage).verifyForUnlock(accountId, client);
+					await getTravelModeEnforcer(storage).verifyForUnlock(
+						accountId,
+						client,
+					);
 					const muk = await storage.decryptStoredMasterUnlockKeyPublic(
 						accountId,
 						true, // Skip biometric since we just authenticated

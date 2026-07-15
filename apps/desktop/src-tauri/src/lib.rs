@@ -68,6 +68,20 @@ fn read_account_id_scoped_string<R: Runtime>(
     read_store_string(store, &account_id_key(account_id, suffix))
 }
 
+/// Resolves the per-account `biometric_enabled` preference from its raw stored
+/// value. The flag is persisted as a JSON boolean; when it has never been set
+/// we default to `true` (biometric opt-out must be explicit).
+fn biometric_enabled_flag(value: Option<serde_json::Value>) -> bool {
+    value.and_then(|v| v.as_bool()).unwrap_or(true)
+}
+
+/// Reads the per-account `biometric_enabled` preference from the store.
+/// This is a security-relevant check: when a user has disabled biometrics for
+/// an account we must refuse to hand its MUK to the extension.
+fn is_biometric_enabled_for_account<R: Runtime>(store: &Store<R>, account_id: &str) -> bool {
+    biometric_enabled_flag(store.get(&account_id_key(account_id, "biometric_enabled")))
+}
+
 /// Resolve the email for a given stable accountId.
 fn resolve_email_for_account_id<R: Runtime>(
     store: &Store<R>,
@@ -1204,9 +1218,7 @@ async fn check_extension_biometric_status(
 
         // biometric_enabled is persisted as a JSON boolean; default to true.
 		let is_enabled = if let Some(account_id) = &active_account_id {
-			store.get(&account_id_key(account_id, "biometric_enabled"))
-				.and_then(|v| v.as_bool())
-                .unwrap_or(true)
+			is_biometric_enabled_for_account(&store, account_id)
 		} else {
 			false
         };
@@ -1260,6 +1272,14 @@ async fn extension_biometric_unlock(
 
 	let target_account_id = account_id.or_else(|| get_active_account_id(&store)).ok_or("No account specified")?;
 	let target_email = resolve_email_for_account_id(&store, &target_account_id).ok_or("Account not found")?;
+
+	// Enforce the per-account biometric preference before releasing any secrets.
+	// If the user disabled biometrics for this account, refuse the unlock.
+	if !is_biometric_enabled_for_account(&store, &target_account_id) {
+		eprintln!("[Biometric Unlock] Biometrics disabled for account: {}", target_account_id);
+		return Err("Biometric unlock is disabled for this account".to_string());
+	}
+
 	eprintln!("[Biometric Unlock] Target account: {}", target_account_id);
 	let session_data_str = read_account_id_scoped_string(&store, &target_account_id, "session_data")
 		.ok_or("No session data found")?;
@@ -1414,6 +1434,13 @@ async fn biometric_unlock_all_internal(
         };
 
         eprintln!("[Biometric Unlock All] Processing account: {}", email);
+
+        // Respect the per-account biometric preference: skip (do not expose the
+        // MUK for) any account whose owner has disabled biometric unlock.
+        if !is_biometric_enabled_for_account(&store, &account_id) {
+            eprintln!("[Biometric Unlock All] Skipping account with biometrics disabled: {}", email);
+            continue;
+        }
 
         // Get session data for this account (accountId key with legacy fallback)
 		let session_data_str = match read_account_id_scoped_string(&store, &account_id, "session_data") {
@@ -1773,9 +1800,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_snapshot_item_payload, lookup_store_string_with_fallback,
-        serialize_encryption_context, unwrap_plaintext_with_context,
-        CachedItemRecord, CachedVaultRecord, CONTEXT_ENVELOPE_MARKER,
+        biometric_enabled_flag, build_snapshot_item_payload,
+        lookup_store_string_with_fallback, serialize_encryption_context,
+        unwrap_plaintext_with_context, CachedItemRecord, CachedVaultRecord,
+        CONTEXT_ENVELOPE_MARKER,
     };
     use std::collections::HashMap;
 
@@ -1884,6 +1912,7 @@ mod tests {
             "not-json",
             Some(&vault),
             false,
+            "account-1",
             "alice@example.com",
             None,
         );
@@ -1925,6 +1954,7 @@ mod tests {
             "{\"title\":\"Example\"}",
             Some(&vault),
             true,
+            "account-1",
             "alice@example.com",
             Some(&account),
         )
@@ -1945,6 +1975,24 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("alice@example.com")
         );
+    }
+
+    #[test]
+    fn biometric_enabled_flag_defaults_to_true_when_unset() {
+        // Never-set preference must not disable biometrics implicitly.
+        assert!(biometric_enabled_flag(None));
+    }
+
+    #[test]
+    fn biometric_enabled_flag_respects_explicit_false() {
+        assert!(!biometric_enabled_flag(Some(serde_json::json!(false))));
+        assert!(biometric_enabled_flag(Some(serde_json::json!(true))));
+    }
+
+    #[test]
+    fn biometric_enabled_flag_defaults_to_true_for_non_boolean() {
+        // A malformed/non-boolean value should not silently disable biometrics.
+        assert!(biometric_enabled_flag(Some(serde_json::json!("false"))));
     }
 
     #[test]

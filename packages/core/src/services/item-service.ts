@@ -24,6 +24,7 @@ import type {
 	DefaultRpcClient,
 } from "./account-resolver";
 import { buildItemEncryptionContext } from "./encryption-context";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export type { RawEncryptedItem, RawEncryptedItemWithVault };
 
@@ -503,6 +504,14 @@ export class ItemService {
 						]);
 					}
 
+					// Fail-closed travel-mode guard: require a verified policy and
+					// drop any items belonging to hidden vaults before decrypting,
+					// mirroring VaultRepository. Prevents hidden-vault leakage if
+					// this path is wired into a UI later.
+					const enforcer = getTravelModeEnforcer(this.storage);
+					enforcer.assertVerified(account.accountId);
+					rawItems = enforcer.filterItems(account.accountId, rawItems);
+
 					const vaultKeyCache = new Map<string, Uint8Array>();
 					const decrypted = await Promise.all(
 						rawItems.map(async (rawItem): Promise<MultiAccountItem | null> => {
@@ -641,6 +650,13 @@ export class ItemService {
 				vaultId,
 			});
 		}
+
+		// Fail-closed travel-mode guard: require a verified policy for the owning
+		// account and drop items in hidden vaults (a hidden target vault yields no
+		// items) before decrypting, mirroring VaultRepository.
+		const enforcer = getTravelModeEnforcer(this.storage);
+		enforcer.assertVerified(ownerAccount.accountId);
+		rawItems = enforcer.filterItems(ownerAccount.accountId, rawItems);
 
 		if (rawItems.length === 0) {
 			return [];
@@ -804,6 +820,14 @@ export class ItemService {
 							await account.rpcClient.vault.listAllDeletedItems.query()
 						).map((item) => normalizeRawItemWithVault(item));
 					}
+
+					// Fail-closed travel-mode guard: require a verified policy and
+					// drop items in hidden vaults before decrypting, mirroring
+					// VaultRepository, so deleted-item listings can't leak
+					// hidden-vault data if wired into a UI later.
+					const enforcer = getTravelModeEnforcer(this.storage);
+					enforcer.assertVerified(account.accountId);
+					rawItems = enforcer.filterItems(account.accountId, rawItems);
 
 					const vaultKeyCache = new Map<string, Uint8Array>();
 					const decrypted = await Promise.all(
@@ -1034,7 +1058,8 @@ export class ItemService {
 			this.storage,
 			sourceAccountEmail,
 		);
-		if (!sourceAccountId) throw new Error("Source account identity is required");
+		if (!sourceAccountId)
+			throw new Error("Source account identity is required");
 
 		if (!input.targetAccountEmail) {
 			const sourceVaultKeys = await this.storage.getVaultKeys(sourceAccountId);
@@ -1068,7 +1093,8 @@ export class ItemService {
 			this.storage,
 			targetAccountEmail,
 		);
-		if (!targetAccountId) throw new Error("Target account identity is required");
+		if (!targetAccountId)
+			throw new Error("Target account identity is required");
 		const targetVaultKey = await this.getVaultKey(
 			input.targetVaultId,
 			targetAccountEmail,

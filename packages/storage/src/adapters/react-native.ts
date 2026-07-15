@@ -23,7 +23,11 @@ import {
 	findAccountByServerUser,
 	generateAccountId,
 } from "../account-id";
-import { getAccountKey, getLegacyAccountKey } from "../account-keys";
+import {
+	ACCOUNT_STORAGE_SUFFIXES,
+	getAccountKey,
+	getLegacyAccountKey,
+} from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
@@ -697,22 +701,11 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	async removeAccount(accountId: string): Promise<void> {
-		// Delete all namespaced keys for this account
-		await this.deleteItem(getAccountKey(accountId, "secret_key"));
-		await this.deleteItem(getAccountKey(accountId, "session_data"));
-		await this.deleteItem(getAccountKey(accountId, "jwt_token"));
-		await this.deleteItem(getAccountKey(accountId, "vault_keys"));
-		await this.deleteItem(getAccountKey(accountId, "pinned_kdf_params"));
-		await this.deleteItem(getAccountKey(accountId, "biometric_enabled"));
-		await this.deleteItem(getAccountKey(accountId, "last_biometric_auth"));
-		await this.deleteItem(getAccountKey(accountId, "server_url"));
-		await this.deleteItem(getAccountKey(accountId, "encrypted_private_key"));
-		await this.deleteItem(getAccountKey(accountId, "cached_items"));
-		await this.deleteItem(getAccountKey(accountId, "cached_vaults"));
-		await this.deleteItem(getAccountKey(accountId, "item_cache_meta"));
-		await this.deleteItem(getAccountKey(accountId, "auto_lock_timeout"));
-		await this.deleteItem(getAccountKey(accountId, "background_timestamp"));
-		await this.deleteItem(getAccountKey(accountId, "travel_mode_cache"));
+		// Delete all namespaced keys for this account. Iterating the shared
+		// ACCOUNT_STORAGE_SUFFIXES keeps removal complete as suffixes are added.
+		for (const suffix of ACCOUNT_STORAGE_SUFFIXES) {
+			await this.deleteItem(getAccountKey(accountId, suffix));
+		}
 
 		this.clearAccountCache(accountId);
 

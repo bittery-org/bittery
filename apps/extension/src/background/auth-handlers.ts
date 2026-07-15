@@ -17,10 +17,7 @@ import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
 import { desktopSync } from "./desktop-sync";
 import { rpcClient } from "./rpc-client";
-import {
-	resolveAccountIdFromEmail,
-	resolveEmailFromAccountId,
-} from "./services/account-resolution";
+import { resolveEmailFromAccountId } from "./services/account-resolution";
 import {
 	isUnlocked,
 	lock,
@@ -227,10 +224,9 @@ async function tryRestoreAllSessions(): Promise<void> {
 		// Try to restore each account's session
 		for (const account of accounts) {
 			try {
-				const restored = await getAccountSessionManager({ storage }).unlockAccount(
-					account.accountId,
-					false,
-				);
+				const restored = await getAccountSessionManager({
+					storage,
+				}).unlockAccount(account.accountId, false);
 				if (restored) {
 					restoredAccountIds.push(account.accountId);
 				}
@@ -382,16 +378,16 @@ export async function handleQuickUnlockAll(payload: {
 		throw new Error("Failed to unlock any accounts");
 	}
 
+	// `unlocked` holds accountIds (UUIDs), not emails.
+	const firstUnlockedAccountId = unlocked[0];
+	if (!firstUnlockedAccountId) {
+		throw new Error("No unlocked accounts found");
+	}
+
 	// Set active account mode
 	if (accounts.length > 1) {
 		await storage.setActiveAccount({ type: "all" });
 	} else {
-		const firstUnlockedAccountId = await resolveAccountIdFromEmail(
-			unlocked[0] ?? "",
-		);
-		if (!firstUnlockedAccountId) {
-			throw new Error("No unlocked accounts found");
-		}
 		await storage.setActiveAccount({
 			type: "single",
 			accountId: firstUnlockedAccountId,
@@ -399,9 +395,7 @@ export async function handleQuickUnlockAll(payload: {
 	}
 
 	// Set MUK for first unlocked account in session manager
-	const activeMuk = await storage.getMasterUnlockKey(
-		(await resolveAccountIdFromEmail(unlocked[0] ?? "")) ?? undefined,
-	);
+	const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);
 	if (activeMuk) {
 		setMasterUnlockKey(activeMuk);
 	}

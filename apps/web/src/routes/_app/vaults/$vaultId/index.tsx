@@ -188,7 +188,7 @@ function VaultDetailPage() {
 			await convertVaultType.mutateAsync({
 				vaultId,
 				targetType,
-					accountId: vaultInfo.accountId,
+				accountId: vaultInfo.accountId,
 			});
 			if (targetType === "team") {
 				setIsMakeSharedDialogOpen(false);

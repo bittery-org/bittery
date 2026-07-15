@@ -113,10 +113,16 @@ export function useLogin(
 				input.enableBiometric ?? options.enableBiometric;
 
 			// Store session data
-			const accountId = await storeLoginSession(result, input.secretKey, storage, input.email, {
-				travelModeRpcClient: rpcClientForRequest,
-				serverUrl,
-			});
+			const accountId = await storeLoginSession(
+				result,
+				input.secretKey,
+				storage,
+				input.email,
+				{
+					travelModeRpcClient: rpcClientForRequest,
+					serverUrl,
+				},
+			);
 
 			if (
 				shouldEnableBiometric &&

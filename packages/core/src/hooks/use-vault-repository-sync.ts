@@ -35,7 +35,9 @@ export function useVaultRepositorySync(
 		if (typeof requiredId !== "undefined" && !requiredId) {
 			return;
 		}
-		void core.vaultCoordinator.hydrate(accountsInfo);
+		core.vaultCoordinator.hydrate(accountsInfo).catch((error) => {
+			console.error("[useVaultRepositorySync] hydrate failed:", error);
+		});
 	}, [
 		core.vaultCoordinator,
 		enabled,

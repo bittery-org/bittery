@@ -23,7 +23,11 @@ import {
 	findAccountByServerUser,
 	generateAccountId,
 } from "../account-id";
-import { getAccountKey, getLegacyAccountKey } from "../account-keys";
+import {
+	ACCOUNT_STORAGE_SUFFIXES,
+	getAccountKey,
+	getLegacyAccountKey,
+} from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import {
@@ -162,7 +166,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 						await this.invoke("keychain_set", { key: newKey, value });
 						const copied = await this.invoke("keychain_get", { key: newKey });
 						if (copied !== value) {
-							throw new Error(`Failed to verify keychain migration for ${newKey}`);
+							throw new Error(
+								`Failed to verify keychain migration for ${newKey}`,
+							);
 						}
 					}
 				},
@@ -847,19 +853,14 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			cachedActiveAccount = null;
 		}
 
-		// Delete all namespaced keys for this account
-		await store.delete(getAccountKey(accountId, "secret_key"));
-		await store.delete(getAccountKey(accountId, "session_data"));
-		await store.delete(getAccountKey(accountId, "vault_keys"));
-		await store.delete(getAccountKey(accountId, "pinned_kdf_params"));
-		await store.delete(getAccountKey(accountId, "biometric_enabled"));
-		await store.delete(getAccountKey(accountId, "last_biometric_auth"));
-		await store.delete(getAccountKey(accountId, "server_url"));
-		await store.delete(getAccountKey(accountId, "encrypted_private_key"));
-		await store.delete(getAccountKey(accountId, "cached_items"));
-		await store.delete(getAccountKey(accountId, "cached_vaults"));
-		await store.delete(getAccountKey(accountId, "item_cache_meta"));
-		await store.delete(getAccountKey(accountId, "travel_mode_cache"));
+		// Delete all namespaced keys for this account. Iterating the shared
+		// ACCOUNT_STORAGE_SUFFIXES keeps removal complete as suffixes are added
+		// (previously auto_lock_timeout/background_timestamp were leaked here).
+		// jwt_token lives in the OS keychain on Tauri, not the store, so its store
+		// delete is a harmless no-op and the keychain entry is cleared below.
+		for (const suffix of ACCOUNT_STORAGE_SUFFIXES) {
+			await store.delete(getAccountKey(accountId, suffix));
+		}
 		await store.save();
 		await this.deleteBearerTokenFromKeychain(accountId);
 
@@ -933,8 +934,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	): Promise<number | null> {
 		const store = await this.getStore();
 		const candidateEmails = new Set<string>();
+		const candidateAccountIds = new Set<string>();
 
 		if (accountId) {
+			candidateAccountIds.add(accountId);
 			const accountsList = await this.getAccountsListInternal();
 			const account = findAccountById(accountsList.accounts, accountId);
 			if (account) {
@@ -943,18 +946,42 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 
 		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (resolvedAccountId && resolvedAccountId !== accountId) {
-			const accountsList = await this.getAccountsListInternal();
-			const account = findAccountById(accountsList.accounts, resolvedAccountId);
-			if (account) {
-				candidateEmails.add(account.email.toLowerCase());
+		if (resolvedAccountId) {
+			candidateAccountIds.add(resolvedAccountId);
+			if (resolvedAccountId !== accountId) {
+				const accountsList = await this.getAccountsListInternal();
+				const account = findAccountById(
+					accountsList.accounts,
+					resolvedAccountId,
+				);
+				if (account) {
+					candidateEmails.add(account.email.toLowerCase());
+				}
 			}
 		}
 
 		if (candidateEmails.size === 0) {
 			const accountsList = await this.getAccountsListInternal();
 			for (const account of accountsList.accounts) {
+				candidateAccountIds.add(account.accountId);
 				candidateEmails.add(account.email.toLowerCase());
+			}
+		}
+
+		// The shared account-id migration copies the legacy per-email timeout into
+		// an accountId-scoped key and then deletes the legacy email key. Tauri
+		// treats auto_lock_timeout as a GLOBAL setting and never persists to the
+		// accountId key itself, so that migrated value would otherwise be orphaned
+		// and the user's customized timeout would silently reset to the default.
+		// Read it back here so it can be promoted to the global key (M1).
+		for (const candidateAccountId of candidateAccountIds) {
+			const migratedKey = getAccountKey(
+				candidateAccountId,
+				"auto_lock_timeout",
+			);
+			const timeout = await store.get<number>(migratedKey);
+			if (typeof timeout === "number") {
+				return timeout;
 			}
 		}
 
@@ -980,6 +1007,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			await store.delete(
 				getLegacyAccountKey(account.email.toLowerCase(), "auto_lock_timeout"),
 			);
+			// Remove the orphaned accountId-scoped key populated by the account-id
+			// migration once its value has been promoted to the global key.
+			await store.delete(getAccountKey(account.accountId, "auto_lock_timeout"));
 		}
 	}
 

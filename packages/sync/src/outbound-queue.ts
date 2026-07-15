@@ -156,6 +156,8 @@ export class OutboundQueue {
 	private readonly unresolvedLegacyEmails = new Set<string>();
 	private readonly listeners = new Set<() => void>();
 	private latestMappings: TempIdMapping[] = [];
+	private draining = false;
+	private drainRequested = false;
 
 	constructor(
 		private readonly storage: SyncStorage,
@@ -212,7 +214,8 @@ export class OutboundQueue {
 		this.queuesByAccountId.clear();
 		this.unresolvedLegacyEmails.clear();
 
-		const accountIds = (await this.storage.get<string[]>(QUEUE_INDEX_KEY)) ?? [];
+		const accountIds =
+			(await this.storage.get<string[]>(QUEUE_INDEX_KEY)) ?? [];
 		for (const accountId of accountIds) {
 			const queue =
 				(await this.storage.get<PendingMutation[]>(
@@ -221,13 +224,17 @@ export class OutboundQueue {
 			if (queue.length > 0) {
 				this.queuesByAccountId.set(
 					accountId,
-					queue.map((entry) => ({ ...entry, accountId })).sort((a, b) => a.timestamp - b.timestamp),
+					queue
+						.map((entry) => ({ ...entry, accountId }))
+						.sort((a, b) => a.timestamp - b.timestamp),
 				);
 			}
 		}
 
 		const emails =
-			(await this.storage.get<string[]>(LEGACY_QUEUE_INDEX_KEY))?.map(normalizeEmail) ?? [];
+			(await this.storage.get<string[]>(LEGACY_QUEUE_INDEX_KEY))?.map(
+				normalizeEmail,
+			) ?? [];
 		for (const email of emails) {
 			const queueKey = getQueueKeyForEmail(email);
 			const legacyQueueKey = getLegacyQueueKeyForEmail(email);
@@ -262,7 +269,8 @@ export class OutboundQueue {
 				);
 				await this.persistQueue(accountId);
 				await this.storage.remove(queueKey);
-				if (legacyQueueKey !== queueKey) await this.storage.remove(legacyQueueKey);
+				if (legacyQueueKey !== queueKey)
+					await this.storage.remove(legacyQueueKey);
 			}
 		}
 		await this.storage.set(
@@ -413,7 +421,31 @@ export class OutboundQueue {
 			accountId: string,
 		) => OutboundQueueClient | Promise<OutboundQueueClient>,
 	): Promise<void> {
+		// Serialize drains across all callers (multiple sync sources may share
+		// this queue). A drain triggered while another is in flight is coalesced
+		// into a single follow-up pass so no request is lost.
+		if (this.draining) {
+			this.drainRequested = true;
+			return;
+		}
+
+		this.draining = true;
 		this.latestMappings = [];
+		try {
+			do {
+				this.drainRequested = false;
+				await this.drainOnce(getClient);
+			} while (this.drainRequested);
+		} finally {
+			this.draining = false;
+		}
+	}
+
+	private async drainOnce(
+		getClient: (
+			accountId: string,
+		) => OutboundQueueClient | Promise<OutboundQueueClient>,
+	): Promise<void> {
 		if (this.unresolvedLegacyEmails.size > 0) {
 			throw new Error(
 				`Cannot drain ambiguous legacy queues: ${Array.from(this.unresolvedLegacyEmails).join(", ")}`,
@@ -455,7 +487,7 @@ export class OutboundQueue {
 							mutation.retryCount += 1;
 							await this.persistQueue(accountId);
 							this.emit();
-							return;
+							break;
 						}
 					}
 
@@ -473,7 +505,7 @@ export class OutboundQueue {
 						mutation.retryCount += 1;
 						await this.persistQueue(accountId);
 						this.emit();
-						return;
+						break;
 					}
 
 					console.error(
@@ -483,7 +515,7 @@ export class OutboundQueue {
 					mutation.retryCount += 1;
 					await this.persistQueue(accountId);
 					this.emit();
-					return;
+					break;
 				}
 			}
 		}

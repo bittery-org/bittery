@@ -1,9 +1,24 @@
 import type { IStorageAdapter } from "./adapter";
 import type { AccountMetadata } from "./types";
 
+/**
+ * Monotonic counter guaranteeing uniqueness for the `randomUUID` fallback path.
+ * Without this, several accounts minted within the same millisecond (e.g. the
+ * synchronous `ensureAccountIds` map) would collide on `Date.now()` and alias
+ * each other's per-account storage.
+ */
+let accountIdFallbackCounter = 0;
+
 /** Generate a new stable local account identifier. */
 export function generateAccountId(): string {
-	return globalThis?.crypto?.randomUUID?.() ?? String(Date.now());
+	const uuid = globalThis?.crypto?.randomUUID?.();
+	if (uuid) {
+		return uuid;
+	}
+	// Collision-proof fallback: timestamp + monotonic counter + randomness.
+	accountIdFallbackCounter += 1;
+	const random = Math.random().toString(36).slice(2, 10);
+	return `acct_${Date.now().toString(36)}_${accountIdFallbackCounter}_${random}`;
 }
 
 /** Find account metadata by accountId. */

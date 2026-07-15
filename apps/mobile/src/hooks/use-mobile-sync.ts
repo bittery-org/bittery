@@ -199,16 +199,24 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	const getAuthToken = useCallback(async () => {
 		return storage.getAuthToken(syncAccountId ?? undefined);
 	}, [syncAccountId]);
-	const getClientForAccount = useCallback(async (accountId: string) => {
-		const client = await createStoredAccountRpcClient(storage, accountId, clientId);
-		if (!client) throw new Error(`No RPC client for account ${accountId}`);
-		return client as unknown as OutboundQueueClient;
-	}, [clientId]);
+	const getClientForAccount = useCallback(
+		async (accountId: string) => {
+			const client = await createStoredAccountRpcClient(
+				storage,
+				accountId,
+				clientId,
+			);
+			if (!client) throw new Error(`No RPC client for account ${accountId}`);
+			return client as unknown as OutboundQueueClient;
+		},
+		[clientId],
+	);
 	const resolveLegacyAccountId = useCallback(async (email: string) => {
 		const matches = (await storage.getAccountsList()).filter(
 			(account) => account.email.toLowerCase() === email.toLowerCase(),
 		);
-		if (matches.length !== 1) throw new Error(`Ambiguous legacy account queue for ${email}`);
+		if (matches.length !== 1)
+			throw new Error(`Ambiguous legacy account queue for ${email}`);
 		return matches[0]?.accountId;
 	}, []);
 

@@ -66,7 +66,12 @@ export type DesktopResponse =
 			expiresAt?: number;
 			userId?: string;
 	  }
-	| { type: "DESKTOP_VAULT_KEYS"; accountId: string; email: string; vaultKeys: string }
+	| {
+			type: "DESKTOP_VAULT_KEYS";
+			accountId: string;
+			email: string;
+			vaultKeys: string;
+	  }
 	| {
 			type: "DESKTOP_ITEMS_SNAPSHOT";
 			items: Array<Record<string, unknown>>;
