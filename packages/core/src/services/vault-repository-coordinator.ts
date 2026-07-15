@@ -180,6 +180,54 @@ export class VaultRepositoryCoordinator {
 		);
 	}
 
+	/**
+	 * Hydrates the given accounts' repositories WITHOUT changing the active
+	 * account set. Unlike `hydrate`, this never calls `setActiveAccounts`, so
+	 * `getActiveRepoEntries` (and therefore the single-account item views) are
+	 * left untouched. Used by the item Move dialog to make every unlocked
+	 * account's vault keys available as cross-account move targets while a
+	 * single account remains active.
+	 */
+	async hydrateAccountRepos(accounts: AccountInfo[]): Promise<void> {
+		await Promise.all(
+			accounts.map(async (account) => {
+				const repo = this.getOrCreate(
+					account.accountId,
+					account.serverUrl,
+					account.email,
+				);
+
+				if (
+					(repo.isHydrated() && repo.hasCacheSnapshot()) ||
+					this.hydratingAccountIds.has(account.accountId)
+				) {
+					return;
+				}
+
+				this.hydratingAccountIds.add(account.accountId);
+				this.emit();
+
+				try {
+					await repo.hydrate();
+
+					if (!repo.hasCacheSnapshot()) {
+						await repo.hydrateFromServer(
+							account.rpcClient as unknown as BootstrapItemsClient,
+						);
+					}
+				} catch (error) {
+					console.error(
+						`[VaultRepositoryCoordinator] hydrateAccountRepos failed for account ${account.accountId}:`,
+						error,
+					);
+				} finally {
+					this.hydratingAccountIds.delete(account.accountId);
+					this.emit();
+				}
+			}),
+		);
+	}
+
 	async refreshFromServer(accounts: AccountInfo[]): Promise<void> {
 		this.setActiveAccounts(accounts);
 		await Promise.all(

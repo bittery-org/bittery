@@ -89,7 +89,7 @@ export interface UseQuickUnlockAllOptions {
  * const quickUnlockAll = useQuickUnlockAll({
  *   onSuccess: (result) => {
  *     toast.success(`Unlocked ${result.unlocked.length} accounts`);
- *     navigate('/all-accounts');
+ *     navigate('/vault');
  *   },
  *   onPartialSuccess: (result) => {
  *     toast.warning(`Unlocked ${result.unlocked.length} accounts, ${result.failed.length} failed`);

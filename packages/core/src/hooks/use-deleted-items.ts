@@ -18,16 +18,10 @@ export interface UseDeletedItemsOptions {
  * Hook to fetch deleted items across vaults.
  */
 export function useDeletedItems(options: UseDeletedItemsOptions = {}) {
-	const {
-		accountsInfo,
-		isAllAccountsMode,
-		isLoading,
-		refetch,
-		snapshot,
-		vaultCoordinator,
-	} = useVaultRepositorySync({
-		enabled: options.enabled,
-	});
+	const { accountsInfo, isLoading, refetch, snapshot, vaultCoordinator } =
+		useVaultRepositorySync({
+			enabled: options.enabled,
+		});
 
 	const items = useMemo(() => {
 		// Snapshot is an invalidation signal from the coordinator store.
@@ -40,7 +34,6 @@ export function useDeletedItems(options: UseDeletedItemsOptions = {}) {
 		isLoading,
 		error: null,
 		refetch,
-		isAllAccountsMode,
 		unlockedAccounts: accountsInfo,
 	};
 }

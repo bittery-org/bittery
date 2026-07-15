@@ -288,12 +288,9 @@
 	"vaults_nav_members_dialog_close": "Schließen",
 	"vaults_sidebar_account_switcher_menu_accounts": "Konten",
 	"vaults_sidebar_account_switcher_menu_no_accounts_added": "Keine Konten hinzugefügt",
-	"vaults_sidebar_account_switcher_menu_all_accounts": "Alle Konten",
-	"vaults_sidebar_account_switcher_menu_view_items_from_accounts_single": "Einträge aus {count} Konto anzeigen",
-	"vaults_sidebar_account_switcher_menu_view_items_from_accounts_plural": "Einträge aus {count} Konten anzeigen",
 	"vaults_sidebar_account_switcher_menu_add_account": "Konto hinzufügen",
 	"vaults_sidebar_account_switcher_menu_setup_another_device": "Weiteres Gerät einrichten",
-	"vaults_sidebar_account_switcher_device_setup_dialog_description": "Öffne Bittery auf deinem Smartphone, tippe auf Anmelden und dann auf \u201eDieses Ger\u00e4t einrichten?\u201c, um deine Daten automatisch auszuf\u00fcllen.",
+	"vaults_sidebar_account_switcher_device_setup_dialog_description": "Öffne Bittery auf deinem Smartphone, tippe auf Anmelden und dann auf „Dieses Gerät einrichten?“, um deine Daten automatisch auszufüllen.",
 	"vaults_sidebar_account_switcher_device_setup_dialog_field_account": "Konto",
 	"vaults_sidebar_account_switcher_device_setup_dialog_placeholder_select_account": "Konto auswählen",
 	"vaults_sidebar_account_switcher_device_setup_dialog_error_select_account": "Wähle ein Konto aus, um Einrichtungsdetails zu erzeugen.",
@@ -604,10 +601,10 @@
 	"vault_export_dialog_cancel": "Abbrechen",
 	"vault_export_dialog_download": "Archiv herunterladen",
 	"vault_export_dialog_try_again": "Erneut versuchen",
-	"vault_export_dialog_stage_fetching": "Einträge abrufen\u2026",
-	"vault_export_dialog_stage_decrypting": "Einträge entschlüsseln\u2026",
-	"vault_export_dialog_stage_downloading_files": "Anhänge herunterladen\u2026",
-	"vault_export_dialog_stage_building_archive": "Archiv erstellen\u2026",
+	"vault_export_dialog_stage_fetching": "Einträge abrufen…",
+	"vault_export_dialog_stage_decrypting": "Einträge entschlüsseln…",
+	"vault_export_dialog_stage_downloading_files": "Anhänge herunterladen…",
+	"vault_export_dialog_stage_building_archive": "Archiv erstellen…",
 	"vault_export_dialog_stage_completed": "Export abgeschlossen",
 	"vault_export_dialog_progress_items": "{done} von {total} Einträgen",
 	"vault_export_dialog_progress_attachments": "{done} von {total} Anhängen",
@@ -953,8 +950,6 @@
 	"toast_auth_unlock_success_single": "Tresor entsperrt",
 	"toast_auth_unlock_warning_partial": "{unlockedCount} von {totalCount} Konten entsperrt",
 	"toast_account_switcher_switch_account_failed": "Kontowechsel fehlgeschlagen",
-	"toast_account_switcher_no_unlocked_accounts": "Keine Konten sind entsperrt. Bitte entsperre mindestens ein Konto.",
-	"toast_account_switcher_switch_all_accounts_failed": "Wechsel in den Modus „Alle Konten“ fehlgeschlagen",
 	"toast_account_switcher_lock_all_success": "Alle Konten wurden gesperrt",
 	"toast_account_switcher_lock_all_failed": "Konten konnten nicht gesperrt werden",
 	"toast_account_switcher_remove_account_success": "Konto entfernt",
@@ -1704,15 +1699,13 @@
 	"device_setup_scanner_try_again": "Erneut versuchen",
 	"vaults_sidebar_account_switcher_device_setup_dialog_step_1": "Lade Bittery auf dein Gerät herunter",
 	"vaults_sidebar_account_switcher_device_setup_dialog_step_2": "Öffne die App und tippe auf Anmelden",
-	"vaults_sidebar_account_switcher_device_setup_dialog_step_3": "Tippe auf \u201eDieses Ger\u00e4t einrichten?\u201c",
+	"vaults_sidebar_account_switcher_device_setup_dialog_step_3": "Tippe auf „Dieses Gerät einrichten?“",
 	"vaults_sidebar_account_switcher_device_setup_dialog_step_4": "Richte deine Kamera auf diesen QR-Code",
 	"vaults_sidebar_account_switcher_device_setup_dialog_step_5": "Gib dein Master-Passwort ein",
 	"vaults_sidebar_account_switcher_device_setup_dialog_no_secret_key_guidance": "Dein Secret Key ist in dieser Sitzung nicht gespeichert. Verwende den unten stehenden Setup-Link – er füllt deine E-Mail-Adresse und Server-URL auf dem neuen Gerät automatisch aus. Du musst deinen Secret Key manuell eingeben.",
 	"settings_devices_action_setup_another": "Weiteres Gerät einrichten",
-
 	"MSG_extName": "Bittery",
 	"MSG_extDescription": "Passwörter und Passkeys, auf deinem Gerät verschlüsselt. Zero-Knowledge-Autofill.",
-
 	"ext_login_toast_invalid_server_url": "Ungültige Server-URL",
 	"ext_login_toast_account_added": "Konto erfolgreich hinzugefügt",
 	"ext_login_toast_signed_in": "Erfolgreich angemeldet!",
@@ -1723,7 +1716,6 @@
 	"ext_login_description": "Gib deine Zugangsdaten ein, um auf deinen Tresor zuzugreifen",
 	"ext_login_label_server_url": "Server-URL",
 	"ext_login_server_url_hint": "Die URL deines selbst gehosteten Bittery-Servers",
-
 	"ext_unlock_toast_unlocked_all": "Alle {count} Konten entsperrt",
 	"ext_unlock_toast_partial": "{unlockedCount} von {totalCount} Konten entsperrt",
 	"ext_unlock_toast_failed": "Entsperren fehlgeschlagen",
@@ -1735,7 +1727,6 @@
 	"ext_unlock_biometric_fallback": "Oder nutze dein Passwort unten",
 	"ext_unlock_button_unlocking": "Entsperren...",
 	"ext_unlock_button_unlock_all": "Alle entsperren ({count})",
-
 	"ext_settings_label_extension": "Erweiterung",
 	"ext_settings_label_settings": "Einstellungen",
 	"ext_settings_section_security": "Sicherheit",
@@ -1756,7 +1747,6 @@
 	"ext_settings_sign_out_description": "Von deinem Konto auf diesem Gerät abmelden",
 	"ext_settings_toast_signed_out": "Erfolgreich abgemeldet",
 	"ext_settings_toast_sign_out_failed": "Abmelden fehlgeschlagen",
-
 	"ext_vault_has_2fa": "Hat 2FA",
 	"ext_vault_passkey_count_single": "{count} Passkey",
 	"ext_vault_passkey_count_plural": "{count} Passkeys",
@@ -1773,19 +1763,13 @@
 	"ext_vault_all_items": "Alle Einträge",
 	"ext_vault_select_item": "Eintrag auswählen",
 	"ext_vault_select_item_hint": "Wähle einen Eintrag aus der Liste, um die Details zu sehen.",
-
 	"ext_item_detail_not_found": "Eintrag nicht gefunden",
 	"ext_item_detail_title": "Eintragdetails",
 	"ext_item_detail_description": "Gespeicherte Zugangsdaten ansehen und kopieren",
-
 	"ext_account_switcher_toast_switch_failed": "Kontowechsel fehlgeschlagen",
 	"ext_account_switcher_toast_all_locked": "Alle Konten gesperrt",
 	"ext_account_switcher_toast_lock_failed": "Konten sperren fehlgeschlagen",
-	"ext_account_switcher_toast_no_unlocked": "Keine Konten sind entsperrt. Bitte entsperre mindestens ein Konto.",
-	"ext_account_switcher_toast_all_accounts_failed": "Wechsel zu Alle Konten fehlgeschlagen",
-	"ext_account_switcher_all_accounts": "Alle Konten",
 	"ext_account_switcher_unlocked_count": "{count} entsperrt",
-
 	"ext_detail_toast_no_url": "Keine URL zum Öffnen",
 	"ext_detail_click_to_copy": "Zum Kopieren klicken",
 	"ext_detail_otp": "Einmalpasswort",
@@ -1812,7 +1796,6 @@
 	"ext_detail_last_used_today": "heute",
 	"ext_detail_last_used_yesterday": "gestern",
 	"ext_detail_last_used_days_ago": "vor {count} T.",
-
 	"ext_qr_scan_title": "TOTP QR-Code scannen",
 	"ext_qr_scan_description": "Stelle sicher, dass der TOTP QR-Code auf der aktuellen Seite sichtbar ist, dann klicke auf Scannen.",
 	"ext_qr_scan_button": "Seite nach QR-Code scannen",
@@ -1825,7 +1808,6 @@
 	"ext_qr_try_again": "Erneut versuchen",
 	"ext_qr_cancel": "Abbrechen",
 	"ext_qr_error_scan_toast": "QR-Code-Scan fehlgeschlagen",
-
 	"ext_autofill_unlock_required": "Entsperren erforderlich",
 	"ext_autofill_no_matches": "Keine Treffer für \"{query}\"",
 	"ext_autofill_available": "verfügbar",
@@ -1833,24 +1815,20 @@
 	"ext_autofill_match": "Treffer",
 	"ext_autofill_matches": "Treffer",
 	"ext_autofill_keyboard_hint": "Tippen zum Filtern • ↑↓ navigieren • Enter auswählen • Esc schließen",
-
 	"ext_autofill_login_empty": "Keine gespeicherten Logins für diese Seite",
 	"ext_autofill_login_unlock": "Klicke auf das Bittery-Symbol, um zu entsperren und Autofill zu verwenden",
 	"ext_autofill_login_singular": "Login",
 	"ext_autofill_login_plural": "Logins",
-
 	"ext_autofill_card_brand_unknown": "Karte",
 	"ext_autofill_card_empty": "Keine gespeicherten Kreditkarten",
 	"ext_autofill_card_unlock": "Klicke auf das Bittery-Symbol, um zu entsperren und Kreditkarten-Autofill zu verwenden",
 	"ext_autofill_card_singular": "Karte",
 	"ext_autofill_card_plural": "Karten",
 	"ext_autofill_card_expiry": "Abl.: {date}",
-
 	"ext_autofill_identity_empty": "Keine gespeicherten Identitäten",
 	"ext_autofill_identity_unlock": "Klicke auf das Bittery-Symbol, um zu entsperren und Identitäts-Autofill zu verwenden",
 	"ext_autofill_identity_singular": "Identität",
 	"ext_autofill_identity_plural": "Identitäten",
-
 	"ext_save_updating": "Zugangsdaten werden aktualisiert...",
 	"ext_save_saving": "Zugangsdaten werden gespeichert...",
 	"ext_save_updated": "Zugangsdaten aktualisiert!",
@@ -1874,7 +1852,6 @@
 	"ext_save_new": "Neu speichern",
 	"ext_save_button": "Speichern",
 	"ext_save_error_fallback": "Zugangsdaten konnten nicht gespeichert werden. Bitte versuche es erneut.",
-
 	"ext_passkey_never_used": "Nie verwendet",
 	"ext_passkey_used_recently": "Kürzlich verwendet",
 	"ext_passkey_used_today": "Heute verwendet",
@@ -1889,7 +1866,6 @@
 	"ext_passkey_vault_fallback": "Tresor",
 	"ext_passkey_use": "Passkey verwenden",
 	"ext_passkey_cancel": "Abbrechen",
-
 	"ext_passkey_save_title": "Wo soll der Passkey gespeichert werden?",
 	"ext_passkey_save_attach": "An bestehendes Login anhängen",
 	"ext_passkey_save_vault_fallback": "Tresor",
@@ -1899,13 +1875,11 @@
 	"ext_passkey_save_no_target": "Kein beschreibbares Ziel für diesen Passkey verfügbar.",
 	"ext_passkey_save_continue": "Weiter",
 	"ext_passkey_save_cancel": "Abbrechen",
-
 	"mob_tab_all_items": "Alle Einträge",
 	"mob_tab_search": "Suche",
 	"mob_tab_tags": "Tags",
 	"mob_tab_vaults": "Tresore",
 	"mob_tab_trash": "Papierkorb",
-
 	"mob_unlock_title": "Bittery entsperren",
 	"mob_unlock_all_accounts": "Alle Konten",
 	"mob_unlock_accounts_count": "{count} Konten",
@@ -1929,14 +1903,12 @@
 	"mob_unlock_alert_session_expired_message": "Bitte melden Sie sich erneut mit Ihren Zugangsdaten an.",
 	"mob_unlock_biometric_not_available": "Biometrische Entsperrung ist nicht verfügbar.",
 	"mob_unlock_biometric_failed": "Biometrische Authentifizierung fehlgeschlagen.",
-
 	"mob_items_error_loading": "Fehler beim Laden der Einträge",
 	"mob_items_button_retry": "Erneut versuchen",
 	"mob_items_empty_no_items_filtered": "Keine Einträge gefunden",
 	"mob_items_empty_no_items": "Noch keine Einträge",
 	"mob_items_empty_try_filter": "Versuchen Sie einen anderen Filter",
 	"mob_items_empty_add_items_description": "Fügen Sie Einträge zu Ihren Tresoren hinzu, um sie hier zu sehen",
-
 	"mob_search_empty_title": "Tresor durchsuchen",
 	"mob_search_empty_description": "Passwörter, Karten, Notizen und mehr finden",
 	"mob_search_recent_title": "Letzte Suchen",
@@ -1946,7 +1918,6 @@
 	"mob_search_result_count_singular": "{count} Ergebnis",
 	"mob_search_result_count_plural": "{count} Ergebnisse",
 	"mob_search_placeholder": "Einträge suchen...",
-
 	"mob_trash_time_today": "Heute",
 	"mob_trash_time_yesterday": "Gestern",
 	"mob_trash_time_days_ago": "Vor {count} Tagen",
@@ -1963,27 +1934,23 @@
 	"mob_trash_error_loading": "Fehler beim Laden des Papierkorbs",
 	"mob_trash_empty_title": "Papierkorb ist leer",
 	"mob_trash_empty_description": "Gelöschte Einträge erscheinen hier für 30 Tage, bevor sie endgültig entfernt werden",
-
 	"mob_vaults_toast_create_title": "Tresor erstellen",
 	"mob_vaults_toast_create_description": "Tresor-Erstellung kommt bald. Erstellen Sie Tresore vorerst über die Web-App.",
 	"mob_vaults_section_personal": "Persönliche Tresore",
 	"mob_vaults_section_team": "Team-Tresore",
 	"mob_vaults_empty_title": "Noch keine Tresore",
 	"mob_vaults_empty_description": "Erstellen Sie einen Tresor, um Ihre Passwörter zu speichern",
-
 	"mob_tags_search_placeholder": "Tags suchen...",
 	"mob_tags_error_loading": "Fehler beim Laden der Tags",
 	"mob_tags_empty_no_results": "Keine Tags gefunden",
 	"mob_tags_empty_no_tags": "Noch keine Tags",
 	"mob_tags_empty_no_results_description": "Versuchen Sie einen anderen Suchbegriff",
 	"mob_tags_empty_no_tags_description": "Fügen Sie Tags zu Ihren Einträgen hinzu, um sie zu organisieren",
-
 	"mob_tag_filter_fallback_title": "Tag",
 	"mob_tag_filter_error_loading": "Fehler beim Laden der Einträge",
 	"mob_tag_filter_empty_title": "Keine Einträge gefunden",
 	"mob_tag_filter_empty_category_description": "Versuchen Sie einen anderen Kategorie-Filter",
 	"mob_tag_filter_empty_no_items_description": "Keine Einträge haben diesen Tag",
-
 	"mob_create_item_header": "Neuer Eintrag",
 	"mob_create_item_saving": "Speichern...",
 	"mob_create_item_save": "Speichern",
@@ -2001,7 +1968,6 @@
 	"mob_create_item_toast_totp_invalid": "Bitte geben Sie einen gültigen TOTP-Geheimschlüssel ein",
 	"mob_create_item_toast_success": "Eintrag erfolgreich erstellt",
 	"mob_create_item_toast_failed": "Eintrag konnte nicht erstellt werden",
-
 	"mob_vault_items_loading": "Laden...",
 	"mob_vault_items_search_placeholder": "Einträge suchen...",
 	"mob_vault_items_fallback_title": "Einträge",
@@ -2010,7 +1976,6 @@
 	"mob_vault_items_empty_filtered_description": "Versuchen Sie eine andere Suche oder einen anderen Filter",
 	"mob_vault_items_empty_description": "Fügen Sie Ihr erstes Passwort oder sicheres Element hinzu",
 	"mob_vault_items_empty_add_item": "Eintrag hinzufügen",
-
 	"mob_item_detail_toast_copied": "In Zwischenablage kopiert",
 	"mob_item_detail_toast_copied_description": "{label} wurde in die Zwischenablage kopiert.",
 	"mob_item_detail_toast_deleted": "Eintrag in Papierkorb verschoben",
@@ -2019,7 +1984,6 @@
 	"mob_item_detail_toast_password_restored": "Passwort wiederhergestellt",
 	"mob_item_detail_toast_password_restored_description": "Das Passwort wurde erfolgreich wiederhergestellt.",
 	"mob_item_detail_toast_password_restore_failed": "Passwort konnte nicht wiederhergestellt werden",
-
 	"mob_edit_item_not_found": "Eintrag nicht gefunden",
 	"mob_edit_item_go_back": "Zurück",
 	"mob_edit_item_untitled": "Ohne Titel",
@@ -2034,21 +1998,14 @@
 	"mob_edit_item_toast_totp_invalid": "Bitte geben Sie einen gültigen TOTP-Geheimschlüssel ein",
 	"mob_edit_item_toast_success": "Eintrag erfolgreich aktualisiert",
 	"mob_edit_item_toast_failed": "Eintrag konnte nicht aktualisiert werden",
-
 	"mob_autofill_unlock_title": "Für Autofill entsperren",
 	"mob_autofill_unlock_alert_unlocked_title": "Entsperrt",
 	"mob_autofill_unlock_alert_unlocked_message": "Ihr Tresor ist jetzt entsperrt. Kehren Sie zur App zurück, um Autofill zu verwenden.",
 	"mob_autofill_unlock_alert_ok": "OK",
-	"mob_autofill_unlock_alert_partial": "Teilweise entsperrt",
-	"mob_autofill_unlock_alert_partial_message": "{unlocked} von {total} Konten entsperrt.",
-
 	"mob_settings_title": "Einstellungen",
 	"mob_settings_section_account": "Konto",
-	"mob_settings_all_accounts": "Alle Konten",
 	"mob_settings_account_fallback": "Konto",
-	"mob_settings_accounts_count": "{count} Konten",
 	"mob_settings_server_label": "Server",
-	"mob_settings_server_per_account": "Pro Konto",
 	"mob_settings_server_not_set": "Nicht festgelegt",
 	"mob_settings_section_appearance": "Erscheinungsbild",
 	"mob_settings_dark_mode": "Dunkelmodus",
@@ -2078,15 +2035,10 @@
 	"mob_settings_accessibility_title": "Alternativer Zugang",
 	"mob_settings_accessibility_description": "Wenn Sie die biometrische Authentifizierung nicht nutzen können, können Sie Ihren Tresor jederzeit mit Ihrem Master-Passwort entsperren. Die Passwort-Option ist auf dem Entsperrbildschirm verfügbar.",
 	"mob_settings_section_other_accounts": "Andere Konten",
-	"mob_settings_section_accounts": "Konten",
 	"mob_settings_section_danger": "Gefahrenzone",
 	"mob_settings_sign_out": "Abmelden",
-	"mob_settings_sign_out_all": "Alle abmelden",
 	"mob_settings_sign_out_value": "Dieses Konto vom Gerät entfernen",
-	"mob_settings_sign_out_all_value": "Alle Konten vom Gerät entfernen",
-	"mob_settings_sign_out_all_title": "Alle Konten abmelden",
 	"mob_settings_sign_out_description": "Dies entfernt Ihr Konto von diesem Gerät. Sie benötigen Ihren Geheimschlüssel, um sich erneut anzumelden.",
-	"mob_settings_sign_out_all_description": "Dies entfernt alle Konten von diesem Gerät. Sie benötigen Ihre Geheimschlüssel, um sich erneut anzumelden.",
 	"mob_settings_remove_account_title": "Konto entfernen",
 	"mob_settings_remove_account_message": "Möchten Sie {email} wirklich von diesem Gerät entfernen?",
 	"mob_settings_remove_account_confirm": "Entfernen",
@@ -2096,14 +2048,9 @@
 	"mob_settings_biometric_settings_error": "Biometrische Einstellungen konnten nicht aktualisiert werden",
 	"mob_settings_app_name": "Bittery Mobile",
 	"mob_settings_app_version": "Version 0.1.0",
-
 	"mob_index_authenticating": "Authentifizierung...",
-
 	"mob_account_switcher_title": "Konten",
-	"mob_account_switcher_all_accounts": "Alle Konten",
 	"mob_account_switcher_toast_switch_failed": "Kontowechsel fehlgeschlagen. Bitte versuchen Sie es erneut.",
-	"mob_account_switcher_toast_unlock_required": "Entsperren Sie mindestens ein Konto, um Alle Konten zu verwenden.",
-	"mob_account_switcher_toast_switch_all_failed": "Kontowechsel fehlgeschlagen. Bitte versuchen Sie es erneut.",
 	"mob_account_switcher_add_account": "Konto hinzufügen",
 	"mob_account_switcher_settings": "Einstellungen",
 	"mob_account_switcher_trash": "Papierkorb",
@@ -2112,7 +2059,6 @@
 	"mob_account_switcher_lock_dialog_message": "Dadurch wird Ihr Tresor gesperrt. Sie müssen Ihr Passwort eingeben, um ihn zu entsperren.",
 	"mob_account_switcher_lock_dialog_cancel": "Abbrechen",
 	"mob_account_switcher_lock_dialog_confirm": "Sperren",
-
 	"mob_conflict_title": "Synchronisationskonflikt",
 	"mob_conflict_subtitle": "Wählen Sie, welche Version beibehalten werden soll",
 	"mob_conflict_description_delete": "Dieser Eintrag wurde auf dem Server gelöscht, während Sie lokale Änderungen hatten.",
@@ -2141,7 +2087,6 @@
 	"mob_conflict_list_modified_both": "Auf beiden Geräten geändert",
 	"mob_conflict_summary_singular": "{count} Synchronisationskonflikt",
 	"mob_conflict_summary_plural": "{count} Synchronisationskonflikte",
-
 	"mob_password_gen_type_label": "Passwort-Typ",
 	"mob_password_gen_type_random": "Zufällig",
 	"mob_password_gen_type_memorable": "Merkbar",
@@ -2163,7 +2108,6 @@
 	"mob_password_gen_memorable_hint": "Merkbare Passwörter verwenden Wortkombinationen, die leichter zu merken sind und dennoch sicher bleiben.",
 	"mob_password_gen_use_button": "Dieses Passwort verwenden",
 	"mob_password_gen_toast_copied": "Passwort in Zwischenablage kopiert",
-
 	"mob_password_history_title": "Passwortverlauf",
 	"mob_password_history_description": "Vorherige Passwörter anzeigen und bei Bedarf wiederherstellen.",
 	"mob_password_history_empty": "Noch keine früheren Passwörter gespeichert.",
@@ -2175,10 +2119,8 @@
 	"mob_password_history_restore_dialog_message": "Dieses Passwort wiederherstellen? Das aktuelle Passwort wird automatisch archiviert.",
 	"mob_password_history_restore_dialog_cancel": "Abbrechen",
 	"mob_password_history_restore_dialog_confirm": "Wiederherstellen",
-
 	"mob_totp_display_label": "Einmalpasswort",
 	"mob_totp_display_toast_copied": "Code in Zwischenablage kopiert",
-
 	"mob_qr_scanner_loading_camera": "Kamera wird geladen...",
 	"mob_qr_scanner_permission_title": "Kamerazugriff erforderlich",
 	"mob_qr_scanner_permission_description": "Um TOTP-QR-Codes zu scannen, benötigt Bittery Zugriff auf Ihre Kamera. Ihre Kamera wird nur zum Scannen verwendet und nicht aufgezeichnet.",
@@ -2194,7 +2136,6 @@
 	"mob_qr_scanner_cancel": "Abbrechen",
 	"mob_qr_scanner_instruction": "Positionieren Sie den QR-Code im Rahmen zum Scannen",
 	"mob_qr_scanner_processing": "Verarbeitung...",
-
 	"mob_share_title": "Eintrag teilen",
 	"mob_share_description": "Erstellen Sie einen sicheren Link, um \"{title}\" zu teilen",
 	"mob_share_expires_label": "Link läuft ab in",
@@ -2212,23 +2153,19 @@
 	"mob_share_toast_shared": "Link geteilt",
 	"mob_share_toast_shared_description": "Der sichere Freigabelink wurde geteilt.",
 	"mob_share_toast_failed": "Freigabelink konnte nicht erstellt werden",
-
 	"mob_vault_item_team_badge": "Team",
 	"mob_vault_item_type_team": "Team-Tresor",
 	"mob_vault_item_type_personal": "Persönlicher Tresor",
-
 	"mob_tag_input_default_label": "Tags",
 	"mob_tag_input_default_placeholder": "Tags hinzufügen...",
 	"mob_tag_input_max_reached": "Maximal {count} Tags erreicht",
 	"mob_tag_input_add_button": "Hinzufügen",
-
 	"mob_category_all": "Alle Kategorien",
 	"mob_category_login": "Login",
 	"mob_category_credit_card": "Kreditkarte",
 	"mob_category_identity": "Identität",
 	"mob_category_secure_note": "Sichere Notiz",
 	"mob_category_totp": "TOTP",
-
 	"mob_biometric_error_not_available": "Dieses Gerät unterstützt keine biometrische Authentifizierung.",
 	"mob_biometric_error_not_enrolled": "Auf diesem Gerät ist keine Biometrie eingerichtet. Bitte konfigurieren Sie Face ID oder Touch ID in Ihren Geräteeinstellungen.",
 	"mob_biometric_error_not_enabled": "Die biometrische Entsperrung ist für dieses Konto nicht aktiviert. Sie können sie in den Einstellungen aktivieren.",
@@ -2239,7 +2176,6 @@
 	"mob_biometric_error_session_expired": "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich mit Ihren Zugangsdaten an.",
 	"mob_biometric_error_account_not_found": "Kein Konto für biometrisches Entsperren gefunden.",
 	"mob_biometric_error_unknown": "Bei der Authentifizierung ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.",
-
 	"mob_biometric_modal_password_required_title": "Passwort erforderlich",
 	"mob_biometric_modal_password_required_description": "Zu Ihrer Sicherheit geben Sie bitte Ihr Master-Passwort ein. Dies ist alle 30 Tage erforderlich.",
 	"mob_biometric_modal_enter_password": "Passwort eingeben",
@@ -2250,10 +2186,8 @@
 	"mob_biometric_modal_use_password": "Stattdessen Passwort verwenden",
 	"mob_biometric_modal_use_biometric": "{biometricType} verwenden, um Ihren Tresor zu entsperren",
 	"mob_biometric_modal_authenticate": "Authentifizieren",
-
 	"mob_empty_state_no_items": "Noch keine Einträge",
 	"mob_empty_state_add_description": "Fügen Sie Einträge zu Ihren Tresoren hinzu, um sie hier zu sehen",
-
 	"mob_detail_field_cardholder_name": "Name des Karteninhabers",
 	"mob_detail_field_card_number": "Kartennummer",
 	"mob_detail_field_expiry_date": "Ablaufdatum",
@@ -2286,14 +2220,12 @@
 	"mob_detail_error_title": "Fehler beim Laden des Eintrags",
 	"mob_detail_error_unknown": "Unbekannter Fehler",
 	"mob_detail_not_found": "Eintrag nicht gefunden",
-
 	"mob_item_header_action_edit": "Eintrag bearbeiten",
 	"mob_item_header_action_share": "Eintrag teilen",
 	"mob_item_header_action_share_creating": "Link wird erstellt...",
 	"mob_item_header_action_password_history": "Passwortverlauf",
 	"mob_item_header_action_delete": "In den Papierkorb verschieben",
 	"mob_item_header_action_deleting": "Wird in den Papierkorb verschoben...",
-
 	"mob_attachments_title": "Anhänge",
 	"mob_attachments_title_count": "Anhänge ({count})",
 	"mob_attachments_attach_button": "Anhängen",
@@ -2318,14 +2250,12 @@
 	"mob_attachments_toast_deleted": "Anhang gelöscht",
 	"mob_attachments_toast_delete_failed": "Löschen fehlgeschlagen",
 	"mob_attachments_toast_delete_failed_description": "Anhang konnte nicht gelöscht werden.",
-
 	"mob_form_login_username_label": "Benutzername",
 	"mob_form_login_username_placeholder": "Benutzernamen eingeben",
 	"mob_form_login_password_label": "Passwort",
 	"mob_form_login_password_placeholder": "Passwort eingeben",
 	"mob_form_login_url_label": "Webseiten-URL",
 	"mob_form_login_url_placeholder": "https://beispiel.de",
-
 	"mob_form_cc_cardholder_label": "Name des Karteninhabers",
 	"mob_form_cc_cardholder_placeholder": "Name auf der Karte",
 	"mob_form_cc_number_label": "Kartennummer",
@@ -2336,17 +2266,14 @@
 	"mob_form_cc_cvv_placeholder": "123",
 	"mob_form_cc_billing_label": "Rechnungsadresse",
 	"mob_form_cc_billing_placeholder": "Musterstraße 123, Stadt, PLZ",
-
 	"mob_form_identity_first_name_label": "Vorname",
 	"mob_form_identity_first_name_placeholder": "Vorname",
 	"mob_form_identity_last_name_label": "Nachname",
 	"mob_form_identity_last_name_placeholder": "Nachname",
 	"mob_form_identity_email_label": "E-Mail",
 	"mob_form_identity_email_placeholder": "email@beispiel.de",
-
 	"mob_form_note_label": "Notiz",
 	"mob_form_note_placeholder": "Geben Sie Ihre sichere Notiz ein...",
-
 	"mob_form_totp_scan_qr": "QR scannen",
 	"mob_form_totp_paste": "Einfügen",
 	"mob_form_totp_secret_label": "Geheimschlüssel",

@@ -255,7 +255,6 @@ export function TravelModeSettings() {
 	});
 
 	const accounts = accountsQuery.data?.accountsInfo ?? [];
-	const isAllAccountsMode = accountsQuery.data?.isAllAccountsMode ?? false;
 
 	if (accountsQuery.isLoading) {
 		return (
@@ -283,7 +282,7 @@ export function TravelModeSettings() {
 				<TravelModeAccountSettings
 					key={account.accountId}
 					account={account}
-					showAccountHeading={isAllAccountsMode}
+					showAccountHeading={false}
 				/>
 			))}
 		</SettingsSection>

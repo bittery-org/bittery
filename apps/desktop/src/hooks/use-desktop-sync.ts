@@ -56,10 +56,9 @@ function areSyncContextsEquivalent(
 async function resolveDesktopSyncContexts(
 	clientId?: string,
 ): Promise<SyncConnectionContext[]> {
-	const [activeAccount, accounts, unlocked] = await Promise.all([
+	const [activeAccount, accounts] = await Promise.all([
 		storage.getActiveAccount(),
 		storage.getAccountsList(),
-		storage.getUnlockedAccounts?.(),
 	]);
 
 	const accountById = new Map(
@@ -68,12 +67,6 @@ async function resolveDesktopSyncContexts(
 	const candidateIds: string[] = [];
 	if (activeAccount?.type === "single") {
 		candidateIds.push(activeAccount.accountId);
-	} else if (activeAccount?.type === "all") {
-		for (const accountId of unlocked ?? []) {
-			if (!candidateIds.includes(accountId)) {
-				candidateIds.push(accountId);
-			}
-		}
 	}
 
 	const contexts: SyncConnectionContext[] = [];
@@ -281,13 +274,6 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			) {
 				window.location.href = `/unlock?email=${encodeURIComponent(normalizedEmail)}`;
 				return;
-			}
-
-			if (activeAccount?.type === "all") {
-				const unlockedAccounts = await storage.getUnlockedAccounts?.();
-				if (!unlockedAccounts || unlockedAccounts.length === 0) {
-					window.location.href = "/unlock";
-				}
 			}
 		},
 		[queryClient],

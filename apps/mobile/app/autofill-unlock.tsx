@@ -2,7 +2,6 @@ import {
 	useBiometricUnlock,
 	usePlatformStorage,
 	useQuickUnlock,
-	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
 import { useQuery } from "@tanstack/react-query";
@@ -46,7 +45,6 @@ import { useAccount } from "../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../src/lib/biometric-error-message";
 import { arrayBufferToBase64 } from "../src/lib/crypto";
 import { useServerUrl } from "../src/lib/rpc";
-import { enforceTravelModeForUnlockedAccounts } from "../src/lib/travel-mode-unlock";
 import { useI18n } from "../src/providers/i18n-provider";
 import { storage } from "../src/services/storage";
 
@@ -68,8 +66,7 @@ export default function AutofillUnlockScreen() {
 	}>();
 	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
-	const { activeAccount, isAllAccountsMode, allAccounts, refreshAccounts } =
-		useAccount();
+	const { activeAccount, allAccounts, refreshAccounts } = useAccount();
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -81,57 +78,16 @@ export default function AutofillUnlockScreen() {
 	// Get session state for the active account
 	const { data: sessionState, refetch: refetchSessionState } = useSessionState(
 		activeAccount?.accountId,
-		{ enabled: !!activeAccount && !isAllAccountsMode },
+		{ enabled: !!activeAccount },
 	);
 	const biometricTypeQuery = useQuery({
 		queryKey: ["autofill-unlock", "biometric-type"],
 		queryFn: async () => {
 			return (await platformStorage.getBiometricType?.()) ?? null;
 		},
-		enabled: !!activeAccount || isAllAccountsMode,
+		enabled: !!activeAccount,
 	});
 	const biometricType = biometricTypeQuery.data ?? null;
-	const allAccountsStatusQuery = useQuery({
-		queryKey: [
-			"autofill-unlock",
-			"all-accounts-status",
-			allAccounts.map((account) => account.email).join("|"),
-		],
-		queryFn: async () => {
-			if (allAccounts.length === 0) {
-				return {
-					canBiometricUnlock: false,
-					requiresPasswordReentry: false,
-					isLoading: false,
-				};
-			}
-
-			const [biometricFlags, reentryFlags] = await Promise.all([
-				Promise.all(
-					allAccounts.map((account) =>
-						storage.canBiometricUnlock(account.accountId),
-					),
-				),
-				Promise.all(
-					allAccounts.map((account) =>
-						storage.isMasterPasswordReentryRequired(account.accountId),
-					),
-				),
-			]);
-
-			return {
-				canBiometricUnlock: biometricFlags.some(Boolean),
-				requiresPasswordReentry: reentryFlags.some(Boolean),
-				isLoading: false,
-			};
-		},
-		enabled: isAllAccountsMode,
-	});
-	const allAccountsStatus = allAccountsStatusQuery.data ?? {
-		canBiometricUnlock: false,
-		requiresPasswordReentry: false,
-		isLoading: allAccountsStatusQuery.isLoading,
-	};
 
 	const setNativeMuksForAccountIds = useCallback(
 		async (accountIds: string[]) => {
@@ -311,140 +267,7 @@ export default function AutofillUnlockScreen() {
 		},
 	});
 
-	const resolveUnlockedAccountIds = useCallback(
-		(identifiers: string[]) =>
-			identifiers.map((identifier) => {
-				const byId = allAccounts.find(
-					(account) => account.accountId === identifier,
-				);
-				if (byId) {
-					return byId.accountId;
-				}
-				const byEmail = allAccounts.find(
-					(account) => account.email === identifier,
-				);
-				return byEmail?.accountId ?? identifier;
-			}),
-		[allAccounts],
-	);
-
-	const finalizeAllAccountsUnlock = useCallback(
-		async (unlockedIdentifiers: string[], showPartialAlert: boolean) => {
-			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForAccountIds(
-					resolveUnlockedAccountIds(unlockedIdentifiers),
-				);
-			}
-
-			if (allAccounts.length > 1) {
-				await storage.setActiveAccount({ type: "all" });
-			} else if (allAccounts.length === 1) {
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: allAccounts[0].accountId,
-				});
-			}
-
-			await refreshAccounts();
-
-			if (showPartialAlert) {
-				Alert.alert(
-					m.mob_autofill_unlock_alert_partial(),
-					m.mob_autofill_unlock_alert_partial_message({
-						unlocked: String(unlockedIdentifiers.length),
-						total: String(allAccounts.length),
-					}),
-				);
-			}
-
-			Alert.alert(
-				m.mob_autofill_unlock_alert_unlocked_title(),
-				m.mob_autofill_unlock_alert_unlocked_message(),
-				[
-					{
-						text: m.mob_autofill_unlock_alert_ok(),
-						onPress: () => {
-							if (router.canGoBack()) {
-								router.back();
-							} else {
-								router.replace("/(vault)");
-							}
-						},
-					},
-				],
-			);
-		},
-		[
-			allAccounts,
-			refreshAccounts,
-			resolveUnlockedAccountIds,
-			router,
-			setNativeMuksForAccountIds,
-			m.mob_autofill_unlock_alert_ok,
-			m.mob_autofill_unlock_alert_partial,
-			m.mob_autofill_unlock_alert_partial_message,
-			m.mob_autofill_unlock_alert_unlocked_message,
-			m.mob_autofill_unlock_alert_unlocked_title,
-		],
-	);
-
-	const quickUnlockAll = useQuickUnlockAll({
-		onSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result.unlocked, false);
-		},
-		onPartialSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result.unlocked, true);
-		},
-		onError: (error) => {
-			console.error("Unlock all error:", error);
-			Alert.alert(
-				m.mob_unlock_alert_error_title(),
-				error.message || m.mob_unlock_alert_error_unlock_failed(),
-			);
-		},
-	});
-
 	const handleBiometricUnlock = async () => {
-		if (isAllAccountsMode) {
-			if (allAccountsStatus.requiresPasswordReentry || passwordRequired) {
-				setBiometricError(m.mob_unlock_password_required_description());
-				return;
-			}
-
-			setBiometricError(null);
-
-			if (!storage.unlockAllAccountsWithBiometric) {
-				setBiometricError(m.mob_unlock_biometric_not_available());
-				return;
-			}
-
-			try {
-				const result = await storage.unlockAllAccountsWithBiometric();
-				if (result.unlocked.length === 0) {
-					setBiometricError(m.mob_unlock_biometric_failed());
-					return;
-				}
-				// Travel mode MUST fail closed: re-verify each unlocked account
-				// against the server before treating it as unlocked.
-				const verifiedAccountIds = await enforceTravelModeForUnlockedAccounts(
-					resolveUnlockedAccountIds(result.unlocked),
-				);
-				if (verifiedAccountIds.length === 0) {
-					setBiometricError(m.mob_unlock_biometric_failed());
-					return;
-				}
-				await finalizeAllAccountsUnlock(
-					verifiedAccountIds,
-					result.failed.length > 0 ||
-						verifiedAccountIds.length < result.unlocked.length,
-				);
-			} catch (error) {
-				console.error("Biometric unlock all failed:", error);
-				setBiometricError(m.mob_unlock_biometric_failed());
-			}
-			return;
-		}
-
 		if (!activeAccount) return;
 
 		// Check if master password is required first (UI-level check for immediate feedback)
@@ -458,20 +281,6 @@ export default function AutofillUnlockScreen() {
 	};
 
 	const handlePasswordUnlock = async () => {
-		if (isAllAccountsMode) {
-			if (!password.trim()) {
-				Alert.alert(
-					m.mob_unlock_alert_error_title(),
-					m.mob_unlock_alert_error_enter_password(),
-				);
-				return;
-			}
-
-			setBiometricError(null);
-			quickUnlockAll.mutate({ password });
-			return;
-		}
-
 		if (!activeAccount || !password.trim()) {
 			Alert.alert(
 				m.mob_unlock_alert_error_title(),
@@ -495,26 +304,16 @@ export default function AutofillUnlockScreen() {
 	};
 
 	// If no accounts, redirect to login
-	if ((!activeAccount && !isAllAccountsMode) || allAccounts.length === 0) {
+	if (!activeAccount || allAccounts.length === 0) {
 		router.replace("/(auth)/login");
 		return null;
 	}
 
-	const loading =
-		biometricUnlock.isPending ||
-		quickUnlock.isPending ||
-		quickUnlockAll.isPending;
+	const loading = biometricUnlock.isPending || quickUnlock.isPending;
 	const requiresPasswordReentry =
-		passwordRequired ||
-		(isAllAccountsMode
-			? allAccountsStatus.requiresPasswordReentry
-			: sessionState?.requiresPasswordReentry) ||
-		false;
-	const canUseBiometric = isAllAccountsMode
-		? allAccountsStatus.canBiometricUnlock &&
-			!requiresPasswordReentry &&
-			!allAccountsStatus.isLoading
-		: sessionState?.canBiometricUnlock && !requiresPasswordReentry;
+		passwordRequired || sessionState?.requiresPasswordReentry || false;
+	const canUseBiometric =
+		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
 		<SafeAreaView className="flex-1 bg-background">
@@ -544,9 +343,7 @@ export default function AutofillUnlockScreen() {
 								{m.mob_autofill_unlock_title()}
 							</Text>
 							<Text className="mt-2 text-center text-muted">
-								{isAllAccountsMode
-									? `${m.mob_unlock_all_accounts()} • ${m.mob_unlock_accounts_count({ count: String(allAccounts.length) })}`
-									: activeAccount?.email}
+								{activeAccount?.email}
 							</Text>
 						</View>
 

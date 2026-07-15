@@ -184,11 +184,8 @@ async function ensureActiveAccountSet(): Promise<void> {
 			// Multiple accounts - check if any are unlocked
 			const unlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
 
-			if (unlockedAccountIds.length > 1) {
-				// Multiple unlocked - use "all" mode
-				await storage.setActiveAccount({ type: "all" });
-			} else if (unlockedAccountIds.length === 1) {
-				// One unlocked - use that one
+			if (unlockedAccountIds.length >= 1) {
+				// One or more unlocked - use the first unlocked account as active
 				const unlockedAccountId = unlockedAccountIds[0];
 				if (!unlockedAccountId) return; // Should never happen but satisfies TS
 				await storage.setActiveAccount({
@@ -384,15 +381,12 @@ export async function handleQuickUnlockAll(payload: {
 		throw new Error("No unlocked accounts found");
 	}
 
-	// Set active account mode
-	if (accounts.length > 1) {
-		await storage.setActiveAccount({ type: "all" });
-	} else {
-		await storage.setActiveAccount({
-			type: "single",
-			accountId: firstUnlockedAccountId,
-		});
-	}
+	// Set the active account to the first unlocked account. Other accounts stay
+	// unlocked in the background but only the active one is surfaced.
+	await storage.setActiveAccount({
+		type: "single",
+		accountId: firstUnlockedAccountId,
+	});
 
 	// Set MUK for first unlocked account in session manager
 	const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);

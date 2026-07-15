@@ -63,13 +63,9 @@ export interface AccountMetadata {
 /**
  * Active account configuration
  * - { type: "single", accountId: string } - A specific account is active
- * - { type: "all" } - All unlocked accounts are active (multi-account mode)
  * - null - No account is active (logged out)
  */
-export type ActiveAccount =
-	| { type: "single"; accountId: string }
-	| { type: "all" }
-	| null;
+export type ActiveAccount = { type: "single"; accountId: string } | null;
 
 /**
  * Platform types

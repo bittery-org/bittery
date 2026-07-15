@@ -47,9 +47,6 @@ export interface AccountSwitcherLabels {
 	accountsLabel?: string;
 	noAccountLabel?: string;
 	noAccountsAdded?: string;
-	allAccountsLabel?: string;
-	unlockedCount?: (params: { count: number }) => string;
-	viewItemsFromAccounts?: (params: { count: number }) => string;
 	manageAccountsLabel?: string;
 	addAccountLabel?: string;
 	setupAnotherDeviceLabel?: string;
@@ -62,7 +59,7 @@ export interface AccountSwitcherProps {
 	/** List of all accounts */
 	accounts: AccountSwitcherAccount[];
 
-	/** Currently active account ID (or "all" for All Accounts mode) */
+	/** Currently active account ID */
 	activeAccountId: string | null;
 
 	/** List of unlocked account IDs (with MUKs in memory) */
@@ -91,12 +88,6 @@ export interface AccountSwitcherProps {
 
 	/** Optional: show "Add Account" option */
 	showAddAccount?: boolean;
-
-	/** Optional: show "All Accounts" option */
-	showAllAccountsOption?: boolean;
-
-	/** Optional: callback when user selects "All Accounts" */
-	onAllAccountsSelect?: () => void;
 
 	/** Optional: show "Settings" option */
 	showSettings?: boolean;
@@ -153,8 +144,6 @@ export function AccountSwitcher({
 	showManageAccounts = false,
 	onManageAccounts,
 	showAddAccount = true,
-	showAllAccountsOption = false,
-	onAllAccountsSelect,
 	showSettings = false,
 	onSettings,
 	showSetupAnotherDevice = false,
@@ -166,18 +155,10 @@ export function AccountSwitcher({
 	labels,
 }: AccountSwitcherProps) {
 	const activeAccount = accounts.find((a) => a.accountId === activeAccountId);
-	const isAllAccountsMode = activeAccountId === "all";
 	const resolvedLabels: Required<AccountSwitcherLabels> = {
 		accountsLabel: "Accounts",
 		noAccountLabel: "No account",
 		noAccountsAdded: "No accounts added",
-		allAccountsLabel: "All Accounts",
-		unlockedCount: ({ count }) =>
-			count === 1 ? `${count} unlocked` : `${count} unlocked`,
-		viewItemsFromAccounts: ({ count }) =>
-			count === 1
-				? `View items from ${count} account`
-				: `View items from ${count} accounts`,
 		manageAccountsLabel: "Manage Accounts",
 		addAccountLabel: "Add Account",
 		setupAnotherDeviceLabel: "Set up another device",
@@ -186,12 +167,6 @@ export function AccountSwitcher({
 		removeAccountLabel: "Remove Account",
 		...labels,
 	};
-	const showAllAccountsAction = Boolean(
-		showAllAccountsOption &&
-			onAllAccountsSelect &&
-			accounts.length > 1 &&
-			unlockedAccountIds.length > 1,
-	);
 	const showManageAccountsAction = Boolean(
 		showManageAccounts && onManageAccounts,
 	);
@@ -204,75 +179,50 @@ export function AccountSwitcher({
 		showLockAll && accounts.length > 0 && unlockedAccountIds.length > 0,
 	);
 	const showRemoveAccountAction = Boolean(
-		showRemoveAccount &&
-			onRemoveAccount &&
-			activeAccount &&
-			!isAllAccountsMode,
+		showRemoveAccount && onRemoveAccount && activeAccount,
 	);
 	const hasPrimaryActions =
-		showAllAccountsAction ||
 		showManageAccountsAction ||
 		showAddAccountAction ||
 		showSetupAnotherDeviceAction ||
 		showSettingsAction ||
 		showLockAllAction;
 	const hasActionsBeforeLockAll =
-		showAllAccountsAction ||
 		showManageAccountsAction ||
 		showAddAccountAction ||
 		showSetupAnotherDeviceAction ||
 		showSettingsAction;
 
-	// Default trigger: Avatar with email or "All Accounts"
+	// Default trigger: Avatar with email
 	const defaultTrigger = (
 		<Button
 			variant="ghost"
 			className="flex items-center gap-2 px-2 hover:bg-accent"
 			disabled={isLoading}
 		>
-			{isAllAccountsMode ? (
-				<>
-					<div className="flex size-8 items-center justify-center rounded-full bg-primary/10">
-						<UsersIcon className="size-4 text-primary" />
-					</div>
-					<div className="flex flex-col items-start text-left">
-						<span className="font-medium text-sm">
-							{resolvedLabels.allAccountsLabel}
-						</span>
-						<span className="text-muted-foreground text-xs">
-							{resolvedLabels.unlockedCount({
-								count: unlockedAccountIds.length,
-							})}
-						</span>
-					</div>
-				</>
-			) : (
-				<>
-					<Avatar className="size-8">
-						{activeAccount?.teamAvatarUrl && (
-							<AvatarImage
-								src={activeAccount.teamAvatarUrl}
-								alt={activeAccount.teamName || activeAccount.name}
-							/>
-						)}
-						<AvatarFallback className="text-xs">
-							{activeAccount?.email.slice(0, 2).toUpperCase() ?? "?"}
-						</AvatarFallback>
-					</Avatar>
-					<div className="flex flex-col items-start text-left">
-						<span className="font-medium text-sm">
-							{activeAccount?.name ||
-								activeAccount?.email ||
-								resolvedLabels.noAccountLabel}
-						</span>
-						{activeAccount && (
-							<span className="text-muted-foreground text-xs">
-								{activeAccount.email}
-							</span>
-						)}
-					</div>
-				</>
-			)}
+			<Avatar className="size-8">
+				{activeAccount?.teamAvatarUrl && (
+					<AvatarImage
+						src={activeAccount.teamAvatarUrl}
+						alt={activeAccount.teamName || activeAccount.name}
+					/>
+				)}
+				<AvatarFallback className="text-xs">
+					{activeAccount?.email.slice(0, 2).toUpperCase() ?? "?"}
+				</AvatarFallback>
+			</Avatar>
+			<div className="flex flex-col items-start text-left">
+				<span className="font-medium text-sm">
+					{activeAccount?.name ||
+						activeAccount?.email ||
+						resolvedLabels.noAccountLabel}
+				</span>
+				{activeAccount && (
+					<span className="text-muted-foreground text-xs">
+						{activeAccount.email}
+					</span>
+				)}
+			</div>
 		</Button>
 	);
 
@@ -346,39 +296,6 @@ export function AccountSwitcher({
 				)}
 
 				{hasPrimaryActions && <DropdownMenuSeparator />}
-
-				{/* All Accounts option (optional) */}
-				{showAllAccountsAction && (
-						<>
-							<DropdownMenuItem
-								onClick={onAllAccountsSelect!}
-								className={cn(
-									"flex cursor-pointer items-center gap-2",
-									isAllAccountsMode && "bg-accent",
-								)}
-							>
-								<div className="flex size-6 items-center justify-center rounded-full bg-primary/10">
-									<UsersIcon className="size-4 text-primary" />
-								</div>
-								<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-									<div className="flex items-center gap-1.5">
-										<span className="font-medium text-sm">
-											{resolvedLabels.allAccountsLabel}
-										</span>
-										{isAllAccountsMode && (
-											<CheckIcon className="size-3 shrink-0 text-primary" />
-										)}
-									</div>
-									<span className="text-muted-foreground text-xs">
-										{resolvedLabels.viewItemsFromAccounts({
-											count: unlockedAccountIds.length,
-										})}
-									</span>
-								</div>
-							</DropdownMenuItem>
-							<DropdownMenuSeparator />
-						</>
-					)}
 
 				{/* Manage Accounts (optional) */}
 				{showManageAccountsAction && (

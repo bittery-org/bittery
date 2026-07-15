@@ -13,7 +13,6 @@ function RouteComponent() {
 	const { id, itemId } = useParams({ strict: false });
 
 	// Fetch and decrypt items for the selected vault
-	// useVaultItems automatically handles single-account vs all-accounts mode
 	const { items: decryptedItems, isLoading } = useVaultItems(id || "");
 	const {
 		searchQuery,

@@ -35,10 +35,7 @@ export type SyncConnectionContext = {
 	token: string;
 };
 
-type ActiveAccount =
-	| { type: "single"; accountId: string }
-	| { type: "all" }
-	| null;
+type ActiveAccount = { type: "single"; accountId: string } | null;
 
 type VaultKeyLike = {
 	vaultId: string;

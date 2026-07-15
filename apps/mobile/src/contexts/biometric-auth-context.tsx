@@ -18,7 +18,6 @@ import {
 } from "react";
 import { AppState, type AppStateStatus, Platform } from "react-native";
 import CredentialProvider from "../../modules/credential-provider";
-import { enforceTravelModeForUnlockedAccounts } from "../lib/travel-mode-unlock";
 import { type BiometricAuthResult, storage } from "../services/storage";
 import { useAccount } from "./account-context";
 
@@ -45,8 +44,7 @@ const BiometricAuthContext = createContext<BiometricAuthContextValue | null>(
 
 export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 	const router = useRouter();
-	const { activeAccount, activeAccountConfig, allAccounts, isAllAccountsMode } =
-		useAccount();
+	const { activeAccount, activeAccountConfig, allAccounts } = useAccount();
 	const appState = useRef<AppStateStatus>(AppState.currentState);
 
 	const [requiresReauth, setRequiresReauth] = useState(false);
@@ -92,9 +90,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				appState.current === "active" &&
 				(nextAppState === "background" || nextAppState === "inactive")
 			) {
-				if (isAllAccountsMode) {
-					await storage.storeBackgroundTimestampGlobal?.();
-				} else if (activeAccount) {
+				if (activeAccount) {
 					await storage.storeBackgroundTimestamp(activeAccount.accountId);
 				}
 			}
@@ -106,13 +102,11 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				nextAppState === "active"
 			) {
 				// Check if re-authentication is required
-				const shouldRequireAuth = isAllAccountsMode
-					? await storage.shouldRequireAuthAfterBackgroundGlobal?.()
-					: activeAccount
-						? await storage.shouldRequireAuthAfterBackground(
-								activeAccount.accountId,
-							)
-						: false;
+				const shouldRequireAuth = activeAccount
+					? await storage.shouldRequireAuthAfterBackground(
+							activeAccount.accountId,
+						)
+					: false;
 
 				if (shouldRequireAuth) {
 					// IMPORTANT: Clear MUK from native VaultStateManager when auto-lock triggers
@@ -134,35 +128,17 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					const biometricEnabled = fallbackAccountId
 						? await storage.isBiometricEnabled(fallbackAccountId)
 						: false;
-					const canUseBiometric = isAllAccountsMode
-						? (
-								await Promise.all(
-									allAccounts.map((account) =>
-										storage.canBiometricUnlock(account.accountId),
-									),
-								)
-							).some(Boolean)
-						: activeAccount
-							? await storage.canBiometricUnlock(activeAccount.accountId)
-							: false;
+					const canUseBiometric = activeAccount
+						? await storage.canBiometricUnlock(activeAccount.accountId)
+						: false;
 
 					if (biometricEnabled && canUseBiometric) {
-						// Check if master password re-entry is required for any account
-						const masterPasswordRequired = isAllAccountsMode
-							? (
-									await Promise.all(
-										allAccounts.map((account) =>
-											storage.isMasterPasswordReentryRequired(
-												account.accountId,
-											),
-										),
-									)
-								).some(Boolean)
-							: activeAccount
-								? await storage.isMasterPasswordReentryRequired(
-										activeAccount.accountId,
-									)
-								: false;
+						// Check if master password re-entry is required
+						const masterPasswordRequired = activeAccount
+							? await storage.isMasterPasswordReentryRequired(
+									activeAccount.accountId,
+								)
+							: false;
 
 						if (masterPasswordRequired) {
 							setRequiresMasterPassword(true);
@@ -182,22 +158,14 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				}
 
 				// Clear background timestamp after handling
-				if (isAllAccountsMode) {
-					await storage.clearBackgroundTimestampGlobal?.();
-				} else if (activeAccount) {
+				if (activeAccount) {
 					await storage.clearBackgroundTimestamp(activeAccount.accountId);
 				}
 			}
 
 			appState.current = nextAppState;
 		},
-		[
-			activeAccount,
-			activeAccountConfig,
-			allAccounts,
-			isAllAccountsMode,
-			router,
-		],
+		[activeAccount, activeAccountConfig, allAccounts, router],
 	);
 
 	// Set up app state listener
@@ -215,48 +183,6 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 	// Trigger biometric authentication
 	const triggerBiometricAuth =
 		useCallback(async (): Promise<BiometricAuthResult> => {
-			if (isAllAccountsMode) {
-				if (!storage.unlockAllAccountsWithBiometric) {
-					const result: BiometricAuthResult = {
-						success: false,
-						error: "not_available",
-						message: "Biometric unlock is not available",
-					};
-					setLastAuthResult(result);
-					return result;
-				}
-
-				const unlockResult = await storage.unlockAllAccountsWithBiometric();
-
-				// Enforce travel mode per unlocked account. The storage adapter's
-				// "unlock all" path does NOT verify travel mode against the server,
-				// so we must do it here at the caller level (fail closed). Any
-				// account that fails verification has its session cleared and is
-				// dropped from the unlocked set.
-				const verifiedAccountIds = await enforceTravelModeForUnlockedAccounts(
-					unlockResult.unlocked,
-				);
-
-				const success = verifiedAccountIds.length > 0;
-				const result: BiometricAuthResult = success
-					? { success: true }
-					: {
-							success: false,
-							error: "authentication_failed",
-							message: "Biometric authentication failed",
-						};
-
-				if (success) {
-					await setNativeMuksForAccounts(verifiedAccountIds);
-					setRequiresReauth(false);
-					setShowAuthModal(false);
-					setRequiresMasterPassword(false);
-				}
-
-				setLastAuthResult(result);
-				return result;
-			}
-
 			if (!activeAccount) {
 				const result: BiometricAuthResult = {
 					success: false,
@@ -318,62 +244,11 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			}
 
 			return result;
-		}, [activeAccount, isAllAccountsMode, setNativeMuksForAccounts]);
+		}, [activeAccount, setNativeMuksForAccounts]);
 
 	// Check if re-auth is needed
 	const checkAndRequireAuth = useCallback(async (): Promise<boolean> => {
 		if (!activeAccountConfig) return false;
-
-		if (isAllAccountsMode) {
-			const sessionResults = await Promise.all(
-				allAccounts.map((account) => storage.isSessionValid(account.accountId)),
-			);
-			const anySessionValid = sessionResults.some(Boolean);
-			if (!anySessionValid) {
-				router.replace("/(auth)/unlock");
-				return true;
-			}
-
-			const biometricRequiredResults = await Promise.all(
-				allAccounts.map((account) =>
-					storage.isBiometricAuthRequiredPublic?.(account.accountId),
-				),
-			);
-			const biometricRequired = biometricRequiredResults.some(Boolean);
-
-			if (biometricRequired) {
-				const canUseBiometric = (
-					await Promise.all(
-						allAccounts.map((account) =>
-							storage.canBiometricUnlock(account.accountId),
-						),
-					)
-				).some(Boolean);
-
-				if (canUseBiometric) {
-					setRequiresReauth(true);
-					setShowAuthModal(true);
-					return true;
-				}
-			}
-
-			const masterPasswordRequired = (
-				await Promise.all(
-					allAccounts.map((account) =>
-						storage.isMasterPasswordReentryRequired(account.accountId),
-					),
-				)
-			).some(Boolean);
-
-			if (masterPasswordRequired) {
-				setRequiresMasterPassword(true);
-				setRequiresReauth(true);
-				router.replace("/(auth)/unlock");
-				return true;
-			}
-
-			return false;
-		}
 
 		if (!activeAccount) return false;
 
@@ -412,13 +287,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 		}
 
 		return false;
-	}, [
-		activeAccount,
-		activeAccountConfig,
-		allAccounts,
-		isAllAccountsMode,
-		router,
-	]);
+	}, [activeAccount, activeAccountConfig, router]);
 
 	// Dismiss auth requirement
 	const dismissAuthRequirement = useCallback(() => {

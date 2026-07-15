@@ -92,21 +92,14 @@ const crypto: ICrypto = {
  * back to other known accounts.
  */
 async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null> {
-	const [activeAccount, accounts, unlocked] = await Promise.all([
+	const [activeAccount, accounts] = await Promise.all([
 		storage.getActiveAccount(),
 		storage.getAccountsList(),
-		storage.getUnlockedAccounts?.(),
 	]);
 
 	const candidateIds: string[] = [];
 	if (activeAccount?.type === "single") {
 		candidateIds.push(activeAccount.accountId);
-	} else if (activeAccount?.type === "all") {
-		for (const accountId of unlocked ?? []) {
-			if (!candidateIds.includes(accountId)) {
-				candidateIds.push(accountId);
-			}
-		}
 	}
 	for (const account of accounts) {
 		if (!candidateIds.includes(account.accountId)) {

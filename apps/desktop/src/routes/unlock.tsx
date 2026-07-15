@@ -111,13 +111,13 @@ export function UnlockPage() {
 		onSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
-			// Set active account to "all" mode if multiple accounts
-			if (allAccounts.length > 1) {
-				await storage.setActiveAccount({ type: "all" });
-			} else if (allAccounts.length === 1) {
+			// Multiple accounts may be unlocked, but the app always operates on a
+			// single active account. Select the first unlocked account.
+			const activeId = result.unlocked[0] ?? allAccounts[0]?.accountId;
+			if (activeId) {
 				await storage.setActiveAccount({
 					type: "single",
-					accountId: allAccounts[0].accountId,
+					accountId: activeId,
 				});
 			}
 
@@ -132,8 +132,12 @@ export function UnlockPage() {
 		onPartialSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
-			if (allAccounts.length > 1) {
-				await storage.setActiveAccount({ type: "all" });
+			const activeId = result.unlocked[0];
+			if (activeId) {
+				await storage.setActiveAccount({
+					type: "single",
+					accountId: activeId,
+				});
 			}
 			toast.warning(getPartialUnlockMessage(result.unlocked.length));
 			await peekAccountSessionManager()?.refresh();
@@ -182,15 +186,12 @@ export function UnlockPage() {
 			throw new Error(m.toast_auth_unlock_error_biometric_none_unlocked());
 		}
 
-		// Set active mode based on accounts that passed policy verification.
-		if (verified.length > 1) {
-			await storage.setActiveAccount({ type: "all" });
-		} else {
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: verified[0],
-			});
-		}
+		// Multiple accounts may pass verification, but the app always operates on
+		// a single active account. Select the first verified account.
+		await storage.setActiveAccount({
+			type: "single",
+			accountId: verified[0],
+		});
 
 		await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 

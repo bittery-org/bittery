@@ -89,11 +89,19 @@ class DesktopSyncService {
 				// Restore active account if available
 				if (previousState.activeAccount) {
 					try {
-						// Active account is either "all" or a stable account ID.
+						const accounts = await storage.getAccountsList();
+						// All-accounts mode was removed; collapse a legacy "all" pointer
+						// to a single active account (first unlocked, else first known).
 						if (previousState.activeAccount === "all") {
-							await storage.setActiveAccount({ type: "all" });
+							const unlocked = await storage.getUnlockedAccounts?.();
+							const accountId = unlocked?.[0] ?? accounts[0]?.accountId;
+							if (accountId) {
+								await storage.setActiveAccount({
+									type: "single",
+									accountId,
+								});
+							}
 						} else {
-							const accounts = await storage.getAccountsList();
 							const account = accounts.find(
 								(item) => item.accountId === previousState.activeAccount,
 							);
@@ -195,10 +203,19 @@ class DesktopSyncService {
 
 			// Update active account if desktop has one set
 			if (accountsData.activeAccount) {
+				const refreshedAccounts = await storage.getAccountsList();
+				// All-accounts mode was removed; collapse a legacy "all" pointer to a
+				// single active account (first unlocked, else first known).
 				if (accountsData.activeAccount === "all") {
-					await storage.setActiveAccount({ type: "all" });
+					const unlocked = await storage.getUnlockedAccounts?.();
+					const accountId = unlocked?.[0] ?? refreshedAccounts[0]?.accountId;
+					if (accountId) {
+						await storage.setActiveAccount({
+							type: "single",
+							accountId,
+						});
+					}
 				} else {
-					const refreshedAccounts = await storage.getAccountsList();
 					const active = refreshedAccounts.find(
 						(item) => item.accountId === accountsData.activeAccount,
 					);
@@ -474,11 +491,7 @@ class DesktopSyncService {
 			const state: DesktopModeStateSnapshot = {
 				lastConnectedAt: Date.now(),
 				activeAccount:
-					activeAccount?.type === "single"
-						? activeAccount.accountId
-						: activeAccount?.type === "all"
-							? "all"
-							: null,
+					activeAccount?.type === "single" ? activeAccount.accountId : null,
 			};
 			await chrome.storage.local.set({ [STORAGE_KEY_DESKTOP_MODE]: state });
 		} catch (error) {

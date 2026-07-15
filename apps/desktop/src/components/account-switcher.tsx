@@ -6,7 +6,6 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
 import type { AccountMetadata } from "@bittery/storage/types";
 import {
-	AccountAvatarGroup,
 	Badge,
 	Button,
 	cn,
@@ -64,7 +63,6 @@ export function AccountSwitcher() {
 
 	const accountsData = accounts;
 	const unlockedAccountIdsList = unlockedAccountIds;
-	const isAllAccountsMode = activeSelection?.type === "all";
 	const activeAccountId =
 		activeSelection?.type === "single" ? activeSelection.accountId : null;
 	const activeAccount = accountsData.find(
@@ -113,22 +111,6 @@ export function AccountSwitcher() {
 		} catch (error) {
 			console.error("Failed to switch account:", error);
 			toast.error(m.toast_account_switcher_switch_account_failed());
-		}
-	};
-
-	const handleAllAccountsSelect = async () => {
-		if (unlockedAccountIdsList.length === 0) {
-			toast.error(m.toast_account_switcher_no_unlocked_accounts());
-			return;
-		}
-
-		try {
-			await switchAccount.mutateAsync({ type: "all" });
-			await invalidator.invalidateAllAccountData();
-			navigate({ to: "/vault" });
-		} catch (error) {
-			console.error("Failed to switch to All Accounts mode:", error);
-			toast.error(m.toast_account_switcher_switch_all_accounts_failed());
 		}
 	};
 
@@ -236,22 +218,7 @@ export function AccountSwitcher() {
 			className="w-full justify-start gap-2 text-left"
 			disabled={switchAccount.isPending}
 		>
-			{isAllAccountsMode ? (
-				<>
-					<AccountAvatarGroup
-						accounts={accountsData.filter((a) =>
-							unlockedAccountIdsList.includes(a.accountId),
-						)}
-						maxVisible={2}
-						size="sm"
-					/>
-					<div className="flex flex-col items-start overflow-hidden">
-						<span className="max-w-24 truncate font-medium text-sm">
-							{m.vaults_sidebar_account_switcher_menu_all_accounts()}
-						</span>
-					</div>
-				</>
-			) : activeAccount ? (
+			{activeAccount ? (
 				<>
 					<AccountAvatar account={activeAccount} size="sm" />
 					<div className="flex flex-col items-start overflow-hidden">
@@ -275,23 +242,13 @@ export function AccountSwitcher() {
 		<>
 			<SharedAccountSwitcher
 				accounts={accountsData}
-				activeAccountId={isAllAccountsMode ? "all" : activeAccountId}
+				activeAccountId={activeAccountId}
 				unlockedAccountIds={unlockedAccountIdsList}
 				isLoading={switchAccount.isPending}
 				labels={{
 					accountsLabel: m.vaults_sidebar_account_switcher_menu_accounts(),
 					noAccountsAdded:
 						m.vaults_sidebar_account_switcher_menu_no_accounts_added(),
-					allAccountsLabel:
-						m.vaults_sidebar_account_switcher_menu_all_accounts(),
-					viewItemsFromAccounts: ({ count }) =>
-						count === 1
-							? m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_single(
-									{ count },
-								)
-							: m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_plural(
-									{ count },
-								),
 					addAccountLabel: m.vaults_sidebar_account_switcher_menu_add_account(),
 					setupAnotherDeviceLabel:
 						m.vaults_sidebar_account_switcher_menu_setup_another_device(),
@@ -309,8 +266,6 @@ export function AccountSwitcher() {
 				showManageAccounts={true}
 				onManageAccounts={handleManageAccounts}
 				showAddAccount={false}
-				showAllAccountsOption={true}
-				onAllAccountsSelect={handleAllAccountsSelect}
 				showSettings={true}
 				onSettings={handleSettings}
 				showSetupAnotherDevice={true}

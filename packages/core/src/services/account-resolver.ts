@@ -26,7 +26,6 @@ export interface AccountInfo {
 export interface ResolveAccountsResult {
 	activeAccount: ActiveAccount;
 	accountsInfo: AccountInfo[];
-	isAllAccountsMode: boolean;
 }
 
 export interface ItemWithOptionalAccount extends ItemContextMetadata {
@@ -127,15 +126,34 @@ export class AccountResolver {
 			return {
 				activeAccount,
 				accountsInfo: [],
-				isAllAccountsMode: false,
 			};
 		}
 
-		const accountIds =
-			activeAccount.type === "single"
-				? [activeAccount.accountId]
-				: ((await this.storage.getUnlockedAccounts?.()) ?? []);
+		const accountIds = [activeAccount.accountId];
 
+		const accountsInfo = await this.buildAccountInfos(accountIds);
+
+		return {
+			activeAccount,
+			accountsInfo,
+		};
+	}
+
+	/**
+	 * Resolves every currently-unlocked account into full `AccountInfo`.
+	 *
+	 * View-mode independent: used by the item Move dialog to surface
+	 * cross-account move targets while a single account stays active. Does not
+	 * change the active account or the coordinator's active-account set.
+	 */
+	async resolveUnlockedAccounts(): Promise<AccountInfo[]> {
+		const accountIds = (await this.storage.getUnlockedAccounts?.()) ?? [];
+		return this.buildAccountInfos(accountIds);
+	}
+
+	private async buildAccountInfos(
+		accountIds: string[],
+	): Promise<AccountInfo[]> {
 		const infos = await Promise.all(
 			accountIds.map(async (accountId): Promise<AccountInfo | null> => {
 				try {
@@ -179,11 +197,7 @@ export class AccountResolver {
 			}),
 		);
 
-		return {
-			activeAccount,
-			accountsInfo: infos.filter((info): info is AccountInfo => info !== null),
-			isAllAccountsMode: activeAccount.type === "all",
-		};
+		return infos.filter((info): info is AccountInfo => info !== null);
 	}
 
 	async getClientForAccount(

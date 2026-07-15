@@ -60,13 +60,6 @@ export const Route = createFileRoute("/login")({
 			await storage.setActiveAccount(activeAccount);
 		}
 
-		if (activeAccount.type === "all") {
-			const unlockedAccounts = await storage.getUnlockedAccounts?.();
-			throw redirect({
-				to: unlockedAccounts?.length ? "/vault" : "/unlock",
-			});
-		}
-
 		const activeAccountMetadata = accountsList.find(
 			(account) => account.accountId === activeAccount.accountId,
 		);

@@ -11,7 +11,6 @@ export interface UseVaultRepositorySyncOptions {
 interface UseVaultRepositorySyncResult {
 	snapshot: number;
 	isLoading: boolean;
-	isAllAccountsMode: boolean;
 	refetch: () => Promise<void>;
 	accountsInfo: ReturnType<typeof useAccountsInfo>["accountsInfo"];
 	vaultCoordinator: VaultRepositoryCoordinator;
@@ -22,11 +21,9 @@ export function useVaultRepositorySync(
 ): UseVaultRepositorySyncResult {
 	const core = useCoreContext();
 	const { enabled = true, requiredId } = options;
-	const {
-		accountsInfo,
-		isLoading: isLoadingAccounts,
-		isAllAccountsMode,
-	} = useAccountsInfo({ enabled });
+	const { accountsInfo, isLoading: isLoadingAccounts } = useAccountsInfo({
+		enabled,
+	});
 
 	useEffect(() => {
 		if (!enabled || isLoadingAccounts || accountsInfo.length === 0) {
@@ -62,7 +59,6 @@ export function useVaultRepositorySync(
 	return {
 		snapshot,
 		isLoading: isLoadingAccounts || core.vaultCoordinator.isHydrating(),
-		isAllAccountsMode,
 		refetch,
 		accountsInfo,
 		vaultCoordinator: core.vaultCoordinator,

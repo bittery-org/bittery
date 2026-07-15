@@ -256,10 +256,7 @@ export async function handleUpdateExistingCredential(payload: {
 	}
 
 	try {
-		const accountEmail = await resolveAccountEmailForItemId(
-			itemId,
-			getAllItemsForMatching,
-		);
+		const accountEmail = await resolveAccountEmailForItemId(itemId);
 
 		if (!accountEmail) {
 			return {

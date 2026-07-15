@@ -467,14 +467,12 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		if (!options?.preserveActiveAccount) {
-			if (accounts.length > 1) {
-				await storage.setActiveAccount({ type: "all" });
-			} else {
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: firstUnlockedAccountId,
-				});
-			}
+			// All-accounts mode was removed; even when multiple accounts unlock the
+			// app operates on a single active account (the first unlocked one).
+			await storage.setActiveAccount({
+				type: "single",
+				accountId: firstUnlockedAccountId,
+			});
 		}
 
 		// IMPORTANT: Update activity FIRST to set timestamp, otherwise isUnlocked()

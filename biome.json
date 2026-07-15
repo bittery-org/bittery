@@ -11,6 +11,7 @@
 			"**",
 			"!**/.next",
 			"!**/.expo",
+			"!**/.automaker",
 			"!**/.claude",
 			"!**/.agents",
 			"!**/.tanstack",

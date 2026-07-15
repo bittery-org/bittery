@@ -297,13 +297,9 @@ async function resolveAccountEmailForItem(
 	}
 
 	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type !== "all") {
-		return activeAccount?.type === "single"
-			? await resolveEmailFromAccountId(activeAccount.accountId)
-			: undefined;
-	}
-
-	return undefined;
+	return activeAccount?.type === "single"
+		? await resolveEmailFromAccountId(activeAccount.accountId)
+		: undefined;
 }
 
 function allowCredentialIds(

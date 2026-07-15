@@ -118,7 +118,7 @@ describe("handleQuickUnlockAll", () => {
 		expect(setMasterUnlockKeyCalls.length).toBe(1);
 	});
 
-	test("multiple accounts: switches to all-accounts mode", async () => {
+	test("multiple accounts: selects the first unlocked account as active", async () => {
 		accounts = [
 			{ accountId: "acc-uuid-1", email: "a@example.com" },
 			{ accountId: "acc-uuid-2", email: "b@example.com" },
@@ -127,7 +127,10 @@ describe("handleQuickUnlockAll", () => {
 		const response = await handleQuickUnlockAll({ password: "pw" });
 
 		expect(response.success).toBe(true);
-		expect(setActiveAccountCalls).toEqual([{ type: "all" }]);
+		// All accounts stay unlocked, but the active pointer is a single account.
+		expect(setActiveAccountCalls).toEqual([
+			{ type: "single", accountId: "acc-uuid-1" },
+		]);
 		// MUK is seeded from the first unlocked accountId.
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-1"]);
 	});

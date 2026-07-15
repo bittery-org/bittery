@@ -7,10 +7,7 @@ import {
 	type SyncEventQueryClient,
 } from "../../src/background/services/sync-cache-service";
 
-type ActiveAccount =
-	| { type: "single"; accountId: string }
-	| { type: "all" }
-	| null;
+type ActiveAccount = { type: "single"; accountId: string } | null;
 
 type AccountInput =
 	| string
@@ -161,7 +158,7 @@ describe("sync-cache-service", () => {
 		const teamAccountId = "acc_team_example_com";
 
 		const storage = createStorageStub({
-			activeAccount: { type: "all" },
+			activeAccount: null,
 			accounts: [
 				{ accountId: teamAccountId, email: "team@example.com" },
 				{ accountId: aliceAccountId, email: "alice@example.com" },
@@ -255,7 +252,7 @@ describe("sync-cache-service", () => {
 		const accountBId = "acc_b_example_com";
 
 		const storage = createStorageStub({
-			activeAccount: { type: "all" },
+			activeAccount: null,
 			accounts: [
 				{ accountId: accountBId, email: "b@example.com" },
 				{ accountId: accountAId, email: "a@example.com" },
@@ -297,7 +294,7 @@ describe("sync-cache-service", () => {
 		const teamAccountId = "acc_team";
 
 		const storage = createStorageStub({
-			activeAccount: { type: "all" },
+			activeAccount: null,
 			accounts: [
 				{
 					accountId: aliceAccountId,

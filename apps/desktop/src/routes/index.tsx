@@ -27,18 +27,6 @@ export const Route = createFileRoute("/")({
 			};
 		}
 
-		// Handle "All Accounts" mode specially
-		if (activeAccount.type === "all") {
-			// Check if we have any unlocked accounts
-			const unlockedAccounts = await storage.getUnlockedAccounts?.();
-			if (unlockedAccounts && unlockedAccounts.length > 0) {
-				// At least one account is unlocked, go to vault
-				throw redirect({ to: "/vault" });
-			}
-			// No unlocked accounts, redirect to unlock
-			throw redirect({ to: "/unlock" });
-		}
-
 		// Single account mode: check if active account has valid session
 		const activeAccountEmail = accountsList.find(
 			(account) => account.accountId === activeAccount.accountId,

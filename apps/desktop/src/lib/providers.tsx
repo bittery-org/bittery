@@ -22,7 +22,7 @@ function isUnauthorizedError(error: unknown): boolean {
 	return isUnauthorizedRpcError(error);
 }
 
-function handleUnauthorizedError(error: unknown) {
+function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
 
 	const path = window.location.pathname;
@@ -30,7 +30,7 @@ function handleUnauthorizedError(error: unknown) {
 
 	isHandlingAuthError = true;
 
-	void handleDesktopUnauthorizedError(error)
+	void handleDesktopUnauthorizedError()
 		.then(({ prefillEmail, shouldRedirect }) => {
 			if (!shouldRedirect) {
 				isHandlingAuthError = false;
@@ -54,7 +54,7 @@ const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
 			if (isUnauthorizedError(error)) {
-				handleUnauthorizedError(error);
+				handleUnauthorizedError();
 				return;
 			}
 			toast.error(error.message, {
@@ -70,7 +70,7 @@ const queryClient = new QueryClient({
 	mutationCache: new MutationCache({
 		onError: (error) => {
 			if (isUnauthorizedError(error)) {
-				handleUnauthorizedError(error);
+				handleUnauthorizedError();
 			}
 		},
 	}),

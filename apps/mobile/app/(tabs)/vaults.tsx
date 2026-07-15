@@ -30,7 +30,7 @@ export default function VaultsScreen() {
 	const [refreshing, setRefreshing] = useState(false);
 	const queryClient = useQueryClient();
 
-	const { vaultKeys, isLoading, isAllAccountsMode } = useAllVaultKeys();
+	const { vaultKeys, isLoading } = useAllVaultKeys();
 
 	const handleRefresh = useCallback(async () => {
 		setRefreshing(true);
@@ -58,36 +58,22 @@ export default function VaultsScreen() {
 		[router],
 	);
 
-	const { personalVaults, teamVaults, accountVaultsByTeamName } =
-		useMemo(() => {
-			if (!vaultKeys) {
-				return {
-					personalVaults: [],
-					teamVaults: [],
-					accountVaultsByTeamName: new Map<string, VaultKeyWithAccount[]>(),
-				};
-			}
-
-			const personal = vaultKeys.filter((v) => v.vaultType === "personal");
-			const team = vaultKeys.filter((v) => v.vaultType === "team");
-
-			const byTeamName = new Map<string, VaultKeyWithAccount[]>();
-			for (const vault of vaultKeys) {
-				const teamName = vault.accountTeamName || "Personal";
-				const existing = byTeamName.get(teamName);
-				if (existing) {
-					existing.push(vault);
-				} else {
-					byTeamName.set(teamName, [vault]);
-				}
-			}
-
+	const { personalVaults, teamVaults } = useMemo(() => {
+		if (!vaultKeys) {
 			return {
-				personalVaults: personal,
-				teamVaults: team,
-				accountVaultsByTeamName: byTeamName,
+				personalVaults: [],
+				teamVaults: [],
 			};
-		}, [vaultKeys]);
+		}
+
+		const personal = vaultKeys.filter((v) => v.vaultType === "personal");
+		const team = vaultKeys.filter((v) => v.vaultType === "team");
+
+		return {
+			personalVaults: personal,
+			teamVaults: team,
+		};
+	}, [vaultKeys]);
 
 	const renderSectionHeader = useCallback(
 		(title: string, count: number) => (
@@ -107,65 +93,40 @@ export default function VaultsScreen() {
 
 		const nextSections: VaultSection[] = [];
 
-		if (isAllAccountsMode) {
-			for (const [teamName, vaults] of accountVaultsByTeamName.entries()) {
+		if (personalVaults.length > 0) {
+			nextSections.push({
+				type: "header",
+				title: m.mob_vaults_section_personal(),
+				count: personalVaults.length,
+			});
+			for (let i = 0; i < personalVaults.length; i++) {
 				nextSections.push({
-					type: "header",
-					title: teamName,
-					count: vaults.length,
+					type: "vault",
+					item: personalVaults[i],
+					isFirst: i === 0,
+					isLast: i === personalVaults.length - 1,
 				});
-				for (let i = 0; i < vaults.length; i++) {
-					nextSections.push({
-						type: "vault",
-						item: vaults[i],
-						isFirst: i === 0,
-						isLast: i === vaults.length - 1,
-					});
-				}
 			}
-		} else {
-			if (personalVaults.length > 0) {
-				nextSections.push({
-					type: "header",
-					title: m.mob_vaults_section_personal(),
-					count: personalVaults.length,
-				});
-				for (let i = 0; i < personalVaults.length; i++) {
-					nextSections.push({
-						type: "vault",
-						item: personalVaults[i],
-						isFirst: i === 0,
-						isLast: i === personalVaults.length - 1,
-					});
-				}
-			}
+		}
 
-			if (teamVaults.length > 0) {
+		if (teamVaults.length > 0) {
+			nextSections.push({
+				type: "header",
+				title: m.mob_vaults_section_team(),
+				count: teamVaults.length,
+			});
+			for (let i = 0; i < teamVaults.length; i++) {
 				nextSections.push({
-					type: "header",
-					title: m.mob_vaults_section_team(),
-					count: teamVaults.length,
+					type: "vault",
+					item: teamVaults[i],
+					isFirst: i === 0,
+					isLast: i === teamVaults.length - 1,
 				});
-				for (let i = 0; i < teamVaults.length; i++) {
-					nextSections.push({
-						type: "vault",
-						item: teamVaults[i],
-						isFirst: i === 0,
-						isLast: i === teamVaults.length - 1,
-					});
-				}
 			}
 		}
 
 		return nextSections;
-	}, [
-		vaultKeys,
-		isAllAccountsMode,
-		accountVaultsByTeamName,
-		personalVaults,
-		teamVaults,
-		m,
-	]);
+	}, [vaultKeys, personalVaults, teamVaults, m]);
 
 	const renderSection = useCallback(
 		({ item: section }: { item: VaultSection }) => {
@@ -182,16 +143,13 @@ export default function VaultsScreen() {
 					role={vault.role}
 					icon={vault.vaultIcon}
 					imageUrl={vault.vaultImageUrl}
-					accountLabel={
-						isAllAccountsMode ? vault.accountTeamName || "Personal" : undefined
-					}
 					onPress={() => handleVaultPress(vault.vaultId)}
 					isFirstInSection={section.isFirst}
 					isLastInSection={section.isLast}
 				/>
 			);
 		},
-		[handleVaultPress, isAllAccountsMode, renderSectionHeader],
+		[handleVaultPress, renderSectionHeader],
 	);
 
 	const keyExtractor = useCallback(

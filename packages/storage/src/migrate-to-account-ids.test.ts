@@ -13,6 +13,7 @@ import {
 import {
 	type AccountIdMigrationContext,
 	migrateEmailKeysToAccountIds,
+	parseStoredActiveAccount,
 } from "./migrate-to-account-ids";
 import type { AccountMetadata } from "./types";
 
@@ -196,10 +197,14 @@ describe("migrateEmailKeysToAccountIds", () => {
 		expect(store.values.get(ACCOUNT_ID_MIGRATION_FLAG)).toBe(true);
 	});
 
-	it("preserves the all-accounts active pointer", async () => {
+	it("collapses a legacy all-accounts active pointer to null", async () => {
 		const { store, context } = createMigrationFixture("all");
 		await migrateEmailKeysToAccountIds(context);
-		expect(store.values.get("active")).toBe("all");
+		// All-accounts view mode was removed; a legacy "all" pointer must collapse
+		// to null so a single account gets re-selected on next unlock.
+		expect(parseStoredActiveAccount(store.values.get("active") as string)).toBe(
+			null,
+		);
 	});
 
 	it("copies keychain data before deleting its legacy key", async () => {

@@ -21,7 +21,6 @@ import {
 } from "@tanstack/react-router";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import type { AccountOption } from "../../components/vault/create-vault-dialog";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
@@ -36,18 +35,6 @@ export const Route = createFileRoute("/vault")({
 		const activeAccount = await storage.getActiveAccount();
 		if (!activeAccount) {
 			throw redirect({ to: "/login" });
-		}
-
-		// Handle "All Accounts" mode specially
-		if (activeAccount.type === "all") {
-			// Check if we have any unlocked accounts
-			const unlockedAccounts = await storage.getUnlockedAccounts?.();
-			if (!unlockedAccounts || unlockedAccounts.length === 0) {
-				// No unlocked accounts, redirect to unlock
-				throw redirect({ to: "/unlock" });
-			}
-			// At least one account is unlocked, allow access
-			return;
 		}
 
 		// Single account mode: validate session for specific account
@@ -84,9 +71,8 @@ export const Route = createFileRoute("/vault")({
 });
 
 function RouteComponent() {
-	// Fetch all vault keys with account metadata
-	// Automatically handles single-account vs "All Accounts" mode
-	const { vaultKeys, isAllAccountsMode } = useAllVaultKeys();
+	// Fetch the active account's vault keys for the sidebar / vault list.
+	const { vaultKeys } = useAllVaultKeys();
 
 	// Get cross-vault tags for sidebar
 	const { tags: crossVaultTags } = useCrossVaultTags();
@@ -114,29 +100,6 @@ function RouteComponent() {
 		id: string;
 		name: string;
 	} | null>(null);
-	const availableAccountsQuery = useQuery({
-		queryKey: ["vault-route", "available-accounts", isAllAccountsMode],
-		enabled: isAllAccountsMode,
-		queryFn: async (): Promise<AccountOption[]> => {
-			const accountIds = await storage.getUnlockedAccounts?.();
-			if (!accountIds?.length) {
-				return [];
-			}
-
-			return await Promise.all(
-				accountIds.map(async (accountId) => {
-					const metadata = await storage.getAccountMetadata?.(accountId);
-					return {
-						accountId,
-						email: metadata?.email ?? accountId,
-						name: metadata?.name,
-						teamName: metadata?.teamName,
-					};
-				}),
-			);
-		},
-	});
-	const availableAccounts = availableAccountsQuery.data ?? [];
 	const accountIdsQuery = useQuery({
 		queryKey: ["vault-route", "account-ids"],
 		queryFn: async () => {
@@ -145,9 +108,6 @@ function RouteComponent() {
 				return [];
 			}
 
-			if (activeAccount.type === "all") {
-				return (await storage.getUnlockedAccounts?.()) ?? [];
-			}
 			return [activeAccount.accountId];
 		},
 	});
@@ -166,19 +126,12 @@ function RouteComponent() {
 		try {
 			let accountId = data.accountId;
 
-			// If no account email provided and we're not in all-accounts mode,
-			// get the active account email
-			if (!accountId && !isAllAccountsMode) {
+			// If no account provided, use the active account.
+			if (!accountId) {
 				const activeAccount = await storage.getActiveAccount();
 				if (activeAccount?.type === "single") {
 					accountId = activeAccount.accountId;
 				}
-			}
-
-			// If in all-accounts mode and no account selected, require selection
-			if (isAllAccountsMode && !accountId) {
-				toast.error("Please select an account for the new vault");
-				throw new Error("Account selection required");
 			}
 
 			// Hook handles image upload internally if imageFile is provided
@@ -361,7 +314,6 @@ function RouteComponent() {
 					open={isNewVaultDialogOpen}
 					onOpenChange={setIsNewVaultDialogOpen}
 					onSubmit={handleCreateVault}
-					accounts={isAllAccountsMode ? availableAccounts : undefined}
 				/>
 
 				<EditVaultDialog

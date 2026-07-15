@@ -17,7 +17,7 @@ export function useVaultItems(
 	vaultId: string,
 	options: UseVaultItemsOptions = {},
 ) {
-	const { isAllAccountsMode, isLoading, refetch, snapshot, vaultCoordinator } =
+	const { isLoading, refetch, snapshot, vaultCoordinator } =
 		useVaultRepositorySync({
 			enabled: options.enabled,
 			requiredId: vaultId,
@@ -34,6 +34,5 @@ export function useVaultItems(
 		isLoading,
 		error: null,
 		refetch,
-		isAllAccountsMode,
 	};
 }

@@ -49,8 +49,6 @@ export {
 	type CreateItemInput,
 	type CreateItemResult,
 	type FetchDecryptedItemResult,
-	type FetchDeletedItemsOptions,
-	type FetchItemsOptions,
 	ItemService,
 	type MoveItemInput,
 	type MoveItemResult,

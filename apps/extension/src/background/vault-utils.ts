@@ -67,7 +67,6 @@ function isPasskey(value: unknown): value is Passkey {
 
 export function normalizeDesktopSnapshotItem(
 	item: Record<string, unknown>,
-	includeAccountContext: boolean,
 ): MultiAccountItem | null {
 	if (typeof item.id !== "string" || typeof item.vaultId !== "string") {
 		return null;
@@ -137,21 +136,6 @@ export function normalizeDesktopSnapshotItem(
 		},
 	};
 
-	if (includeAccountContext) {
-		const account = item.account as Record<string, unknown> | null | undefined;
-		if (
-			typeof account === "object" &&
-			account !== null &&
-			typeof account.email === "string"
-		) {
-			normalized.account = {
-				email: account.email,
-				userId: typeof account.userId === "string" ? account.userId : "",
-				name: typeof account.name === "string" ? account.name : account.email,
-			};
-		}
-	}
-
 	return normalized;
 }
 
@@ -161,28 +145,7 @@ async function getDesktopTargetAccountIds(): Promise<string[]> {
 		return [activeAccount.accountId];
 	}
 
-	const statusAccountIds = desktopSync.getLastStatus()?.unlockedAccounts;
-	if (statusAccountIds && statusAccountIds.length > 0) {
-		return Array.from(new Set(statusAccountIds));
-	}
-
-	const accounts = await desktopClient.getAccounts();
-	if (!accounts) {
-		return [];
-	}
-
-	return Array.from(new Set(accounts.unlockedAccounts));
-}
-
-async function resolveAccountIdForItem(
-	item: MultiAccountItem,
-	accountsByEmail: Map<string, string>,
-): Promise<string | null> {
-	const email = item.account?.email?.toLowerCase();
-	if (!email) {
-		return null;
-	}
-	return accountsByEmail.get(email) ?? null;
+	return [];
 }
 
 async function filterItemsForTravelMode(
@@ -190,48 +153,24 @@ async function filterItemsForTravelMode(
 ): Promise<MultiAccountItem[]> {
 	const enforcer = getTravelModeEnforcer(storage);
 	const activeAccount = await storage.getActiveAccount();
-	const accounts = await storage.getAccountsList();
-	const accountsByEmail = new Map(
-		accounts.map((account) => [account.email.toLowerCase(), account.accountId]),
-	);
 
 	if (activeAccount?.type === "single") {
 		await enforcer.hydrateFromStorage(activeAccount.accountId);
 		return enforcer.filterItems(activeAccount.accountId, items);
 	}
 
-	const itemsByAccountId = new Map<string, MultiAccountItem[]>();
-	const unassigned: MultiAccountItem[] = [];
-
-	for (const item of items) {
-		const accountId = await resolveAccountIdForItem(item, accountsByEmail);
-		if (!accountId) {
-			unassigned.push(item);
-			continue;
-		}
-		const bucket = itemsByAccountId.get(accountId) ?? [];
-		bucket.push(item);
-		itemsByAccountId.set(accountId, bucket);
-	}
-
-	const filtered: MultiAccountItem[] = [...unassigned];
-
-	for (const [accountId, accountItems] of itemsByAccountId) {
-		await enforcer.hydrateFromStorage(accountId);
-		filtered.push(...enforcer.filterItems(accountId, accountItems));
-	}
-
-	return filtered;
+	// No single active account means we cannot determine which account's travel
+	// rules apply. Fail closed and surface nothing rather than leaking items that
+	// may be blocked by travel mode.
+	return [];
 }
 
 async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
-	const activeAccount = await storage.getActiveAccount();
 	const targetAccountIds = await getDesktopTargetAccountIds();
 	if (targetAccountIds.length === 0) {
 		return [];
 	}
 
-	const includeAccountContext = activeAccount?.type === "all";
 	const snapshot = await desktopClient.getItemsSnapshot(targetAccountIds);
 	if (!snapshot) {
 		console.warn("[vault-utils] desktop snapshot unavailable", {
@@ -242,10 +181,7 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 
 	const normalizedItems = snapshot.items
 		.map((item) =>
-			normalizeDesktopSnapshotItem(
-				item as Record<string, unknown>,
-				includeAccountContext,
-			),
+			normalizeDesktopSnapshotItem(item as Record<string, unknown>),
 		)
 		.filter((item): item is MultiAccountItem => item !== null);
 

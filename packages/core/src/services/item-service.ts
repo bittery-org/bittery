@@ -23,6 +23,12 @@ import type {
 	AccountResolver,
 	DefaultRpcClient,
 } from "./account-resolver";
+import {
+	decryptAttachmentParts,
+	encodeAttachmentBlobEnvelope,
+	encryptAttachmentParts,
+	parseAttachmentBlobEnvelope,
+} from "./attachment-crypto";
 import { buildItemEncryptionContext } from "./encryption-context";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
@@ -53,11 +59,6 @@ export interface MultiAccountItem extends DecryptedItem {
 		icon: string | null;
 		imageUrl: string | null;
 	};
-	account?: {
-		email: string;
-		userId: string;
-		name: string;
-	};
 }
 
 export interface MultiAccountDeletedItem {
@@ -76,20 +77,7 @@ export interface MultiAccountDeletedItem {
 		icon: string | null;
 		imageUrl: string | null;
 	};
-	account?: {
-		email: string;
-		userId: string;
-		name: string;
-	};
 	[key: string]: any;
-}
-
-export interface FetchItemsOptions {
-	isAllAccountsMode?: boolean;
-}
-
-export interface FetchDeletedItemsOptions {
-	isAllAccountsMode?: boolean;
 }
 
 export interface FetchDecryptedItemResult {
@@ -466,7 +454,6 @@ export class ItemService {
 
 	async fetchAndDecryptItems(
 		accounts: AccountInfo[],
-		options: FetchItemsOptions = {},
 	): Promise<MultiAccountItem[]> {
 		if (accounts.length === 0) return [];
 
@@ -561,15 +548,6 @@ export class ItemService {
 										icon: rawItem.vault.icon,
 										imageUrl: rawItem.vault.imageUrl,
 									},
-									...(options.isAllAccountsMode
-										? {
-												account: {
-													email: account.email,
-													userId: account.userId,
-													name: account.name,
-												},
-											}
-										: {}),
 								} as MultiAccountItem;
 							} catch (error) {
 								console.error(
@@ -788,7 +766,6 @@ export class ItemService {
 
 	async fetchDeletedItems(
 		accounts: AccountInfo[],
-		options: FetchDeletedItemsOptions = {},
 	): Promise<MultiAccountDeletedItem[]> {
 		if (accounts.length === 0) return [];
 
@@ -882,15 +859,6 @@ export class ItemService {
 											icon: rawItem.vault.icon,
 											imageUrl: rawItem.vault.imageUrl,
 										},
-										...(options.isAllAccountsMode
-											? {
-													account: {
-														email: account.email,
-														userId: account.userId,
-														name: account.name,
-													},
-												}
-											: {}),
 									} as MultiAccountDeletedItem;
 								} catch (error) {
 									console.error(
@@ -1048,6 +1016,153 @@ export class ItemService {
 		return { _encryptedData: encryptedData, _accountEmail: input.accountEmail };
 	}
 
+	/**
+	 * Copy every attachment from the source item onto the target item during a
+	 * cross-account move. Throws on the first failure so the caller can keep the
+	 * source intact. No-op (and no source vault-key lookup) when the item has no
+	 * attachments.
+	 */
+	private async migrateAttachmentsForCrossAccountMove(params: {
+		sourceClient: DefaultRpcClient;
+		targetClient: DefaultRpcClient;
+		sourceItemId: string;
+		targetItemId: string;
+		sourceVaultId: string;
+		targetVaultId: string;
+		sourceAccountEmail?: string;
+		targetVaultKey: Uint8Array;
+		targetUserId: string;
+	}): Promise<void> {
+		const attachments = await params.sourceClient.vault.listAttachments.query({
+			itemId: params.sourceItemId,
+		});
+		if (!attachments || attachments.length === 0) {
+			return;
+		}
+
+		const sourceVaultKey = await this.getVaultKey(
+			params.sourceVaultId,
+			params.sourceAccountEmail,
+		);
+		if (!sourceVaultKey) {
+			throw new Error(
+				"Cannot access the source vault key to migrate attachments. Please unlock the source account.",
+			);
+		}
+		const sourceUserId = await this.resolveUserId(params.sourceAccountEmail);
+
+		for (const attachment of attachments) {
+			// Fetch the encrypted blob envelope from object storage.
+			const download =
+				await params.sourceClient.vault.getAttachmentDownloadUrl.mutate({
+					attachmentId: attachment.id,
+				});
+			const response = await fetch(download.downloadUrl);
+			if (!response.ok) {
+				throw new Error(
+					`Failed to download attachment ${attachment.id} during cross-account move.`,
+				);
+			}
+			const blobEnvelope = parseAttachmentBlobEnvelope(await response.text());
+
+			// Decrypt under the SOURCE scope (source vault key + source AAD). The
+			// attachment's own uploader is used for context binding when present,
+			// mirroring the read paths in useItemAttachments.
+			const decrypted = await decryptAttachmentParts(
+				this.crypto,
+				sourceVaultKey,
+				{
+					vaultId: params.sourceVaultId,
+					attachmentKey: attachment.storageKey,
+					userId: attachment.uploadedBy || sourceUserId,
+				},
+				{
+					blobEnvelope,
+					encryptedName: attachment.encryptedName,
+					encryptedContentType: attachment.encryptedContentType,
+					encryptionIv: attachment.encryptionIv,
+					encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+					encryptionAlgorithm: attachment.encryptionAlgorithm,
+				},
+			);
+
+			// Mint a NEW server-signed storage key on the target. Quota errors
+			// (file-too-large / storage-limit-reached) reject here and propagate,
+			// aborting the move with the source left intact. The name/content-type
+			// passed here are only used for the storage object itself, so we keep
+			// them opaque (like useItemAttachments) to avoid leaking plaintext.
+			const upload =
+				await params.targetClient.vault.createAttachmentUpload.mutate({
+					itemId: params.targetItemId,
+					fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
+					contentType: "application/octet-stream",
+					fileSize: attachment.fileSize,
+				});
+
+			// Re-encrypt under the TARGET scope (target vault key + target AAD bound
+			// to the freshly-minted storage key).
+			const reEncrypted = await encryptAttachmentParts(
+				this.crypto,
+				params.targetVaultKey,
+				{
+					vaultId: params.targetVaultId,
+					attachmentKey: upload.key,
+					userId: params.targetUserId,
+				},
+				decrypted,
+			);
+
+			const putResponse = await fetch(upload.uploadUrl, {
+				method: "PUT",
+				headers: { "Content-Type": "application/octet-stream" },
+				body: encodeAttachmentBlobEnvelope(reEncrypted.blobEnvelope),
+			});
+			if (!putResponse.ok) {
+				throw new Error(
+					`Failed to upload migrated attachment for item ${params.targetItemId}.`,
+				);
+			}
+
+			await params.targetClient.vault.createAttachment.mutate({
+				itemId: params.targetItemId,
+				storageKey: upload.key,
+				encryptedName: reEncrypted.encryptedName,
+				encryptedContentType: reEncrypted.encryptedContentType,
+				encryptionIv: reEncrypted.encryptionIv,
+				encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
+				encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
+				fileSize: attachment.fileSize,
+			});
+		}
+	}
+
+	/**
+	 * Best-effort removal of a target item created during a cross-account move
+	 * whose attachment migration failed. Swallows errors: the invariant we care
+	 * about (the SOURCE item is never deleted on failure) is upheld by the caller,
+	 * so a lingering partial target is acceptable if cleanup can't complete.
+	 */
+	private async bestEffortDeleteTargetItem(
+		targetClient: DefaultRpcClient,
+		targetItemId: string,
+	): Promise<void> {
+		try {
+			await targetClient.vault.deleteItem.mutate({
+				itemId: targetItemId,
+				clientId: null,
+			});
+			await targetClient.vault.permanentlyDeleteItem.mutate({
+				itemId: targetItemId,
+				clientId: null,
+			});
+		} catch (cleanupError) {
+			console.error(
+				"[ItemService] Failed to clean up partial target item after attachment migration failure:",
+				cleanupError,
+			);
+		}
+	}
+
 	async moveItem(
 		input: MoveItemInput,
 		defaultClient: DefaultRpcClient,
@@ -1162,11 +1277,45 @@ export class ItemService {
 				throw new Error("Server returned mismatched item ID");
 			}
 
+			const sourceClient = await this.accounts.getClientForAccount(
+				defaultClient,
+				sourceAccountId,
+			);
+
+			// Migrate attachment blobs onto the newly-created target item BEFORE the
+			// source item is deleted. Attachment ciphertext cannot be copied as-is:
+			// the vault key, and the AAD's vaultId/userId/attachmentKey all differ on
+			// the target, so every attachment is downloaded, decrypted under the
+			// source scope and re-encrypted + re-uploaded under a fresh, server-minted
+			// target storage key.
+			//
+			// Partial-failure policy: the move is already non-atomic, so we optimise
+			// for NEVER losing data. If any attachment step throws (including target
+			// quota errors from createAttachmentUpload) we do NOT delete the source —
+			// its item and attachments stay intact for a retry — and we best-effort
+			// remove the partially-created target item so no orphan/duplicate lingers.
 			try {
-				const sourceClient = await this.accounts.getClientForAccount(
-					defaultClient,
-					sourceAccountId,
-				);
+				await this.migrateAttachmentsForCrossAccountMove({
+					sourceClient,
+					targetClient,
+					sourceItemId: input.itemId,
+					targetItemId,
+					sourceVaultId: input.sourceVaultId,
+					targetVaultId: input.targetVaultId,
+					sourceAccountEmail,
+					targetVaultKey,
+					targetUserId,
+				});
+			} catch (error) {
+				await this.bestEffortDeleteTargetItem(targetClient, targetItemId);
+				throw error instanceof Error
+					? error
+					: new Error(
+							"Failed to migrate attachments during cross-account move. The original item was left intact.",
+						);
+			}
+
+			try {
 				await sourceClient.vault.deleteItem.mutate({
 					itemId: input.itemId,
 					clientId: null,

@@ -167,8 +167,10 @@ export function parseStoredActiveAccount(
 	if (!stored) {
 		return null;
 	}
+	// Legacy "all-accounts" pointer no longer exists; collapse it to null so a
+	// single account gets re-selected on next unlock.
 	if (stored === "all") {
-		return { type: "all" };
+		return null;
 	}
 	return { type: "single", accountId: stored };
 }
@@ -177,9 +179,6 @@ export function parseStoredActiveAccount(
 export function serializeActiveAccount(account: ActiveAccount): string | null {
 	if (!account) {
 		return null;
-	}
-	if (account.type === "all") {
-		return "all";
 	}
 	return account.accountId;
 }

@@ -82,7 +82,6 @@ export async function resolveAccountEmailForVault(
 
 export async function resolveAccountEmailForItemId(
 	itemId: string,
-	loadItems: () => Promise<Array<DecryptedItemWithContext | null>>,
 ): Promise<string | undefined> {
 	const coordinatedItem = core.vaultCoordinator.getById(itemId);
 	if (coordinatedItem?.accountEmail) {
@@ -96,15 +95,6 @@ export async function resolveAccountEmailForItemId(
 	if (activeAccount?.type === "single") {
 		return await resolveEmailFromAccountId(activeAccount.accountId);
 	}
-	if (activeAccount?.type !== "all") {
-		return undefined;
-	}
 
-	const items = await loadItems();
-	const item = items.find(
-		(candidate): candidate is DecryptedItemWithContext =>
-			candidate !== null && candidate.id === itemId,
-	);
-
-	return item ? getItemAccountEmail(item) : undefined;
+	return undefined;
 }

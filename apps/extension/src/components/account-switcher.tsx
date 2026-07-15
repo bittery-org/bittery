@@ -1,7 +1,6 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import {
-	AccountAvatarGroup,
 	AccountSwitcher,
 	Avatar,
 	AvatarFallback,
@@ -70,11 +69,7 @@ export function ExtensionAccountSwitcher() {
 	);
 
 	const activeAccountId =
-		activeSelection?.type === "single"
-			? activeSelection.accountId
-			: activeSelection?.type === "all"
-				? "all"
-				: null;
+		activeSelection?.type === "single" ? activeSelection.accountId : null;
 	// Update team names for accounts that don't have them
 	useEffect(() => {
 		const updateMissingTeamNames = async () => {
@@ -177,33 +172,10 @@ export function ExtensionAccountSwitcher() {
 		}
 	};
 
-	const handleAllAccountsSelect = async () => {
-		// Check if we have any unlocked accounts
-		if (unlockedAccountIdsList.length === 0) {
-			toast.error(m.ext_account_switcher_toast_no_unlocked());
-			return;
-		}
-
-		try {
-			await switchAccount.mutateAsync({ type: "all" });
-			// Invalidate account-related data to refresh multi-account view
-			await Promise.all([
-				invalidator.invalidateVaultKeys(),
-				queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-				queryClient.invalidateQueries({ queryKey: ["items"] }),
-				queryClient.invalidateQueries({ queryKey: ["accounts"] }),
-			]);
-		} catch (error) {
-			console.error("Failed to switch to All Accounts mode:", error);
-			toast.error(m.ext_account_switcher_toast_all_accounts_failed());
-		}
-	};
-
 	// Get active account for trigger display
 	const activeAccount = accountsData.find(
 		(a) => a.accountId === activeAccountId,
 	);
-	const isAllAccountsMode = activeAccountId === "all";
 
 	// Helper to get avatar color
 	const getAvatarColor = (email: string) => {
@@ -223,27 +195,7 @@ export function ExtensionAccountSwitcher() {
 			className="gap-2"
 			disabled={switchAccount.isPending}
 		>
-			{isAllAccountsMode ? (
-				<>
-					<AccountAvatarGroup
-						accounts={accountsData.filter((a) =>
-							unlockedAccountIdsList.includes(a.accountId),
-						)}
-						maxVisible={2}
-						size="sm"
-					/>
-					<div className="flex flex-col items-start overflow-hidden">
-						<span className="max-w-32 truncate font-medium text-sm">
-							{m.ext_account_switcher_all_accounts()}
-						</span>
-						<span className="text-muted-foreground text-xs">
-							{m.ext_account_switcher_unlocked_count({
-								count: unlockedAccountIdsList.length,
-							})}
-						</span>
-					</div>
-				</>
-			) : activeAccount ? (
+			{activeAccount ? (
 				<>
 					<Avatar className="h-6 w-6">
 						{activeAccount.teamAvatarUrl && (
@@ -282,9 +234,7 @@ export function ExtensionAccountSwitcher() {
 			showAddAccount={!desktopStatus.data?.available}
 			onLockAll={handleLockAll}
 			showLockAll={!desktopStatus.data?.available}
-			showAllAccountsOption={true}
 			showSetupAnotherDevice={!desktopStatus.data?.available}
-			onAllAccountsSelect={handleAllAccountsSelect}
 			isLoading={switchAccount.isPending}
 			trigger={trigger}
 		/>

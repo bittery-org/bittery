@@ -40,7 +40,7 @@ declare class CredentialProviderModule extends NativeModule<CredentialProviderMo
 	clearMasterUnlockKey(userId?: string): boolean;
 
 	/**
-	 * Clear all Master Unlock Keys (on logout or auto-lock in all-accounts mode).
+	 * Clear all Master Unlock Keys (on logout or when locking all accounts).
 	 * @returns true if successful
 	 */
 	clearAllMasterUnlockKeys(): boolean;

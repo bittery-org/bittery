@@ -1,4 +1,4 @@
-import { useAllVaultKeys, useMoveItem } from "@bittery/core/hooks";
+import { useMoveItem, useMoveTargetVaults } from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	Avatar,
@@ -49,11 +49,15 @@ export function MoveItemDialog({
 	const { m } = useI18n();
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
 	const [searchQuery, setSearchQuery] = useState("");
-	const { vaultKeys, isLoading, isAllAccountsMode } = useAllVaultKeys();
+	// Only resolve/hydrate cross-account move targets while the dialog is open;
+	// the dialog stays mounted with the item detail page, so an unconditional
+	// call would hydrate every unlocked account's repo on every item view.
+	const { vaultKeys, isLoading } = useMoveTargetVaults({ enabled: open });
 	const moveItem = useMoveItem();
 	const navigate = useNavigate();
 
-	// Find the current vault's account email
+	// Find the account email that owns the item being moved (i.e. the account
+	// that owns the current vault). Used to detect cross-account targets.
 	const currentVaultAccount = useMemo(() => {
 		const currentVault = vaultKeys.find((vk) => vk.vaultId === currentVaultId);
 		return currentVault?.accountEmail;
@@ -71,13 +75,10 @@ export function MoveItemDialog({
 		);
 	}, [vaultKeys, searchQuery]);
 
-	// Group vaults by account in multi-account mode for better UX
-	// Includes all vaults (current vault will be shown as disabled)
+	// Group vaults by account. Move targets are surfaced across every unlocked
+	// account, so the list is always account-grouped (the current vault is
+	// rendered disabled).
 	const vaultsByAccount = useMemo(() => {
-		if (!isAllAccountsMode) {
-			return { single: filteredVaultKeys };
-		}
-
 		const grouped: Record<string, typeof filteredVaultKeys> = {};
 		for (const vault of filteredVaultKeys) {
 			const accountKey = vault.accountEmail || "__unknown__";
@@ -87,7 +88,7 @@ export function MoveItemDialog({
 			grouped[accountKey].push(vault);
 		}
 		return grouped;
-	}, [filteredVaultKeys, isAllAccountsMode]);
+	}, [filteredVaultKeys]);
 
 	// Check if selected vault is in a different account
 	const selectedVault = useMemo(() => {
@@ -95,9 +96,9 @@ export function MoveItemDialog({
 	}, [vaultKeys, selectedVaultId]);
 
 	const isCrossAccount = useMemo(() => {
-		if (!selectedVault || !isAllAccountsMode) return false;
+		if (!selectedVault) return false;
 		return selectedVault.accountEmail !== currentVaultAccount;
-	}, [selectedVault, currentVaultAccount, isAllAccountsMode]);
+	}, [selectedVault, currentVaultAccount]);
 
 	const handleMove = async () => {
 		if (!selectedVaultId) {
@@ -198,138 +199,85 @@ export function MoveItemDialog({
 						</div>
 					) : (
 						<div className="max-h-80 space-y-1 overflow-y-auto">
-							{isAllAccountsMode
-								? // Multi-account mode: group by account
-									Object.entries(vaultsByAccount).map(
-										([accountEmail, vaults]) => {
-											if (vaults.length === 0) return null;
+							{/* Move targets are always account-grouped so cross-account
+							    targets are surfaced regardless of active-account view. */}
+							{Object.entries(vaultsByAccount).map(([accountEmail, vaults]) => {
+								if (vaults.length === 0) return null;
 
-											const accountName =
-												vaults[0].accountTeamName ||
-												vaults[0].accountName ||
-												(accountEmail === "__unknown__"
-													? m.vaults_detail_items_move_dialog_account_unknown()
-													: accountEmail);
-											const accountTeamAvatarUrl =
-												vaults[0].accountTeamAvatarUrl;
+								const accountName =
+									vaults[0].accountTeamName ||
+									vaults[0].accountName ||
+									(accountEmail === "__unknown__"
+										? m.vaults_detail_items_move_dialog_account_unknown()
+										: accountEmail);
+								const accountTeamAvatarUrl = vaults[0].accountTeamAvatarUrl;
 
-											return (
-												<div key={accountEmail} className="py-1">
-													<div className="flex items-center gap-2 px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-														<Avatar className="size-5 text-[10px]">
-															<AvatarImage
-																src={accountTeamAvatarUrl ?? undefined}
-																alt={accountName}
-															/>
-															<AvatarFallback className="text-[10px]">
-																{getInitials(accountName)}
-															</AvatarFallback>
-														</Avatar>
-														<span>{accountName}</span>
-													</div>
-													<div className="ml-4 space-y-0.5">
-														{vaults.map((vaultKey) => {
-															const isCurrentVault =
-																vaultKey.vaultId === currentVaultId;
-															const isSelected =
-																vaultKey.vaultId === selectedVaultId;
-															const isDisabled =
-																isCurrentVault || vaultKey.role === "read-only";
-
-															return (
-																<button
-																	type="button"
-																	key={vaultKey.vaultId}
-																	disabled={isDisabled}
-																	onClick={() =>
-																		!isDisabled &&
-																		setSelectedVaultId(vaultKey.vaultId)
-																	}
-																	className={cn(
-																		"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
-																		isSelected &&
-																			!isDisabled &&
-																			"bg-primary/10 ring-1 ring-primary/20",
-																		!isDisabled &&
-																			!isSelected &&
-																			"hover:bg-accent",
-																		isDisabled &&
-																			"cursor-not-allowed opacity-50",
-																	)}
-																>
-																	<VaultAvatar
-																		name={vaultKey.vaultName}
-																		icon={vaultKey.vaultIcon}
-																		imageUrl={vaultKey.vaultImageUrl}
-																		size="sm"
-																	/>
-																	<span className="flex-1 text-left font-medium">
-																		{vaultKey.vaultName}
-																	</span>
-																	{isCurrentVault && (
-																		<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-																			{m.vaults_detail_items_move_dialog_badge_current()}
-																		</span>
-																	)}
-																	{isSelected && !isDisabled && (
-																		<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-																			<IconCheckOutlineDuo18 className="size-3" />
-																		</div>
-																	)}
-																</button>
-															);
-														})}
-													</div>
-												</div>
-											);
-										},
-									)
-								: // Single-account mode: simple list with current vault included
-									filteredVaultKeys.map((vaultKey) => {
-										const isCurrentVault = vaultKey.vaultId === currentVaultId;
-										const isSelected = vaultKey.vaultId === selectedVaultId;
-										const isDisabled =
-											isCurrentVault || vaultKey.role === "read-only";
-
-										return (
-											<button
-												type="button"
-												key={vaultKey.vaultId}
-												disabled={isDisabled}
-												onClick={() =>
-													!isDisabled && setSelectedVaultId(vaultKey.vaultId)
-												}
-												className={cn(
-													"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
-													isSelected &&
-														!isDisabled &&
-														"bg-primary/10 ring-1 ring-primary/20",
-													!isDisabled && !isSelected && "hover:bg-accent",
-													isDisabled && "cursor-not-allowed opacity-50",
-												)}
-											>
-												<VaultAvatar
-													name={vaultKey.vaultName}
-													icon={vaultKey.vaultIcon}
-													imageUrl={vaultKey.vaultImageUrl}
-													size="sm"
+								return (
+									<div key={accountEmail} className="py-1">
+										<div className="flex items-center gap-2 px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
+											<Avatar className="size-5 text-[10px]">
+												<AvatarImage
+													src={accountTeamAvatarUrl ?? undefined}
+													alt={accountName}
 												/>
-												<span className="flex-1 text-left font-medium">
-													{vaultKey.vaultName}
-												</span>
-												{isCurrentVault && (
-													<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-														{m.vaults_detail_items_move_dialog_badge_current()}
-													</span>
-												)}
-												{isSelected && !isDisabled && (
-													<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-														<IconCheckOutlineDuo18 className="size-3" />
-													</div>
-												)}
-											</button>
-										);
-									})}
+												<AvatarFallback className="text-[10px]">
+													{getInitials(accountName)}
+												</AvatarFallback>
+											</Avatar>
+											<span>{accountName}</span>
+										</div>
+										<div className="ml-4 space-y-0.5">
+											{vaults.map((vaultKey) => {
+												const isCurrentVault =
+													vaultKey.vaultId === currentVaultId;
+												const isSelected = vaultKey.vaultId === selectedVaultId;
+												const isDisabled =
+													isCurrentVault || vaultKey.role === "read-only";
+
+												return (
+													<button
+														type="button"
+														key={vaultKey.vaultId}
+														disabled={isDisabled}
+														onClick={() =>
+															!isDisabled &&
+															setSelectedVaultId(vaultKey.vaultId)
+														}
+														className={cn(
+															"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
+															isSelected &&
+																!isDisabled &&
+																"bg-primary/10 ring-1 ring-primary/20",
+															!isDisabled && !isSelected && "hover:bg-accent",
+															isDisabled && "cursor-not-allowed opacity-50",
+														)}
+													>
+														<VaultAvatar
+															name={vaultKey.vaultName}
+															icon={vaultKey.vaultIcon}
+															imageUrl={vaultKey.vaultImageUrl}
+															size="sm"
+														/>
+														<span className="flex-1 text-left font-medium">
+															{vaultKey.vaultName}
+														</span>
+														{isCurrentVault && (
+															<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
+																{m.vaults_detail_items_move_dialog_badge_current()}
+															</span>
+														)}
+														{isSelected && !isDisabled && (
+															<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+																<IconCheckOutlineDuo18 className="size-3" />
+															</div>
+														)}
+													</button>
+												);
+											})}
+										</div>
+									</div>
+								);
+							})}
 						</div>
 					)}
 				</div>

@@ -93,41 +93,38 @@ describe("vault-utils", () => {
 	});
 
 	test("retains passkeys when normalizing desktop snapshot items", () => {
-		const normalized = normalizeDesktopSnapshotItem(
-			{
-				id: "item_1",
-				vaultId: "vault_1",
-				category: "login",
-				favorite: false,
-				createdAt: "2026-01-01T00:00:00.000Z",
-				updatedAt: "2026-01-01T00:00:00.000Z",
-				title: "Example",
-				passkeys: [
-					{
-						credentialId: "cred_1",
-						rpId: "www.passkeys.io",
-						rpName: "passkeys.io",
-						userHandle: "user",
-						userName: "alice",
-						userDisplayName: "Alice",
-						privateKey: "private",
-						publicKey: "public",
-						algorithm: -7,
-						signCount: 0,
-						transports: ["internal"],
-						createdAt: "2026-01-01T00:00:00.000Z",
-					},
-				],
-				vault: {
-					id: "vault_1",
-					name: "Personal",
-					type: "personal",
-					icon: null,
-					imageUrl: null,
+		const normalized = normalizeDesktopSnapshotItem({
+			id: "item_1",
+			vaultId: "vault_1",
+			category: "login",
+			favorite: false,
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+			title: "Example",
+			passkeys: [
+				{
+					credentialId: "cred_1",
+					rpId: "www.passkeys.io",
+					rpName: "passkeys.io",
+					userHandle: "user",
+					userName: "alice",
+					userDisplayName: "Alice",
+					privateKey: "private",
+					publicKey: "public",
+					algorithm: -7,
+					signCount: 0,
+					transports: ["internal"],
+					createdAt: "2026-01-01T00:00:00.000Z",
 				},
+			],
+			vault: {
+				id: "vault_1",
+				name: "Personal",
+				type: "personal",
+				icon: null,
+				imageUrl: null,
 			},
-			false,
-		);
+		});
 
 		expect(normalized?.passkeys).toHaveLength(1);
 		expect(normalized?.passkeys?.[0]?.credentialId).toBe("cred_1");

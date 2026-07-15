@@ -195,7 +195,6 @@ export interface IStorageAdapter {
 	 * Get the currently active account configuration.
 	 * Returns:
 	 * - { type: "single", accountId: string } - A specific account is active
-	 * - { type: "all" } - All unlocked accounts are active (multi-account mode)
 	 * - null - No account is active (logged out)
 	 */
 	getActiveAccount(): Promise<ActiveAccount>;

@@ -211,7 +211,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		if (accountId) return accountId;
 
 		const account = await this.getActiveAccount();
-		if (!account || account.type === "all") return null;
+		if (!account) return null;
 		return account.accountId;
 	}
 
@@ -731,7 +731,7 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 
 	async getActiveAccountUserId(): Promise<string | null> {
 		const account = await this.getActiveAccount();
-		if (!account || account.type === "all") return null;
+		if (!account) return null;
 
 		const sessionData = await this.getStoredSessionData(account.accountId);
 		return sessionData?.userId ?? null;

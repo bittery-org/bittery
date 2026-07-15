@@ -25,16 +25,10 @@ export type UseItemsUnifiedOptions = UseItemsOptions;
  * Hook to fetch and decrypt items from active account(s).
  */
 export function useItems(options: UseItemsOptions = {}) {
-	const {
-		accountsInfo,
-		isAllAccountsMode,
-		isLoading,
-		refetch,
-		snapshot,
-		vaultCoordinator,
-	} = useVaultRepositorySync({
-		enabled: options.enabled,
-	});
+	const { accountsInfo, isLoading, refetch, snapshot, vaultCoordinator } =
+		useVaultRepositorySync({
+			enabled: options.enabled,
+		});
 
 	const items = useMemo(() => {
 		// Snapshot is an invalidation signal from the coordinator store.
@@ -47,7 +41,6 @@ export function useItems(options: UseItemsOptions = {}) {
 		isLoading,
 		error: null,
 		refetch,
-		isAllAccountsMode,
 		unlockedAccounts: accountsInfo,
 	};
 }

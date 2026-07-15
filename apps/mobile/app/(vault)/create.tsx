@@ -55,11 +55,7 @@ export default function CreateItemScreen() {
 		vaultId?: string;
 	}>();
 	const createItem = useCreateItem();
-	const {
-		vaultKeys = [],
-		isLoading: isLoadingVaults,
-		isAllAccountsMode,
-	} = useAllVaultKeys();
+	const { vaultKeys = [], isLoading: isLoadingVaults } = useAllVaultKeys();
 
 	// Vault selection state
 	const [selectedVaultId, setSelectedVaultId] = useState<string | undefined>(
@@ -203,10 +199,6 @@ export default function CreateItemScreen() {
 	);
 	const getVaultLabel = (vault?: (typeof vaultKeys)[number]) => {
 		if (!vault) return "";
-		if (isAllAccountsMode && vault.accountEmail) {
-			const accountLabel = vault.accountName || vault.accountEmail;
-			return `${vault.vaultName} • ${accountLabel}`;
-		}
 		return vault.vaultName;
 	};
 
@@ -308,11 +300,6 @@ export default function CreateItemScreen() {
 														<Text className="text-base text-foreground">
 															{vault.vaultName}
 														</Text>
-														{isAllAccountsMode && vault.accountEmail && (
-															<Text className="text-muted text-xs">
-																{vault.accountName || vault.accountEmail}
-															</Text>
-														)}
 													</View>
 												</View>
 												<Select.ItemIndicator />

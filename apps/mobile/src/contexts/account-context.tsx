@@ -24,11 +24,9 @@ interface AccountContextValue {
 	allAccounts: AccountMetadata[];
 	activeAccountConfig: ActiveAccount;
 	activeAccount: AccountMetadata | null;
-	isAllAccountsMode: boolean;
 	isLoading: boolean;
 	refreshAccounts: () => Promise<void>;
 	switchAccount: (accountId: string) => Promise<void>;
-	switchAllAccounts: () => Promise<void>;
 	removeAccount: (accountId: string) => Promise<void>;
 }
 
@@ -36,11 +34,9 @@ const AccountContext = createContext<AccountContextValue>({
 	allAccounts: [],
 	activeAccountConfig: null,
 	activeAccount: null,
-	isAllAccountsMode: false,
 	isLoading: true,
 	refreshAccounts: async () => {},
 	switchAccount: async () => {},
-	switchAllAccounts: async () => {},
 	removeAccount: async () => {},
 });
 
@@ -95,10 +91,6 @@ export function AccountProvider({ children }: AccountProviderProps) {
 		[manager],
 	);
 
-	const switchAllAccounts = useCallback(async () => {
-		await manager.switchAccount({ type: "all" });
-	}, [manager]);
-
 	const removeAccount = useCallback(
 		async (accountId: string) => {
 			await manager.removeAccount(accountId);
@@ -112,11 +104,9 @@ export function AccountProvider({ children }: AccountProviderProps) {
 				allAccounts,
 				activeAccountConfig,
 				activeAccount,
-				isAllAccountsMode: activeAccountConfig?.type === "all",
 				isLoading,
 				refreshAccounts,
 				switchAccount,
-				switchAllAccounts,
 				removeAccount,
 			}}
 		>

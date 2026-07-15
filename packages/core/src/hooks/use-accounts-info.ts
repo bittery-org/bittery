@@ -1,6 +1,5 @@
 /**
- * Utility hook for fetching complete account information for active accounts.
- * Handles both single account and "All Accounts" mode.
+ * Utility hook for fetching complete account information for the active account.
  */
 
 import { useQuery } from "@tanstack/react-query";
@@ -22,8 +21,7 @@ export interface UseAccountsInfoOptions {
 }
 
 /**
- * Utility hook that fetches complete account information for active accounts.
- * Handles both single account and "All Accounts" mode.
+ * Utility hook that fetches complete account information for the active account.
  * Returns all data needed to make API calls and decrypt items.
  */
 export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
@@ -81,6 +79,5 @@ export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 		accountsInfo,
 		isLoading: (!manager && isLoadingActive) || isLoadingInfo,
 		error,
-		isAllAccountsMode: effectiveActiveAccount?.type === "all",
 	};
 }

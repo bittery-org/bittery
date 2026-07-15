@@ -1,5 +1,5 @@
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { Badge, Button, cn, Input, Skeleton, toast } from "@bittery/ui";
+import { Button, cn, Input, Skeleton, toast } from "@bittery/ui";
 import {
 	IconCircleKeyOutlineDuo18,
 	IconGear3OutlineDuo18,
@@ -16,21 +16,6 @@ import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
-type MultiAccountItem = DecryptedItemWithContext & {
-	account?: {
-		email: string;
-		userId: string;
-		name: string;
-	};
-	vault?: {
-		id: string;
-		name: string;
-		type: string;
-		icon: string | null;
-		imageUrl: string | null;
-	};
-};
-
 type PopupActiveAccount = Awaited<ReturnType<typeof storage.getActiveAccount>>;
 
 const LAST_SELECTED_ITEM_BY_SCOPE_KEY =
@@ -38,7 +23,6 @@ const LAST_SELECTED_ITEM_BY_SCOPE_KEY =
 
 function getSelectionScope(activeAccount: PopupActiveAccount): string {
 	if (!activeAccount) return "none";
-	if (activeAccount.type === "all") return "all";
 	return `single:${activeAccount.accountId}`;
 }
 
@@ -107,12 +91,10 @@ function hostnameMatches(
 function ItemListRow({
 	item,
 	isSelected,
-	isAllAccountsMode,
 	onClick,
 }: {
 	item: DecryptedItemWithContext;
 	isSelected: boolean;
-	isAllAccountsMode: boolean;
 	onClick: () => void;
 }) {
 	const { m } = useI18n();
@@ -172,13 +154,6 @@ function ItemListRow({
 							{subtitle}
 						</div>
 					)}
-					{isAllAccountsMode && (item as MultiAccountItem).account && (
-						<div className="mt-0.5 flex items-center gap-1">
-							<Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
-								{(item as MultiAccountItem).account?.name}
-							</Badge>
-						</div>
-					)}
 				</div>
 			</div>
 		</button>
@@ -205,7 +180,6 @@ export function VaultPage() {
 		[activeAccount],
 	);
 
-	const isAllAccountsMode = activeAccount?.type === "all";
 	const currentHostnameQuery = useQuery({
 		queryKey: ["current-tab-hostname"],
 		queryFn: async () => {
@@ -421,7 +395,6 @@ export function VaultPage() {
 												key={item.id}
 												item={item}
 												isSelected={item.id === selectedItemId}
-												isAllAccountsMode={isAllAccountsMode}
 												onClick={() => handleSelectItem(item.id)}
 											/>
 										))}
@@ -435,7 +408,6 @@ export function VaultPage() {
 										key={item.id}
 										item={item}
 										isSelected={item.id === selectedItemId}
-										isAllAccountsMode={isAllAccountsMode}
 										onClick={() => handleSelectItem(item.id)}
 									/>
 								))}

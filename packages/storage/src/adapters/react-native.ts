@@ -54,7 +54,6 @@ const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
 const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
 const AUTO_LOCK_TIMEOUT_GLOBAL_KEY = "bittery_auto_lock_timeout_global";
 const BIOMETRIC_ENABLED_GLOBAL_KEY = "bittery_biometric_enabled_global";
-const BACKGROUND_TIMESTAMP_GLOBAL_KEY = "bittery_background_timestamp_global";
 
 function isSecureStoreOnlyKey(key: string): boolean {
 	return (
@@ -293,7 +292,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		if (accountId) return accountId;
 
 		const account = await this.getActiveAccount();
-		if (!account || account.type === "all") return null;
+		if (!account) return null;
 		return account.accountId;
 	}
 
@@ -616,7 +615,7 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 	async getActiveAccountUserId(): Promise<string | null> {
 		const account = await this.getActiveAccount();
-		if (!account || account.type === "all") return null;
+		if (!account) return null;
 
 		const sessionData = await this.getStoredSessionData(account.accountId);
 		return sessionData?.userId ?? null;
@@ -1534,13 +1533,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
-	 * Store the global timestamp when app went to background (all-accounts mode)
-	 */
-	async storeBackgroundTimestampGlobal(): Promise<void> {
-		await this.setItem(BACKGROUND_TIMESTAMP_GLOBAL_KEY, Date.now().toString());
-	}
-
-	/**
 	 * Get the timestamp when app went to background
 	 */
 	async getBackgroundTimestamp(accountId?: string): Promise<number | null> {
@@ -1553,14 +1545,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 	}
 
 	/**
-	 * Get the global background timestamp (all-accounts mode)
-	 */
-	async getBackgroundTimestampGlobal(): Promise<number | null> {
-		const timestamp = await this.getItem(BACKGROUND_TIMESTAMP_GLOBAL_KEY);
-		return timestamp ? Number.parseInt(timestamp, 10) : null;
-	}
-
-	/**
 	 * Clear the background timestamp
 	 */
 	async clearBackgroundTimestamp(accountId?: string): Promise<void> {
@@ -1569,13 +1553,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 
 		const key = getAccountKey(resolvedAccountId, "background_timestamp");
 		await this.deleteItem(key);
-	}
-
-	/**
-	 * Clear the global background timestamp (all-accounts mode)
-	 */
-	async clearBackgroundTimestampGlobal(): Promise<void> {
-		await this.deleteItem(BACKGROUND_TIMESTAMP_GLOBAL_KEY);
 	}
 
 	/**
@@ -1593,20 +1570,6 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 			await this.getAutoLockTimeoutOrDefault(resolvedAccountId);
 
 		// If auto-lock is set to "Never" (-1), don't require re-auth
-		if (autoLockTimeout === -1) return false;
-
-		const timeSinceBackground = Date.now() - backgroundTimestamp;
-		return timeSinceBackground > autoLockTimeout;
-	}
-
-	/**
-	 * Check if app should require re-authentication after returning from background (global)
-	 */
-	async shouldRequireAuthAfterBackgroundGlobal(): Promise<boolean> {
-		const backgroundTimestamp = await this.getBackgroundTimestampGlobal();
-		if (!backgroundTimestamp) return false;
-
-		const autoLockTimeout = await this.getAutoLockTimeoutOrDefault();
 		if (autoLockTimeout === -1) return false;
 
 		const timeSinceBackground = Date.now() - backgroundTimestamp;

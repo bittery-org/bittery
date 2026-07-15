@@ -18,6 +18,12 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
 import { createStoredAccountRpcClient } from "../services/account-resolver";
 import {
+	attachmentBase64ToBytes,
+	attachmentBytesToBase64,
+	encodeAttachmentBlobEnvelope,
+	parseAttachmentBlobEnvelope,
+} from "../services/attachment-crypto";
+import {
 	buildAttachmentBlobEncryptionContext,
 	buildAttachmentContentTypeEncryptionContext,
 	buildAttachmentNameEncryptionContext,
@@ -234,9 +240,7 @@ export function useItemAttachments(
 			// Read file as ArrayBuffer and convert to base64
 			const fileBuffer = await file.arrayBuffer();
 			const fileBytes = new Uint8Array(fileBuffer);
-			const base64File = btoa(
-				fileBytes.reduce((data, byte) => data + String.fromCharCode(byte), ""),
-			);
+			const base64File = attachmentBytesToBase64(fileBytes);
 
 			// Encrypt the file contents
 			// storageKey is stable and available before metadata creation, so we use it
@@ -285,9 +289,7 @@ export function useItemAttachments(
 			);
 
 			// Upload encrypted file content to S3
-			const encryptedBlob = new TextEncoder().encode(
-				JSON.stringify(encryptedFile),
-			);
+			const encryptedBlob = encodeAttachmentBlobEnvelope(encryptedFile);
 			const uploadResponse = await fetch(upload.uploadUrl, {
 				method: "PUT",
 				headers: { "Content-Type": "application/octet-stream" },
@@ -344,11 +346,7 @@ export function useItemAttachments(
 			if (!response.ok) throw new Error("Failed to download attachment");
 
 			const encryptedJson = await response.text();
-			const encryptedFile = JSON.parse(encryptedJson) as {
-				ciphertext: string;
-				iv: string;
-				algorithm: string;
-			};
+			const encryptedFile = parseAttachmentBlobEnvelope(encryptedJson);
 
 			// Decrypt file contents
 			const base64File = await crypto.decrypt(
@@ -369,11 +367,7 @@ export function useItemAttachments(
 			);
 
 			// Convert base64 back to binary
-			const binaryString = atob(base64File);
-			const bytes = new Uint8Array(binaryString.length);
-			for (let i = 0; i < binaryString.length; i++) {
-				bytes[i] = binaryString.charCodeAt(i);
-			}
+			const bytes = attachmentBase64ToBytes(base64File);
 
 			return { bytes, fileName };
 		},

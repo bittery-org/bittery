@@ -197,6 +197,10 @@ export {
 	useItems,
 	useItemsUnified,
 } from "./use-items";
+export {
+	type UseMoveTargetVaultsOptions,
+	useMoveTargetVaults,
+} from "./use-move-target-vaults";
 export { useTravelMode } from "./use-travel-mode";
 export {
 	type UseVaultInfoOptions,

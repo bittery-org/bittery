@@ -51,25 +51,10 @@ export async function findAccountEmailBySessionId(
 	);
 }
 
-async function resolveUnauthorizedAccountId(
-	error: unknown,
-): Promise<string | null> {
-	if (
-		error &&
-		typeof error === "object" &&
-		"data" in error &&
-		typeof (error as { data?: { sessionId?: string } }).data?.sessionId ===
-			"string"
-	) {
-		const sessionId = (error as { data: { sessionId: string } }).data.sessionId;
-		return findAccountIdBySessionId(sessionId);
-	}
-	return null;
-}
-
-export async function handleDesktopUnauthorizedError(
-	error: unknown,
-): Promise<{ prefillEmail?: string; shouldRedirect: boolean }> {
+export async function handleDesktopUnauthorizedError(): Promise<{
+	prefillEmail?: string;
+	shouldRedirect: boolean;
+}> {
 	const activeAccount = await storage.getActiveAccount();
 
 	if (activeAccount?.type === "single") {
@@ -82,17 +67,6 @@ export async function handleDesktopUnauthorizedError(
 			prefillEmail: meta?.email,
 			shouldRedirect: true,
 		};
-	}
-
-	if (activeAccount?.type === "all") {
-		const failingAccountId = await resolveUnauthorizedAccountId(error);
-		if (failingAccountId) {
-			await invalidateDesktopAccountSession(failingAccountId);
-			const unlockedAccounts = await storage.getUnlockedAccounts?.();
-			return {
-				shouldRedirect: !unlockedAccounts || unlockedAccounts.length === 0,
-			};
-		}
 	}
 
 	return { shouldRedirect: false };

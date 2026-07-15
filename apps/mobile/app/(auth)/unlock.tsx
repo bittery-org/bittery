@@ -68,13 +68,7 @@ export default function UnlockScreen() {
 	const { m } = useI18n();
 	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
-	const {
-		allAccounts,
-		activeAccount,
-		activeAccountConfig,
-		isAllAccountsMode,
-		refreshAccounts,
-	} = useAccount();
+	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -82,11 +76,12 @@ export default function UnlockScreen() {
 		activeAccount?.accountId ?? allAccounts[0]?.accountId ?? "",
 	);
 	const [manualUnlockMode, setManualUnlockMode] = useState<"single" | "all">(
-		isAllAccountsMode ? "all" : "single",
+		"single",
 	);
 	const [biometricError, setBiometricError] = useState<string | null>(null);
-	const unlockMode =
-		activeAccountConfig?.type === "all" ? "all" : manualUnlockMode;
+	// "all" here is an "unlock every account" convenience action; its result
+	// still sets a single active account (the app never operates on all at once).
+	const unlockMode = manualUnlockMode;
 	const targetAccount = useMemo(() => {
 		if (unlockMode !== "single") {
 			return null;
@@ -316,8 +311,10 @@ export default function UnlockScreen() {
 		onError: (error) => {
 			console.error("Unlock error:", error);
 			Alert.alert(
-				"Error",
-				error instanceof Error ? error.message : "Unlock failed",
+				m.mob_unlock_alert_error_title(),
+				error instanceof Error
+					? error.message
+					: m.mob_unlock_alert_error_unlock_failed(),
 			);
 		},
 	});
@@ -341,18 +338,19 @@ export default function UnlockScreen() {
 
 	const finalizeAllAccountsUnlock = useCallback(
 		async (unlockedIdentifiers: string[], showPartialToast: boolean) => {
+			const unlockedAccountIds = resolveUnlockedAccountIds(unlockedIdentifiers);
+
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForAccountIds(
-					resolveUnlockedAccountIds(unlockedIdentifiers),
-				);
+				await setNativeMuksForAccountIds(unlockedAccountIds);
 			}
 
-			if (allAccounts.length > 1) {
-				await storage.setActiveAccount({ type: "all" });
-			} else if (allAccounts.length === 1) {
+			// Multiple accounts may be unlocked, but the app always operates on a
+			// single active account. Select the first unlocked account.
+			const activeId = unlockedAccountIds[0] ?? allAccounts[0]?.accountId;
+			if (activeId) {
 				await storage.setActiveAccount({
 					type: "single",
-					accountId: allAccounts[0].accountId,
+					accountId: activeId,
 				});
 			}
 
@@ -401,16 +399,14 @@ export default function UnlockScreen() {
 	const handleBiometricUnlock = async () => {
 		if (unlockMode === "all") {
 			if (allAccountsStatus.requiresPasswordReentry) {
-				setBiometricError(
-					"For your security, please enter your master password. This is required every 30 days.",
-				);
+				setBiometricError(m.mob_unlock_password_required_description());
 				return;
 			}
 
 			setBiometricError(null);
 
 			if (!storage.unlockAllAccountsWithBiometric) {
-				setBiometricError("Biometric unlock is not available.");
+				setBiometricError(m.mob_unlock_biometric_not_available());
 				return;
 			}
 
@@ -720,11 +716,10 @@ export default function UnlockScreen() {
 								<StyledKeyRound size={20} className="text-amber-600" />
 								<View className="ml-3 flex-1">
 									<Text className="font-medium text-amber-800">
-										Password Required
+										{m.mob_unlock_password_required_title()}
 									</Text>
 									<Text className="text-amber-700 text-sm">
-										For your security, please enter your master password. This
-										is required every 30 days.
+										{m.mob_unlock_password_required_description()}
 									</Text>
 								</View>
 							</View>
