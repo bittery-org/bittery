@@ -4,7 +4,6 @@
  */
 
 import { useAccountSwitcher } from "@bittery/core/hooks";
-import { normalizeServerUrl } from "@bittery/shared/server-url";
 import type { AccountMetadata } from "@bittery/storage/types";
 import {
 	AccountAvatarGroup,
@@ -19,9 +18,7 @@ import {
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
-	DropdownMenuSeparator,
 	DropdownMenuTrigger,
-	Input,
 	ScrollArea,
 	AccountSwitcher as SharedAccountSwitcher,
 	toast,
@@ -30,18 +27,14 @@ import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import {
 	ArrowLeftRight,
-	Check,
 	Copy,
 	MoreVertical,
-	Pencil,
 	Plus,
 	Server,
 	Trash2,
-	X,
 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useAccount } from "@/contexts/account-context";
-import { setActiveAuthServerUrl } from "@/lib/auth-server";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "@/providers/sync-provider";
@@ -59,7 +52,6 @@ export function AccountSwitcher() {
 		unlockedAccountIds,
 		switchAccount,
 		removeAccount,
-		updateAccount,
 	} = useAccountSwitcher();
 	const { lockAllAccounts: lockAllAccountsWithBroadcast } = useAccount();
 	const invalidator = useQueryInvalidator();
@@ -231,38 +223,6 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleSaveServerUrl = async (
-		account: AccountMetadata,
-		nextUrl: string,
-	): Promise<boolean> => {
-		const normalized = normalizeServerUrl(nextUrl);
-		if (!normalized) {
-			toast.error(m.toast_auth_server_invalid_url());
-			return false;
-		}
-
-		if (normalized === account.serverUrl) {
-			return true;
-		}
-
-		try {
-			await storage.storeServerUrl(normalized, account.accountId);
-			await updateAccount.mutateAsync({ ...account, serverUrl: normalized });
-
-			if (activeAccountId === account.accountId) {
-				await setActiveAuthServerUrl(normalized);
-			}
-
-			await invalidator.invalidateAllAccountData();
-			toast.success(m.toast_auth_server_updated());
-			return true;
-		} catch (error) {
-			console.error("Failed to update server URL:", error);
-			toast.error(m.toast_auth_server_invalid_url());
-			return false;
-		}
-	};
-
 	const handleSharedAccountSelect = (accountId: string) => {
 		void handleAccountSelect(accountId);
 	};
@@ -401,7 +361,7 @@ export function AccountSwitcher() {
 										isUnlocked={unlockedAccountIdsList.includes(
 											account.accountId,
 										)}
-										isBusy={switchAccount.isPending || updateAccount.isPending}
+										isBusy={switchAccount.isPending}
 										formatTimestamp={formatTimestamp}
 										onSwitch={() =>
 											handleAccountSelectFromManageDialog(account.accountId)
@@ -411,7 +371,6 @@ export function AccountSwitcher() {
 											handleRemoveAccountClick(account.accountId);
 										}}
 										onCopy={handleCopy}
-										onSaveServerUrl={(url) => handleSaveServerUrl(account, url)}
 									/>
 								))}
 							</div>
@@ -422,13 +381,8 @@ export function AccountSwitcher() {
 
 			<RemoveAccountDialog
 				email={removeAccountEmail}
-				onConfirm={(email) => {
-					const account = accountsData.find(
-						(item) => item.email.toLowerCase() === email.toLowerCase(),
-					);
-					if (account) {
-						void handleRemoveAccount(account.accountId);
-					}
+				onConfirm={() => {
+					if (accountToRemove) void handleRemoveAccount(accountToRemove);
 				}}
 				onCancel={() => setAccountToRemove(null)}
 			/>
@@ -459,7 +413,6 @@ interface ManageAccountCardProps {
 	onSwitch: () => void;
 	onRemove: () => void;
 	onCopy: (value: string) => void;
-	onSaveServerUrl: (url: string) => Promise<boolean>;
 }
 
 function ManageAccountCard({
@@ -471,34 +424,11 @@ function ManageAccountCard({
 	onSwitch,
 	onRemove,
 	onCopy,
-	onSaveServerUrl,
 }: ManageAccountCardProps) {
 	const { m } = useI18n();
-	const [isEditingServer, setIsEditingServer] = useState(false);
-	const [serverDraft, setServerDraft] = useState(account.serverUrl ?? "");
-	const [isSaving, setIsSaving] = useState(false);
 
 	const displayName =
 		account.teamName || account.name || account.email.split("@")[0];
-
-	const startEditingServer = () => {
-		setServerDraft(account.serverUrl ?? "");
-		setIsEditingServer(true);
-	};
-
-	const cancelEditingServer = () => {
-		setIsEditingServer(false);
-		setServerDraft(account.serverUrl ?? "");
-	};
-
-	const submitServer = async () => {
-		setIsSaving(true);
-		const saved = await onSaveServerUrl(serverDraft);
-		setIsSaving(false);
-		if (saved) {
-			setIsEditingServer(false);
-		}
-	};
 
 	return (
 		<div
@@ -565,11 +495,6 @@ function ManageAccountCard({
 							</Button>
 						</DropdownMenuTrigger>
 						<DropdownMenuContent align="end" className="w-52">
-							<DropdownMenuItem onClick={startEditingServer}>
-								<Pencil className="size-4" />
-								{m.vaults_sidebar_account_switcher_action_edit_server()}
-							</DropdownMenuItem>
-							<DropdownMenuSeparator />
 							<DropdownMenuItem variant="destructive" onClick={onRemove}>
 								<Trash2 className="size-4" />
 								{m.vaults_sidebar_account_switcher_menu_remove_account()}
@@ -594,58 +519,17 @@ function ManageAccountCard({
 						</span>
 					}
 				>
-					{isEditingServer ? (
-						<form
-							className="flex flex-1 items-center justify-end gap-1"
-							onSubmit={(event) => {
-								event.preventDefault();
-								void submitServer();
-							}}
-						>
-							<Input
-								autoFocus
-								type="url"
-								value={serverDraft}
-								onChange={(event) => setServerDraft(event.target.value)}
-								placeholder={m.auth_footer_server_placeholder()}
-								className="h-7 max-w-[260px] font-mono text-[11px]"
-								disabled={isSaving}
-							/>
-							<Button
-								type="submit"
-								size="icon"
-								variant="ghost"
-								className="size-7 text-emerald-600 hover:text-emerald-700"
-								disabled={isSaving}
-								aria-label={m.vaults_sidebar_account_switcher_action_save()}
-							>
-								<Check className="size-3.5" />
-							</Button>
-							<Button
-								type="button"
-								size="icon"
-								variant="ghost"
-								className="size-7 text-muted-foreground"
-								onClick={cancelEditingServer}
-								disabled={isSaving}
-								aria-label={m.vaults_sidebar_account_switcher_action_cancel()}
-							>
-								<X className="size-3.5" />
-							</Button>
-						</form>
-					) : (
-						<button
-							type="button"
-							onClick={startEditingServer}
-							className="group flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-foreground transition-colors hover:bg-muted"
-							title={account.serverUrl ?? undefined}
-						>
-							<span className="truncate font-mono text-[11px]">
-								{account.serverUrl || "—"}
-							</span>
-							<Pencil className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-						</button>
-					)}
+					<button
+						type="button"
+						onClick={() => account.serverUrl && onCopy(account.serverUrl)}
+						className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-foreground transition-colors hover:bg-muted"
+						title={account.serverUrl ?? undefined}
+					>
+						<span className="truncate font-mono text-[11px]">
+							{account.serverUrl || "—"}
+						</span>
+						<Copy className="size-3 shrink-0 text-muted-foreground" />
+					</button>
 				</DetailRow>
 
 				<DetailRow label={m.vaults_sidebar_account_switcher_label_user_id()}>
