@@ -7,11 +7,10 @@
 import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
 import {
 	type UseMutationResult,
-	type UseQueryResult,
 	useMutation,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 import { usePlatformStorage } from "../../context/platform-context";
 import {
 	type AccountSessionManager,
@@ -23,9 +22,11 @@ export interface UseAccountSwitcherOptions {
 }
 
 export interface UseAccountSwitcherResult {
-	accounts: UseQueryResult<AccountMetadata[], Error>;
-	activeAccount: UseQueryResult<ActiveAccount, Error>;
-	unlockedAccountIds: UseQueryResult<string[], Error>;
+	accounts: AccountMetadata[];
+	activeAccount: ActiveAccount;
+	unlockedAccountIds: string[];
+	isInitialized: boolean;
+	refresh(): Promise<void>;
 	switchAccount: UseMutationResult<void, Error, ActiveAccount, unknown>;
 	removeAccount: UseMutationResult<void, Error, string, unknown>;
 	updateAccount: UseMutationResult<void, Error, AccountMetadata, unknown>;
@@ -50,45 +51,13 @@ function useAccountSessionManager(): AccountSessionManager {
 	);
 }
 
-function toSuccessQuery<T>(
-	data: T,
-	enabled: boolean,
-): UseQueryResult<T, Error> {
-	return {
-		data,
-		error: null,
-		isError: false,
-		isPending: false,
-		isLoading: false,
-		isSuccess: enabled,
-		status: enabled ? "success" : "pending",
-		fetchStatus: "idle",
-		isFetching: false,
-		isRefetching: false,
-		isLoadingError: false,
-		isRefetchError: false,
-		isPlaceholderData: false,
-		isStale: false,
-		dataUpdatedAt: Date.now(),
-		errorUpdatedAt: 0,
-		failureCount: 0,
-		failureReason: null,
-		errorUpdateCount: 0,
-		isFetched: enabled,
-		isFetchedAfterMount: enabled,
-		isInitialLoading: false,
-		isPaused: false,
-		promise: Promise.resolve(data),
-		refetch: () => Promise.resolve(toSuccessQuery(data, enabled)),
-	} as UseQueryResult<T, Error>;
-}
-
 export function useAccountSwitcher(
 	options: UseAccountSwitcherOptions = {},
 ): UseAccountSwitcherResult {
 	const storage = usePlatformStorage();
 	const manager = useAccountSessionManager();
 	const enabled = options.enabled !== false && storage.supportsMultiAccount;
+	const refresh = useCallback(() => manager.refresh(), [manager]);
 
 	useSyncExternalStore(manager.subscribe, manager.getSnapshot);
 
@@ -97,10 +66,6 @@ export function useAccountSwitcher(
 			void manager.initialize();
 		}
 	}, [manager, enabled]);
-
-	const accountsData = manager.getAccounts();
-	const activeAccountData = manager.getActiveAccount();
-	const unlockedAccountIdsData = manager.getUnlockedAccountIds();
 
 	const switchAccount = useMutation({
 		mutationFn: async (account: ActiveAccount) => {
@@ -127,9 +92,11 @@ export function useAccountSwitcher(
 	});
 
 	return {
-		accounts: toSuccessQuery(accountsData, enabled),
-		activeAccount: toSuccessQuery(activeAccountData, options.enabled !== false),
-		unlockedAccountIds: toSuccessQuery(unlockedAccountIdsData, enabled),
+		accounts: manager.getAccounts(),
+		activeAccount: manager.getActiveAccount(),
+		unlockedAccountIds: manager.getUnlockedAccountIds(),
+		isInitialized: manager.isInitialized(),
+		refresh,
 		switchAccount,
 		removeAccount,
 		updateAccount,

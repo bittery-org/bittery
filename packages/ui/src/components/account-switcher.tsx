@@ -35,6 +35,7 @@ import {
 } from "./dropdown-menu.js";
 
 export interface AccountSwitcherAccount {
+	accountId: string;
 	email: string;
 	name: string;
 	userId: string;
@@ -61,17 +62,17 @@ export interface AccountSwitcherProps {
 	/** List of all accounts */
 	accounts: AccountSwitcherAccount[];
 
-	/** Currently active account email (or "all" for All Accounts mode) */
-	activeEmail: string | null;
+	/** Currently active account ID (or "all" for All Accounts mode) */
+	activeAccountId: string | null;
 
-	/** List of unlocked account emails (with MUKs in memory) */
-	unlockedEmails: string[];
+	/** List of unlocked account IDs (with MUKs in memory) */
+	unlockedAccountIds: string[];
 
 	/** Loading state */
 	isLoading?: boolean;
 
 	/** Callback when user selects an account */
-	onAccountSelect: (email: string) => void;
+	onAccountSelect: (accountId: string) => void;
 
 	/** Optional: callback when user clicks "Add Account" */
 	onAddAccount?: () => void;
@@ -113,7 +114,7 @@ export interface AccountSwitcherProps {
 	showRemoveAccount?: boolean;
 
 	/** Optional: callback when user clicks "Remove Account" */
-	onRemoveAccount?: (email: string) => void;
+	onRemoveAccount?: (accountId: string) => void;
 
 	/** Optional: custom trigger element */
 	trigger?: React.ReactNode;
@@ -131,10 +132,10 @@ export interface AccountSwitcherProps {
  * @example
  * ```tsx
  * <AccountSwitcher
- *   accounts={accounts.data ?? []}
- *   activeEmail={activeEmail.data}
- *   unlockedEmails={unlockedEmails.data ?? []}
- *   onAccountSelect={(email) => switchAccount.mutate(email)}
+ *   accounts={accounts}
+ *   activeAccountId={activeAccountId}
+ *   unlockedAccountIds={unlockedAccountIds}
+ *   onAccountSelect={(accountId) => switchAccount.mutate(accountId)}
  *   onAddAccount={() => navigate('/login?add=true')}
  *   onLockAll={() => lockAllAccounts.mutate()}
  * />
@@ -142,8 +143,8 @@ export interface AccountSwitcherProps {
  */
 export function AccountSwitcher({
 	accounts,
-	activeEmail,
-	unlockedEmails,
+	activeAccountId,
+	unlockedAccountIds,
 	isLoading = false,
 	onAccountSelect,
 	onAddAccount,
@@ -164,8 +165,8 @@ export function AccountSwitcher({
 	align = "start",
 	labels,
 }: AccountSwitcherProps) {
-	const activeAccount = accounts.find((a) => a.email === activeEmail);
-	const isAllAccountsMode = activeEmail === "all";
+	const activeAccount = accounts.find((a) => a.accountId === activeAccountId);
+	const isAllAccountsMode = activeAccountId === "all";
 	const resolvedLabels: Required<AccountSwitcherLabels> = {
 		accountsLabel: "Accounts",
 		noAccountLabel: "No account",
@@ -189,7 +190,7 @@ export function AccountSwitcher({
 		showAllAccountsOption &&
 			onAllAccountsSelect &&
 			accounts.length > 1 &&
-			unlockedEmails.length > 1,
+			unlockedAccountIds.length > 1,
 	);
 	const showManageAccountsAction = Boolean(
 		showManageAccounts && onManageAccounts,
@@ -200,7 +201,7 @@ export function AccountSwitcher({
 	);
 	const showSettingsAction = Boolean(showSettings && onSettings);
 	const showLockAllAction = Boolean(
-		showLockAll && accounts.length > 0 && unlockedEmails.length > 0,
+		showLockAll && accounts.length > 0 && unlockedAccountIds.length > 0,
 	);
 	const showRemoveAccountAction = Boolean(
 		showRemoveAccount &&
@@ -240,7 +241,7 @@ export function AccountSwitcher({
 						</span>
 						<span className="text-muted-foreground text-xs">
 							{resolvedLabels.unlockedCount({
-								count: unlockedEmails.length,
+								count: unlockedAccountIds.length,
 							})}
 						</span>
 					</div>
@@ -288,13 +289,13 @@ export function AccountSwitcher({
 
 				{/* Account list */}
 				{accounts.map((account) => {
-					const isActive = account.email === activeEmail;
-					const isUnlocked = unlockedEmails.includes(account.email);
+					const isActive = account.accountId === activeAccountId;
+					const isUnlocked = unlockedAccountIds.includes(account.accountId);
 
 					return (
 						<DropdownMenuItem
-							key={account.email}
-							onClick={() => onAccountSelect(account.email)}
+							key={account.accountId}
+							onClick={() => onAccountSelect(account.accountId)}
 							className={cn(
 								"flex cursor-pointer items-center gap-2 py-1.5",
 								isActive && "bg-accent",
@@ -370,7 +371,7 @@ export function AccountSwitcher({
 									</div>
 									<span className="text-muted-foreground text-xs">
 										{resolvedLabels.viewItemsFromAccounts({
-											count: unlockedEmails.length,
+											count: unlockedAccountIds.length,
 										})}
 									</span>
 								</div>

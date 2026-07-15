@@ -36,6 +36,8 @@ export class AccountSessionManager {
 	private accounts: AccountMetadata[] = [];
 	private lockState = new Map<string, LockState>();
 	private active: ActiveAccount = null;
+	private initialized = false;
+	private initialization: Promise<void> | null = null;
 	private snapshot = 0;
 	private readonly listeners = new Set<() => void>();
 
@@ -81,7 +83,11 @@ export class AccountSessionManager {
 	}
 
 	async initialize(): Promise<void> {
-		await this.refresh();
+		if (this.initialized) return;
+		this.initialization ??= this.refresh().finally(() => {
+			this.initialization = null;
+		});
+		await this.initialization;
 	}
 
 	async refresh(): Promise<void> {
@@ -109,7 +115,12 @@ export class AccountSessionManager {
 				verifiedUnlocked.has(account.accountId) ? "unlocked" : "locked",
 			);
 		}
+		this.initialized = true;
 		this.emit();
+	}
+
+	isInitialized(): boolean {
+		return this.initialized;
 	}
 
 	getAccounts(): AccountMetadata[] {

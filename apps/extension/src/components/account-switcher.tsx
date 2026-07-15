@@ -24,8 +24,9 @@ import { useI18n } from "@/providers/i18n-provider";
 export function ExtensionAccountSwitcher() {
 	const {
 		accounts,
-		activeAccount: activeAccountQuery,
+		activeAccount: activeSelection,
 		unlockedAccountIds,
+		refresh,
 		switchAccount,
 		lockAllAccounts,
 	} = useAccountSwitcher();
@@ -54,47 +55,26 @@ export function ExtensionAccountSwitcher() {
 		staleTime: 2000,
 	});
 
-	const accountsData = accounts.data ?? [];
-	const localUnlockedAccountIds = unlockedAccountIds.data ?? [];
+	const accountsData = accounts;
+	const localUnlockedAccountIds = unlockedAccountIds;
 
-	const accountEmailById = useMemo(
-		() =>
-			new Map(
-				accountsData.map((account) => [account.accountId, account.email]),
-			),
-		[accountsData],
-	);
-
-	const localUnlockedEmails = useMemo(
-		() =>
-			localUnlockedAccountIds
-				.map((accountId) => accountEmailById.get(accountId))
-				.filter((email): email is string => Boolean(email)),
-		[accountEmailById, localUnlockedAccountIds],
-	);
-
-	// Merge local unlocked emails with desktop unlocked accounts
-	const desktopUnlockedEmails =
+	// Merge local unlocked IDs with desktop unlocked accounts
+	const desktopUnlockedAccountIds =
 		desktopStatus.data?.success && desktopStatus.data?.available
 			? (desktopStatus.data?.unlockedAccounts ?? [])
 			: [];
 
 	// Combine and deduplicate
-	const unlockedEmailsList = Array.from(
-		new Set([...localUnlockedEmails, ...desktopUnlockedEmails]),
+	const unlockedAccountIdsList = Array.from(
+		new Set([...localUnlockedAccountIds, ...desktopUnlockedAccountIds]),
 	);
 
 	const activeAccountId =
-		activeAccountQuery.data?.type === "single"
-			? activeAccountQuery.data.accountId
-			: activeAccountQuery.data?.type === "all"
+		activeSelection?.type === "single"
+			? activeSelection.accountId
+			: activeSelection?.type === "all"
 				? "all"
 				: null;
-	const activeAccountEmail =
-		activeAccountId && activeAccountId !== "all"
-			? (accountEmailById.get(activeAccountId) ?? null)
-			: activeAccountId;
-
 	// Update team names for accounts that don't have them
 	useEffect(() => {
 		const updateMissingTeamNames = async () => {
@@ -122,7 +102,7 @@ export function ExtensionAccountSwitcher() {
 					});
 
 					// Refresh accounts list
-					accounts.refetch();
+					await refresh();
 				} catch (error) {
 					console.error(
 						`[account-switcher] Failed to fetch team name for ${account.email}:`,
@@ -135,20 +115,18 @@ export function ExtensionAccountSwitcher() {
 		if (accountsData.length > 0) {
 			updateMissingTeamNames();
 		}
-	}, [accountsData, accounts]);
+	}, [accountsData, refresh]);
 
-	const handleSwitchAccount = async (email: string) => {
-		if (email === activeAccountEmail) return;
+	const handleSwitchAccount = async (accountId: string) => {
+		if (accountId === activeAccountId) return;
 
-		const account = accountsData.find(
-			(item) => item.email.toLowerCase() === email.toLowerCase(),
-		);
+		const account = accountsData.find((item) => item.accountId === accountId);
 		if (!account) return;
 
 		try {
 			await switchAccount.mutateAsync({
 				type: "single",
-				accountId: account.accountId,
+				accountId,
 			});
 
 			// Check if desktop is available and has this account unlocked
@@ -159,10 +137,10 @@ export function ExtensionAccountSwitcher() {
 			const isUnlockedInDesktop =
 				desktopStatus?.success &&
 				desktopStatus?.available &&
-				desktopStatus?.unlockedAccounts?.includes(email);
+				desktopStatus?.unlockedAccounts?.includes(accountId);
 
 			// Check local session validity
-			const sessionValid = await storage.isSessionValid(account.accountId);
+			const sessionValid = await storage.isSessionValid(accountId);
 
 			// If account is unlocked in desktop OR has valid local session, just switch
 			if (isUnlockedInDesktop || sessionValid) {
@@ -175,7 +153,7 @@ export function ExtensionAccountSwitcher() {
 				]);
 			} else {
 				// Need to unlock - redirect to unlock screen with the account email
-				navigate({ to: "/unlock", search: { email } });
+				navigate({ to: "/unlock", search: { email: account.email } });
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
@@ -201,7 +179,7 @@ export function ExtensionAccountSwitcher() {
 
 	const handleAllAccountsSelect = async () => {
 		// Check if we have any unlocked accounts
-		if (unlockedEmailsList.length === 0) {
+		if (unlockedAccountIdsList.length === 0) {
 			toast.error(m.ext_account_switcher_toast_no_unlocked());
 			return;
 		}
@@ -223,9 +201,9 @@ export function ExtensionAccountSwitcher() {
 
 	// Get active account for trigger display
 	const activeAccount = accountsData.find(
-		(a) => a.email === activeAccountEmail,
+		(a) => a.accountId === activeAccountId,
 	);
-	const isAllAccountsMode = activeAccountEmail === "all";
+	const isAllAccountsMode = activeAccountId === "all";
 
 	// Helper to get avatar color
 	const getAvatarColor = (email: string) => {
@@ -249,7 +227,7 @@ export function ExtensionAccountSwitcher() {
 				<>
 					<AccountAvatarGroup
 						accounts={accountsData.filter((a) =>
-							unlockedEmailsList.includes(a.email),
+							unlockedAccountIdsList.includes(a.accountId),
 						)}
 						maxVisible={2}
 						size="sm"
@@ -260,7 +238,7 @@ export function ExtensionAccountSwitcher() {
 						</span>
 						<span className="text-muted-foreground text-xs">
 							{m.ext_account_switcher_unlocked_count({
-								count: unlockedEmailsList.length,
+								count: unlockedAccountIdsList.length,
 							})}
 						</span>
 					</div>
@@ -297,8 +275,8 @@ export function ExtensionAccountSwitcher() {
 	return (
 		<AccountSwitcher
 			accounts={accountsData}
-			activeEmail={activeAccountEmail}
-			unlockedEmails={unlockedEmailsList}
+			activeAccountId={activeAccountId}
+			unlockedAccountIds={unlockedAccountIdsList}
 			onAccountSelect={handleSwitchAccount}
 			onAddAccount={handleAddAccount}
 			showAddAccount={!desktopStatus.data?.available}
@@ -307,7 +285,7 @@ export function ExtensionAccountSwitcher() {
 			showAllAccountsOption={true}
 			showSetupAnotherDevice={!desktopStatus.data?.available}
 			onAllAccountsSelect={handleAllAccountsSelect}
-			isLoading={accounts.isLoading || switchAccount.isPending}
+			isLoading={switchAccount.isPending}
 			trigger={trigger}
 		/>
 	);

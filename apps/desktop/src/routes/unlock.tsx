@@ -51,7 +51,7 @@ export const Route = createFileRoute("/unlock")({
 export function UnlockPage() {
 	const { m } = useI18n();
 	const navigate = useNavigate();
-	const { accounts } = useAccountSwitcher();
+	const { accounts, isInitialized } = useAccountSwitcher();
 	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -59,7 +59,7 @@ export function UnlockPage() {
 	const lastAutoTriggerId = useRef<string | undefined>(undefined);
 	const { autoTrigger, autoTriggerId } = Route.useSearch();
 
-	const allAccounts = accounts.data ?? [];
+	const allAccounts = accounts;
 	const getPartialUnlockMessage = useCallback(
 		(unlockedCount: number) =>
 			m.toast_auth_unlock_warning_partial({
@@ -271,7 +271,7 @@ export function UnlockPage() {
 	}, [autoTrigger, allAccounts, queryClient, m, showUnlockToast]);
 
 	// Show loading state while accounts are being fetched
-	if (accounts.isLoading) {
+	if (!isInitialized) {
 		return (
 			<AuthDoorsLayout showFooter={false}>
 				<div className="flex items-center justify-center rounded-full border border-border bg-white p-4 shadow-sm dark:bg-gray-900">

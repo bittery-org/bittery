@@ -55,7 +55,7 @@ export function AccountSwitcher() {
 	const { m, locale } = useI18n();
 	const {
 		accounts,
-		activeAccount: activeAccountQuery,
+		activeAccount: activeSelection,
 		unlockedAccountIds,
 		switchAccount,
 		removeAccount,
@@ -70,32 +70,22 @@ export function AccountSwitcher() {
 	const [showDeviceSetup, setShowDeviceSetup] = useState(false);
 	const [showManageAccounts, setShowManageAccounts] = useState(false);
 
-	const accountsData = accounts.data ?? [];
-	const unlockedAccountIdsList = unlockedAccountIds.data ?? [];
-	const isAllAccountsMode = activeAccountQuery.data?.type === "all";
+	const accountsData = accounts;
+	const unlockedAccountIdsList = unlockedAccountIds;
+	const isAllAccountsMode = activeSelection?.type === "all";
 	const activeAccountId =
-		activeAccountQuery.data?.type === "single"
-			? activeAccountQuery.data.accountId
+		activeSelection?.type === "single"
+			? activeSelection.accountId
 			: null;
 	const activeAccount = accountsData.find(
 		(a) => a.accountId === activeAccountId,
 	);
-	const activeAccountEmail = activeAccount?.email ?? null;
-
 	const accountEmailById = useMemo(
 		() =>
 			new Map(
 				accountsData.map((account) => [account.accountId, account.email]),
 			),
 		[accountsData],
-	);
-
-	const unlockedEmailsList = useMemo(
-		() =>
-			unlockedAccountIdsList
-				.map((accountId) => accountEmailById.get(accountId))
-				.filter((email): email is string => Boolean(email)),
-		[accountEmailById, unlockedAccountIdsList],
 	);
 
 	const dateTimeFormatter = useMemo(
@@ -273,22 +263,12 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleSharedAccountSelect = (email: string) => {
-		const account = accountsData.find(
-			(item) => item.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (account) {
-			void handleAccountSelect(account.accountId);
-		}
+	const handleSharedAccountSelect = (accountId: string) => {
+		void handleAccountSelect(accountId);
 	};
 
-	const handleSharedRemoveAccountClick = (email: string) => {
-		const account = accountsData.find(
-			(item) => item.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (account) {
-			handleRemoveAccountClick(account.accountId);
-		}
+	const handleSharedRemoveAccountClick = (accountId: string) => {
+		handleRemoveAccountClick(accountId);
 	};
 
 	const trigger = (
@@ -337,8 +317,8 @@ export function AccountSwitcher() {
 		<>
 			<SharedAccountSwitcher
 				accounts={accountsData}
-				activeEmail={activeAccountEmail}
-				unlockedEmails={unlockedEmailsList}
+				activeAccountId={isAllAccountsMode ? "all" : activeAccountId}
+				unlockedAccountIds={unlockedAccountIdsList}
 				isLoading={switchAccount.isPending}
 				labels={{
 					accountsLabel: m.vaults_sidebar_account_switcher_menu_accounts(),
