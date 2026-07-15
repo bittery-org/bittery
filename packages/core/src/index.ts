@@ -21,6 +21,8 @@ export {
 } from "./services/account-resolver";
 export {
 	type CheckEmailResult,
+	type BiometricUnlockAvailability,
+	getBiometricUnlockAvailability,
 	checkEmailExists,
 	clearSession,
 	deriveSrpLoginProof,

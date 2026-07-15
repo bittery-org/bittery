@@ -1010,6 +1010,27 @@ export async function getSessionState(
 	};
 }
 
+export interface BiometricUnlockAvailability {
+	canUnlock: boolean;
+	requiresPasswordReentry: boolean;
+}
+
+/** Aggregate biometric unlock availability across the requested accounts. */
+export async function getBiometricUnlockAvailability(
+	storage: IStorageAdapter,
+	accountIds: string[],
+): Promise<BiometricUnlockAvailability> {
+	let requiresPasswordReentry = false;
+	for (const accountId of accountIds) {
+		const state = await getSessionState(storage, accountId);
+		if (state.canBiometricUnlock && !state.requiresPasswordReentry) {
+			return { canUnlock: true, requiresPasswordReentry: false };
+		}
+		requiresPasswordReentry ||= state.requiresPasswordReentry;
+	}
+	return { canUnlock: false, requiresPasswordReentry };
+}
+
 /**
  * Clear session data for logout.
  */

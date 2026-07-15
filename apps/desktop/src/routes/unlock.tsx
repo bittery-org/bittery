@@ -1,8 +1,8 @@
 import {
 	useAccountSwitcher,
 	useQuickUnlockAll,
-	useSessionState,
 } from "@bittery/core/hooks";
+import { getBiometricUnlockAvailability } from "@bittery/core";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import {
 	AccountAvatarGroup as AvatarGroup,
@@ -20,7 +20,7 @@ import {
 	IconKeyOutlineDuo18,
 	IconLoader2Fill18,
 } from "@bittery/ui/icons";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
@@ -99,10 +99,13 @@ export function UnlockPage() {
 		[allAccounts.length, getPartialUnlockMessage, m],
 	);
 
-	// Get session state for first account (to check biometric availability)
-	const { data: sessionState } = useSessionState(
-		allAccounts.length > 0 ? allAccounts[0].email : undefined,
-	);
+	const accountIds = allAccounts.map((account) => account.accountId);
+	const biometricAvailability = useQuery({
+		queryKey: ["auth", "biometricAvailability", ...accountIds],
+		queryFn: () => getBiometricUnlockAvailability(storage, accountIds),
+		enabled: accountIds.length > 0,
+		staleTime: 5 * 1000,
+	});
 
 	// Unlock all accounts at once with password
 	const quickUnlockAll = useQuickUnlockAll({
@@ -196,10 +199,9 @@ export function UnlockPage() {
 	};
 
 	const loading = quickUnlockAll.isPending;
+	const canUseBiometric = biometricAvailability.data?.canUnlock ?? false;
 	const requiresPasswordReentry =
-		sessionState?.requiresPasswordReentry ?? false;
-	const canUseBiometric =
-		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
+		biometricAvailability.data?.requiresPasswordReentry ?? false;
 
 	// Reset attempt flag on each extension trigger event.
 	useEffect(() => {

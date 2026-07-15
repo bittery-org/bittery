@@ -3,6 +3,7 @@ import type { IStorageAdapter } from "@bittery/storage";
 import type { AccountMetadata } from "@bittery/storage/types";
 import type { ICrypto, KdfParams } from "@bittery/types";
 import {
+	getBiometricUnlockAvailability,
 	deriveSrpLoginProof,
 	type IAuthClient,
 	performSRPLogin,
@@ -86,6 +87,35 @@ function createAuthClient(startedEmails: string[], token = "token"): IAuthClient
 }
 
 describe("account-routed authentication", () => {
+	it("reports biometric unlock when any account is eligible", async () => {
+		const checkedAccountIds: string[] = [];
+		const storage = {
+			supportsBiometric: true,
+			getAccountMetadata: mock(async (accountId: string) =>
+				account(accountId, `user-${accountId}`, `https://${accountId}.example`),
+			),
+			isSessionValid: mock(async () => true),
+			canQuickUnlock: mock(async () => true),
+			canBiometricUnlock: mock(async (accountId: string) => {
+				checkedAccountIds.push(accountId);
+				return accountId === "account-b";
+			}),
+			isMasterPasswordReentryRequired: mock(async () => false),
+			getStoredSessionData: mock(async () => null),
+		} as unknown as IStorageAdapter;
+
+		const availability = await getBiometricUnlockAvailability(storage, [
+			"account-a",
+			"account-b",
+		]);
+
+		expect(availability).toEqual({
+			canUnlock: true,
+			requiresPasswordReentry: false,
+		});
+		expect(checkedAccountIds).toEqual(["account-a", "account-b"]);
+	});
+
 	it("derives proofs for duplicate-email accounts from only the requested account", async () => {
 		const accounts = [
 			account("account-a", "user-a", "https://a.example"),
