@@ -77,8 +77,8 @@ export default function UnlockScreen() {
 
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [selectedAccountEmail, setSelectedAccountEmail] = useState(
-		activeAccount?.email ?? allAccounts[0]?.email ?? "",
+	const [selectedAccountId, setSelectedAccountId] = useState(
+		activeAccount?.accountId ?? allAccounts[0]?.accountId ?? "",
 	);
 	const [manualUnlockMode, setManualUnlockMode] = useState<"single" | "all">(
 		isAllAccountsMode ? "all" : "single",
@@ -93,11 +93,11 @@ export default function UnlockScreen() {
 
 		return (
 			activeAccount ??
-			allAccounts.find((account) => account.email === selectedAccountEmail) ??
+			allAccounts.find((account) => account.accountId === selectedAccountId) ??
 			allAccounts[0] ??
 			null
 		);
-	}, [activeAccount, allAccounts, selectedAccountEmail, unlockMode]);
+	}, [activeAccount, allAccounts, selectedAccountId, unlockMode]);
 	const selectedAccountValue = useMemo(() => {
 		if (unlockMode === "all") {
 			return { value: "all", label: m.mob_unlock_all_accounts() };
@@ -108,7 +108,7 @@ export default function UnlockScreen() {
 		}
 
 		return {
-			value: targetAccount.email,
+			value: targetAccount.accountId,
 			label:
 				targetAccount.teamName ||
 				targetAccount.name ||
@@ -501,7 +501,7 @@ export default function UnlockScreen() {
 			setManualUnlockMode("all");
 		} else {
 			setManualUnlockMode("single");
-			setSelectedAccountEmail(option.value);
+			setSelectedAccountId(option.value);
 		}
 		setPassword("");
 		setBiometricError(null);

@@ -12,6 +12,7 @@ import { useVaultRepositorySync } from "./use-vault-repository-sync";
  * Vault key with associated account metadata
  */
 export interface VaultKeyWithAccount extends VaultKeyData {
+	accountId: string;
 	accountEmail?: string;
 	accountName?: string;
 	accountTeamName?: string;
@@ -70,6 +71,7 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 				.getVaultKeys()
 				.map((vaultKey) => ({
 					...vaultKey,
+					accountId: account.accountId,
 					accountEmail: isAllAccountsMode ? account.email : undefined,
 					accountName: isAllAccountsMode ? account.name : undefined,
 					accountTeamName: isAllAccountsMode ? account.teamName : undefined,

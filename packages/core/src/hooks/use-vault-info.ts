@@ -13,6 +13,7 @@ import { useVaultRepositorySync } from "./use-vault-repository-sync";
  * Vault info with associated account metadata
  */
 export interface VaultInfoWithAccount extends VaultKeyData {
+	accountId: string;
 	accountEmail?: string;
 	accountName?: string;
 	accountTeamName?: string;
@@ -73,6 +74,7 @@ export function useVaultInfo(
 
 				return {
 					...vaultKey,
+					accountId: account.accountId,
 					accountEmail: account.email,
 					accountName: account.name,
 					accountTeamName: account.teamName,

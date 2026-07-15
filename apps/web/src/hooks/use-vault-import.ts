@@ -98,6 +98,7 @@ export interface ImportExecutionSummary {
 interface ResolvedTargetVault {
 	vaultId: string;
 	vaultName: string;
+	accountId?: string;
 	accountEmail?: string;
 }
 
@@ -469,12 +470,16 @@ export function useVaultImport() {
 				}
 
 				const activeAccount = await storage.getActiveAccount();
-				const defaultAccountEmail =
-					activeAccount?.type === "single"
+					const defaultAccountId =
+						activeAccount?.type === "single"
+							? activeAccount.accountId
+							: undefined;
+					const defaultAccountEmail = defaultAccountId
 						? (await storage.getAccountsList()).find(
-								(a) => a.accountId === activeAccount.accountId,
+								(a) => a.accountId === defaultAccountId,
 							)?.email
 						: undefined;
+					if (!defaultAccountId) throw new Error();
 
 				for (const sourceVault of sourceVaults) {
 					const mapping = mappings[sourceVault.id];
@@ -494,15 +499,16 @@ export function useVaultImport() {
 							name: targetVaultName,
 							type: "personal",
 							icon: DEFAULT_CREATED_VAULT_ICON,
-							accountEmail: defaultAccountEmail,
+							accountId: defaultAccountId,
 						},
 						rpcClient,
 					);
 
 					const resolvedTarget: ResolvedTargetVault = {
 						vaultId: createdVault.vaultId,
-						vaultName: targetVaultName,
-						accountEmail: defaultAccountEmail,
+							vaultName: targetVaultName,
+							accountId: defaultAccountId,
+							accountEmail: defaultAccountEmail,
 					};
 
 					createdVaults.push(resolvedTarget);
@@ -512,7 +518,7 @@ export function useVaultImport() {
 				if (createdVaults.length > 0) {
 					await core.vaults.refreshVaultKeys(
 						rpcClient,
-						createdVaults[0].accountEmail,
+						createdVaults[0].accountId ?? defaultAccountId,
 					);
 					await invalidator.invalidateVaultKeys();
 				}

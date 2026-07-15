@@ -6,6 +6,7 @@ export interface VaultOption {
 	type: "personal" | "team";
 	icon?: string | null;
 	imageUrl?: string | null;
+	accountId?: string;
 	accountEmail?: string;
 	accountName?: string;
 	accountTeamName?: string;

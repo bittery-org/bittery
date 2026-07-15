@@ -24,6 +24,7 @@ import {
 	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
 import { useI18n } from "@/providers/i18n-provider";
+import { storage } from "@/lib/storage";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
 export const Route = createFileRoute("/_app/vaults")({
@@ -59,7 +60,12 @@ function VaultsLayout() {
 	} | null>(null);
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
-		const result = await createVault.mutateAsync(data);
+		const active = await storage.getActiveAccount();
+		if (active?.type !== "single") throw new Error();
+		const result = await createVault.mutateAsync({
+			...data,
+			accountId: active.accountId,
+		});
 		navigate({ to: "/vaults/$vaultId", params: { vaultId: result.vaultId } });
 	};
 
@@ -74,12 +80,15 @@ function VaultsLayout() {
 	};
 
 	const handleUpdateVault = async (vaultId: string, data: UpdateVaultData) => {
+		const accountId = vaultKeys.find((vault) => vault.vaultId === vaultId)?.accountId;
+		if (!accountId) throw new Error();
 		await updateVault.mutateAsync({
 			vaultId,
 			name: data.name,
 			icon: data.icon,
 			imageFile: data.imageFile,
 			removeImage: data.removeImage,
+			accountId,
 		});
 		setEditingVault(null);
 	};
@@ -90,7 +99,9 @@ function VaultsLayout() {
 	};
 
 	const handleDeleteVault = async (vaultId: string) => {
-		await deleteVault.mutateAsync({ vaultId });
+		const accountId = vaultKeys.find((vault) => vault.vaultId === vaultId)?.accountId;
+		if (!accountId) throw new Error();
+		await deleteVault.mutateAsync({ vaultId, accountId });
 		setDeletingVault(null);
 		if (currentVaultId === vaultId) {
 			navigate({ to: "/vaults" });

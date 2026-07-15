@@ -3,7 +3,6 @@
  * Updates team avatar URLs and other account data that may change on the server
  */
 
-import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
 import { createStoredAccountRpcClient } from "../../services/account-resolver";
@@ -12,8 +11,8 @@ const ACCOUNT_METADATA_STALE_TIME_MS = 10 * 60 * 1000;
 const ACCOUNT_METADATA_REFETCH_INTERVAL_MS = 10 * 60 * 1000;
 
 export interface UseAccountMetadataSyncOptions {
-	/** Email of the account to sync (optional - defaults to current active account) */
-	email?: string;
+	/** Stable ID of the account to sync. */
+	accountId?: string;
 	/** Whether the hook is enabled (default: true) */
 	enabled?: boolean;
 	/** Refetch interval in milliseconds (default: 60000 = 1 minute) */
@@ -31,25 +30,22 @@ export interface UseAccountMetadataSyncOptions {
  * Usage:
  * ```tsx
  * // In your app layout/root component
- * useAccountMetadataSync({ email: activeAccount.email });
+ * useAccountMetadataSync({ accountId: activeAccount.accountId });
  * ```
  */
 export function useAccountMetadataSync(
 	options: UseAccountMetadataSyncOptions = {},
 ) {
 	const {
-		email,
+			accountId,
 		enabled = true,
 		refetchInterval = ACCOUNT_METADATA_REFETCH_INTERVAL_MS,
 	} = options;
 	const storage = usePlatformStorage();
 
 	return useQuery({
-		queryKey: ["account-metadata-sync", email],
+		queryKey: ["account-metadata-sync", accountId],
 		queryFn: async () => {
-			if (!email) return null;
-
-			const accountId = await resolveAccountScopeId(storage, email);
 			if (!accountId) return null;
 
 			try {
@@ -64,11 +60,11 @@ export function useAccountMetadataSync(
 
 				// Get stored account metadata
 				const accounts = await storage.getAccountsList();
-				const storedAccount = accounts.find((a) => a.email === email);
+				const storedAccount = accounts.find((a) => a.accountId === accountId);
 
 				if (!storedAccount) {
 					console.log(
-						`[account-metadata-sync] No stored account found for ${email}`,
+						`[account-metadata-sync] No stored account found for ${accountId}`,
 					);
 					return null;
 				}
@@ -79,7 +75,7 @@ export function useAccountMetadataSync(
 
 				if (hasChanged) {
 					console.log(
-						`[account-metadata-sync] Team avatar changed for ${email}`,
+						`[account-metadata-sync] Team avatar changed for ${accountId}`,
 						{
 							old: storedAccount.teamAvatarUrl,
 							new: userData.teamAvatarUrl,
@@ -95,25 +91,27 @@ export function useAccountMetadataSync(
 
 					return {
 						updated: true,
-						email,
+						accountId,
+						email: storedAccount.email,
 						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 					};
 				}
 
 				return {
 					updated: false,
-					email,
+					accountId,
+					email: storedAccount.email,
 					teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 				};
 			} catch (error) {
 				console.error(
-					`[account-metadata-sync] Failed to sync metadata for ${email}:`,
+					`[account-metadata-sync] Failed to sync metadata for ${accountId}:`,
 					error,
 				);
 				throw error;
 			}
 		},
-		enabled: enabled && !!email,
+		enabled: enabled && !!accountId,
 		refetchInterval,
 		staleTime: ACCOUNT_METADATA_STALE_TIME_MS,
 		refetchOnWindowFocus: false,
@@ -133,43 +131,38 @@ export function useAccountMetadataSync(
  * Usage:
  * ```tsx
  * useAccountMetadataSyncAll({
- *   emails: unlockedEmails,
+ *   accountIds: unlockedAccountIds,
  *   refetchInterval: 60000,
  * });
  * ```
  */
 export function useAccountMetadataSyncAll(options: {
-	/** List of account emails to sync */
-	emails?: string[];
+	/** List of stable account IDs to sync */
+	accountIds?: string[];
 	/** Whether the hook is enabled (default: true) */
 	enabled?: boolean;
 	/** Refetch interval in milliseconds (default: 60000 = 1 minute) */
 	refetchInterval?: number;
 }) {
 	const {
-		emails = [],
+		accountIds = [],
 		enabled = true,
 		refetchInterval = ACCOUNT_METADATA_REFETCH_INTERVAL_MS,
 	} = options;
 	const storage = usePlatformStorage();
 
 	return useQueries({
-		queries: emails.map((email) => ({
-			queryKey: ["account-metadata-sync", email],
+		queries: accountIds.map((accountId) => ({
+			queryKey: ["account-metadata-sync", accountId],
 			queryFn: async () => {
 				try {
-					const accountId = await resolveAccountScopeId(storage, email);
-					if (!accountId) {
-						return null;
-					}
-
 					const accountClient = await createStoredAccountRpcClient(
 						storage,
 						accountId,
 					);
 					if (!accountClient) {
 						console.log(
-							`[account-metadata-sync-all] No auth session found for ${email}`,
+							`[account-metadata-sync-all] No auth session found for ${accountId}`,
 						);
 						return null;
 					}
@@ -179,11 +172,11 @@ export function useAccountMetadataSyncAll(options: {
 
 					// Get stored account metadata
 					const accounts = await storage.getAccountsList();
-					const storedAccount = accounts.find((a) => a.email === email);
+					const storedAccount = accounts.find((a) => a.accountId === accountId);
 
 					if (!storedAccount) {
 						console.log(
-							`[account-metadata-sync-all] No stored account found for ${email}`,
+							`[account-metadata-sync-all] No stored account found for ${accountId}`,
 						);
 						return null;
 					}
@@ -194,7 +187,7 @@ export function useAccountMetadataSyncAll(options: {
 
 					if (hasChanged) {
 						console.log(
-							`[account-metadata-sync-all] Team avatar changed for ${email}`,
+							`[account-metadata-sync-all] Team avatar changed for ${accountId}`,
 							{
 								old: storedAccount.teamAvatarUrl,
 								new: userData.teamAvatarUrl,
@@ -210,25 +203,27 @@ export function useAccountMetadataSyncAll(options: {
 
 						return {
 							updated: true,
-							email,
+							accountId,
+							email: storedAccount.email,
 							teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 						};
 					}
 
 					return {
 						updated: false,
-						email,
+						accountId,
+						email: storedAccount.email,
 						teamAvatarUrl: userData.teamAvatarUrl ?? undefined,
 					};
 				} catch (error) {
 					console.error(
-						`[account-metadata-sync-all] Failed to sync metadata for ${email}:`,
+						`[account-metadata-sync-all] Failed to sync metadata for ${accountId}:`,
 						error,
 					);
 					throw error;
 				}
 			},
-			enabled: enabled && !!email,
+			enabled: enabled && !!accountId,
 			refetchInterval,
 			staleTime: ACCOUNT_METADATA_STALE_TIME_MS,
 			refetchOnWindowFocus: false,

@@ -55,7 +55,7 @@ function TravelModeAccountSettings({
 		setHiddenVaults,
 		enable,
 		disable,
-	} = useTravelMode(account.email);
+	} = useTravelMode(account.accountId);
 
 	const effectiveSelection = useMemo(() => {
 		return selectedVaultIds ?? hiddenVaultIds;

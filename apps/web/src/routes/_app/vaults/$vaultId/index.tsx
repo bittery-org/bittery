@@ -184,10 +184,11 @@ function VaultDetailPage() {
 
 	const handleConvertVaultType = async (targetType: "personal" | "team") => {
 		try {
+			if (!vaultInfo?.accountId) throw new Error();
 			await convertVaultType.mutateAsync({
 				vaultId,
 				targetType,
-				accountEmail: vaultInfo?.accountEmail,
+					accountId: vaultInfo.accountId,
 			});
 			if (targetType === "team") {
 				setIsMakeSharedDialogOpen(false);

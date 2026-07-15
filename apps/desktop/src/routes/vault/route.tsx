@@ -127,6 +127,7 @@ function RouteComponent() {
 				accountIds.map(async (accountId) => {
 					const metadata = await storage.getAccountMetadata?.(accountId);
 					return {
+						accountId,
 						email: metadata?.email ?? accountId,
 						name: metadata?.name,
 						teamName: metadata?.teamName,
@@ -136,64 +137,46 @@ function RouteComponent() {
 		},
 	});
 	const availableAccounts = availableAccountsQuery.data ?? [];
-	const accountEmailsQuery = useQuery({
-		queryKey: ["vault-route", "account-emails"],
+	const accountIdsQuery = useQuery({
+		queryKey: ["vault-route", "account-ids"],
 		queryFn: async () => {
 			const activeAccount = await storage.getActiveAccount();
 			if (!activeAccount) {
 				return [];
 			}
 
-			const accounts = await storage.getAccountsList();
-
 			if (activeAccount.type === "all") {
-				const unlockedAccountIds =
-					(await storage.getUnlockedAccounts?.()) ?? [];
-				return unlockedAccountIds
-					.map(
-						(accountId) =>
-							accounts.find((account) => account.accountId === accountId)
-								?.email,
-					)
-					.filter((email): email is string => Boolean(email));
+				return (await storage.getUnlockedAccounts?.()) ?? [];
 			}
-
-			const email = accounts.find(
-				(account) => account.accountId === activeAccount.accountId,
-			)?.email;
-			return email ? [email] : [];
+			return [activeAccount.accountId];
 		},
 	});
-	const accountEmails = accountEmailsQuery.data ?? [];
+	const accountIds = accountIdsQuery.data ?? [];
 
 	// Sync account metadata for all accounts periodically
 	// This keeps team avatar URLs up-to-date
 	useAccountMetadataSyncAll({
-		emails: accountEmails,
-		enabled: accountEmails.length > 0,
+		accountIds,
+		enabled: accountIds.length > 0,
 		refetchInterval: 60000, // Check every minute
 	});
 
 	// Vault operation handlers
 	const handleCreateVault = async (data: CreateVaultInput) => {
 		try {
-			// Determine accountEmail for new vault
-			let accountEmail = data.accountEmail;
+			let accountId = data.accountId;
 
 			// If no account email provided and we're not in all-accounts mode,
 			// get the active account email
-			if (!accountEmail && !isAllAccountsMode) {
+			if (!accountId && !isAllAccountsMode) {
 				const activeAccount = await storage.getActiveAccount();
 				if (activeAccount?.type === "single") {
-					const accounts = await storage.getAccountsList();
-					accountEmail = accounts.find(
-						(account) => account.accountId === activeAccount.accountId,
-					)?.email;
+					accountId = activeAccount.accountId;
 				}
 			}
 
 			// If in all-accounts mode and no account selected, require selection
-			if (isAllAccountsMode && !accountEmail) {
+			if (isAllAccountsMode && !accountId) {
 				toast.error("Please select an account for the new vault");
 				throw new Error("Account selection required");
 			}
@@ -201,7 +184,7 @@ function RouteComponent() {
 			// Hook handles image upload internally if imageFile is provided
 			const result = await createVaultMutation.mutateAsync({
 				...data,
-				accountEmail,
+				accountId,
 			});
 
 			toast.success("Vault created successfully");
@@ -236,8 +219,8 @@ function RouteComponent() {
 		try {
 			// Find the vault to get its account email
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-			const accountEmail =
-				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+			const accountId = vault?.accountId;
+			if (!accountId) throw new Error();
 
 			await updateVaultMutation.mutateAsync({
 				vaultId,
@@ -245,7 +228,7 @@ function RouteComponent() {
 				icon: data.icon,
 				imageFile: data.imageFile,
 				removeImage: data.removeImage,
-				accountEmail,
+				accountId,
 			});
 			setEditingVault(null);
 		} catch (error) {
@@ -265,12 +248,12 @@ function RouteComponent() {
 		try {
 			// Find the vault to get its account email
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-			const accountEmail =
-				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+			const accountId = vault?.accountId;
+			if (!accountId) throw new Error();
 
 			await deleteVaultMutation.mutateAsync({
 				vaultId,
-				accountEmail,
+				accountId,
 			});
 			setDeletingVault(null);
 
@@ -296,14 +279,14 @@ function RouteComponent() {
 		try {
 			// Find the vault to get its account email
 			const vault = vaultKeys?.find((v) => v.vaultId === vaultId);
-			const accountEmail =
-				vault && "accountEmail" in vault ? vault.accountEmail : undefined;
+			const accountId = vault?.accountId;
+			if (!accountId) throw new Error();
 
 			const result = await createItemMutation.mutateAsync({
 				vaultId,
 				category,
 				data,
-				accountEmail,
+				accountId,
 			});
 
 			// Close dialog
@@ -357,6 +340,7 @@ function RouteComponent() {
 							type: v.vaultType as "personal" | "team",
 							icon: v.vaultIcon,
 							imageUrl: v.vaultImageUrl,
+							accountId: v.accountId,
 							accountEmail: "accountEmail" in v ? v.accountEmail : undefined,
 							accountName: "accountName" in v ? v.accountName : undefined,
 							accountTeamName:
