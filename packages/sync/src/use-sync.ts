@@ -135,8 +135,11 @@ export interface UseSyncOptions {
 	itemCacheServerUrl?: string | null;
 	sources?: SyncSource[];
 	getClientForAccount?: (
-		email: string,
+		accountId: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
+	resolveLegacyAccountId?: (
+		email: string,
+	) => string | undefined | Promise<string | undefined>;
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
@@ -169,6 +172,7 @@ export function useSync(options: UseSyncOptions) {
 		itemCacheServerUrl,
 		sources,
 		getClientForAccount,
+		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed,
 		fetch: fetchImpl,
@@ -179,8 +183,8 @@ export function useSync(options: UseSyncOptions) {
 		[storage],
 	);
 	const outboundQueue = useMemo(
-		() => new OutboundQueue(syncStorage, clientId),
-		[syncStorage, clientId],
+		() => new OutboundQueue(syncStorage, clientId, resolveLegacyAccountId),
+		[syncStorage, clientId, resolveLegacyAccountId],
 	);
 	const orchestratorsRef = useRef<Map<string, SyncOrchestrator>>(new Map());
 	const sourceStatusesRef = useRef<Map<string, SyncStatus>>(new Map());

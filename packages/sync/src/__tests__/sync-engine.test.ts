@@ -324,6 +324,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 1,
 			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			timestamp: 1,
 			retryCount: 0,
 		});
@@ -334,6 +335,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 2,
 			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			timestamp: 2,
 			retryCount: 0,
 		});
@@ -349,6 +351,7 @@ describe("sync engine regressions", () => {
 			},
 			baseVersion: 3,
 			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			timestamp: 3,
 			retryCount: 0,
 		});
@@ -410,6 +413,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 1,
 			accountEmail: firstEmail,
+			accountId: "account-first",
 			timestamp: 1,
 			retryCount: 0,
 		});
@@ -420,6 +424,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 1,
 			accountEmail: secondEmail,
+			accountId: "account-second",
 			timestamp: 2,
 			retryCount: 0,
 		});
@@ -429,9 +434,9 @@ describe("sync engine regressions", () => {
 		const restored = new OutboundQueue(storage, "self_client");
 		await restored.restore();
 
-		const perEmailItemIds = new Map<string, string[]>();
-		await restored.drain((email) => {
-			perEmailItemIds.set(email, []);
+		const perAccountItemIds = new Map<string, string[]>();
+		await restored.drain((accountId) => {
+			perAccountItemIds.set(accountId, []);
 			return {
 				vault: {
 					createItem: {
@@ -439,40 +444,40 @@ describe("sync engine regressions", () => {
 					},
 					updateItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					deleteItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					permanentlyDeleteItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					restoreItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					moveItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					toggleFavorite: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 				},
 			};
 		});
 
-		expect(perEmailItemIds.get(firstEmail.toLowerCase())).toEqual(["item_1"]);
-		expect(perEmailItemIds.get(secondEmail.toLowerCase())).toEqual(["item_2"]);
+		expect(perAccountItemIds.get("account-first")).toEqual(["item_1"]);
+		expect(perAccountItemIds.get("account-second")).toEqual(["item_2"]);
 	});
 
 	test("migrates legacy outbound queue keys to collision-safe keys", async () => {
@@ -480,7 +485,7 @@ describe("sync engine regressions", () => {
 		const email = "a+b@example.com";
 		const normalizedEmail = email.toLowerCase();
 		const legacyKey = `bittery_pending_mutations_${normalizedEmail.replace(/[^a-z0-9]/g, "_")}`;
-		const nextKey = `bittery_pending_mutations_${encodeURIComponent(normalizedEmail)}`;
+		const nextKey = "bittery_pending_mutations_v2_account-legacy";
 
 		await storage.set("bittery_pending_mutation_accounts", [normalizedEmail]);
 		await storage.set(legacyKey, [
@@ -496,11 +501,42 @@ describe("sync engine regressions", () => {
 			},
 		]);
 
-		const queue = new OutboundQueue(storage, "self_client");
+		const queue = new OutboundQueue(
+			storage,
+			"self_client",
+			async () => "account-legacy",
+		);
 		await queue.restore();
 
 		expect(queue.getPendingCount()).toBe(1);
 		expect(await storage.get(legacyKey)).toBeNull();
 		expect(await storage.get(nextKey)).not.toBeNull();
+	});
+
+	test("preserves and refuses to drain an ambiguous legacy queue", async () => {
+		const storage = new MemoryStorage();
+		const email = "same@example.com";
+		const legacyKey = `bittery_pending_mutations_${email.replace(/[^a-z0-9]/g, "_")}`;
+		await storage.set("bittery_pending_mutation_accounts", [email]);
+		await storage.set(legacyKey, [
+			{
+				id: "m_legacy",
+				type: "delete",
+				entityId: "item_legacy",
+				vaultId: "vault_1",
+				baseVersion: 1,
+				accountEmail: email,
+				timestamp: 1,
+				retryCount: 0,
+			},
+		]);
+		const queue = new OutboundQueue(storage, "self_client", async () => {
+			throw new Error("Ambiguous account email");
+		});
+		await queue.restore();
+		expect(await storage.get(legacyKey)).not.toBeNull();
+		expect(queue.drain(async () => {
+			throw new Error("must not resolve a client");
+		})).rejects.toThrow("Cannot drain ambiguous legacy queues");
 	});
 });

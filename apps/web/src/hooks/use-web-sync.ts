@@ -95,6 +95,13 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 			window.location.href = "/login";
 		}
 	}, [queryClient]);
+	const resolveLegacyAccountId = useCallback(async (email: string) => {
+		const matches = (await storage.getAccountsList()).filter(
+			(account) => account.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (matches.length !== 1) throw new Error(`Ambiguous legacy account queue for ${email}`);
+		return matches[0]?.accountId;
+	}, []);
 
 	return useSync({
 		serverUrl,
@@ -104,6 +111,7 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		storage: syncStorage,
 		enabled,
 		itemCacheAdapter: vaultCoordinator,
+		resolveLegacyAccountId,
 		onSessionRevoked,
 	});
 }

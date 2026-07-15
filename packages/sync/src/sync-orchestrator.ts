@@ -12,7 +12,7 @@ import type {
 } from "./types";
 
 interface MutableItemCacheAdapter extends ItemCacheAdapter {
-	replaceItemId?: (tempId: string, realId: string, email?: string) => void;
+	replaceItemId?: (tempId: string, realId: string, accountId?: string) => void;
 }
 
 export interface SyncOrchestratorOptions {
@@ -24,7 +24,7 @@ export interface SyncOrchestratorOptions {
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;
 	getClientForAccount?: (
-		email: string,
+		accountId: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
 	onEventProcessed?: (event: SyncEvent) => Promise<void>;
 	onSessionRevoked?: (
@@ -40,7 +40,7 @@ export class SyncOrchestrator {
 	private readonly itemCacheAccountId?: string | null;
 	private readonly itemCacheServerUrl?: string | null;
 	private readonly getClientForAccount?: (
-		email: string,
+		accountId: string,
 	) => OutboundQueueClient | Promise<OutboundQueueClient>;
 	private readonly onEventProcessed?: (event: SyncEvent) => Promise<void>;
 
@@ -223,9 +223,9 @@ export class SyncOrchestrator {
 
 		try {
 			this.options.outboundQueue.compact();
-			await this.options.outboundQueue.drain((email) => {
+			await this.options.outboundQueue.drain((accountId) => {
 				if (this.getClientForAccount) {
-					return this.getClientForAccount(email);
+					return this.getClientForAccount(accountId);
 				}
 				return this.options.rpcClient as unknown as OutboundQueueClient;
 			});
@@ -234,7 +234,7 @@ export class SyncOrchestrator {
 				this.options.itemCache.replaceItemId?.(
 					mapping.tempId,
 					mapping.realId,
-					mapping.accountEmail,
+					mapping.accountId,
 				);
 			}
 		} finally {

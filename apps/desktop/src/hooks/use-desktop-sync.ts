@@ -222,18 +222,12 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	}, [syncContexts]);
 
 	const getClientForAccount = useCallback(
-		async (email: string): Promise<OutboundQueueClient> => {
-			const normalizedEmail = email.toLowerCase();
-			const accounts = await storage.getAccountsList();
-			const account = accounts.find(
-				(candidate) => candidate.email.toLowerCase() === normalizedEmail,
-			);
-			const accountId = account?.accountId;
+		async (accountId: string): Promise<OutboundQueueClient> => {
 			const [accountToken, accountServerUrl] = await Promise.all([
 				storage.getAuthToken(accountId),
 				storage.getServerUrl(accountId),
 			]);
-			if (accountToken && accountId) {
+			if (accountToken) {
 				const client = await createStoredAccountRpcClient(
 					storage,
 					accountId,
@@ -248,19 +242,20 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				) as unknown as OutboundQueueClient;
 			}
 
-			const fallbackToken = await getAuthToken();
-			if (!fallbackToken) {
-				throw new Error(
-					`No auth token available for account queue drain (${normalizedEmail})`,
-				);
-			}
-			return createAccountRpcClient(
-				fallbackToken,
-				serverUrl || "http://localhost:3000",
-			) as unknown as OutboundQueueClient;
+			throw new Error(`No auth token available for account queue drain (${accountId})`);
 		},
-		[clientId, getAuthToken, serverUrl],
+		[clientId, serverUrl],
 	);
+
+	const resolveLegacyAccountId = useCallback(async (email: string) => {
+		const matches = (await storage.getAccountsList()).filter(
+			(account) => account.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (matches.length !== 1) {
+			throw new Error(`Ambiguous legacy account queue for ${email}`);
+		}
+		return matches[0]?.accountId;
+	}, []);
 
 	const handleAccountSessionInvalidation = useCallback(
 		async (email: string) => {
@@ -390,7 +385,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			if (!accountId || !accountEmail || event.type !== "travel_mode_updated") {
 				return;
 			}
-			const rpcClient = await getClientForAccount(accountEmail);
+			const rpcClient = await getClientForAccount(accountId);
 			const accounts = new AccountResolver(storage);
 			await handleTravelModeSyncEvent(
 				event,
@@ -431,6 +426,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAdapter: vaultCoordinator,
 		sources: syncSources,
 		getClientForAccount,
+		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed: onTravelModeEvent,
 	});

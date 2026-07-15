@@ -1,11 +1,12 @@
 import {
 	AccountResolver,
+	createStoredAccountRpcClient,
 	getOrCreateVaultRepositoryCoordinator,
 	handleTravelModeSyncEvent,
 	type RpcVaultClient,
 } from "@bittery/core";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
-import type { SyncStorage } from "@bittery/sync";
+import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
@@ -198,6 +199,18 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	const getAuthToken = useCallback(async () => {
 		return storage.getAuthToken(syncAccountId ?? undefined);
 	}, [syncAccountId]);
+	const getClientForAccount = useCallback(async (accountId: string) => {
+		const client = await createStoredAccountRpcClient(storage, accountId, clientId);
+		if (!client) throw new Error(`No RPC client for account ${accountId}`);
+		return client as unknown as OutboundQueueClient;
+	}, [clientId]);
+	const resolveLegacyAccountId = useCallback(async (email: string) => {
+		const matches = (await storage.getAccountsList()).filter(
+			(account) => account.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (matches.length !== 1) throw new Error(`Ambiguous legacy account queue for ${email}`);
+		return matches[0]?.accountId;
+	}, []);
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const vaultCoordinator = useMemo(
@@ -247,6 +260,8 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountId: syncAccountId,
 		itemCacheServerUrl: syncAccountId ? serverUrl : null,
+		getClientForAccount,
+		resolveLegacyAccountId,
 		fetch: expoFetch,
 		onEventProcessed: onTravelModeEvent,
 	});
