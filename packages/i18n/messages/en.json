@@ -2345,7 +2345,7 @@
 	"dashboard_home_device_current": "This device",
 	"dashboard_home_device_active_time": "Active {time}",
 	"dashboard_home_get_desktop_title": "Get the desktop app",
-	"dashboard_home_get_desktop_description": "Biometric unlock, offline access and system-wide autofill.",
+	"dashboard_home_get_desktop_description": "Biometric unlock, faster access and system-wide autofill.",
 	"dashboard_home_download_action": "Download",
 	"dashboard_home_vaults_empty": "No vaults yet."
 }

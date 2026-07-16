@@ -1,18 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { FileText } from "lucide-react";
 import { motion } from "motion/react";
+import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/terms")({
 	component: TermsPage,
 	head: () => ({
-		meta: [
-			{ title: "Terms of Service — Bittery" },
-			{
-				name: "description",
-				content:
-					"Bittery's terms of service. Read the terms governing your use of the Bittery password manager.",
-			},
-		],
+		meta: seo({
+			title: "Terms of Service — Bittery",
+			description:
+				"Bittery's terms of service. Read the terms governing your use of the Bittery password manager.",
+		}),
 	}),
 });
 

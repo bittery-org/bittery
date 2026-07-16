@@ -10,18 +10,16 @@ import { motion } from "motion/react";
 import { DocsSidebar, MobileDocsDrawer } from "@/components/docs/docs-sidebar";
 
 import { getAllArticles, getCategories } from "@/lib/docs";
+import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/docs/")({
 	component: DocsIndex,
 	head: () => ({
-		meta: [
-			{ title: "Documentation — Bittery" },
-			{
-				name: "description",
-				content:
-					"Find answers, guides, and resources for getting the most out of Bittery.",
-			},
-		],
+		meta: seo({
+			title: "Documentation — Bittery",
+			description:
+				"Find answers, guides, and resources for getting the most out of Bittery.",
+		}),
 	}),
 });
 

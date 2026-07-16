@@ -10,20 +10,18 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import { seo } from "@/lib/seo";
 import { billingMarketingEnabled } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/roadmap")({
 	component: RoadmapPage,
 	head: () => ({
-		meta: [
-			{ title: "Roadmap — Bittery" },
-			{
-				name: "description",
-				content:
-					"See what's coming next for Bittery. Our transparent roadmap shows what we're building, what's done, and what's planned.",
-			},
-		],
+		meta: seo({
+			title: "Roadmap — Bittery",
+			description:
+				"See what's coming next for Bittery. Our transparent roadmap shows what we're building, what's done, and what's planned.",
+		}),
 	}),
 });
 

@@ -22,6 +22,14 @@ export function signupUrl(plan?: string): string {
 	return webappUrl("/signup", plan ? { plan } : undefined);
 }
 
+/** Fully-qualified URL on the marketing site itself, e.g. for canonicals & OG tags. */
+export function siteUrl(path = "/"): string {
+	const base = (
+		import.meta.env.VITE_MARKETING_URL ?? "https://bittery.com"
+	).replace(/\/+$/, "");
+	return new URL(path, base).toString();
+}
+
 export function billingMarketingEnabled(): boolean {
 	const value = import.meta.env.VITE_BILLING_MARKETING_ENABLED;
 	return ["1", "true", "yes", "on"].includes(value?.toLowerCase?.() ?? "");

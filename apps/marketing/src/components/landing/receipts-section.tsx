@@ -54,7 +54,7 @@ export function ReceiptsSection() {
 								whileInView={{ opacity: 1, y: 0 }}
 								viewport={{ once: true, margin: "-80px" }}
 								transition={{ duration: 0.5, delay: i * 0.07 }}
-								className="border-b p-7 lg:not-last:border-r lg:border-b-0 sm:[&:nth-child(odd)]:border-r"
+								className="border-b p-7 sm:first:pl-4 lg:not-last:border-r lg:border-b-0 sm:[&:nth-child(odd)]:border-r"
 							>
 								<span className="mb-2.5 block font-mono text-[12px] text-primary">
 									{receipt.mono}

@@ -369,11 +369,13 @@ export function VaultNavSidebar({
 						</SidebarSection>
 					</div>
 				)}
+			</div>
 
-				{/* Trash */}
+			{/* Trash — pinned at the bottom */}
+			<div className="relative border-t p-2">
 				<Link
 					to="/vaults/trash"
-					className={cn(navLinkClass(isTrashActive), "mt-2")}
+					className={navLinkClass(isTrashActive)}
 					onClick={onNavigate}
 				>
 					{isTrashActive && (

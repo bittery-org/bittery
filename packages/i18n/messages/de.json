@@ -2345,7 +2345,7 @@
 	"dashboard_home_device_current": "Dieses Gerät",
 	"dashboard_home_device_active_time": "Aktiv {time}",
 	"dashboard_home_get_desktop_title": "Hol dir die Desktop-App",
-	"dashboard_home_get_desktop_description": "Biometrisches Entsperren, Offline-Zugriff und systemweites Autofill.",
+	"dashboard_home_get_desktop_description": "Biometrisches Entsperren, schnellerer Zugriff und systemweites Autofill.",
 	"dashboard_home_download_action": "Herunterladen",
 	"dashboard_home_vaults_empty": "Noch keine Tresore."
 }

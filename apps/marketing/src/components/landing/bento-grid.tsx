@@ -407,7 +407,7 @@ function PlatformsDemo() {
 						ease: "easeInOut",
 					}}
 				/>
-				All devices in sync · offline-first, no exceptions
+				All devices in sync · end-to-end encrypted, no exceptions
 			</p>
 		</div>
 	);
@@ -483,8 +483,8 @@ export function BentoGrid() {
 						horizontal
 						className="lg:col-span-6"
 						icon={Globe}
-						title="Everywhere you are — even offline"
-						description="One encrypted vault on web, desktop and mobile, with autofill in your browser. Everything works offline and syncs when you're back."
+						title="Everywhere you are — one vault, every device"
+						description="One encrypted vault on web, desktop and mobile, with autofill in your browser. Every change syncs across all of them in seconds."
 					>
 						<PlatformsDemo />
 					</Tile>

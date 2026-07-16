@@ -1,18 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Shield } from "lucide-react";
 import { motion } from "motion/react";
+import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/privacy")({
 	component: PrivacyPage,
 	head: () => ({
-		meta: [
-			{ title: "Privacy Policy — Bittery" },
-			{
-				name: "description",
-				content:
-					"Bittery's privacy policy. Learn how we handle your data with our zero-knowledge architecture.",
-			},
-		],
+		meta: seo({
+			title: "Privacy Policy — Bittery",
+			description:
+				"Bittery's privacy policy. Learn how we handle your data with our zero-knowledge architecture.",
+		}),
 	}),
 });
 

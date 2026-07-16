@@ -3,7 +3,6 @@ import {
 	usePermanentDeleteItem,
 	useRestoreItem,
 } from "@bittery/core/hooks";
-import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import {
 	Badge,
@@ -25,15 +24,12 @@ import {
 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Favicon } from "@/components/vault/favicon";
-import { formatDate } from "@/lib/i18n-format";
-import { useI18n } from "@/providers/i18n-provider";
+import { Favicon } from "../../components/vault/favicon";
+import { formatDate } from "../../lib/i18n-format";
+import { useI18n } from "../../providers/i18n-provider";
 
-export const Route = createFileRoute("/_app/vaults/trash")({
-	component: VaultTrashPage,
-	head: () => ({
-		meta: [{ title: messages.vaults_trash_meta_title() }],
-	}),
+export const Route = createFileRoute("/vault/trash")({
+	component: TrashComponent,
 });
 
 function formatDeletedDate(
@@ -50,7 +46,7 @@ function formatDeletedDate(
 	});
 }
 
-function VaultTrashPage() {
+function TrashComponent() {
 	const { m } = useI18n();
 	const { items: deletedItems, isLoading } = useDeletedItems();
 	const restoreItem = useRestoreItem();
@@ -95,9 +91,9 @@ function VaultTrashPage() {
 	};
 
 	return (
-		<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+		<div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
 			{/* Header */}
-			<div className="flex h-11 shrink-0 items-center gap-2 border-b px-4 xl:h-12">
+			<div className="flex h-11 shrink-0 items-center gap-2 border-b px-4">
 				<Archive className="size-4 shrink-0 text-muted-foreground" />
 				<span className="truncate font-medium text-sm">
 					{m.vaults_trash_hero_heading()}

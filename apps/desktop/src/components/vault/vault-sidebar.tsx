@@ -461,13 +461,14 @@ export function VaultSidebar({
 						</SidebarSection>
 					</div>
 				)}
+			</div>
 
-				{/* Trash */}
+			{/* Trash — pinned at the bottom */}
+			<div className="relative border-t p-2">
 				<Link
 					to="/vault/trash"
 					className={cn(
 						"relative",
-						"mt-2",
 						"flex",
 						"h-7",
 						"w-full",
