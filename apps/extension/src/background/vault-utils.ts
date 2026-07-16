@@ -29,6 +29,23 @@ export function mergeItemCollections(
 	return Array.from(merged.values());
 }
 
+export async function mergeDesktopAndLocalItemSources(
+	desktopItemsPromise: Promise<MultiAccountItem[]>,
+	localItemsPromise: Promise<MultiAccountItem[]>,
+): Promise<MultiAccountItem[]> {
+	const [desktopItems, localItems] = await Promise.all([
+		desktopItemsPromise,
+		localItemsPromise.catch((error) => {
+			console.warn(
+				"[vault-utils] Local items unavailable during desktop-backed read; using the desktop snapshot:",
+				error,
+			);
+			return [];
+		}),
+	]);
+	return mergeItemCollections(desktopItems, localItems);
+}
+
 async function getDesktopTargetAccountIds(): Promise<string[]> {
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
@@ -73,7 +90,11 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 		.map((item) => parseDesktopSnapshotItem(item as Record<string, unknown>))
 		.filter((item): item is MultiAccountItem => item !== null);
 
-	return filterItemsForTravelMode(normalizedItems);
+	// The desktop only exposes items whose vault keys survived its verified
+	// travel-mode enforcement. Applying the extension's separate local policy
+	// here can discard a valid snapshot after a service-worker restart, before
+	// the extension has rebuilt its own policy cache.
+	return normalizedItems;
 }
 
 async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
@@ -99,11 +120,10 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 
 	if (desktopReadAvailable) {
 		try {
-			const [desktopItems, localItems] = await Promise.all([
+			const mergedItems = await mergeDesktopAndLocalItemSources(
 				getDesktopItemsSnapshot(),
 				getLocalCoordinatorItems(),
-			]);
-			const mergedItems = mergeItemCollections(desktopItems, localItems);
+			);
 			return mergedItems;
 		} catch (error) {
 			console.warn(

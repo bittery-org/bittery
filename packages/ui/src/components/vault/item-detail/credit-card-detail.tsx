@@ -6,10 +6,15 @@ import {
 	maskCardNumber,
 } from "@bittery/shared/credit-card";
 import { Button } from "../../button";
-import { Card } from "../../card";
 import { Label } from "../../label";
 import { TagInput } from "../../tag-input";
-import { DetailField, DetailHeader, DetailPasswordField } from "./field-components";
+import {
+	DetailField,
+	DetailFieldGroup,
+	DetailHeader,
+	DetailNoteField,
+	DetailPasswordField,
+} from "./field-components";
 import type { CategoryDetailProps, CreditCardDisplayData } from "./shared";
 
 export function CreditCardDetail({
@@ -53,17 +58,16 @@ export function CreditCardDetail({
 				)}
 			</div>
 
-			<div className="space-y-3">
-				<DetailField
-					label={m.vaults_detail_items_detail_credit_card_field_cardholder_name()}
-					value={data.cardholderName}
-				/>
-				<DetailPasswordField
-					label={m.vaults_detail_items_detail_credit_card_field_card_number()}
-					value={data.cardNumber}
-				/>
-
-				<div className="grid grid-cols-2 gap-4">
+			<div className="space-y-3.5">
+				<DetailFieldGroup>
+					<DetailField
+						label={m.vaults_detail_items_detail_credit_card_field_cardholder_name()}
+						value={data.cardholderName}
+					/>
+					<DetailPasswordField
+						label={m.vaults_detail_items_detail_credit_card_field_card_number()}
+						value={data.cardNumber}
+					/>
 					<DetailField
 						label={m.vaults_detail_items_detail_credit_card_field_expiry_date()}
 						value={formattedExpiry}
@@ -72,31 +76,17 @@ export function CreditCardDetail({
 						label={m.vaults_detail_items_detail_credit_card_field_cvv()}
 						value={data.cvv}
 					/>
-				</div>
+				</DetailFieldGroup>
 
-				{data.billingAddress && (
-					<div className="space-y-2">
-						<Label className="font-medium text-sm">
-							{m.vaults_detail_items_detail_credit_card_field_billing_address()}
-						</Label>
-						<Card>
-							<div className="whitespace-pre-wrap px-4 py-1 text-sm">
-								{data.billingAddress}
-							</div>
-						</Card>
-					</div>
-				)}
+				<DetailNoteField
+					label={m.vaults_detail_items_detail_credit_card_field_billing_address()}
+					value={data.billingAddress}
+				/>
 
-				{data.notes && (
-					<div className="space-y-2">
-						<Label className="font-medium text-sm">
-							{m.vaults_detail_items_form_field_notes_label()}
-						</Label>
-						<Card>
-							<div className="whitespace-pre-wrap px-4 py-1 text-sm">{data.notes}</div>
-						</Card>
-					</div>
-				)}
+				<DetailNoteField
+					label={m.vaults_detail_items_form_field_notes_label()}
+					value={data.notes}
+				/>
 			</div>
 
 			{onTagsChange && (

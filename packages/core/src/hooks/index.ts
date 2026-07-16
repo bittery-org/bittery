@@ -182,6 +182,7 @@ export {
 	getAttachmentUploadErrorCode,
 	useItemAttachments,
 } from "./use-item-attachments";
+export { useItemCounts, type VaultItemCounts } from "./use-item-counts";
 export {
 	type ItemListCategoryFilter,
 	type ItemListFilterable,

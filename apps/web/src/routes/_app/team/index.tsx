@@ -72,8 +72,8 @@ function TeamPage() {
 
 	if (teamListQuery.isLoading || teamQuery.isLoading) {
 		return (
-			<div className="mx-auto w-full max-w-6xl space-y-6">
-				<Skeleton className="h-48 w-full rounded-2xl" />
+			<div className="mx-auto w-full max-w-6xl space-y-4">
+				<Skeleton className="h-48 w-full rounded-lg" />
 				<div className="grid gap-4 sm:grid-cols-3">
 					<Skeleton className="h-24" />
 					<Skeleton className="h-24" />
@@ -130,49 +130,43 @@ function TeamPage() {
 				});
 
 	return (
-		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-			{/* Hero Banner */}
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
-
-				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-					<div className="flex min-w-0 items-center gap-3">
-						<Avatar className="h-9 w-9 shrink-0 rounded-lg border shadow-sm sm:h-10 sm:w-10">
-							{team.imageUrl && (
-								<AvatarImage src={team.imageUrl} alt={team.name} />
-							)}
-							<AvatarFallback className="rounded-lg text-sm">
-								{getTeamInitials()}
-							</AvatarFallback>
-						</Avatar>
-						<div className="min-w-0">
-							<div className="flex flex-wrap items-center gap-2">
-								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
-									{team.name}
-								</h1>
-								<Badge
-									variant={roleBadgeVariant}
-									className="px-1.5 py-0 text-[11px] capitalize"
-								>
-									{getRoleLabel(team.userRole)}
-								</Badge>
-							</div>
-							<p className="text-muted-foreground text-xs">
-								{memberCountLabel}
-							</p>
+		<div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-3">
+			{/* Page header */}
+			<div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+				<div className="flex min-w-0 items-center gap-3">
+					<Avatar className="size-9 shrink-0 rounded-lg border sm:size-10">
+						{team.imageUrl && (
+							<AvatarImage src={team.imageUrl} alt={team.name} />
+						)}
+						<AvatarFallback className="rounded-lg text-sm">
+							{getTeamInitials()}
+						</AvatarFallback>
+					</Avatar>
+					<div className="min-w-0">
+						<div className="flex flex-wrap items-center gap-2">
+							<h1 className="truncate font-semibold text-lg tracking-[-0.015em]">
+								{team.name}
+							</h1>
+							<Badge
+								variant={roleBadgeVariant}
+								className="px-1.5 py-0 text-[11px] capitalize"
+							>
+								{getRoleLabel(team.userRole)}
+							</Badge>
 						</div>
+						<p className="text-muted-foreground text-xs">{memberCountLabel}</p>
 					</div>
-
-					{canManageTeam && teamId && (
-						<div className="sm:shrink-0">
-							<InviteDialog teamId={teamId} />
-						</div>
-					)}
 				</div>
-			</section>
+
+				{canManageTeam && teamId && (
+					<div className="sm:ml-auto sm:shrink-0">
+						<InviteDialog teamId={teamId} />
+					</div>
+				)}
+			</div>
 
 			{isCloudMode && !teamManagementEnabled ? (
-				<div className="rounded-xl border bg-muted/40 px-4 py-3 text-muted-foreground text-sm">
+				<div className="rounded-lg border bg-card px-4 py-3 text-muted-foreground text-sm">
 					{m.team_page_notice_management_unavailable()}
 				</div>
 			) : null}
@@ -193,7 +187,7 @@ function TeamPage() {
 								{m.team_page_tab_invitations()}
 							</span>
 							{invitationsQuery.data?.length ? (
-								<span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-primary-foreground text-xs">
+								<span className="ml-1.5 rounded-full border bg-foreground/3 px-1.5 text-[10px] text-muted-foreground tabular-nums">
 									{invitationsQuery.data.length}
 								</span>
 							) : null}
@@ -210,7 +204,7 @@ function TeamPage() {
 				<TabsContent value="members" className="mt-4">
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
+							<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 								{m.team_page_members_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
@@ -241,7 +235,7 @@ function TeamPage() {
 					<TabsContent value="invitations" className="mt-4">
 						<div className="space-y-3">
 							<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-								<h2 className="font-semibold text-lg tracking-tight">
+								<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 									{m.team_page_invitations_heading()}
 								</h2>
 								<p className="text-muted-foreground text-sm">

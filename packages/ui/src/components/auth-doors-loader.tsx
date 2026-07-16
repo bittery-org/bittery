@@ -47,20 +47,46 @@ function runRevealSequence(
   window.setTimeout(onComplete, COMPLETE_DELAY_MS);
 }
 
-function RevealStateIcon({ phase }: { phase: RevealAnimationPhase }) {
+function AuthDoorsMedallion({
+  engaged = false,
+  children,
+}: {
+  engaged?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div className="relative flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
+    <div
+      className={cn(
+        "relative flex size-14 items-center justify-center rounded-full border border-border-strong bg-popover transition-[box-shadow,transform] duration-500",
+        engaged
+          ? "scale-[1.08] shadow-[0_8px_24px_oklch(0_0_0/0.12),0_0_40px_color-mix(in_oklab,var(--color-primary-deep)_45%,transparent)] dark:shadow-[0_8px_24px_oklch(0_0_0/0.45),0_0_40px_color-mix(in_oklab,var(--color-primary-deep)_55%,transparent)]"
+          : "shadow-[0_8px_24px_oklch(0_0_0/0.12)] dark:shadow-[0_8px_24px_oklch(0_0_0/0.45),0_0_22px_color-mix(in_oklab,var(--color-primary-deep)_25%,transparent)]",
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function RevealStateIcon({ phase }: { phase: RevealAnimationPhase }) {
+  const engaged = phase !== "locked";
+  return (
+    <AuthDoorsMedallion engaged={engaged}>
       <IconLockOutlineDuo18
-        className="size-7 text-primary transition-opacity duration-300"
-        style={{ opacity: phase === "locked" ? 1 : 0 }}
-      />
-      <IconLockOpenOutlineDuo18
-        className="absolute size-7 text-primary transition-opacity duration-300"
+        className="absolute size-6 text-primary transition-[opacity,transform] duration-300 dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]"
         style={{
-          opacity: phase === "unlocked" || phase === "opening" ? 1 : 0,
+          opacity: engaged ? 0 : 1,
+          transform: engaged ? "scale(0.8)" : "scale(1)",
         }}
       />
-    </div>
+      <IconLockOpenOutlineDuo18
+        className="absolute size-6 text-primary transition-[opacity,transform] duration-300 dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]"
+        style={{
+          opacity: engaged ? 1 : 0,
+          transform: engaged ? "scale(1)" : "scale(0.8)",
+        }}
+      />
+    </AuthDoorsMedallion>
   );
 }
 
@@ -79,11 +105,26 @@ export function AuthDoorsOverlay({
         style={{
           transform: open ? "translateX(-110%)" : "translateX(0)",
           transition: open
-            ? "transform 0.7s cubic-bezier(0.76, 0, 0.24, 1)"
+            ? "transform 0.7s cubic-bezier(0.6, 0, 0.2, 1)"
             : "none",
         }}
       >
-        <div className="absolute inset-y-0 right-0 w-0.5 bg-foreground/10" />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-[46%] bg-[radial-gradient(130%_100%_at_35%_0%,color-mix(in_oklab,var(--color-primary-deep)_8%,transparent),transparent_68%)] dark:bg-[radial-gradient(130%_100%_at_35%_0%,color-mix(in_oklab,var(--color-primary-deep)_14%,transparent),transparent_68%)]"
+        />
+
+        <div
+          className={cn(
+            "absolute inset-y-0 right-0 w-px bg-border transition-opacity duration-400",
+            open && "opacity-0",
+          )}
+        >
+          <span
+            aria-hidden
+            className="absolute top-[14%] left-0 h-[28%] w-px animate-[auth-seam-breathe_4.5s_ease-in-out_infinite] bg-linear-to-b from-transparent via-primary/60 to-transparent drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_80%,transparent)] dark:via-primary/75"
+          />
+        </div>
 
         <div className="absolute top-1/4 right-0 translate-x-1/2">
           {children}
@@ -99,11 +140,11 @@ export function AuthDoorsOverlay({
         style={{
           transform: open ? "translateX(100%)" : "translateX(0)",
           transition: open
-            ? "transform 0.7s cubic-bezier(0.76, 0, 0.24, 1)"
+            ? "transform 0.7s cubic-bezier(0.6, 0, 0.2, 1)"
             : "none",
         }}
       >
-        <div className="absolute inset-y-0 left-0 w-0.5 bg-foreground/10" />
+        <div className="absolute inset-y-0 left-0 w-px bg-border" />
       </div>
     </div>
   );
@@ -117,9 +158,9 @@ export function AuthDoorsPendingLoader({
       open={false}
       logoPositionClassName={logoPositionClassName}
     >
-      <div className="flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
-        <IconLoader2Fill18 className="size-7 animate-spin text-primary" />
-      </div>
+      <AuthDoorsMedallion>
+        <IconLoader2Fill18 className="size-6 animate-spin text-primary dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]" />
+      </AuthDoorsMedallion>
     </AuthDoorsOverlay>
   );
 }

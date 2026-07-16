@@ -8,6 +8,7 @@ interface FormWrapperProps {
 	onSubmit: () => void;
 	onCancel: () => void;
 	submitLabel?: string;
+	cancelLabel?: string;
 	isSubmitting?: boolean;
 	vaults?: VaultOption[];
 	currentVaultId: string;
@@ -19,6 +20,7 @@ export function FormWrapper({
 	onSubmit,
 	onCancel,
 	submitLabel,
+	cancelLabel,
 	isSubmitting = false,
 	vaults = [],
 	currentVaultId,
@@ -32,13 +34,13 @@ export function FormWrapper({
 				e.preventDefault();
 				onSubmit();
 			}}
-			className="flex flex-1 flex-col overflow-hidden"
+			className="flex min-h-0 flex-1 flex-col overflow-hidden"
 		>
-			<div className="flex-1 space-y-4 overflow-y-auto px-1 py-1">
+			<div className="flex-1 divide-y divide-border overflow-y-auto">
 				{children}
 			</div>
 
-			<div className="mt-4 flex items-center justify-between gap-3 border-t bg-background pt-4 pb-0.5">
+			<div className="flex items-center justify-between gap-3 border-t px-6 py-4">
 				{vaults.length > 0 && (
 					<VaultSelector
 						vaults={vaults}
@@ -49,6 +51,7 @@ export function FormWrapper({
 				<FormActions
 					onCancel={onCancel}
 					submitLabel={submitLabel}
+					cancelLabel={cancelLabel}
 					isSubmitting={isSubmitting}
 				/>
 			</div>

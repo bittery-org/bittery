@@ -248,6 +248,46 @@ describe("AccountSessionManager", () => {
 		});
 	});
 
+	it("treats a stored active accountId that matches no account as null", async () => {
+		// Older builds persisted an email into the accountId field. It reads back
+		// as a valid-looking id, so refresh must validate it against the list.
+		const storage = createMockStorage({
+			getActiveAccount: mock(async () => ({
+				type: "single" as const,
+				accountId: "a@test.com",
+			})),
+		});
+		const manager = new AccountSessionManager({
+			storage,
+			verifyUnlockPolicy: async () => {},
+		});
+
+		await manager.initialize();
+
+		expect(manager.getActiveAccount()).toBeNull();
+		expect(manager.getActiveAccountMetadata()).toBeNull();
+	});
+
+	it("keeps a stored active accountId that matches a known account", async () => {
+		const storage = createMockStorage({
+			getActiveAccount: mock(async () => ({
+				type: "single" as const,
+				accountId: "acc-2",
+			})),
+		});
+		const manager = new AccountSessionManager({
+			storage,
+			verifyUnlockPolicy: async () => {},
+		});
+
+		await manager.initialize();
+
+		expect(manager.getActiveAccount()).toEqual({
+			type: "single",
+			accountId: "acc-2",
+		});
+	});
+
 	it("clears a restored session when travel mode cannot be verified", async () => {
 		const storage = createMockStorage();
 		const manager = new AccountSessionManager({

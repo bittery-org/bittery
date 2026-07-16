@@ -4,17 +4,21 @@ import { Button } from "../../../button";
 interface FormActionsProps {
 	onCancel: () => void;
 	submitLabel?: string;
+	cancelLabel?: string;
 	isSubmitting?: boolean;
 }
 
 export function FormActions({
 	onCancel,
 	submitLabel,
+	cancelLabel,
 	isSubmitting = false,
 }: FormActionsProps) {
 	const { m } = useI18n();
 	const resolvedSubmitLabel =
 		submitLabel ?? m.vaults_detail_items_form_action_save();
+	const resolvedCancelLabel =
+		cancelLabel ?? m.vaults_detail_items_detail_action_cancel();
 
 	return (
 		<div className="flex flex-1 justify-end gap-2">
@@ -25,7 +29,7 @@ export function FormActions({
 				disabled={isSubmitting}
 				data-testid="item-form-cancel-button"
 			>
-				{m.vaults_detail_items_detail_action_cancel()}
+				{resolvedCancelLabel}
 			</Button>
 			<Button
 				type="submit"

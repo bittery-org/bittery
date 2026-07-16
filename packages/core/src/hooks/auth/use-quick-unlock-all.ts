@@ -7,6 +7,8 @@
  */
 
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { ICrypto } from "@bittery/types";
 import {
 	type UseMutationResult,
 	useMutation,
@@ -41,12 +43,14 @@ export interface QuickUnlockAllInput {
  */
 export interface QuickUnlockAllResult {
 	/**
-	 * Emails of accounts that were successfully unlocked
+	 * Account ids of accounts that were successfully unlocked.
+	 * These are ids rather than emails because callers feed them straight into
+	 * account-scoped storage APIs such as `setActiveAccount`.
 	 */
 	unlocked: string[];
 
 	/**
-	 * Emails of accounts that failed to unlock (with error messages)
+	 * Accounts that failed to unlock, keyed by email for display.
 	 */
 	failed: Array<{ email: string; error: string }>;
 }
@@ -79,6 +83,100 @@ export interface UseQuickUnlockAllOptions {
 	) => void;
 }
 
+export interface QuickUnlockAllDeps {
+	crypto: ICrypto;
+	storage: IStorageAdapter;
+}
+
+/**
+ * Unlock every account that shares the given password.
+ *
+ * Split out of the hook so the id/email contract of {@link QuickUnlockAllResult}
+ * can be tested without a React renderer.
+ */
+export async function quickUnlockAllAccounts(
+	input: QuickUnlockAllInput,
+	{ crypto, storage }: QuickUnlockAllDeps,
+): Promise<QuickUnlockAllResult> {
+	const { password, emails } = input;
+
+	// Get list of accounts to unlock
+	const accounts = await storage.getAccountsList();
+	const accountsToUnlock = emails
+		? accounts.filter((a) => emails.includes(a.email))
+		: accounts;
+
+	if (accountsToUnlock.length === 0) {
+		throw new Error("No accounts found to unlock");
+	}
+
+	const unlocked: string[] = [];
+	const failed: Array<{ email: string; error: string }> = [];
+
+	// Attempt to unlock each account
+	for (const account of accountsToUnlock) {
+		try {
+			// Check if account has stored secret key
+			const hasSecretKey = await storage.hasStoredSecretKey?.(
+				account.accountId,
+			);
+			if (!hasSecretKey) {
+				failed.push({
+					email: account.email,
+					error: "No stored Secret Key. Please sign in with full credentials.",
+				});
+				continue;
+			}
+
+			const serverUrl =
+				(await storage.getServerUrl?.(account.accountId)) ||
+				getDefaultServerUrl();
+			const accountRpcClient = await createStaticStoredAccountRpcClient(
+				storage,
+				account.accountId,
+			);
+			if (!accountRpcClient) {
+				failed.push({
+					email: account.email,
+					error: "No auth token found for account",
+				});
+				continue;
+			}
+
+			// Perform SRP unlock for this account
+			const result = await performSRPUnlock(
+				{
+					accountId: account.accountId,
+					password,
+				},
+				{ crypto, rpcClient: accountRpcClient, storage },
+			);
+
+			// Store unlock session data
+			await storeUnlockSession(result, storage, account.accountId, {
+				travelModeRpcClient: accountRpcClient,
+				serverUrl,
+			});
+
+			unlocked.push(account.accountId);
+		} catch (error) {
+			failed.push({
+				email: account.email,
+				error: error instanceof Error ? error.message : "Unknown error",
+			});
+		}
+	}
+
+	// If no accounts were unlocked, throw error
+	if (unlocked.length === 0) {
+		throw new Error(
+			`Failed to unlock any accounts. ${failed.map((f) => `${f.email}: ${f.error}`).join("; ")}`,
+		);
+	}
+
+	return { unlocked, failed };
+}
+
 /**
  * Hook for unlocking all accounts with a single password.
  *
@@ -108,88 +206,8 @@ export function useQuickUnlockAll(
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: async (
-			input: QuickUnlockAllInput,
-		): Promise<QuickUnlockAllResult> => {
-			const { password, emails } = input;
-
-			// Get list of accounts to unlock
-			const accounts = await storage.getAccountsList();
-			const accountsToUnlock = emails
-				? accounts.filter((a) => emails.includes(a.email))
-				: accounts;
-
-			if (accountsToUnlock.length === 0) {
-				throw new Error("No accounts found to unlock");
-			}
-
-			const unlocked: string[] = [];
-			const failed: Array<{ email: string; error: string }> = [];
-
-			// Attempt to unlock each account
-			for (const account of accountsToUnlock) {
-				try {
-					// Check if account has stored secret key
-					const hasSecretKey = await storage.hasStoredSecretKey?.(
-						account.accountId,
-					);
-					if (!hasSecretKey) {
-						failed.push({
-							email: account.email,
-							error:
-								"No stored Secret Key. Please sign in with full credentials.",
-						});
-						continue;
-					}
-
-					const serverUrl =
-						(await storage.getServerUrl?.(account.accountId)) ||
-						getDefaultServerUrl();
-					const accountRpcClient = await createStaticStoredAccountRpcClient(
-						storage,
-						account.accountId,
-					);
-					if (!accountRpcClient) {
-						failed.push({
-							email: account.email,
-							error: "No auth token found for account",
-						});
-						continue;
-					}
-
-					// Perform SRP unlock for this account
-					const result = await performSRPUnlock(
-						{
-							accountId: account.accountId,
-							password,
-						},
-						{ crypto, rpcClient: accountRpcClient, storage },
-					);
-
-					// Store unlock session data
-					await storeUnlockSession(result, storage, account.accountId, {
-						travelModeRpcClient: accountRpcClient,
-						serverUrl,
-					});
-
-					unlocked.push(account.email);
-				} catch (error) {
-					failed.push({
-						email: account.email,
-						error: error instanceof Error ? error.message : "Unknown error",
-					});
-				}
-			}
-
-			// If no accounts were unlocked, throw error
-			if (unlocked.length === 0) {
-				throw new Error(
-					`Failed to unlock any accounts. ${failed.map((f) => `${f.email}: ${f.error}`).join("; ")}`,
-				);
-			}
-
-			return { unlocked, failed };
-		},
+		mutationFn: (input: QuickUnlockAllInput) =>
+			quickUnlockAllAccounts(input, { crypto, storage }),
 		onSuccess: (result, input) => {
 			// Invalidate all account-related queries
 			queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] });

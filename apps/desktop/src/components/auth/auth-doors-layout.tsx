@@ -130,18 +130,27 @@ export function AuthDoorsLayout({
 				className="absolute inset-x-0 top-0 z-50 h-9"
 				data-tauri-drag-region
 			/>
-			<div className="relative hidden w-1/3 flex-col bg-auth-panel md:flex lg:w-1/3 dark:bg-[linear-gradient(180deg,oklch(0.14_0.025_285),oklch(0.10_0.015_280))]">
+			<div className="relative hidden w-1/3 flex-col bg-auth-panel md:flex">
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-0 top-0 h-[46%] bg-[radial-gradient(130%_100%_at_35%_0%,color-mix(in_oklab,var(--color-primary-deep)_8%,transparent),transparent_68%)] dark:bg-[radial-gradient(130%_100%_at_35%_0%,color-mix(in_oklab,var(--color-primary-deep)_14%,transparent),transparent_68%)]"
+				/>
 				<div className="absolute top-8 left-4 sm:top-9 sm:left-6">
 					<img src="/logo.png" alt="Bittery" className="h-7 w-auto sm:h-10" />
 				</div>
 
-				<div className="absolute top-1/4 right-0 z-10 translate-x-1/2">
-					<div className="flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
-						<IconLockOutlineDuo18 className="size-7 text-primary" />
-					</div>
+				<div className="absolute inset-y-0 right-0 w-px bg-border">
+					<span
+						aria-hidden
+						className="absolute top-[14%] left-0 h-[28%] w-px animate-[auth-seam-breathe_4.5s_ease-in-out_infinite] bg-linear-to-b from-transparent via-primary/60 to-transparent drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_80%,transparent)] dark:via-primary/75"
+					/>
 				</div>
 
-				<div className="absolute inset-y-0 right-0 w-px bg-foreground/10" />
+				<div className="absolute top-1/4 right-0 z-10 translate-x-1/2">
+					<div className="flex size-14 items-center justify-center rounded-full border border-border-strong bg-popover shadow-[0_8px_24px_oklch(0_0_0/0.12)] dark:shadow-[0_8px_24px_oklch(0_0_0/0.45),0_0_22px_color-mix(in_oklab,var(--color-primary-deep)_25%,transparent)]">
+						<IconLockOutlineDuo18 className="size-6 text-primary dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]" />
+					</div>
+				</div>
 			</div>
 
 			<div className="flex h-full min-h-0 flex-1 flex-col overflow-y-auto bg-background">

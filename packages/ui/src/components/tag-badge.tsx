@@ -37,20 +37,22 @@ export function TagBadge({
 	const color = getTagColorFromName(name);
 
 	const baseClassName = cn(
-		"inline-flex items-center gap-1 rounded-full border font-medium transition-colors",
+		"inline-flex items-center gap-1.5 rounded-md border bg-foreground/3 font-medium text-muted-foreground transition-colors",
 		size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-sm",
-		onClick && "cursor-pointer hover:opacity-80",
+		onClick && "cursor-pointer hover:bg-accent",
 		className,
 	);
 
-	const baseStyle = {
-		backgroundColor: `${color}20`,
-		borderColor: `${color}40`,
-		color,
-	};
+	const dot = (
+		<span
+			className="size-1.5 shrink-0 rounded-full"
+			style={{ backgroundColor: color }}
+		/>
+	);
 
 	const content = (
 		<>
+			{dot}
 			{name}
 			{onRemove && (
 				<button
@@ -59,7 +61,7 @@ export function TagBadge({
 						e.stopPropagation();
 						onRemove();
 					}}
-					className="ml-0.5 rounded-full hover:bg-black/10"
+					className="ml-0.5 rounded-full hover:bg-accent"
 				>
 					<IconXmarkOutlineDuo18
 						className={cn(size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")}
@@ -71,20 +73,11 @@ export function TagBadge({
 
 	if (onClick) {
 		return (
-			<button
-				type="button"
-				className={baseClassName}
-				style={baseStyle}
-				onClick={onClick}
-			>
+			<button type="button" className={baseClassName} onClick={onClick}>
 				{content}
 			</button>
 		);
 	}
 
-	return (
-		<span className={baseClassName} style={baseStyle}>
-			{content}
-		</span>
-	);
+	return <span className={baseClassName}>{content}</span>;
 }

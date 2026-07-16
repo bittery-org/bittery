@@ -18,6 +18,7 @@ import { Label } from "../../label";
 import { toast } from "../../sonner";
 import {
 	type BaseFormProps,
+	FormSection,
 	FormWrapper,
 	NotesField,
 	TitleField,
@@ -47,6 +48,7 @@ export function TotpForm({
 	onSubmit,
 	onCancel,
 	submitLabel,
+	cancelLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
@@ -210,14 +212,14 @@ export function TotpForm({
 
 	if (!hasImported) {
 		return (
-			<div className="flex flex-1 flex-col overflow-hidden">
-				<div className="flex-1 space-y-6 overflow-y-auto py-1 pr-2">
+			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+				<div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
 					<div className="space-y-4">
 						<div className="text-center">
-							<div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-primary/10">
-								<IconKeyOutlineDuo18 className="size-8 text-primary" />
+							<div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg border bg-foreground/3 text-foreground shadow-[0_0_20px_color-mix(in_oklab,var(--color-primary-deep)_16%,transparent)] dark:shadow-[0_0_24px_color-mix(in_oklab,var(--color-primary-deep)_28%,transparent)]">
+								<IconKeyOutlineDuo18 className="size-6" />
 							</div>
-							<h3 className="font-semibold text-lg">
+							<h3 className="font-semibold text-base">
 								{m.vaults_detail_items_form_totp_intro_title()}
 							</h3>
 							<p className="mt-1 text-muted-foreground text-sm">
@@ -240,7 +242,7 @@ export function TotpForm({
 								<span className="w-full border-t" />
 							</div>
 							<div className="relative flex justify-center text-xs uppercase">
-								<span className="bg-background px-2 text-muted-foreground">
+								<span className="bg-popover px-2 text-muted-foreground">
 									{m.vaults_detail_items_form_totp_separator_or()}
 								</span>
 							</div>
@@ -270,9 +272,9 @@ export function TotpForm({
 					</div>
 				</div>
 
-				<div className="mt-4 flex items-center justify-end gap-3 border-t bg-background pt-4">
+				<div className="flex items-center justify-end gap-3 border-t px-6 py-4">
 					<Button type="button" variant="outline" onClick={onCancel}>
-						{m.vaults_detail_items_detail_action_cancel()}
+						{cancelLabel ?? m.vaults_detail_items_detail_action_cancel()}
 					</Button>
 				</div>
 			</div>
@@ -284,12 +286,13 @@ export function TotpForm({
 			onSubmit={form.handleSubmit}
 			onCancel={onCancel}
 			submitLabel={submitLabel}
+			cancelLabel={cancelLabel}
 			isSubmitting={isSubmitting}
 			vaults={vaults}
 			currentVaultId={currentVaultId}
 			onVaultChange={setCurrentVaultId}
 		>
-			<div>
+			<FormSection>
 				<form.Field name="title">
 					{(field) => (
 						<TitleField
@@ -300,9 +303,9 @@ export function TotpForm({
 						/>
 					)}
 				</form.Field>
-			</div>
+			</FormSection>
 
-			<div>
+			<FormSection>
 				<form.Field name="totpSecret">
 					{(field) => (
 						<div className="space-y-2">
@@ -342,15 +345,13 @@ export function TotpForm({
 								</Button>
 							</div>
 							{secretError && (
-								<p className="text-destructive text-sm">{secretError}</p>
+								<p className="text-destructive text-xs">{secretError}</p>
 							)}
 						</div>
 					)}
 				</form.Field>
-			</div>
 
-			<div className="grid grid-cols-2 gap-4">
-				<div>
+				<div className="grid grid-cols-2 gap-4">
 					<form.Field name="totpIssuer">
 						{(field) => (
 							<div className="space-y-2">
@@ -368,9 +369,7 @@ export function TotpForm({
 							</div>
 						)}
 					</form.Field>
-				</div>
 
-				<div>
 					<form.Field name="totpAccountName">
 						{(field) => (
 							<div className="space-y-2">
@@ -389,30 +388,30 @@ export function TotpForm({
 						)}
 					</form.Field>
 				</div>
-			</div>
 
-			<form.Field name="totpAlgorithm">
-				{(algorithmField) => (
-					<form.Field name="totpDigits">
-						{(digitsField) => (
-							<form.Field name="totpPeriod">
-								{(periodField) => (
-									<TotpAdvancedSettings
-										algorithm={algorithmField.state.value}
-										digits={digitsField.state.value}
-										period={periodField.state.value}
-										onAlgorithmChange={(v) => algorithmField.handleChange(v)}
-										onDigitsChange={(v) => digitsField.handleChange(v)}
-										onPeriodChange={(v) => periodField.handleChange(v)}
-									/>
-								)}
-							</form.Field>
-						)}
-					</form.Field>
-				)}
-			</form.Field>
+				<form.Field name="totpAlgorithm">
+					{(algorithmField) => (
+						<form.Field name="totpDigits">
+							{(digitsField) => (
+								<form.Field name="totpPeriod">
+									{(periodField) => (
+										<TotpAdvancedSettings
+											algorithm={algorithmField.state.value}
+											digits={digitsField.state.value}
+											period={periodField.state.value}
+											onAlgorithmChange={(v) => algorithmField.handleChange(v)}
+											onDigitsChange={(v) => digitsField.handleChange(v)}
+											onPeriodChange={(v) => periodField.handleChange(v)}
+										/>
+									)}
+								</form.Field>
+							)}
+						</form.Field>
+					)}
+				</form.Field>
+			</FormSection>
 
-			<div>
+			<FormSection>
 				<form.Field name="notes">
 					{(field) => (
 						<NotesField
@@ -422,7 +421,7 @@ export function TotpForm({
 						/>
 					)}
 				</form.Field>
-			</div>
+			</FormSection>
 		</FormWrapper>
 	);
 }

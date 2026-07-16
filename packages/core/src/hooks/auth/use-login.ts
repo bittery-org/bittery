@@ -119,7 +119,6 @@ export function useLogin(
 				storage,
 				input.email,
 				{
-					travelModeRpcClient: rpcClientForRequest,
 					serverUrl,
 				},
 			);

@@ -306,7 +306,7 @@ function BillingRoute() {
 	if (billingQuery.isLoading) {
 		return (
 			<div className="mx-auto w-full max-w-6xl space-y-6">
-				<Skeleton className="h-48 w-full rounded-2xl" />
+				<Skeleton className="h-48 w-full rounded-lg" />
 				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
 					<Skeleton className="h-64" />
 					<Skeleton className="h-64" />
@@ -320,7 +320,7 @@ function BillingRoute() {
 	if (billingQuery.error || !billingQuery.data) {
 		return (
 			<div className="mx-auto w-full max-w-6xl">
-				<div className="rounded-2xl border bg-card p-8 text-center">
+				<div className="rounded-lg border bg-card p-4 text-center">
 					<CircleWarning className="mx-auto h-8 w-8 text-muted-foreground" />
 					<p className="mt-3 font-medium">
 						{m.billing_error_load_status_title()}
@@ -369,7 +369,7 @@ function BillingRoute() {
 				return (
 					<Badge
 						variant="outline"
-						className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+						className="border-success/30 bg-success/10 text-success"
 					>
 						<CheckCircle className="mr-1 h-3 w-3" />
 						{m.billing_plan_current()}
@@ -383,7 +383,7 @@ function BillingRoute() {
 			return (
 				<Badge
 					variant="outline"
-					className="border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+					className="border-success/30 bg-success/10 text-success"
 				>
 					<CheckCircle className="mr-1 h-3 w-3" />
 					{m.billing_plan_current()}
@@ -428,65 +428,57 @@ function BillingRoute() {
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-			{/* Hero Banner */}
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
-
-				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-					<div className="flex min-w-0 items-center gap-3">
-						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
-							<CreditCard className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
-						</div>
-						<div className="min-w-0">
-							<div className="flex flex-wrap items-center gap-1.5">
-								<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
-									{m.billing_page_heading()}
-								</h1>
-								<Badge
-									variant={statusDisplay.variant}
-									className="px-1.5 py-0 text-[11px]"
-								>
-									{statusDisplay.label}
-								</Badge>
-							</div>
-							<p className="text-muted-foreground text-xs">
-								{getPlanLabel(billing.plan, m)}
-								{billing.cancelAtPeriodEnd && billing.currentPeriodEnd && (
-									<>
-										{" · "}
-										<span className="text-amber-600 dark:text-amber-400">
-											{m.billing_page_cancels({
-												date: formatDate(billing.currentPeriodEnd),
-											})}
-										</span>
-									</>
-								)}
-							</p>
-						</div>
-					</div>
-
-					{billing.stripeCustomerId && (
-						<div className="sm:shrink-0">
-							<Button
-								variant="outline"
-								size="sm"
-								className="h-8 px-2 sm:px-3"
-								onClick={() => portalMutation.mutate()}
-								disabled={isPending}
-							>
-								<ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-								<span className="text-xs">
-									{m.billing_page_manage_stripe()}
-								</span>
-							</Button>
-						</div>
-					)}
+			{/* Hero Header */}
+			<div className="flex items-center gap-3">
+				<div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+					<CreditCard className="size-4" aria-hidden />
 				</div>
-			</section>
+				<div className="min-w-0">
+					<div className="flex flex-wrap items-center gap-1.5">
+						<h1 className="truncate font-semibold text-lg tracking-[-0.015em]">
+							{m.billing_page_heading()}
+						</h1>
+						<Badge
+							variant={statusDisplay.variant}
+							className="px-1.5 py-0 text-[11px]"
+						>
+							{statusDisplay.label}
+						</Badge>
+					</div>
+					<p className="text-muted-foreground text-xs">
+						{getPlanLabel(billing.plan, m)}
+						{billing.cancelAtPeriodEnd && billing.currentPeriodEnd && (
+							<>
+								{" · "}
+								<span className="text-warning">
+									{m.billing_page_cancels({
+										date: formatDate(billing.currentPeriodEnd),
+									})}
+								</span>
+							</>
+						)}
+					</p>
+				</div>
+
+				{billing.stripeCustomerId && (
+					<div className="ml-auto shrink-0">
+						<Button
+							variant="outline"
+							size="sm"
+							className="h-8 px-2 sm:px-3"
+							onClick={() => portalMutation.mutate()}
+							disabled={isPending}
+						>
+							<ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+							<span className="text-xs">{m.billing_page_manage_stripe()}</span>
+						</Button>
+					</div>
+				)}
+			</div>
 
 			{/* Checkout Alerts */}
 			{billing.requiresPayment && !billing.isActive && (
-				<div className="flex items-start gap-3 rounded-xl border border-amber-300/60 bg-amber-50 p-4 text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300">
+				<div className="flex items-start gap-3 rounded-lg border border-warning/30 bg-warning/10 p-3 text-warning">
 					<CircleWarning className="mt-0.5 h-4 w-4 shrink-0" />
 					<div className="space-y-1">
 						<p className="font-medium text-sm">
@@ -500,7 +492,7 @@ function BillingRoute() {
 			)}
 
 			{checkout === "success" && (
-				<div className="flex items-start gap-3 rounded-xl border border-emerald-300/60 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300">
+				<div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 p-3 text-success">
 					<CheckCircle className="mt-0.5 h-4 w-4 shrink-0" />
 					<div className="space-y-1">
 						<p className="font-medium text-sm">
@@ -514,7 +506,7 @@ function BillingRoute() {
 			)}
 
 			{checkout === "cancel" && (
-				<div className="flex items-start gap-3 rounded-xl border bg-muted/40 p-4">
+				<div className="flex items-start gap-3 rounded-lg border bg-card p-4">
 					<CircleWarning className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
 					<div className="space-y-1">
 						<p className="font-medium text-sm">
@@ -530,7 +522,7 @@ function BillingRoute() {
 			{/* Plan Cards */}
 			<div>
 				<div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-					<h2 className="font-semibold text-lg tracking-tight">
+					<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 						{m.billing_plans_title()}
 					</h2>
 					<p className="text-muted-foreground text-sm">
@@ -546,31 +538,23 @@ function BillingRoute() {
 						return (
 							<div
 								key={plan.id}
-								className={`relative flex flex-col rounded-xl border p-5 transition-colors ${
+								className={`relative flex flex-col rounded-lg border p-4 transition-colors ${
 									isCurrent
-										? "border-primary/40 bg-primary/3 ring-1 ring-primary/20"
-										: "bg-card hover:border-primary/20"
+										? "bg-selected shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+										: "bg-card hover:border-border-strong"
 								}`}
 							>
 								{plan.highlighted && !isCurrent && (
 									<div className="absolute -top-2.5 right-4">
-										<Badge className="text-[10px]">
+										<Badge className="text-[10.5px]">
 											{m.billing_plan_popular()}
 										</Badge>
 									</div>
 								)}
 
 								<div className="mb-4 flex items-center gap-3">
-									<div
-										className={`flex h-9 w-9 items-center justify-center rounded-lg ${
-											isCurrent ? "bg-primary/10" : "bg-muted"
-										}`}
-									>
-										<Icon
-											className={`h-4 w-4 ${
-												isCurrent ? "text-primary" : "text-muted-foreground"
-											}`}
-										/>
+									<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+										<Icon className="size-4" />
 									</div>
 									<div>
 										<p className="font-semibold text-sm">{m[plan.nameKey]()}</p>
@@ -588,7 +572,7 @@ function BillingRoute() {
 											key={featureKey}
 											className="flex items-start gap-2 text-sm"
 										>
-											<CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
+											<CheckCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-success" />
 											<span className="text-muted-foreground">
 												{m[featureKey]()}
 											</span>
@@ -612,7 +596,7 @@ function BillingRoute() {
 			{billing.plan !== "free" && (
 				<section className="space-y-4">
 					<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-						<h2 className="font-semibold text-lg tracking-tight">
+						<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 							{m.billing_subscription_title()}
 						</h2>
 						<p className="text-muted-foreground text-sm">
@@ -622,10 +606,10 @@ function BillingRoute() {
 
 					<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 						{/* Status */}
-						<div className="rounded-xl border bg-card p-5">
+						<div className="rounded-lg border bg-card p-4">
 							<div className="flex items-center gap-3">
-								<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-									<CheckCircle className="h-4 w-4 text-muted-foreground" />
+								<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+									<CheckCircle className="size-4" />
 								</div>
 								<div className="min-w-0 flex-1">
 									<p className="text-muted-foreground text-xs">
@@ -636,7 +620,7 @@ function BillingRoute() {
 											{statusDisplay.label}
 										</Badge>
 										{billing.cancelAtPeriodEnd && (
-											<span className="text-amber-600 text-xs dark:text-amber-400">
+											<span className="text-warning text-xs">
 												{m.billing_subscription_canceling()}
 											</span>
 										)}
@@ -647,10 +631,10 @@ function BillingRoute() {
 
 						{/* Billing Period */}
 						{billing.currentPeriodEnd && (
-							<div className="rounded-xl border bg-card p-5">
+							<div className="rounded-lg border bg-card p-4">
 								<div className="flex items-center gap-3">
-									<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-										<CreditCard className="h-4 w-4 text-muted-foreground" />
+									<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+										<CreditCard className="size-4" />
 									</div>
 									<div className="min-w-0 flex-1">
 										<p className="text-muted-foreground text-xs">
@@ -672,10 +656,10 @@ function BillingRoute() {
 
 						{/* Seats */}
 						{billing.seatsPurchased !== null && (
-							<div className="rounded-xl border bg-card p-5">
+							<div className="rounded-lg border bg-card p-4">
 								<div className="flex items-center gap-3">
-									<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-										<Users className="h-4 w-4 text-muted-foreground" />
+									<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+										<Users className="size-4" />
 									</div>
 									<div className="min-w-0 flex-1">
 										<p className="text-muted-foreground text-xs">
@@ -696,7 +680,7 @@ function BillingRoute() {
 			{attachmentUsage && (
 				<section className="space-y-4">
 					<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-						<h2 className="font-semibold text-lg tracking-tight">
+						<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 							{m.billing_attachments_title()}
 						</h2>
 						<p className="text-muted-foreground text-sm">
@@ -704,10 +688,10 @@ function BillingRoute() {
 						</p>
 					</div>
 
-					<div className="rounded-xl border bg-card p-5">
+					<div className="rounded-lg border bg-card p-4">
 						<div className="flex items-start gap-3">
-							<div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-								<FileIcon className="h-4 w-4 text-muted-foreground" />
+							<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+								<FileIcon className="size-4" />
 							</div>
 							<div className="min-w-0 flex-1 space-y-1">
 								<p className="font-medium text-sm">
@@ -723,33 +707,33 @@ function BillingRoute() {
 
 						{attachmentUsage.state === "available" && (
 							<div className="mt-4 grid gap-4 sm:grid-cols-3">
-								<div className="rounded-lg bg-muted/40 p-4">
+								<div className="rounded-md border bg-foreground/3 p-3">
 									<p className="text-muted-foreground text-xs">
 										{m.billing_attachments_current_used()}
 									</p>
-									<p className="mt-1 font-semibold text-lg tracking-tight">
+									<p className="mt-1 font-semibold text-xl tabular-nums">
 										{formatStorageBytes(
 											attachmentUsage.committedStorageBytes,
 											locale,
 										)}
 									</p>
 								</div>
-								<div className="rounded-lg bg-muted/40 p-4">
+								<div className="rounded-md border bg-foreground/3 p-3">
 									<p className="text-muted-foreground text-xs">
 										{m.billing_attachments_total_quota()}
 									</p>
-									<p className="mt-1 font-semibold text-lg tracking-tight">
+									<p className="mt-1 font-semibold text-xl tabular-nums">
 										{attachmentUsage.quotaBytes === null
 											? ""
 											: formatStorageBytes(attachmentUsage.quotaBytes, locale)}
 									</p>
 								</div>
 								{attachmentUsage.usedPercentage !== null && (
-									<div className="rounded-lg bg-muted/40 p-4">
+									<div className="rounded-md border bg-foreground/3 p-3">
 										<p className="text-muted-foreground text-xs">
 											{m.billing_attachments_percentage_used()}
 										</p>
-										<p className="mt-1 font-semibold text-lg tracking-tight">
+										<p className="mt-1 font-semibold text-xl tabular-nums">
 											{formatUsagePercentage(
 												attachmentUsage.usedPercentage,
 												locale,
@@ -790,7 +774,7 @@ function BillingRoute() {
 			{entitlementsQuery.data && (
 				<section className="space-y-4">
 					<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-						<h2 className="font-semibold text-lg tracking-tight">
+						<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 							{m.billing_features_title()}
 						</h2>
 						<p className="text-muted-foreground text-sm">
@@ -798,15 +782,15 @@ function BillingRoute() {
 						</p>
 					</div>
 
-					<div className="rounded-xl border bg-card p-5">
+					<div className="rounded-lg border bg-card p-4">
 						<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
 							{Object.entries(entitlementsQuery.data.entitlements).map(
 								([key, enabled]) => (
 									<div key={key} className="flex items-center gap-2.5 text-sm">
 										{enabled ? (
-											<CheckCircle className="h-4 w-4 shrink-0 text-emerald-500" />
+											<CheckCircle className="h-4 w-4 shrink-0 text-success" />
 										) : (
-											<div className="h-4 w-4 shrink-0 rounded-full border-2 border-muted" />
+											<div className="h-4 w-4 shrink-0 rounded-full border border-border" />
 										)}
 										<span
 											className={

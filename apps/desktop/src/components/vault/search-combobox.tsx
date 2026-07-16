@@ -102,8 +102,8 @@ export function SearchCombobox() {
 	return (
 		<div ref={containerRef} className="relative w-full">
 			<Command shouldFilter={false} className="overflow-visible">
-				<div className="flex h-9 w-full items-center rounded-md border border-input bg-transparent px-3 text-sm shadow-xs">
-					<IconMagnifier3OutlineDuo18 className="mr-2 size-4 shrink-0 text-muted-foreground" />
+				<div className="flex h-8 w-full items-center rounded-md border border-input bg-foreground/2 px-2.5 text-sm transition-[border-color,box-shadow] duration-120 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25 hover:border-border-strong">
+					<IconMagnifier3OutlineDuo18 className="mr-2 size-3.5 shrink-0 text-muted-foreground" />
 					<input
 						ref={inputRef}
 						value={search}
@@ -116,14 +116,14 @@ export function SearchCombobox() {
 						className="flex-1 bg-transparent placeholder:text-muted-foreground focus:outline-none"
 						placeholder={m.vaults_search_combobox_placeholder()}
 					/>
-					<kbd className="pointer-events-none ml-auto inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-medium font-mono text-[10px] text-muted-foreground">
-						<span className="text-xs">⌘</span>K
+					<kbd className="pointer-events-none ml-auto inline-flex h-[18px] select-none items-center gap-0.5 rounded-[4px] border bg-foreground/3 px-1 font-medium font-mono text-[10px] text-muted-foreground tabular-nums">
+						<span className="text-[11px]">⌘</span>K
 					</kbd>
 				</div>
 
 				<div
 					className={cn(
-						"absolute top-full left-0 z-50 mt-1 w-full rounded-md border bg-popover shadow-md",
+						"absolute top-full left-0 z-50 mt-1.5 w-full rounded-lg border bg-popover shadow-pop",
 						open && (hasResults || search.length > 0) ? "block" : "hidden",
 					)}
 				>

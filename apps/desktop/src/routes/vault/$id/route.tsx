@@ -69,10 +69,10 @@ function RouteComponent() {
 							</p>
 						</div>
 					) : (
-						<div className="flex flex-col p-2">
+						<div className="flex flex-col gap-px p-1.5">
 							{favoriteItems.length > 0 && (
 								<>
-									<div className="mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
+									<div className="mb-1 px-2.5 pt-1 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 										{m.vaults_favorites_title()}
 									</div>
 									{id &&
@@ -86,7 +86,7 @@ function RouteComponent() {
 												vaultId={id}
 											/>
 										))}
-									<div className="mt-4 mb-2 px-3 font-semibold text-muted-foreground text-xs uppercase">
+									<div className="mt-4 mb-1 px-2.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 										{m.vaults_detail_tab_items()}
 									</div>
 								</>

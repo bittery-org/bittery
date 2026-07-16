@@ -59,7 +59,6 @@ export async function handleLogin(payload: {
 
 	// Store session data using shared utility
 	await storeLoginSession(result, secretKey, storage, email, {
-		travelModeRpcClient: rpcClient,
 		serverUrl: DEFAULT_SERVER_URL,
 	});
 

@@ -4,6 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Must Follow Guidelines
 
+- When working on any user-facing UI, follow the design system spec in `DESIGN.md` (tokens, elevation ladder, selection/hover/button recipes).
 - Ignore any class sorting issues, it will be auto formatted by Biome.
 - Ignore any weird formatting issues, it will be auto formatted by Biome.
 - Never run the dev server to test code changes, a dev server is always running when working with this repository.

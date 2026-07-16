@@ -130,10 +130,10 @@ export function ItemList({
 			{/* Scrollable Items List */}
 			{filteredItems.length === 0 ? (
 				<div className="flex min-h-0 flex-1 flex-col items-center justify-center p-6 text-center">
-					<div className="mb-4 rounded-full bg-muted p-4">
-						<Key className="h-8 w-8 text-muted-foreground" />
+					<div className="mb-4 inline-flex rounded-full border bg-foreground/3 p-4">
+						<Key className="size-6 text-muted-foreground" />
 					</div>
-					<h3 className="mb-1 font-semibold">
+					<h3 className="mb-1 font-medium text-sm">
 						{hasActiveFilters
 							? m.vaults_detail_items_list_empty_filtered_title()
 							: m.vaults_detail_items_list_empty_default_title()}
@@ -153,7 +153,7 @@ export function ItemList({
 						{/* Favorites Section */}
 						{favoriteItems.length > 0 && (
 							<>
-								<div className="px-2 py-2 font-semibold text-muted-foreground text-xs uppercase">
+								<div className="px-2 py-1.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 									{m.vaults_detail_items_list_section_favorites({
 										count: favoriteItems.length,
 									})}
@@ -176,7 +176,7 @@ export function ItemList({
 						{regularItems.length > 0 && (
 							<>
 								{favoriteItems.length > 0 && (
-									<div className="mt-4 px-2 py-2 font-semibold text-muted-foreground text-xs uppercase">
+									<div className="mt-3 px-2 py-1.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 										{m.vaults_detail_items_list_section_all_items({
 											count: regularItems.length,
 										})}

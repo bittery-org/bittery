@@ -152,7 +152,6 @@ function SignInFormContent({
 				},
 			);
 			await storeLoginSession(result, input.secretKey, storage, input.email, {
-				travelModeRpcClient: rpcClient,
 				serverUrl,
 			});
 			return result;

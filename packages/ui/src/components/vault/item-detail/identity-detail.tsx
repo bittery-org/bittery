@@ -8,13 +8,16 @@ import {
 } from "@bittery/shared/identity";
 import { IconCopyOutlineDuo18 } from "../../../icons";
 import { Button } from "../../button";
-import { Card } from "../../card";
 import { Label } from "../../label";
 import { TagInput } from "../../tag-input";
 import {
 	DetailField,
+	DetailFieldGroup,
+	DetailGroupLabel,
 	DetailHeader,
+	DetailNoteField,
 	DetailPasswordField,
+	DetailRow,
 	DetailSection,
 } from "./field-components";
 import {
@@ -75,7 +78,7 @@ export function IdentityDetail({
 				)}
 			</div>
 
-			<div className="space-y-3">
+			<div className="space-y-3.5">
 				{(data.firstName || data.lastName || data.email || data.dateOfBirth) && (
 					<DetailSection
 						title={m.vaults_detail_items_detail_identity_section_personal_information()}
@@ -109,10 +112,7 @@ export function IdentityDetail({
 				)}
 
 				{data.phoneNumbers && data.phoneNumbers.length > 0 && (
-					<div className="space-y-3">
-						<Label className="font-medium text-sm">
-							{m.vaults_detail_items_form_identity_section_phone_numbers()}
-						</Label>
+					<DetailSection title={m.vaults_detail_items_form_identity_section_phone_numbers()}>
 						{data.phoneNumbers.map((phone) => (
 							<DetailField
 								key={phone.id}
@@ -121,34 +121,38 @@ export function IdentityDetail({
 								copyLabel={m.vaults_detail_items_copy_label_phone({ label: getPhoneLabel(phone.label) })}
 							/>
 						))}
-					</div>
+					</DetailSection>
 				)}
 
 				{data.addresses && data.addresses.length > 0 && (
-					<div className="space-y-3">
-						<Label className="font-medium text-sm">
+					<div>
+						<DetailGroupLabel>
 							{m.vaults_detail_items_form_identity_section_addresses()}
-						</Label>
-						{data.addresses.map((address) => (
-							<div key={address.id} className="space-y-2">
-								<Card>
-									<div className="px-4 py-3">
-										<div className="text-sm">{formatAddress(address)}</div>
-									</div>
-								</Card>
-								<Button
-									size="sm"
-									variant="outline"
-									onClick={() =>
-										handleCopy(formatAddress(address), m.vaults_detail_items_copy_label_address(), m)
-									}
-									className="w-full"
-								>
-									<IconCopyOutlineDuo18 size={16} />
-									{m.vaults_detail_items_detail_identity_action_copy_address()}
-								</Button>
-							</div>
-						))}
+						</DetailGroupLabel>
+						<div className="space-y-2">
+							{data.addresses.map((address) => (
+								<div key={address.id} className="space-y-2">
+									<DetailFieldGroup>
+										<DetailRow align="start">
+											<p className="whitespace-pre-wrap text-sm text-foreground">
+												{formatAddress(address)}
+											</p>
+										</DetailRow>
+									</DetailFieldGroup>
+									<Button
+										size="sm"
+										variant="outline"
+										onClick={() =>
+											handleCopy(formatAddress(address), m.vaults_detail_items_copy_label_address(), m)
+										}
+										className="w-full"
+									>
+										<IconCopyOutlineDuo18 size={16} />
+										{m.vaults_detail_items_detail_identity_action_copy_address()}
+									</Button>
+								</div>
+							))}
+						</div>
 					</div>
 				)}
 
@@ -181,14 +185,10 @@ export function IdentityDetail({
 					</DetailSection>
 				)}
 
-				{data.notes && (
-					<div className="space-y-2">
-						<Label className="font-medium text-sm">{m.vaults_detail_items_form_field_notes_label()}</Label>
-						<Card>
-							<div className="whitespace-pre-wrap px-4 py-1 text-sm">{data.notes}</div>
-						</Card>
-					</div>
-				)}
+				<DetailNoteField
+					label={m.vaults_detail_items_form_field_notes_label()}
+					value={data.notes}
+				/>
 			</div>
 
 			{onTagsChange && (

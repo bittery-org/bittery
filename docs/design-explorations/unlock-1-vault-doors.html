@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bittery — Unlock · Vault Doors</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     UNLOCK VARIANT 1 — VAULT DOORS
+     Evolution of the current split layout. The seam between the
+     two "doors" is the brand moment: a hairline with a breathing
+     purple glow segment, and a lock medallion sitting astride it.
+     Press ⏎ (or Unlock) to preview the doors parting.
+     ============================================================ */
+  :root {
+    --bg:        oklch(0.126 0.008 282);
+    --sidebar:   oklch(0.148 0.011 283);
+    --card:      oklch(0.172 0.013 283);
+    --popover:   oklch(0.196 0.015 284);
+    --overlay:   oklch(0.225 0.017 284);
+
+    --border:        oklch(1 0 0 / 0.065);
+    --border-strong: oklch(1 0 0 / 0.11);
+
+    --text-1: oklch(0.935 0.005 288);
+    --text-2: oklch(0.715 0.010 288);
+    --text-3: oklch(0.535 0.013 288);
+
+    --hover:  oklch(1 0 0 / 0.04);
+
+    --primary:       oklch(0.70 0.165 288);
+    --primary-deep:  oklch(0.58 0.185 292);
+    --primary-fg:    oklch(0.985 0.005 288);
+
+    --green:  oklch(0.72 0.14 160);
+
+    --radius:    10px;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+
+    --shadow-pop: 0 0 0 1px oklch(1 0 0 / 0.07), 0 10px 28px oklch(0 0 0 / 0.5), 0 2px 8px oklch(0 0 0 / 0.35);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    letter-spacing: -0.006em;
+    font-feature-settings: "cv05", "cv11";
+    background: var(--bg);
+    color: var(--text-1);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  svg { display: block; flex: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; letter-spacing: inherit; }
+  input { font: inherit; letter-spacing: inherit; }
+
+  .window { display: flex; height: 100vh; position: relative; }
+  .traffic { position: fixed; top: 16px; left: 16px; display: flex; gap: 8px; z-index: 90; }
+  .traffic i { width: 12px; height: 12px; border-radius: 50%; background: oklch(1 0 0 / 0.14); }
+
+  /* ================= LEFT DOOR ================= */
+  .door {
+    position: relative;
+    width: 34%; min-width: 280px; flex: none;
+    background: var(--sidebar);
+    transition: transform 0.7s cubic-bezier(0.6, 0, 0.2, 1);
+  }
+  /* brand moment: aurora wash at the top of the panel */
+  .door::before {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 46%;
+    background: radial-gradient(130% 100% at 35% 0%, oklch(0.58 0.185 292 / 0.16), transparent 68%);
+    pointer-events: none;
+  }
+  .wordmark {
+    position: absolute; top: 34px; left: 28px;
+    font-size: 22px; font-weight: 700; letter-spacing: -0.035em;
+    color: var(--primary);
+    filter: drop-shadow(0 0 18px oklch(0.58 0.185 292 / 0.4));
+    user-select: none;
+  }
+  .door-footer {
+    position: absolute; bottom: 22px; left: 28px; right: 28px;
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11px; color: var(--text-3);
+  }
+  .door-footer svg { color: var(--text-3); }
+
+  /* ================= SEAM ================= */
+  .seam {
+    position: absolute; top: 0; bottom: 0;
+    left: max(34%, 280px);
+    width: 1px; z-index: 20;
+    background: var(--border);
+    transition: opacity 0.4s ease;
+  }
+  /* brand moment: breathing glow segment centered on the medallion */
+  .seam::after {
+    content: "";
+    position: absolute; left: 0; top: 14%; height: 28%; width: 1px;
+    background: linear-gradient(to bottom, transparent, oklch(0.72 0.17 288 / 0.75), transparent);
+    filter: drop-shadow(0 0 6px oklch(0.70 0.165 288 / 0.8));
+    animation: seam-breathe 4.5s ease-in-out infinite;
+  }
+  @keyframes seam-breathe {
+    0%, 100% { opacity: 0.55; }
+    50% { opacity: 1; }
+  }
+  .medallion {
+    position: absolute; top: 28%; left: max(34%, 280px); z-index: 30;
+    transform: translate(-50%, -50%);
+    width: 56px; height: 56px; border-radius: 50%;
+    background: var(--popover);
+    border: 1px solid var(--border-strong);
+    display: grid; place-items: center;
+    box-shadow: 0 8px 24px oklch(0 0 0 / 0.45), 0 0 22px oklch(0.58 0.185 292 / 0.25);
+    transition: box-shadow 0.5s ease, transform 0.7s cubic-bezier(0.6, 0, 0.2, 1);
+  }
+  .medallion svg { color: var(--primary); filter: drop-shadow(0 0 6px oklch(0.70 0.165 288 / 0.55)); position: absolute; transition: opacity 0.25s ease, transform 0.25s ease; }
+  .medallion .ic-unlock { opacity: 0; transform: scale(0.8); }
+
+  /* ================= RIGHT / CONTENT ================= */
+  .stage {
+    flex: 1; min-width: 0;
+    display: flex; flex-direction: column;
+    background: var(--bg);
+    position: relative;
+  }
+  .stage-main {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center;
+    padding: 32px;
+  }
+  .panel {
+    width: 100%; max-width: 340px;
+    transition: opacity 0.45s ease, transform 0.45s ease;
+  }
+
+  .avatars { display: flex; margin-bottom: 22px; }
+  .avatar {
+    width: 40px; height: 40px; border-radius: 11px;
+    display: grid; place-items: center;
+    font-size: 14px; font-weight: 650; color: var(--primary-fg); letter-spacing: 0.02em;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.14), 0 0 0 3px var(--bg);
+  }
+  .avatar + .avatar { margin-left: -9px; }
+  .avatar.a1 { background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305)); box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.16), 0 0 0 3px var(--bg), 0 0 16px oklch(0.58 0.185 292 / 0.35); }
+  .avatar.a2 { background: linear-gradient(135deg, oklch(0.55 0.1 220), oklch(0.45 0.1 250)); }
+
+  .headline { font-size: 17px; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 4px; }
+  .subline  { font-size: 12.5px; color: var(--text-3); margin-bottom: 22px; }
+
+  .pw-group {
+    display: flex; align-items: center; gap: 4px;
+    height: 38px; padding: 0 5px 0 12px;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: oklch(1 0 0 / 0.02);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .pw-group:hover { border-color: var(--border-strong); }
+  .pw-group:focus-within {
+    border-color: oklch(0.70 0.165 288 / 0.6);
+    box-shadow: 0 0 0 3px oklch(0.70 0.165 288 / 0.16), 0 0 18px oklch(0.58 0.185 292 / 0.15);
+  }
+  .pw-group input {
+    flex: 1; min-width: 0; background: none; border: 0; outline: 0;
+    color: var(--text-1); font-size: 13px;
+  }
+  .pw-group input::placeholder { color: var(--text-3); }
+  .pw-btn {
+    display: grid; place-items: center;
+    width: 28px; height: 28px; border-radius: var(--radius-sm);
+    color: var(--text-3);
+    transition: background 0.1s, color 0.1s;
+  }
+  .pw-btn:hover { background: var(--hover); color: var(--text-1); }
+  .pw-btn.bio { color: var(--primary); }
+  .pw-btn.bio:hover { color: var(--primary); filter: brightness(1.12); }
+
+  /* brand moment: glowing gradient primary action */
+  .btn-unlock {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    width: 100%; height: 36px; margin-top: 12px;
+    border-radius: var(--radius-md);
+    background: linear-gradient(to bottom, oklch(0.72 0.165 286), oklch(0.63 0.18 293));
+    color: var(--primary-fg);
+    font-size: 13px; font-weight: 550;
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 16px oklch(0.58 0.185 292 / 0.35);
+    transition: filter 0.12s ease, box-shadow 0.12s ease;
+  }
+  .btn-unlock:hover { filter: brightness(1.08); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 22px oklch(0.58 0.185 292 / 0.5); }
+  .btn-unlock .kbd-inline {
+    font-size: 10px; font-weight: 500; line-height: 1.3;
+    padding: 1px 4px; border-radius: 4px;
+    background: oklch(1 0 0 / 0.16);
+    color: oklch(0.985 0.005 288 / 0.85);
+  }
+
+  .locked-note { margin-top: 16px; font-size: 12px; color: var(--text-3); }
+
+  /* ================= FOOTER ================= */
+  .stage-footer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px 16px;
+    transition: opacity 0.45s ease;
+  }
+  .chip {
+    display: flex; align-items: center; gap: 6px;
+    height: 26px; padding: 0 9px;
+    border-radius: var(--radius-sm);
+    font-size: 11.5px; color: var(--text-3);
+    transition: background 0.1s, color 0.1s;
+  }
+  .chip:hover { background: var(--hover); color: var(--text-2); }
+  .chip svg { opacity: 0.8; }
+  .footer-right { display: flex; align-items: center; gap: 2px; }
+
+  /* ================= UNLOCK PREVIEW ================= */
+  body.unlocking .door { transform: translateX(-102%); }
+  body.unlocking .seam { opacity: 0; }
+  body.unlocking .medallion {
+    transform: translate(-50%, -50%) scale(1.08);
+    box-shadow: 0 8px 24px oklch(0 0 0 / 0.45), 0 0 40px oklch(0.58 0.185 292 / 0.55);
+    animation: medallion-exit 0.7s ease 0.35s forwards;
+  }
+  @keyframes medallion-exit { to { opacity: 0; transform: translate(-50%, -50%) scale(0.7); } }
+  body.unlocking .medallion .ic-lock { opacity: 0; transform: scale(0.8); }
+  body.unlocking .medallion .ic-unlock { opacity: 1; transform: scale(1); }
+  body.unlocking .panel { opacity: 0; transform: translateY(-8px) scale(0.985); }
+  body.unlocking .stage-footer { opacity: 0; }
+
+  .variant-chip {
+    position: fixed; right: 14px; bottom: 12px; z-index: 100;
+    font-size: 10.5px; font-weight: 550; letter-spacing: 0.04em;
+    color: var(--text-3);
+    background: var(--popover);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    box-shadow: 0 2px 10px oklch(0 0 0 / 0.4);
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9.5" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9.5" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.9-.8"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.5 13.5 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" y1="2" x2="22" y2="22"/></symbol>
+    <symbol id="i-finger" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></symbol>
+    <symbol id="i-server" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="7" rx="2"/><rect x="2" y="14" width="20" height="7" rx="2"/><line x1="6" y1="6.5" x2="6.01" y2="6.5"/><line x1="6" y1="17.5" x2="6.01" y2="17.5"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19"/><path d="M12 2.5a15 15 0 0 1 4 9.5 15 15 0 0 1-4 9.5 15 15 0 0 1-4-9.5 15 15 0 0 1 4-9.5z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5l7.5 3v6c0 4.8-3.2 8.4-7.5 10-4.3-1.6-7.5-5.2-7.5-10v-6z"/></symbol>
+    <symbol id="i-chev-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></symbol>
+  </defs>
+</svg>
+
+<div class="window">
+  <div class="traffic"><i></i><i></i><i></i></div>
+
+  <!-- left door -->
+  <aside class="door">
+    <div class="wordmark">bittery</div>
+    <div class="door-footer">
+      <svg width="12" height="12"><use href="#i-shield"/></svg>
+      End-to-end encrypted
+    </div>
+  </aside>
+
+  <div class="seam" aria-hidden="true"></div>
+  <div class="medallion" aria-hidden="true">
+    <svg class="ic-lock" width="22" height="22"><use href="#i-lock"/></svg>
+    <svg class="ic-unlock" width="22" height="22"><use href="#i-unlock"/></svg>
+  </div>
+
+  <!-- right stage -->
+  <div class="stage">
+    <div class="stage-main">
+      <form class="panel" id="unlockForm">
+        <div class="avatars">
+          <span class="avatar a1">QW</span>
+          <span class="avatar a2">JS</span>
+        </div>
+
+        <h1 class="headline">Welcome back</h1>
+        <p class="subline">Bittery was locked with 2 accounts.</p>
+
+        <div class="pw-group">
+          <input id="pw" type="password" placeholder="Enter your master password" autofocus autocomplete="off" />
+          <button type="button" class="pw-btn" id="toggle" title="Show password">
+            <svg class="on" width="15" height="15"><use href="#i-eye"/></svg>
+            <svg class="off" width="15" height="15" style="display:none"><use href="#i-eye-off"/></svg>
+          </button>
+          <button type="button" class="pw-btn bio" id="bio" title="Unlock with Touch ID">
+            <svg width="16" height="16"><use href="#i-finger"/></svg>
+          </button>
+        </div>
+
+        <button class="btn-unlock" type="submit">
+          Unlock
+          <span class="kbd-inline">⏎</span>
+        </button>
+      </form>
+    </div>
+
+    <footer class="stage-footer">
+      <button class="chip" type="button">
+        <svg width="12" height="12"><use href="#i-server"/></svg>
+        vault.qrawall.com
+        <svg width="10" height="10"><use href="#i-chev-d"/></svg>
+      </button>
+      <div class="footer-right">
+        <button class="chip" type="button">Help</button>
+        <button class="chip" type="button">
+          <svg width="12" height="12"><use href="#i-globe"/></svg>
+          English
+          <svg width="10" height="10"><use href="#i-chev-d"/></svg>
+        </button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<div class="variant-chip">Unlock · 1 — Vault Doors</div>
+
+<script>
+  const pw = document.getElementById('pw');
+  const toggle = document.getElementById('toggle');
+  toggle.addEventListener('click', () => {
+    const hidden = pw.type === 'password';
+    pw.type = hidden ? 'text' : 'password';
+    toggle.querySelector('.on').style.display = hidden ? 'none' : 'block';
+    toggle.querySelector('.off').style.display = hidden ? 'block' : 'none';
+    pw.focus();
+  });
+
+  function previewUnlock() {
+    if (document.body.classList.contains('unlocking')) return;
+    document.body.classList.add('unlocking');
+    setTimeout(() => document.body.classList.remove('unlocking'), 2000);
+  }
+  document.getElementById('unlockForm').addEventListener('submit', (e) => { e.preventDefault(); previewUnlock(); });
+  document.getElementById('bio').addEventListener('click', previewUnlock);
+</script>
+</body>
+</html>

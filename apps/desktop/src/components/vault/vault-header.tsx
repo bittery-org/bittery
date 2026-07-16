@@ -15,12 +15,13 @@ export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
 
 	return (
 		<header
-			className="flex items-center gap-4 border-b px-4 py-2.5"
+			className="flex h-12 items-center gap-4 border-b px-3"
 			data-tauri-drag-region
 		>
-			<div className="flex-1">
+			<div className="w-full max-w-[360px]">
 				<SearchCombobox />
 			</div>
+			<div className="flex-1" data-tauri-drag-region />
 			{/* {syncContext ? (
 				<SyncStatusIndicator status={syncContext.status.connectionStatus} />
 			) : null} */}

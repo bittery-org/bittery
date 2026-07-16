@@ -14,14 +14,13 @@
 import {
 	CheckIcon,
 	LockIcon,
-	LockOpenIcon,
-	LogOutIcon,
 	PlusIcon,
 	SettingsIcon,
 	SmartphoneIcon,
 	UsersIcon,
 } from "lucide-react";
 import type React from "react";
+import { useState } from "react";
 import { cn } from "../lib/utils.js";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar.js";
 import { Button } from "./button.js";
@@ -52,7 +51,6 @@ export interface AccountSwitcherLabels {
 	setupAnotherDeviceLabel?: string;
 	settingsLabel?: string;
 	lockAllAccountsLabel?: string;
-	removeAccountLabel?: string;
 }
 
 export interface AccountSwitcherProps {
@@ -101,12 +99,6 @@ export interface AccountSwitcherProps {
 	/** Optional: callback when user clicks "Set up another device" */
 	onSetupAnotherDevice?: () => void;
 
-	/** Optional: show "Remove Account" option */
-	showRemoveAccount?: boolean;
-
-	/** Optional: callback when user clicks "Remove Account" */
-	onRemoveAccount?: (accountId: string) => void;
-
 	/** Optional: custom trigger element */
 	trigger?: React.ReactNode;
 
@@ -116,6 +108,23 @@ export interface AccountSwitcherProps {
 	/** Optional: localized/overridden labels */
 	labels?: AccountSwitcherLabels;
 }
+
+// Same initials + gradient treatment as the desktop trigger avatar
+// (apps/desktop AccountAvatar) so the open menu matches the trigger.
+function getAccountInitials(account: AccountSwitcherAccount): string {
+	const source = account.teamName || account.name;
+	if (source) {
+		const parts = source.trim().split(/\s+/);
+		if (parts.length >= 2) {
+			return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+		}
+		return source.slice(0, 2).toUpperCase();
+	}
+	return account.email.slice(0, 2).toUpperCase();
+}
+
+const avatarFallbackClassName =
+	"bg-linear-to-br from-primary to-primary-deep font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]";
 
 /**
  * Account switcher dropdown for multi-account platforms.
@@ -148,12 +157,11 @@ export function AccountSwitcher({
 	onSettings,
 	showSetupAnotherDevice = false,
 	onSetupAnotherDevice,
-	showRemoveAccount = false,
-	onRemoveAccount,
 	trigger,
 	align = "start",
 	labels,
 }: AccountSwitcherProps) {
+	const [open, setOpen] = useState(false);
 	const activeAccount = accounts.find((a) => a.accountId === activeAccountId);
 	const resolvedLabels: Required<AccountSwitcherLabels> = {
 		accountsLabel: "Accounts",
@@ -164,7 +172,6 @@ export function AccountSwitcher({
 		setupAnotherDeviceLabel: "Set up another device",
 		settingsLabel: "Settings",
 		lockAllAccountsLabel: "Lock All Accounts",
-		removeAccountLabel: "Remove Account",
 		...labels,
 	};
 	const showManageAccountsAction = Boolean(
@@ -177,9 +184,6 @@ export function AccountSwitcher({
 	const showSettingsAction = Boolean(showSettings && onSettings);
 	const showLockAllAction = Boolean(
 		showLockAll && accounts.length > 0 && unlockedAccountIds.length > 0,
-	);
-	const showRemoveAccountAction = Boolean(
-		showRemoveAccount && onRemoveAccount && activeAccount,
 	);
 	const hasPrimaryActions =
 		showManageAccountsAction ||
@@ -197,18 +201,20 @@ export function AccountSwitcher({
 	const defaultTrigger = (
 		<Button
 			variant="ghost"
-			className="flex items-center gap-2 px-2 hover:bg-accent"
+			className="flex items-center gap-2 px-2 text-foreground hover:bg-accent"
 			disabled={isLoading}
 		>
-			<Avatar className="size-8">
+			<Avatar className="size-8 rounded-md">
 				{activeAccount?.teamAvatarUrl && (
 					<AvatarImage
 						src={activeAccount.teamAvatarUrl}
 						alt={activeAccount.teamName || activeAccount.name}
 					/>
 				)}
-				<AvatarFallback className="text-xs">
-					{activeAccount?.email.slice(0, 2).toUpperCase() ?? "?"}
+				<AvatarFallback
+					className={cn("rounded-md text-xs", avatarFallbackClassName)}
+				>
+					{activeAccount ? getAccountInitials(activeAccount) : "?"}
 				</AvatarFallback>
 			</Avatar>
 			<div className="flex flex-col items-start text-left">
@@ -227,13 +233,26 @@ export function AccountSwitcher({
 	);
 
 	return (
-		<DropdownMenu>
+		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger asChild>
 				{trigger || defaultTrigger}
 			</DropdownMenuTrigger>
 
-			<DropdownMenuContent align={align} className="w-[280px]">
-				<DropdownMenuLabel className="text-muted-foreground text-xs">
+			<DropdownMenuContent
+				align={align}
+				className="relative w-[272px] overflow-hidden"
+			>
+				{/* Brand moment: faint purple gradient wash at the top of the menu */}
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-linear-to-b from-primary-deep/10 to-transparent dark:from-primary-deep/20"
+				/>
+				<div
+					aria-hidden
+					className="pointer-events-none absolute top-0 right-[8%] left-[8%] h-px bg-linear-to-r from-transparent via-primary/55 to-transparent"
+				/>
+
+				<DropdownMenuLabel className="relative font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
 					{resolvedLabels.accountsLabel}
 				</DropdownMenuLabel>
 
@@ -241,49 +260,57 @@ export function AccountSwitcher({
 				{accounts.map((account) => {
 					const isActive = account.accountId === activeAccountId;
 					const isUnlocked = unlockedAccountIds.includes(account.accountId);
+					const displayName =
+						account.teamName || account.name || account.email.split("@")[0];
 
 					return (
 						<DropdownMenuItem
 							key={account.accountId}
 							onClick={() => onAccountSelect(account.accountId)}
-							className={cn(
-								"flex cursor-pointer items-center gap-2 py-1.5",
-								isActive && "bg-accent",
-							)}
+							className="relative flex cursor-pointer items-center gap-2.5 py-1.5"
 						>
-							<Avatar className="size-5">
+							<Avatar className="size-6 rounded-md">
 								{account.teamAvatarUrl && (
 									<AvatarImage
 										src={account.teamAvatarUrl}
 										alt={account.teamName || account.name}
 									/>
 								)}
-								<AvatarFallback className="text-[10px]">
-									{account.email.slice(0, 2).toUpperCase()}
+								<AvatarFallback
+									className={cn(
+										"rounded-md text-[10px]",
+										avatarFallbackClassName,
+									)}
+								>
+									{getAccountInitials(account)}
 								</AvatarFallback>
 							</Avatar>
 
 							<div className="flex min-w-0 flex-1 flex-col">
 								<div className="flex items-center gap-1.5">
-									<span className="truncate font-medium text-xs">
-										{account.email}
+									<span className="truncate font-medium text-sm leading-tight">
+										{displayName}
 									</span>
 									{isActive && (
-										<CheckIcon className="size-3 shrink-0 text-primary" />
+										<CheckIcon className="size-3.5 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]" />
 									)}
 								</div>
-								{account.teamName && (
-									<span className="truncate text-[10px] text-muted-foreground">
-										{account.teamName}
-									</span>
-								)}
+								<span className="truncate text-[11px] text-muted-foreground leading-tight">
+									{account.email}
+								</span>
 							</div>
 
-							{isUnlocked ? (
-								<LockOpenIcon className="size-3.5 shrink-0 text-green-600" />
-							) : (
-								<LockIcon className="size-3.5 shrink-0 text-muted-foreground" />
-							)}
+							{/* Quiet lock-state indicator */}
+							<span
+								aria-hidden
+								className={cn(
+									"size-1.5 shrink-0 rounded-full",
+									isUnlocked
+										? "bg-emerald-400 shadow-[0_0_6px_oklch(0.72_0.14_160/0.6)]"
+										: "bg-muted-foreground/50",
+								)}
+							/>
+
 						</DropdownMenuItem>
 					);
 				})}
@@ -362,21 +389,6 @@ export function AccountSwitcher({
 					</DropdownMenuItem>
 				)}
 
-				{/* Remove Account (optional) */}
-				{showRemoveAccountAction && (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem
-								onClick={() => onRemoveAccount!(activeAccount!.email)}
-								className="flex cursor-pointer items-center gap-2 text-destructive focus:text-destructive"
-							>
-								<LogOutIcon className="size-4" />
-								<span className="text-sm">
-									{resolvedLabels.removeAccountLabel}
-								</span>
-							</DropdownMenuItem>
-						</>
-					)}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

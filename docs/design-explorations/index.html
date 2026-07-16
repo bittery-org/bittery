@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Bittery — Design Explorations</title>
+<style>
+  * { margin: 0; box-sizing: border-box; }
+  body { height: 100vh; display: flex; flex-direction: column; background: #0b0b0e; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .tabs { display: flex; gap: 4px; padding: 8px 10px; background: #101014; border-bottom: 1px solid rgba(255,255,255,0.08); }
+  .tabs button {
+    font: 500 12px/1 ui-sans-serif, system-ui; color: rgba(255,255,255,0.55);
+    background: none; border: 0; border-radius: 6px; padding: 7px 11px; cursor: pointer;
+  }
+  .tabs button:hover { background: rgba(255,255,255,0.05); color: #fff; }
+  .tabs button.on { background: rgba(255,255,255,0.09); color: #fff; }
+  .tabs .note { margin-left: auto; align-self: center; font-size: 11px; color: rgba(255,255,255,0.35); }
+  .tabs .sep { width: 1px; align-self: stretch; margin: 2px 4px; background: rgba(255,255,255,0.1); }
+  iframe { flex: 1; border: 0; width: 100%; }
+</style>
+</head>
+<body>
+  <div class="tabs">
+    <button class="on" data-src="1-crisp-technical.html">1 · Crisp / Technical</button>
+    <button data-src="2-soft-premium.html">2 · Soft / Premium</button>
+    <button data-src="3-brand-forward.html">3 · Brand-Forward</button>
+    <span class="sep"></span>
+    <button data-src="unlock-1-vault-doors.html">U1 · Vault Doors</button>
+    <button data-src="unlock-2-monolith.html">U2 · Monolith</button>
+    <button data-src="unlock-3-aurora-stage.html">U3 · Aurora Stage</button>
+    <button data-src="unlock-4-doors-monolith.html">U4 · Doors × Monolith</button>
+    <button data-src="unlock-5-doors-aurora.html">U5 · Doors × Aurora</button>
+    <button data-src="unlock-6-vault-dial.html">U6 · Vault Dial</button>
+    <span class="note">Unlock mockups: press ⏎ to preview the unlock transition</span>
+  </div>
+  <iframe src="1-crisp-technical.html"></iframe>
+  <script>
+    const frame = document.querySelector('iframe');
+    document.querySelectorAll('.tabs button').forEach(b => b.addEventListener('click', () => {
+      document.querySelectorAll('.tabs button').forEach(x => x.classList.remove('on'));
+      b.classList.add('on');
+      frame.src = b.dataset.src;
+    }));
+  </script>
+</body>
+</html>

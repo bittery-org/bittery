@@ -1,3 +1,4 @@
+import type { VaultItemCounts } from "@bittery/core/hooks";
 import {
 	Button,
 	cn,
@@ -7,6 +8,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 	getTagColorFromName,
+	SidebarCount,
 	SidebarSection,
 	VaultAvatar,
 } from "@bittery/ui";
@@ -16,7 +18,6 @@ import {
 	IconGrid2OutlineDuo18,
 	IconPen2OutlineDuo18,
 	IconStarOutlineDuo18,
-	IconTagOutlineDuo18,
 	IconTrash2OutlineDuo18,
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
@@ -44,6 +45,8 @@ interface VaultInfo {
 interface VaultSidebarProps {
 	vaults: VaultInfo[];
 	tags: string[];
+	/** Omitted while items load, so counts appear only once they are real. */
+	itemCounts?: VaultItemCounts;
 	currentVaultId?: string;
 	onNewVault: () => void;
 	onEditVault: (vault: {
@@ -58,6 +61,7 @@ interface VaultSidebarProps {
 interface DroppableVaultEntryProps {
 	vault: VaultInfo;
 	isActive: boolean;
+	count?: number;
 	onEditVault: (vault: {
 		id: string;
 		name: string;
@@ -70,6 +74,7 @@ interface DroppableVaultEntryProps {
 function DroppableVaultEntry({
 	vault,
 	isActive,
+	count,
 	onEditVault,
 	onDeleteVault,
 }: DroppableVaultEntryProps) {
@@ -121,21 +126,29 @@ function DroppableVaultEntry({
 				"relative",
 				"mb-0.5",
 				"w-full",
-				"rounded-md",
+				"rounded-sm",
 				"text-left",
 				"text-sm",
 				"transition-colors",
-				isActive ? "bg-primary/10" : "hover:bg-muted/30",
+				isActive
+					? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+					: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 				dropBackgroundStyle,
 			)}
 		>
+			{isActive && (
+				<span
+					aria-hidden
+					className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+				/>
+			)}
 			{dropIndicatorStyle && (
 				<div
 					className={cn(
 						"pointer-events-none",
 						"absolute",
 						"inset-px",
-						"rounded-md",
+						"rounded-sm",
 						"border",
 						"transition-[border-color,box-shadow]",
 						dropIndicatorStyle,
@@ -145,7 +158,7 @@ function DroppableVaultEntry({
 			<Link
 				to="/vault/$id"
 				params={{ id: vault.vaultId }}
-				className="block px-3 py-2"
+				className="flex h-7 items-center px-2"
 			>
 				<div className="flex min-w-0 items-center gap-2">
 					<VaultAvatar
@@ -156,6 +169,14 @@ function DroppableVaultEntry({
 					/>
 					<div className="truncate">{vault.vaultName}</div>
 				</div>
+				<SidebarCount
+					count={count}
+					className={cn(
+						"transition-opacity",
+						// The owner "..." menu occupies this spot on hover.
+						vault.role === "owner" && "group-hover:opacity-0",
+					)}
+				/>
 			</Link>
 			{vault.role === "owner" && (
 				<DropdownMenu>
@@ -163,10 +184,10 @@ function DroppableVaultEntry({
 						<Button
 							variant="ghost"
 							size="sm"
-							className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
+							className="absolute top-1/2 right-1 size-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
 							onClick={(e) => e.stopPropagation()}
 						>
-							<IconDotsOutlineDuo18 className="h-3.5 w-3.5" />
+							<IconDotsOutlineDuo18 className="size-3.5" />
 						</Button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
@@ -206,6 +227,7 @@ function DroppableVaultEntry({
 export function VaultSidebar({
 	vaults,
 	tags,
+	itemCounts,
 	currentVaultId,
 	onNewVault,
 	onEditVault,
@@ -260,6 +282,7 @@ export function VaultSidebar({
 		<DroppableVaultEntry
 			key={vault.vaultId}
 			vault={vault}
+			count={itemCounts && (itemCounts.byVault[vault.vaultId] ?? 0)}
 			isActive={
 				currentVaultId === vault.vaultId &&
 				!isAllItemsActive &&
@@ -273,60 +296,89 @@ export function VaultSidebar({
 	);
 
 	return (
-		<div className="relative flex w-50 flex-col border-r bg-sidebar pt-10">
+		<div className="relative flex w-54 flex-col border-r bg-sidebar pt-10">
+			<div
+				aria-hidden
+				className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_8%,transparent),transparent_65%)] dark:bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_14%,transparent),transparent_65%)]"
+			/>
 			<div className="absolute inset-x-0 top-0 h-9" data-tauri-drag-region />
 			{/* Account Switcher - Fixed at top */}
-			<div className="p-2">
+			<div className="relative px-2 pt-1.5 pb-0.5">
 				<AccountSwitcher />
 			</div>
 
 			{/* Scrollable sidebar content */}
-			<div className="flex flex-1 flex-col overflow-y-auto p-2">
+			<div className="relative flex flex-1 flex-col overflow-y-auto p-2">
 				{/* All Objects */}
 				<Link
 					to="/vault/all-items"
 					className={cn(
+						"relative",
 						"mb-1",
 						"flex",
+						"h-7",
 						"w-full",
 						"items-center",
 						"gap-2",
-						"rounded-md",
-						"px-3",
-						"py-2",
+						"rounded-sm",
+						"px-2",
 						"text-left",
 						"text-sm",
 						"transition-colors",
-						isAllItemsActive ? "bg-primary/10" : "hover:bg-muted/30",
+						isAllItemsActive
+							? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+							: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 					)}
 				>
-					<IconGrid2OutlineDuo18 className="size-4 text-muted-foreground" />
+					{isAllItemsActive && (
+						<span
+							aria-hidden
+							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+						/>
+					)}
+					<IconGrid2OutlineDuo18
+						className={cn(
+							"size-3.5",
+							isAllItemsActive ? "text-primary" : "text-muted-foreground",
+						)}
+					/>
 					<span>{m.vaults_sidebar_link_all_objects()}</span>
+					<SidebarCount count={itemCounts?.total} />
 				</Link>
 
 				{/* Favorites */}
 				<Link
 					to="/vault/favorites"
 					className={cn(
+						"relative",
 						"mb-1",
 						"flex",
+						"h-7",
 						"w-full",
 						"items-center",
 						"gap-2",
-						"rounded-md",
-						"px-3",
-						"py-2",
+						"rounded-sm",
+						"px-2",
 						"text-left",
 						"text-sm",
 						"transition-colors",
-						isFavoritesActive ? "bg-primary/10" : "hover:bg-muted/30",
+						isFavoritesActive
+							? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+							: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 					)}
 				>
+					{isFavoritesActive && (
+						<span
+							aria-hidden
+							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+						/>
+					)}
 					<IconStarOutlineDuo18
-						className="size-4 text-yellow-500"
+						className="size-3.5 text-yellow-500"
 						fill="currentColor"
 					/>
 					<span>{m.vaults_favorites_title()}</span>
+					<SidebarCount count={itemCounts?.favorites} />
 				</Link>
 
 				{/* Vaults Section */}
@@ -374,23 +426,33 @@ export function VaultSidebar({
 										to="/vault/tag/$tagName"
 										params={{ tagName: encodeURIComponent(tagName) }}
 										className={cn(
+											"relative",
 											"mb-0.5",
 											"flex",
+											"h-7",
 											"w-full",
 											"items-center",
 											"gap-2",
-											"rounded-md",
-											"px-3",
-											"py-2",
+											"rounded-sm",
+											"px-2",
 											"text-left",
 											"text-sm",
 											"transition-colors",
-											isActive ? "bg-primary/10" : "hover:bg-muted/30",
+											isActive
+												? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+												: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 										)}
 									>
-										<IconTagOutlineDuo18
-											className="size-3.5 shrink-0"
-											style={{ color }}
+										{isActive && (
+											<span
+												aria-hidden
+												className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+											/>
+										)}
+										<span
+											aria-hidden
+											className="mx-[3.5px] size-[7px] shrink-0 rounded-full"
+											style={{ backgroundColor: color }}
 										/>
 										<span className="truncate">{tagName}</span>
 									</Link>
@@ -404,21 +466,35 @@ export function VaultSidebar({
 				<Link
 					to="/vault/trash"
 					className={cn(
+						"relative",
 						"mt-2",
 						"flex",
+						"h-7",
 						"w-full",
 						"items-center",
 						"gap-2",
-						"rounded-md",
-						"px-3",
-						"py-2",
+						"rounded-sm",
+						"px-2",
 						"text-left",
 						"text-sm",
 						"transition-colors",
-						isTrashActive ? "bg-primary/10" : "hover:bg-muted/30",
+						isTrashActive
+							? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+							: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 					)}
 				>
-					<IconBoxArchive3OutlineDuo18 className="size-4 text-muted-foreground" />
+					{isTrashActive && (
+						<span
+							aria-hidden
+							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+						/>
+					)}
+					<IconBoxArchive3OutlineDuo18
+						className={cn(
+							"size-3.5",
+							isTrashActive ? "text-primary" : "text-muted-foreground",
+						)}
+					/>
 					<span>{m.vaults_sidebar_link_archive()}</span>
 				</Link>
 			</div>

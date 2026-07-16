@@ -5,19 +5,23 @@ import {
 	AvatarFallback,
 	AvatarImage,
 	Button,
+	Command,
+	CommandGroup,
+	CommandInput,
+	CommandItem,
+	CommandList,
 	Dialog,
 	DialogContent,
 	DialogFooter,
 	DialogHeader,
 	DialogTitle,
-	Input,
 	toast,
 	VaultAvatar,
 } from "@bittery/ui";
 import {
 	IconCheckOutlineDuo18,
 	IconLoader2OutlineDuo18,
-	IconMagnifier3OutlineDuo18,
+	IconTriangleWarningOutlineDuo18,
 } from "@bittery/ui/icons";
 import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
@@ -163,45 +167,40 @@ export function MoveItemDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
-			<DialogContent className="max-w-md gap-0 p-0">
-				<DialogHeader className="p-6 pb-4">
+			<DialogContent className="max-w-md gap-0 overflow-hidden p-0">
+				<DialogHeader className="px-5 pt-5 pb-3 text-left">
 					<DialogTitle className="font-medium text-base">
 						{m.vaults_detail_items_move_dialog_title({ title: item.title })}
 					</DialogTitle>
 				</DialogHeader>
 
-				{/* Search */}
-				<div className="px-6 pb-3">
-					<div className="relative">
-						<IconMagnifier3OutlineDuo18 className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-						<Input
-							placeholder={m.vaults_detail_items_move_dialog_search_placeholder()}
-							value={searchQuery}
-							onChange={(e) => setSearchQuery(e.target.value)}
-							className="pl-9"
-						/>
-					</div>
-				</div>
+				{/* Filtering stays manual (name + account/team match), Command only
+				    provides keyboard navigation between vault rows. */}
+				<Command shouldFilter={false} className="rounded-none bg-transparent">
+					<CommandInput
+						autoFocus
+						value={searchQuery}
+						onValueChange={setSearchQuery}
+						placeholder={m.vaults_detail_items_move_dialog_search_placeholder()}
+					/>
 
-				{/* Vault List */}
-				<div className="px-3 pb-3">
-					{isLoading ? (
-						<div className="flex items-center justify-center py-8">
-							<IconLoader2OutlineDuo18 className="size-6 animate-spin text-muted-foreground" />
-						</div>
-					) : vaultKeys.length <= 1 ? (
-						<div className="py-8 text-center text-muted-foreground text-sm">
-							{m.vaults_detail_items_move_dialog_empty_no_other_vaults()}
-						</div>
-					) : filteredVaultKeys.length === 0 ? (
-						<div className="py-8 text-center text-muted-foreground text-sm">
-							{m.vaults_detail_items_move_dialog_empty_no_matches()}
-						</div>
-					) : (
-						<div className="max-h-80 space-y-1 overflow-y-auto">
-							{/* Move targets are always account-grouped so cross-account
-							    targets are surfaced regardless of active-account view. */}
-							{Object.entries(vaultsByAccount).map(([accountEmail, vaults]) => {
+					<CommandList className="max-h-80 p-2">
+						{isLoading ? (
+							<div className="flex items-center justify-center py-10">
+								<IconLoader2OutlineDuo18 className="size-6 animate-spin text-muted-foreground" />
+							</div>
+						) : vaultKeys.length <= 1 ? (
+							<div className="py-10 text-center text-muted-foreground text-sm">
+								{m.vaults_detail_items_move_dialog_empty_no_other_vaults()}
+							</div>
+						) : filteredVaultKeys.length === 0 ? (
+							<div className="py-10 text-center text-muted-foreground text-sm">
+								{m.vaults_detail_items_move_dialog_empty_no_matches()}
+							</div>
+						) : (
+							/* Move targets are always account-grouped so cross-account
+							   targets are surfaced regardless of active-account view. */
+							Object.entries(vaultsByAccount).map(([accountEmail, vaults]) => {
 								if (vaults.length === 0) return null;
 
 								const accountName =
@@ -213,79 +212,99 @@ export function MoveItemDialog({
 								const accountTeamAvatarUrl = vaults[0].accountTeamAvatarUrl;
 
 								return (
-									<div key={accountEmail} className="py-1">
-										<div className="flex items-center gap-2 px-3 py-2 font-medium text-muted-foreground text-xs uppercase tracking-wide">
-											<Avatar className="size-5 text-[10px]">
+									<CommandGroup key={accountEmail} className="p-0 pb-1">
+										<div className="flex items-center gap-2 px-2.5 py-2">
+											<Avatar className="size-5 rounded-[5px]">
 												<AvatarImage
 													src={accountTeamAvatarUrl ?? undefined}
 													alt={accountName}
+													className="rounded-[5px]"
 												/>
-												<AvatarFallback className="text-[10px]">
+												<AvatarFallback className="rounded-[5px] bg-linear-to-br from-primary to-primary-deep font-semibold text-[9px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]">
 													{getInitials(accountName)}
 												</AvatarFallback>
 											</Avatar>
-											<span>{accountName}</span>
+											<span className="truncate font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
+												{accountName}
+											</span>
 										</div>
-										<div className="ml-4 space-y-0.5">
-											{vaults.map((vaultKey) => {
-												const isCurrentVault =
-													vaultKey.vaultId === currentVaultId;
-												const isSelected = vaultKey.vaultId === selectedVaultId;
-												const isDisabled =
-													isCurrentVault || vaultKey.role === "read-only";
 
-												return (
-													<button
-														type="button"
-														key={vaultKey.vaultId}
-														disabled={isDisabled}
-														onClick={() =>
-															!isDisabled &&
-															setSelectedVaultId(vaultKey.vaultId)
-														}
-														className={cn(
-															"flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm outline-none transition-colors",
+										{vaults.map((vaultKey) => {
+											const isCurrentVault =
+												vaultKey.vaultId === currentVaultId;
+											const isReadOnly = vaultKey.role === "read-only";
+											const isSelected = vaultKey.vaultId === selectedVaultId;
+											const isDisabled = isCurrentVault || isReadOnly;
+
+											return (
+												<CommandItem
+													key={vaultKey.vaultId}
+													value={vaultKey.vaultId}
+													disabled={isDisabled}
+													onSelect={() => {
+														// Second select (Enter / double-click) on the
+														// chosen vault confirms the move.
+														if (
 															isSelected &&
-																!isDisabled &&
-																"bg-primary/10 ring-1 ring-primary/20",
-															!isDisabled && !isSelected && "hover:bg-accent",
-															isDisabled && "cursor-not-allowed opacity-50",
-														)}
-													>
-														<VaultAvatar
-															name={vaultKey.vaultName}
-															icon={vaultKey.vaultIcon}
-															imageUrl={vaultKey.vaultImageUrl}
-															size="sm"
+															!moveItem.isPending &&
+															selectedVaultId
+														) {
+															void handleMove();
+														} else {
+															setSelectedVaultId(vaultKey.vaultId);
+														}
+													}}
+													className={cn(
+														"relative cursor-pointer gap-2.5 rounded-sm px-2.5 py-1.5 data-[selected=true]:bg-overlay",
+														isSelected &&
+															"bg-selected shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)] data-[selected=true]:bg-selected",
+													)}
+												>
+													{isSelected && (
+														<span
+															aria-hidden
+															className="absolute top-[7px] bottom-[7px] left-1 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
 														/>
-														<span className="flex-1 text-left font-medium">
-															{vaultKey.vaultName}
+													)}
+													<VaultAvatar
+														name={vaultKey.vaultName}
+														icon={vaultKey.vaultIcon}
+														imageUrl={vaultKey.vaultImageUrl}
+														size="sm"
+													/>
+													<span className="min-w-0 flex-1 truncate text-left font-medium">
+														{vaultKey.vaultName}
+													</span>
+													{isCurrentVault && (
+														<span className="rounded-[4px] border bg-foreground/3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+															{m.vaults_detail_items_move_dialog_badge_current()}
 														</span>
-														{isCurrentVault && (
-															<span className="rounded-full bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-																{m.vaults_detail_items_move_dialog_badge_current()}
-															</span>
-														)}
-														{isSelected && !isDisabled && (
-															<div className="flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-																<IconCheckOutlineDuo18 className="size-3" />
-															</div>
-														)}
-													</button>
-												);
-											})}
-										</div>
-									</div>
+													)}
+													{isReadOnly && !isCurrentVault && (
+														<span className="rounded-[4px] border bg-foreground/3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+															{m.vaults_common_role_read_only()}
+														</span>
+													)}
+													{isSelected && (
+														<IconCheckOutlineDuo18 className="size-4 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]" />
+													)}
+												</CommandItem>
+											);
+										})}
+									</CommandGroup>
 								);
-							})}
-						</div>
-					)}
-				</div>
+							})
+						)}
+					</CommandList>
+				</Command>
 
 				{/* Cross-account warning */}
 				{isCrossAccount && selectedVault && (
-					<div className="mx-6 mb-3 rounded-lg bg-amber-500/10 px-3 py-2.5 text-amber-600 text-sm dark:text-amber-500">
-						{m.vaults_detail_items_move_dialog_warning_cross_account()}
+					<div className="mx-4 mb-3 flex items-start gap-2.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-amber-600 text-sm dark:text-amber-400">
+						<IconTriangleWarningOutlineDuo18 className="mt-0.5 size-4 shrink-0" />
+						<span>
+							{m.vaults_detail_items_move_dialog_warning_cross_account()}
+						</span>
 					</div>
 				)}
 

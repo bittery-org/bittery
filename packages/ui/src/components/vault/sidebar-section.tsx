@@ -54,8 +54,8 @@ export function SidebarSection({
 
 	return (
 		<Collapsible open={isOpen} onOpenChange={handleOpenChange}>
-			<div className="flex items-center justify-between gap-1 px-2 py-1">
-				<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-1.5 font-semibold text-muted-foreground text-xs uppercase hover:bg-muted/50">
+			<div className="group/section flex h-6 items-center justify-between gap-1 px-2">
+				<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-0.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em] hover:bg-muted/50">
 					<IconChevronRightOutlineDuo18
 						className={cn(
 							"size-3",
@@ -71,7 +71,7 @@ export function SidebarSection({
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-5 w-5 shrink-0 p-0 text-muted-foreground hover:text-foreground"
+						className="h-5 w-5 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100"
 						onClick={(e) => {
 							e.stopPropagation();
 							onAdd();

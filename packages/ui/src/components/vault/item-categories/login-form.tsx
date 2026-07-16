@@ -25,10 +25,19 @@ import {
 } from "../../input-group";
 import { Label } from "../../label";
 import { PasswordGenerator } from "../../password-generator";
+import {
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
+} from "../../select";
 import { toast } from "../../sonner";
 import type { CustomField } from "../types";
 import {
 	type BaseFormProps,
+	FormAddRow,
+	FormSection,
 	FormWrapper,
 	NotesField,
 	TitleField,
@@ -64,6 +73,7 @@ export function LoginForm({
 	onSubmit,
 	onCancel,
 	submitLabel,
+	cancelLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
@@ -191,74 +201,25 @@ export function LoginForm({
 			onSubmit={form.handleSubmit}
 			onCancel={onCancel}
 			submitLabel={submitLabel}
+			cancelLabel={cancelLabel}
 			isSubmitting={isSubmitting}
 			vaults={vaults}
 			currentVaultId={currentVaultId}
 			onVaultChange={setCurrentVaultId}
 		>
-			<div>
+			<FormSection>
 				<form.Field name="title">
 					{(field) => (
 						<TitleField
 							field={field}
 							placeholder={m.vaults_detail_items_form_login_placeholder_title()}
+							autoFocus={!field.state.value}
 						/>
 					)}
 				</form.Field>
-			</div>
+			</FormSection>
 
-			<div>
-				<form.Field name="url">
-					{(field) => (
-						<div className="space-y-2">
-							<Label htmlFor={field.name}>
-								{m.vaults_detail_items_form_login_field_website()}
-							</Label>
-							<Input
-								id={field.name}
-								name={field.name}
-								type="url"
-								value={field.state.value}
-								onBlur={field.handleBlur}
-								onChange={(e) => field.handleChange(e.target.value)}
-								placeholder={m.vaults_detail_items_form_login_placeholder_website()}
-							/>
-							{additionalUrls.map((url, index) => (
-								<InputGroup key={index}>
-									<InputGroupInput
-										type="url"
-										value={url}
-										onChange={(e) => updateAdditionalUrl(index, e.target.value)}
-										placeholder={m.vaults_detail_items_form_login_placeholder_website()}
-									/>
-									<InputGroupAddon align="inline-end">
-										<InputGroupButton
-											type="button"
-											size="icon-sm"
-											onClick={() => removeAdditionalUrl(index)}
-											aria-label={m.vaults_detail_items_form_login_action_remove_website()}
-										>
-											<IconXmarkOutlineDuo18 className="size-4" />
-										</InputGroupButton>
-									</InputGroupAddon>
-								</InputGroup>
-							))}
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								className="h-8 text-muted-foreground"
-								onClick={addAdditionalUrl}
-							>
-								<IconPlusOutlineDuo18 className="mr-1 size-3" />
-								{m.vaults_detail_items_form_login_action_add_website()}
-							</Button>
-						</div>
-					)}
-				</form.Field>
-			</div>
-
-			<div>
+			<FormSection label={m.vaults_detail_items_form_login_section_credentials()}>
 				<form.Field name="username">
 					{(field) => (
 						<div className="space-y-2">
@@ -276,9 +237,7 @@ export function LoginForm({
 						</div>
 					)}
 				</form.Field>
-			</div>
 
-			<div>
 				<form.Field name="password">
 					{(field) => (
 						<div className="space-y-2">
@@ -333,91 +292,140 @@ export function LoginForm({
 						</div>
 					)}
 				</form.Field>
-			</div>
+			</FormSection>
 
-			<div>
+			<FormSection label={m.vaults_detail_items_form_login_section_websites()}>
+				<form.Field name="url">
+					{(field) => (
+						<div className="space-y-2">
+							<Input
+								id={field.name}
+								name={field.name}
+								type="url"
+								value={field.state.value}
+								onBlur={field.handleBlur}
+								onChange={(e) => field.handleChange(e.target.value)}
+								placeholder={m.vaults_detail_items_form_login_placeholder_website()}
+								aria-label={m.vaults_detail_items_form_login_field_website()}
+							/>
+							{additionalUrls.map((url, index) => (
+								<InputGroup key={index}>
+									<InputGroupInput
+										type="url"
+										value={url}
+										onChange={(e) => updateAdditionalUrl(index, e.target.value)}
+										placeholder={m.vaults_detail_items_form_login_placeholder_website()}
+									/>
+									<InputGroupAddon align="inline-end">
+										<InputGroupButton
+											type="button"
+											size="icon-sm"
+											onClick={() => removeAdditionalUrl(index)}
+											aria-label={m.vaults_detail_items_form_login_action_remove_website()}
+										>
+											<IconXmarkOutlineDuo18 className="size-4" />
+										</InputGroupButton>
+									</InputGroupAddon>
+								</InputGroup>
+							))}
+							<FormAddRow onClick={addAdditionalUrl}>
+								<IconPlusOutlineDuo18 className="size-3.5" />
+								{m.vaults_detail_items_form_login_action_add_website()}
+							</FormAddRow>
+						</div>
+					)}
+				</form.Field>
+			</FormSection>
+
+			<FormSection
+				label={m.vaults_detail_items_form_totp_section_two_factor_authentication()}
+			>
+				<TotpInputSection
+					state={totpState}
+					onChange={setTotpState}
+					showSection={showTotpSection}
+					onShowSectionChange={setShowTotpSection}
+					secretError={totpSecretError}
+					onSecretErrorChange={setTotpSecretError}
+				/>
+			</FormSection>
+
+			<FormSection
+				label={m.vaults_detail_items_form_login_section_custom_fields()}
+			>
+				{customFields.length > 0 && (
+					<div className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border bg-card">
+						{customFields.map((field) => (
+							<div key={field.id} className="space-y-2 p-3">
+								<div className="flex items-center gap-2">
+									<Input
+										placeholder={m.vaults_detail_items_form_login_placeholder_custom_field_label()}
+										value={field.label}
+										onChange={(e) =>
+											updateCustomField(field.id, { label: e.target.value })
+										}
+										className="flex-1"
+									/>
+									<Select
+										value={field.type}
+										onValueChange={(value) =>
+											updateCustomField(field.id, {
+												type: value as CustomField["type"],
+											})
+										}
+									>
+										<SelectTrigger className="w-32 shrink-0">
+											<SelectValue />
+										</SelectTrigger>
+										<SelectContent>
+											<SelectItem value="text">
+												{m.vaults_detail_items_form_login_custom_field_type_text()}
+											</SelectItem>
+											<SelectItem value="password">
+												{m.vaults_detail_items_form_login_custom_field_type_password()}
+											</SelectItem>
+											<SelectItem value="email">
+												{m.vaults_detail_items_form_login_custom_field_type_email()}
+											</SelectItem>
+											<SelectItem value="url">
+												{m.vaults_detail_items_form_login_custom_field_type_url()}
+											</SelectItem>
+										</SelectContent>
+									</Select>
+									<Button
+										type="button"
+										variant="ghost"
+										size="icon"
+										className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+										onClick={() => removeCustomField(field.id)}
+										aria-label={m.vaults_detail_items_form_login_action_remove_custom_field()}
+									>
+										<IconTrash2OutlineDuo18 size={16} />
+									</Button>
+								</div>
+								<Input
+									type={field.type === "password" ? "password" : "text"}
+									placeholder={m.vaults_detail_items_form_login_placeholder_custom_field_value()}
+									value={field.value}
+									onChange={(e) =>
+										updateCustomField(field.id, { value: e.target.value })
+									}
+								/>
+							</div>
+						))}
+					</div>
+				)}
+				<FormAddRow onClick={addCustomField}>
+					<IconPlusOutlineDuo18 className="size-3.5" />
+					{m.vaults_detail_items_form_login_action_add_custom_field()}
+				</FormAddRow>
+			</FormSection>
+
+			<FormSection>
 				<form.Field name="notes">
 					{(field) => <NotesField field={field} />}
 				</form.Field>
-			</div>
-
-			<div className="space-y-2">
-				<div className="flex items-center justify-between">
-					<Label>
-						{m.vaults_detail_items_form_login_section_custom_fields()}
-					</Label>
-					<Button
-						type="button"
-						variant="outline"
-						size="sm"
-						onClick={addCustomField}
-					>
-						<IconPlusOutlineDuo18 className="mr-1 size-3" />
-						{m.vaults_detail_items_form_login_action_add_custom_field()}
-					</Button>
-				</div>
-				{customFields.map((field) => (
-					<div key={field.id} className="space-y-2 rounded-lg border p-3">
-						<div className="flex gap-2">
-							<Input
-								placeholder={m.vaults_detail_items_form_login_placeholder_custom_field_label()}
-								value={field.label}
-								onChange={(e) =>
-									updateCustomField(field.id, { label: e.target.value })
-								}
-								className="flex-1"
-							/>
-							<select
-								value={field.type}
-								onChange={(e) =>
-									updateCustomField(field.id, {
-										type: e.target.value as CustomField["type"],
-									})
-								}
-								className="rounded-md border border-input bg-background px-3 py-2 text-sm"
-							>
-								<option value="text">
-									{m.vaults_detail_items_form_login_custom_field_type_text()}
-								</option>
-								<option value="password">
-									{m.vaults_detail_items_form_login_custom_field_type_password()}
-								</option>
-								<option value="email">
-									{m.vaults_detail_items_form_login_custom_field_type_email()}
-								</option>
-								<option value="url">
-									{m.vaults_detail_items_form_login_custom_field_type_url()}
-								</option>
-							</select>
-							<Button
-								type="button"
-								variant="ghost"
-								size="icon"
-								onClick={() => removeCustomField(field.id)}
-							>
-								<IconTrash2OutlineDuo18 size={16} />
-							</Button>
-						</div>
-						<Input
-							type={field.type === "password" ? "password" : "text"}
-							placeholder={m.vaults_detail_items_form_login_placeholder_custom_field_value()}
-							value={field.value}
-							onChange={(e) =>
-								updateCustomField(field.id, { value: e.target.value })
-							}
-						/>
-					</div>
-				))}
-			</div>
-
-			<TotpInputSection
-				state={totpState}
-				onChange={setTotpState}
-				showSection={showTotpSection}
-				onShowSectionChange={setShowTotpSection}
-				secretError={totpSecretError}
-				onSecretErrorChange={setTotpSecretError}
-			/>
+			</FormSection>
 		</FormWrapper>
 	);
 }

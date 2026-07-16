@@ -45,41 +45,40 @@ export function ImportOnboardingCard({
 					</SidebarMenuItem>
 				</SidebarMenu>
 			) : (
-				<div className="mx-2 mb-2 overflow-hidden rounded-xl border border-primary/12 bg-gradient-to-br from-primary/7 via-primary/3 to-sidebar-background/85">
-					<div className="flex items-center justify-between gap-2 border-sidebar-border/50 border-b px-2.5 py-2">
-						<p className="inline-flex items-center gap-1.5 text-[10px] text-sidebar-foreground/80 uppercase tracking-[0.13em]">
-							<span className="h-1.5 w-1.5 rounded-full bg-primary" />
+				<div className="mx-2 mb-2 overflow-hidden rounded-lg border bg-card">
+					<div className="flex items-center justify-between gap-2 border-b px-2.5 py-1.5">
+						<p className="inline-flex items-center gap-1.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 							{m.vaults_import_onboarding_badge()}
 						</p>
 						<Button
 							type="button"
 							size="icon"
 							variant="ghost"
-							className="h-5 w-5 text-sidebar-foreground/70 hover:bg-sidebar-background/40 hover:text-sidebar-foreground"
+							className="size-5 text-muted-foreground hover:text-foreground"
 							onClick={markDismissed}
 						>
-							<X className="h-3 w-3" />
+							<X className="size-3" />
 							<span className="sr-only">
 								{m.vaults_import_onboarding_dismiss_sr_label()}
 							</span>
 						</Button>
 					</div>
 					<div className="space-y-2 px-2.5 py-2.5">
-						<p className="flex items-center gap-1.5 font-semibold text-sm">
-							<Vault className="h-3.5 w-3.5 text-primary" />
+						<p className="flex items-center gap-1.5 font-medium text-sm">
+							<Vault className="size-3.5 text-muted-foreground" />
 							{m.vaults_import_onboarding_title()}
 						</p>
-						<p className="text-sidebar-foreground/75 text-xs leading-snug">
+						<p className="text-muted-foreground text-xs leading-snug">
 							{m.vaults_import_onboarding_description()}
 						</p>
 						<Button
 							type="button"
 							variant="outline"
-							className="h-7 w-full justify-center border-primary/18 bg-sidebar-background/60 text-[11px] shadow-none"
+							className="h-7 w-full justify-center"
 							size="sm"
 							onClick={() => setIsDialogOpen(true)}
 						>
-							<Upload className="mr-1.5 h-3.5 w-3.5" />
+							<Upload className="size-3.5" />
 							{m.vaults_import_onboarding_cta()}
 						</Button>
 					</div>

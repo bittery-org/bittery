@@ -242,22 +242,22 @@ function VaultDetailPage() {
 			{/* Middle pane: vault header + item list */}
 			<div
 				className={cn(
-					"flex w-full shrink-0 flex-col border-r md:w-80",
+					"flex w-full shrink-0 flex-col border-r md:w-78",
 					selectedItemId && "hidden md:flex",
 				)}
 			>
 				{/* Vault header */}
-				<div className="flex items-center gap-2 border-b px-4 py-3">
+				<div className="flex h-11 shrink-0 items-center gap-2 border-b px-2.5 xl:h-12">
 					<VaultAvatar
 						name={vaultInfo.vaultName}
 						icon={vaultInfo.vaultIcon}
 						imageUrl={vaultInfo.vaultImageUrl}
 						size="xs"
 					/>
-					<span className="min-w-0 truncate font-medium">
+					<span className="min-w-0 truncate font-medium text-sm">
 						{vaultInfo.vaultName}
 					</span>
-					<Badge variant="secondary" className="ml-auto">
+					<Badge variant="secondary" className="ml-auto shrink-0">
 						{itemCount}
 					</Badge>
 					<div className="flex shrink-0 items-center gap-1">
@@ -265,11 +265,11 @@ function VaultDetailPage() {
 							<Button
 								variant="ghost"
 								size="sm"
-								className="h-7 w-7 p-0"
+								className="size-7 p-0"
 								onClick={() => setIsCreateItemSheetOpen(true)}
 								data-testid="new-item-button"
 							>
-								<Plus className="h-3.5 w-3.5" />
+								<Plus className="size-3.5" />
 							</Button>
 						)}
 						{hasManageActions && (
@@ -278,10 +278,10 @@ function VaultDetailPage() {
 									<Button
 										variant="ghost"
 										size="sm"
-										className="h-7 w-7 p-0"
+										className="size-7 p-0"
 										data-testid="vault-menu-button"
 									>
-										<Dots className="h-3.5 w-3.5" />
+										<Dots className="size-3.5" />
 									</Button>
 								</DropdownMenuTrigger>
 								<DropdownMenuContent align="end">

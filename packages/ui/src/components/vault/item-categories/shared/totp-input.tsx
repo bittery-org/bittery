@@ -8,7 +8,6 @@ import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { useCallback } from "react";
 import {
 	IconClipboardArrowInOutlineDuo18,
-	IconMobileOutlineDuo18,
 	IconPlusOutlineDuo18,
 	IconTrash2OutlineDuo18,
 } from "../../../../icons";
@@ -17,6 +16,7 @@ import { Button } from "../../../button";
 import { Input } from "../../../input";
 import { Label } from "../../../label";
 import { toast } from "../../../sonner";
+import { FormAddRow } from "./form-section";
 import { TotpAdvancedSettings } from "./totp-settings";
 
 export interface TotpState {
@@ -135,109 +135,96 @@ export function TotpInputSection({
 		onSecretErrorChange(null);
 	};
 
+	if (!showSection) {
+		return (
+			<FormAddRow onClick={() => onShowSectionChange(true)}>
+				<IconPlusOutlineDuo18 className="size-3.5" />
+				{m.vaults_detail_items_form_totp_action_add_totp()}
+			</FormAddRow>
+		);
+	}
+
 	return (
-		<div className="space-y-2">
-			<div className="flex items-center justify-between">
-				<Label className="flex items-center gap-2">
-					<IconMobileOutlineDuo18 className="size-4" />
-					{m.vaults_detail_items_form_totp_section_two_factor_authentication()}
+		<>
+			<div className="space-y-2">
+				<Label>
+					{m.vaults_detail_items_form_totp_field_setup_key()}
 				</Label>
-				{!showSection && (
+				<div className="flex gap-2">
+					<Input
+						value={state.secret}
+						onChange={(e) => {
+							onChange({ ...state, secret: e.target.value });
+							validateSecret(e.target.value);
+						}}
+						onBlur={() => validateSecret(state.secret)}
+						placeholder={m.vaults_detail_items_form_totp_placeholder_setup_key()}
+						className={cn(
+							"flex-1 font-mono tracking-wider",
+							secretError ? "border-destructive" : "",
+						)}
+					/>
 					<Button
 						type="button"
 						variant="outline"
-						size="sm"
-						onClick={() => onShowSectionChange(true)}
+						onClick={() => handlePasteFromClipboard()}
+						title={m.vaults_detail_items_form_totp_action_paste_from_clipboard()}
 					>
-						<IconPlusOutlineDuo18 className="mr-1 size-3" />
-						{m.vaults_detail_items_form_totp_action_add_totp()}
+						<IconClipboardArrowInOutlineDuo18 size={16} />
+						{m.vaults_detail_items_form_totp_action_paste()}
 					</Button>
+				</div>
+				{secretError && (
+					<p className="text-destructive text-xs">{secretError}</p>
 				)}
 			</div>
 
-			{showSection && (
-				<div className="space-y-4 rounded-lg border p-4">
-					<div className="space-y-2">
-						<Label>
-							{m.vaults_detail_items_form_totp_field_setup_key()}
-						</Label>
-						<div className="flex gap-2">
-							<Input
-								value={state.secret}
-								onChange={(e) => {
-									onChange({ ...state, secret: e.target.value });
-									validateSecret(e.target.value);
-								}}
-								onBlur={() => validateSecret(state.secret)}
-								placeholder={m.vaults_detail_items_form_totp_placeholder_setup_key()}
-								className={cn(
-									"flex-1",
-									"font-mono",
-									"tracking-wider",
-									secretError ? "border-destructive" : "",
-								)}
-							/>
-							<Button
-								type="button"
-								variant="outline"
-								onClick={() => handlePasteFromClipboard()}
-								title={m.vaults_detail_items_form_totp_action_paste_from_clipboard()}
-							>
-								<IconClipboardArrowInOutlineDuo18 size={16} />
-								{m.vaults_detail_items_form_totp_action_paste()}
-							</Button>
-						</div>
-						{secretError && (
-							<p className="text-destructive text-sm">{secretError}</p>
-						)}
-					</div>
-
-					<div className="grid grid-cols-2 gap-4">
-						<div className="space-y-2">
-							<Label>
-								{m.vaults_detail_items_form_totp_field_service()}
-							</Label>
-							<Input
-								value={state.issuer}
-								onChange={(e) => onChange({ ...state, issuer: e.target.value })}
-								placeholder={m.vaults_detail_items_form_totp_placeholder_service()}
-							/>
-						</div>
-						<div className="space-y-2">
-							<Label>
-								{m.vaults_detail_items_form_totp_field_account()}
-							</Label>
-							<Input
-								value={state.accountName}
-								onChange={(e) =>
-									onChange({ ...state, accountName: e.target.value })
-								}
-								placeholder={m.vaults_detail_items_form_totp_placeholder_account()}
-							/>
-						</div>
-					</div>
-
-					<TotpAdvancedSettings
-						algorithm={state.algorithm}
-						digits={state.digits}
-						period={state.period}
-						onAlgorithmChange={(algorithm) => onChange({ ...state, algorithm })}
-						onDigitsChange={(digits) => onChange({ ...state, digits })}
-						onPeriodChange={(period) => onChange({ ...state, period })}
+			<div className="grid grid-cols-2 gap-4">
+				<div className="space-y-2">
+					<Label>
+						{m.vaults_detail_items_form_totp_field_service()}
+					</Label>
+					<Input
+						value={state.issuer}
+						onChange={(e) => onChange({ ...state, issuer: e.target.value })}
+						placeholder={m.vaults_detail_items_form_totp_placeholder_service()}
 					/>
-
-					<Button
-						type="button"
-						variant="ghost"
-						size="sm"
-						className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-						onClick={handleRemoveTotp}
-					>
-						<IconTrash2OutlineDuo18 size={14} className="mr-1" />
-						{m.vaults_detail_items_form_totp_action_remove_totp()}
-					</Button>
 				</div>
-			)}
-		</div>
+				<div className="space-y-2">
+					<Label>
+						{m.vaults_detail_items_form_totp_field_account()}
+					</Label>
+					<Input
+						value={state.accountName}
+						onChange={(e) =>
+							onChange({ ...state, accountName: e.target.value })
+						}
+						placeholder={m.vaults_detail_items_form_totp_placeholder_account()}
+					/>
+				</div>
+			</div>
+
+			<TotpAdvancedSettings
+				algorithm={state.algorithm}
+				digits={state.digits}
+				period={state.period}
+				onAlgorithmChange={(algorithm) => onChange({ ...state, algorithm })}
+				onDigitsChange={(digits) => onChange({ ...state, digits })}
+				onPeriodChange={(period) => onChange({ ...state, period })}
+			/>
+
+			<div>
+				<Button
+					type="button"
+					variant="ghost"
+					size="sm"
+					className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+					onClick={handleRemoveTotp}
+				>
+					<IconTrash2OutlineDuo18 size={14} className="mr-1" />
+					{m.vaults_detail_items_form_totp_action_remove_totp()}
+				</Button>
+			</div>
+		</>
 	);
 }

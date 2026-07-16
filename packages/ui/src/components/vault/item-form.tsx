@@ -44,6 +44,7 @@ interface ItemFormProps {
 	) => Promise<void> | void;
 	onCancel: () => void;
 	submitLabel?: string;
+	cancelLabel?: string;
 	isSubmitting?: boolean;
 	vaults?: VaultOption[];
 	selectedVaultId?: string;
@@ -57,6 +58,7 @@ export function ItemForm(props: ItemFormProps) {
 				onSubmit={props.onSubmit}
 				onCancel={props.onCancel}
 				submitLabel={props.submitLabel}
+				cancelLabel={props.cancelLabel}
 				isSubmitting={props.isSubmitting}
 				vaults={props.vaults}
 				selectedVaultId={props.selectedVaultId}
@@ -70,6 +72,7 @@ export function ItemForm(props: ItemFormProps) {
 				onSubmit={props.onSubmit}
 				onCancel={props.onCancel}
 				submitLabel={props.submitLabel}
+				cancelLabel={props.cancelLabel}
 				isSubmitting={props.isSubmitting}
 				vaults={props.vaults}
 				selectedVaultId={props.selectedVaultId}
@@ -83,6 +86,7 @@ export function ItemForm(props: ItemFormProps) {
 				onSubmit={props.onSubmit}
 				onCancel={props.onCancel}
 				submitLabel={props.submitLabel}
+				cancelLabel={props.cancelLabel}
 				isSubmitting={props.isSubmitting}
 				vaults={props.vaults}
 				selectedVaultId={props.selectedVaultId}
@@ -96,6 +100,7 @@ export function ItemForm(props: ItemFormProps) {
 				onSubmit={props.onSubmit}
 				onCancel={props.onCancel}
 				submitLabel={props.submitLabel}
+				cancelLabel={props.cancelLabel}
 				isSubmitting={props.isSubmitting}
 				vaults={props.vaults}
 				selectedVaultId={props.selectedVaultId}
@@ -108,6 +113,7 @@ export function ItemForm(props: ItemFormProps) {
 			onSubmit={props.onSubmit}
 			onCancel={props.onCancel}
 			submitLabel={props.submitLabel}
+			cancelLabel={props.cancelLabel}
 			isSubmitting={props.isSubmitting}
 			vaults={props.vaults}
 			selectedVaultId={props.selectedVaultId}

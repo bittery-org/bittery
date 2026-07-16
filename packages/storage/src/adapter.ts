@@ -201,7 +201,7 @@ export interface IStorageAdapter {
 
 	/**
 	 * Get the currently active account user ID.
-	 * Returns null if no account is active or if in "all accounts" mode.
+	 * Returns null if no account is active.
 	 */
 	getActiveAccountUserId(): Promise<string | null>;
 

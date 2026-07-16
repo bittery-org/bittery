@@ -1,6 +1,5 @@
 import { useI18n } from "@bittery/i18n/react";
 import { Button } from "../../button";
-import { Card } from "../../card";
 import { Label } from "../../label";
 import { TagInput } from "../../tag-input";
 import { DetailHeader } from "./field-components";
@@ -44,13 +43,13 @@ export function SecureNoteDetail({
 				)}
 			</div>
 
-			<Card className="gap-0 py-0">
-				<div className="overflow-x-auto px-6 py-4">
-					<pre className="m-0 inline-block min-w-full whitespace-pre font-mono text-[13px] leading-5">
+			<div className="overflow-hidden rounded-lg border bg-card">
+				<div className="overflow-x-auto px-4 py-3">
+					<pre className="m-0 inline-block min-w-full whitespace-pre font-mono text-[13px] leading-5 text-foreground">
 						{data.note}
 					</pre>
 				</div>
-			</Card>
+			</div>
 
 			{onTagsChange && (
 				<div className="space-y-2">

@@ -48,6 +48,7 @@ export * from "./components/vault/item-form";
 export * from "./components/vault/item-list-controls";
 export * from "./components/vault/item-list-row";
 export * from "./components/vault/password-history-dialog";
+export * from "./components/vault/sidebar-count";
 export * from "./components/vault/sidebar-section";
 export * from "./components/vault/types";
 export * from "./components/vault-avatar";

@@ -880,7 +880,10 @@ pub(crate) async fn signup_with_invitation(
             team_id: Some(invitation.team_id),
             team_name: Some(invitation.team_name),
             team_type: Some(invitation.team_type),
-            team_avatar_url: invitation.team_image_key.map(storage_public_url),
+            team_avatar_url: invitation
+                .team_image_key
+                .as_deref()
+                .and_then(storage::public_asset_url),
             role: invitation.role,
         },
         vault_keys,
@@ -1520,7 +1523,10 @@ pub(crate) async fn get_me(
         team_id: user.team_id,
         team_name: user.team_name,
         team_type: user.team_type,
-        team_avatar_url: user.team_image_key.map(storage_public_url),
+        team_avatar_url: user
+            .team_image_key
+            .as_deref()
+            .and_then(storage::public_asset_url),
         role: user.role,
         secret_key_hint: user.secret_key_hint,
         public_key: user.public_key,
@@ -2431,10 +2437,6 @@ async fn assert_pending_vault_keys_authorized(
 ) -> Result<(), AppError> {
     repo_auth::assert_pending_vault_keys_authorized(pool, team_id, inviter_id, pending_vault_keys)
         .await
-}
-
-fn storage_public_url(key: String) -> String {
-    storage::public_url(key)
 }
 
 async fn has_any_registered_user(pool: &PgPool) -> Result<bool, AppError> {

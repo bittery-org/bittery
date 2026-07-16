@@ -6,6 +6,8 @@ import {
 	useCreateVault,
 	useCrossVaultTags,
 	useDeleteVault,
+	useItemCounts,
+	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
 import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
@@ -74,8 +76,10 @@ function RouteComponent() {
 	// Fetch the active account's vault keys for the sidebar / vault list.
 	const { vaultKeys } = useAllVaultKeys();
 
-	// Get cross-vault tags for sidebar
-	const { tags: crossVaultTags } = useCrossVaultTags();
+	// One item subscription feeds both the sidebar tags and its counts.
+	const { items, isLoading: isLoadingItems } = useItems();
+	const { tags: crossVaultTags } = useCrossVaultTags(items);
+	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
 
 	const params = useParams({ strict: false });
 	const navigate = useNavigate();
@@ -266,6 +270,7 @@ function RouteComponent() {
 				<VaultSidebar
 					vaults={vaultKeys || []}
 					tags={crossVaultTags}
+					itemCounts={itemCounts}
 					currentVaultId={params.id}
 					onNewVault={() => setIsNewVaultDialogOpen(true)}
 					onEditVault={handleOpenEditVault}

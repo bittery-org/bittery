@@ -23,6 +23,14 @@ import type { TravelModeRpcClient } from "./travel-mode-service";
 
 export interface StoreAuthSessionOptions {
 	travelModeRpcClient?: TravelModeRpcClient;
+	/**
+	 * Builds the travel mode client from the token the flow just obtained.
+	 * Overridable for tests; defaults to a plain account-scoped client.
+	 */
+	createTravelModeRpcClient?: (
+		token: string,
+		serverUrl: string,
+	) => TravelModeRpcClient;
 	serverUrl?: string;
 }
 
@@ -44,9 +52,32 @@ async function prepareTravelModeForSession(
 	const travelMode = getTravelModeEnforcer(storage);
 	try {
 		await travelMode.verifyForUnlock(accountId, travelModeRpcClient);
-	} catch {
-		throw new Error(m.auth_error_travel_mode_verify_failed());
+	} catch (error) {
+		throw new Error(m.auth_error_travel_mode_verify_failed(), { cause: error });
 	}
+}
+
+/**
+ * Travel mode is verified before the session token is committed to storage, so
+ * a client that reads its token from storage would still be unauthenticated
+ * here. Build the client from the token this flow just obtained instead.
+ */
+function resolveTravelModeRpcClientForToken(
+	token: string,
+	serverUrl: string,
+	options?: StoreAuthSessionOptions,
+): TravelModeRpcClient {
+	if (options?.travelModeRpcClient) {
+		return options.travelModeRpcClient;
+	}
+	const factory = options?.createTravelModeRpcClient;
+	if (factory) {
+		return factory(token, serverUrl);
+	}
+	return createAccountRpcClient(
+		token,
+		serverUrl,
+	) as unknown as TravelModeRpcClient;
 }
 
 /**
@@ -527,7 +558,7 @@ export async function storeLoginSession(
 	await prepareTravelModeForSession(
 		accountId,
 		storage,
-		options?.travelModeRpcClient,
+		resolveTravelModeRpcClientForToken(result.token, serverUrl, options),
 	);
 
 	const travelMode = getTravelModeEnforcer(storage);

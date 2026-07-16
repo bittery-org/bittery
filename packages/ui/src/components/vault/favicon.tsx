@@ -15,6 +15,11 @@ import {
 	IconMobileOutlineDuo18,
 	IconUserOutlineDuo18,
 } from "../../icons";
+import {
+	analyzeFaviconLuminance,
+	getFaviconGradient,
+	readCachedLuminance,
+} from "../../lib/favicon-luminance";
 import { cn } from "../../lib/utils";
 import { useState } from "react";
 
@@ -52,37 +57,6 @@ function getInitials(title: string): string {
 	return cleaned.slice(0, 2).toUpperCase();
 }
 
-function getAvatarColor(title: string): string {
-	const colors = [
-		"bg-red-50",
-		"bg-orange-50",
-		"bg-amber-50",
-		"bg-yellow-50",
-		"bg-lime-50",
-		"bg-green-50",
-		"bg-emerald-50",
-		"bg-teal-50",
-		"bg-cyan-50",
-		"bg-sky-50",
-		"bg-blue-50",
-		"bg-indigo-50",
-		"bg-violet-50",
-		"bg-purple-50",
-		"bg-fuchsia-50",
-		"bg-pink-50",
-		"bg-rose-50",
-	];
-
-	if (!title) return "bg-gray-50";
-
-	let hash = 0;
-	for (let i = 0; i < title.length; i++) {
-		hash = title.charCodeAt(i) + ((hash << 5) - hash);
-	}
-
-	return colors[Math.abs(hash) % colors.length] ?? "bg-gray-50";
-}
-
 export function VaultFavicon({
 	item,
 	url,
@@ -95,6 +69,10 @@ export function VaultFavicon({
 	className,
 }: VaultFaviconProps) {
 	const [failedFaviconUrl, setFailedFaviconUrl] = useState<string | null>(null);
+	const [luminanceState, setLuminanceState] = useState<{
+		url: string;
+		result: "dark" | "light" | "unknown";
+	} | null>(null);
 
 	const faviconSizeMap = {
 		sm: 64,
@@ -122,12 +100,34 @@ export function VaultFavicon({
 	);
 	const domain = resolvedUrl ? getDomainFromUrl(resolvedUrl) : null;
 	const initials = getInitials(domain || resolvedTitle);
-	const avatarColor = getAvatarColor(domain || resolvedTitle);
+
+	// Derive luminance for the currently displayed favicon URL from state.
+	// Keying the cached async result by URL (rather than trusting stale
+	// state) ensures that if `faviconUrl` changes before a prior analysis
+	// resolves, the outdated result is simply ignored.
+	const luminance =
+		faviconUrl && luminanceState?.url === faviconUrl
+			? luminanceState.result
+			: readCachedLuminance(faviconUrl);
+
+	const showFaviconImage =
+		resolvedCategory === "login" && Boolean(faviconUrl) && !hasFaviconError;
+	const showColoredFallback =
+		resolvedCategory === "login" && Boolean(resolvedUrl) && !showFaviconImage;
+	const [gradientMid, gradientDeep] = getFaviconGradient(
+		domain || resolvedTitle,
+	);
 
 	const sizeClasses = {
 		sm: "w-8 h-8 text-xs",
 		md: "w-10 h-10 text-sm",
 		lg: "w-12 h-12 text-base",
+	};
+
+	const radiusClasses = {
+		sm: "rounded-[7px]",
+		md: "rounded-lg",
+		lg: "rounded-lg",
 	};
 
 	const iconSizes = {
@@ -160,25 +160,44 @@ export function VaultFavicon({
 	return (
 		<div
 			className={cn(
-				"flex shrink-0 items-center justify-center overflow-hidden rounded-xl border",
+				"flex shrink-0 items-center justify-center overflow-hidden",
 				sizeClasses[size],
+				radiusClasses[size],
 				resolvedCategory === "credit-card"
-					? cardColor
-					: hasFaviconError || !faviconUrl
-						? avatarColor
-						: "bg-accent",
+					? cn(cardColor, "border")
+					: showColoredFallback
+						? "shadow-[inset_0_0_0_1px_oklch(1_0_0/0.12)]"
+						: cn(
+								"border",
+								"bg-accent",
+								showFaviconImage &&
+									luminance === "dark" &&
+									"dark:bg-white/90",
+							),
 				className,
 			)}
+			style={
+				showColoredFallback
+					? {
+							background: `linear-gradient(135deg, ${gradientMid}, ${gradientDeep})`,
+						}
+					: undefined
+			}
 		>
-			{resolvedCategory === "login" && faviconUrl && !hasFaviconError ? (
+			{showFaviconImage && faviconUrl ? (
 				<img
 					src={faviconUrl}
 					alt=""
 					className={cn(imageSizes[size], "rounded-lg", "object-contain")}
 					onError={() => setFailedFaviconUrl(faviconUrl)}
+					onLoad={() => {
+						analyzeFaviconLuminance(faviconUrl).then((result) => {
+							setLuminanceState({ url: faviconUrl, result });
+						});
+					}}
 				/>
 			) : resolvedCategory === "login" && resolvedUrl ? (
-				<span className="select-none font-semibold text-zinc-700">
+				<span className="select-none font-semibold text-white">
 					{initials}
 				</span>
 			) : resolvedCategory === "login" ? (

@@ -55,10 +55,10 @@ export function DownloadCard() {
 			: m.dashboard_download_button_download_for({ platform: name });
 
 	return (
-		<Card className="gap-0 overflow-hidden border-border/70 py-0">
-			<CardHeader className="border-b bg-muted/35 py-4">
+		<Card className="gap-0 overflow-hidden py-0">
+			<CardHeader className="border-b py-4">
 				<div className="flex items-center justify-between gap-3">
-					<CardTitle className="flex items-center gap-2 text-base">
+					<CardTitle className="flex items-center gap-2 font-medium text-sm">
 						<Download className="h-4 w-4" />
 						{m.dashboard_download_title()}
 					</CardTitle>
@@ -69,11 +69,11 @@ export function DownloadCard() {
 				</CardDescription>
 			</CardHeader>
 
-			<CardContent className="space-y-4 p-5">
-				<div className="rounded-lg border bg-background/70 p-4">
+			<CardContent className="space-y-4 p-4">
+				<div className="rounded-md border bg-foreground/3 p-4">
 					<div className="mb-3 flex items-start justify-between gap-3">
 						<div className="flex items-center gap-2">
-							<div className="inline-flex size-9 items-center justify-center rounded-md border bg-muted/70 text-muted-foreground">
+							<div className="inline-flex size-9 items-center justify-center rounded-md border bg-foreground/3 text-muted-foreground">
 								<Icon className="h-4 w-4" />
 							</div>
 							<div className="space-y-0.5">

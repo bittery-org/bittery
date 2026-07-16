@@ -5,6 +5,7 @@ import {
 	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
+import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
@@ -345,9 +346,17 @@ export default function UnlockScreen() {
 			}
 
 			// Multiple accounts may be unlocked, but the app always operates on a
-			// single active account. Select the first unlocked account.
-			const activeId = unlockedAccountIds[0] ?? allAccounts[0]?.accountId;
-			if (activeId) {
+			// single active account. Return to whichever one was last active.
+			const previousActive = await storage.getActiveAccount();
+			const activeId = selectActiveAccountAfterUnlock({
+				previousActive,
+				unlockedAccountIds,
+				accounts: allAccounts,
+			});
+			const unchanged =
+				previousActive?.type === "single" &&
+				previousActive.accountId === activeId;
+			if (activeId && !unchanged) {
 				await storage.setActiveAccount({
 					type: "single",
 					accountId: activeId,

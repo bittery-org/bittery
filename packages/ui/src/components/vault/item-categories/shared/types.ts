@@ -3,6 +3,7 @@ import type { VaultOption } from "../../types";
 export interface BaseFormProps {
 	onCancel: () => void;
 	submitLabel?: string;
+	cancelLabel?: string;
 	isSubmitting?: boolean;
 	vaults?: VaultOption[];
 	selectedVaultId?: string;

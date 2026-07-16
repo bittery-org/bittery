@@ -1,7 +1,4 @@
 import {
-	Avatar,
-	AvatarFallback,
-	AvatarImage,
 	Button,
 	Popover,
 	PopoverContent,
@@ -22,22 +19,12 @@ interface VaultInfoPopoverProps {
 	children?: React.ReactNode;
 }
 
-function getInitials(name: string): string {
-	if (!name) return "??";
-	const parts = name.trim().split(/\s+/);
-	if (parts.length >= 2) {
-		return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
-	}
-	return name.slice(0, 2).toUpperCase();
-}
-
 export function VaultInfoPopover({
 	vaultName,
 	vaultIcon,
 	vaultImageUrl,
 	accountName,
 	accountTeamName,
-	accountTeamAvatarUrl,
 	children,
 }: VaultInfoPopoverProps) {
 	const displayTeamName = accountTeamName || accountName;
@@ -50,23 +37,6 @@ export function VaultInfoPopover({
 					size="sm"
 					className="min-w-0 max-w-full gap-1.5 px-2 py-1.5 text-muted-foreground hover:text-foreground"
 				>
-					{displayTeamName && (
-						<>
-							<Avatar className="size-5 shrink-0 text-[10px]">
-								<AvatarImage
-									src={accountTeamAvatarUrl ?? undefined}
-									alt={displayTeamName}
-								/>
-								<AvatarFallback className="text-[10px]">
-									{getInitials(displayTeamName)}
-								</AvatarFallback>
-							</Avatar>
-							<span className="hidden min-w-0 max-w-32 shrink truncate text-sm lg:block">
-								{displayTeamName}
-							</span>
-							<Separator orientation="vertical" className="mx-1" />
-						</>
-					)}
 					<VaultAvatar
 						name={vaultName}
 						icon={vaultIcon}

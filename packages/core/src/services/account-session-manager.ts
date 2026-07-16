@@ -5,6 +5,7 @@
 
 import {
 	findAccountById,
+	resolveActiveAccountId,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
@@ -98,7 +99,15 @@ export class AccountSessionManager {
 		]);
 
 		this.accounts = accounts;
-		this.active = active;
+		// The stored id is not trustworthy on its own: older builds persisted an
+		// email here, and an account may have been removed elsewhere. Anything
+		// that does not resolve to a known account is treated as "no active
+		// account" so the normal selection path takes over.
+		this.active =
+			active?.type === "single" &&
+			!resolveActiveAccountId(active.accountId, accounts)
+				? null
+				: active;
 		this.lockState.clear();
 		const verifiedUnlocked = new Set(
 			(

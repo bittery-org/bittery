@@ -6,7 +6,9 @@ use sqlx::{query, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 
 use super::*;
+use crate::config::bittery_mode;
 use crate::error::AppErrorCode;
+use crate::services::team_billing::team_management_enabled;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
     seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
@@ -277,16 +279,22 @@ fn mask_user_agent_handles_common_browsers_and_fallbacks() {
 
 #[test]
 fn team_management_enabled_respects_billing_state_and_mode() {
+    // The console gate resolves entitlement on the team plan; these assertions pin
+    // the billing states it accepts. The gate itself lives in `services::team_admin`.
+    let console_gate = |billing_status: Option<&str>| {
+        team_management_enabled(bittery_mode(), Some("team"), billing_status)
+    };
+
     with_bittery_mode(None, || {
-        assert!(!team_management_enabled(None));
-        assert!(!team_management_enabled(Some("past_due")));
-        assert!(team_management_enabled(Some("active")));
-        assert!(team_management_enabled(Some("trialing")));
+        assert!(!console_gate(None));
+        assert!(!console_gate(Some("past_due")));
+        assert!(console_gate(Some("active")));
+        assert!(console_gate(Some("trialing")));
         assert_eq!(bittery_mode(), "cloud");
     });
 
     with_bittery_mode(Some("self_hosted"), || {
-        assert!(team_management_enabled(None));
+        assert!(console_gate(None));
         assert_eq!(bittery_mode(), "self-hosted");
     });
 }

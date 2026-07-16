@@ -54,10 +54,24 @@ function createMockStorage(): IStorageAdapter {
 	} as unknown as IStorageAdapter;
 }
 
+function makeTravelModeClient(hiddenVaultIds: string[] = []) {
+	return {
+		getTravelMode: {
+			query: mock(async () => ({
+				enabled: hiddenVaultIds.length > 0,
+				hiddenVaultIds,
+				enabledAt: null,
+				updatedAt: new Date(0).toISOString(),
+			})),
+		},
+	};
+}
+
 function makeAccountInfo(
 	accountId: string,
 	email: string,
 	serverUrl: string,
+	travelMode?: ReturnType<typeof makeTravelModeClient>,
 ): AccountInfo {
 	return {
 		accountId,
@@ -76,6 +90,7 @@ function makeAccountInfo(
 				},
 			},
 			vault: { list: { query: mock(async () => []) } },
+			...(travelMode ? { travelMode } : {}),
 		} as never,
 	} as unknown as AccountInfo;
 }
@@ -214,6 +229,51 @@ describe("VaultRepositoryCoordinator", () => {
 				coordinator.getRepositoryForAccount("acc-unverified");
 			expect(verifiedRepo.isHydrated()).toBe(true);
 			expect(unverifiedRepo.isHydrated()).toBe(false);
+		});
+
+		it("verifies travel mode against the server when the in-memory policy was lost", async () => {
+			// Reproduces a web page reload: the session is still unlocked in
+			// storage, but the enforcer's in-memory verification is gone because
+			// nothing re-ran the unlock flow. Hydrate must re-verify rather than
+			// fail closed on a perfectly valid session.
+			const storage = createMockStorage();
+			const travelMode = makeTravelModeClient();
+			const coordinator = new VaultRepositoryCoordinator(crypto, storage);
+			const account = makeAccountInfo(
+				"acc-reloaded",
+				"reloaded@example.com",
+				"https://reloaded.example.com",
+				travelMode,
+			);
+
+			await coordinator.hydrate([account]);
+
+			expect(travelMode.getTravelMode.query).toHaveBeenCalled();
+			expect(getTravelModeEnforcer(storage).isVerified("acc-reloaded")).toBe(
+				true,
+			);
+			expect(
+				coordinator.getRepositoryForAccount("acc-reloaded").isHydrated(),
+			).toBe(true);
+		});
+
+		it("verifies each account only once across concurrent hydrate calls", async () => {
+			const storage = createMockStorage();
+			const travelMode = makeTravelModeClient();
+			const coordinator = new VaultRepositoryCoordinator(crypto, storage);
+			const account = makeAccountInfo(
+				"acc-once",
+				"once@example.com",
+				"https://once.example.com",
+				travelMode,
+			);
+
+			await Promise.all([
+				coordinator.hydrate([account]),
+				coordinator.hydrate([account]),
+			]);
+
+			expect(travelMode.getTravelMode.query).toHaveBeenCalledTimes(1);
 		});
 	});
 });

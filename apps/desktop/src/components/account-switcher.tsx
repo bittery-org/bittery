@@ -6,7 +6,6 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
 import type { AccountMetadata } from "@bittery/storage/types";
 import {
-	Badge,
 	Button,
 	cn,
 	Dialog,
@@ -14,24 +13,13 @@ import {
 	DialogDescription,
 	DialogHeader,
 	DialogTitle,
-	DropdownMenu,
-	DropdownMenuContent,
-	DropdownMenuItem,
-	DropdownMenuTrigger,
 	ScrollArea,
 	AccountSwitcher as SharedAccountSwitcher,
 	toast,
 } from "@bittery/ui";
 import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
-import {
-	ArrowLeftRight,
-	Copy,
-	MoreVertical,
-	Plus,
-	Server,
-	Trash2,
-} from "lucide-react";
+import { ArrowLeftRight, CheckIcon, Copy, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
@@ -207,22 +195,18 @@ export function AccountSwitcher() {
 		void handleAccountSelect(accountId);
 	};
 
-	const handleSharedRemoveAccountClick = (accountId: string) => {
-		handleRemoveAccountClick(accountId);
-	};
-
 	const trigger = (
 		<Button
 			variant="ghost"
 			size="sm"
-			className="w-full justify-start gap-2 text-left"
+			className="w-full justify-start gap-2 text-left text-foreground"
 			disabled={switchAccount.isPending}
 		>
 			{activeAccount ? (
 				<>
 					<AccountAvatar account={activeAccount} size="sm" />
-					<div className="flex flex-col items-start overflow-hidden">
-						<span className="max-w-24 truncate font-medium text-sm">
+					<div className="flex min-w-0 flex-1 flex-col items-start">
+						<span className="w-full truncate font-medium text-sm">
 							{activeAccount.teamName ||
 								activeAccount.name ||
 								activeAccount.email.split("@")[0]}
@@ -230,7 +214,7 @@ export function AccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<IconChevronDownOutlineDuo18 className="ml-auto h-4 w-4 opacity-50" />
+			<IconChevronDownOutlineDuo18 className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
 		</Button>
 	);
 
@@ -255,8 +239,6 @@ export function AccountSwitcher() {
 					settingsLabel: m.nav_menu_settings(),
 					lockAllAccountsLabel:
 						m.vaults_sidebar_account_switcher_menu_lock_all_accounts(),
-					removeAccountLabel:
-						m.vaults_sidebar_account_switcher_menu_remove_account(),
 					manageAccountsLabel:
 						m.vaults_sidebar_account_switcher_manage_accounts_title(),
 				}}
@@ -265,70 +247,65 @@ export function AccountSwitcher() {
 				onLockAll={handleLockAll}
 				showManageAccounts={true}
 				onManageAccounts={handleManageAccounts}
-				showAddAccount={false}
+				showAddAccount={true}
 				showSettings={true}
 				onSettings={handleSettings}
 				showSetupAnotherDevice={true}
 				onSetupAnotherDevice={handleSetupAnotherDevice}
-				showRemoveAccount={true}
-				onRemoveAccount={handleSharedRemoveAccountClick}
 				trigger={trigger}
 				align="start"
 			/>
 
 			<Dialog open={showManageAccounts} onOpenChange={setShowManageAccounts}>
-				<DialogContent className="max-w-2xl gap-0 overflow-hidden p-0">
-					<DialogHeader className="space-y-4 border-b px-6 pt-6 pb-5 text-left">
-						<div className="space-y-1.5">
-							<DialogTitle className="text-xl tracking-tight">
-								{m.vaults_sidebar_account_switcher_manage_accounts_title()}
-							</DialogTitle>
-							<DialogDescription>
-								{m.vaults_sidebar_account_switcher_manage_accounts_description()}
-							</DialogDescription>
-						</div>
-						<Button
-							size="sm"
-							className="w-fit gap-1.5"
-							onClick={handleAddAccountFromManageDialog}
-						>
-							<Plus className="size-4" />
-							{m.vaults_sidebar_account_switcher_menu_add_account()}
-						</Button>
+				<DialogContent className="gap-0 p-0 sm:max-w-xl">
+					<DialogHeader className="relative gap-1 px-5 pt-5 pb-4 text-left">
+						<DialogTitle>
+							{m.vaults_sidebar_account_switcher_manage_accounts_title()}
+						</DialogTitle>
+						<DialogDescription>
+							{m.vaults_sidebar_account_switcher_manage_accounts_description()}
+						</DialogDescription>
 					</DialogHeader>
 
-					{accountsData.length === 0 ? (
-						<div className="px-6 py-10">
-							<div className="rounded-2xl border border-dashed px-4 py-12 text-center text-muted-foreground text-sm">
-								{m.vaults_sidebar_account_switcher_manage_accounts_empty()}
-							</div>
+					<ScrollArea className="max-h-[65vh]">
+						<div className="flex flex-col gap-3 px-5 pb-5">
+							{accountsData.length === 0 && (
+								<div className="rounded-lg border border-dashed px-4 py-10 text-center text-muted-foreground text-sm">
+									{m.vaults_sidebar_account_switcher_manage_accounts_empty()}
+								</div>
+							)}
+
+							{accountsData.map((account) => (
+								<ManageAccountCard
+									key={account.accountId}
+									account={account}
+									isActive={activeAccountId === account.accountId}
+									isUnlocked={unlockedAccountIdsList.includes(
+										account.accountId,
+									)}
+									isBusy={switchAccount.isPending}
+									formatTimestamp={formatTimestamp}
+									onSwitch={() =>
+										handleAccountSelectFromManageDialog(account.accountId)
+									}
+									onRemove={() => {
+										setShowManageAccounts(false);
+										handleRemoveAccountClick(account.accountId);
+									}}
+									onCopy={handleCopy}
+								/>
+							))}
+
+							<button
+								type="button"
+								onClick={handleAddAccountFromManageDialog}
+								className="flex h-10 items-center justify-center gap-2 rounded-lg border border-dashed text-muted-foreground text-sm transition-colors hover:border-border-strong hover:bg-foreground/3 hover:text-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+							>
+								<Plus className="size-4" />
+								{m.vaults_sidebar_account_switcher_menu_add_account()}
+							</button>
 						</div>
-					) : (
-						<ScrollArea className="max-h-[60vh]">
-							<div className="space-y-3 px-6 py-5">
-								{accountsData.map((account) => (
-									<ManageAccountCard
-										key={account.accountId}
-										account={account}
-										isActive={activeAccountId === account.accountId}
-										isUnlocked={unlockedAccountIdsList.includes(
-											account.accountId,
-										)}
-										isBusy={switchAccount.isPending}
-										formatTimestamp={formatTimestamp}
-										onSwitch={() =>
-											handleAccountSelectFromManageDialog(account.accountId)
-										}
-										onRemove={() => {
-											setShowManageAccounts(false);
-											handleRemoveAccountClick(account.accountId);
-										}}
-										onCopy={handleCopy}
-									/>
-								))}
-							</div>
-						</ScrollArea>
-					)}
+					</ScrollArea>
 				</DialogContent>
 			</Dialog>
 
@@ -382,164 +359,154 @@ function ManageAccountCard({
 
 	const displayName =
 		account.teamName || account.name || account.email.split("@")[0];
+	const serverUrl = account.serverUrl;
 
 	return (
 		<div
 			className={cn(
-				"overflow-hidden rounded-2xl border bg-card transition-colors",
-				isActive
-					? "border-primary/50 ring-1 ring-primary/15"
-					: "hover:border-border",
+				"group/card overflow-hidden rounded-lg border bg-card",
+				isActive &&
+					"shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]",
 			)}
 		>
-			<div className="flex items-center gap-3 p-4">
-				<AccountAvatar account={account} size="lg" />
+			{/* Header row */}
+			<div className="relative flex items-center gap-3 px-4 py-3">
+				{isActive && (
+					<span
+						aria-hidden
+						className="absolute top-2.5 bottom-2.5 left-0 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+					/>
+				)}
+				<AccountAvatar account={account} size="md" />
 
-				<div className="min-w-0 flex-1 space-y-1">
-					<div className="flex flex-wrap items-center gap-1.5">
-						<span className="truncate font-semibold text-sm">
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-1.5">
+						<span className="truncate font-medium text-sm leading-tight">
 							{displayName}
 						</span>
 						{isActive && (
-							<Badge className="h-5 px-2 font-semibold text-[10px] uppercase tracking-wide">
-								{m.vaults_sidebar_account_switcher_badge_active()}
-							</Badge>
+							<CheckIcon
+								aria-label={m.vaults_sidebar_account_switcher_badge_active()}
+								className="size-3.5 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]"
+							/>
 						)}
-						<Badge
-							variant={isUnlocked ? "secondary" : "outline"}
-							className={cn(
-								"h-5 px-2 font-semibold text-[10px] uppercase tracking-wide",
-								isUnlocked &&
-									"border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-							)}
-						>
-							{isUnlocked
-								? m.vaults_sidebar_account_switcher_badge_unlocked()
-								: m.vaults_sidebar_account_switcher_badge_locked()}
-						</Badge>
 					</div>
-					<p className="truncate text-muted-foreground text-xs">
+					<span className="block truncate text-[11px] text-muted-foreground leading-tight">
 						{account.email}
-					</p>
+					</span>
 				</div>
 
-				<div className="flex shrink-0 items-center gap-1.5">
-					{!isActive && (
-						<Button
-							size="sm"
-							variant="outline"
-							className="gap-1.5"
-							onClick={onSwitch}
-							disabled={isBusy}
-						>
-							<ArrowLeftRight className="size-3.5" />
-							{m.vaults_sidebar_account_switcher_action_switch()}
-						</Button>
-					)}
-					<DropdownMenu>
-						<DropdownMenuTrigger asChild>
-							<Button
-								size="icon"
-								variant="ghost"
-								className="size-8 text-muted-foreground"
-								aria-label={m.vaults_sidebar_account_switcher_action_account_actions()}
-							>
-								<MoreVertical className="size-4" />
-							</Button>
-						</DropdownMenuTrigger>
-						<DropdownMenuContent align="end" className="w-52">
-							<DropdownMenuItem variant="destructive" onClick={onRemove}>
-								<Trash2 className="size-4" />
-								{m.vaults_sidebar_account_switcher_menu_remove_account()}
-							</DropdownMenuItem>
-						</DropdownMenuContent>
-					</DropdownMenu>
-				</div>
+				<span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
+					<span
+						aria-hidden
+						className={cn(
+							"size-1.5 rounded-full",
+							isUnlocked
+								? "bg-emerald-400 shadow-[0_0_6px_oklch(0.72_0.14_160/0.6)]"
+								: "bg-muted-foreground/50",
+						)}
+					/>
+					{isUnlocked
+						? m.vaults_sidebar_account_switcher_badge_unlocked()
+						: m.vaults_sidebar_account_switcher_badge_locked()}
+				</span>
+
+				{!isActive && (
+					<Button
+						size="sm"
+						variant="outline"
+						className="gap-1.5"
+						onClick={onSwitch}
+						disabled={isBusy}
+					>
+						<ArrowLeftRight className="size-3.5" />
+						{m.vaults_sidebar_account_switcher_action_switch()}
+					</Button>
+				)}
+
+				<Button
+					size="icon"
+					variant="ghost"
+					className="size-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover/card:opacity-100"
+					onClick={onRemove}
+					aria-label={m.vaults_sidebar_account_switcher_menu_remove_account()}
+				>
+					<Trash2 className="size-3.5" />
+				</Button>
 			</div>
 
-			<dl className="space-y-2.5 border-t bg-muted/30 px-4 py-3 text-xs">
-				{account.teamName && (
-					<DetailRow label={m.vaults_sidebar_account_switcher_label_team()}>
-						<span className="truncate font-medium">{account.teamName}</span>
-					</DetailRow>
-				)}
-
-				<DetailRow
-					label={
-						<span className="flex items-center gap-1.5">
-							<Server className="size-3.5" />
-							{m.vaults_sidebar_account_switcher_label_server()}
-						</span>
-					}
-				>
-					<button
-						type="button"
-						onClick={() => account.serverUrl && onCopy(account.serverUrl)}
-						className="flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-0.5 text-foreground transition-colors hover:bg-muted"
-						title={account.serverUrl ?? undefined}
-					>
-						<span className="truncate font-mono text-[11px]">
-							{account.serverUrl || "—"}
-						</span>
-						<Copy className="size-3 shrink-0 text-muted-foreground" />
-					</button>
-				</DetailRow>
-
-				<DetailRow label={m.vaults_sidebar_account_switcher_label_user_id()}>
-					<span className="truncate font-mono text-[11px]">
-						{account.userId}
-					</span>
-					<button
-						type="button"
-						onClick={() => onCopy(account.userId)}
-						className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-						aria-label={m.vaults_sidebar_account_switcher_action_copy()}
-					>
-						<Copy className="size-3" />
-					</button>
-				</DetailRow>
-
-				{"secretKeyHint" in account && (
-					<DetailRow
+			{/* Detail field rows (hairline-divided, hover-revealed copy actions) */}
+			<div className="divide-y border-t">
+				<ManageAccountFieldRow
+					label={m.vaults_sidebar_account_switcher_label_server()}
+					value={serverUrl || "—"}
+					onCopy={serverUrl ? () => onCopy(serverUrl) : undefined}
+					copyLabel={m.vaults_sidebar_account_switcher_action_copy()}
+				/>
+				<ManageAccountFieldRow
+					label={m.vaults_sidebar_account_switcher_label_user_id()}
+					value={account.userId}
+					onCopy={() => onCopy(account.userId)}
+					copyLabel={m.vaults_sidebar_account_switcher_action_copy()}
+				/>
+				{"secretKeyHint" in account && account.secretKeyHint && (
+					<ManageAccountFieldRow
 						label={m.vaults_sidebar_account_switcher_label_secret_key_hint()}
-					>
-						<span className="font-mono text-[11px]">
-							{account.secretKeyHint || "—"}
+						value={account.secretKeyHint}
+						copyLabel={m.vaults_sidebar_account_switcher_action_copy()}
+					/>
+				)}
+
+				<div className="flex items-center gap-4 px-4 py-2 text-[11px] text-muted-foreground tabular-nums">
+					{"addedAt" in account && (
+						<span>
+							{m.vaults_sidebar_account_switcher_label_added()}{" "}
+							{formatTimestamp(account.addedAt)}
 						</span>
-					</DetailRow>
-				)}
-
-				{"addedAt" in account && (
-					<DetailRow label={m.vaults_sidebar_account_switcher_label_added()}>
-						<span>{formatTimestamp(account.addedAt)}</span>
-					</DetailRow>
-				)}
-
-				{"lastActiveAt" in account && (
-					<DetailRow
-						label={m.vaults_sidebar_account_switcher_label_last_active()}
-					>
-						<span>{formatTimestamp(account.lastActiveAt)}</span>
-					</DetailRow>
-				)}
-			</dl>
+					)}
+					{"lastActiveAt" in account && (
+						<span>
+							{m.vaults_sidebar_account_switcher_label_last_active()}{" "}
+							{formatTimestamp(account.lastActiveAt)}
+						</span>
+					)}
+				</div>
+			</div>
 		</div>
 	);
 }
 
-function DetailRow({
+function ManageAccountFieldRow({
 	label,
-	children,
+	value,
+	onCopy,
+	copyLabel,
 }: {
 	label: ReactNode;
-	children: ReactNode;
+	value: string;
+	onCopy?: () => void;
+	copyLabel: string;
 }) {
 	return (
-		<div className="flex items-center justify-between gap-3">
-			<dt className="shrink-0 text-muted-foreground">{label}</dt>
-			<dd className="flex min-w-0 items-center justify-end gap-1.5 text-right">
-				{children}
-			</dd>
+		<div className="group/row flex min-h-[42px] items-center gap-3 px-4 py-1.5 transition-colors hover:bg-foreground/3">
+			<div className="min-w-0 flex-1">
+				<div className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
+					{label}
+				</div>
+				<div className="truncate font-mono text-[11.5px]" title={value}>
+					{value}
+				</div>
+			</div>
+			{onCopy && (
+				<button
+					type="button"
+					onClick={onCopy}
+					aria-label={copyLabel}
+					className="grid size-7 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-overlay hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+				>
+					<Copy className="size-3.5" />
+				</button>
+			)}
 		</div>
 	);
 }

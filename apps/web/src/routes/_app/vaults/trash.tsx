@@ -96,7 +96,7 @@ function VaultTrashPage() {
 	return (
 		<div className="flex flex-1 flex-col overflow-hidden">
 			{/* Header */}
-			<div className="flex items-center justify-between border-b bg-background px-8 py-4">
+			<div className="flex h-12 items-center justify-between border-b bg-background px-8">
 				<div className="flex items-center gap-3">
 					<Archive className="size-5 text-muted-foreground" />
 					<div>
@@ -150,7 +150,7 @@ function VaultTrashPage() {
 							return (
 								<div
 									key={item.id}
-									className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-muted/30"
+									className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-foreground/4"
 								>
 									<div className="flex min-w-0 flex-1 items-center gap-4">
 										<Favicon item={item} title={title} size="md" />

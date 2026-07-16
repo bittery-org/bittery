@@ -143,7 +143,7 @@ export function ItemDetailPane({
 		>
 			{selectedItem ? (
 				<>
-					<div className="flex items-center justify-between border-b px-3 py-2.5">
+					<div className="flex h-11 min-w-0 shrink-0 items-center justify-between border-b px-2.5 xl:h-12">
 						<Button
 							variant="ghost"
 							size="sm"
@@ -171,7 +171,7 @@ export function ItemDetailPane({
 							)}
 							<DropdownMenu>
 								<DropdownMenuTrigger asChild>
-									<Button variant="ghost" size="sm" className="h-8 w-8 p-0">
+									<Button variant="ghost" size="sm" className="size-7 p-0">
 										<Dots className="h-4 w-4" />
 									</Button>
 								</DropdownMenuTrigger>
@@ -221,7 +221,7 @@ export function ItemDetailPane({
 							</DropdownMenu>
 						</div>
 					</div>
-					<div className="min-h-0 flex-1 overflow-y-auto p-4">
+					<div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
 						<ItemDetail
 							category={selectedItem.category}
 							data={selectedItem}
@@ -279,10 +279,10 @@ export function ItemDetailPane({
 			) : (
 				<div className="hidden flex-1 items-center justify-center p-8 text-center md:flex">
 					<div>
-						<div className="mb-4 inline-flex rounded-full bg-muted p-6">
+						<div className="mb-4 inline-flex rounded-full border bg-foreground/3 p-5">
 							{emptyIcon ?? <Key className="size-12 text-muted-foreground" />}
 						</div>
-						<h3 className="mb-2 font-semibold text-lg">
+						<h3 className="mb-2 font-medium text-sm">
 							{m.vaults_shared_empty_no_item_selected()}
 						</h3>
 						<p className="text-muted-foreground text-sm">

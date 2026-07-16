@@ -7,6 +7,7 @@ import type {
 } from "@bittery/types";
 import type { AccountInfo } from "./account-resolver";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
+import type { TravelModeRpcClient } from "./travel-mode-service";
 import {
 	type BootstrapItemsClient,
 	type VaultRepository,
@@ -44,6 +45,7 @@ export class VaultRepositoryCoordinator {
 	>();
 	private readonly activeAccountIds = new Set<string>();
 	private readonly hydratingAccountIds = new Set<string>();
+	private readonly verifyingAccounts = new Map<string, Promise<void>>();
 	private snapshot = 0;
 
 	constructor(
@@ -132,6 +134,39 @@ export class VaultRepositoryCoordinator {
 		this.emit();
 	}
 
+	/**
+	 * Travel mode verification lives in memory, so it is lost on every page
+	 * reload even though the unlocked session survives in storage. Platforms
+	 * that re-run an unlock flow (desktop, mobile, extension) re-verify there;
+	 * the web app boots straight into an unlocked vault and has no such hook.
+	 * Verifying here covers both: it is a no-op once the account is verified,
+	 * and it re-fetches the authoritative policy from the server otherwise, so
+	 * a stale local cache can never fail open.
+	 */
+	private async ensureTravelModeVerified(account: AccountInfo): Promise<void> {
+		const enforcer = getTravelModeEnforcer(this.storage, this);
+		if (enforcer.isVerified(account.accountId)) {
+			return;
+		}
+
+		const inFlight = this.verifyingAccounts.get(account.accountId);
+		if (inFlight) {
+			return inFlight;
+		}
+
+		const verification = enforcer
+			.verifyForUnlock(
+				account.accountId,
+				account.rpcClient as unknown as TravelModeRpcClient,
+			)
+			.then(() => undefined)
+			.finally(() => {
+				this.verifyingAccounts.delete(account.accountId);
+			});
+		this.verifyingAccounts.set(account.accountId, verification);
+		return verification;
+	}
+
 	async hydrate(accounts: AccountInfo[]): Promise<void> {
 		this.setActiveAccounts(accounts);
 
@@ -157,6 +192,7 @@ export class VaultRepositoryCoordinator {
 				this.emit();
 
 				try {
+					await this.ensureTravelModeVerified(account);
 					await repo.hydrate();
 
 					// Bootstrap only when local cache has no established snapshot yet.
@@ -208,6 +244,7 @@ export class VaultRepositoryCoordinator {
 				this.emit();
 
 				try {
+					await this.ensureTravelModeVerified(account);
 					await repo.hydrate();
 
 					if (!repo.hasCacheSnapshot()) {

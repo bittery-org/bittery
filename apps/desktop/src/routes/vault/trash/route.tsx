@@ -138,7 +138,7 @@ function TrashComponent() {
 								return (
 									<div
 										key={item.id}
-										className="group mb-1 w-full rounded-md px-3 py-2.5 text-left transition-colors hover:bg-muted/30"
+										className="group mb-1 w-full rounded-md px-2.5 py-2 text-left transition-colors hover:bg-foreground/4"
 									>
 										<div className="flex min-w-0 items-center gap-3">
 											<Favicon item={item} title={title} size="sm" />

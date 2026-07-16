@@ -22,56 +22,39 @@ function RouteComponent() {
 	const name = userQuery.data?.name;
 
 	return (
-		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
-
-				<div className="relative flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-					<div className="flex min-w-0 items-center gap-3">
-						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
-							<ShieldCheck className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
-						</div>
-						<div className="min-w-0">
-							<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
-								{name
-									? m.dashboard_home_hero_heading_named({ name })
-									: m.dashboard_home_hero_heading_default()}
-							</h1>
-							<p className="text-muted-foreground text-xs">
-								{m.dashboard_home_hero_description()}
-							</p>
-						</div>
-					</div>
-
-					<div className="flex items-center gap-2 sm:shrink-0">
-						<Button
-							variant="outline"
-							size="sm"
-							className="h-8 px-2 sm:px-3"
-							asChild
-						>
-							<Link to="/settings">
-								<span className="text-xs">
-									{m.dashboard_home_button_account_settings()}
-								</span>
-							</Link>
-						</Button>
-						<Button size="sm" className="h-8 px-2 sm:px-3" asChild>
-							<Link to="/vaults">
-								<span className="text-xs">
-									{m.dashboard_home_button_open_vaults()}
-								</span>
-							</Link>
-						</Button>
-					</div>
+		<div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-3">
+			<div className="flex items-center gap-3">
+				<div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+					<ShieldCheck className="size-4" />
 				</div>
-			</section>
+				<div className="min-w-0">
+					<h1 className="truncate font-semibold text-lg tracking-[-0.015em]">
+						{name
+							? m.dashboard_home_hero_heading_named({ name })
+							: m.dashboard_home_hero_heading_default()}
+					</h1>
+					<p className="text-muted-foreground text-xs">
+						{m.dashboard_home_hero_description()}
+					</p>
+				</div>
 
-			<div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-				<div className="space-y-6">
+				<div className="ml-auto flex items-center gap-2">
+					<Button variant="outline" size="sm" asChild>
+						<Link to="/settings">
+							{m.dashboard_home_button_account_settings()}
+						</Link>
+					</Button>
+					<Button size="sm" asChild>
+						<Link to="/vaults">{m.dashboard_home_button_open_vaults()}</Link>
+					</Button>
+				</div>
+			</div>
+
+			<div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+				<div className="space-y-4">
 					<section className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
+							<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 								{m.dashboard_home_metrics_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">

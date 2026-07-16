@@ -129,6 +129,7 @@ pub async fn edge_http_middleware(
 
     apply_security_headers(&path, &mut response);
     apply_cors_headers(&config, origin.as_deref(), &mut response);
+    apply_public_asset_cors(&path, &mut response);
     response
 }
 
@@ -246,6 +247,26 @@ fn apply_cors_headers(config: &EdgeHttpConfig, origin: Option<&str>, response: &
     );
 }
 
+// Favicons are public, unauthenticated images; clients (including origins
+// that can never be allowlisted, like the desktop webview's tauri://localhost
+// or browser extensions) need CORS-readable responses to inspect icon pixels
+// on a canvas. An allowlisted origin set by apply_cors_headers wins.
+fn apply_public_asset_cors(path: &str, response: &mut Response) {
+    if !is_public_asset_path(path) {
+        return;
+    }
+    if response.headers().contains_key(ACCESS_CONTROL_ALLOW_ORIGIN) {
+        return;
+    }
+    response
+        .headers_mut()
+        .insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+}
+
+fn is_public_asset_path(path: &str) -> bool {
+    path.starts_with("/favicon/")
+}
+
 fn is_sensitive_path(path: &str) -> bool {
     path == "/"
         || path == "/healthz"
@@ -325,7 +346,58 @@ fn assert_valid_origin(value: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_cors_origins;
+    use axum::{
+        body::Body,
+        http::{header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue},
+        response::Response,
+    };
+
+    use super::{apply_public_asset_cors, parse_cors_origins};
+
+    #[test]
+    fn adds_wildcard_cors_for_favicon_responses() {
+        let mut response = Response::new(Body::empty());
+        apply_public_asset_cors("/favicon/github.com", &mut response);
+        assert_eq!(
+            response
+                .headers()
+                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                .expect("favicon responses should be CORS-readable"),
+            "*"
+        );
+    }
+
+    #[test]
+    fn keeps_allowlisted_origin_over_wildcard() {
+        let mut response = Response::new(Body::empty());
+        response.headers_mut().insert(
+            ACCESS_CONTROL_ALLOW_ORIGIN,
+            HeaderValue::from_static("https://app.example.com"),
+        );
+        apply_public_asset_cors("/favicon/github.com", &mut response);
+        assert_eq!(
+            response
+                .headers()
+                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                .expect("existing origin header should be preserved"),
+            "https://app.example.com"
+        );
+    }
+
+    #[test]
+    fn does_not_add_wildcard_cors_for_other_paths() {
+        for path in ["/rpc", "/sync", "/cdn/teams/1/avatar.png", "/waitlist"] {
+            let mut response = Response::new(Body::empty());
+            apply_public_asset_cors(path, &mut response);
+            assert!(
+                response
+                    .headers()
+                    .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .is_none(),
+                "unexpected wildcard CORS on {path}"
+            );
+        }
+    }
 
     #[test]
     fn accepts_localhost_http_origins() {

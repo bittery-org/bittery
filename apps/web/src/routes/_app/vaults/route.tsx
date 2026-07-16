@@ -4,6 +4,7 @@ import {
 	useAvailableTags,
 	useCreateVault,
 	useDeleteVault,
+	useItemCounts,
 	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
@@ -38,8 +39,9 @@ function VaultsLayout() {
 	const currentVaultId = (params as { vaultId?: string }).vaultId;
 
 	const { vaultKeys } = useAllVaultKeys();
-	const { items } = useItems();
+	const { items, isLoading: isLoadingItems } = useItems();
 	const availableTags = useAvailableTags(items);
+	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
@@ -119,10 +121,12 @@ function VaultsLayout() {
 		<VaultDndProvider>
 			<div className="flex min-h-0 flex-1 overflow-hidden">
 				{/* Desktop sidebar */}
-				<aside className="hidden w-52 shrink-0 flex-col border-r pt-11 lg:flex xl:pt-12">
+				<aside className="hidden w-54 shrink-0 flex-col border-r lg:flex">
 					<VaultNavSidebar
+						hasHeaderInset
 						vaults={vaultKeys}
 						tags={tags}
+						itemCounts={itemCounts}
 						currentVaultId={currentVaultId}
 						onNewVault={() => setIsCreateVaultDialogOpen(true)}
 						onEditVault={handleOpenEditVault}
@@ -157,6 +161,7 @@ function VaultsLayout() {
 						<VaultNavSidebar
 							vaults={vaultKeys}
 							tags={tags}
+							itemCounts={itemCounts}
 							currentVaultId={currentVaultId}
 							onNewVault={() => {
 								setIsSidebarOpen(false);

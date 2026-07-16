@@ -156,7 +156,7 @@ export function VaultIcon({
 			{state === "unlocking" && (
 				<div className="absolute inset-0 flex items-center justify-center">
 					<div
-						className="animate-spin rounded-full border-4 border-blue-200 border-t-blue-600"
+						className="animate-spin rounded-full border-4 border-primary/20 border-t-primary"
 						style={{ width: size * 0.85, height: size * 0.85 }}
 					/>
 				</div>

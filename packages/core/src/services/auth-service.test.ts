@@ -6,8 +6,12 @@ import {
 	deriveSrpLoginProof,
 	getBiometricUnlockAvailability,
 	type IAuthClient,
+	type LoginResult,
 	performSRPLogin,
+	storeLoginSession,
 } from "./auth-service";
+import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
+import type { TravelModeRpcClient } from "./travel-mode-service";
 
 const kdfParams: KdfParams = {
 	schemaVersion: 1,
@@ -215,5 +219,86 @@ describe("account-routed authentication", () => {
 		for (const write of Object.values(writes)) {
 			expect(write).not.toHaveBeenCalled();
 		}
+	});
+});
+
+describe("storeLoginSession travel mode verification", () => {
+	function loginResult(): LoginResult {
+		return {
+			token: "fresh-login-token",
+			sessionId: "session",
+			expiresAt: new Date(Date.now() + 60_000),
+			user: { id: "user-1", email: "user@example.com" },
+			vaultKeys: [],
+			masterUnlockKey: new Uint8Array([1, 2, 3]),
+			kdfParams,
+			serverUrl: "https://cloud.example",
+		};
+	}
+
+	function createStorage(): IStorageAdapter {
+		// No auth token is stored yet — this is a first login in a fresh browser,
+		// so any ambient RPC client reading storage is unauthenticated.
+		return {
+			getAccountsList: mock(async () => []),
+			getAuthToken: mock(async () => null),
+			getServerUrl: mock(async () => "https://cloud.example"),
+			getTravelModeCache: mock(async () => null),
+			storeTravelModeCache: mock(async () => {}),
+			getPinnedKdfParams: mock(async () => null),
+			storePinnedKdfParams: mock(async () => {}),
+			storeAuthToken: mock(async () => {}),
+			storeServerUrl: mock(async () => {}),
+			storeVaultKeys: mock(async () => {}),
+			getVaultKeys: mock(async () => []),
+			storeSecretKey: mock(async () => {}),
+			storeSessionData: mock(async () => {}),
+			setMasterUnlockKey: mock(async () => {}),
+			storeEncryptedPrivateKey: mock(async () => {}),
+		} as unknown as IStorageAdapter;
+	}
+
+	function travelModeClientForToken(
+		token: string | null,
+		seenTokens: (string | null)[],
+	): TravelModeRpcClient {
+		return {
+			travelMode: {
+				getTravelMode: {
+					query: mock(async () => {
+						seenTokens.push(token);
+						if (!token) {
+							throw new Error("UNAUTHORIZED");
+						}
+						return {
+							enabled: false,
+							hiddenVaultIds: [],
+							enabledAt: null,
+							updatedAt: new Date().toISOString(),
+						};
+					}),
+				},
+			},
+		} as unknown as TravelModeRpcClient;
+	}
+
+	it("verifies travel mode with the freshly issued login token", async () => {
+		resetTravelModeEnforcerForTests();
+		const storage = createStorage();
+		const seenTokens: (string | null)[] = [];
+
+		await storeLoginSession(
+			loginResult(),
+			"secret",
+			storage,
+			"user@example.com",
+			{
+				serverUrl: "https://cloud.example",
+				createTravelModeRpcClient: (token) =>
+					travelModeClientForToken(token, seenTokens),
+			},
+		);
+
+		expect(seenTokens).toEqual(["fresh-login-token"]);
 	});
 });

@@ -3,6 +3,7 @@ use qubit::{handler, server::Router};
 use crate::{
     config::db_pool,
     error::AppError,
+    services::access::{get_member_access, MemberAccessInput, MemberAccessResponse},
     services::auth::{AppContext, RefreshSessionContext},
     services::team::{self, invitation_handlers, member_handlers, *},
     AppState, NotifySyncExt,
@@ -173,6 +174,15 @@ mod rpc_member_handlers {
         member_handlers::list_team_members(pool, &ctx.session.user_id, input).await
     }
 
+    #[handler(query)]
+    pub async fn access(
+        ctx: RefreshSessionContext,
+        input: MemberAccessInput,
+    ) -> Result<MemberAccessResponse, AppError> {
+        let pool = db_pool(&ctx.app_state)?;
+        get_member_access(pool, &ctx.session.user_id, input).await
+    }
+
     #[allow(non_snake_case)]
     #[handler(query)]
     pub async fn getTeamRotationData(
@@ -256,6 +266,7 @@ fn create_team_invitations_router() -> Router<AppState> {
 fn create_team_members_router() -> Router<AppState> {
     Router::new()
         .handler(rpc_member_handlers::list)
+        .handler(rpc_member_handlers::access)
         .handler(rpc_member_handlers::getTeamRotationData)
         .handler(rpc_member_handlers::remove)
         .handler(rpc_member_handlers::deleteAccount)

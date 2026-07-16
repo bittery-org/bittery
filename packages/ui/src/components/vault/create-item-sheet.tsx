@@ -2,6 +2,8 @@ import type { CompiledMessages } from "@bittery/i18n";
 import { useI18n } from "@bittery/i18n/react";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
+	IconChevronLeftOutlineDuo18,
+	IconChevronRightOutlineDuo18,
 	IconCreditCardLockOutlineDuo18,
 	IconFileLockOutlineDuo18,
 	IconIdBadge2OutlineDuo18,
@@ -9,6 +11,8 @@ import {
 	IconMobileOutlineDuo18,
 } from "../../icons";
 import { useState } from "react";
+import { Button } from "../button";
+import { DialogBrandAccent } from "../dialog";
 import {
 	Sheet,
 	SheetContent,
@@ -108,6 +112,10 @@ export function CreateItemSheet({
 		useState<ItemCategory>("login");
 	const [isSubmitting, setIsSubmitting] = useState(false);
 
+	const SelectedCategoryIcon =
+		categories.find((category) => category.type === selectedCategory)?.icon ??
+		IconKeyOutlineDuo18;
+
 	const handleReset = () => {
 		setStep(1);
 		setSelectedCategory("login");
@@ -160,61 +168,95 @@ export function CreateItemSheet({
 			}}
 		>
 			<SheetContent
-				className="flex flex-col overflow-hidden p-0 sm:w-[65vw] sm:max-w-4xl"
+				className="flex flex-col gap-0 overflow-hidden p-0 sm:w-[65vw] sm:max-w-2xl"
 				data-testid="create-item-sheet"
 			>
-				<SheetHeader className="px-7 py-4">
-					<SheetTitle className="mb-1">
-						{step === 1
-							? m.vaults_detail_items_create_sheet_title_default()
-							: m.vaults_detail_items_create_sheet_title_selected({
-									category: getCategoryTitle(selectedCategory, m),
-								})}
-					</SheetTitle>
-					<SheetDescription>
-						{step === 1
-							? m.vaults_detail_items_create_sheet_description_default()
-							: m.vaults_detail_items_create_sheet_description_selected()}
-					</SheetDescription>
+				<DialogBrandAccent />
+
+				<SheetHeader className="relative space-y-0 border-b px-6 pt-5 pb-4">
+					{step === 1 ? (
+						<div className="flex flex-col gap-1 pr-8">
+							<SheetTitle>
+								{m.vaults_detail_items_create_sheet_title_default()}
+							</SheetTitle>
+							<SheetDescription>
+								{m.vaults_detail_items_create_sheet_description_default()}
+							</SheetDescription>
+						</div>
+					) : (
+						<div className="flex items-center gap-3 pr-8">
+							<Button
+								type="button"
+								variant="ghost"
+								size="icon"
+								onClick={handleBack}
+								aria-label={m.vaults_detail_items_create_sheet_action_back()}
+								data-testid="create-item-back-button"
+								className="-ml-1.5 size-7 shrink-0 text-muted-foreground"
+							>
+								<IconChevronLeftOutlineDuo18 className="size-4" />
+							</Button>
+							<span
+								aria-hidden
+								className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-foreground/3 text-foreground shadow-[0_0_20px_color-mix(in_oklab,var(--color-primary-deep)_16%,transparent)] dark:shadow-[0_0_24px_color-mix(in_oklab,var(--color-primary-deep)_28%,transparent)]"
+							>
+								<SelectedCategoryIcon className="size-4.5" />
+							</span>
+							<div className="flex min-w-0 flex-col gap-0.5">
+								<SheetTitle className="truncate">
+									{m.vaults_detail_items_create_sheet_title_selected({
+										category: getCategoryTitle(selectedCategory, m),
+									})}
+								</SheetTitle>
+								<SheetDescription className="truncate">
+									{m.vaults_detail_items_create_sheet_description_selected()}
+								</SheetDescription>
+							</div>
+						</div>
+					)}
 				</SheetHeader>
 
-				<div className="flex flex-1 flex-col overflow-y-auto px-6 pb-6">
-					{step === 1 ? (
-						<div className="grid gap-3">
+				{step === 1 ? (
+					<div className="flex-1 overflow-y-auto px-6 py-5">
+						<div className="flex flex-col divide-y divide-border overflow-hidden rounded-lg border bg-card">
 							{categories.map((category) => (
 								<button
 									key={category.type}
 									type="button"
 									onClick={() => handleCategorySelect(category.type)}
 									data-testid={`item-category-${category.type}`}
-									className="group flex items-start gap-4 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-accent"
+									className="group flex items-center gap-3.5 px-4 py-3 text-left transition-colors hover:bg-foreground/4 focus-visible:bg-foreground/4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:ring-inset"
 								>
-									<div className="flex size-10 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-										<category.icon className="size-5" />
-									</div>
-									<div className="flex-1">
-										<h3 className="font-medium">
+									<span className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-foreground/3 text-muted-foreground transition-colors group-hover:text-foreground group-focus-visible:text-foreground">
+										<category.icon className="size-4.5" />
+									</span>
+									<span className="flex min-w-0 flex-1 flex-col gap-0.5">
+										<span className="font-medium text-foreground text-sm">
 											{getCategoryTitle(category.type, m)}
-										</h3>
-										<p className="mt-1 text-muted-foreground text-sm">
+										</span>
+										<span className="text-muted-foreground text-xs">
 											{getCategoryDescription(category.type, m)}
-										</p>
-									</div>
+										</span>
+									</span>
+									<IconChevronRightOutlineDuo18 className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
 								</button>
 							))}
 						</div>
-					) : (
+					</div>
+				) : (
+					<div className="flex min-h-0 flex-1 flex-col">
 						<ItemForm
 							category={selectedCategory}
 							onSubmit={handleSubmit}
 							onCancel={handleCancel}
 							submitLabel={m.vaults_detail_items_form_action_create()}
+							cancelLabel={m.vaults_detail_items_create_sheet_action_back()}
 							isSubmitting={isSubmitting}
 							vaults={vaults}
 							selectedVaultId={selectedVaultId}
 						/>
-					)}
-				</div>
+					</div>
+				)}
 			</SheetContent>
 		</Sheet>
 	);

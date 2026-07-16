@@ -1,8 +1,31 @@
 import { describe, expect, test } from "bun:test";
 import { parseDesktopSnapshotItem } from "../../src/background/desktop-snapshot";
-import { mergeItemCollections } from "../../src/background/vault-utils";
+import {
+	mergeDesktopAndLocalItemSources,
+	mergeItemCollections,
+} from "../../src/background/vault-utils";
 
 describe("vault-utils", () => {
+	test("keeps verified desktop items when the local travel-mode policy is unavailable", async () => {
+		const desktopItems = [
+			{
+				id: "item_1",
+				vaultId: "vault_1",
+				title: "Desktop password",
+			},
+		] as never;
+		const localItems = Promise.reject(
+			new Error("No verified travel mode policy for account acc-1"),
+		);
+
+		const merged = await mergeDesktopAndLocalItemSources(
+			Promise.resolve(desktopItems),
+			localItems,
+		);
+
+		expect(merged).toEqual(desktopItems);
+	});
+
 	test("prefers local items over desktop snapshot items with the same id", () => {
 		const merged = mergeItemCollections(
 			[
