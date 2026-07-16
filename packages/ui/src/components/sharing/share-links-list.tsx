@@ -40,7 +40,7 @@ import {
 } from "../dialog";
 import { ScrollArea } from "../scroll-area";
 import { Skeleton } from "../skeleton";
-import { toast } from "sonner";
+import { toast } from "../sonner";
 
 interface ShareLinksListProps {
 	itemId: string;

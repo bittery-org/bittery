@@ -223,11 +223,11 @@ export function Header() {
 					<ThemeToggle />
 					<Button
 						size="sm"
-						className="rounded-full px-5 font-semibold text-xs"
+						className="rounded-md border-0 bg-linear-to-b from-primary to-primary-deep px-4 font-medium text-primary-foreground text-xs shadow-[inset_0_1px_0_oklch(1_0_0/0.22),0_1px_2px_oklch(0_0_0/0.3)] transition-[filter] duration-150 hover:brightness-108 dark:shadow-[inset_0_1px_0_oklch(1_0_0/0.22),0_1px_2px_oklch(0_0_0/0.3),0_0_14px_color-mix(in_oklab,var(--color-primary-deep)_35%,transparent)]"
 						asChild
 					>
 						<a href={billingMarketingEnabled() ? signupUrl() : "/#waitlist"}>
-							{billingMarketingEnabled() ? "Get Started" : "Join waitlist"}
+							{billingMarketingEnabled() ? "Get Bittery free" : "Join waitlist"}
 						</a>
 					</Button>
 					<button

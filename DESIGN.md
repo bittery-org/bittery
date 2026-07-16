@@ -70,6 +70,8 @@ plus, on nav/list rows, the glowing indicator bar:
 
 **Text/kbd chips**: `border bg-foreground/3 rounded-[4px] text-[10px] text-muted-foreground`.
 
+**Toasts** (implemented in `packages/ui/src/components/sonner.tsx` — don't restyle ad hoc): the "aurora pill", shown bottom-center. A `rounded-full bg-popover border shadow-pop` pill with a status hairline (`bg-linear-to-r from-transparent via-<status>/60 to-transparent` along the top edge) and a faint radial status wash; flat status-colored icon, `font-medium` title, and the optional description flowing *inline* after the title in `text-muted-foreground` separated by ` · ` (single line, truncating — never stacked). Actions render as an inline `rounded-full` chip in the status color. Always call `toast.*` from `@bittery/ui`; never import from `sonner` directly (chosen via prototype exploration, 2026-07).
+
 **Focus**: `focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30` (inputs use `ring-ring/25` with `focus-within`).
 
 **Brand moments** (the only sanctioned ambient purple):
