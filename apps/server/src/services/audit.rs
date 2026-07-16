@@ -379,7 +379,7 @@ fn to_share_access_event(
 fn parse_metadata(metadata: Option<&str>) -> Option<Value> {
     metadata
         .and_then(|value| serde_json::from_str::<Value>(value).ok())
-        .and_then(|value| if value.is_object() { Some(value) } else { None })
+        .filter(|value| value.is_object())
 }
 
 fn action_group_for_action(action: &str) -> AuditActionGroup {
