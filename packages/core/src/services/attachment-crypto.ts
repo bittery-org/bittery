@@ -80,6 +80,118 @@ export interface EncryptedAttachmentMetadata {
 	encryptionAlgorithm: string;
 }
 
+/** Just the name+content-type ciphertexts (no blob) — what list/detail views need. */
+export type EncryptedAttachmentMetaFields = Omit<
+	EncryptedAttachmentMetadata,
+	"blobEnvelope"
+>;
+
+/** Decrypted name + content-type pair returned by {@link decryptAttachmentMeta}. */
+export interface DecryptedAttachmentMeta {
+	name: string;
+	contentType: string;
+}
+
+/** Encrypt an attachment's display name under `scope`. */
+export async function encryptAttachmentName(
+	crypto: ICrypto,
+	vaultKey: Uint8Array,
+	scope: AttachmentCryptoScope,
+	name: string,
+): Promise<EncryptedData> {
+	return crypto.encrypt(
+		name,
+		vaultKey,
+		buildAttachmentNameEncryptionContext(scope),
+	);
+}
+
+/** Decrypt an attachment's display name under `scope`. */
+export async function decryptAttachmentName(
+	crypto: ICrypto,
+	vaultKey: Uint8Array,
+	scope: AttachmentCryptoScope,
+	encrypted: Pick<EncryptedData, "ciphertext" | "iv" | "algorithm">,
+): Promise<string> {
+	return crypto.decrypt(
+		encrypted,
+		vaultKey,
+		buildAttachmentNameEncryptionContext(scope),
+	);
+}
+
+/**
+ * Decrypt an attachment's content-type under `scope`. Preserves the
+ * content-type IV fallback: rows created before the dedicated content-type IV
+ * existed fall back to the name's `encryptionIv`.
+ */
+export async function decryptAttachmentContentType(
+	crypto: ICrypto,
+	vaultKey: Uint8Array,
+	scope: AttachmentCryptoScope,
+	encrypted: {
+		ciphertext: string;
+		/** IV used for `encryptedName`; fallback when `encryptedContentTypeIv` is absent. */
+		encryptionIv: string;
+		/** IV used for `encryptedContentType`. Falls back to `encryptionIv` for old rows. */
+		encryptedContentTypeIv: string | null;
+		algorithm: string;
+	},
+): Promise<string> {
+	return crypto.decrypt(
+		{
+			ciphertext: encrypted.ciphertext,
+			iv: encrypted.encryptedContentTypeIv ?? encrypted.encryptionIv,
+			algorithm: encrypted.algorithm,
+		},
+		vaultKey,
+		buildAttachmentContentTypeEncryptionContext(scope),
+	);
+}
+
+/** Decrypt an attachment's blob (base64 ciphertext envelope) under `scope`. */
+export async function decryptAttachmentBlob(
+	crypto: ICrypto,
+	vaultKey: Uint8Array,
+	scope: AttachmentCryptoScope,
+	blobEnvelope: EncryptedData,
+): Promise<string> {
+	return crypto.decrypt(
+		blobEnvelope,
+		vaultKey,
+		buildAttachmentBlobEncryptionContext(scope),
+	);
+}
+
+/**
+ * Decrypt an attachment's name + content-type (no blob) under `scope`.
+ * Shared by list/detail views that don't need the (larger) blob ciphertext.
+ */
+export async function decryptAttachmentMeta(
+	crypto: ICrypto,
+	vaultKey: Uint8Array,
+	scope: AttachmentCryptoScope,
+	encrypted: EncryptedAttachmentMetaFields,
+): Promise<DecryptedAttachmentMeta> {
+	const name = await decryptAttachmentName(crypto, vaultKey, scope, {
+		ciphertext: encrypted.encryptedName,
+		iv: encrypted.encryptionIv,
+		algorithm: encrypted.encryptionAlgorithm,
+	});
+	const contentType = await decryptAttachmentContentType(
+		crypto,
+		vaultKey,
+		scope,
+		{
+			ciphertext: encrypted.encryptedContentType,
+			encryptionIv: encrypted.encryptionIv,
+			encryptedContentTypeIv: encrypted.encryptedContentTypeIv,
+			algorithm: encrypted.encryptionAlgorithm,
+		},
+	);
+	return { name, contentType };
+}
+
 /**
  * Decrypt an attachment's blob, name and content-type using its source scope.
  * Mirrors the decrypt paths in `useItemAttachments` (blob + name) and
@@ -92,28 +204,17 @@ export async function decryptAttachmentParts(
 	scope: AttachmentCryptoScope,
 	encrypted: EncryptedAttachmentMetadata,
 ): Promise<DecryptedAttachmentParts> {
-	const base64File = await crypto.decrypt(
+	const base64File = await decryptAttachmentBlob(
+		crypto,
+		vaultKey,
+		scope,
 		encrypted.blobEnvelope,
-		vaultKey,
-		buildAttachmentBlobEncryptionContext(scope),
 	);
-	const name = await crypto.decrypt(
-		{
-			ciphertext: encrypted.encryptedName,
-			iv: encrypted.encryptionIv,
-			algorithm: encrypted.encryptionAlgorithm,
-		},
+	const { name, contentType } = await decryptAttachmentMeta(
+		crypto,
 		vaultKey,
-		buildAttachmentNameEncryptionContext(scope),
-	);
-	const contentType = await crypto.decrypt(
-		{
-			ciphertext: encrypted.encryptedContentType,
-			iv: encrypted.encryptedContentTypeIv ?? encrypted.encryptionIv,
-			algorithm: encrypted.encryptionAlgorithm,
-		},
-		vaultKey,
-		buildAttachmentContentTypeEncryptionContext(scope),
+		scope,
+		encrypted,
 	);
 	return { base64File, name, contentType };
 }
@@ -148,10 +249,11 @@ export async function encryptAttachmentParts(
 		vaultKey,
 		buildAttachmentBlobEncryptionContext(scope),
 	);
-	const encryptedName = await crypto.encrypt(
-		parts.name,
+	const encryptedName = await encryptAttachmentName(
+		crypto,
 		vaultKey,
-		buildAttachmentNameEncryptionContext(scope),
+		scope,
+		parts.name,
 	);
 	const encryptedContentType = await crypto.encrypt(
 		parts.contentType,

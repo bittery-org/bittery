@@ -138,3 +138,50 @@ export function resolveActiveAccountId(
 ): string | null {
 	return findAccountById(accounts, activeAccountId) ? activeAccountId : null;
 }
+
+/**
+ * Canonical `getStoredSessionData → getAccountMetadata → getActiveAccountUserId`
+ * triad for resolving the current user id used as encryption-context AAD.
+ * Tries the account's live session first, then its persisted metadata, then
+ * falls back to whatever account is currently active. Throws when none of
+ * those sources have a userId.
+ */
+export async function resolveUserIdForAccount(
+	storage: IStorageAdapter,
+	accountId?: string,
+	opts?: { errorMessage?: string },
+): Promise<string> {
+	const sessionData = await storage.getStoredSessionData?.(accountId);
+	if (sessionData?.userId) {
+		return sessionData.userId;
+	}
+
+	if (accountId) {
+		const accountMetadata = await storage.getAccountMetadata?.(accountId);
+		if (accountMetadata?.userId) {
+			return accountMetadata.userId;
+		}
+	}
+
+	const activeUserId = await storage.getActiveAccountUserId();
+	if (activeUserId) {
+		return activeUserId;
+	}
+
+	throw new Error(
+		opts?.errorMessage ?? "User ID not available for encryption context",
+	);
+}
+
+/**
+ * Same as {@link resolveUserIdForAccount}, but resolves a storage scope
+ * (accountId or legacy email) to an accountId first via {@link resolveAccountScopeId}.
+ */
+export async function resolveUserIdForScope(
+	storage: IStorageAdapter,
+	scope?: string,
+	opts?: { errorMessage?: string },
+): Promise<string> {
+	const accountId = await resolveAccountScopeId(storage, scope);
+	return resolveUserIdForAccount(storage, accountId, opts);
+}

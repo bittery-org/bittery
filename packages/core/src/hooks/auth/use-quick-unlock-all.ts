@@ -6,10 +6,7 @@
  * Each account's Master Unlock Key is derived from the password + that account's secret key.
  */
 
-import {
-	createAccountRpcClient,
-	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import {
 	type UseMutationResult,
 	useMutation,
@@ -20,6 +17,7 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../../context/platform-context";
+import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
 
 /**
  * Input for quick unlock all operation
@@ -144,19 +142,20 @@ export function useQuickUnlockAll(
 						continue;
 					}
 
-					const authToken = await storage.getAuthToken(account.accountId);
-					if (!authToken) {
+					const serverUrl =
+						(await storage.getServerUrl?.(account.accountId)) ||
+						getDefaultServerUrl();
+					const accountRpcClient = await createStaticStoredAccountRpcClient(
+						storage,
+						account.accountId,
+					);
+					if (!accountRpcClient) {
 						failed.push({
 							email: account.email,
 							error: "No auth token found for account",
 						});
 						continue;
 					}
-
-					const serverUrl =
-						(await storage.getServerUrl?.(account.accountId)) ||
-						getDefaultServerUrl();
-					const accountRpcClient = createAccountRpcClient(authToken, serverUrl);
 
 					// Perform SRP unlock for this account
 					const result = await performSRPUnlock(

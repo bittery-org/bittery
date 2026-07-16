@@ -3,10 +3,10 @@
  * Handles autofill-specific messages.
  */
 
-import type { DecryptedItem } from "@bittery/shared/types";
+import { hostnameMatches } from "../lib/hostname";
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
-import { desktopSync } from "./desktop-sync";
+import { isDesktopUnlockedNow } from "./desktop-status";
 import {
 	getLastActivityTimestamp,
 	isUnlocked,
@@ -14,21 +14,7 @@ import {
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-import {
-	getDecryptedItemsForCurrentMode,
-	hostnameMatches,
-} from "./vault-utils";
-
-async function isDesktopUnlockedNow(): Promise<boolean> {
-	const status =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-
-	return !!(
-		status?.available &&
-		!status.locked &&
-		(status.unlockedAccounts?.length ?? 0) > 0
-	);
-}
+import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
 /**
  * Handle CHECK_AUTOFILL_AUTH message - Check if autofill is authenticated
@@ -75,13 +61,6 @@ export async function handleUpdateAutofillTimestamp(): Promise<MessageResponse> 
 }
 
 /**
- * Get all decrypted items for the current runtime mode.
- */
-async function getAllDecryptedItems(): Promise<Array<DecryptedItem | null>> {
-	return getDecryptedItemsForCurrentMode();
-}
-
-/**
  * Handle GET_AUTOFILL_ITEMS message - Get autofill items for a hostname
  */
 export async function handleGetAutofillItems(payload: {
@@ -90,7 +69,7 @@ export async function handleGetAutofillItems(payload: {
 	updateActivity();
 
 	const { hostname } = payload;
-	const items = await getAllDecryptedItems();
+	const items = await getDecryptedItemsForCurrentMode();
 
 	const filtered = items.filter(
 		(item) =>
@@ -106,7 +85,7 @@ export async function handleGetAutofillItems(payload: {
 export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await getAllDecryptedItems();
+	const items = await getDecryptedItemsForCurrentMode();
 	const creditCards = items.filter(
 		(item) => item?.category === "credit-card" && item?.cardNumber,
 	);
@@ -120,7 +99,7 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
 	updateActivity();
 
-	const items = await getAllDecryptedItems();
+	const items = await getDecryptedItemsForCurrentMode();
 	const identities = items.filter((item) => item?.category === "identity");
 
 	return { success: true, items: identities };

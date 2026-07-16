@@ -16,8 +16,8 @@ import {
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
 import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
-import { createStoredAccountRpcClient } from "./account-resolver";
 import { peekAccountSessionManager } from "./account-session-manager";
+import { createStoredAccountRpcClient } from "./rpc-client";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { TravelModeRpcClient } from "./travel-mode-service";
 

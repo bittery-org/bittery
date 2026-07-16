@@ -15,7 +15,7 @@ import { getAccountSessionManager } from "@bittery/core/services/account-session
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
-import { desktopSync } from "./desktop-sync";
+import { isDesktopUnlockedNow } from "./desktop-status";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import {
@@ -39,17 +39,6 @@ async function getAccountRpcClient(accountId: string) {
 		(await storage.getServerUrl()) ??
 		DEFAULT_SERVER_URL;
 	return createAccountRpcClient(token, serverUrl);
-}
-
-async function isDesktopUnlockedNow(): Promise<boolean> {
-	const status =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-
-	return !!(
-		status?.available &&
-		!status.locked &&
-		(status.unlockedAccounts?.length ?? 0) > 0
-	);
 }
 
 /**

@@ -5,7 +5,7 @@
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
-import { createStoredAccountRpcClient } from "../../services/account-resolver";
+import { createStoredAccountRpcClient } from "../../services/rpc-client";
 
 const ACCOUNT_METADATA_STALE_TIME_MS = 10 * 60 * 1000;
 const ACCOUNT_METADATA_REFETCH_INTERVAL_MS = 10 * 60 * 1000;

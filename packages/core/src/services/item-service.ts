@@ -8,7 +8,10 @@ import type {
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
-import { resolveAccountScopeId } from "@bittery/storage/account-id";
+import {
+	resolveAccountScopeId,
+	resolveUserIdForScope,
+} from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
 	CachedAttachment,
@@ -199,26 +202,7 @@ export class ItemService {
 	}
 
 	private async resolveUserId(scope?: string): Promise<string> {
-		const accountId = await resolveAccountScopeId(this.storage, scope);
-		const sessionUserId = await this.storage.getStoredSessionData?.(accountId);
-		if (sessionUserId?.userId) {
-			return sessionUserId.userId;
-		}
-
-		if (accountId) {
-			const accountMetadata =
-				await this.storage.getAccountMetadata?.(accountId);
-			if (accountMetadata?.userId) {
-				return accountMetadata.userId;
-			}
-		}
-
-		const activeUserId = await this.storage.getActiveAccountUserId();
-		if (activeUserId) {
-			return activeUserId;
-		}
-
-		throw new Error("User ID not available for encryption context");
+		return resolveUserIdForScope(this.storage, scope);
 	}
 
 	async encryptItemData(

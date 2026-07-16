@@ -4,6 +4,7 @@ import {
 } from "@bittery/shared";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
+import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type {
@@ -304,28 +305,7 @@ export class VaultRepository {
 	}
 
 	private async resolveUserId(): Promise<string> {
-		const sessionData = await this.storage.getStoredSessionData?.(
-			this.accountId,
-		);
-		if (sessionData?.userId) {
-			return sessionData.userId;
-		}
-
-		if (this.accountId) {
-			const accountMetadata = await this.storage.getAccountMetadata?.(
-				this.accountId,
-			);
-			if (accountMetadata?.userId) {
-				return accountMetadata.userId;
-			}
-		}
-
-		const activeUserId = await this.storage.getActiveAccountUserId();
-		if (activeUserId) {
-			return activeUserId;
-		}
-
-		throw new Error("User ID not available for encryption context");
+		return resolveUserIdForAccount(this.storage, this.accountId);
 	}
 
 	private getVersionCandidates(version: number): number[] {

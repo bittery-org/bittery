@@ -4,6 +4,7 @@ import type {
 	DecryptedItemWithContext,
 	Passkey,
 } from "@bittery/shared/types";
+import { getBaseDomain, normalizeHost, parseHostname } from "../lib/hostname";
 import { storage } from "../lib/storage";
 import {
 	buildPasskeyAttestationObject,
@@ -31,7 +32,7 @@ import type {
 } from "../passkey/types";
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
-import { desktopSync } from "./desktop-sync";
+import { getDesktopStatus, isDesktopUnlockedNow } from "./desktop-status";
 import { rpcClient } from "./rpc-client";
 import {
 	resolveAccountEmailForVault,
@@ -151,25 +152,6 @@ function logPasskeyEvent(
 	console.info("[Passkey]", payload);
 }
 
-async function isDesktopUnlockedNow(): Promise<boolean> {
-	const cachedStatus = desktopSync.getLastStatus();
-	const cachedUnlocked = !!(
-		cachedStatus?.available &&
-		!cachedStatus.locked &&
-		(cachedStatus.unlockedAccounts?.length ?? 0) > 0
-	);
-	if (cachedUnlocked) {
-		return true;
-	}
-
-	const refreshedStatus = await desktopSync.checkDesktopStatus();
-	return !!(
-		refreshedStatus?.available &&
-		!refreshedStatus.locked &&
-		(refreshedStatus.unlockedAccounts?.length ?? 0) > 0
-	);
-}
-
 async function ensurePasskeyHandlerUnlocked(): Promise<boolean> {
 	if (isUnlocked()) {
 		return true;
@@ -181,32 +163,20 @@ async function ensurePasskeyHandlerUnlocked(): Promise<boolean> {
 		return true;
 	}
 
+	// The cached status may be stale after a service worker restart between
+	// the picker and selection steps; force a fresh check before giving up.
+	const refreshedStatus = await getDesktopStatus({ refresh: true });
+	const refreshedUnlocked = !!(
+		refreshedStatus?.available &&
+		!refreshedStatus.locked &&
+		(refreshedStatus.unlockedAccounts?.length ?? 0) > 0
+	);
+	if (refreshedUnlocked) {
+		setDesktopModeSentinel();
+		return true;
+	}
+
 	return false;
-}
-
-function normalizeHost(value: string): string {
-	return value.trim().toLowerCase().replace(/^\.+/, "").replace(/\.+$/, "");
-}
-
-function getBaseDomain(hostname: string): string {
-	const parts = hostname.split(".").filter(Boolean);
-	if (parts.length <= 2) {
-		return hostname;
-	}
-	return parts.slice(-2).join(".");
-}
-
-function parseHostname(urlValue: string): string | null {
-	try {
-		const parsed = new URL(
-			urlValue.startsWith("http://") || urlValue.startsWith("https://")
-				? urlValue
-				: `https://${urlValue}`,
-		);
-		return normalizeHost(parsed.hostname);
-	} catch {
-		return null;
-	}
 }
 
 function deriveRpId(origin: string, rpId?: string): string {

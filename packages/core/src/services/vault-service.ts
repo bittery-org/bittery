@@ -1,4 +1,5 @@
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
@@ -176,12 +177,17 @@ export class VaultService {
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}
-		const currentUserId =
-			(await this.storage.getAccountMetadata?.(accountId))?.userId ??
-			(await this.storage.getActiveAccountUserId());
-		if (!currentUserId) {
-			throw new Error("Session data missing. Please sign in again.");
-		}
+		// Migrated to the canonical session→metadata→active triad
+		// (resolveUserIdForAccount). This is a superset of the previous
+		// metadata→active lookup: it also tries the account's live session
+		// first. Session userId and account metadata userId are written
+		// together at login (see storeLoginSession/registerLoginAccount), so
+		// for the same accountId they are always in sync — this is benign.
+		const currentUserId = await resolveUserIdForAccount(
+			this.storage,
+			accountId,
+			{ errorMessage: "Session data missing. Please sign in again." },
+		);
 		const vaultId = this.crypto.generateUuid
 			? await this.crypto.generateUuid()
 			: (globalThis.crypto?.randomUUID?.() ?? `vault_${Date.now()}`);

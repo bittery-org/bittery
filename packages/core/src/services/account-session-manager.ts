@@ -9,7 +9,7 @@ import {
 } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
-import { createStoredAccountRpcClient } from "./account-resolver";
+import { createStoredAccountRpcClient } from "./rpc-client";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export interface AccountSessionManagerOptions {

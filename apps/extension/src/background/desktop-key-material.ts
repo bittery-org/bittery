@@ -6,7 +6,7 @@
 import type { VaultKeyData } from "../lib/storage";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
-import { desktopSync } from "./desktop-sync";
+import { isDesktopUnlockedNow } from "./desktop-status";
 import { handleNativeBiometricUnlockAll } from "./native-messaging";
 import { resolveAccountIdFromEmail } from "./services/account-resolution";
 
@@ -21,16 +21,6 @@ function isNonEmptyVaultKeys(value: unknown): value is VaultKeyData[] {
 				"vaultId" in item &&
 				"encryptedVaultKey" in item,
 		)
-	);
-}
-
-async function isDesktopUnlockedNow(): Promise<boolean> {
-	const status =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-	return !!(
-		status?.available &&
-		!status.locked &&
-		(status.unlockedAccounts?.length ?? 0) > 0
 	);
 }
 

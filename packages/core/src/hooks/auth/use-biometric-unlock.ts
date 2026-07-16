@@ -8,7 +8,7 @@
 import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
-import { createStoredAccountRpcClient } from "../../services/account-resolver";
+import { createStoredAccountRpcClient } from "../../services/rpc-client";
 import { getTravelModeEnforcer } from "../../services/travel-mode-enforcer";
 
 /**

@@ -13,6 +13,7 @@ import { useCallback, useMemo, useState } from "react";
 import { ExtensionAccountSwitcher } from "@/components/account-switcher";
 import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
+import { hostnameMatches } from "@/lib/hostname";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -49,42 +50,6 @@ function writeSelectedItemForScope(scope: string, itemId: string): void {
 		);
 	} catch {
 		// Ignore storage failures in popup context.
-	}
-}
-
-function getBaseDomain(host: string): string {
-	const parts = host.split(".");
-	if (parts.length <= 2) return host;
-	return parts.slice(-2).join(".");
-}
-
-function hostnameMatches(
-	itemUrl: string | undefined,
-	targetHostname: string,
-): boolean {
-	if (!itemUrl) return false;
-
-	try {
-		const itemUrlObj = new URL(
-			itemUrl.startsWith("http") ? itemUrl : `https://${itemUrl}`,
-		);
-		const itemHostname = itemUrlObj.hostname;
-
-		if (itemHostname === targetHostname) return true;
-
-		if (
-			itemHostname.endsWith(`.${targetHostname}`) ||
-			targetHostname.endsWith(`.${itemHostname}`)
-		) {
-			return true;
-		}
-
-		const itemBaseDomain = getBaseDomain(itemHostname);
-		const hostnameBaseDomain = getBaseDomain(targetHostname);
-
-		return itemBaseDomain === hostnameBaseDomain;
-	} catch {
-		return false;
 	}
 }
 

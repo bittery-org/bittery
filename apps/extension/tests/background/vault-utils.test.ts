@@ -1,8 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import {
-	mergeItemCollections,
-	normalizeDesktopSnapshotItem,
-} from "../../src/background/vault-utils";
+import { parseDesktopSnapshotItem } from "../../src/background/desktop-snapshot";
+import { mergeItemCollections } from "../../src/background/vault-utils";
 
 describe("vault-utils", () => {
 	test("prefers local items over desktop snapshot items with the same id", () => {
@@ -93,7 +91,7 @@ describe("vault-utils", () => {
 	});
 
 	test("retains passkeys when normalizing desktop snapshot items", () => {
-		const normalized = normalizeDesktopSnapshotItem({
+		const normalized = parseDesktopSnapshotItem({
 			id: "item_1",
 			vaultId: "vault_1",
 			category: "login",
@@ -128,5 +126,49 @@ describe("vault-utils", () => {
 
 		expect(normalized?.passkeys).toHaveLength(1);
 		expect(normalized?.passkeys?.[0]?.credentialId).toBe("cred_1");
+	});
+
+	test("retains credit-card and identity fields the desktop app already decrypted", () => {
+		const normalized = parseDesktopSnapshotItem({
+			id: "item_cc",
+			vaultId: "vault_1",
+			category: "credit-card",
+			favorite: false,
+			createdAt: "2026-01-01T00:00:00.000Z",
+			updatedAt: "2026-01-01T00:00:00.000Z",
+			title: "My Card",
+			cardholderName: "Alice Example",
+			cardNumber: "4111111111111111",
+			cvv: "123",
+			expiryDate: "12/30",
+			billingAddress: "1 Example St",
+			totpAlgorithm: "SHA256",
+			totpDigits: 8,
+			totpPeriod: 60,
+			linkedItemId: "item_1",
+			customFields: [
+				{ id: "field_1", label: "PIN", value: "0000", type: "text" },
+			],
+			vault: {
+				id: "vault_1",
+				name: "Personal",
+				type: "personal",
+				icon: null,
+				imageUrl: null,
+			},
+		});
+
+		expect(normalized?.cardholderName).toBe("Alice Example");
+		expect(normalized?.cardNumber).toBe("4111111111111111");
+		expect(normalized?.cvv).toBe("123");
+		expect(normalized?.expiryDate).toBe("12/30");
+		expect(normalized?.billingAddress).toBe("1 Example St");
+		expect(normalized?.totpAlgorithm).toBe("SHA256");
+		expect(normalized?.totpDigits).toBe(8);
+		expect(normalized?.totpPeriod).toBe(60);
+		expect(normalized?.linkedItemId).toBe("item_1");
+		expect(normalized?.customFields).toEqual([
+			{ id: "field_1", label: "PIN", value: "0000", type: "text" },
+		]);
 	});
 });

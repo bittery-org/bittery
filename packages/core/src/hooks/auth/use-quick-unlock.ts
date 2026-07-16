@@ -5,10 +5,7 @@
  * Wraps the core performSRPUnlock utility with React Query mutation.
  */
 
-import {
-	createAccountRpcClient,
-	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	performSRPUnlock,
@@ -20,6 +17,7 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../../context/platform-context";
+import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
 
 /**
  * Options for useQuickUnlock hook
@@ -74,13 +72,13 @@ export function useQuickUnlock(
 			// Build a per-account RPC client so travel mode can be re-verified
 			// against the server during unlock. Without this, storeUnlockSession
 			// silently trusts stale local cache (travel mode fail-open).
-			const authToken = await storage.getAuthToken(input.accountId);
 			const serverUrl =
 				(await storage.getServerUrl?.(input.accountId)) ||
 				getDefaultServerUrl();
-			const accountRpcClient = authToken
-				? createAccountRpcClient(authToken, serverUrl)
-				: undefined;
+			const accountRpcClient = await createStaticStoredAccountRpcClient(
+				storage,
+				input.accountId,
+			);
 
 			// Perform SRP unlock
 			const result = await performSRPUnlock(

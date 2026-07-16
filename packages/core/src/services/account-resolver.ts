@@ -1,12 +1,14 @@
-import {
-	createAccountRpcClient,
-	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ActiveAccount } from "@bittery/storage/types";
+import {
+	createStoredAccountRpcClient,
+	type DefaultRpcClient,
+} from "./rpc-client";
 
-export type DefaultRpcClient = ReturnType<typeof createAccountRpcClient>;
+export type { DefaultRpcClient };
+export { createStoredAccountRpcClient };
 
 /**
  * Complete account information including metadata, credentials, and RPC client.
@@ -67,45 +69,6 @@ export async function getClientForAccount(
 	}
 
 	return client;
-}
-
-export async function createStoredAccountRpcClient(
-	storage: IStorageAdapter,
-	accountId: string,
-	clientId?: string,
-): Promise<DefaultRpcClient | null> {
-	const [authToken, serverUrl] = await Promise.all([
-		storage.getAuthToken(accountId),
-		storage.getServerUrl(accountId),
-	]);
-
-	if (!authToken) {
-		return null;
-	}
-
-	const resolvedServerUrl = serverUrl || getDefaultServerUrl();
-	return createAccountRpcClient(authToken, resolvedServerUrl, clientId, {
-		getSessionSnapshot: async () => {
-			const [token, sessionData] = await Promise.all([
-				storage.getAuthToken(accountId),
-				storage.getStoredSessionData?.(accountId),
-			]);
-			return {
-				token,
-				issuedAt: sessionData?.createdAt ?? null,
-				expiresAt: sessionData?.expiresAt ?? null,
-			};
-		},
-		getRefreshToken: () => storage.getAuthToken(accountId),
-		storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-			await storage.storeAuthToken(token, accountId);
-			await storage.updateStoredSessionMetadata?.(accountId, {
-				sessionId,
-				expiresAt,
-			});
-		},
-		appPlatform: storage.platform,
-	});
 }
 
 /**
