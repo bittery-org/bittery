@@ -1,7 +1,7 @@
 # Bittery — Zero-Knowledge Password Manager
 
 [![Website](https://img.shields.io/badge/website-bittery.com-2563eb)](https://bittery.com)
-[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-f97316)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--only-f97316)](LICENSE)
 [![Docs](https://img.shields.io/badge/docs-bittery.com%2Fdocs-64748b)](https://bittery.com/docs)
 
 **Bittery is a source-available password manager with zero-knowledge, end-to-end encryption.** Your passwords, notes, cards, and TOTP secrets are encrypted on your device before they ever reach a server — so no one else can read them, not even us.
@@ -122,4 +122,20 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and the [self-hosting docs](https://bitte
 
 ## License
 
-This project is source-available under the [Functional Source License 1.1 (FSL-1.1-ALv2)](LICENSE). After two years, each release converts to the Apache License 2.0.
+Copyright (C) 2025-2026 Bittery.
+
+Bittery is free software, licensed under the GNU AGPLv3 and GPLv3. The split follows the component:
+
+| Component | License |
+| --- | --- |
+| `apps/server` | [AGPL-3.0-only](LICENSE) |
+| `apps/web`, `apps/extension`, `apps/desktop`, `apps/mobile`, `apps/marketing` | [GPL-3.0-only](LICENSE-GPL) |
+| `packages/*` (including `packages/crypto/*`) | [GPL-3.0-only](LICENSE-GPL) |
+
+Each app and package carries its own `LICENSE` file, so the boundary is unambiguous in any subtree you vendor or redistribute.
+
+The crypto core is GPLv3 rather than AGPLv3 so that it links cleanly into both the AGPL server (via AGPLv3 §13 cross-compatibility) and the GPL clients.
+
+The license covers the code, not the name: Bittery™ is our unregistered trademark, so please rename your fork if you distribute a modified version. See [TRADEMARK.md](TRADEMARK.md) — it's short and friendlier than it sounds.
+
+Contributions require signing our [Contributor License Agreement](CLA.md). See [CONTRIBUTING.md](CONTRIBUTING.md).

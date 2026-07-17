@@ -453,8 +453,8 @@ function RoadmapPage() {
 								Want to shape what's next?
 							</h2>
 							<p className="mx-auto mt-4 max-w-md text-base text-muted-foreground sm:text-lg">
-								Bittery's source code is public under FSL. Join the community,
-								share your ideas, or contribute directly on GitHub.
+								Bittery is open source under the AGPLv3 and GPLv3. Join the
+								community, share your ideas, or contribute directly on GitHub.
 							</p>
 							<div className="mt-8 flex flex-wrap items-center justify-center gap-3">
 								<Button size="lg" className="gap-2 rounded-full px-7" asChild>

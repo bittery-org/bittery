@@ -40,5 +40,5 @@
 		"url": "https://github.com/bittery-org/bittery",
 		"directory": "packages/crypto/napi"
 	},
-	"license": "FSL-1.1-ALv2"
+	"license": "GPL-3.0-only"
 }

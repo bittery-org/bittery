@@ -27,7 +27,7 @@ By creating an account or using the Service, you agree to be bound by these Term
 		title: "2. Description of service",
 		content: `Bittery is a zero-knowledge password manager that allows you to securely store, manage, and share passwords, secure notes, credit card information, identity documents, and TOTP secrets. All sensitive data is encrypted on your device before being transmitted to our servers using AES-256-GCM encryption.
 
-The Service is available as a cloud-hosted beta and as self-hosted source-available software. These Terms apply to the cloud-hosted version. Self-hosted deployments are governed by the software license.`,
+The Service is available as a cloud-hosted beta and as self-hosted open source software. These Terms apply only to the cloud-hosted version operated by us. Self-hosted deployments are governed solely by the software license — see section 10.`,
 	},
 	{
 		title: "3. Account registration",
@@ -50,7 +50,7 @@ Important: Due to our zero-knowledge architecture, we cannot reset your Master P
 • Interfere with or disrupt the Service's infrastructure or security measures
 • Use the public source code or Service in a way that violates the applicable software license
 • Use automated systems to access the Service in a manner that exceeds reasonable usage
-• Resell, sublicense, or commercialize access to the Service without our written consent
+• Resell or commercialize access to our cloud-hosted Service without our written consent (this restriction applies only to the Service we operate; it does not limit your right to run your own deployment under the software license)
 • Use the Service to conduct phishing, distribute malware, or carry out any form of cyber attack`,
 	},
 	{
@@ -98,10 +98,14 @@ Team administrators are responsible for managing team membership and ensuring co
 • You can revoke share links at any time`,
 	},
 	{
-		title: "10. Source-available license",
-		content: `Bittery's source code is publicly available on GitHub under the Functional Source License 1.1 (FSL-1.1-ALv2). This is a source-available license, not an OSI-approved open-source license. It lets you view, modify, and self-host the software, but you may not use it to offer a competing commercial password management service. After two years from each version's release, that version converts to the Apache License 2.0.
+		title: "10. Open source license",
+		content: `Bittery is free and open source software. The server is licensed under the GNU Affero General Public License v3 (AGPL-3.0-only). Our clients, cryptography core, and shared packages are licensed under the GNU General Public License v3 (GPL-3.0-only). The full text ships in the repository, and each component carries its own LICENSE file.
 
-If you choose to self-host Bittery for your own use or your organization's internal use, you are welcome to do so. You are responsible for your own deployment, security, and data management when self-hosting.`,
+These licenses grant you the right to use, study, modify, and redistribute Bittery. You may self-host it for any purpose — personal, internal, or commercial — and you may operate it as a service for others, including in competition with us. If you modify the server and offer it to others over a network, the AGPL requires you to make your modified source available to those users. Nothing in these Terms restricts the rights those licenses give you.
+
+Your license rights cover the code, not our name. If you distribute a modified version of Bittery, you must rename it — see our trademark policy. You may state factually that your software is based on or compatible with Bittery.
+
+If you self-host, you are responsible for your own deployment, security, and data management. The software is provided without warranty, as set out in the license.`,
 	},
 	{
 		title: "11. Service availability",
