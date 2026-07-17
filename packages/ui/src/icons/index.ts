@@ -23,6 +23,7 @@ export {
 	Contact as IconContact,
 	Copy as IconCopy,
 	CreditCard as IconCreditCard,
+	Download as IconDownload,
 	Earth as IconEarth,
 	Ellipsis as IconEllipsis,
 	ExternalLink as IconExternalLink,

@@ -20,7 +20,7 @@ import {
 } from "@bittery/ui";
 import {
 	IconArchive as Archive,
-	IconShare as Restore,
+	IconArchiveRestore as Restore,
 	IconTrash as Trash,
 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";

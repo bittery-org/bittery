@@ -10,7 +10,7 @@ import {
 import {
 	IconCircleAlert as AlertCircle,
 	IconCircleCheck as CheckCircle,
-	IconArchiveRestore as Download,
+	IconDownload as Download,
 	IconLoaderCircle as Loader2,
 } from "@bittery/ui/icons";
 import { useCallback } from "react";

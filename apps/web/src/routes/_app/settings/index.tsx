@@ -17,7 +17,7 @@ import {
 import {
 	IconCircleCheck as CheckCircle,
 	IconClock as Clock,
-	IconArchiveRestore as Download,
+	IconDownload as Download,
 	IconExternalLink as ExternalLink,
 	IconFingerprint as Fingerprint,
 	IconSettings as Gear,
