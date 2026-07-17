@@ -4,9 +4,9 @@ Thanks for helping improve Bittery. This repository is free software: `apps/serv
 
 ## Contributor License Agreement
 
-**Before we can merge your first pull request, you must sign our [Contributor License Agreement](CLA.md).** The CLA Assistant bot will comment on your PR with a link; signing takes one click and covers all your future contributions.
+**Before we can merge your first pull request, you must sign our [Contributor License Agreement](https://gist.github.com/bittery-bot/a75c287eccaaaa188b02c3cac1c8472b).** The CLA Assistant bot will comment on your PR with a link; signing takes one click and covers all your future contributions.
 
-The CLA grants us the right to relicense your contribution. We need it for one specific reason: GPLv3 conflicts with Apple's App Store terms, so without it we could not ship our mobile clients. [CLA.md](CLA.md) explains this in full, and includes our commitment that every accepted contribution stays published under the AGPLv3/GPLv3.
+The CLA grants us the right to relicense your contribution. We need it for one specific reason: GPLv3 conflicts with Apple's App Store terms, so without it we could not ship our mobile clients. The [CLA](https://gist.github.com/bittery-bot/a75c287eccaaaa188b02c3cac1c8472b) explains this in full, and includes our commitment that every accepted contribution stays published under the AGPLv3/GPLv3.
 
 Please don't send substantial work before signing — we'd hate to have to turn away a good patch.
 

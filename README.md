@@ -138,4 +138,4 @@ The crypto core is GPLv3 rather than AGPLv3 so that it links cleanly into both t
 
 The license covers the code, not the name: Bittery™ is our unregistered trademark, so please rename your fork if you distribute a modified version. See [TRADEMARK.md](TRADEMARK.md) — it's short and friendlier than it sounds.
 
-Contributions require signing our [Contributor License Agreement](CLA.md). See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions require signing our [Contributor License Agreement](https://gist.github.com/bittery-bot/a75c287eccaaaa188b02c3cac1c8472b). See [CONTRIBUTING.md](CONTRIBUTING.md).
