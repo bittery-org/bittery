@@ -10,7 +10,7 @@ export const faqs = [
 	{
 		question: "How much does Bittery cost?",
 		answer:
-			"Hosted cloud access is invite-only during beta, and paid subscriptions are not being sold yet. Self-hosting is available under Bittery's source-available FSL license if you prefer full control over your data.",
+			"Hosted cloud access is invite-only during beta, and paid subscriptions are not being sold yet. Self-hosting is free and always will be — Bittery is open source under the AGPLv3 — if you prefer full control over your data.",
 	},
 	{
 		question: "What happens if I forget my master password?",

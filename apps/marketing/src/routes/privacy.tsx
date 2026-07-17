@@ -95,7 +95,7 @@ Audit logs and security event records may be retained for up to 12 months for se
 	{
 		title: "8. Self-hosting",
 		content:
-			"Bittery is source-available software that you can self-host on your own infrastructure under the Functional Source License. When you self-host Bittery, your data never touches our servers. This Privacy Policy applies only to the cloud-hosted version of the Service operated by Bittery Software.",
+			"Bittery is free and open source software that you can self-host on your own infrastructure under the GNU AGPLv3 (server) and GPLv3 (clients). When you self-host Bittery, your data never touches our servers, and we collect nothing about you or your deployment. This Privacy Policy applies only to the cloud-hosted version of the Service operated by Bittery Software.",
 	},
 	{
 		title: "9. Third-party services",

@@ -19,7 +19,7 @@
 		"rsa"
 	],
 	"author": "Bittery",
-	"license": "FSL-1.1-ALv2",
+	"license": "GPL-3.0-only",
 	"peerDependencies": {
 		"expo": "*",
 		"react": "*",

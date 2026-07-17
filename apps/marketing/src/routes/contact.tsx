@@ -87,7 +87,7 @@ const faqs = [
 	{
 		question: "Can I contribute to Bittery?",
 		answer:
-			"Absolutely. Bittery's source code is public under FSL. Check out our GitHub repository for contribution guidelines, or open a discussion to suggest ideas.",
+			"Absolutely. Bittery is open source under the AGPLv3 and GPLv3. Check out our GitHub repository for contribution guidelines, or open a discussion to suggest ideas.",
 	},
 ];
 

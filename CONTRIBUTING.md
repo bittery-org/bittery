@@ -1,6 +1,14 @@
 # Contributing to Bittery
 
-Thanks for helping improve Bittery. This repository is source-available under `FSL-1.1-ALv2`; by contributing, you agree that your contribution is provided under the same license unless a different license is explicitly agreed in writing.
+Thanks for helping improve Bittery. This repository is free software: `apps/server` is licensed under the [GNU AGPLv3](LICENSE), and the clients, crypto, and packages under the [GNU GPLv3](LICENSE-GPL). See the [license section of the README](README.md#license) for the full component map.
+
+## Contributor License Agreement
+
+**Before we can merge your first pull request, you must sign our [Contributor License Agreement](CLA.md).** The CLA Assistant bot will comment on your PR with a link; signing takes one click and covers all your future contributions.
+
+The CLA grants us the right to relicense your contribution. We need it for one specific reason: GPLv3 conflicts with Apple's App Store terms, so without it we could not ship our mobile clients. [CLA.md](CLA.md) explains this in full, and includes our commitment that every accepted contribution stays published under the AGPLv3/GPLv3.
+
+Please don't send substantial work before signing — we'd hate to have to turn away a good patch.
 
 ## Before You Start
 

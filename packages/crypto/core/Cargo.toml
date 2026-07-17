@@ -9,7 +9,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
-license = "FSL-1.1-ALv2"
+license = "GPL-3.0-only"
 repository = "https://github.com/bittery-org/bittery"
 authors = ["Bittery <team@bittery.com>"]
 

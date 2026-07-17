@@ -141,4 +141,6 @@ Test vectors are verified against the existing TypeScript implementation to ensu
 
 ## License
 
-FSL-1.1-ALv2
+GPL-3.0-only. See [LICENSE](./LICENSE).
+
+GPLv3 rather than AGPLv3 so this crate links cleanly into both the AGPLv3 server (via AGPLv3 §13) and the GPLv3 clients.
