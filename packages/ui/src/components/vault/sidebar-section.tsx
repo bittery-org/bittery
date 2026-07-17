@@ -1,6 +1,6 @@
 import {
-	IconChevronRightOutlineDuo18,
-	IconPlusOutlineDuo18,
+	IconChevronRight,
+	IconPlus,
 } from "../../icons";
 import { cn } from "../../lib/utils";
 import { Button } from "../button";
@@ -56,7 +56,7 @@ export function SidebarSection({
 		<Collapsible open={isOpen} onOpenChange={handleOpenChange}>
 			<div className="group/section flex h-6 items-center justify-between gap-1 px-2">
 				<CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-1 rounded px-1 py-0.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em] hover:bg-muted/50">
-					<IconChevronRightOutlineDuo18
+					<IconChevronRight
 						className={cn(
 							"size-3",
 							"shrink-0",
@@ -77,7 +77,7 @@ export function SidebarSection({
 							onAdd();
 						}}
 					>
-						<IconPlusOutlineDuo18 className="size-3" />
+						<IconPlus className="size-3" />
 					</Button>
 				)}
 			</div>

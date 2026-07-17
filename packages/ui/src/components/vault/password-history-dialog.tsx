@@ -21,7 +21,7 @@ import {
 	DialogTitle,
 } from "../dialog";
 import { copyWithToast } from "../clipboard";
-import { IconCopyOutlineDuo18 } from "@bittery/ui/icons";
+import { IconCopy } from "@bittery/ui/icons";
 
 export interface PasswordHistoryDialogProps {
 	open: boolean;
@@ -138,7 +138,7 @@ export function PasswordHistoryDialog({
 														)
 													}
 												>
-													<IconCopyOutlineDuo18 className="size-4" />
+													<IconCopy className="size-4" />
 													{m.vaults_detail_items_password_history_dialog_action_copy()}
 												</Button>
 												<Button

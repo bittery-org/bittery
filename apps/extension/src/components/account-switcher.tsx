@@ -8,7 +8,7 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
-import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
+import { IconChevronDown } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
@@ -220,7 +220,7 @@ export function ExtensionAccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<IconChevronDownOutlineDuo18 className="h-4 w-4 opacity-50" />
+			<IconChevronDown className="h-4 w-4 opacity-50" />
 		</Button>
 	);
 

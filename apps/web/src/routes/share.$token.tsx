@@ -14,19 +14,19 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconCircleWarningOutlineDuo18 as AlertCircle,
-	IconCalendarOutlineDuo18 as Calendar,
-	IconCheckOutlineDuo18 as Check,
-	IconClockTimeOutlineDuo18 as Clock,
-	IconCopyOutlineDuo18 as Copy,
-	IconExternalLinkOutlineDuo18 as ExternalLink,
-	IconEyeOutlineDuo18 as Eye,
-	IconEyeSlashOutlineDuo18 as EyeOff,
-	IconLoader2OutlineDuo18 as Loader2,
-	IconLockOutlineDuo18 as Lock,
-	IconEnvelopeOutlineDuo18 as Mail,
-	IconMagicShieldOutlineDuo18 as ShieldCheck,
-	IconXmarkOutlineDuo18 as X,
+	IconCircleAlert as AlertCircle,
+	IconCalendar as Calendar,
+	IconCheck as Check,
+	IconClock as Clock,
+	IconCopy as Copy,
+	IconExternalLink as ExternalLink,
+	IconEye as Eye,
+	IconEyeOff as EyeOff,
+	IconLoaderCircle as Loader2,
+	IconLock as Lock,
+	IconMail as Mail,
+	IconShieldCheck as ShieldCheck,
+	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";

@@ -25,10 +25,10 @@ import {
 	useSidebar,
 } from "@bittery/ui";
 import {
-	IconCircleCheck2OutlineDuo18 as Check,
-	IconLoader2OutlineDuo18 as Loader2,
-	IconMagnifier3OutlineDuo18 as Search,
-	IconUsers6OutlineDuo18 as UserPlus,
+	IconCircleCheck as Check,
+	IconLoaderCircle as Loader2,
+	IconSearch as Search,
+	IconUsers as UserPlus,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";

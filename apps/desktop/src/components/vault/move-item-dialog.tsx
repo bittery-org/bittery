@@ -19,9 +19,9 @@ import {
 	VaultAvatar,
 } from "@bittery/ui";
 import {
-	IconCheckOutlineDuo18,
-	IconLoader2OutlineDuo18,
-	IconTriangleWarningOutlineDuo18,
+	IconCheck,
+	IconLoaderCircle,
+	IconTriangleAlert,
 } from "@bittery/ui/icons";
 import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
@@ -187,7 +187,7 @@ export function MoveItemDialog({
 					<CommandList className="max-h-80 p-2">
 						{isLoading ? (
 							<div className="flex items-center justify-center py-10">
-								<IconLoader2OutlineDuo18 className="size-6 animate-spin text-muted-foreground" />
+								<IconLoaderCircle className="size-6 animate-spin text-muted-foreground" />
 							</div>
 						) : vaultKeys.length <= 1 ? (
 							<div className="py-10 text-center text-muted-foreground text-sm">
@@ -286,7 +286,7 @@ export function MoveItemDialog({
 														</span>
 													)}
 													{isSelected && (
-														<IconCheckOutlineDuo18 className="size-4 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]" />
+														<IconCheck className="size-4 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]" />
 													)}
 												</CommandItem>
 											);
@@ -301,7 +301,7 @@ export function MoveItemDialog({
 				{/* Cross-account warning */}
 				{isCrossAccount && selectedVault && (
 					<div className="mx-4 mb-3 flex items-start gap-2.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2.5 text-amber-600 text-sm dark:text-amber-400">
-						<IconTriangleWarningOutlineDuo18 className="mt-0.5 size-4 shrink-0" />
+						<IconTriangleAlert className="mt-0.5 size-4 shrink-0" />
 						<span>
 							{m.vaults_detail_items_move_dialog_warning_cross_account()}
 						</span>
@@ -322,7 +322,7 @@ export function MoveItemDialog({
 					>
 						{moveItem.isPending ? (
 							<>
-								<IconLoader2OutlineDuo18 className="size-4 animate-spin" />
+								<IconLoaderCircle className="size-4 animate-spin" />
 								{isCrossAccount
 									? m.vaults_detail_items_move_dialog_action_transferring()
 									: m.vaults_detail_items_move_dialog_action_moving()}

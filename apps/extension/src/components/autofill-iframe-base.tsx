@@ -1,6 +1,6 @@
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Card, cn } from "@bittery/ui";
-import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
+import { IconLock } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getIframeNonceFromLocation } from "@/content-script/iframe-messages";
@@ -181,7 +181,7 @@ export function AutofillIframeBase({
 		return (
 			<Card className="mt-1 p-2.5">
 				<div className="flex items-center gap-2 text-sm">
-					<IconLockOutlineDuo18 size={14} className="text-primary" />
+					<IconLock size={14} className="text-primary" />
 					<span className="font-medium">
 						{m.ext_autofill_unlock_required()}
 					</span>

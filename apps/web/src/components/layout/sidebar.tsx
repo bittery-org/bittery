@@ -20,9 +20,9 @@ import {
 	useSidebar,
 } from "@bittery/ui";
 import {
-	IconChevronExpandYOutlineDuo18 as ChevronsUpDown,
-	IconArrowDoorOutOutlineDuo18 as LogOut,
-	IconGear3OutlineDuo18 as Settings,
+	IconChevronsUpDown as ChevronsUpDown,
+	IconLogOut as LogOut,
+	IconSettings as Settings,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";

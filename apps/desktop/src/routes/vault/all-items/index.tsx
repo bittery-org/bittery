@@ -1,4 +1,4 @@
-import { IconGrid2OutlineDuo18 } from "@bittery/ui/icons";
+import { IconLayoutGrid } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -13,7 +13,7 @@ function AllItemsIndexComponent() {
 		<div className="flex flex-1 items-center justify-center p-8 text-center">
 			<div>
 				<div className="mb-4 inline-flex rounded-full bg-muted p-6">
-					<IconGrid2OutlineDuo18 className="size-12 text-muted-foreground" />
+					<IconLayoutGrid className="size-12 text-muted-foreground" />
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">
 					{m.vaults_sidebar_link_all_objects()}

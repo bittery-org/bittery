@@ -25,10 +25,10 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconLoader2OutlineDuo18 as Loader2,
-	IconMagicShieldOutlineDuo18 as Shield,
-	IconTrash2OutlineDuo18 as Trash2,
-	IconUsers6OutlineDuo18 as Users,
+	IconLoaderCircle as Loader2,
+	IconShieldCheck as Shield,
+	IconTrash as Trash2,
+	IconUsers as Users,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";

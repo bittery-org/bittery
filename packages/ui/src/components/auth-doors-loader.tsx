@@ -1,9 +1,9 @@
 "use client";
 
 import {
-  IconLoader2Fill18,
-  IconLockOpenOutlineDuo18,
-  IconLockOutlineDuo18,
+  IconLoaderCircle,
+  IconLockOpen,
+  IconLock,
 } from "../icons/index.js";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -72,14 +72,14 @@ function RevealStateIcon({ phase }: { phase: RevealAnimationPhase }) {
   const engaged = phase !== "locked";
   return (
     <AuthDoorsMedallion engaged={engaged}>
-      <IconLockOutlineDuo18
+      <IconLock
         className="absolute size-6 text-primary transition-[opacity,transform] duration-300 dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]"
         style={{
           opacity: engaged ? 0 : 1,
           transform: engaged ? "scale(0.8)" : "scale(1)",
         }}
       />
-      <IconLockOpenOutlineDuo18
+      <IconLockOpen
         className="absolute size-6 text-primary transition-[opacity,transform] duration-300 dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]"
         style={{
           opacity: engaged ? 1 : 0,
@@ -159,7 +159,7 @@ export function AuthDoorsPendingLoader({
       logoPositionClassName={logoPositionClassName}
     >
       <AuthDoorsMedallion>
-        <IconLoader2Fill18 className="size-6 animate-spin text-primary dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]" />
+        <IconLoaderCircle className="size-6 animate-spin text-primary dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]" />
       </AuthDoorsMedallion>
     </AuthDoorsOverlay>
   );

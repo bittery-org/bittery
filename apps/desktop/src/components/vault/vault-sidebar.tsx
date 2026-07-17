@@ -13,12 +13,12 @@ import {
 	VaultAvatar,
 } from "@bittery/ui";
 import {
-	IconBoxArchive3OutlineDuo18,
-	IconDotsOutlineDuo18,
-	IconGrid2OutlineDuo18,
-	IconPen2OutlineDuo18,
-	IconStarOutlineDuo18,
-	IconTrash2OutlineDuo18,
+	IconArchive,
+	IconEllipsis,
+	IconLayoutGrid,
+	IconPencil,
+	IconStar,
+	IconTrash,
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation } from "@tanstack/react-router";
@@ -187,7 +187,7 @@ function DroppableVaultEntry({
 							className="absolute top-1/2 right-1 size-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
 							onClick={(e) => e.stopPropagation()}
 						>
-							<IconDotsOutlineDuo18 className="size-3.5" />
+							<IconEllipsis className="size-3.5" />
 						</Button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
@@ -201,7 +201,7 @@ function DroppableVaultEntry({
 								})
 							}
 						>
-							<IconPen2OutlineDuo18 className="h-4 w-4" />
+							<IconPencil className="h-4 w-4" />
 							{m.vaults_page_card_action_edit_vault()}
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
@@ -214,7 +214,7 @@ function DroppableVaultEntry({
 								})
 							}
 						>
-							<IconTrash2OutlineDuo18 className="h-4 w-4" />
+							<IconTrash className="h-4 w-4" />
 							{m.vaults_page_card_action_delete_vault()}
 						</DropdownMenuItem>
 					</DropdownMenuContent>
@@ -336,7 +336,7 @@ export function VaultSidebar({
 							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
 						/>
 					)}
-					<IconGrid2OutlineDuo18
+					<IconLayoutGrid
 						className={cn(
 							"size-3.5",
 							isAllItemsActive ? "text-primary" : "text-muted-foreground",
@@ -373,10 +373,7 @@ export function VaultSidebar({
 							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
 						/>
 					)}
-					<IconStarOutlineDuo18
-						className="size-3.5 text-yellow-500"
-						fill="currentColor"
-					/>
+					<IconStar className="size-3.5 text-yellow-500" fill="currentColor" />
 					<span>{m.vaults_favorites_title()}</span>
 					<SidebarCount count={itemCounts?.favorites} />
 				</Link>
@@ -490,7 +487,7 @@ export function VaultSidebar({
 							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
 						/>
 					)}
-					<IconBoxArchive3OutlineDuo18
+					<IconArchive
 						className={cn(
 							"size-3.5",
 							isTrashActive ? "text-primary" : "text-muted-foreground",

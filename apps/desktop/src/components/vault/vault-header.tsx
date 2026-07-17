@@ -1,5 +1,5 @@
 import { Button } from "@bittery/ui";
-import { IconPlusOutlineDuo18 } from "@bittery/ui/icons";
+import { IconPlus } from "@bittery/ui/icons";
 // import { useSyncContextOptional } from "../../providers/sync-provider";
 import { useI18n } from "../../providers/i18n-provider";
 import { SearchCombobox } from "./search-combobox";
@@ -26,7 +26,7 @@ export function VaultHeader({ hasVaults, onNewItemClick }: VaultHeaderProps) {
 				<SyncStatusIndicator status={syncContext.status.connectionStatus} />
 			) : null} */}
 			<Button onClick={onNewItemClick} disabled={!hasVaults}>
-				<IconPlusOutlineDuo18 />
+				<IconPlus />
 				{m.vaults_detail_action_new_item()}
 			</Button>
 		</header>

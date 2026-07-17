@@ -1,4 +1,4 @@
-import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
+import { IconStar } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -13,10 +13,7 @@ function FavoritesIndexComponent() {
 		<div className="flex flex-1 items-center justify-center p-8 text-center">
 			<div>
 				<div className="mb-4 inline-flex rounded-full bg-muted p-6">
-					<IconStarOutlineDuo18
-						className="size-12 text-yellow-500"
-						fill="currentColor"
-					/>
+					<IconStar className="size-12 text-yellow-500" fill="currentColor" />
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">
 					{m.vaults_favorites_title()}

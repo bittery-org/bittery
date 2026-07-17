@@ -12,11 +12,7 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import {
-	IconEyeOutlineDuo18,
-	IconEyeSlashOutlineDuo18,
-	IconFingerprintOutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconEye, IconEyeOff, IconFingerprint } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -283,9 +279,9 @@ export function LoginPage() {
 									onClick={() => setShowSecretKey(!showSecretKey)}
 								>
 									{showSecretKey ? (
-										<IconEyeSlashOutlineDuo18 className="h-3.5 w-3.5" />
+										<IconEyeOff className="h-3.5 w-3.5" />
 									) : (
-										<IconEyeOutlineDuo18 className="h-3.5 w-3.5" />
+										<IconEye className="h-3.5 w-3.5" />
 									)}
 								</InputGroupButton>
 							</InputGroupAddon>
@@ -313,9 +309,9 @@ export function LoginPage() {
 									onClick={() => setShowPassword(!showPassword)}
 								>
 									{showPassword ? (
-										<IconEyeSlashOutlineDuo18 className="h-3.5 w-3.5" />
+										<IconEyeOff className="h-3.5 w-3.5" />
 									) : (
-										<IconEyeOutlineDuo18 className="h-3.5 w-3.5" />
+										<IconEye className="h-3.5 w-3.5" />
 									)}
 								</InputGroupButton>
 							</InputGroupAddon>
@@ -335,7 +331,7 @@ export function LoginPage() {
 								htmlFor="biometric"
 								className="flex items-center gap-2 font-normal"
 							>
-								<IconFingerprintOutlineDuo18 className="h-4 w-4 text-muted-foreground" />
+								<IconFingerprint className="h-4 w-4 text-muted-foreground" />
 								{m.auth_signin_biometric_enable()}
 							</Label>
 						</div>

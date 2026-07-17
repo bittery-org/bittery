@@ -9,10 +9,7 @@ import {
 	getTagColorFromName,
 	VaultAvatar,
 } from "@bittery/ui";
-import {
-	IconMagnifier3OutlineDuo18,
-	IconTagOutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconSearch, IconTag } from "@bittery/ui/icons";
 import { cn } from "@bittery/ui/lib/utils";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -103,7 +100,7 @@ export function SearchCombobox() {
 		<div ref={containerRef} className="relative w-full">
 			<Command shouldFilter={false} className="overflow-visible">
 				<div className="flex h-8 w-full items-center rounded-md border border-input bg-foreground/2 px-2.5 text-sm transition-[border-color,box-shadow] duration-120 focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25 hover:border-border-strong">
-					<IconMagnifier3OutlineDuo18 className="mr-2 size-3.5 shrink-0 text-muted-foreground" />
+					<IconSearch className="mr-2 size-3.5 shrink-0 text-muted-foreground" />
 					<input
 						ref={inputRef}
 						value={search}
@@ -213,7 +210,7 @@ export function SearchCombobox() {
 													className="flex size-6 shrink-0 items-center justify-center rounded-md"
 													style={{ backgroundColor: `${tagColor}20` }}
 												>
-													<IconTagOutlineDuo18
+													<IconTag
 														className="size-3.5"
 														style={{ color: tagColor }}
 													/>

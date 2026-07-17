@@ -27,10 +27,10 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconCircleWarningOutlineDuo18 as AlertCircle,
-	IconCircleCheck2OutlineDuo18 as CheckCircle,
-	IconLoader2OutlineDuo18 as Loader2,
-	IconUpload4OutlineDuo18 as Upload,
+	IconCircleAlert as AlertCircle,
+	IconCircleCheck as CheckCircle,
+	IconLoaderCircle as Loader2,
+	IconUpload as Upload,
 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import {

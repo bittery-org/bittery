@@ -18,10 +18,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "@bittery/ui";
-import {
-	IconCopyOutlineDuo18,
-	IconLoader2OutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconCopy, IconLoaderCircle } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { QRCodeSVG } from "qrcode.react";
 import { useMemo, useState } from "react";
@@ -247,7 +244,7 @@ function DeviceSetupDialogContent({
 				{/* QR + steps panel */}
 				<div className="grid min-h-[232px] place-items-center rounded-lg border bg-card p-5">
 					{setupDataQuery.isLoading ? (
-						<IconLoader2OutlineDuo18 className="size-5 animate-spin text-muted-foreground" />
+						<IconLoaderCircle className="size-5 animate-spin text-muted-foreground" />
 					) : setupPreview.qrUri ? (
 						<div className="flex w-full items-center gap-6">
 							<div className="shrink-0 rounded-lg bg-white p-3 shadow-[0_2px_8px_oklch(0_0_0/0.15),0_0_24px_color-mix(in_oklab,var(--color-primary-deep)_18%,transparent)]">
@@ -304,7 +301,7 @@ function DeviceSetupDialogContent({
 							aria-label={m.vaults_sidebar_account_switcher_action_copy()}
 							className="grid size-7 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-overlay hover:text-foreground focus-visible:opacity-100 group-hover/link:opacity-100"
 						>
-							<IconCopyOutlineDuo18 className="size-3.5" />
+							<IconCopy className="size-3.5" />
 						</button>
 					)}
 				</div>

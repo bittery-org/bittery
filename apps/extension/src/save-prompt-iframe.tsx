@@ -1,11 +1,11 @@
 import "./index.css";
 import { Button, cn } from "@bittery/ui";
 import {
-	IconCircleCheck2OutlineDuo18,
-	IconCircleXmarkOutlineDuo18,
-	IconKeyOutlineDuo18,
-	IconLoader2OutlineDuo18,
-	IconLockOutlineDuo18,
+	IconCircleCheck,
+	IconCircleX,
+	IconKey,
+	IconLoaderCircle,
+	IconLock,
 } from "@bittery/ui/icons";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
@@ -249,7 +249,7 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-center gap-2.5">
-					<IconLoader2OutlineDuo18
+					<IconLoaderCircle
 						size={20}
 						className="shrink-0 animate-spin text-primary"
 					/>
@@ -271,10 +271,7 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-center gap-2.5">
-					<IconCircleCheck2OutlineDuo18
-						size={20}
-						className="shrink-0 text-green-600"
-					/>
+					<IconCircleCheck size={20} className="shrink-0 text-green-600" />
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
 							{isUpdating ? m.ext_save_updated() : m.ext_save_saved()}
@@ -295,10 +292,7 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-start gap-2.5">
-					<IconCircleXmarkOutlineDuo18
-						size={20}
-						className="shrink-0 text-destructive"
-					/>
+					<IconCircleX size={20} className="shrink-0 text-destructive" />
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">
 							{isUpdating
@@ -344,7 +338,7 @@ function SavePromptIframe() {
 		return (
 			<Wrapper>
 				<div className="flex items-start gap-2.5">
-					<IconLockOutlineDuo18 size={20} className="shrink-0 text-amber-600" />
+					<IconLock size={20} className="shrink-0 text-amber-600" />
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">{m.ext_save_cannot_save()}</p>
 						<p className="mt-0.5 text-muted-foreground text-xs">
@@ -414,10 +408,7 @@ function SavePromptIframe() {
 						className="flex w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
 					>
 						<div className="flex min-w-0 items-center gap-2">
-							<IconKeyOutlineDuo18
-								size={14}
-								className="shrink-0 text-muted-foreground"
-							/>
+							<IconKey size={14} className="shrink-0 text-muted-foreground" />
 							<span className="truncate">
 								{selectedVault?.name || m.ext_save_select_vault()}
 							</span>
@@ -475,7 +466,7 @@ function SavePromptIframe() {
 												: "",
 										)}
 									>
-										<IconKeyOutlineDuo18
+										<IconKey
 											size={14}
 											className="shrink-0 text-muted-foreground"
 										/>

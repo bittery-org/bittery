@@ -17,14 +17,14 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconArrowLeftOutlineDuo18 as ArrowLeft,
-	IconDotsOutlineDuo18 as Dots,
-	IconHistoryOutlineDuo18 as History,
-	IconKeyOutlineDuo18 as Key,
-	IconPen2OutlineDuo18 as Pen,
-	IconShareLeft2OutlineDuo18 as Share,
-	IconStarOutlineDuo18 as Star,
-	IconTrash2OutlineDuo18 as Trash,
+	IconArrowLeft as ArrowLeft,
+	IconEllipsis as Dots,
+	IconHistory as History,
+	IconKey as Key,
+	IconPencil as Pen,
+	IconShare as Share,
+	IconStar as Star,
+	IconTrash as Trash,
 } from "@bittery/ui/icons";
 import { type ReactNode, useCallback, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";

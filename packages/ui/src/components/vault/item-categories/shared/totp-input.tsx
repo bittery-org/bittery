@@ -7,9 +7,9 @@ import {
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { useCallback } from "react";
 import {
-	IconClipboardArrowInOutlineDuo18,
-	IconPlusOutlineDuo18,
-	IconTrash2OutlineDuo18,
+	IconClipboardPaste,
+	IconPlus,
+	IconTrash,
 } from "../../../../icons";
 import { cn } from "../../../../lib/utils";
 import { Button } from "../../../button";
@@ -138,7 +138,7 @@ export function TotpInputSection({
 	if (!showSection) {
 		return (
 			<FormAddRow onClick={() => onShowSectionChange(true)}>
-				<IconPlusOutlineDuo18 className="size-3.5" />
+				<IconPlus className="size-3.5" />
 				{m.vaults_detail_items_form_totp_action_add_totp()}
 			</FormAddRow>
 		);
@@ -170,7 +170,7 @@ export function TotpInputSection({
 						onClick={() => handlePasteFromClipboard()}
 						title={m.vaults_detail_items_form_totp_action_paste_from_clipboard()}
 					>
-						<IconClipboardArrowInOutlineDuo18 size={16} />
+						<IconClipboardPaste size={16} />
 						{m.vaults_detail_items_form_totp_action_paste()}
 					</Button>
 				</div>
@@ -221,7 +221,7 @@ export function TotpInputSection({
 					className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 					onClick={handleRemoveTotp}
 				>
-					<IconTrash2OutlineDuo18 size={14} className="mr-1" />
+					<IconTrash size={14} className="mr-1" />
 					{m.vaults_detail_items_form_totp_action_remove_totp()}
 				</Button>
 			</div>

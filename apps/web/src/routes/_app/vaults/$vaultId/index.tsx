@@ -37,10 +37,10 @@ import {
 	type VaultOption,
 } from "@bittery/ui";
 import {
-	IconDotsOutlineDuo18 as Dots,
-	IconLockOutlineDuo18 as Lock,
-	IconPlusOutlineDuo18 as Plus,
-	IconUsers6OutlineDuo18 as Users,
+	IconEllipsis as Dots,
+	IconLock as Lock,
+	IconPlus as Plus,
+	IconUsers as Users,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";

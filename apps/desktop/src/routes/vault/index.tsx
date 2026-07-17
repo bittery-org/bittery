@@ -1,4 +1,4 @@
-import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
+import { IconLock } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -13,7 +13,7 @@ function VaultComponent() {
 		<div className="flex flex-1 items-center justify-center p-8 text-center">
 			<div>
 				<div className="mb-4 inline-flex rounded-full bg-muted p-6">
-					<IconLockOutlineDuo18 size={48} className="text-muted-foreground" />
+					<IconLock size={48} className="text-muted-foreground" />
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">
 					{m.vaults_shared_empty_no_vault_selected()}

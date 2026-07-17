@@ -18,11 +18,11 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconCopyOutlineDuo18 as Copy,
-	IconClipboardArrowInOutlineDuo18 as Download,
-	IconEyeOutlineDuo18 as Eye,
-	IconEyeSlashOutlineDuo18 as EyeOff,
-	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
+	IconCopy as Copy,
+	IconClipboardPaste as Download,
+	IconEye as Eye,
+	IconEyeOff as EyeOff,
+	IconArrowLeftRight as RefreshCw,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";

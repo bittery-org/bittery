@@ -28,10 +28,7 @@ import {
 	toast,
 	type VaultOption,
 } from "@bittery/ui";
-import {
-	IconGrid2OutlineDuo18 as Grid,
-	IconPlusOutlineDuo18 as Plus,
-} from "@bittery/ui/icons";
+import { IconLayoutGrid as Grid, IconPlus as Plus } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { z } from "zod";

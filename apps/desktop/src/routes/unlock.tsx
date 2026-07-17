@@ -14,11 +14,11 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconEyeOutlineDuo18,
-	IconEyeSlashOutlineDuo18,
-	IconFingerprintOutlineDuo18,
-	IconKeyOutlineDuo18,
-	IconLoader2Fill18,
+	IconEye,
+	IconEyeOff,
+	IconFingerprint,
+	IconKey,
+	IconLoaderCircle,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
@@ -275,7 +275,7 @@ export function UnlockPage() {
 		return (
 			<AuthDoorsLayout showFooter={false}>
 				<div className="flex items-center justify-center rounded-full border border-border bg-background p-4 shadow-sm">
-					<IconLoader2Fill18 className="size-7 animate-spin text-primary" />
+					<IconLoaderCircle className="size-7 animate-spin text-primary" />
 				</div>
 			</AuthDoorsLayout>
 		);
@@ -307,7 +307,7 @@ export function UnlockPage() {
 
 				{requiresPasswordReentry && (
 					<div className="mb-6 flex items-start gap-3 rounded-lg border border-amber-200/60 bg-amber-50/50 p-4 dark:border-amber-500/20 dark:bg-amber-950/20">
-						<IconKeyOutlineDuo18 className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+						<IconKey className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
 						<div>
 							<p className="font-medium text-amber-900 text-sm dark:text-amber-200">
 								{m.auth_unlock_password_required_title()}
@@ -344,19 +344,16 @@ export function UnlockPage() {
 								}
 							>
 								{showPassword ? (
-									<IconEyeSlashOutlineDuo18
-										className="h-4 w-4"
-										strokeWidth={1}
-									/>
+									<IconEyeOff className="h-4 w-4" strokeWidth={1} />
 								) : (
-									<IconEyeOutlineDuo18 className="h-4 w-4" strokeWidth={1} />
+									<IconEye className="h-4 w-4" strokeWidth={1} />
 								)}
 							</InputGroupButton>
 						</InputGroupAddon>
 					</InputGroup>
 
 					<Button type="submit" className="mt-3 w-full" disabled={loading}>
-						{loading && <IconLoader2Fill18 className="size-4 animate-spin" />}
+						{loading && <IconLoaderCircle className="size-4 animate-spin" />}
 						{m.auth_unlock_action_unlock()}
 					</Button>
 				</form>
@@ -378,7 +375,7 @@ export function UnlockPage() {
 							onClick={handleBiometricUnlockAll}
 							disabled={loading}
 						>
-							<IconFingerprintOutlineDuo18 className="size-4.5 text-primary dark:drop-shadow-[0_0_5px_color-mix(in_oklab,var(--color-primary)_45%,transparent)]" />
+							<IconFingerprint className="size-4.5 text-primary dark:drop-shadow-[0_0_5px_color-mix(in_oklab,var(--color-primary)_45%,transparent)]" />
 							{m.auth_unlock_action_biometric()}
 						</Button>
 					</>

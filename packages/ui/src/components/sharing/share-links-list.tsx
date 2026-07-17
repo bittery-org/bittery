@@ -2,17 +2,17 @@ import { useQueryInvalidator } from "@bittery/core/hooks";
 import { useI18n } from "@bittery/i18n/react";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
-	IconCalendarOutlineDuo18,
-	IconClockTimeOutlineDuo18,
-	IconCopyOutlineDuo18,
-	IconEarthOutlineDuo18,
-	IconEnvelopeOutlineDuo18,
-	IconEyeOutlineDuo18,
-	IconLinkOutlineDuo18,
-	IconLoader2OutlineDuo18,
-	IconMagicShieldOutlineDuo18,
-	IconTrash2OutlineDuo18,
-	IconUsers6OutlineDuo18,
+	IconCalendar,
+	IconClock,
+	IconCopy,
+	IconEarth,
+	IconMail,
+	IconEye,
+	IconLink,
+	IconLoaderCircle,
+	IconShieldCheck,
+	IconTrash,
+	IconUsers,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
@@ -214,7 +214,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		return (
 			<Card>
 				<CardContent className="flex flex-col items-center justify-center py-8">
-					<IconLinkOutlineDuo18 className="mb-4 h-8 w-8 text-muted-foreground" />
+					<IconLink className="mb-4 h-8 w-8 text-muted-foreground" />
 					<p className="text-muted-foreground text-sm">
 						{m.sharing_links_list_empty_links()}
 					</p>
@@ -252,19 +252,19 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 										<Badge variant="secondary">
 											{link.accessMode === "anyone" ? (
 												<>
-													<IconEarthOutlineDuo18 className="mr-1 h-3 w-3" />
+													<IconEarth className="mr-1 h-3 w-3" />
 													{m.sharing_links_list_access_mode_anyone()}
 												</>
 											) : (
 												<>
-													<IconEnvelopeOutlineDuo18 className="mr-1 h-3 w-3" />
+													<IconMail className="mr-1 h-3 w-3" />
 													{m.sharing_links_list_access_mode_email_restricted()}
 												</>
 											)}
 										</Badge>
 										{link.isOneTimeUse && (
 											<Badge variant="secondary">
-												<IconMagicShieldOutlineDuo18 className="mr-1 h-3 w-3" />
+												<IconShieldCheck className="mr-1 h-3 w-3" />
 												{m.sharing_links_list_badge_one_time()}
 											</Badge>
 										)}
@@ -272,14 +272,14 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 
 									<div className="flex flex-wrap gap-4 text-muted-foreground text-xs">
 										<span className="flex items-center gap-1">
-											<IconEyeOutlineDuo18 className="h-3 w-3" />
+											<IconEye className="h-3 w-3" />
 											{getAccessCountLabel(
 												link.accessCount,
 												link.maxAccessCount ?? null,
 											)}
 										</span>
 										<span className="flex items-center gap-1">
-											<IconClockTimeOutlineDuo18 className="h-3 w-3" />
+											<IconClock className="h-3 w-3" />
 											{link.status === "active"
 												? formatRelativeTime(link.expiresAt)
 												: m.sharing_links_list_label_expires_at({
@@ -287,7 +287,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 													})}
 										</span>
 										<span className="flex items-center gap-1">
-											<IconCalendarOutlineDuo18 className="h-3 w-3" />
+											<IconCalendar className="h-3 w-3" />
 											{m.sharing_links_list_label_created_at({
 												date: formatDate(link.createdAt),
 											})}
@@ -319,7 +319,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 										onClick={() => handleCopyLink(link.token)}
 										title={m.sharing_links_list_action_copy_link()}
 									>
-										<IconCopyOutlineDuo18 className="h-4 w-4" />
+										<IconCopy className="h-4 w-4" />
 									</Button>
 									<Button
 										size="sm"
@@ -330,7 +330,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 										}}
 										title={m.sharing_links_list_action_view_access_logs()}
 									>
-										<IconUsers6OutlineDuo18 className="h-4 w-4" />
+										<IconUsers className="h-4 w-4" />
 									</Button>
 									{link.status === "active" && (
 										<Button
@@ -340,7 +340,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 											className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 											title={m.sharing_links_list_action_revoke_link()}
 										>
-											<IconTrash2OutlineDuo18 className="h-4 w-4" />
+											<IconTrash className="h-4 w-4" />
 										</Button>
 									)}
 								</div>
@@ -410,7 +410,7 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							</div>
 						) : (
 							<div className="py-8 text-center">
-								<IconEyeOutlineDuo18 className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
+								<IconEye className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
 								<p className="text-muted-foreground text-sm">
 									{m.sharing_links_list_empty_logs()}
 								</p>
@@ -444,9 +444,9 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
 						>
 							{revokeMutation.isPending ? (
-								<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
+								<IconLoaderCircle className="h-4 w-4 animate-spin" />
 							) : (
-								<IconTrash2OutlineDuo18 className="h-4 w-4" />
+								<IconTrash className="h-4 w-4" />
 							)}
 							{m.sharing_links_list_action_revoke_link()}
 						</AlertDialogAction>

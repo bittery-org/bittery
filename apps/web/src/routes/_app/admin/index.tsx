@@ -25,19 +25,19 @@ import {
 	TabsTrigger,
 } from "@bittery/ui";
 import {
-	IconConnectedDots3OutlineDuo18 as Activity,
-	IconCircleWarningOutlineDuo18 as AlertTriangle,
-	IconCheckOutlineDuo18 as Check,
-	IconChevronRightOutlineDuo18 as ChevronRight,
-	IconEyeOutlineDuo18 as Eye,
-	IconHistoryOutlineDuo18 as History,
-	IconLaptop2OutlineDuo18 as Laptop,
-	IconLoader2OutlineDuo18 as Loader2,
-	IconLockKeyOutlineDuo18 as LockKey,
-	IconMagnifier3OutlineDuo18 as Search,
-	IconShareLeft2OutlineDuo18 as Share,
-	IconUsers6OutlineDuo18 as Users,
-	IconVault3OutlineDuo18 as Vault,
+	IconNetwork as Activity,
+	IconCircleAlert as AlertTriangle,
+	IconCheck as Check,
+	IconChevronRight as ChevronRight,
+	IconEye as Eye,
+	IconHistory as History,
+	IconLaptop as Laptop,
+	IconLoaderCircle as Loader2,
+	IconLockKeyhole as LockKey,
+	IconSearch as Search,
+	IconShare as Share,
+	IconUsers as Users,
+	IconVault as Vault,
 } from "@bittery/ui/icons";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";

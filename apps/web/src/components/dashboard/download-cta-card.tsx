@@ -4,7 +4,7 @@ import {
 	RELEASES_PAGE_URL,
 } from "@bittery/shared/releases";
 import { Button } from "@bittery/ui";
-import { IconClipboardArrowInOutlineDuo18 as Download } from "@bittery/ui/icons";
+import { IconClipboardPaste as Download } from "@bittery/ui/icons";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function DownloadCtaCard() {

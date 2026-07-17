@@ -1,11 +1,11 @@
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, cn, Input, Skeleton, toast } from "@bittery/ui";
 import {
-	IconCircleKeyOutlineDuo18,
-	IconGear3OutlineDuo18,
-	IconMagnifier3OutlineDuo18,
-	IconMobileOutlineDuo18,
-	IconPlusOutlineDuo18,
+	IconPasskey,
+	IconPlus,
+	IconSearch,
+	IconSettings,
+	IconSmartphone,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -86,7 +86,7 @@ function ItemListRow({
 						<span className="truncate font-medium text-sm">{title}</span>
 						{item.category === "login" && item.totpSecret && (
 							<span title={m.ext_vault_has_2fa()}>
-								<IconMobileOutlineDuo18 className="size-3 shrink-0" />
+								<IconSmartphone className="size-3 shrink-0" />
 							</span>
 						)}
 						{passkeyCount > 0 && (
@@ -103,7 +103,7 @@ function ItemListRow({
 										: "text-muted-foreground",
 								)}
 							>
-								<IconCircleKeyOutlineDuo18 className="size-3.5 shrink-0" />
+								<IconPasskey className="size-3.5 shrink-0" />
 							</span>
 						)}
 					</div>
@@ -292,10 +292,10 @@ export function VaultPage() {
 							onClick={() => navigate({ to: "/settings" })}
 							title={m.ext_vault_settings()}
 						>
-							<IconGear3OutlineDuo18 className="size-[18px]" />
+							<IconSettings className="size-[18px]" />
 						</Button>
 						<Button size="sm" onClick={handleOpenDesktopApp}>
-							<IconPlusOutlineDuo18 className="mr-2 size-4" />
+							<IconPlus className="mr-2 size-4" />
 							{m.ext_vault_new_item()}
 						</Button>
 					</div>
@@ -306,7 +306,7 @@ export function VaultPage() {
 				<aside className="flex w-[220px] shrink-0 flex-col border-r bg-muted/20">
 					<div className="border-b p-3">
 						<div className="relative">
-							<IconMagnifier3OutlineDuo18
+							<IconSearch
 								className="absolute top-2.5 left-3 text-muted-foreground"
 								size={16}
 							/>

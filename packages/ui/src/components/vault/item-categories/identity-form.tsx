@@ -10,9 +10,9 @@ import { useForm } from "@tanstack/react-form";
 import { nanoid } from "nanoid";
 import { useState } from "react";
 import {
-	IconPlusOutlineDuo18,
-	IconTrash2OutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconPlus,
+	IconTrash,
+	IconX,
 } from "../../../icons";
 import { Button } from "../../button";
 import { Input } from "../../input";
@@ -319,12 +319,12 @@ export function IdentityForm({
 							onClick={() => removePhoneNumber(phone.id)}
 							aria-label={m.vaults_detail_items_form_identity_action_remove_phone()}
 						>
-							<IconTrash2OutlineDuo18 size={16} />
+							<IconTrash size={16} />
 						</Button>
 					</div>
 				))}
 				<FormAddRow onClick={addPhoneNumber}>
-					<IconPlusOutlineDuo18 className="size-3.5" />
+					<IconPlus className="size-3.5" />
 					{m.vaults_detail_items_form_identity_action_add_phone()}
 				</FormAddRow>
 			</FormSection>
@@ -349,7 +349,7 @@ export function IdentityForm({
 								onClick={() => removeAddress(address.id)}
 								aria-label={m.vaults_detail_items_form_identity_action_remove_address()}
 							>
-								<IconXmarkOutlineDuo18 size={16} />
+								<IconX size={16} />
 							</Button>
 						</div>
 						<Input
@@ -394,7 +394,7 @@ export function IdentityForm({
 					</div>
 				))}
 				<FormAddRow onClick={addAddress}>
-					<IconPlusOutlineDuo18 className="size-3.5" />
+					<IconPlus className="size-3.5" />
 					{m.vaults_detail_items_form_identity_action_add_address()}
 				</FormAddRow>
 			</FormSection>

@@ -14,7 +14,7 @@ import {
 import {
 	IconFlagGermany,
 	IconFlagUnitedStates,
-	IconLockOutlineDuo18,
+	IconLock,
 } from "@bittery/ui/icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, ExternalLink, Plus, Server } from "lucide-react";
@@ -148,7 +148,7 @@ export function AuthDoorsLayout({
 
 				<div className="absolute top-1/4 right-0 z-10 translate-x-1/2">
 					<div className="flex size-14 items-center justify-center rounded-full border border-border-strong bg-popover shadow-[0_8px_24px_oklch(0_0_0/0.12)] dark:shadow-[0_8px_24px_oklch(0_0_0/0.45),0_0_22px_color-mix(in_oklab,var(--color-primary-deep)_25%,transparent)]">
-						<IconLockOutlineDuo18 className="size-6 text-primary dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]" />
+						<IconLock className="size-6 text-primary dark:drop-shadow-[0_0_6px_color-mix(in_oklab,var(--color-primary)_55%,transparent)]" />
 					</div>
 				</div>
 			</div>

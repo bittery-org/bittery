@@ -9,11 +9,11 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import {
-	IconCreditCardLockOutlineDuo18,
-	IconEarthOutlineDuo18,
-	IconFileLockOutlineDuo18,
-	IconMobileOutlineDuo18,
-	IconUserOutlineDuo18,
+	IconCreditCard,
+	IconEarth,
+	IconFileLock,
+	IconSmartphone,
+	IconUser,
 } from "../../icons";
 import {
 	analyzeFaviconLuminance,
@@ -201,27 +201,27 @@ export function VaultFavicon({
 					{initials}
 				</span>
 			) : resolvedCategory === "login" ? (
-				<IconEarthOutlineDuo18
+				<IconEarth
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>
 			) : resolvedCategory === "credit-card" ? (
-				<IconCreditCardLockOutlineDuo18
+				<IconCreditCard
 					className="text-white"
 					size={iconSizes[size]}
 				/>
 			) : resolvedCategory === "identity" ? (
-				<IconUserOutlineDuo18
+				<IconUser
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>
 			) : resolvedCategory === "totp" ? (
-				<IconMobileOutlineDuo18
+				<IconSmartphone
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>
 			) : (
-				<IconFileLockOutlineDuo18
+				<IconFileLock
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>

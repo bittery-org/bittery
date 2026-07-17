@@ -1,10 +1,10 @@
 import { useRPC } from "@bittery/shared/rpc";
 import { Skeleton } from "@bittery/ui";
 import {
-	IconKeyOutlineDuo18 as Key,
-	IconLaptop2OutlineDuo18 as Laptop,
-	IconLockOutlineDuo18 as Lock,
-	IconUsers6OutlineDuo18 as Users,
+	IconKey as Key,
+	IconLaptop as Laptop,
+	IconLock as Lock,
+	IconUsers as Users,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useI18n } from "@/providers/i18n-provider";

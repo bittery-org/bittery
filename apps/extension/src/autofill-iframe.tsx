@@ -1,5 +1,5 @@
 import "./index.css";
-import { IconLockOutlineDuo18 } from "@bittery/ui/icons";
+import { IconLock } from "@bittery/ui/icons";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import type { AutofillIframeConfig } from "@/components/autofill-iframe-base";
@@ -18,7 +18,7 @@ function AutofillIframe() {
 		selectMessageType: "AUTOFILL_SELECT",
 		filterFn: filterLoginItems,
 		defaultFieldType: "username",
-		emptyIcon: <IconLockOutlineDuo18 size={14} />,
+		emptyIcon: <IconLock size={14} />,
 		emptyText: m.ext_autofill_login_empty(),
 		unlockText: m.ext_autofill_login_unlock(),
 		itemNounSingular: m.ext_autofill_login_singular(),

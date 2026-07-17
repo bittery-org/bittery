@@ -1,11 +1,6 @@
 import "./index.css";
 import { Button, Card, cn } from "@bittery/ui";
-import {
-	IconCircleKeyOutlineDuo18,
-	IconFolderOutlineDuo18,
-	IconPlusOutlineDuo18,
-	IconUserOutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconFolder, IconPasskey, IconPlus, IconUser } from "@bittery/ui/icons";
 import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Favicon } from "@/components/favicon";
@@ -126,7 +121,7 @@ function PasskeySaveTargetIframe() {
 			<Card className="space-y-3 p-3">
 				<div className="flex items-start gap-2.5">
 					<div className="mt-0.5 rounded-full bg-primary/10 p-1.5 text-primary">
-						<IconCircleKeyOutlineDuo18 size={16} />
+						<IconPasskey size={16} />
 					</div>
 					<div className="min-w-0 flex-1">
 						<p className="font-medium text-sm">{m.ext_passkey_save_title()}</p>
@@ -158,7 +153,7 @@ function PasskeySaveTargetIframe() {
 							)}
 						>
 							<span className="flex items-center gap-2 text-xs">
-								<IconUserOutlineDuo18 size={14} />
+								<IconUser size={14} />
 								{m.ext_passkey_save_attach()}
 							</span>
 							<span className="text-[10px] text-muted-foreground">
@@ -236,7 +231,7 @@ function PasskeySaveTargetIframe() {
 							)}
 						>
 							<span className="flex items-center gap-2 text-xs">
-								<IconPlusOutlineDuo18 size={14} />
+								<IconPlus size={14} />
 								{m.ext_passkey_save_create_new()}
 							</span>
 							<span className="text-[10px] text-muted-foreground">
@@ -270,7 +265,7 @@ function PasskeySaveTargetIframe() {
 													: "hover:bg-accent/70",
 											)}
 										>
-											<IconFolderOutlineDuo18 size={14} />
+											<IconFolder size={14} />
 											<span className="truncate">{vault.name}</span>
 											<span className="ml-auto text-[10px] text-muted-foreground">
 												{vault.type}

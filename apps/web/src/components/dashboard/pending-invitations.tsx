@@ -10,10 +10,10 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconCheckOutlineDuo18 as Check,
-	IconClockTimeOutlineDuo18 as Clock,
-	IconEnvelopeOutlineDuo18 as Mail,
-	IconXmarkOutlineDuo18 as X,
+	IconCheck as Check,
+	IconClock as Clock,
+	IconMail as Mail,
+	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { formatDistanceToNow } from "date-fns";

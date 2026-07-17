@@ -6,7 +6,7 @@ import {
 	maskPassportNumber,
 	maskSSN,
 } from "@bittery/shared/identity";
-import { IconCopyOutlineDuo18 } from "../../../icons";
+import { IconCopy } from "../../../icons";
 import { Button } from "../../button";
 import { Label } from "../../label";
 import { TagInput } from "../../tag-input";
@@ -147,7 +147,7 @@ export function IdentityDetail({
 										}
 										className="w-full"
 									>
-										<IconCopyOutlineDuo18 size={16} />
+										<IconCopy size={16} />
 										{m.vaults_detail_items_detail_identity_action_copy_address()}
 									</Button>
 								</div>

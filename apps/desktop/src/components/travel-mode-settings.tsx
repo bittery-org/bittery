@@ -15,7 +15,7 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import { IconLoader2OutlineDuo18 } from "@bittery/ui/icons";
+import { IconLoaderCircle } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { SettingsSection } from "@/components/settings/settings-field";
@@ -232,7 +232,7 @@ function TravelModeAccountSettings({
 						>
 							{isDisabling ? (
 								<>
-									<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
+									<IconLoaderCircle className="h-4 w-4 animate-spin" />
 									{m.travel_mode_action_disabling()}
 								</>
 							) : (

@@ -16,7 +16,7 @@ import { Button } from "../../button";
 import { Label } from "../../label";
 import { InlineTotpDisplay } from "../../inline-totp-display";
 import { TagInput } from "../../tag-input";
-import { IconCopyOutlineDuo18, IconTrash2OutlineDuo18, IconTriangleWarningOutlineDuo18 } from "../../../icons";
+import { IconCopy, IconTrash, IconTriangleAlert } from "../../../icons";
 import {
 	DetailCustomField,
 	DetailField,
@@ -211,7 +211,7 @@ export function LoginDetail({
 															)
 														}
 													>
-														<IconCopyOutlineDuo18 className="size-4" />
+														<IconCopy className="size-4" />
 													</DetailFieldActionButton>
 													{onRemovePasskey && (
 														<DetailFieldActionButton
@@ -225,7 +225,7 @@ export function LoginDetail({
 															{isRemoving ? (
 																<span className="text-[10px]">...</span>
 															) : (
-																<IconTrash2OutlineDuo18 className="size-4" />
+																<IconTrash className="size-4" />
 															)}
 														</DetailFieldActionButton>
 													)}
@@ -254,7 +254,7 @@ export function LoginDetail({
 												</p>
 												{isSuspect && (
 													<p className="mt-1 flex items-center gap-1 text-[11px] text-destructive">
-														<IconTriangleWarningOutlineDuo18 className="size-3.5 shrink-0" />
+														<IconTriangleAlert className="size-3.5 shrink-0" />
 														{m.vaults_detail_items_detail_login_passkeys_item_suspect_reason({
 															reason:
 																passkey.statusReason ||

@@ -1,10 +1,10 @@
 import { useI18n } from "@bittery/i18n/react";
 import { useState } from "react";
 import {
-	IconCopyOutlineDuo18,
-	IconEyeOutlineDuo18,
-	IconEyeSlashOutlineDuo18,
-	IconOpenExternalOutlineDuo18,
+	IconCopy,
+	IconEye,
+	IconEyeOff,
+	IconOpenExternal,
 } from "../../../icons";
 import { cn } from "../../../lib/utils";
 import type { CustomField } from "./shared";
@@ -153,7 +153,7 @@ export function DetailField({
 			actions={
 				onCopy ? (
 					<DetailFieldActionButton onClick={() => handleCopy(value, copyText, m)}>
-						<IconCopyOutlineDuo18 className="size-4" />
+						<IconCopy className="size-4" />
 					</DetailFieldActionButton>
 				) : undefined
 			}
@@ -197,13 +197,13 @@ export function DetailPasswordField({
 						onClick={() => setShowPassword((current) => !current)}
 					>
 						{showPassword ? (
-							<IconEyeSlashOutlineDuo18 className="size-4" />
+							<IconEyeOff className="size-4" />
 						) : (
-							<IconEyeOutlineDuo18 className="size-4" />
+							<IconEye className="size-4" />
 						)}
 					</DetailFieldActionButton>
 					<DetailFieldActionButton onClick={() => handleCopy(value, copyText, m)}>
-						<IconCopyOutlineDuo18 className="size-4" />
+						<IconCopy className="size-4" />
 					</DetailFieldActionButton>
 				</>
 			}
@@ -258,10 +258,10 @@ export function DetailUrlField({
 			actions={
 				<>
 					<DetailFieldActionButton onClick={() => handleCopy(value, copyText, m)}>
-						<IconCopyOutlineDuo18 className="size-4" />
+						<IconCopy className="size-4" />
 					</DetailFieldActionButton>
 					<DetailFieldActionButton onClick={() => openHandler(value)}>
-						<IconOpenExternalOutlineDuo18 className="size-4" />
+						<IconOpenExternal className="size-4" />
 					</DetailFieldActionButton>
 				</>
 			}
@@ -314,7 +314,7 @@ export function DetailNoteField({ label, value, copyLabel, className }: DetailNo
 				onClick={() => handleCopy(value, copyText, m)}
 				actions={
 					<DetailFieldActionButton onClick={() => handleCopy(value, copyText, m)}>
-						<IconCopyOutlineDuo18 className="size-4" />
+						<IconCopy className="size-4" />
 					</DetailFieldActionButton>
 				}
 			>

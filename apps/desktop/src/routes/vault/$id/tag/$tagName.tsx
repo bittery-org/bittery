@@ -2,10 +2,10 @@ import { useToggleFavorite, useVaultItems } from "@bittery/core/hooks";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import { Button, cn, getTagColorFromName } from "@bittery/ui";
 import {
-	IconArrowLeftOutlineDuo18,
-	IconMobileOutlineDuo18,
-	IconStarOutlineDuo18,
-	IconTagOutlineDuo18,
+	IconArrowLeft,
+	IconSmartphone,
+	IconStar,
+	IconTag,
 } from "@bittery/ui/icons";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
@@ -72,7 +72,7 @@ function TagRouteComponent() {
 						navigate({ to: "/vault/$id", params: { id: vaultId } })
 					}
 				>
-					<IconArrowLeftOutlineDuo18 className="size-4" />
+					<IconArrowLeft className="size-4" />
 				</Button>
 				<div
 					className="flex size-10 items-center justify-center rounded-full"
@@ -81,7 +81,7 @@ function TagRouteComponent() {
 						color: tagColor,
 					}}
 				>
-					<IconTagOutlineDuo18 className="size-5" />
+					<IconTag className="size-5" />
 				</div>
 				<div>
 					<h2 className="font-semibold text-lg">{decodedTagName}</h2>
@@ -105,7 +105,7 @@ function TagRouteComponent() {
 							className="mb-4 inline-flex rounded-full p-6"
 							style={{ backgroundColor: `${tagColor}20` }}
 						>
-							<IconTagOutlineDuo18 size={48} style={{ color: tagColor }} />
+							<IconTag size={48} style={{ color: tagColor }} />
 						</div>
 						<h3 className="mb-2 font-semibold text-lg">
 							{m.vaults_tag_empty_title()}
@@ -139,7 +139,7 @@ function TagRouteComponent() {
 													<span
 														title={m.vaults_detail_items_list_item_badge_has_2fa()}
 													>
-														<IconMobileOutlineDuo18 className="size-3.5 text-primary" />
+														<IconSmartphone className="size-3.5 text-primary" />
 													</span>
 												)}
 											</div>
@@ -167,7 +167,7 @@ function TagRouteComponent() {
 												: "text-muted-foreground hover:text-yellow-500",
 										)}
 									>
-										<IconStarOutlineDuo18
+										<IconStar
 											className="size-4"
 											fill={item.favorite ? "currentColor" : "none"}
 										/>

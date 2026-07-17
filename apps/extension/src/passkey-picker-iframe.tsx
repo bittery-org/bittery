@@ -1,11 +1,11 @@
 import "./index.css";
 import { Button, Card, cn } from "@bittery/ui";
 import {
-	IconCircleCheck2OutlineDuo18,
-	IconCircleKeyOutlineDuo18,
-	IconClockTimeOutlineDuo18,
-	IconEnvelopeOutlineDuo18,
-	IconUserOutlineDuo18,
+	IconCircleCheck,
+	IconClock,
+	IconMail,
+	IconPasskey,
+	IconUser,
 } from "@bittery/ui/icons";
 import React, {
 	useCallback,
@@ -129,7 +129,7 @@ function PasskeyPickerIframe() {
 			<Card className="gap-2 space-y-3 border border-border/80 bg-card p-3 shadow-sm">
 				<div className="flex items-start gap-2.5">
 					<div className="mt-0.5 rounded-xl border border-primary/25 bg-primary/10 p-1.5 text-primary shadow-sm">
-						<IconCircleKeyOutlineDuo18 size={16} />
+						<IconPasskey size={16} />
 					</div>
 					<div className="min-w-0 flex-1">
 						<div className="flex items-center justify-between gap-2">
@@ -219,7 +219,7 @@ function PasskeyPickerIframe() {
 														: "border-border text-transparent",
 												)}
 											>
-												<IconCircleCheck2OutlineDuo18 size={11} />
+												<IconCircleCheck size={11} />
 											</span>
 										</div>
 										<p className="mt-0.5 truncate text-muted-foreground text-xs">
@@ -239,7 +239,7 @@ function PasskeyPickerIframe() {
 														: "bg-muted/75 text-muted-foreground",
 												)}
 											>
-												<IconUserOutlineDuo18 size={11} />
+												<IconUser size={11} />
 												{option.vaultName || m.ext_passkey_vault_fallback()}
 											</span>
 											<span
@@ -255,7 +255,7 @@ function PasskeyPickerIframe() {
 														: "bg-muted/75 text-muted-foreground",
 												)}
 											>
-												<IconClockTimeOutlineDuo18 size={11} />
+												<IconClock size={11} />
 												{formatRelativeTime(
 													option.lastUsedAt || option.createdAt,
 												)}
@@ -270,7 +270,7 @@ function PasskeyPickerIframe() {
 
 				{selectedOption?.accountEmail && (
 					<div className="flex items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-muted-foreground text-xs">
-						<IconEnvelopeOutlineDuo18 size={12} className="shrink-0" />
+						<IconMail size={12} className="shrink-0" />
 						<span className="truncate">{selectedOption.accountEmail}</span>
 					</div>
 				)}
