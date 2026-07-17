@@ -46,13 +46,13 @@ async function initializeApp() {
 				<I18nProvider>
 					<QueryClientProvider client={queryClient}>
 						<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
-							<AccountProvider router={router}>
-								<DesktopSyncProvider queryClient={queryClient}>
-									<DesktopPlatformProvider>
+							<DesktopSyncProvider queryClient={queryClient}>
+								<DesktopPlatformProvider>
+									<AccountProvider router={router}>
 										<RouterProvider router={router} />
-									</DesktopPlatformProvider>
-								</DesktopSyncProvider>
-							</AccountProvider>
+									</AccountProvider>
+								</DesktopPlatformProvider>
+							</DesktopSyncProvider>
 						</RpcProvider>
 					</QueryClientProvider>
 				</I18nProvider>

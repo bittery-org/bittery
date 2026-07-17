@@ -1,4 +1,5 @@
 export { FormActions } from "./form-actions";
+export { FormAddRow, FormSection } from "./form-section";
 export { FormWrapper } from "./form-wrapper";
 export { NotesField } from "./notes-field";
 export { TitleField } from "./title-field";

@@ -108,11 +108,11 @@ export interface DecryptVaultKeyInput {
 
 export interface VaultKeyStorageLike {
 	getVaultKeys(
-		email?: string,
+		accountId?: string,
 	): Promise<Array<{ vaultId: string; encryptedVaultKey: string }> | null>;
-	getMasterUnlockKey(email?: string): Promise<Uint8Array | null>;
-	getEncryptedPrivateKey(email?: string): Promise<string | null>;
-	getStoredSessionData?(email?: string): Promise<{ userId: string } | null>;
+	getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null>;
+	getEncryptedPrivateKey(accountId?: string): Promise<string | null>;
+	getStoredSessionData?(accountId?: string): Promise<{ userId: string } | null>;
 }
 
 /**
@@ -194,7 +194,7 @@ export interface DecryptStoredVaultKeyInput {
 	encryptedVaultKey: string;
 	vaultId?: string;
 	userId?: string;
-	email?: string;
+	accountId?: string;
 	storage: VaultKeyStorageLike;
 	crypto: VaultKeyCryptoProvider;
 }
@@ -203,19 +203,19 @@ export async function decryptStoredVaultKey({
 	encryptedVaultKey,
 	vaultId,
 	userId,
-	email,
+	accountId,
 	storage,
 	crypto,
 }: DecryptStoredVaultKeyInput): Promise<Uint8Array> {
-	const masterUnlockKey = await storage.getMasterUnlockKey(email);
+	const masterUnlockKey = await storage.getMasterUnlockKey(accountId);
 	if (!masterUnlockKey) {
 		throw new Error("Master Unlock Key not available. Please log in again.");
 	}
 
-	const encryptedPrivateKey = await storage.getEncryptedPrivateKey(email);
+	const encryptedPrivateKey = await storage.getEncryptedPrivateKey(accountId);
 	const resolvedUserId =
 		userId ??
-		(await storage.getStoredSessionData?.(email))?.userId ??
+		(await storage.getStoredSessionData?.(accountId))?.userId ??
 		undefined;
 	return decryptVaultKey({
 		encryptedVaultKey,
@@ -230,7 +230,7 @@ export async function decryptStoredVaultKey({
 export interface GetDecryptedVaultKeyInput {
 	vaultId: string;
 	userId?: string;
-	email?: string;
+	accountId?: string;
 	storage: VaultKeyStorageLike;
 	crypto: VaultKeyCryptoProvider;
 }
@@ -238,11 +238,11 @@ export interface GetDecryptedVaultKeyInput {
 export async function getDecryptedVaultKey({
 	vaultId,
 	userId,
-	email,
+	accountId,
 	storage,
 	crypto,
 }: GetDecryptedVaultKeyInput): Promise<Uint8Array | null> {
-	const vaultKeys = await storage.getVaultKeys(email);
+	const vaultKeys = await storage.getVaultKeys(accountId);
 	if (!vaultKeys) {
 		return null;
 	}
@@ -256,7 +256,7 @@ export async function getDecryptedVaultKey({
 		encryptedVaultKey: entry.encryptedVaultKey,
 		vaultId,
 		userId,
-		email,
+		accountId,
 		storage,
 		crypto,
 	});

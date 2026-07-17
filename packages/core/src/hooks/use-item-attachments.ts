@@ -13,14 +13,24 @@ import {
 	getDecryptedVaultKey,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import {
+	resolveAccountScopeId,
+	resolveUserIdForScope,
+} from "@bittery/storage/account-id";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { usePlatform } from "../context/platform-context";
 import {
-	buildAttachmentBlobEncryptionContext,
-	buildAttachmentContentTypeEncryptionContext,
-	buildAttachmentNameEncryptionContext,
-} from "../services/encryption-context";
+	attachmentBase64ToBytes,
+	attachmentBytesToBase64,
+	decryptAttachmentBlob,
+	decryptAttachmentMeta as decryptAttachmentMetaShared,
+	decryptAttachmentName,
+	encodeAttachmentBlobEnvelope,
+	encryptAttachmentName,
+	encryptAttachmentParts,
+	parseAttachmentBlobEnvelope,
+} from "../services/attachment-crypto";
+import { createStoredAccountRpcClient } from "../services/rpc-client";
 import { useItem } from "./use-item";
 
 export interface AttachmentMeta {
@@ -105,10 +115,7 @@ export function useItemAttachments(
 	vaultId: string | undefined,
 	accountEmail?: string,
 ) {
-	const rpc = useRPC();
-	const client = useRPCClient();
 	const { storage, crypto } = usePlatform();
-	const entitlementsQuery = useQuery(rpc.billing.entitlements.queryOptions());
 
 	const {
 		rawItem,
@@ -117,13 +124,43 @@ export function useItemAttachments(
 		refetch: refetchItem,
 	} = useItem(itemId ?? "", { enabled: !!itemId });
 	const attachments = (rawItem?.attachments ?? []) as AttachmentMeta[];
+	const accountScope =
+		accountEmail ?? rawItem?.account?.accountId ?? rawItem?.accountEmail;
+
+	async function getAccountRpcClient() {
+		const accountId = await resolveAccountScopeId(storage, accountScope);
+		if (!accountId) {
+			throw new Error("Account context is required for attachment operations");
+		}
+		const accountClient = await createStoredAccountRpcClient(
+			storage,
+			accountId,
+		);
+		if (!accountClient) {
+			throw new Error("Account session is not available");
+		}
+		return accountClient;
+	}
+
+	const entitlementsQuery = useQuery({
+		queryKey: ["billing", "entitlements", accountScope ?? "active"],
+		queryFn: async () => {
+			const accountClient = await getAccountRpcClient();
+			return accountClient.billing.entitlements.query();
+		},
+		enabled: Boolean(itemId && accountScope),
+	});
 
 	// Helper to get the decrypted vault key
 	async function getVaultKey(): Promise<Uint8Array> {
 		if (!vaultId) throw new Error("vaultId is required");
+		const accountId = await resolveAccountScopeId(storage, accountScope);
+		if (!accountId) {
+			throw new Error("Account context is required");
+		}
 		const key = await getDecryptedVaultKey({
 			vaultId,
-			email: accountEmail,
+			accountId,
 			storage,
 			crypto: crypto as unknown as VaultKeyCryptoProvider,
 		});
@@ -132,21 +169,9 @@ export function useItemAttachments(
 	}
 
 	async function getCurrentUserId(): Promise<string> {
-		const sessionData = await storage.getStoredSessionData?.(accountEmail);
-		if (sessionData?.userId) {
-			return sessionData.userId;
-		}
-		if (accountEmail) {
-			const accountMetadata = await storage.getAccountMetadata?.(accountEmail);
-			if (accountMetadata?.userId) {
-				return accountMetadata.userId;
-			}
-		}
-		const activeUserId = await storage.getActiveAccountUserId();
-		if (activeUserId) {
-			return activeUserId;
-		}
-		throw new Error("User ID not available for attachment encryption context");
+		return resolveUserIdForScope(storage, accountScope, {
+			errorMessage: "User ID not available for attachment encryption context",
+		});
 	}
 
 	// Decrypt attachment metadata (name + contentType)
@@ -155,35 +180,15 @@ export function useItemAttachments(
 	): Promise<DecryptedAttachment> {
 		const vaultKey = await getVaultKey();
 		const contextUserId = attachment.uploadedBy || (await getCurrentUserId());
-		const nameContext = buildAttachmentNameEncryptionContext({
-			vaultId: attachment.vaultId,
-			attachmentKey: attachment.storageKey,
-			userId: contextUserId,
-		});
-		const contentTypeContext = buildAttachmentContentTypeEncryptionContext({
-			vaultId: attachment.vaultId,
-			attachmentKey: attachment.storageKey,
-			userId: contextUserId,
-		});
-		const name = await crypto.decrypt(
-			{
-				ciphertext: attachment.encryptedName,
-				iv: attachment.encryptionIv,
-				algorithm: attachment.encryptionAlgorithm,
-			},
+		const { name, contentType } = await decryptAttachmentMetaShared(
+			crypto,
 			vaultKey,
-			nameContext,
-		);
-		const contentType = await crypto.decrypt(
 			{
-				ciphertext: attachment.encryptedContentType,
-				// Use the dedicated content-type IV if present, otherwise fall back
-				// to the name IV (for attachments created before this fix)
-				iv: attachment.encryptedContentTypeIv ?? attachment.encryptionIv,
-				algorithm: attachment.encryptionAlgorithm,
+				vaultId: attachment.vaultId,
+				attachmentKey: attachment.storageKey,
+				userId: contextUserId,
 			},
-			vaultKey,
-			contentTypeContext,
+			attachment,
 		);
 		return { ...attachment, name, contentType };
 	}
@@ -200,63 +205,40 @@ export function useItemAttachments(
 			if (!vaultId) throw new Error("vaultId is required");
 			const vaultKey = await getVaultKey();
 			const userId = await getCurrentUserId();
+			const accountClient = await getAccountRpcClient();
 
 			// Read file as ArrayBuffer and convert to base64
 			const fileBuffer = await file.arrayBuffer();
 			const fileBytes = new Uint8Array(fileBuffer);
-			const base64File = btoa(
-				fileBytes.reduce((data, byte) => data + String.fromCharCode(byte), ""),
-			);
+			const base64File = attachmentBytesToBase64(fileBytes);
 
-			// Encrypt the file contents
 			// storageKey is stable and available before metadata creation, so we use it
 			// as the attachment entity key for context binding.
-			const upload = await client.vault.createAttachmentUpload.mutate({
+			const upload = await accountClient.vault.createAttachmentUpload.mutate({
 				itemId,
 				fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
 				contentType: "application/octet-stream",
 				fileSize: file.size,
 			});
 
-			const blobContext = buildAttachmentBlobEncryptionContext({
-				vaultId,
-				attachmentKey: upload.key,
-				userId,
-			});
-			const encryptedFile = await crypto.encrypt(
-				base64File,
-				vaultKey,
-				blobContext,
-			);
-
 			// Use custom display name if provided, otherwise use the file name
 			const nameToEncrypt = file.displayName?.trim() || file.name;
 
-			// Encrypt name and content-type with separate IVs
-			const nameContext = buildAttachmentNameEncryptionContext({
-				vaultId,
-				attachmentKey: upload.key,
-				userId,
-			});
-			const encryptedName = await crypto.encrypt(
-				nameToEncrypt,
+			// Encrypt blob, name and content-type (each with its own IV) in one shot.
+			const encrypted = await encryptAttachmentParts(
+				crypto,
 				vaultKey,
-				nameContext,
-			);
-			const contentTypeContext = buildAttachmentContentTypeEncryptionContext({
-				vaultId,
-				attachmentKey: upload.key,
-				userId,
-			});
-			const encryptedContentType = await crypto.encrypt(
-				file.type || "application/octet-stream",
-				vaultKey,
-				contentTypeContext,
+				{ vaultId, attachmentKey: upload.key, userId },
+				{
+					base64File,
+					name: nameToEncrypt,
+					contentType: file.type || "application/octet-stream",
+				},
 			);
 
 			// Upload encrypted file content to S3
-			const encryptedBlob = new TextEncoder().encode(
-				JSON.stringify(encryptedFile),
+			const encryptedBlob = encodeAttachmentBlobEnvelope(
+				encrypted.blobEnvelope,
 			);
 			const uploadResponse = await fetch(upload.uploadUrl, {
 				method: "PUT",
@@ -269,14 +251,14 @@ export function useItemAttachments(
 			}
 
 			// Save metadata
-			await client.vault.createAttachment.mutate({
+			await accountClient.vault.createAttachment.mutate({
 				itemId,
 				storageKey: upload.key,
-				encryptedName: encryptedName.ciphertext,
-				encryptedContentType: encryptedContentType.ciphertext,
-				encryptionIv: encryptedName.iv,
-				encryptedContentTypeIv: encryptedContentType.iv,
-				encryptionAlgorithm: encryptedName.algorithm,
+				encryptedName: encrypted.encryptedName,
+				encryptedContentType: encrypted.encryptedContentType,
+				encryptionIv: encrypted.encryptionIv,
+				encryptedContentTypeIv: encrypted.encryptedContentTypeIv,
+				encryptionAlgorithm: encrypted.encryptionAlgorithm,
 				fileSize: file.size,
 			});
 		},
@@ -290,20 +272,17 @@ export function useItemAttachments(
 		mutationFn: async (attachment: AttachmentMeta) => {
 			const vaultKey = await getVaultKey();
 			const contextUserId = attachment.uploadedBy || (await getCurrentUserId());
-			const blobContext = buildAttachmentBlobEncryptionContext({
+			const scope = {
 				vaultId: attachment.vaultId,
 				attachmentKey: attachment.storageKey,
 				userId: contextUserId,
-			});
-			const nameContext = buildAttachmentNameEncryptionContext({
-				vaultId: attachment.vaultId,
-				attachmentKey: attachment.storageKey,
-				userId: contextUserId,
-			});
+			};
 
 			// Get presigned download URL + encrypted metadata from server
 			const { downloadUrl, encryptionIv, encryptionAlgorithm, encryptedName } =
-				await client.vault.getAttachmentDownloadUrl.mutate({
+				await (
+					await getAccountRpcClient()
+				).vault.getAttachmentDownloadUrl.mutate({
 					attachmentId: attachment.id,
 				});
 
@@ -312,36 +291,25 @@ export function useItemAttachments(
 			if (!response.ok) throw new Error("Failed to download attachment");
 
 			const encryptedJson = await response.text();
-			const encryptedFile = JSON.parse(encryptedJson) as {
-				ciphertext: string;
-				iv: string;
-				algorithm: string;
-			};
+			const encryptedFile = parseAttachmentBlobEnvelope(encryptedJson);
 
 			// Decrypt file contents
-			const base64File = await crypto.decrypt(
-				encryptedFile,
+			const base64File = await decryptAttachmentBlob(
+				crypto,
 				vaultKey,
-				blobContext,
+				scope,
+				encryptedFile,
 			);
 
 			// Decrypt filename
-			const fileName = await crypto.decrypt(
-				{
-					ciphertext: encryptedName,
-					iv: encryptionIv,
-					algorithm: encryptionAlgorithm,
-				},
-				vaultKey,
-				nameContext,
-			);
+			const fileName = await decryptAttachmentName(crypto, vaultKey, scope, {
+				ciphertext: encryptedName,
+				iv: encryptionIv,
+				algorithm: encryptionAlgorithm,
+			});
 
 			// Convert base64 back to binary
-			const binaryString = atob(base64File);
-			const bytes = new Uint8Array(binaryString.length);
-			for (let i = 0; i < binaryString.length; i++) {
-				bytes[i] = binaryString.charCodeAt(i);
-			}
+			const bytes = attachmentBase64ToBytes(base64File);
 
 			return { bytes, fileName };
 		},
@@ -362,17 +330,17 @@ export function useItemAttachments(
 				throw new Error("Attachment metadata not found");
 			}
 			const contextUserId = attachment.uploadedBy || (await getCurrentUserId());
-			const nameContext = buildAttachmentNameEncryptionContext({
-				vaultId: attachment.vaultId,
-				attachmentKey: attachment.storageKey,
-				userId: contextUserId,
-			});
-			const encryptedName = await crypto.encrypt(
-				newName.trim(),
+			const encryptedName = await encryptAttachmentName(
+				crypto,
 				vaultKey,
-				nameContext,
+				{
+					vaultId: attachment.vaultId,
+					attachmentKey: attachment.storageKey,
+					userId: contextUserId,
+				},
+				newName.trim(),
 			);
-			await client.vault.updateAttachment.mutate({
+			await (await getAccountRpcClient()).vault.updateAttachment.mutate({
 				attachmentId,
 				encryptedName: encryptedName.ciphertext,
 				encryptionIv: encryptedName.iv,
@@ -387,7 +355,9 @@ export function useItemAttachments(
 	// Delete mutation
 	const deleteMutation = useMutation({
 		mutationFn: async (attachmentId: string) => {
-			await client.vault.deleteAttachment.mutate({ attachmentId });
+			await (await getAccountRpcClient()).vault.deleteAttachment.mutate({
+				attachmentId,
+			});
 		},
 		onSuccess: () => {
 			invalidateItem();

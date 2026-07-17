@@ -6,7 +6,10 @@
  */
 
 import { useRPCClient } from "@bittery/shared/rpc";
-import { createRpcClientForServer } from "@bittery/shared/rpc-client-factory";
+import {
+	createRpcClientForServer,
+	getDefaultServerUrl,
+} from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	type LoginResult,
@@ -60,7 +63,7 @@ export interface LoginInput extends SRPLoginInput {
 	 * instead of using the default client. Use this when the user can configure
 	 * a custom server URL (e.g. self-hosted instances).
 	 */
-	serverUrl?: string;
+	serverUrl: string;
 }
 
 /**
@@ -87,8 +90,12 @@ export function useLogin(
 
 	return useMutation({
 		mutationFn: async (input: LoginInput) => {
+			const serverUrl = (input.serverUrl || getDefaultServerUrl()).replace(
+				/\/$/,
+				"",
+			);
 			const rpcClientForRequest = input.serverUrl
-				? createRpcClientForServer(input.serverUrl)
+				? createRpcClientForServer(serverUrl)
 				: rpcClient;
 
 			// Perform SRP login
@@ -97,31 +104,37 @@ export function useLogin(
 					email: input.email,
 					password: input.password,
 					secretKey: input.secretKey,
+					serverUrl,
 				},
 				{ crypto, rpcClient: rpcClientForRequest, storage },
 			);
 
-			// Enable biometric if requested and supported
 			const shouldEnableBiometric =
 				input.enableBiometric ?? options.enableBiometric;
+
+			// Store session data
+			const accountId = await storeLoginSession(
+				result,
+				input.secretKey,
+				storage,
+				input.email,
+				{
+					serverUrl,
+				},
+			);
+
 			if (
 				shouldEnableBiometric &&
 				storage.supportsBiometric &&
 				storage.enableBiometric
 			) {
-				await storage.enableBiometric(input.email);
+				await storage.enableBiometric(accountId);
 			}
 
-			// Store session data
-			await storeLoginSession(result, input.secretKey, storage, input.email, {
-				travelModeRpcClient: rpcClientForRequest,
-			});
-
-			// For multi-account platforms, set this as the active account
-			if (storage.supportsMultiAccount) {
-				await storage.setActiveAccount({ type: "single", email: input.email });
-			}
-
+			// storeLoginSession writes the new account + active selection directly
+			// to storage, bypassing the in-memory AccountSessionManager. Refresh it
+			// so the account switcher reflects the new account without requiring a
+			// lock/unlock cycle.
 			return result;
 		},
 		onSuccess: (result, input) => {

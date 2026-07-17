@@ -16,6 +16,7 @@ import {
 	IconVShapedArrowUpOutlineDuo18,
 	IconXmarkOutlineDuo18,
 } from "../../icons";
+import { cn } from "../../lib/utils";
 import { Button } from "../button";
 import {
 	DropdownMenu,
@@ -26,7 +27,6 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from "../dropdown-menu";
-import { Input } from "../input";
 import { Popover, PopoverContent, PopoverTrigger } from "../popover";
 import {
 	Select,
@@ -114,12 +114,12 @@ export function VaultItemListControls({
 	);
 
 	return (
-		<div className="flex shrink-0 items-center justify-between gap-1 border-b px-2 py-1.5">
+		<div className="flex h-9 shrink-0 items-center justify-between gap-1 border-b px-2">
 			<Select
 				value={categoryFilter}
 				onValueChange={(value) => onCategoryFilterChange(value as ItemListCategoryFilter)}
 			>
-				<SelectTrigger className="h-7 min-w-0 w-44 border-0 bg-transparent px-2 text-xs shadow-none focus:ring-0">
+				<SelectTrigger className="h-7 w-auto min-w-0 max-w-44 gap-1 rounded-md border-0 bg-transparent px-2 font-medium text-muted-foreground text-sm transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground dark:bg-transparent dark:hover:bg-accent/50 dark:data-[state=open]:bg-accent/50 [&>svg]:size-3">
 					<div className="flex min-w-0 items-center gap-1.5">
 						<selectedCategory.icon className="size-3.5 shrink-0" />
 						<span className="truncate">{selectedCategory.label(m)}</span>
@@ -143,31 +143,35 @@ export function VaultItemListControls({
 						<Button
 							variant="ghost"
 							size="sm"
-							className="h-7 w-7 p-0"
+							className={cn(
+								"size-7 rounded-md p-0 data-[state=open]:bg-accent data-[state=open]:text-foreground dark:data-[state=open]:bg-accent/50",
+								searchQuery &&
+									"bg-accent text-foreground dark:bg-accent/50",
+							)}
 							aria-label={m.vaults_detail_items_list_search_toggle()}
 						>
 							<IconMagnifier3OutlineDuo18 className="size-3.5" />
 						</Button>
 					</PopoverTrigger>
-					<PopoverContent align="end" className="w-65 p-2" sideOffset={6}>
-						<div className="flex items-center gap-1">
+					<PopoverContent align="end" className="w-64 overflow-hidden p-0" sideOffset={6}>
+						<div className="flex h-9 items-center gap-2 px-3">
 							<IconMagnifier3OutlineDuo18 className="size-3.5 shrink-0 text-muted-foreground" />
-							<Input
+							<input
 								autoFocus
 								value={searchQuery}
 								onChange={(event) => onSearchQueryChange(event.target.value)}
 								placeholder={m.vaults_detail_items_list_search_placeholder()}
-								className="h-8 border-0 px-0 text-sm shadow-none focus-visible:ring-0"
+								className="h-full w-full min-w-0 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
 							/>
 							{searchQuery ? (
-								<Button
-									variant="ghost"
-									size="sm"
-									className="h-6 w-6 p-0"
+								<button
+									type="button"
 									onClick={() => onSearchQueryChange("")}
+									aria-label={m.vaults_detail_items_list_search_clear()}
+									className="grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-overlay hover:text-foreground"
 								>
 									<IconXmarkOutlineDuo18 className="size-3.5" />
-								</Button>
+								</button>
 							) : null}
 						</div>
 					</PopoverContent>
@@ -178,14 +182,14 @@ export function VaultItemListControls({
 						<Button
 							variant="ghost"
 							size="sm"
-							className="h-7 w-7 p-0"
+							className="size-7 rounded-md p-0 data-[state=open]:bg-accent data-[state=open]:text-foreground dark:data-[state=open]:bg-accent/50"
 							aria-label={m.vaults_detail_items_list_sort_toggle()}
 						>
 							<IconSortObjTopToBottomOutlineDuo18 className="size-3.5" />
 						</Button>
 					</DropdownMenuTrigger>
-					<DropdownMenuContent align="end" className="w-56">
-						<DropdownMenuLabel className="text-muted-foreground text-xs">
+					<DropdownMenuContent align="end" className="w-48">
+						<DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.06em]">
 							{m.vaults_detail_items_list_sort_menu_label()}
 						</DropdownMenuLabel>
 						<DropdownMenuRadioGroup
@@ -193,20 +197,20 @@ export function VaultItemListControls({
 							onValueChange={(value) => onSortFieldChange(value as ItemListSortField)}
 						>
 							<DropdownMenuRadioItem value="title">
-								<IconSortObjTopToBottomOutlineDuo18 className="mr-2 size-3.5" />
+								<IconSortObjTopToBottomOutlineDuo18 className="size-3.5" />
 								{m.vaults_detail_items_list_sort_field_title()}
 							</DropdownMenuRadioItem>
 							<DropdownMenuRadioItem value="createdAt">
-								<IconCalendarOutlineDuo18 className="mr-2 size-3.5" />
+								<IconCalendarOutlineDuo18 className="size-3.5" />
 								{m.vaults_detail_items_list_sort_field_created_at()}
 							</DropdownMenuRadioItem>
 							<DropdownMenuRadioItem value="updatedAt">
-								<IconCalendarOutlineDuo18 className="mr-2 size-3.5" />
+								<IconCalendarOutlineDuo18 className="size-3.5" />
 								{m.vaults_detail_items_list_sort_field_updated_at()}
 							</DropdownMenuRadioItem>
 						</DropdownMenuRadioGroup>
 						<DropdownMenuSeparator />
-						<DropdownMenuLabel className="text-muted-foreground text-xs">
+						<DropdownMenuLabel className="text-[10.5px] font-semibold uppercase tracking-[0.06em]">
 							{m.vaults_detail_items_list_sort_direction_label()}
 						</DropdownMenuLabel>
 						<DropdownMenuRadioGroup
@@ -216,11 +220,11 @@ export function VaultItemListControls({
 							}
 						>
 							<DropdownMenuRadioItem value="asc">
-								<IconVShapedArrowUpOutlineDuo18 className="mr-2 size-3.5" />
+								<IconVShapedArrowUpOutlineDuo18 className="size-3.5" />
 								{m.vaults_detail_items_list_sort_direction_asc()}
 							</DropdownMenuRadioItem>
 							<DropdownMenuRadioItem value="desc">
-								<IconVShapedArrowDownOutlineDuo18 className="mr-2 size-3.5" />
+								<IconVShapedArrowDownOutlineDuo18 className="size-3.5" />
 								{m.vaults_detail_items_list_sort_direction_desc()}
 							</DropdownMenuRadioItem>
 						</DropdownMenuRadioGroup>

@@ -4,9 +4,8 @@
  */
 
 import { useAccountSwitcher } from "@bittery/core/hooks";
+import type { AccountMetadata } from "@bittery/storage/types";
 import {
-	AccountAvatarGroup,
-	Badge,
 	Button,
 	cn,
 	Dialog,
@@ -20,7 +19,8 @@ import {
 } from "@bittery/ui";
 import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { ArrowLeftRight, CheckIcon, Copy, Plus, Trash2 } from "lucide-react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useAccount } from "@/contexts/account-context";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -35,12 +35,11 @@ export function AccountSwitcher() {
 	const { m, locale } = useI18n();
 	const {
 		accounts,
-		activeAccount: activeAccountQuery,
-		unlockedEmails,
+		activeAccount: activeSelection,
+		unlockedAccountIds,
 		switchAccount,
 		removeAccount,
 	} = useAccountSwitcher();
-	// Use AccountContext's lockAllAccounts (has broadcast) instead of hook's version
 	const { lockAllAccounts: lockAllAccountsWithBroadcast } = useAccount();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
@@ -50,86 +49,56 @@ export function AccountSwitcher() {
 	const [showDeviceSetup, setShowDeviceSetup] = useState(false);
 	const [showManageAccounts, setShowManageAccounts] = useState(false);
 
-	const accountsData = accounts.data ?? [];
-	const unlockedEmailsList = unlockedEmails.data ?? [];
-	const isAllAccountsMode = activeAccountQuery.data?.type === "all";
-	const activeAccountEmail =
-		activeAccountQuery.data?.type === "single"
-			? activeAccountQuery.data.email
-			: null;
+	const accountsData = accounts;
+	const unlockedAccountIdsList = unlockedAccountIds;
+	const activeAccountId =
+		activeSelection?.type === "single" ? activeSelection.accountId : null;
 	const activeAccount = accountsData.find(
-		(a) => a.email === activeAccountEmail,
+		(a) => a.accountId === activeAccountId,
 	);
-	const isGerman = locale === "de";
-	const manageAccountsLabel = isGerman ? "Konten verwalten" : "Manage Accounts";
-	const manageAccountsDescription = isGerman
-		? "Alle Konten auf diesem Gerät anzeigen, Details prüfen und neue Konten hinzufügen."
-		: "View every account on this device, review details, and add new ones.";
-	const activeBadgeLabel = isGerman ? "Aktiv" : "Active";
-	const unlockedBadgeLabel = isGerman ? "Entsperrt" : "Unlocked";
-	const lockedBadgeLabel = isGerman ? "Gesperrt" : "Locked";
-	const userIdLabel = isGerman ? "Benutzer-ID" : "User ID";
-	const addedLabel = isGerman ? "Hinzugefügt" : "Added";
-	const lastActiveLabel = isGerman ? "Zuletzt aktiv" : "Last active";
-	const teamLabel = isGerman ? "Team" : "Team";
-	const secretKeyHintLabel = isGerman
-		? "Secret-Key-Hinweis"
-		: "Secret key hint";
-	const switchLabel = isGerman ? "Wechseln" : "Switch";
-	const emptyManageAccountsLabel = isGerman
-		? "Noch keine Konten hinzugefügt."
-		: "No accounts added yet.";
-	const dateTimeFormatter = new Intl.DateTimeFormat(
-		isGerman ? "de-DE" : "en-US",
-		{
-			dateStyle: "medium",
-			timeStyle: "short",
-		},
+	const accountEmailById = useMemo(
+		() =>
+			new Map(
+				accountsData.map((account) => [account.accountId, account.email]),
+			),
+		[accountsData],
 	);
+
+	const dateTimeFormatter = useMemo(
+		() =>
+			new Intl.DateTimeFormat(locale === "de" ? "de-DE" : "en-US", {
+				dateStyle: "medium",
+				timeStyle: "short",
+			}),
+		[locale],
+	);
+
 	const formatTimestamp = (value?: number) => {
 		if (!value || Number.isNaN(value)) {
 			return "—";
 		}
-
 		return dateTimeFormatter.format(value);
 	};
 
-	const handleAccountSelect = async (email: string) => {
-		if (email === activeAccountEmail) return;
+	const handleAccountSelect = async (accountId: string) => {
+		if (accountId === activeAccountId) return;
+
+		const account = accountsData.find((item) => item.accountId === accountId);
+		if (!account) return;
 
 		try {
-			await switchAccount.mutateAsync({ type: "single", email });
+			await switchAccount.mutateAsync({ type: "single", accountId });
 
-			// Check if session is valid for the switched account
-			const sessionValid = await storage.isSessionValid(email);
+			const sessionValid = await storage.isSessionValid(accountId);
 			if (!sessionValid) {
-				navigate({ to: "/unlock", search: { email } });
+				navigate({ to: "/unlock", search: { email: account.email } });
 			} else {
-				// Invalidate all account-related data to clear cache from previous account
 				await invalidator.invalidateAllAccountData();
 				navigate({ to: "/vault" });
 			}
 		} catch (error) {
 			console.error("Failed to switch account:", error);
 			toast.error(m.toast_account_switcher_switch_account_failed());
-		}
-	};
-
-	const handleAllAccountsSelect = async () => {
-		// Check if we have any unlocked accounts
-		if (unlockedEmailsList.length === 0) {
-			toast.error(m.toast_account_switcher_no_unlocked_accounts());
-			return;
-		}
-
-		try {
-			await switchAccount.mutateAsync({ type: "all" });
-			// Invalidate all account-related data to refresh multi-account view
-			await invalidator.invalidateAllAccountData();
-			navigate({ to: "/vault" });
-		} catch (error) {
-			console.error("Failed to switch to All Accounts mode:", error);
-			toast.error(m.toast_account_switcher_switch_all_accounts_failed());
 		}
 	};
 
@@ -143,7 +112,6 @@ export function AccountSwitcher() {
 
 	const handleLockAll = async () => {
 		try {
-			// Use AccountContext's version which broadcasts to extension
 			await lockAllAccountsWithBroadcast();
 			navigate({ to: "/unlock" });
 			toast.success(m.toast_account_switcher_lock_all_success());
@@ -165,33 +133,35 @@ export function AccountSwitcher() {
 		setShowManageAccounts(true);
 	};
 
-	const handleRemoveAccountClick = (email: string) => {
-		setAccountToRemove(email);
+	const handleRemoveAccountClick = (accountId: string) => {
+		setAccountToRemove(accountId);
 	};
 
-	const handleRemoveAccount = async (email: string) => {
+	const handleRemoveAccount = async (accountId: string) => {
 		try {
-			const wasActive =
-				activeAccountEmail?.toLowerCase() === email.toLowerCase();
+			const wasActive = activeAccountId === accountId;
 
-			await removeAccount.mutateAsync(email);
+			await removeAccount.mutateAsync(accountId);
 
 			const accountsList = await storage.getAccountsList();
 			if (accountsList.length === 0) {
-				// No accounts left — go to login
 				await storage.setActiveAccount(null);
 				navigate({ to: "/login" });
 			} else if (wasActive) {
-				// Removed the active account — switch to another one
 				const nextAccount = accountsList[0];
 				await switchAccount.mutateAsync({
 					type: "single",
-					email: nextAccount.email,
+					accountId: nextAccount.accountId,
 				});
 
-				const sessionValid = await storage.isSessionValid(nextAccount.email);
+				const sessionValid = await storage.isSessionValid(
+					nextAccount.accountId,
+				);
 				if (!sessionValid) {
-					navigate({ to: "/unlock", search: { email: nextAccount.email } });
+					navigate({
+						to: "/unlock",
+						search: { email: nextAccount.email },
+					});
 				} else {
 					await invalidator.invalidateAllAccountData();
 					navigate({ to: "/vault" });
@@ -207,39 +177,36 @@ export function AccountSwitcher() {
 		}
 	};
 
-	const handleAccountSelectFromManageDialog = (email: string) => {
+	const handleAccountSelectFromManageDialog = (accountId: string) => {
 		setShowManageAccounts(false);
-		void handleAccountSelect(email);
+		void handleAccountSelect(accountId);
 	};
 
-	// Custom trigger for desktop
+	const handleCopy = async (value: string) => {
+		try {
+			await navigator.clipboard.writeText(value);
+			toast.success(m.vaults_sidebar_account_switcher_toast_copied());
+		} catch (error) {
+			console.error("Failed to copy to clipboard:", error);
+		}
+	};
+
+	const handleSharedAccountSelect = (accountId: string) => {
+		void handleAccountSelect(accountId);
+	};
+
 	const trigger = (
 		<Button
 			variant="ghost"
 			size="sm"
-			className="w-full justify-start gap-2 text-left"
+			className="w-full justify-start gap-2 text-left text-foreground"
 			disabled={switchAccount.isPending}
 		>
-			{isAllAccountsMode ? (
-				<>
-					<AccountAvatarGroup
-						accounts={accountsData.filter((a) =>
-							unlockedEmailsList.includes(a.email),
-						)}
-						maxVisible={2}
-						size="sm"
-					/>
-					<div className="flex flex-col items-start overflow-hidden">
-						<span className="max-w-24 truncate font-medium text-sm">
-							{m.vaults_sidebar_account_switcher_menu_all_accounts()}
-						</span>
-					</div>
-				</>
-			) : activeAccount ? (
+			{activeAccount ? (
 				<>
 					<AccountAvatar account={activeAccount} size="sm" />
-					<div className="flex flex-col items-start overflow-hidden">
-						<span className="max-w-24 truncate font-medium text-sm">
+					<div className="flex min-w-0 flex-1 flex-col items-start">
+						<span className="w-full truncate font-medium text-sm">
 							{activeAccount.teamName ||
 								activeAccount.name ||
 								activeAccount.email.split("@")[0]}
@@ -247,211 +214,106 @@ export function AccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<IconChevronDownOutlineDuo18 className="ml-auto h-4 w-4 opacity-50" />
+			<IconChevronDownOutlineDuo18 className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
 		</Button>
 	);
+
+	const removeAccountEmail = accountToRemove
+		? (accountEmailById.get(accountToRemove) ?? null)
+		: null;
 
 	return (
 		<>
 			<SharedAccountSwitcher
 				accounts={accountsData}
-				activeEmail={activeAccountEmail}
-				unlockedEmails={unlockedEmailsList}
+				activeAccountId={activeAccountId}
+				unlockedAccountIds={unlockedAccountIdsList}
 				isLoading={switchAccount.isPending}
 				labels={{
 					accountsLabel: m.vaults_sidebar_account_switcher_menu_accounts(),
 					noAccountsAdded:
 						m.vaults_sidebar_account_switcher_menu_no_accounts_added(),
-					allAccountsLabel:
-						m.vaults_sidebar_account_switcher_menu_all_accounts(),
-					viewItemsFromAccounts: ({ count }) =>
-						count === 1
-							? m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_single(
-									{ count },
-								)
-							: m.vaults_sidebar_account_switcher_menu_view_items_from_accounts_plural(
-									{ count },
-								),
 					addAccountLabel: m.vaults_sidebar_account_switcher_menu_add_account(),
 					setupAnotherDeviceLabel:
 						m.vaults_sidebar_account_switcher_menu_setup_another_device(),
 					settingsLabel: m.nav_menu_settings(),
 					lockAllAccountsLabel:
 						m.vaults_sidebar_account_switcher_menu_lock_all_accounts(),
-					removeAccountLabel:
-						m.vaults_sidebar_account_switcher_menu_remove_account(),
-					manageAccountsLabel: manageAccountsLabel,
+					manageAccountsLabel:
+						m.vaults_sidebar_account_switcher_manage_accounts_title(),
 				}}
-				onAccountSelect={handleAccountSelect}
+				onAccountSelect={handleSharedAccountSelect}
 				onAddAccount={handleAddAccount}
 				onLockAll={handleLockAll}
 				showManageAccounts={true}
 				onManageAccounts={handleManageAccounts}
-				showAddAccount={false}
-				showAllAccountsOption={true}
-				onAllAccountsSelect={handleAllAccountsSelect}
+				showAddAccount={true}
 				showSettings={true}
 				onSettings={handleSettings}
 				showSetupAnotherDevice={true}
 				onSetupAnotherDevice={handleSetupAnotherDevice}
-				showRemoveAccount={true}
-				onRemoveAccount={handleRemoveAccountClick}
 				trigger={trigger}
 				align="start"
 			/>
 
 			<Dialog open={showManageAccounts} onOpenChange={setShowManageAccounts}>
-				<DialogContent className="max-w-2xl overflow-hidden p-0">
-					<DialogHeader className="gap-3 border-b bg-background px-6 py-5">
-						<div className="flex flex-wrap items-start justify-between gap-3">
-							<div className="space-y-1">
-								<DialogTitle>{manageAccountsLabel}</DialogTitle>
-								<DialogDescription>
-									{manageAccountsDescription}
-								</DialogDescription>
-							</div>
-							<Button size="sm" onClick={handleAddAccountFromManageDialog}>
-								{m.vaults_sidebar_account_switcher_menu_add_account()}
-							</Button>
-						</div>
+				<DialogContent className="gap-0 p-0 sm:max-w-xl">
+					<DialogHeader className="relative gap-1 px-5 pt-5 pb-4 text-left">
+						<DialogTitle>
+							{m.vaults_sidebar_account_switcher_manage_accounts_title()}
+						</DialogTitle>
+						<DialogDescription>
+							{m.vaults_sidebar_account_switcher_manage_accounts_description()}
+						</DialogDescription>
 					</DialogHeader>
 
-					<div className="px-6 py-4">
-						{accountsData.length === 0 ? (
-							<div className="rounded-xl border border-dashed px-4 py-8 text-center text-muted-foreground text-sm">
-								{emptyManageAccountsLabel}
-							</div>
-						) : (
-							<ScrollArea className="max-h-[420px] pr-4">
-								<div className="space-y-3 pb-1">
-									{accountsData.map((account) => {
-										const isActive =
-											activeAccountEmail?.toLowerCase() ===
-											account.email.toLowerCase();
-										const isUnlocked = unlockedEmailsList.includes(
-											account.email,
-										);
-										const accountDisplayName =
-											account.teamName ||
-											account.name ||
-											account.email.split("@")[0];
-
-										return (
-											<div
-												key={account.email}
-												className={cn(
-													"rounded-xl border bg-card/70 p-4 shadow-xs transition-colors",
-													isActive && "border-primary/40 bg-primary/5",
-												)}
-											>
-												<div className="flex items-start gap-3">
-													<AccountAvatar account={account} size="md" />
-
-													<div className="min-w-0 flex-1 space-y-1">
-														<div className="flex flex-wrap items-center gap-1.5">
-															<span className="truncate font-medium text-sm">
-																{accountDisplayName}
-															</span>
-															{isActive && (
-																<Badge className="h-5 px-2 font-semibold text-[10px] uppercase tracking-wide">
-																	{activeBadgeLabel}
-																</Badge>
-															)}
-															<Badge
-																variant={isUnlocked ? "secondary" : "outline"}
-																className={cn(
-																	"h-5 px-2 font-semibold text-[10px] uppercase tracking-wide",
-																	isUnlocked &&
-																		"border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-																)}
-															>
-																{isUnlocked
-																	? unlockedBadgeLabel
-																	: lockedBadgeLabel}
-															</Badge>
-														</div>
-														<p className="truncate text-muted-foreground text-xs">
-															{account.email}
-														</p>
-													</div>
-
-													{!isActive && (
-														<Button
-															size="sm"
-															variant="outline"
-															onClick={() =>
-																handleAccountSelectFromManageDialog(
-																	account.email,
-																)
-															}
-															disabled={switchAccount.isPending}
-														>
-															{switchLabel}
-														</Button>
-													)}
-												</div>
-
-												<div className="mt-3 grid gap-1.5 rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5 text-xs">
-													{account.teamName && (
-														<div className="flex items-center justify-between gap-2">
-															<span className="text-muted-foreground">
-																{teamLabel}
-															</span>
-															<span className="max-w-[220px] truncate font-medium">
-																{account.teamName}
-															</span>
-														</div>
-													)}
-													<div className="flex items-center justify-between gap-2">
-														<span className="text-muted-foreground">
-															{userIdLabel}
-														</span>
-														<span className="max-w-[220px] truncate font-mono text-[11px]">
-															{account.userId}
-														</span>
-													</div>
-													{"secretKeyHint" in account && (
-														<div className="flex items-center justify-between gap-2">
-															<span className="text-muted-foreground">
-																{secretKeyHintLabel}
-															</span>
-															<span className="font-mono text-[11px]">
-																{account.secretKeyHint || "—"}
-															</span>
-														</div>
-													)}
-													{"addedAt" in account && (
-														<div className="flex items-center justify-between gap-2">
-															<span className="text-muted-foreground">
-																{addedLabel}
-															</span>
-															<span>{formatTimestamp(account.addedAt)}</span>
-														</div>
-													)}
-													{"lastActiveAt" in account && (
-														<div className="flex items-center justify-between gap-2">
-															<span className="text-muted-foreground">
-																{lastActiveLabel}
-															</span>
-															<span>
-																{formatTimestamp(account.lastActiveAt)}
-															</span>
-														</div>
-													)}
-												</div>
-											</div>
-										);
-									})}
+					<ScrollArea className="max-h-[65vh]">
+						<div className="flex flex-col gap-3 px-5 pb-5">
+							{accountsData.length === 0 && (
+								<div className="rounded-lg border border-dashed px-4 py-10 text-center text-muted-foreground text-sm">
+									{m.vaults_sidebar_account_switcher_manage_accounts_empty()}
 								</div>
-							</ScrollArea>
-						)}
-					</div>
+							)}
+
+							{accountsData.map((account) => (
+								<ManageAccountCard
+									key={account.accountId}
+									account={account}
+									isActive={activeAccountId === account.accountId}
+									isUnlocked={unlockedAccountIdsList.includes(
+										account.accountId,
+									)}
+									isBusy={switchAccount.isPending}
+									formatTimestamp={formatTimestamp}
+									onSwitch={() =>
+										handleAccountSelectFromManageDialog(account.accountId)
+									}
+									onRemove={() => {
+										setShowManageAccounts(false);
+										handleRemoveAccountClick(account.accountId);
+									}}
+									onCopy={handleCopy}
+								/>
+							))}
+
+							<button
+								type="button"
+								onClick={handleAddAccountFromManageDialog}
+								className="flex h-10 items-center justify-center gap-2 rounded-lg border border-dashed text-muted-foreground text-sm transition-colors hover:border-border-strong hover:bg-foreground/3 hover:text-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+							>
+								<Plus className="size-4" />
+								{m.vaults_sidebar_account_switcher_menu_add_account()}
+							</button>
+						</div>
+					</ScrollArea>
 				</DialogContent>
 			</Dialog>
 
 			<RemoveAccountDialog
-				email={accountToRemove}
-				onConfirm={handleRemoveAccount}
+				email={removeAccountEmail}
+				onConfirm={() => {
+					if (accountToRemove) void handleRemoveAccount(accountToRemove);
+				}}
 				onCancel={() => setAccountToRemove(null)}
 			/>
 
@@ -466,8 +328,185 @@ export function AccountSwitcher() {
 				open={showDeviceSetup}
 				onOpenChange={setShowDeviceSetup}
 				accounts={accountsData}
-				initialAccountEmail={activeAccountEmail}
+				initialAccountId={activeAccountId}
 			/>
 		</>
+	);
+}
+
+interface ManageAccountCardProps {
+	account: AccountMetadata;
+	isActive: boolean;
+	isUnlocked: boolean;
+	isBusy: boolean;
+	formatTimestamp: (value?: number) => string;
+	onSwitch: () => void;
+	onRemove: () => void;
+	onCopy: (value: string) => void;
+}
+
+function ManageAccountCard({
+	account,
+	isActive,
+	isUnlocked,
+	isBusy,
+	formatTimestamp,
+	onSwitch,
+	onRemove,
+	onCopy,
+}: ManageAccountCardProps) {
+	const { m } = useI18n();
+
+	const displayName =
+		account.teamName || account.name || account.email.split("@")[0];
+	const serverUrl = account.serverUrl;
+
+	return (
+		<div
+			className={cn(
+				"group/card overflow-hidden rounded-lg border bg-card",
+				isActive &&
+					"shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]",
+			)}
+		>
+			{/* Header row */}
+			<div className="relative flex items-center gap-3 px-4 py-3">
+				{isActive && (
+					<span
+						aria-hidden
+						className="absolute top-2.5 bottom-2.5 left-0 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+					/>
+				)}
+				<AccountAvatar account={account} size="md" />
+
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-1.5">
+						<span className="truncate font-medium text-sm leading-tight">
+							{displayName}
+						</span>
+						{isActive && (
+							<CheckIcon
+								aria-label={m.vaults_sidebar_account_switcher_badge_active()}
+								className="size-3.5 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]"
+							/>
+						)}
+					</div>
+					<span className="block truncate text-[11px] text-muted-foreground leading-tight">
+						{account.email}
+					</span>
+				</div>
+
+				<span className="flex shrink-0 items-center gap-1.5 text-[10.5px] text-muted-foreground">
+					<span
+						aria-hidden
+						className={cn(
+							"size-1.5 rounded-full",
+							isUnlocked
+								? "bg-emerald-400 shadow-[0_0_6px_oklch(0.72_0.14_160/0.6)]"
+								: "bg-muted-foreground/50",
+						)}
+					/>
+					{isUnlocked
+						? m.vaults_sidebar_account_switcher_badge_unlocked()
+						: m.vaults_sidebar_account_switcher_badge_locked()}
+				</span>
+
+				{!isActive && (
+					<Button
+						size="sm"
+						variant="outline"
+						className="gap-1.5"
+						onClick={onSwitch}
+						disabled={isBusy}
+					>
+						<ArrowLeftRight className="size-3.5" />
+						{m.vaults_sidebar_account_switcher_action_switch()}
+					</Button>
+				)}
+
+				<Button
+					size="icon"
+					variant="ghost"
+					className="size-7 text-muted-foreground opacity-0 transition-opacity hover:text-destructive focus-visible:opacity-100 group-hover/card:opacity-100"
+					onClick={onRemove}
+					aria-label={m.vaults_sidebar_account_switcher_menu_remove_account()}
+				>
+					<Trash2 className="size-3.5" />
+				</Button>
+			</div>
+
+			{/* Detail field rows (hairline-divided, hover-revealed copy actions) */}
+			<div className="divide-y border-t">
+				<ManageAccountFieldRow
+					label={m.vaults_sidebar_account_switcher_label_server()}
+					value={serverUrl || "—"}
+					onCopy={serverUrl ? () => onCopy(serverUrl) : undefined}
+					copyLabel={m.vaults_sidebar_account_switcher_action_copy()}
+				/>
+				<ManageAccountFieldRow
+					label={m.vaults_sidebar_account_switcher_label_user_id()}
+					value={account.userId}
+					onCopy={() => onCopy(account.userId)}
+					copyLabel={m.vaults_sidebar_account_switcher_action_copy()}
+				/>
+				{"secretKeyHint" in account && account.secretKeyHint && (
+					<ManageAccountFieldRow
+						label={m.vaults_sidebar_account_switcher_label_secret_key_hint()}
+						value={account.secretKeyHint}
+						copyLabel={m.vaults_sidebar_account_switcher_action_copy()}
+					/>
+				)}
+
+				<div className="flex items-center gap-4 px-4 py-2 text-[11px] text-muted-foreground tabular-nums">
+					{"addedAt" in account && (
+						<span>
+							{m.vaults_sidebar_account_switcher_label_added()}{" "}
+							{formatTimestamp(account.addedAt)}
+						</span>
+					)}
+					{"lastActiveAt" in account && (
+						<span>
+							{m.vaults_sidebar_account_switcher_label_last_active()}{" "}
+							{formatTimestamp(account.lastActiveAt)}
+						</span>
+					)}
+				</div>
+			</div>
+		</div>
+	);
+}
+
+function ManageAccountFieldRow({
+	label,
+	value,
+	onCopy,
+	copyLabel,
+}: {
+	label: ReactNode;
+	value: string;
+	onCopy?: () => void;
+	copyLabel: string;
+}) {
+	return (
+		<div className="group/row flex min-h-[42px] items-center gap-3 px-4 py-1.5 transition-colors hover:bg-foreground/3">
+			<div className="min-w-0 flex-1">
+				<div className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
+					{label}
+				</div>
+				<div className="truncate font-mono text-[11.5px]" title={value}>
+					{value}
+				</div>
+			</div>
+			{onCopy && (
+				<button
+					type="button"
+					onClick={onCopy}
+					aria-label={copyLabel}
+					className="grid size-7 shrink-0 place-items-center rounded-sm text-muted-foreground opacity-0 transition-opacity hover:bg-overlay hover:text-foreground focus-visible:opacity-100 group-hover/row:opacity-100"
+				>
+					<Copy className="size-3.5" />
+				</button>
+			)}
+		</div>
 	);
 }

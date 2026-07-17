@@ -49,6 +49,38 @@ function getHostname(url: string): string {
 	}
 }
 
+/**
+ * Map a stable background `errorType` code to a localized message. Falls
+ * back to a generic message when the code is missing or unrecognized.
+ */
+function getSaveErrorMessage(
+	m: ReturnType<typeof useI18n>["m"],
+	errorType: string | undefined,
+): string {
+	switch (errorType) {
+		case "network":
+			return m.ext_save_error_network();
+		case "encryption":
+			return m.ext_save_error_encryption();
+		case "auth":
+			return m.ext_save_error_auth();
+		case "permission":
+			return m.ext_save_error_permission();
+		case "not_found":
+			return m.ext_save_error_not_found();
+		case "locked":
+			return m.ext_save_error_locked();
+		case "validation":
+			return m.ext_save_error_validation();
+		case "vault_key":
+			return m.ext_save_error_vault_key();
+		case "unknown":
+			return m.ext_save_error_unknown();
+		default:
+			return m.ext_save_error_fallback();
+	}
+}
+
 function SavePromptIframe() {
 	const { m } = useI18n();
 	const nonce = getIframeNonceFromLocation() ?? "";
@@ -126,7 +158,7 @@ function SavePromptIframe() {
 					}, 2000);
 				} else {
 					setState("error");
-					setErrorMessage(event.data.error || m.ext_save_error_fallback());
+					setErrorMessage(getSaveErrorMessage(m, event.data.errorType));
 				}
 			}
 		};
@@ -137,7 +169,7 @@ function SavePromptIframe() {
 		window.parent.postMessage({ type: "SAVE_IFRAME_READY", nonce }, "*");
 
 		return () => window.removeEventListener("message", handleMessage);
-	}, [handleCancel, nonce, m.ext_save_error_fallback]);
+	}, [handleCancel, nonce, m]);
 
 	const handleSave = () => {
 		if (!data || !selectedVaultId) return;

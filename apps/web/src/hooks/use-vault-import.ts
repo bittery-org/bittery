@@ -1,3 +1,4 @@
+import { getClientForAccount } from "@bittery/core";
 import { useAllVaultKeys, useCoreContext } from "@bittery/core/hooks";
 import {
 	getDecryptedVaultKey,
@@ -12,6 +13,7 @@ import {
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
+import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "@/lib/wasm-crypto";
@@ -63,6 +65,7 @@ type HookImportErrorCode =
 	| "target-vault-name-required"
 	| "target-vault-missing"
 	| "target-vault-read-only"
+	| "create-vault-account-required"
 	| "missing-target-mapping"
 	| "target-vault-key-decrypt-failed"
 	| "vault-import-failed"
@@ -96,6 +99,7 @@ export interface ImportExecutionSummary {
 interface ResolvedTargetVault {
 	vaultId: string;
 	vaultName: string;
+	accountId?: string;
 	accountEmail?: string;
 }
 
@@ -387,22 +391,21 @@ export function useVaultImport() {
 			const userIdByAccount = new Map<string, string>();
 
 			const resolveUserIdForContext = async (
-				accountEmail?: string,
+				accountId: string,
 			): Promise<string> => {
-				const cacheKey = accountEmail ?? "__active__";
-				const cachedUserId = userIdByAccount.get(cacheKey);
+				const cachedUserId = userIdByAccount.get(accountId);
 				if (cachedUserId) {
 					return cachedUserId;
 				}
 
-				const sessionData = await storage.getStoredSessionData?.(accountEmail);
+				const sessionData = await storage.getStoredSessionData?.(accountId);
 				const userId =
 					sessionData?.userId ?? (await storage.getActiveAccountUserId());
 				if (!userId) {
 					throw new Error("User ID not available for encryption context");
 				}
 
-				userIdByAccount.set(cacheKey, userId);
+				userIdByAccount.set(accountId, userId);
 				return userId;
 			};
 
@@ -468,13 +471,35 @@ export function useVaultImport() {
 				}
 
 				const activeAccount = await storage.getActiveAccount();
-				const defaultAccountEmail =
-					activeAccount?.type === "single" ? activeAccount.email : undefined;
+				const defaultAccountId =
+					activeAccount?.type === "single"
+						? activeAccount.accountId
+						: undefined;
+				const defaultAccountEmail = defaultAccountId
+					? (await storage.getAccountsList()).find(
+							(a) => a.accountId === defaultAccountId,
+						)?.email
+					: undefined;
+
+				// A default account is only required to CREATE new vaults.
+				// Existing-vault mappings resolve their own account later via
+				// resolveAccountScopeId, so imports that only reuse existing
+				// vaults must be allowed to proceed in "All Accounts" mode.
+				const requiresVaultCreation = sourceVaults.some(
+					(sourceVault) => mappings[sourceVault.id]?.mode === "create",
+				);
+				if (requiresVaultCreation && !defaultAccountId) {
+					throw new VaultImportError("create-vault-account-required");
+				}
 
 				for (const sourceVault of sourceVaults) {
 					const mapping = mappings[sourceVault.id];
 					if (!mapping || mapping.mode !== "create") {
 						continue;
+					}
+
+					if (!defaultAccountId) {
+						throw new VaultImportError("create-vault-account-required");
 					}
 
 					const targetVaultName = mapping.targetVaultName.trim();
@@ -489,7 +514,7 @@ export function useVaultImport() {
 							name: targetVaultName,
 							type: "personal",
 							icon: DEFAULT_CREATED_VAULT_ICON,
-							accountEmail: defaultAccountEmail,
+							accountId: defaultAccountId,
 						},
 						rpcClient,
 					);
@@ -497,6 +522,7 @@ export function useVaultImport() {
 					const resolvedTarget: ResolvedTargetVault = {
 						vaultId: createdVault.vaultId,
 						vaultName: targetVaultName,
+						accountId: defaultAccountId,
 						accountEmail: defaultAccountEmail,
 					};
 
@@ -504,11 +530,10 @@ export function useVaultImport() {
 					resolvedTargets.set(sourceVault.id, resolvedTarget);
 				}
 
-				if (createdVaults.length > 0) {
-					await core.vaults.refreshVaultKeys(
-						rpcClient,
-						createdVaults[0].accountEmail,
-					);
+				const refreshAccountId =
+					createdVaults[0]?.accountId ?? defaultAccountId;
+				if (createdVaults.length > 0 && refreshAccountId) {
+					await core.vaults.refreshVaultKeys(rpcClient, refreshAccountId);
 					await invalidator.invalidateVaultKeys();
 				}
 
@@ -541,9 +566,24 @@ export function useVaultImport() {
 					let importedItemsInVault = 0;
 
 					try {
+						const accountId = await resolveAccountScopeId(
+							storage,
+							resolvedTarget.accountEmail,
+						);
+						if (!accountId) {
+							throw new VaultImportError("vault-import-failed", {
+								targetVaultName: resolvedTarget.vaultName,
+							});
+						}
+						const vaultRpcClient = await getClientForAccount(
+							storage,
+							rpcClient,
+							accountId,
+						);
+						const userId = await resolveUserIdForContext(accountId);
 						const vaultKey = await getDecryptedVaultKey({
 							vaultId: resolvedTarget.vaultId,
-							email: resolvedTarget.accountEmail,
+							accountId,
 							storage,
 							crypto: vaultKeyCrypto,
 						});
@@ -553,9 +593,6 @@ export function useVaultImport() {
 								targetVaultName: resolvedTarget.vaultName,
 							});
 						}
-						const userId = await resolveUserIdForContext(
-							resolvedTarget.accountEmail,
-						);
 
 						const encryptedItems = [];
 						for (const sourceItem of sourceItems) {
@@ -608,7 +645,7 @@ export function useVaultImport() {
 								index,
 								index + IMPORT_BATCH_SIZE,
 							);
-							const result = await rpcClient.vault.bulkImportItems.mutate({
+							const result = await vaultRpcClient.vault.bulkImportItems.mutate({
 								vaultId: resolvedTarget.vaultId,
 								clientId: clientId ?? null,
 								items: batch,

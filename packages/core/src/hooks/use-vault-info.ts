@@ -13,6 +13,7 @@ import { useVaultRepositorySync } from "./use-vault-repository-sync";
  * Vault info with associated account metadata
  */
 export interface VaultInfoWithAccount extends VaultKeyData {
+	accountId: string;
 	accountEmail?: string;
 	accountName?: string;
 	accountTeamName?: string;
@@ -61,7 +62,9 @@ export function useVaultInfo(
 
 		for (const account of accountsInfo) {
 			try {
-				const repo = vaultCoordinator.getRepositoryForEmail(account.email);
+				const repo = vaultCoordinator.getRepositoryForAccount(
+					account.accountId,
+				);
 				const vaultKey = repo
 					.getVaultKeys()
 					.find((candidate) => candidate.vaultId === vaultId);
@@ -71,6 +74,7 @@ export function useVaultInfo(
 
 				return {
 					...vaultKey,
+					accountId: account.accountId,
 					accountEmail: account.email,
 					accountName: account.name,
 					accountTeamName: account.teamName,

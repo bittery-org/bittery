@@ -77,28 +77,22 @@ function SettingsPage() {
 
 	return (
 		<div className="mx-auto flex w-full max-w-6xl flex-col gap-6 pb-3">
-			{/* Hero Banner */}
-			<section className="relative overflow-hidden rounded-2xl border bg-card p-3 sm:p-5">
-				<div className="pointer-events-none absolute inset-0 bg-linear-to-br from-muted/60 via-transparent to-transparent" />
-
-				<div className="relative flex items-center justify-between gap-3">
-					<div className="flex min-w-0 items-center gap-3">
-						<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted shadow-sm sm:h-10 sm:w-10">
-							<Gear className="h-4 w-4 text-muted-foreground sm:h-5 sm:w-5" />
-						</div>
-						<div className="min-w-0">
-							<h1 className="truncate font-semibold text-lg tracking-tight sm:text-xl">
-								{m.settings_page_hero_heading()}
-							</h1>
-							{userQuery.data?.email && (
-								<p className="truncate text-muted-foreground text-xs">
-									{userQuery.data.email}
-								</p>
-							)}
-						</div>
-					</div>
+			{/* Header */}
+			<div className="flex items-center gap-3">
+				<div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+					<Gear className="size-4" />
 				</div>
-			</section>
+				<div className="min-w-0">
+					<h1 className="truncate font-semibold text-lg tracking-[-0.015em]">
+						{m.settings_page_hero_heading()}
+					</h1>
+					{userQuery.data?.email && (
+						<p className="truncate text-muted-foreground text-xs">
+							{userQuery.data.email}
+						</p>
+					)}
+				</div>
+			</div>
 
 			{/* Tabs Area */}
 			<Tabs defaultValue="account">
@@ -127,7 +121,7 @@ function SettingsPage() {
 				<TabsContent value="account" className="mt-4">
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
+							<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 								{m.settings_account_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
@@ -144,10 +138,10 @@ function SettingsPage() {
 						) : (
 							<div className="grid gap-4 sm:grid-cols-2">
 								{/* Name */}
-								<div className="rounded-xl border bg-card p-5">
+								<div className="rounded-lg border bg-card p-4">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-											<User className="h-4 w-4 text-muted-foreground" />
+										<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+											<User className="size-4" />
 										</div>
 										<div className="min-w-0 flex-1">
 											<p className="text-muted-foreground text-xs">
@@ -161,11 +155,11 @@ function SettingsPage() {
 								</div>
 
 								{/* Email */}
-								<div className="rounded-xl border bg-card p-5">
+								<div className="rounded-lg border bg-card p-4">
 									<div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
 										<div className="flex items-center gap-3">
-											<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-												<Mail className="h-4 w-4 text-muted-foreground" />
+											<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+												<Mail className="size-4" />
 											</div>
 											<div className="min-w-0 flex-1">
 												<p className="text-muted-foreground text-xs">
@@ -183,16 +177,16 @@ function SettingsPage() {
 								</div>
 
 								{/* Secret Key Hint */}
-								<div className="rounded-xl border bg-card p-5 sm:col-span-2">
+								<div className="rounded-lg border bg-card p-4 sm:col-span-2">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-											<Fingerprint className="h-4 w-4 text-muted-foreground" />
+										<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+											<Fingerprint className="size-4" />
 										</div>
 										<div className="min-w-0 flex-1">
 											<p className="text-muted-foreground text-xs">
 												{m.settings_field_secret_key_hint()}
 											</p>
-											<code className="mt-0.5 inline-block rounded bg-muted px-2 py-0.5 font-mono text-muted-foreground text-sm">
+											<code className="mt-0.5 inline-block rounded-[4px] border bg-foreground/3 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
 												{userQuery.data?.secretKeyHint ||
 													m.settings_common_na()}
 											</code>
@@ -208,7 +202,7 @@ function SettingsPage() {
 				<TabsContent value="security" className="mt-4">
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
+							<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 								{m.settings_security_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
@@ -218,11 +212,11 @@ function SettingsPage() {
 
 						<div className="space-y-3">
 							{/* Master Password */}
-							<div className="rounded-xl border bg-card p-5">
+							<div className="rounded-lg border bg-card p-4">
 								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-											<LockKey className="h-4 w-4 text-muted-foreground" />
+										<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+											<LockKey className="size-4" />
 										</div>
 										<div className="space-y-0.5">
 											<span className="font-medium text-sm">
@@ -240,11 +234,11 @@ function SettingsPage() {
 							</div>
 
 							{/* Secret Key */}
-							<div className="rounded-xl border bg-card p-5">
+							<div className="rounded-lg border bg-card p-4">
 								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-											<Key className="h-4 w-4 text-muted-foreground" />
+										<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+											<Key className="size-4" />
 										</div>
 										<div className="space-y-0.5">
 											<span className="font-medium text-sm">
@@ -264,11 +258,11 @@ function SettingsPage() {
 							</div>
 
 							{/* Recovery Key */}
-							<div className="rounded-xl border bg-card p-5">
+							<div className="rounded-lg border bg-card p-4">
 								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-											<Shield className="h-4 w-4 text-muted-foreground" />
+										<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+											<Shield className="size-4" />
 										</div>
 										<div className="flex items-center gap-2">
 											<div className="space-y-0.5">
@@ -279,7 +273,7 @@ function SettingsPage() {
 													{userQuery.data?.hasRecoveryKey && (
 														<Badge
 															variant="outline"
-															className="border-emerald-500/30 bg-emerald-500/10 text-[10px] text-emerald-600 dark:text-emerald-400"
+															className="border-success/30 bg-success/10 text-[10.5px] text-success"
 														>
 															<CheckCircle className="mr-1 h-3 w-3" />
 															{m.settings_security_recovery_key_configured()}
@@ -306,11 +300,11 @@ function SettingsPage() {
 							</div>
 
 							{/* Auto-Lock */}
-							<div className="rounded-xl border bg-card p-5">
+							<div className="rounded-lg border bg-card p-4">
 								<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 									<div className="flex items-center gap-3">
-										<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-											<Clock className="h-4 w-4 text-muted-foreground" />
+										<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+											<Clock className="size-4" />
 										</div>
 										<div className="space-y-0.5">
 											<span className="font-medium text-sm">
@@ -332,7 +326,7 @@ function SettingsPage() {
 				<TabsContent value="devices" className="mt-4">
 					<div className="space-y-3">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
+							<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 								{m.settings_devices_heading()}
 							</h2>
 							<div className="flex items-center gap-3">
@@ -356,7 +350,7 @@ function SettingsPage() {
 				<TabsContent value="general" className="mt-4">
 					<div className="space-y-6">
 						<div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-							<h2 className="font-semibold text-lg tracking-tight">
+							<h2 className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 								{m.settings_general_heading()}
 							</h2>
 							<p className="text-muted-foreground text-sm">
@@ -364,7 +358,7 @@ function SettingsPage() {
 							</p>
 						</div>
 
-						<div className="rounded-xl border bg-card p-6">
+						<div className="rounded-lg border bg-card p-4">
 							<div className="space-y-4">
 								<p className="max-w-2xl text-muted-foreground text-sm leading-relaxed">
 									{m.settings_general_product_description()}
@@ -396,11 +390,11 @@ function SettingsPage() {
 							</div>
 						</div>
 
-						<div className="rounded-xl border bg-card p-5">
+						<div className="rounded-lg border bg-card p-4">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="flex items-start gap-3">
-									<div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-										<Upload className="h-4 w-4 text-muted-foreground" />
+									<div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+										<Upload className="size-4" />
 									</div>
 									<div className="space-y-1">
 										<span className="font-medium text-sm">
@@ -421,11 +415,11 @@ function SettingsPage() {
 							</div>
 						</div>
 
-						<div className="rounded-xl border bg-card p-5">
+						<div className="rounded-lg border bg-card p-4">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="flex items-start gap-3">
-									<div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-										<Download className="h-4 w-4 text-muted-foreground" />
+									<div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
+										<Download className="size-4" />
 									</div>
 									<div className="space-y-1">
 										<span className="font-medium text-sm">
@@ -446,7 +440,7 @@ function SettingsPage() {
 							</div>
 						</div>
 
-						<div className="rounded-xl border bg-card p-5">
+						<div className="rounded-lg border bg-card p-4">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="space-y-0.5">
 									<span className="font-medium text-sm">
@@ -492,7 +486,7 @@ function SettingsPage() {
 							</div>
 						</div>
 
-						<div className="rounded-xl border bg-card p-5">
+						<div className="rounded-lg border bg-card p-4">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="space-y-0.5">
 									<span className="font-medium text-sm">
@@ -547,11 +541,11 @@ function SettingsPage() {
 						</div>
 
 						{/* Danger Zone */}
-						<div className="rounded-xl border border-destructive/20 p-5">
+						<div className="rounded-lg border border-destructive/20 p-4">
 							<div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
 								<div className="flex items-center gap-3">
-									<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10">
-										<Trash2 className="h-4 w-4 text-destructive" />
+									<div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-destructive/10 text-destructive">
+										<Trash2 className="size-4" />
 									</div>
 									<div className="space-y-0.5">
 										<span className="font-medium text-sm">

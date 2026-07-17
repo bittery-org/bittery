@@ -3,6 +3,8 @@
  * Handles communication with the desktop app for biometric unlock
  */
 
+import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { desktopClient } from "./desktop-client";
@@ -62,11 +64,14 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 			type: "BIOMETRIC_UNLOCK_REQUEST",
 			challenge,
 			extension_id: chrome.runtime.id,
-			email: activeAccount.email,
+			accountId: activeAccount.accountId,
 		});
 
 		const responseData = response as any;
 		if (responseData?.type === "BIOMETRIC_UNLOCK_SUCCESS") {
+			if (responseData.accountId !== activeAccount.accountId) {
+				throw new Error("Desktop returned biometric data for another account");
+			}
 			// Verify the response contains the expected data
 			if (
 				!responseData.encrypted_session ||
@@ -81,10 +86,14 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				activeAccount.type === "single" &&
 				"updateBiometricEnabled" in storage
 			) {
-				await (storage as any).updateBiometricEnabled(
-					activeAccount.email,
-					true,
-				);
+				await (
+					storage as {
+						updateBiometricEnabled: (
+							accountId: string,
+							enabled: boolean,
+						) => Promise<void>;
+					}
+				).updateBiometricEnabled(activeAccount.accountId, true);
 			}
 
 			// Verify signature (challenge + encrypted_session)
@@ -119,35 +128,51 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				muk[i] = mukStr.charCodeAt(i);
 			}
 
-			// Store the MUK in memory
-			setMasterUnlockKey(muk);
-			await storage.setMasterUnlockKey(muk, activeAccount.email);
-
 			// Get auth token and vault keys from response (desktop app provides them) or storage
 			let token: string;
 			let vaultKeys: any[];
 
 			if (responseData.auth_token) {
 				token = responseData.auth_token;
-				await storage.storeAuthToken(token, activeAccount.email);
+				await storage.storeAuthToken(token, activeAccount.accountId);
 			} else {
-				const storedToken = await storage.getAuthToken(activeAccount.email);
+				const storedToken = await storage.getAuthToken(activeAccount.accountId);
 				if (!storedToken) {
 					throw new Error("Missing auth token in response and storage");
 				}
 				token = storedToken;
 			}
 
+			const enforcer = getTravelModeEnforcer(storage);
+			const client = await createStoredAccountRpcClient(
+				storage,
+				activeAccount.accountId,
+			).catch(() => null);
+			try {
+				await enforcer.verifyForUnlock(activeAccount.accountId, client);
+			} catch (error) {
+				await storage.clearSession(activeAccount.accountId);
+				throw error;
+			}
+
 			if (responseData.vault_keys) {
-				vaultKeys = JSON.parse(responseData.vault_keys);
-				await storage.storeVaultKeys(vaultKeys, activeAccount.email);
+				vaultKeys = enforcer.filterVaultKeys(
+					activeAccount.accountId,
+					JSON.parse(responseData.vault_keys),
+				);
+				await storage.storeVaultKeys(vaultKeys, activeAccount.accountId);
 			} else {
-				const storedVaultKeys = await storage.getVaultKeys(activeAccount.email);
+				const storedVaultKeys = await storage.getVaultKeys(
+					activeAccount.accountId,
+				);
 				if (!storedVaultKeys || storedVaultKeys.length === 0) {
 					throw new Error("Missing vault keys in response and storage");
 				}
 				vaultKeys = storedVaultKeys;
 			}
+
+			setMasterUnlockKey(muk);
+			await storage.setMasterUnlockKey(muk, activeAccount.accountId);
 
 			// Update activity tracking
 			await updateActivity();
@@ -368,11 +393,13 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		const unlocked: string[] = [];
-		const failed: Array<{ email: string; error: string }> = [];
+		const failed: Array<{ accountId: string; email: string; error: string }> =
+			[];
 
 		// Process each account from response
 		for (const accountData of responseData.accounts || []) {
 			const email = accountData.email;
+			const accountId = accountData.accountId;
 
 			try {
 				// Decode the encrypted session data
@@ -389,23 +416,36 @@ export async function handleNativeBiometricUnlockAll(options?: {
 					muk[i] = mukStr.charCodeAt(i);
 				}
 
-				// Store the MUK for this account
-				await storage.setMasterUnlockKey(muk, email);
+				if (!accountId) throw new Error(`Missing account ID for ${email}`);
 
 				// Store auth token if provided
 				if (accountData.auth_token) {
-					await storage.storeAuthToken(accountData.auth_token, email);
+					await storage.storeAuthToken(accountData.auth_token, accountId);
 				}
 
-				// Store vault keys if provided
+				const enforcer = getTravelModeEnforcer(storage);
+				const client = await createStoredAccountRpcClient(
+					storage,
+					accountId,
+				).catch(() => null);
+				await enforcer.verifyForUnlock(accountId, client);
+
+				// Store only policy-visible vault keys after verification.
 				if (accountData.vault_keys) {
-					const vaultKeys = JSON.parse(accountData.vault_keys);
-					await storage.storeVaultKeys(vaultKeys, email);
+					const vaultKeys = enforcer.filterVaultKeys(
+						accountId,
+						JSON.parse(accountData.vault_keys),
+					);
+					await storage.storeVaultKeys(vaultKeys, accountId);
 				}
 
-				unlocked.push(email);
+				await storage.setMasterUnlockKey(muk, accountId);
+
+				unlocked.push(accountId);
 			} catch (error) {
+				if (accountId) await storage.clearSession(accountId);
 				failed.push({
+					accountId,
 					email,
 					error: error instanceof Error ? error.message : "Unknown error",
 				});
@@ -421,20 +461,18 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		// Get first unlocked email (guaranteed to exist because we checked length above)
-		const firstUnlockedEmail = unlocked[0];
-		if (!firstUnlockedEmail) {
-			throw new Error("No unlocked email found");
+		const firstUnlockedAccountId = unlocked[0];
+		if (!firstUnlockedAccountId) {
+			throw new Error("No unlocked account found");
 		}
 
 		if (!options?.preserveActiveAccount) {
-			if (accounts.length > 1) {
-				await storage.setActiveAccount({ type: "all" });
-			} else {
-				await storage.setActiveAccount({
-					type: "single",
-					email: firstUnlockedEmail,
-				});
-			}
+			// All-accounts mode was removed; even when multiple accounts unlock the
+			// app operates on a single active account (the first unlocked one).
+			await storage.setActiveAccount({
+				type: "single",
+				accountId: firstUnlockedAccountId,
+			});
 		}
 
 		// IMPORTANT: Update activity FIRST to set timestamp, otherwise isUnlocked()
@@ -442,7 +480,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		await updateActivity();
 
 		// Set MUK for first unlocked account in session manager
-		const activeMuk = await storage.getMasterUnlockKey(firstUnlockedEmail);
+		const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);
 		if (activeMuk) {
 			setMasterUnlockKey(activeMuk);
 		}

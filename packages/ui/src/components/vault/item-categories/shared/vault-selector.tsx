@@ -51,7 +51,7 @@ export function VaultSelector({
 		> = new Map();
 
 		for (const vault of vaults) {
-			const accountKey = vault.accountEmail || "default";
+			const accountKey = vault.accountId || "default";
 			const existingGroup = groups.get(accountKey);
 
 			if (existingGroup) {

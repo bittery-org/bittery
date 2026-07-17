@@ -182,6 +182,7 @@ export {
 	getAttachmentUploadErrorCode,
 	useItemAttachments,
 } from "./use-item-attachments";
+export { useItemCounts, type VaultItemCounts } from "./use-item-counts";
 export {
 	type ItemListCategoryFilter,
 	type ItemListFilterable,
@@ -197,6 +198,10 @@ export {
 	useItems,
 	useItemsUnified,
 } from "./use-items";
+export {
+	type UseMoveTargetVaultsOptions,
+	useMoveTargetVaults,
+} from "./use-move-target-vaults";
 export { useTravelMode } from "./use-travel-mode";
 export {
 	type UseVaultInfoOptions,

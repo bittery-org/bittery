@@ -2,9 +2,9 @@ export type DesktopRequest =
 	| { type: "PING" }
 	| { type: "GET_DESKTOP_STATUS" }
 	| { type: "GET_DESKTOP_ACCOUNTS" }
-	| { type: "GET_DESKTOP_AUTH_TOKEN"; email: string }
-	| { type: "GET_DESKTOP_VAULT_KEYS"; email: string }
-	| { type: "GET_DESKTOP_ITEMS_SNAPSHOT"; emails?: string[] }
+	| { type: "GET_DESKTOP_AUTH_TOKEN"; accountId: string }
+	| { type: "GET_DESKTOP_VAULT_KEYS"; accountId: string }
+	| { type: "GET_DESKTOP_ITEMS_SNAPSHOT"; accountIds?: string[] }
 	| { type: "SUBSCRIBE_DESKTOP_EVENTS" }
 	| { type: "UNSUBSCRIBE_DESKTOP_EVENTS" }
 	| { type: "CHECK_BIOMETRIC_AVAILABLE" }
@@ -12,7 +12,7 @@ export type DesktopRequest =
 			type: "BIOMETRIC_UNLOCK_REQUEST";
 			challenge: string;
 			extension_id: string;
-			email?: string;
+			accountId?: string;
 	  }
 	| {
 			type: "BIOMETRIC_UNLOCK_ALL_REQUEST";
@@ -28,7 +28,7 @@ export type DesktopEventPayload =
 	| { event: "desktop_close"; payload: { timestamp: number } }
 	| {
 			event: "active_account_changed";
-			payload: { email: string; timestamp: number };
+			payload: { accountId: string; timestamp: number };
 	  };
 
 export type DesktopResponse =
@@ -44,6 +44,7 @@ export type DesktopResponse =
 	| {
 			type: "DESKTOP_ACCOUNTS";
 			accounts: Array<{
+				accountId: string;
 				email: string;
 				userId: string;
 				name: string;
@@ -59,12 +60,18 @@ export type DesktopResponse =
 	  }
 	| {
 			type: "DESKTOP_AUTH_TOKEN";
+			accountId: string;
 			email: string;
 			authToken: string;
 			expiresAt?: number;
 			userId?: string;
 	  }
-	| { type: "DESKTOP_VAULT_KEYS"; email: string; vaultKeys: string }
+	| {
+			type: "DESKTOP_VAULT_KEYS";
+			accountId: string;
+			email: string;
+			vaultKeys: string;
+	  }
 	| {
 			type: "DESKTOP_ITEMS_SNAPSHOT";
 			items: Array<Record<string, unknown>>;
@@ -81,6 +88,8 @@ export type DesktopResponse =
 	  }
 	| {
 			type: "BIOMETRIC_UNLOCK_SUCCESS";
+			accountId: string;
+			email: string;
 			encrypted_session: string;
 			device_key: string;
 			signature: string;
@@ -93,6 +102,7 @@ export type DesktopResponse =
 			device_key: string;
 			signature: string;
 			accounts: Array<{
+				accountId: string;
 				email: string;
 				encrypted_session: string;
 				auth_token?: string;

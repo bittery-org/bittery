@@ -402,7 +402,10 @@ pub(crate) async fn list_teams(
         role: team.role,
         member_count: team.member_count,
         member_limit: team.member_limit,
-        image_url: team.image_key.map(storage::public_url),
+        image_url: team
+            .image_key
+            .as_deref()
+            .and_then(storage::public_asset_url),
         created_at: format_timestamp(team.created_at),
     })
 }
@@ -449,7 +452,10 @@ pub(crate) async fn get_team(
         user_role: team.user_role,
         member_count: team.member_count,
         member_limit: team.member_limit,
-        image_url: team.image_key.map(storage::public_url),
+        image_url: team
+            .image_key
+            .as_deref()
+            .and_then(storage::public_asset_url),
         created_at: format_timestamp(team.created_at),
         updated_at: format_timestamp(team.updated_at),
     })

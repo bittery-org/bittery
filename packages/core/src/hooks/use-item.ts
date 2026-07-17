@@ -80,6 +80,9 @@ export function useItem(
 		updatedAt: item.updatedAt,
 		deletedAt: item.deletedAt,
 		attachments: item.attachments,
+		accountEmail: item.accountEmail ?? item.account?.email,
+		serverUrl: item.serverUrl ?? item.account?.serverUrl,
+		account: item.account,
 	};
 
 	return {

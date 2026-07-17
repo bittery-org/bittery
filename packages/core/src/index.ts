@@ -11,6 +11,7 @@ export {
 export {
 	type AccountInfo,
 	AccountResolver,
+	createStoredAccountRpcClient,
 	type DefaultRpcClient,
 	findAccountForItem,
 	getClientForAccount,
@@ -19,11 +20,13 @@ export {
 	type ResolveAccountsResult,
 } from "./services/account-resolver";
 export {
+	type BiometricUnlockAvailability,
 	type CheckEmailResult,
 	checkEmailExists,
 	clearSession,
 	deriveSrpLoginProof,
 	type FinishLoginResponse,
+	getBiometricUnlockAvailability,
 	getSessionState,
 	type IAuthClient,
 	type LoginResult,
@@ -46,8 +49,6 @@ export {
 	type CreateItemInput,
 	type CreateItemResult,
 	type FetchDecryptedItemResult,
-	type FetchDeletedItemsOptions,
-	type FetchItemsOptions,
 	ItemService,
 	type MoveItemInput,
 	type MoveItemResult,
@@ -69,11 +70,9 @@ export {
 export {
 	filterItemsByTravelMode,
 	filterVaultKeys,
-	getTravelModeService,
 	isVaultHidden,
 	type TravelModeRpcClient,
 	type TravelModeServerResponse,
-	TravelModeService,
 } from "./services/travel-mode-service";
 export {
 	handleTravelModeSyncEvent,

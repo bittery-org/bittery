@@ -144,25 +144,25 @@ function AllItemsPage() {
 			{/* Middle pane: item list */}
 			<div
 				className={cn(
-					"flex w-full shrink-0 flex-col border-r md:w-80",
+					"flex w-full shrink-0 flex-col border-r md:w-78",
 					selectedItemId && "hidden md:flex",
 				)}
 			>
-				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<Grid className="size-4 text-muted-foreground" />
-					<span className="font-medium">
+				<div className="flex h-11 shrink-0 items-center gap-2 border-b px-2.5 xl:h-12">
+					<Grid className="size-3.5 shrink-0 text-muted-foreground" />
+					<span className="truncate font-medium text-sm">
 						{m.vaults_sidebar_link_all_objects()}
 					</span>
-					<Badge variant="secondary" className="ml-auto">
+					<Badge variant="secondary" className="ml-auto shrink-0">
 						{items.length}
 					</Badge>
 					<Button
 						variant="ghost"
 						size="sm"
-						className="h-7 w-7 p-0"
+						className="size-7 p-0"
 						onClick={() => setIsCreateItemSheetOpen(true)}
 					>
-						<Plus className="h-4 w-4" />
+						<Plus className="size-3.5" />
 					</Button>
 				</div>
 				<div className="flex min-h-0 flex-1 flex-col overflow-hidden py-1">

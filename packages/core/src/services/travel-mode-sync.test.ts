@@ -3,9 +3,9 @@ import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type { AccountResolver } from "./account-resolver";
 import {
-	getTravelModeService,
-	resetTravelModeServiceForTests,
-} from "./travel-mode-service";
+	getTravelModeEnforcer,
+	resetTravelModeEnforcerForTests,
+} from "./travel-mode-enforcer";
 import {
 	handleTravelModeSyncEvent,
 	restoreAfterTravelModeDisabled,
@@ -13,9 +13,11 @@ import {
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 import type { RpcVaultClient } from "./vault-service";
 
+const ACCOUNT_ID = "account-1";
+
 describe("travel-mode-sync", () => {
 	beforeEach(() => {
-		resetTravelModeServiceForTests();
+		resetTravelModeEnforcerForTests();
 	});
 
 	it("restores vault keys and refreshes coordinator after travel mode is disabled", async () => {
@@ -68,6 +70,7 @@ describe("travel-mode-sync", () => {
 			resolveAccounts: mock(async () => ({
 				accountsInfo: [
 					{
+						accountId: ACCOUNT_ID,
 						email: "user@example.com",
 						rpcClient,
 					},
@@ -75,21 +78,16 @@ describe("travel-mode-sync", () => {
 			})),
 		} as unknown as AccountResolver;
 
-		await restoreAfterTravelModeDisabled(
-			"user@example.com",
-			storage,
-			coordinator,
-			{ rpcClient, accounts },
-		);
+		await restoreAfterTravelModeDisabled(ACCOUNT_ID, storage, coordinator, {
+			rpcClient,
+			accounts,
+		});
 
 		expect(rpcClient.vault.list.query).toHaveBeenCalled();
-		expect(storage.storeVaultKeys).toHaveBeenCalledWith(
-			vaultKeys,
-			"user@example.com",
-		);
+		expect(storage.storeVaultKeys).toHaveBeenCalledWith(vaultKeys, ACCOUNT_ID);
 		expect(coordinator.syncVaultKeys).toHaveBeenCalledWith(
 			vaultKeys,
-			"user@example.com",
+			ACCOUNT_ID,
 		);
 		expect(coordinator.refreshFromServer).toHaveBeenCalled();
 	});
@@ -136,7 +134,7 @@ describe("travel-mode-sync", () => {
 		} as unknown as RpcVaultClient;
 
 		const coordinator = {
-			purgeHiddenVaultsForEmail: mock(() => undefined),
+			purgeHiddenVaultsForAccount: mock(() => undefined),
 			syncVaultKeys: mock(async () => undefined),
 			refreshFromServer: mock(async () => undefined),
 		} as unknown as VaultRepositoryCoordinator;
@@ -145,6 +143,7 @@ describe("travel-mode-sync", () => {
 			resolveAccounts: mock(async () => ({
 				accountsInfo: [
 					{
+						accountId: ACCOUNT_ID,
 						email: "user@example.com",
 						rpcClient,
 					},
@@ -152,13 +151,16 @@ describe("travel-mode-sync", () => {
 			})),
 		} as unknown as AccountResolver;
 
-		const travelMode = getTravelModeService(storage);
-		await travelMode.applyRemoteUpdate("user@example.com", {
+		const enforcer = getTravelModeEnforcer(storage, coordinator);
+		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: true,
 			hiddenVaultIds: ["vault-1"],
 			enabledAt: Date.now(),
 			updatedAt: Date.now(),
 		});
+		(
+			coordinator.purgeHiddenVaultsForAccount as ReturnType<typeof mock>
+		).mockClear();
 
 		await handleTravelModeSyncEvent(
 			{
@@ -168,13 +170,13 @@ describe("travel-mode-sync", () => {
 					hiddenVaultIds: ["vault-1"],
 				},
 			},
-			"user@example.com",
+			ACCOUNT_ID,
 			storage,
 			coordinator,
 			{ rpcClient, accounts },
 		);
 
-		expect(coordinator.purgeHiddenVaultsForEmail).not.toHaveBeenCalled();
+		expect(coordinator.purgeHiddenVaultsForAccount).not.toHaveBeenCalled();
 		expect(coordinator.syncVaultKeys).toHaveBeenCalled();
 		expect(coordinator.refreshFromServer).toHaveBeenCalled();
 	});
@@ -191,18 +193,21 @@ describe("travel-mode-sync", () => {
 		} as unknown as IStorageAdapter;
 
 		const coordinator = {
-			purgeHiddenVaultsForEmail: mock(() => undefined),
+			purgeHiddenVaultsForAccount: mock(() => undefined),
 			syncVaultKeys: mock(async () => undefined),
 			refreshFromServer: mock(async () => undefined),
 		} as unknown as VaultRepositoryCoordinator;
 
-		const travelMode = getTravelModeService(storage);
-		await travelMode.applyRemoteUpdate("user@example.com", {
+		const enforcer = getTravelModeEnforcer(storage, coordinator);
+		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: true,
 			hiddenVaultIds: ["vault-1"],
 			enabledAt: Date.now(),
 			updatedAt: Date.now(),
 		});
+		(
+			coordinator.purgeHiddenVaultsForAccount as ReturnType<typeof mock>
+		).mockClear();
 
 		await handleTravelModeSyncEvent(
 			{
@@ -211,15 +216,15 @@ describe("travel-mode-sync", () => {
 					hiddenVaultIds: ["vault-2"],
 				},
 			},
-			"user@example.com",
+			ACCOUNT_ID,
 			storage,
 			coordinator,
 		);
 
-		expect(coordinator.purgeHiddenVaultsForEmail).toHaveBeenCalledWith(
-			"user@example.com",
+		expect(coordinator.purgeHiddenVaultsForAccount).toHaveBeenLastCalledWith(
+			ACCOUNT_ID,
 			["vault-2"],
 		);
-		expect(travelMode.getConfig("user@example.com").enabled).toBe(true);
+		expect(enforcer.getConfig(ACCOUNT_ID).enabled).toBe(true);
 	});
 });

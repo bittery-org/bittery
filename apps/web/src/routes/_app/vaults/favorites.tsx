@@ -145,14 +145,19 @@ function FavoritesPage() {
 			{/* Middle pane: favorites list */}
 			<div
 				className={cn(
-					"flex w-full shrink-0 flex-col border-r md:w-80",
+					"flex w-full shrink-0 flex-col border-r md:w-78",
 					selectedItemId && "hidden md:flex",
 				)}
 			>
-				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<Star className="size-4 text-yellow-500" fill="currentColor" />
-					<span className="font-medium">{m.vaults_favorites_title()}</span>
-					<Badge variant="secondary" className="ml-auto">
+				<div className="flex h-11 shrink-0 items-center gap-2 border-b px-2.5 xl:h-12">
+					<Star
+						className="size-3.5 shrink-0 text-yellow-500"
+						fill="currentColor"
+					/>
+					<span className="truncate font-medium text-sm">
+						{m.vaults_favorites_title()}
+					</span>
+					<Badge variant="secondary" className="ml-auto shrink-0">
 						{favoriteItems.length}
 					</Badge>
 				</div>

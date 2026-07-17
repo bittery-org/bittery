@@ -38,14 +38,21 @@ interface BasePendingMutation {
 	};
 	favorite?: boolean;
 	baseVersion: number;
+	accountId: string;
 	accountEmail: string;
 }
 
 export interface LocalItemMutationContext {
+	accountId: string;
 	accountEmail: string;
 	repo: VaultRepository;
 	item: VaultRepositoryItem;
 	baseVersion: number;
+}
+
+interface LocalItemMutationContextOptions {
+	vaultId?: string;
+	includeDeleted?: boolean;
 }
 
 interface EncryptedPayloadLike {
@@ -87,9 +94,15 @@ export function toQueueEncryptedPayload(
 export function requireRepositoryForVault(
 	core: CoreContext,
 	vaultId: string,
+	accountId?: string,
 	accountEmail?: string,
-): { accountEmail: string; repo: VaultRepository } {
-	const resolved = resolveRepositoryForVault(core, vaultId, accountEmail);
+): { accountId: string; accountEmail: string; repo: VaultRepository } {
+	const resolved = resolveRepositoryForVault(
+		core,
+		vaultId,
+		accountId,
+		accountEmail,
+	);
 	if (!resolved) {
 		throw new Error(`No account repository found for vault ${vaultId}`);
 	}
@@ -99,18 +112,32 @@ export function requireRepositoryForVault(
 export function requireLocalItemMutationContext(
 	core: CoreContext,
 	itemId: string,
+	options: LocalItemMutationContextOptions = {},
 ): LocalItemMutationContext {
-	const resolved = resolveRepositoryForItem(core, itemId);
+	const resolved = options.vaultId
+		? resolveRepositoryForVault(core, options.vaultId)
+		: resolveRepositoryForItem(core, itemId);
 	if (!resolved) {
 		throw new Error(`No account repository found for item ${itemId}`);
 	}
 
-	const existing = resolved.repo.getById(itemId);
+	const existing =
+		resolved.repo.getById(itemId) ??
+		(options.includeDeleted
+			? resolved.repo.getDeleted().find((item) => item.id === itemId)
+			: undefined);
 	if (!existing) {
 		throw new Error(`Item ${itemId} was not found in local repository`);
 	}
 
+	if (options.vaultId && existing.vaultId !== options.vaultId) {
+		throw new Error(
+			`Item ${itemId} does not belong to vault ${options.vaultId}`,
+		);
+	}
+
 	return {
+		accountId: resolved.accountId,
 		accountEmail: resolved.accountEmail,
 		repo: resolved.repo,
 		item: existing,
@@ -120,12 +147,19 @@ export function requireLocalItemMutationContext(
 
 export function enqueueItemMutation(
 	queue: IPendingMutationQueue,
-	context: Pick<LocalItemMutationContext, "accountEmail" | "baseVersion">,
-	mutation: Omit<BasePendingMutation, "baseVersion" | "accountEmail">,
+	context: Pick<
+		LocalItemMutationContext,
+		"accountId" | "accountEmail" | "baseVersion"
+	>,
+	mutation: Omit<
+		BasePendingMutation,
+		"baseVersion" | "accountId" | "accountEmail"
+	>,
 ): void {
 	enqueuePendingMutation(queue, {
 		...mutation,
 		baseVersion: context.baseVersion,
+		accountId: context.accountId,
 		accountEmail: context.accountEmail,
 	});
 }
@@ -143,6 +177,7 @@ export function extractDecryptedItemData(item: unknown): DecryptedItemData {
 	delete data.lastModifiedBy;
 	delete data.attachments;
 	delete data.accountEmail;
+	delete data.accountId;
 	delete data.serverUrl;
 	delete data._encrypted;
 	delete data.vault;

@@ -58,6 +58,7 @@ interface AccountSessionRefreshOptions {
 		expiresAt: string | Date;
 	}) => Promise<void>;
 	thresholdRatio?: number;
+	appPlatform?: string;
 }
 
 function getRuntimeClientId(): string | undefined {
@@ -111,6 +112,7 @@ export function createAccountRpcClient(
 					? async () => resolvedClientId
 					: undefined,
 				thresholdRatio: sessionRefresh.thresholdRatio,
+				appPlatform: sessionRefresh.appPlatform,
 			})
 		: createAppRpcClient({
 				serverUrl: normalizedUrl,
@@ -181,27 +183,27 @@ export async function createAllAccountRpcClients(
 	storage: IStorageAdapter,
 	clientId?: string,
 ): Promise<Map<string, ReturnType<typeof createAccountRpcClient>>> {
-	const unlockedEmails = await storage.getUnlockedAccounts?.();
+	const unlockedAccountIds = await storage.getUnlockedAccounts?.();
 
-	if (!unlockedEmails || unlockedEmails.length === 0) {
+	if (!unlockedAccountIds || unlockedAccountIds.length === 0) {
 		return new Map();
 	}
 
-	const clients = new Map();
+	const clients = new Map<string, ReturnType<typeof createAccountRpcClient>>();
 
-	for (const email of unlockedEmails) {
-		const authToken = await storage.getAuthToken(email);
+	for (const accountId of unlockedAccountIds) {
+		const authToken = await storage.getAuthToken(accountId);
 		if (!authToken) {
 			console.warn(
-				`[rpc-client-factory] No auth token found for account: ${email}`,
+				`[rpc-client-factory] No auth token found for account: ${accountId}`,
 			);
 			continue;
 		}
 
-		const serverUrl = await storage.getServerUrl(email);
+		const serverUrl = await storage.getServerUrl(accountId);
 		const client = createAccountRpcClient(authToken, serverUrl, clientId);
 
-		clients.set(email, client);
+		clients.set(accountId, client);
 	}
 
 	return clients;

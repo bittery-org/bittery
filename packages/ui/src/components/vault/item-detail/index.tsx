@@ -9,8 +9,13 @@ import { CreditCardDetail } from "./credit-card-detail";
 import {
 	DetailCustomField,
 	DetailField,
+	DetailFieldActionButton,
+	DetailFieldGroup,
+	DetailGroupLabel,
 	DetailHeader,
+	DetailNoteField,
 	DetailPasswordField,
+	DetailRow,
 	DetailSection,
 	DetailUrlField,
 } from "./field-components";
@@ -30,8 +35,13 @@ export type {
 export {
 	DetailCustomField,
 	DetailField,
+	DetailFieldActionButton,
+	DetailFieldGroup,
+	DetailGroupLabel,
 	DetailHeader,
+	DetailNoteField,
 	DetailPasswordField,
+	DetailRow,
 	DetailSection,
 	DetailUrlField,
 };

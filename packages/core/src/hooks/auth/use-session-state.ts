@@ -28,7 +28,7 @@ export interface UseSessionStateOptions {
 /**
  * Hook for getting the current session state.
  *
- * @param email - Email for multi-account support (optional, uses active account if not provided)
+ * @param accountId - Stable account ID (optional, uses active account if not provided)
  * @param options - Query options
  * @returns Query result with session state
  *
@@ -46,15 +46,15 @@ export interface UseSessionStateOptions {
  * ```
  */
 export function useSessionState(
-	email?: string,
+	accountId?: string,
 	options: UseSessionStateOptions = {},
 ): UseQueryResult<SessionState, Error> {
 	const storage = usePlatformStorage();
 
 	return useQuery({
-		queryKey: ["auth", "sessionState", email],
+		queryKey: ["auth", "sessionState", accountId],
 		queryFn: async () => {
-			return getSessionState(storage, email);
+			return getSessionState(storage, accountId);
 		},
 		enabled: options.enabled !== false,
 		staleTime: 5 * 1000, // Cache for 5 seconds

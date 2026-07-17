@@ -64,20 +64,20 @@ export function PendingInvitations() {
 			: m.dashboard_pending_description_plural({ count: pendingCount });
 
 	return (
-		<Card className="overflow-hidden border-border/70 py-0">
-			<CardHeader className="border-b bg-muted/30 py-5">
+		<Card className="overflow-hidden py-0">
+			<CardHeader className="border-b py-5">
 				<CardTitle className="flex items-center gap-2">
-					<Mail className="h-5 w-5" />
+					<Mail className="size-4" />
 					{m.dashboard_pending_title()}
 				</CardTitle>
 				<CardDescription>{pendingDescription}</CardDescription>
 			</CardHeader>
-			<CardContent className="space-y-3 p-5">
+			<CardContent className="space-y-3 p-4">
 				<div className="space-y-3">
 					{pendingQuery.data.map((invitation) => (
 						<div
 							key={invitation.id}
-							className="flex flex-col gap-3 rounded-lg border bg-background/70 p-3 sm:flex-row sm:items-center sm:justify-between"
+							className="flex flex-col gap-3 rounded-md border bg-foreground/3 p-3 sm:flex-row sm:items-center sm:justify-between"
 						>
 							<div className="space-y-1">
 								<div className="flex flex-wrap items-center gap-2">

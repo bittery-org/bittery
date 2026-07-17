@@ -7,7 +7,7 @@
  * - register lifecycle event listeners
  */
 
-import { registerBackgroundMessageRouter } from "./message-router";
+import { registerBackgroundMessageRouter } from "./router";
 import {
 	initializeBackgroundServices,
 	registerLifecycleListeners,

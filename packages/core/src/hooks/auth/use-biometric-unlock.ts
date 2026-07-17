@@ -5,9 +5,11 @@
  * Desktop and mobile only - web/extension don't support biometric.
  */
 
-import type { BiometricAuthResult } from "@bittery/storage";
+import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
+import { createStoredAccountRpcClient } from "../../services/rpc-client";
+import { getTravelModeEnforcer } from "../../services/travel-mode-enforcer";
 
 /**
  * Options for useBiometricUnlock hook
@@ -35,26 +37,17 @@ export interface UseBiometricUnlockOptions {
  */
 export interface BiometricUnlockInput {
 	/**
-	 * Email for multi-account platforms.
+	 * Account ID or email for multi-account platforms.
 	 * Optional - uses active account if not provided.
 	 */
-	email?: string;
+	accountId?: string;
 }
 
 /**
  * Biometric unlock error with structured error type
  */
 export interface BiometricUnlockError {
-	type:
-		| "not_available"
-		| "not_enrolled"
-		| "not_enabled"
-		| "master_password_required"
-		| "session_expired"
-		| "user_cancelled"
-		| "lockout"
-		| "authentication_failed"
-		| "unknown";
+	type: BiometricErrorType;
 	message: string;
 }
 
@@ -97,8 +90,31 @@ export function useBiometricUnlock(
 > {
 	const storage = usePlatformStorage();
 
+	const verifyTravelMode = async (accountId: string): Promise<void> => {
+		const client = await createStoredAccountRpcClient(storage, accountId).catch(
+			() => null,
+		);
+		try {
+			await getTravelModeEnforcer(storage).verifyForUnlock(accountId, client);
+		} catch {
+			await storage.clearSession(accountId);
+			throw {
+				type: "authentication_failed",
+				message: "Travel mode policy could not be verified",
+			} as BiometricUnlockError;
+		}
+	};
+
 	return useMutation({
 		mutationFn: async (input: BiometricUnlockInput) => {
+			const accountId = input.accountId;
+			if (!accountId) {
+				throw {
+					type: "account_not_found",
+					message: "",
+				} as BiometricUnlockError;
+			}
+
 			// Check if biometric is supported
 			if (!storage.supportsBiometric) {
 				throw {
@@ -110,9 +126,8 @@ export function useBiometricUnlock(
 			// Check if master password re-entry is required by policy
 			// This check happens before biometric auth for better UX
 			if (storage.isMasterPasswordReentryRequired) {
-				const requiresReentry = await storage.isMasterPasswordReentryRequired(
-					input.email,
-				);
+				const requiresReentry =
+					await storage.isMasterPasswordReentryRequired(accountId);
 				if (requiresReentry) {
 					throw {
 						type: "master_password_required",
@@ -127,7 +142,7 @@ export function useBiometricUnlock(
 				const result: BiometricAuthResult =
 					await storage.authenticateWithBiometricEnhanced(
 						options.promptMessage ?? "Unlock Bittery",
-						input.email,
+						accountId,
 					);
 
 				if (!result.success) {
@@ -139,7 +154,7 @@ export function useBiometricUnlock(
 
 				// Now try to restore the MUK using biometric unlock
 				if (storage.unlockWithBiometric) {
-					const unlocked = await storage.unlockWithBiometric(input.email);
+					const unlocked = await storage.unlockWithBiometric(accountId);
 					if (!unlocked) {
 						throw {
 							type: "authentication_failed",
@@ -147,19 +162,21 @@ export function useBiometricUnlock(
 						} as BiometricUnlockError;
 					}
 				}
+				await verifyTravelMode(accountId);
 
 				return { success: true };
 			}
 
 			// Fallback to simple biometric unlock
 			if (storage.unlockWithBiometric) {
-				const success = await storage.unlockWithBiometric(input.email);
+				const success = await storage.unlockWithBiometric(accountId);
 				if (!success) {
 					throw {
 						type: "authentication_failed",
 						message: "Biometric unlock failed",
 					} as BiometricUnlockError;
 				}
+				await verifyTravelMode(accountId);
 				return { success: true };
 			}
 

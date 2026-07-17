@@ -4,6 +4,7 @@ import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 import type * as React from "react";
 import { cn } from "../lib/utils";
 import { buttonVariants } from "./button";
+import { DialogBrandAccent } from "./dialog";
 
 function AlertDialog({
 	...props
@@ -35,7 +36,7 @@ function AlertDialogOverlay({
 		<AlertDialogPrimitive.Overlay
 			data-slot="alert-dialog-overlay"
 			className={cn(
-				"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=open]:animate-in",
+				"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/60 data-[state=closed]:animate-out data-[state=open]:animate-in",
 				className,
 			)}
 			{...props}
@@ -45,6 +46,7 @@ function AlertDialogOverlay({
 
 function AlertDialogContent({
 	className,
+	children,
 	...props
 }: React.ComponentProps<typeof AlertDialogPrimitive.Content>) {
 	return (
@@ -53,11 +55,14 @@ function AlertDialogContent({
 			<AlertDialogPrimitive.Content
 				data-slot="alert-dialog-content"
 				className={cn(
-					"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in sm:max-w-lg",
+					"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden rounded-xl border bg-popover p-6 shadow-pop duration-[130ms] data-[state=closed]:animate-out data-[state=open]:animate-in sm:max-w-lg",
 					className,
 				)}
 				{...props}
-			/>
+			>
+				<DialogBrandAccent />
+				{children}
+			</AlertDialogPrimitive.Content>
 		</AlertDialogPortal>
 	);
 }
@@ -98,7 +103,7 @@ function AlertDialogTitle({
 	return (
 		<AlertDialogPrimitive.Title
 			data-slot="alert-dialog-title"
-			className={cn("font-semibold text-lg", className)}
+			className={cn("font-semibold text-base tracking-tight", className)}
 			{...props}
 		/>
 	);

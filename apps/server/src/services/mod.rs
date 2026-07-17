@@ -1,3 +1,4 @@
+pub(crate) mod access;
 pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod billing;
@@ -9,6 +10,7 @@ pub(crate) mod share;
 pub(crate) mod sync;
 pub(crate) mod sync_pubsub;
 pub(crate) mod team;
+pub(crate) mod team_admin;
 pub(crate) mod team_billing;
 pub(crate) mod travel_mode;
 pub(crate) mod vault;

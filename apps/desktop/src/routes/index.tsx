@@ -1,3 +1,4 @@
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { storage } from "@/lib/storage";
 
@@ -18,38 +19,34 @@ export const Route = createFileRoute("/")({
 			// Has accounts but none active, set first as active
 			await storage.setActiveAccount({
 				type: "single",
-				email: accountsList[0].email,
+				accountId: accountsList[0].accountId,
 			});
-			activeAccount = { type: "single", email: accountsList[0].email };
-		}
-
-		// Handle "All Accounts" mode specially
-		if (activeAccount.type === "all") {
-			// Check if we have any unlocked accounts
-			const unlockedAccounts = await storage.getUnlockedAccounts?.();
-			if (unlockedAccounts && unlockedAccounts.length > 0) {
-				// At least one account is unlocked, go to vault
-				throw redirect({ to: "/vault" });
-			}
-			// No unlocked accounts, redirect to unlock
-			throw redirect({ to: "/unlock" });
+			activeAccount = {
+				type: "single",
+				accountId: accountsList[0].accountId,
+			};
 		}
 
 		// Single account mode: check if active account has valid session
-		const sessionValid = await storage.isSessionValid(activeAccount.email);
+		const activeAccountEmail = accountsList.find(
+			(account) => account.accountId === activeAccount.accountId,
+		)?.email;
+		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
 
 		if (sessionValid) {
 			// Try to restore session
-			const restored = await storage.tryRestoreSession(
-				true,
-				activeAccount.email,
-			);
+			const restored = await getAccountSessionManager({
+				storage,
+			}).unlockAccount(activeAccount.accountId, true);
 			if (restored) {
 				throw redirect({ to: "/vault" });
 			}
 		}
 
 		// Session not valid or restore failed, go to unlock
-		throw redirect({ to: "/unlock", search: { email: activeAccount.email } });
+		throw redirect({
+			to: "/unlock",
+			search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
+		});
 	},
 });

@@ -1,4 +1,5 @@
 import "./index.css";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { RpcProvider } from "@bittery/shared/rpc";
 import { createAppRpcClient } from "@bittery/shared/rpc-client";
 import { buildRpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
@@ -92,6 +93,18 @@ function Popup() {
 				queryClient.clear();
 				// Navigate to vault screen
 				router.navigate({ to: "/vault" });
+			} else if (message.type === "ACTIVE_ACCOUNT_CHANGED") {
+				void peekAccountSessionManager()
+					?.refresh()
+					.then(() =>
+						Promise.all([
+							queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+							queryClient.invalidateQueries({ queryKey: ["items"] }),
+							queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+							queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+							queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
+						]),
+					);
 			}
 		};
 

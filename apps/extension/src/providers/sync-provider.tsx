@@ -15,6 +15,7 @@ import {
 	useState,
 } from "react";
 import { createExtensionInvalidator } from "../lib/query-invalidation";
+import { storage } from "../lib/storage";
 
 /**
  * Context for sync state
@@ -88,9 +89,18 @@ export function ExtensionSyncProvider({
 	const [invalidator] = useState(() => createExtensionInvalidator(queryClient));
 	const syncStorage = useMemo(() => new ChromeSyncStorage(), []);
 	const resolvedClientId = clientId || "extension_pending_queue_client";
+	const resolveLegacyAccountId = useCallback(async (email: string) => {
+		const matches = (await storage.getAccountsList()).filter(
+			(account) => account.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (matches.length !== 1)
+			throw new Error(`Ambiguous legacy account queue for ${email}`);
+		return matches[0]?.accountId;
+	}, []);
 	const outboundQueue = useMemo(
-		() => new OutboundQueue(syncStorage, resolvedClientId),
-		[syncStorage, resolvedClientId],
+		() =>
+			new OutboundQueue(syncStorage, resolvedClientId, resolveLegacyAccountId),
+		[syncStorage, resolvedClientId, resolveLegacyAccountId],
 	);
 
 	useEffect(() => {

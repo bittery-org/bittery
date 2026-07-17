@@ -11,6 +11,7 @@ import { Label } from "../../label";
 import { toast } from "../../sonner";
 import {
 	type BaseFormProps,
+	FormSection,
 	FormWrapper,
 	NotesField,
 	TitleField,
@@ -38,6 +39,7 @@ export function CreditCardForm({
 	onSubmit,
 	onCancel,
 	submitLabel,
+	cancelLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
@@ -99,23 +101,27 @@ export function CreditCardForm({
 			onSubmit={form.handleSubmit}
 			onCancel={onCancel}
 			submitLabel={submitLabel}
+			cancelLabel={cancelLabel}
 			isSubmitting={isSubmitting}
 			vaults={vaults}
 			currentVaultId={currentVaultId}
 			onVaultChange={setCurrentVaultId}
 		>
-			<div>
+			<FormSection>
 				<form.Field name="title">
 					{(field) => (
 						<TitleField
 							field={field}
 							placeholder={m.vaults_detail_items_form_credit_card_placeholder_title()}
+							autoFocus={!field.state.value}
 						/>
 					)}
 				</form.Field>
-			</div>
+			</FormSection>
 
-			<div>
+			<FormSection
+				label={m.vaults_detail_items_form_credit_card_section_card_details()}
+			>
 				<form.Field name="cardholderName">
 					{(field) => (
 						<div className="space-y-2">
@@ -134,9 +140,7 @@ export function CreditCardForm({
 						</div>
 					)}
 				</form.Field>
-			</div>
 
-			<div>
 				<form.Field name="cardNumber">
 					{(field) => (
 						<div className="space-y-2">
@@ -145,7 +149,7 @@ export function CreditCardForm({
 									{m.vaults_detail_items_form_credit_card_field_card_number_required()}
 								</Label>
 								{detectedBrand && (
-									<span className="text-muted-foreground text-xs">
+									<span className="rounded-[4px] border bg-foreground/3 px-1.5 py-0.5 text-[10px] text-muted-foreground">
 										{getCardBrandDisplayName(detectedBrand as any)}
 									</span>
 								)}
@@ -167,10 +171,8 @@ export function CreditCardForm({
 						</div>
 					)}
 				</form.Field>
-			</div>
 
-			<div className="grid grid-cols-2 gap-4">
-				<div>
+				<div className="grid grid-cols-2 gap-4">
 					<form.Field name="expiryDate">
 						{(field) => (
 							<div className="space-y-2">
@@ -191,9 +193,7 @@ export function CreditCardForm({
 							</div>
 						)}
 					</form.Field>
-				</div>
 
-				<div>
 					<form.Field name="cvv">
 						{(field) => (
 							<div className="space-y-2">
@@ -219,9 +219,9 @@ export function CreditCardForm({
 						)}
 					</form.Field>
 				</div>
-			</div>
+			</FormSection>
 
-			<div>
+			<FormSection>
 				<form.Field name="billingAddress">
 					{(field) => (
 						<NotesField
@@ -232,13 +232,11 @@ export function CreditCardForm({
 						/>
 					)}
 				</form.Field>
-			</div>
 
-			<div>
 				<form.Field name="notes">
 					{(field) => <NotesField field={field} />}
 				</form.Field>
-			</div>
+			</FormSection>
 		</FormWrapper>
 	);
 }

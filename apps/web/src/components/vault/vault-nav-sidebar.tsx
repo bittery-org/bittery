@@ -1,3 +1,4 @@
+import type { VaultItemCounts } from "@bittery/core/hooks";
 import {
 	Button,
 	cn,
@@ -7,6 +8,7 @@ import {
 	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 	getTagColorFromName,
+	SidebarCount,
 	SidebarSection,
 	VaultAvatar,
 } from "@bittery/ui";
@@ -16,13 +18,13 @@ import {
 	IconGrid2OutlineDuo18 as Grid,
 	IconPen2OutlineDuo18 as Pen,
 	IconStarOutlineDuo18 as Star,
-	IconTagOutlineDuo18 as Tag,
 	IconTrash2OutlineDuo18 as Trash,
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 import {
+	type DragItemData,
 	type DropVaultData,
 	useVaultDnd,
 } from "@/providers/vault-dnd-provider";
@@ -39,6 +41,7 @@ interface VaultInfo {
 interface DroppableVaultEntryProps {
 	vault: VaultInfo;
 	isActive: boolean;
+	count?: number;
 	onEditVault: (vault: {
 		id: string;
 		name: string;
@@ -52,6 +55,7 @@ interface DroppableVaultEntryProps {
 function DroppableVaultEntry({
 	vault,
 	isActive,
+	count,
 	onEditVault,
 	onDeleteVault,
 	onNavigate,
@@ -67,36 +71,65 @@ function DroppableVaultEntry({
 		role: vault.role,
 	};
 
-	const { isOver, setNodeRef } = useDroppable({
+	const { isOver, setNodeRef, active } = useDroppable({
 		id: `vault-drop-${vault.vaultId}`,
 		data: dropData,
 	});
 
-	const isReadOnly = vault.role === "read-only";
-	const isValidDropTarget = isDragging && !isReadOnly;
+	// Get the source vault ID from the active drag item
+	const activeData = active?.data.current as DragItemData | undefined;
+	const sourceVaultId = activeData?.sourceVaultId;
 
-	let ringStyle = "";
-	if (isOver && isValidDropTarget) {
-		ringStyle = "ring-2 ring-green-500 bg-green-500/10";
-	} else if (isOver && !isValidDropTarget) {
-		ringStyle = "ring-2 ring-red-500 bg-red-500/10";
-	} else if (isDragging && isValidDropTarget) {
-		ringStyle = "ring-1 ring-muted-foreground/30";
+	// Determine if this is a valid drop target
+	const isSameVault = sourceVaultId === vault.vaultId;
+	const isReadOnly = vault.role === "read-only";
+	const isValidTarget = isDragging && !isSameVault && !isReadOnly;
+	const isInvalidTarget = isDragging && (isSameVault || isReadOnly);
+
+	// Keep drop feedback inside the row; outer rings get clipped by the sidebar scroller.
+	let dropBackgroundStyle = "";
+	let dropIndicatorStyle = "";
+	if (isOver && isValidTarget) {
+		dropBackgroundStyle = "bg-success/10";
+		dropIndicatorStyle =
+			"border-success/70 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-success)_55%,transparent)]";
+	} else if (isOver && isInvalidTarget) {
+		dropBackgroundStyle = "bg-destructive/10";
+		dropIndicatorStyle =
+			"border-destructive/70 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-destructive)_55%,transparent)]";
+	} else if (isDragging && isValidTarget) {
+		dropIndicatorStyle = "border-dashed border-muted-foreground/25";
 	}
 
 	return (
 		<div
 			ref={setNodeRef}
 			className={cn(
-				"group relative mb-0.5 w-full rounded-md text-left text-sm transition-colors",
-				isActive ? "bg-primary/10" : "hover:bg-muted/30",
-				ringStyle,
+				"group relative mb-0.5 w-full rounded-sm text-left text-sm transition-colors",
+				isActive
+					? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+					: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
+				dropBackgroundStyle,
 			)}
 		>
+			{isActive && (
+				<span
+					aria-hidden
+					className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+				/>
+			)}
+			{dropIndicatorStyle && (
+				<div
+					className={cn(
+						"pointer-events-none absolute inset-px rounded-sm border transition-[border-color,box-shadow]",
+						dropIndicatorStyle,
+					)}
+				/>
+			)}
 			<Link
 				to="/vaults/$vaultId"
 				params={{ vaultId: vault.vaultId }}
-				className="block px-3 py-2"
+				className="flex h-7 items-center px-2"
 				onClick={onNavigate}
 			>
 				<div className="flex min-w-0 items-center gap-2">
@@ -108,6 +141,14 @@ function DroppableVaultEntry({
 					/>
 					<div className="truncate">{vault.vaultName}</div>
 				</div>
+				<SidebarCount
+					count={count}
+					className={cn(
+						"transition-opacity",
+						// The "..." menu occupies this spot on hover.
+						(canEdit || canDelete) && "group-hover:opacity-0",
+					)}
+				/>
 			</Link>
 			{(canEdit || canDelete) && (
 				<DropdownMenu>
@@ -115,10 +156,10 @@ function DroppableVaultEntry({
 						<Button
 							variant="ghost"
 							size="sm"
-							className="absolute top-1/2 right-1 h-5 w-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
+							className="absolute top-1/2 right-1 size-5 -translate-y-1/2 p-0 opacity-0 group-hover:opacity-100"
 							onClick={(e) => e.stopPropagation()}
 						>
-							<Dots className="h-3.5 w-3.5" />
+							<Dots className="size-3.5" />
 						</Button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end">
@@ -162,6 +203,8 @@ function DroppableVaultEntry({
 interface VaultNavSidebarProps {
 	vaults: VaultInfo[];
 	tags: string[];
+	/** Omitted while items load, so counts appear only once they are real. */
+	itemCounts?: VaultItemCounts;
 	currentVaultId?: string;
 	onNewVault: () => void;
 	onEditVault: (vault: {
@@ -172,16 +215,20 @@ interface VaultNavSidebarProps {
 	}) => void;
 	onDeleteVault: (vault: { id: string; name: string }) => void;
 	onNavigate?: () => void;
+	/** Reserve room for the app header that floats above the sidebar. */
+	hasHeaderInset?: boolean;
 }
 
 export function VaultNavSidebar({
 	vaults,
 	tags,
+	itemCounts,
 	currentVaultId,
 	onNewVault,
 	onEditVault,
 	onDeleteVault,
 	onNavigate,
+	hasHeaderInset = false,
 }: VaultNavSidebarProps) {
 	const { m } = useI18n();
 	const location = useLocation();
@@ -197,31 +244,61 @@ export function VaultNavSidebar({
 
 	const navLinkClass = (active: boolean) =>
 		cn(
-			"mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
-			active ? "bg-primary/10" : "hover:bg-muted/30",
+			"relative flex h-7 w-full items-center gap-2 rounded-sm px-2 text-left text-sm transition-colors",
+			active
+				? "bg-selected font-medium text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+				: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
 		);
 
 	return (
-		<div className="flex h-full flex-col overflow-hidden">
-			<div className="flex-1 overflow-y-auto p-2">
+		<div className="relative flex h-full flex-col overflow-hidden bg-sidebar">
+			<div
+				aria-hidden
+				className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_8%,transparent),transparent_65%)] dark:bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_14%,transparent),transparent_65%)]"
+			/>
+			<div
+				className={cn(
+					"relative flex-1 overflow-y-auto p-2",
+					hasHeaderInset && "pt-11 xl:pt-12",
+				)}
+			>
 				{/* All Objects */}
 				<Link
 					to="/vaults"
-					className={navLinkClass(isAllItemsActive)}
+					className={cn(navLinkClass(isAllItemsActive), "mb-1")}
 					onClick={onNavigate}
 				>
-					<Grid className="size-4 text-muted-foreground" />
+					{isAllItemsActive && (
+						<span
+							aria-hidden
+							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+						/>
+					)}
+					<Grid
+						className={cn(
+							"size-3.5",
+							isAllItemsActive ? "text-primary" : "text-muted-foreground",
+						)}
+					/>
 					<span>{m.vaults_sidebar_link_all_objects()}</span>
+					<SidebarCount count={itemCounts?.total} />
 				</Link>
 
 				{/* Favorites */}
 				<Link
 					to="/vaults/favorites"
-					className={navLinkClass(isFavoritesActive)}
+					className={cn(navLinkClass(isFavoritesActive), "mb-1")}
 					onClick={onNavigate}
 				>
-					<Star className="size-4 text-yellow-500" fill="currentColor" />
+					{isFavoritesActive && (
+						<span
+							aria-hidden
+							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+						/>
+					)}
+					<Star className="size-3.5 text-yellow-500" fill="currentColor" />
 					<span>{m.vaults_favorites_title()}</span>
+					<SidebarCount count={itemCounts?.favorites} />
 				</Link>
 
 				{/* Vaults Section */}
@@ -243,6 +320,7 @@ export function VaultNavSidebar({
 								<DroppableVaultEntry
 									key={vault.vaultId}
 									vault={vault}
+									count={itemCounts && (itemCounts.byVault[vault.vaultId] ?? 0)}
 									isActive={isActive}
 									onEditVault={onEditVault}
 									onDeleteVault={onDeleteVault}
@@ -270,13 +348,20 @@ export function VaultNavSidebar({
 										to="/vaults/tag/$tagName"
 										params={{ tagName: encodeURIComponent(tagName) }}
 										search={{ itemId: undefined }}
-										className={cn(
-											"mb-0.5 flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
-											isActive ? "bg-primary/10" : "hover:bg-muted/30",
-										)}
+										className={cn(navLinkClass(isActive), "mb-0.5")}
 										onClick={onNavigate}
 									>
-										<Tag className="size-3.5 shrink-0" style={{ color }} />
+										{isActive && (
+											<span
+												aria-hidden
+												className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+											/>
+										)}
+										<span
+											aria-hidden
+											className="mx-[3.5px] size-[7px] shrink-0 rounded-full"
+											style={{ backgroundColor: color }}
+										/>
 										<span className="truncate">{tagName}</span>
 									</Link>
 								);
@@ -284,14 +369,27 @@ export function VaultNavSidebar({
 						</SidebarSection>
 					</div>
 				)}
+			</div>
 
-				{/* Trash */}
+			{/* Trash — pinned at the bottom */}
+			<div className="relative border-t p-2">
 				<Link
 					to="/vaults/trash"
-					className={cn(navLinkClass(isTrashActive), "mt-2")}
+					className={navLinkClass(isTrashActive)}
 					onClick={onNavigate}
 				>
-					<Archive className="size-4 text-muted-foreground" />
+					{isTrashActive && (
+						<span
+							aria-hidden
+							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+						/>
+					)}
+					<Archive
+						className={cn(
+							"size-3.5",
+							isTrashActive ? "text-primary" : "text-muted-foreground",
+						)}
+					/>
 					<span>{m.vaults_sidebar_link_archive()}</span>
 				</Link>
 			</div>

@@ -26,7 +26,10 @@
 		"./services/encryption-context": "./src/services/encryption-context.ts",
 		"./services/item-service": "./src/services/item-service.ts",
 		"./services/vault-service": "./src/services/vault-service.ts",
-		"./services/share-service": "./src/services/share-service.ts"
+		"./services/share-service": "./src/services/share-service.ts",
+		"./services/account-session-manager": "./src/services/account-session-manager.ts",
+		"./services/select-active-account": "./src/services/select-active-account.ts",
+		"./services/travel-mode-enforcer": "./src/services/travel-mode-enforcer.ts"
 	},
 	"dependencies": {
 		"@bittery/i18n": "workspace:*",

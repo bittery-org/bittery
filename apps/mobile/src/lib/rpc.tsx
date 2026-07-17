@@ -79,9 +79,11 @@ export function RpcProvider({ children }: RpcProviderProps) {
 					storage.getActiveAccount(),
 				]);
 
-				const activeEmail =
-					activeAccount?.type === "single" ? activeAccount.email : undefined;
-				const sessionData = await storage.getStoredSessionData(activeEmail);
+				const activeAccountId =
+					activeAccount?.type === "single"
+						? activeAccount.accountId
+						: undefined;
+				const sessionData = await storage.getStoredSessionData(activeAccountId);
 
 				return {
 					token,
@@ -93,10 +95,12 @@ export function RpcProvider({ children }: RpcProviderProps) {
 			storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 				await storage.storeAuthToken(token);
 				const activeAccount = await storage.getActiveAccount();
-				const activeEmail =
-					activeAccount?.type === "single" ? activeAccount.email : undefined;
-				if (activeEmail) {
-					await storage.updateStoredSessionMetadata?.(activeEmail, {
+				const activeAccountId =
+					activeAccount?.type === "single"
+						? activeAccount.accountId
+						: undefined;
+				if (activeAccountId) {
+					await storage.updateStoredSessionMetadata?.(activeAccountId, {
 						sessionId,
 						expiresAt,
 					});

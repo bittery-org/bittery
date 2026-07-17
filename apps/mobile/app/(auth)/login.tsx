@@ -45,7 +45,7 @@ import { useAccount } from "../../src/contexts/account-context";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/rpc";
 import { useI18n } from "../../src/providers/i18n-provider";
-import { type AccountMetadata, storage } from "../../src/services/storage";
+import { storage } from "../../src/services/storage";
 
 // Create styled icon components
 const StyledServer = withUniwind(Server);
@@ -187,40 +187,34 @@ export default function LoginScreen() {
 	// Use the shared login hook
 	const loginMutation = useLogin({
 		enableBiometric: enableBiometric && biometricAvailable,
-		onSuccess: async (result, input) => {
-			const normalizedEmail = input.email.toLowerCase();
+		onSuccess: async (_result, _input) => {
 			const normalizedServerUrl = normalizeServerUrl(serverUrl);
 
-			// Store server URL per-account (mobile-specific)
 			if (normalizedServerUrl) {
-				await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
+				const activeAccount = await storage.getActiveAccount();
+				if (activeAccount?.type === "single") {
+					await storage.storeServerUrl(
+						normalizedServerUrl,
+						activeAccount.accountId,
+					);
+				}
 			}
 
-			// Create account metadata (mobile-specific multi-account support)
-			const secretKeyHint = `${input.secretKey.substring(0, 5)}...`;
-			const accountMetadata: AccountMetadata = {
-				email: normalizedEmail,
-				userId: result.user.id,
-				name: result.user.name || normalizedEmail.split("@")[0],
-				teamName: result.user.teamName,
-				secretKeyHint,
-				addedAt: Date.now(),
-				lastActiveAt: Date.now(),
-				biometricEnabled: enableBiometric && biometricAvailable,
-			};
-
-			// Add to accounts list
-			await storage.addAccountToList(accountMetadata);
-
-			// Refresh account context
 			await refreshAccounts();
 
-			// Keep native credential provider state in sync with the freshly unlocked account.
-			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				const muk = await storage.getMasterUnlockKey(normalizedEmail);
-				const sessionData = await storage.getStoredSessionData(normalizedEmail);
+			const activeConfig = await storage.getActiveAccount();
+			const accountId =
+				activeConfig?.type === "single" ? activeConfig.accountId : null;
+
+			if (
+				Platform.OS === "android" &&
+				CredentialProvider.isAvailable() &&
+				accountId
+			) {
+				const muk = await storage.getMasterUnlockKey(accountId);
+				const sessionData = await storage.getStoredSessionData(accountId);
 				const autoLockTimeoutMs =
-					await storage.getAutoLockTimeoutOrDefault(normalizedEmail);
+					await storage.getAutoLockTimeoutOrDefault(accountId);
 				if (muk && sessionData?.userId) {
 					CredentialProvider.setMasterUnlockKey(
 						arrayBufferToBase64(muk),
@@ -230,7 +224,6 @@ export default function LoginScreen() {
 				}
 			}
 
-			// Navigate to vault
 			router.replace("/(vault)");
 		},
 		onError: (error) => {

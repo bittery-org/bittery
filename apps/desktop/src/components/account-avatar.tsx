@@ -13,9 +13,9 @@ export function AccountAvatar({
 	className,
 }: AccountAvatarProps) {
 	const sizeClasses = {
-		sm: "h-6 w-6 text-xs",
-		md: "h-8 w-8 text-sm",
-		lg: "h-10 w-10 text-base",
+		sm: "size-5 rounded-[5px] text-[9px]",
+		md: "size-8 rounded-md text-xs",
+		lg: "size-10 rounded-lg text-sm",
 	};
 
 	const initials = account?.teamName
@@ -42,7 +42,14 @@ export function AccountAvatar({
 				src={account?.teamAvatarUrl ?? undefined}
 				alt={account?.teamName || account?.name || account?.email}
 			/>
-			<AvatarFallback className={sizeClasses[size]}>{initials}</AvatarFallback>
+			<AvatarFallback
+				className={cn(
+					sizeClasses[size],
+					"bg-linear-to-br from-primary to-primary-deep font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]",
+				)}
+			>
+				{initials}
+			</AvatarFallback>
 		</Avatar>
 	);
 }

@@ -29,27 +29,14 @@ export default function Index() {
 			}
 
 			try {
-				if (activeAccountConfig.type === "all") {
-					const accounts = await storage.getAccountsList();
-					if (accounts.length === 0) {
-						setHasValidSession(false);
-						setMukAvailable(false);
-						return;
-					}
-
-					const sessionChecks = await Promise.all(
-						accounts.map((account) => storage.isSessionValid(account.email)),
-					);
-					setHasValidSession(sessionChecks.some(Boolean));
-
-					const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
-					setMukAvailable(unlockedEmails.length > 0);
-				} else if (activeAccount) {
-					const isValid = await storage.isSessionValid(activeAccount.email);
+				if (activeAccount) {
+					const isValid = await storage.isSessionValid(activeAccount.accountId);
 					setHasValidSession(isValid);
 
 					if (isValid) {
-						const muk = await storage.getMasterUnlockKey(activeAccount.email);
+						const muk = await storage.getMasterUnlockKey(
+							activeAccount.accountId,
+						);
 						setMukAvailable(muk !== null);
 					}
 				}
@@ -67,18 +54,14 @@ export default function Index() {
 	// Re-check MUK availability when biometric auth completes
 	useEffect(() => {
 		if (!requiresReauth && hasValidSession) {
-			if (activeAccountConfig?.type === "all") {
-				storage
-					.getUnlockedAccounts?.()
-					.then((unlocked = []) => setMukAvailable(unlocked.length > 0));
-			} else if (activeAccount) {
+			if (activeAccount) {
 				// Biometric auth just completed, check if MUK is now available
 				storage
-					.getMasterUnlockKey(activeAccount.email)
+					.getMasterUnlockKey(activeAccount.accountId)
 					.then((muk) => setMukAvailable(muk !== null));
 			}
 		}
-	}, [requiresReauth, hasValidSession, activeAccount, activeAccountConfig]);
+	}, [requiresReauth, hasValidSession, activeAccount]);
 
 	// Only show loading while account context is loading
 	// Once that's done, checkingSession should resolve quickly
@@ -95,19 +78,9 @@ export default function Index() {
 		return <Redirect href="/(auth)/login" />;
 	}
 
-	if (activeAccountConfig?.type === "all") {
-		if (!hasValidSession) {
-			return <Redirect href="/(auth)/login" />;
-		}
-
-		if (!mukAvailable) {
-			return <Redirect href="/(auth)/unlock" />;
-		}
-	} else {
-		// Has account but no valid session - go to unlock
-		if (!hasValidSession) {
-			return <Redirect href="/(auth)/unlock" />;
-		}
+	// Has account but no valid session - go to unlock
+	if (!hasValidSession) {
+		return <Redirect href="/(auth)/unlock" />;
 	}
 
 	// Wait for biometric auth to complete before navigating to tabs

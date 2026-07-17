@@ -47,7 +47,7 @@ import {
 	SelectTrigger,
 	SelectValue,
 } from "../select";
-import { toast } from "sonner";
+import { toast } from "../sonner";
 
 interface ShareItemDialogProps {
 	item: DecryptedItem;

@@ -18,10 +18,10 @@ import type { IAutolockService } from "@bittery/types";
  * These methods are available on ReactNativeStorageAdapter
  */
 interface MobileStorageAdapter extends IStorageAdapter {
-	storeBackgroundTimestamp(email?: string): Promise<void>;
-	getBackgroundTimestamp(email?: string): Promise<number | null>;
-	clearBackgroundTimestamp(email?: string): Promise<void>;
-	shouldRequireAuthAfterBackground(email?: string): Promise<boolean>;
+	storeBackgroundTimestamp(accountId?: string): Promise<void>;
+	getBackgroundTimestamp(accountId?: string): Promise<number | null>;
+	clearBackgroundTimestamp(accountId?: string): Promise<void>;
+	shouldRequireAuthAfterBackground(accountId?: string): Promise<boolean>;
 }
 
 /**
@@ -54,7 +54,7 @@ export interface MobileAutolockOptions {
 	/** Storage adapter with mobile-specific methods */
 	storage: MobileStorageAdapter;
 	/** Optional: Get the active account email for multi-account support */
-	getActiveEmail?: () => Promise<string | undefined>;
+	getActiveAccountId?: () => Promise<string | undefined>;
 }
 
 /**
@@ -66,7 +66,7 @@ export interface MobileAutolockOptions {
 export function createMobileAutolockService(
 	options: MobileAutolockOptions,
 ): IAutolockService {
-	const { storage, getActiveEmail } = options;
+	const { storage, getActiveAccountId } = options;
 
 	let isInitialized = false;
 	let isDisposed = false;
@@ -74,26 +74,31 @@ export function createMobileAutolockService(
 	let appStateSubscription: { remove: () => void } | null = null;
 	const lockCallbacks: Set<() => void> = new Set();
 
-	// Get the email to use for storage operations
-	const getEmail = async (): Promise<string | undefined> => {
-		if (getActiveEmail) {
-			return getActiveEmail();
+	// Get the account scope to use for storage operations
+	const getAccountId = async (): Promise<string | undefined> => {
+		if (getActiveAccountId) {
+			return getActiveAccountId();
 		}
-		return undefined;
+		const active = await storage.getActiveAccount();
+		return active?.type === "single" ? active.accountId : undefined;
+	};
+
+	const clearBackgroundTimestamps = async (): Promise<void> => {
+		const accountId = await getAccountId();
+		await storage.clearBackgroundTimestamp(accountId);
 	};
 
 	// Handle app state changes
 	const handleAppStateChange = async (nextAppState: AppStateStatus) => {
 		if (isDisposed) return;
 
-		const email = await getEmail();
-
 		// App is going to background
 		if (
 			currentAppState === "active" &&
 			(nextAppState === "background" || nextAppState === "inactive")
 		) {
-			await storage.storeBackgroundTimestamp(email);
+			const accountId = await getAccountId();
+			await storage.storeBackgroundTimestamp(accountId);
 		}
 
 		// App is coming back to foreground
@@ -106,7 +111,7 @@ export function createMobileAutolockService(
 				await lock();
 			}
 			// Clear the background timestamp after handling
-			await storage.clearBackgroundTimestamp(email);
+			await clearBackgroundTimestamps();
 		}
 
 		currentAppState = nextAppState;
@@ -115,21 +120,17 @@ export function createMobileAutolockService(
 	// Check if lock is required
 	const shouldLock = async (): Promise<boolean> => {
 		if (isDisposed) return false;
-		const email = await getEmail();
-		return storage.shouldRequireAuthAfterBackground(email);
+		const accountId = await getAccountId();
+		return storage.shouldRequireAuthAfterBackground(accountId);
 	};
 
 	// Execute lock
 	const lock = async (): Promise<void> => {
 		if (isDisposed) return;
 
-		const email = await getEmail();
-
-		// Clear MUK from storage
-		await storage.clearMasterUnlockKey(email);
-
-		// Clear background timestamp
-		await storage.clearBackgroundTimestamp(email);
+		const accountId = await getAccountId();
+		await storage.clearMasterUnlockKey(accountId);
+		await storage.clearBackgroundTimestamp(accountId);
 
 		// Notify all callbacks
 		for (const callback of lockCallbacks) {

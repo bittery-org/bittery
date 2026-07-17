@@ -11,7 +11,7 @@ import { useI18n } from "@/providers/i18n-provider";
 
 interface RemoveAccountDialogProps {
 	email: string | null;
-	onConfirm: (email: string) => void;
+	onConfirm: () => void;
 	onCancel: () => void;
 }
 
@@ -44,7 +44,7 @@ export function RemoveAccountDialog({
 					<Button variant="outline" onClick={onCancel}>
 						{m.settings_common_action_cancel()}
 					</Button>
-					<Button onClick={() => onConfirm(email)} variant="destructive">
+					<Button onClick={onConfirm} variant="destructive">
 						{m.vaults_sidebar_account_switcher_menu_remove_account()}
 					</Button>
 				</DialogFooter>

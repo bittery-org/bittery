@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bittery — Variant 3 · Brand-Forward</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     VARIANT 3 — BRAND-FORWARD
+     Crisp foundation (13px, hairlines, tight density) + deliberate
+     purple signature moments: sidebar glow, gradient switcher,
+     tinted selection, glowing primary action.
+     ============================================================ */
+  :root {
+    --bg:        oklch(0.126 0.008 282);
+    --sidebar:   oklch(0.148 0.011 283);
+    --card:      oklch(0.172 0.013 283);
+    --popover:   oklch(0.196 0.015 284);
+    --overlay:   oklch(0.225 0.017 284);
+
+    --border:        oklch(1 0 0 / 0.065);
+    --border-strong: oklch(1 0 0 / 0.11);
+
+    --text-1: oklch(0.935 0.005 288);
+    --text-2: oklch(0.715 0.010 288);
+    --text-3: oklch(0.535 0.013 288);
+
+    --hover:  oklch(1 0 0 / 0.04);
+    --active: oklch(1 0 0 / 0.07);
+
+    --primary:       oklch(0.70 0.165 288);
+    --primary-deep:  oklch(0.58 0.185 292);
+    --primary-soft:  oklch(0.70 0.165 288 / 0.11);
+    --primary-line:  oklch(0.70 0.165 288 / 0.28);
+    --primary-fg:    oklch(0.985 0.005 288);
+
+    /* selection = neutral surface with a purple whisper */
+    --selected: oklch(0.70 0.165 288 / 0.09);
+
+    --green:  oklch(0.72 0.14 160);
+    --amber:  oklch(0.78 0.13 75);
+    --red:    oklch(0.68 0.18 22);
+    --sky:    oklch(0.72 0.12 230);
+
+    --radius:    10px;
+    --radius-sm: 6px;
+
+    --shadow-pop: 0 0 0 1px oklch(1 0 0 / 0.07), 0 10px 28px oklch(0 0 0 / 0.5), 0 2px 8px oklch(0 0 0 / 0.35);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    letter-spacing: -0.006em;
+    font-feature-settings: "cv05", "cv11";
+    background: var(--bg);
+    color: var(--text-1);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  svg { display: block; flex: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; letter-spacing: inherit; }
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: oklch(1 0 0 / 0.09); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: oklch(1 0 0 / 0.16); border: 3px solid transparent; background-clip: content-box; }
+
+  .app { display: flex; height: 100vh; }
+
+  /* ================= SIDEBAR ================= */
+  .sidebar {
+    position: relative;
+    width: 216px; flex: none;
+    display: flex; flex-direction: column;
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+  }
+  /* brand moment: faint purple aurora at sidebar top */
+  .sidebar::before {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 180px;
+    background: radial-gradient(120% 100% at 30% 0%, oklch(0.58 0.185 292 / 0.14), transparent 65%);
+    pointer-events: none;
+  }
+  .traffic { display: flex; gap: 8px; padding: 14px 16px 6px; position: relative; }
+  .traffic i { width: 12px; height: 12px; border-radius: 50%; background: oklch(1 0 0 / 0.14); }
+
+  .acct-wrap { padding: 6px 8px 4px; position: relative; }
+  .acct-trigger {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    transition: background 0.12s ease;
+  }
+  .acct-trigger:hover { background: var(--hover); }
+  .acct-trigger[aria-expanded="true"] { background: var(--active); }
+  .acct-avatar {
+    width: 20px; height: 20px; border-radius: 5px;
+    background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305));
+    color: var(--primary-fg);
+    display: grid; place-items: center;
+    font-size: 9.5px; font-weight: 650; letter-spacing: 0.02em;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.18), 0 0 10px oklch(0.58 0.185 292 / 0.45);
+  }
+  .acct-name { font-weight: 550; font-size: 12.5px; flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acct-trigger .chev { color: var(--text-3); transition: transform 0.15s ease; }
+  .acct-trigger[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+  /* ---- account switcher popover (gradient brand header) ---- */
+  .acct-popover {
+    position: absolute; z-index: 60;
+    top: 66px; left: 8px; width: 268px;
+    background: var(--popover);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-pop);
+    padding: 4px;
+    overflow: hidden;
+    opacity: 0; transform: translateY(-4px) scale(0.98); pointer-events: none;
+    transform-origin: top left;
+    transition: opacity 0.13s ease, transform 0.13s ease;
+  }
+  .acct-popover::before {
+    content: "";
+    position: absolute; inset: 0 0 auto 0; height: 64px;
+    background: linear-gradient(to bottom, oklch(0.58 0.185 292 / 0.2), transparent);
+    pointer-events: none;
+  }
+  .acct-popover::after {
+    content: "";
+    position: absolute; top: 0; left: 8%; right: 8%; height: 1px;
+    background: linear-gradient(to right, transparent, oklch(0.72 0.17 288 / 0.55), transparent);
+  }
+  .acct-popover.open { opacity: 1; transform: none; pointer-events: auto; }
+  .pop-label { padding: 6px 8px 4px; font-size: 10.5px; font-weight: 550; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); position: relative; }
+  .pop-account {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    transition: background 0.1s ease;
+    text-align: left;
+    position: relative;
+  }
+  .pop-account:hover { background: var(--hover); }
+  .pop-account .acct-avatar { width: 24px; height: 24px; font-size: 10.5px; border-radius: 6px; }
+  .pop-account .meta { flex: 1; min-width: 0; }
+  .pop-account .meta .name { font-size: 12.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop-account .meta .email { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lock-dot { display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--text-3); }
+  .lock-dot i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+  .lock-dot.unlocked i { background: var(--green); box-shadow: 0 0 6px oklch(0.72 0.14 160 / 0.6); }
+  .pop-account .check { color: var(--primary); filter: drop-shadow(0 0 4px oklch(0.70 0.165 288 / 0.6)); }
+  .pop-account .kebab { color: var(--text-3); opacity: 0; padding: 2px; border-radius: 4px; transition: opacity 0.1s; }
+  .pop-account:hover .kebab { opacity: 1; }
+  .pop-account .kebab:hover { background: var(--overlay); color: var(--text-1); }
+  .pop-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+  .pop-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 5.5px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 12.5px; color: var(--text-2);
+    transition: background 0.1s ease, color 0.1s ease;
+    text-align: left;
+  }
+  .pop-item:hover { background: var(--hover); color: var(--text-1); }
+  .pop-item svg { color: var(--text-3); }
+  .pop-item:hover svg { color: var(--text-2); }
+  .pop-item .kbd { margin-left: auto; }
+
+  /* ---- nav ---- */
+  .nav { flex: 1; overflow-y: auto; padding: 4px 8px 12px; position: relative; }
+  .nav-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; height: 28px; padding: 0 8px;
+    border-radius: var(--radius-sm);
+    font-size: 12.5px; font-weight: 450; color: var(--text-2);
+    transition: background 0.1s ease, color 0.1s ease;
+    text-align: left;
+    position: relative;
+  }
+  .nav-item svg { color: var(--text-3); transition: color 0.1s ease; }
+  .nav-item:hover { background: var(--hover); color: var(--text-1); }
+  .nav-item:hover svg { color: var(--text-2); }
+  /* brand moment: active nav gets purple tint + glow bar */
+  .nav-item.active {
+    background: var(--primary-soft);
+    color: var(--text-1); font-weight: 500;
+    box-shadow: inset 0 0 0 1px oklch(0.70 0.165 288 / 0.14);
+  }
+  .nav-item.active::before {
+    content: "";
+    position: absolute; left: -8px; top: 6px; bottom: 6px; width: 2px;
+    border-radius: 2px;
+    background: var(--primary);
+    box-shadow: 0 0 8px oklch(0.70 0.165 288 / 0.8);
+  }
+  .nav-item.active svg { color: var(--primary); }
+  .nav-item .count { margin-left: auto; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .nav-item .star { color: var(--amber); }
+  .nav-section {
+    display: flex; align-items: center; gap: 4px;
+    margin: 14px 0 2px; padding: 0 8px; height: 20px;
+  }
+  .nav-section span { font-size: 10.5px; font-weight: 550; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+  .nav-section .add { margin-left: auto; color: var(--text-3); opacity: 0; padding: 2px; border-radius: 4px; transition: opacity 0.12s; }
+  .nav:hover .nav-section .add { opacity: 1; }
+  .nav-section .add:hover { background: var(--hover); color: var(--text-1); }
+  .vault-dot { width: 16px; height: 16px; border-radius: 4.5px; display: grid; place-items: center; font-size: 8px; font-weight: 650; color: var(--primary-fg); flex: none; }
+  .tag-dot { width: 7px; height: 7px; border-radius: 50%; margin: 0 4.5px; flex: none; }
+
+  /* ================= MAIN ================= */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: 46px; flex: none;
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .searchbox {
+    display: flex; align-items: center; gap: 8px;
+    width: 340px; height: 28px; padding: 0 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: oklch(1 0 0 / 0.02);
+    color: var(--text-3); font-size: 12.5px;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .searchbox:hover { border-color: var(--border-strong); }
+  .searchbox:focus-within { border-color: oklch(0.70 0.165 288 / 0.6); box-shadow: 0 0 0 3px oklch(0.70 0.165 288 / 0.16), 0 0 16px oklch(0.58 0.185 292 / 0.15); }
+  .searchbox input { flex: 1; background: none; border: 0; outline: 0; color: var(--text-1); font: inherit; letter-spacing: inherit; }
+  .searchbox input::placeholder { color: var(--text-3); }
+  .kbd {
+    font-size: 10px; font-weight: 500; color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 4px; line-height: 1.3;
+    background: oklch(1 0 0 / 0.03);
+    font-variant-numeric: tabular-nums;
+  }
+  /* brand moment: glowing gradient primary action */
+  .btn-primary {
+    display: flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 11px; margin-left: auto;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(to bottom, oklch(0.72 0.165 286), oklch(0.63 0.18 293));
+    color: var(--primary-fg);
+    font-size: 12.5px; font-weight: 550;
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 14px oklch(0.58 0.185 292 / 0.35);
+    transition: filter 0.12s ease, box-shadow 0.12s ease;
+  }
+  .btn-primary:hover { filter: brightness(1.08); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 20px oklch(0.58 0.185 292 / 0.5); }
+
+  .panes { flex: 1; min-height: 0; display: flex; }
+
+  /* ================= ITEM LIST ================= */
+  .list { width: 296px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+  .list-controls {
+    height: 36px; flex: none;
+    display: flex; align-items: center; gap: 2px;
+    padding: 0 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .cat-select {
+    display: flex; align-items: center; gap: 6px;
+    height: 24px; padding: 0 6px;
+    border-radius: var(--radius-sm);
+    font-size: 12px; font-weight: 500; color: var(--text-2);
+    transition: background 0.1s;
+  }
+  .cat-select:hover { background: var(--hover); color: var(--text-1); }
+  .cat-select svg { color: var(--text-3); }
+  .icon-btn {
+    display: grid; place-items: center;
+    width: 24px; height: 24px;
+    border-radius: var(--radius-sm);
+    color: var(--text-3);
+    transition: background 0.1s, color 0.1s;
+  }
+  .icon-btn:hover { background: var(--hover); color: var(--text-1); }
+  .list-scroll { flex: 1; overflow-y: auto; padding: 6px; }
+  .group-label { padding: 8px 8px 4px; font-size: 10.5px; font-weight: 550; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+  .row {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    text-align: left;
+    transition: background 0.1s ease;
+    position: relative;
+  }
+  .row:hover { background: var(--hover); }
+  /* brand moment: selection is a purple-tinted surface + indicator bar */
+  .row.selected {
+    background: var(--selected);
+    box-shadow: inset 0 0 0 1px oklch(0.70 0.165 288 / 0.16);
+  }
+  .row.selected::before {
+    content: "";
+    position: absolute; left: -6px; top: 7px; bottom: 7px; width: 2px;
+    border-radius: 2px;
+    background: var(--primary);
+    box-shadow: 0 0 8px oklch(0.70 0.165 288 / 0.8);
+  }
+  .tile {
+    width: 26px; height: 26px; border-radius: 7px; flex: none;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 600; color: #fff;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.09);
+  }
+  .row .body { flex: 1; min-width: 0; }
+  .row .title { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; color: var(--text-1); }
+  .row .title span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .title .ind { color: var(--text-3); flex: none; }
+  .row .sub { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  .row.selected .sub { color: var(--text-2); }
+
+  /* ================= DETAIL ================= */
+  .detail { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .detail-bar {
+    height: 36px; flex: none;
+    display: flex; align-items: center;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .vault-chip {
+    display: flex; align-items: center; gap: 6px;
+    height: 24px; padding: 0 7px;
+    border-radius: var(--radius-sm);
+    font-size: 12px; color: var(--text-2);
+    transition: background 0.1s;
+  }
+  .vault-chip:hover { background: var(--hover); color: var(--text-1); }
+  .detail-bar .actions { margin-left: auto; display: flex; align-items: center; gap: 2px; }
+  .text-btn {
+    display: flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 8px;
+    border-radius: var(--radius-sm);
+    font-size: 12px; font-weight: 500; color: var(--text-2);
+    transition: background 0.1s, color 0.1s;
+  }
+  .text-btn:hover { background: var(--hover); color: var(--text-1); }
+
+  .detail-scroll { flex: 1; overflow-y: auto; }
+  .detail-inner { max-width: 620px; padding: 28px 32px 48px; position: relative; }
+  /* brand moment: faint ambient glow behind the item header */
+  .detail-inner::before {
+    content: "";
+    position: absolute; top: -40px; left: -20px; width: 340px; height: 200px;
+    background: radial-gradient(60% 60% at 30% 40%, oklch(0.58 0.185 292 / 0.09), transparent 70%);
+    pointer-events: none;
+  }
+  .detail-head { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; position: relative; }
+  .tile-lg {
+    width: 44px; height: 44px; border-radius: 11px;
+    display: grid; place-items: center;
+    font-size: 18px; font-weight: 600; color: #fff;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.1), 0 2px 8px oklch(0 0 0 / 0.3), 0 0 24px oklch(0.58 0.185 292 / 0.2);
+  }
+  .detail-head h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
+  .detail-head .sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+  .detail-head .fav { margin-left: auto; color: var(--amber); }
+
+  /* --- field-row groups --- */
+  .field-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 14px;
+    position: relative;
+  }
+  .frow {
+    display: flex; align-items: center;
+    padding: 8px 12px;
+    min-height: 46px;
+    position: relative;
+    transition: background 0.1s ease;
+  }
+  .frow + .frow { border-top: 1px solid var(--border); }
+  .frow:hover { background: oklch(1 0 0 / 0.025); }
+  .frow .fbody { flex: 1; min-width: 0; }
+  .flabel { font-size: 10.5px; font-weight: 550; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); margin-bottom: 1px; }
+  .fvalue { font-size: 13px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
+  .fvalue.link { color: oklch(0.76 0.1 285); }
+  .fvalue.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; letter-spacing: 0.04em; }
+  .fvalue.dots { letter-spacing: 0.22em; color: var(--text-2); }
+  .factions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s ease; }
+  .frow:hover .factions { opacity: 1; }
+  .factions .icon-btn { width: 26px; height: 26px; color: var(--text-3); }
+  .factions .icon-btn:hover { background: var(--overlay); color: var(--text-1); }
+
+  .totp-code { display: flex; align-items: center; gap: 10px; }
+  .totp-code .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 16px; font-weight: 500; letter-spacing: 0.12em; color: var(--text-1); }
+  .totp-ring { width: 16px; height: 16px; transform: rotate(-90deg); }
+  .totp-ring circle { fill: none; stroke-width: 2.5; }
+  .totp-ring .track { stroke: oklch(1 0 0 / 0.12); }
+  .totp-ring .prog { stroke: var(--primary); stroke-linecap: round; stroke-dasharray: 37.7; animation: totp 30s linear infinite; filter: drop-shadow(0 0 3px oklch(0.70 0.165 288 / 0.7)); }
+  @keyframes totp { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 37.7; } }
+
+  .passkey-meta { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); margin-top: 1px; }
+  .notes-text { font-size: 12.5px; color: var(--text-2); line-height: 1.55; white-space: pre-wrap; }
+  .frow.tall { align-items: flex-start; padding-top: 10px; padding-bottom: 10px; }
+
+  .tags-row { display: flex; gap: 6px; margin: 4px 0 18px; }
+  .tag-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 21px; padding: 0 8px;
+    border-radius: 6px;
+    font-size: 11px; font-weight: 500;
+    border: 1px solid var(--border);
+    background: oklch(1 0 0 / 0.03);
+    color: var(--text-2);
+  }
+  .tag-badge i { width: 6px; height: 6px; border-radius: 50%; }
+
+  .meta-line { font-size: 11px; color: var(--text-3); display: flex; gap: 14px; font-variant-numeric: tabular-nums; }
+
+  .variant-chip {
+    position: fixed; right: 14px; bottom: 12px; z-index: 100;
+    font-size: 10.5px; font-weight: 550; letter-spacing: 0.04em;
+    color: var(--text-3);
+    background: var(--popover);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    box-shadow: 0 2px 10px oklch(0 0 0 / 0.4);
+  }
+  .hint {
+    position: fixed; left: 232px; top: 40px; z-index: 55;
+    font-size: 10.5px; color: var(--text-3);
+    background: var(--popover); border: 1px solid var(--border);
+    border-radius: 6px; padding: 3px 8px;
+    box-shadow: 0 2px 10px oklch(0 0 0 / 0.4);
+    animation: fadeout 0.2s ease 6s forwards;
+    pointer-events: none;
+  }
+  @keyframes fadeout { to { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<!-- ICON SPRITE (lucide-style, 1.5px stroke) -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-grid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5l2.9 5.9 6.6 1-4.7 4.6 1.1 6.5-5.9-3.1-5.9 3.1 1.1-6.5L2.5 9.4l6.6-1z"/></symbol>
+    <symbol id="i-star-o" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M12 2.5l2.9 5.9 6.6 1-4.7 4.6 1.1 6.5-5.9-3.1-5.9 3.1 1.1-6.5L2.5 9.4l6.6-1z"/></symbol>
+    <symbol id="i-chev-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7.5"/><line x1="20.5" y1="20.5" x2="16.4" y2="16.4"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="19" height="4.5" rx="1"/><path d="M4.5 8v10a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8"/><line x1="10" y1="12" x2="14" y2="12"/></symbol>
+    <symbol id="i-tag" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="0.5" fill="currentColor"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9.5" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9.5" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.9-.8"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></symbol>
+    <symbol id="i-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+    <symbol id="i-share" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><line x1="11" y1="18" x2="13" y2="18"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></symbol>
+    <symbol id="i-card" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><line x1="2" y1="10" x2="22" y2="10"/></symbol>
+    <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></symbol>
+    <symbol id="i-sort" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 16 17 20 13 16"/><line x1="17" y1="20" x2="17" y2="4"/><polyline points="3 8 7 4 11 8"/><line x1="7" y1="4" x2="7" y2="20"/></symbol>
+    <symbol id="i-passkey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 15.5V21"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="traffic"><i></i><i></i><i></i></div>
+
+    <div class="acct-wrap">
+      <button class="acct-trigger" id="acctTrigger" aria-expanded="false">
+        <span class="acct-avatar">QW</span>
+        <span class="acct-name">Qrawall</span>
+        <svg class="chev" width="13" height="13"><use href="#i-chev-d"/></svg>
+      </button>
+    </div>
+
+    <!-- account switcher popover -->
+    <div class="acct-popover" id="acctPopover">
+      <div class="pop-label">Accounts</div>
+      <button class="pop-account">
+        <span class="acct-avatar">QW</span>
+        <span class="meta">
+          <span class="name">Qrawall</span>
+          <span class="email">c.federico@qrawall.com</span>
+        </span>
+        <span class="lock-dot unlocked"><i></i></span>
+        <svg class="check" width="14" height="14"><use href="#i-check"/></svg>
+        <button class="kebab"><svg width="14" height="14"><use href="#i-more"/></svg></button>
+      </button>
+      <button class="pop-account">
+        <span class="acct-avatar" style="background: linear-gradient(135deg, oklch(0.55 0.1 220), oklch(0.45 0.1 250)); box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.12)">JS</span>
+        <span class="meta">
+          <span class="name">Personal</span>
+          <span class="email">julian@sigmund.dev</span>
+        </span>
+        <span class="lock-dot"><i></i></span>
+        <button class="kebab"><svg width="14" height="14"><use href="#i-more"/></svg></button>
+      </button>
+      <div class="pop-sep"></div>
+      <button class="pop-item"><svg width="14" height="14"><use href="#i-plus"/></svg>Add account</button>
+      <button class="pop-item"><svg width="14" height="14"><use href="#i-users"/></svg>Manage accounts</button>
+      <button class="pop-item"><svg width="14" height="14"><use href="#i-phone"/></svg>Set up another device</button>
+      <button class="pop-item"><svg width="14" height="14"><use href="#i-settings"/></svg>Settings<span class="kbd">⌘,</span></button>
+      <div class="pop-sep"></div>
+      <button class="pop-item"><svg width="14" height="14"><use href="#i-lock"/></svg>Lock all accounts<span class="kbd">⇧⌘L</span></button>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active">
+        <svg width="14" height="14"><use href="#i-grid"/></svg>All Objects
+        <span class="count">128</span>
+      </button>
+      <button class="nav-item">
+        <svg class="star" width="14" height="14"><use href="#i-star-o"/></svg>Favorites
+        <span class="count">6</span>
+      </button>
+
+      <div class="nav-section">
+        <span>Vaults</span>
+        <button class="add"><svg width="12" height="12"><use href="#i-plus"/></svg></button>
+      </div>
+      <button class="nav-item">
+        <span class="vault-dot" style="background: oklch(0.58 0.17 288); box-shadow: 0 0 8px oklch(0.58 0.185 292 / 0.5)">P</span>Personal
+        <span class="count">84</span>
+      </button>
+      <button class="nav-item">
+        <span class="vault-dot" style="background: oklch(0.55 0.13 230)">W</span>Work
+        <span class="count">37</span>
+      </button>
+      <button class="nav-item">
+        <span class="vault-dot" style="background: oklch(0.6 0.13 160)">F</span>Family
+        <span class="count">7</span>
+      </button>
+
+      <div class="nav-section"><span>Tags</span></div>
+      <button class="nav-item"><span class="tag-dot" style="background: var(--sky)"></span>dev</button>
+      <button class="nav-item"><span class="tag-dot" style="background: var(--amber)"></span>banking</button>
+      <button class="nav-item"><span class="tag-dot" style="background: var(--green)"></span>family</button>
+
+      <div class="nav-section"><span>&nbsp;</span></div>
+      <button class="nav-item">
+        <svg width="14" height="14"><use href="#i-archive"/></svg>Archive
+      </button>
+    </nav>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+    <header class="topbar">
+      <div class="searchbox">
+        <svg width="13" height="13"><use href="#i-search"/></svg>
+        <input placeholder="Search vaults and items…" />
+        <span class="kbd">⌘K</span>
+      </div>
+      <button class="btn-primary">
+        <svg width="13" height="13"><use href="#i-plus"/></svg>New Item
+      </button>
+    </header>
+
+    <div class="panes">
+      <!-- ============ ITEM LIST ============ -->
+      <section class="list">
+        <div class="list-controls">
+          <button class="cat-select">
+            <svg width="13" height="13"><use href="#i-grid"/></svg>All Categories
+            <svg width="11" height="11" style="color:var(--text-3)"><use href="#i-chev-d"/></svg>
+          </button>
+          <span style="flex:1"></span>
+          <button class="icon-btn"><svg width="13" height="13"><use href="#i-search"/></svg></button>
+          <button class="icon-btn"><svg width="13" height="13"><use href="#i-sort"/></svg></button>
+        </div>
+        <div class="list-scroll">
+          <div class="group-label">Favorites</div>
+          <button class="row selected">
+            <span class="tile" style="background:#1c2128">GH</span>
+            <span class="body">
+              <span class="title"><span>GitHub</span><svg class="ind" width="11" height="11"><use href="#i-phone"/></svg><svg class="ind" width="11" height="11"><use href="#i-passkey"/></svg></span>
+              <span class="sub">jsigmund</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:#635bff">S</span>
+            <span class="body">
+              <span class="title"><span>Stripe</span></span>
+              <span class="sub">c.federico@qrawall.com</span>
+            </span>
+          </button>
+
+          <div class="group-label">Items</div>
+          <button class="row">
+            <span class="tile" style="background:#232f3e;color:#ff9900">A</span>
+            <span class="body">
+              <span class="title"><span>AWS Console</span><svg class="ind" width="11" height="11"><use href="#i-phone"/></svg></span>
+              <span class="sub">qrawall-prod</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:oklch(0.3 0.02 284);color:var(--text-2)"><svg width="13" height="13"><use href="#i-card"/></svg></span>
+            <span class="body">
+              <span class="title"><span>American Express</span></span>
+              <span class="sub">•••• 3007</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:#0acf83;color:#0d1117">F</span>
+            <span class="body">
+              <span class="title"><span>Figma</span></span>
+              <span class="sub">design@qrawall.com</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:#4285f4">G</span>
+            <span class="body">
+              <span class="title"><span>Google</span><svg class="ind" width="11" height="11"><use href="#i-passkey"/></svg></span>
+              <span class="sub">julian.sigmund@gmail.com</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:#5e6ad2">L</span>
+            <span class="body">
+              <span class="title"><span>Linear</span></span>
+              <span class="sub">c.federico@qrawall.com</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:#e50914">N</span>
+            <span class="body">
+              <span class="title"><span>Netflix</span></span>
+              <span class="sub">family@sigmund.dev</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:oklch(0.3 0.02 284);color:var(--text-2)"><svg width="13" height="13"><use href="#i-note"/></svg></span>
+            <span class="body">
+              <span class="title"><span>Recovery Codes — Backup</span></span>
+              <span class="sub">Secure note</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:oklch(0.3 0.02 284);color:var(--text-2)"><svg width="13" height="13"><use href="#i-user"/></svg></span>
+            <span class="body">
+              <span class="title"><span>Julian Sigmund</span></span>
+              <span class="sub">Identity</span>
+            </span>
+          </button>
+          <button class="row">
+            <span class="tile" style="background:#000">▲</span>
+            <span class="body">
+              <span class="title"><span>Vercel</span></span>
+              <span class="sub">c.federico@qrawall.com</span>
+            </span>
+          </button>
+        </div>
+      </section>
+
+      <!-- ============ DETAIL ============ -->
+      <section class="detail">
+        <div class="detail-bar">
+          <button class="vault-chip">
+            <span class="vault-dot" style="background: oklch(0.58 0.17 288)">P</span>Personal
+            <svg width="10" height="10" style="color:var(--text-3)"><use href="#i-chev-d"/></svg>
+          </button>
+          <div class="actions">
+            <button class="text-btn"><svg width="12" height="12"><use href="#i-share"/></svg>Share</button>
+            <button class="text-btn"><svg width="12" height="12"><use href="#i-pen"/></svg>Edit</button>
+            <button class="icon-btn"><svg width="14" height="14"><use href="#i-more"/></svg></button>
+          </div>
+        </div>
+
+        <div class="detail-scroll">
+          <div class="detail-inner">
+            <div class="detail-head">
+              <span class="tile-lg" style="background:#1c2128">GH</span>
+              <div>
+                <h1>GitHub</h1>
+                <div class="sub">github.com</div>
+              </div>
+              <svg class="fav" width="15" height="15"><use href="#i-star"/></svg>
+            </div>
+
+            <div class="field-card">
+              <div class="frow">
+                <div class="fbody">
+                  <div class="flabel">Website</div>
+                  <div class="fvalue link">https://github.com</div>
+                </div>
+                <div class="factions">
+                  <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                  <button class="icon-btn" title="Open"><svg width="13" height="13"><use href="#i-ext"/></svg></button>
+                </div>
+              </div>
+              <div class="frow">
+                <div class="fbody">
+                  <div class="flabel">Username</div>
+                  <div class="fvalue">jsigmund</div>
+                </div>
+                <div class="factions">
+                  <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                </div>
+              </div>
+              <div class="frow">
+                <div class="fbody">
+                  <div class="flabel">Password</div>
+                  <div class="fvalue mono dots" id="pw" data-real="k9#mQv-2xTz!fRb7">••••••••••••••••</div>
+                </div>
+                <div class="factions">
+                  <button class="icon-btn" title="Reveal" id="pwToggle"><svg width="13" height="13"><use href="#i-eye"/></svg></button>
+                  <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                </div>
+              </div>
+              <div class="frow">
+                <div class="fbody">
+                  <div class="flabel">One-time password</div>
+                  <div class="totp-code">
+                    <span class="code">246 810</span>
+                    <svg class="totp-ring" viewBox="0 0 16 16"><circle class="track" cx="8" cy="8" r="6"/><circle class="prog" cx="8" cy="8" r="6"/></svg>
+                  </div>
+                </div>
+                <div class="factions">
+                  <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                </div>
+              </div>
+              <div class="frow">
+                <div class="fbody">
+                  <div class="flabel">Passkey</div>
+                  <div class="fvalue">MacBook Pro — Touch ID</div>
+                  <div class="passkey-meta">github.com · Last used Jul 2, 2026</div>
+                </div>
+                <div class="factions">
+                  <button class="icon-btn" title="Copy credential ID"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="field-card">
+              <div class="frow tall">
+                <div class="fbody">
+                  <div class="flabel">Notes</div>
+                  <div class="notes-text">Recovery codes stored in the office safe. SSO enabled through Qrawall org — use the org account for CI tokens.</div>
+                </div>
+                <div class="factions">
+                  <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                </div>
+              </div>
+            </div>
+
+            <div class="flabel" style="margin: 0 2px 6px">Tags</div>
+            <div class="tags-row">
+              <span class="tag-badge"><i style="background:var(--sky)"></i>dev</span>
+              <span class="tag-badge"><i style="background:var(--amber)"></i>work</span>
+            </div>
+
+            <div class="meta-line">
+              <span>Created Mar 12, 2025</span>
+              <span>Updated Jul 2, 2026</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+
+<div class="hint">↖ click the account switcher</div>
+<div class="variant-chip">Variant 3 · Brand-Forward</div>
+
+<script>
+  const trigger = document.getElementById('acctTrigger');
+  const popover = document.getElementById('acctPopover');
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = popover.classList.toggle('open');
+    trigger.setAttribute('aria-expanded', open);
+  });
+  document.addEventListener('click', (e) => {
+    if (!popover.contains(e.target)) {
+      popover.classList.remove('open');
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+  });
+  const pw = document.getElementById('pw');
+  document.getElementById('pwToggle').addEventListener('click', () => {
+    const hidden = pw.textContent.startsWith('•');
+    pw.textContent = hidden ? pw.dataset.real : '••••••••••••••••';
+    pw.classList.toggle('dots', !hidden);
+  });
+</script>
+</body>
+</html>

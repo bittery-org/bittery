@@ -132,7 +132,7 @@ export function useCredentialProviderSync(
 		isLoading: isLoadingItems,
 		refetch: refetchItems,
 	} = useItems({ enabled });
-	const { accountsInfo, isAllAccountsMode } = useAccountsInfo({ enabled });
+	const { accountsInfo } = useAccountsInfo({ enabled });
 
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [lastSyncResult, setLastSyncResult] = useState<{
@@ -155,23 +155,6 @@ export function useCredentialProviderSync(
 		() => items.filter((item) => item.category === "login"),
 		[items],
 	);
-
-	const loginItemsByAccountEmail = useMemo(() => {
-		const byEmail = new Map<string, typeof loginItems>();
-		for (const item of loginItems) {
-			const accountEmail = item.account?.email?.toLowerCase();
-			if (!accountEmail) {
-				continue;
-			}
-			const existing = byEmail.get(accountEmail);
-			if (existing) {
-				existing.push(item);
-			} else {
-				byEmail.set(accountEmail, [item]);
-			}
-		}
-		return byEmail;
-	}, [loginItems]);
 
 	// Check if credential provider and biometric/device auth are available
 	useEffect(() => {
@@ -272,13 +255,13 @@ export function useCredentialProviderSync(
 				return;
 			}
 
-			for (const email of unlockedEmails) {
-				const muk = await storage.getMasterUnlockKey(email);
-				const sessionData = await storage.getStoredSessionData(email);
+			for (const accountId of unlockedEmails) {
+				const muk = await storage.getMasterUnlockKey(accountId);
+				const sessionData = await storage.getStoredSessionData(accountId);
 				const autoLockTimeoutMs =
-					await storage.getAutoLockTimeoutOrDefault(email);
+					await storage.getAutoLockTimeoutOrDefault(accountId);
 				debugLog(
-					`[CredentialProviderSync] ensureNativeMukSet: email=${email}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`,
+					`[CredentialProviderSync] ensureNativeMukSet: accountId=${accountId}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`,
 				);
 				if (muk && sessionData?.userId) {
 					const mukBase64 = arrayBufferToBase64(muk);
@@ -292,7 +275,7 @@ export function useCredentialProviderSync(
 					);
 				} else {
 					console.warn(
-						`[CredentialProviderSync] ensureNativeMukSet: SKIPPING email=${email} (muk=${!!muk}, userId=${sessionData?.userId ?? "null"})`,
+						`[CredentialProviderSync] ensureNativeMukSet: SKIPPING accountId=${accountId} (muk=${!!muk}, userId=${sessionData?.userId ?? "null"})`,
 					);
 				}
 			}
@@ -342,19 +325,15 @@ export function useCredentialProviderSync(
 
 			for (const account of accountsInfo) {
 				seenAccountIds.add(account.userId);
-				const vaultKeys = await storage.getVaultKeys(account.email);
+				const vaultKeys = await storage.getVaultKeys(account.accountId);
 				if (!vaultKeys || vaultKeys.length === 0) {
 					lastVaultSyncSignatureByAccountRef.current.delete(account.userId);
 					continue;
 				}
 
 				const vaultIdsWithKeys = new Set(vaultKeys.map((vk) => vk.vaultId));
-				const accountEmail = account.email.toLowerCase();
-				const sourceItems = isAllAccountsMode
-					? (loginItemsByAccountEmail.get(accountEmail) ?? [])
-					: loginItems;
 
-				const accountLoginItems = sourceItems.filter((item) =>
+				const accountLoginItems = loginItems.filter((item) =>
 					vaultIdsWithKeys.has(item.vaultId),
 				);
 
@@ -493,15 +472,7 @@ export function useCredentialProviderSync(
 			console.error("[CredentialProviderSync] Vault sync failed:", err);
 			return null;
 		}
-	}, [
-		enabled,
-		accountsInfo,
-		ensureNativeMukSet,
-		isAvailable,
-		isAllAccountsMode,
-		loginItems,
-		loginItemsByAccountEmail,
-	]);
+	}, [enabled, accountsInfo, ensureNativeMukSet, isAvailable, loginItems]);
 
 	/**
 	 * Flush provider-side passkey mutations to server before inbound vault sync.

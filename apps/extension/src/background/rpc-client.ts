@@ -34,13 +34,14 @@ async function getOrCreateSyncClientId(): Promise<string> {
 
 async function getAuthToken(): Promise<string | null> {
 	const activeAccount = await storage.getActiveAccount();
-	const email = activeAccount?.type === "single" ? activeAccount.email : null;
+	const accountId =
+		activeAccount?.type === "single" ? activeAccount.accountId : undefined;
 
-	if (email && desktopSync.isDesktopAvailable()) {
+	if (accountId && desktopSync.isDesktopAvailable()) {
 		try {
-			const desktopToken = await desktopClient.getAuthToken(email);
+			const desktopToken = await desktopClient.getAuthToken(accountId);
 			if (desktopToken) {
-				await storage.storeAuthToken(desktopToken, email);
+				await storage.storeAuthToken(desktopToken, accountId);
 				return desktopToken;
 			}
 		} catch {
@@ -48,7 +49,7 @@ async function getAuthToken(): Promise<string | null> {
 		}
 	}
 
-	return storage.getAuthToken();
+	return storage.getAuthToken(accountId);
 }
 
 export const rpcClient = createSessionRefreshingRpcClient({
@@ -59,11 +60,11 @@ export const rpcClient = createSessionRefreshingRpcClient({
 	},
 	getSessionSnapshot: async () => {
 		const activeAccount = await storage.getActiveAccount();
-		const email =
-			activeAccount?.type === "single" ? activeAccount.email : undefined;
+		const accountId =
+			activeAccount?.type === "single" ? activeAccount.accountId : undefined;
 		const [token, sessionData] = await Promise.all([
 			getAuthToken(),
-			storage.getStoredSessionData?.(email) ?? Promise.resolve(null),
+			storage.getStoredSessionData?.(accountId) ?? Promise.resolve(null),
 		]);
 
 		return {
@@ -75,11 +76,11 @@ export const rpcClient = createSessionRefreshingRpcClient({
 	getRefreshToken: getAuthToken,
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		const activeAccount = await storage.getActiveAccount();
-		const email =
-			activeAccount?.type === "single" ? activeAccount.email : undefined;
-		await storage.storeAuthToken(token, email);
-		if (email) {
-			await storage.updateStoredSessionMetadata?.(email, {
+		const accountId =
+			activeAccount?.type === "single" ? activeAccount.accountId : undefined;
+		await storage.storeAuthToken(token, accountId);
+		if (accountId) {
+			await storage.updateStoredSessionMetadata?.(accountId, {
 				sessionId,
 				expiresAt,
 			});

@@ -13,7 +13,8 @@
 	},
 	"scripts": {
 		"shadcn": "pnpm dlx shadcn@latest",
-		"check-types": "tsc --noEmit"
+		"check-types": "tsc --noEmit",
+		"test": "bun test src/__tests__"
 	},
 	"dependencies": {
 		"@bittery/core": "workspace:*",

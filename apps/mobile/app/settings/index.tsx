@@ -55,13 +55,8 @@ const StyledSun = withUniwind(Sun);
 export default function SettingsScreen() {
 	const router = useRouter();
 	const { m } = useI18n();
-	const {
-		activeAccount,
-		isAllAccountsMode,
-		allAccounts,
-		refreshAccounts,
-		removeAccount,
-	} = useAccount();
+	const { activeAccount, allAccounts, refreshAccounts, removeAccount } =
+		useAccount();
 	const { theme } = useUniwind();
 
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
@@ -93,7 +88,8 @@ export default function SettingsScreen() {
 	const loadSettings = useCallback(async () => {
 		if (allAccounts.length === 0) return;
 
-		const fallbackEmail = activeAccount?.email || allAccounts[0]?.email;
+		const fallbackAccountId =
+			activeAccount?.accountId || allAccounts[0]?.accountId;
 
 		const details = await storage.getBiometricAvailabilityDetails();
 		setBiometricDetails({
@@ -109,43 +105,24 @@ export default function SettingsScreen() {
 			setBiometricType(type);
 		}
 
-		const enabled = await storage.isBiometricEnabled(fallbackEmail);
+		const enabled = await storage.isBiometricEnabled(fallbackAccountId);
 		setBiometricEnabled(enabled);
 
-		const timeout = await storage.getAutoLockTimeoutOrDefault(fallbackEmail);
+		const timeout =
+			await storage.getAutoLockTimeoutOrDefault(fallbackAccountId);
 		setAutoLockTimeout(timeout);
 
-		if (!isAllAccountsMode && activeAccount) {
-			const url = await storage.getServerUrl(activeAccount.email);
+		if (activeAccount) {
+			const url = await storage.getServerUrl(activeAccount.accountId);
 			setServerUrl(url);
 		} else {
 			setServerUrl(null);
 		}
 
 		// Calculate days until master password re-entry is required
-		if (isAllAccountsMode) {
-			const daysRemainingList = await Promise.all(
-				allAccounts.map(async (account) => {
-					const sessionData = await storage.getStoredSessionData(account.email);
-					if (!sessionData) return null;
-					const lastEntry =
-						sessionData.lastMasterPasswordEntry || sessionData.createdAt;
-					const nextRequired = lastEntry + MASTER_PASSWORD_REENTRY_PERIOD_MS;
-					const daysRemaining = Math.ceil(
-						(nextRequired - Date.now()) / (24 * 60 * 60 * 1000),
-					);
-					return Math.max(0, daysRemaining);
-				}),
-			);
-			const filtered = daysRemainingList.filter(
-				(value): value is number => value !== null,
-			);
-			setMasterPasswordDaysRemaining(
-				filtered.length > 0 ? Math.min(...filtered) : null,
-			);
-		} else if (activeAccount) {
+		if (activeAccount) {
 			const sessionData = await storage.getStoredSessionData(
-				activeAccount.email,
+				activeAccount.accountId,
 			);
 			if (sessionData) {
 				const lastEntry =
@@ -157,7 +134,7 @@ export default function SettingsScreen() {
 				setMasterPasswordDaysRemaining(Math.max(0, daysRemaining));
 			}
 		}
-	}, [activeAccount, allAccounts, isAllAccountsMode]);
+	}, [activeAccount, allAccounts]);
 
 	useEffect(() => {
 		loadSettings();
@@ -165,27 +142,34 @@ export default function SettingsScreen() {
 
 	const handleBiometricToggle = async (value: boolean) => {
 		if (allAccounts.length === 0) return;
-		const fallbackEmail = activeAccount?.email || allAccounts[0]?.email;
+		const fallbackAccountId =
+			activeAccount?.accountId || allAccounts[0]?.accountId;
 
 		try {
 			if (value) {
 				// Verify biometric before enabling
 				const success = await storage.authenticateWithBiometric(
 					m.mob_settings_biometric_verify_prompt(),
-					fallbackEmail,
+					fallbackAccountId,
 				);
 				if (!success) {
-					Alert.alert("Error", m.mob_settings_biometric_error());
+					Alert.alert(
+						m.mob_unlock_alert_error_title(),
+						m.mob_settings_biometric_error(),
+					);
 					return;
 				}
-				await storage.enableBiometric(fallbackEmail);
+				await storage.enableBiometric(fallbackAccountId);
 			} else {
-				await storage.disableBiometric(fallbackEmail);
+				await storage.disableBiometric(fallbackAccountId);
 			}
 			setBiometricEnabled(value);
 		} catch (error) {
 			console.error("Error toggling biometric:", error);
-			Alert.alert("Error", m.mob_settings_biometric_settings_error());
+			Alert.alert(
+				m.mob_unlock_alert_error_title(),
+				m.mob_settings_biometric_settings_error(),
+			);
 		}
 	};
 
@@ -201,15 +185,13 @@ export default function SettingsScreen() {
 					setAutoLockTimeout(option.value);
 
 					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-						const accountsToUpdate = isAllAccountsMode
-							? allAccounts
-							: activeAccount
-								? [activeAccount]
-								: allAccounts;
+						const accountsToUpdate = activeAccount
+							? [activeAccount]
+							: allAccounts;
 
 						for (const account of accountsToUpdate) {
 							const sessionData = await storage.getStoredSessionData(
-								account.email,
+								account.accountId,
 							);
 							if (sessionData?.userId) {
 								CredentialProvider.setMukAutoLockTimeout(
@@ -235,18 +217,12 @@ export default function SettingsScreen() {
 		await saveThemePreference(newTheme);
 	};
 
-	const accountLabel = isAllAccountsMode
-		? m.mob_settings_all_accounts()
-		: activeAccount?.name || m.mob_settings_account_fallback();
-	const accountValue = isAllAccountsMode
-		? m.mob_settings_accounts_count({ count: String(allAccounts.length) })
-		: activeAccount?.email;
-	const serverValue = isAllAccountsMode
-		? m.mob_settings_server_per_account()
-		: serverUrl || m.mob_settings_server_not_set();
-	const accountsForList = isAllAccountsMode
-		? allAccounts
-		: allAccounts.filter((a) => a.email !== activeAccount?.email);
+	const accountLabel = activeAccount?.name || m.mob_settings_account_fallback();
+	const accountValue = activeAccount?.email;
+	const serverValue = serverUrl || m.mob_settings_server_not_set();
+	const accountsForList = allAccounts.filter(
+		(a) => a.accountId !== activeAccount?.accountId,
+	);
 
 	const handleLock = async () => {
 		// Clear React Native session (in-memory cache)
@@ -266,12 +242,8 @@ export default function SettingsScreen() {
 	};
 
 	const handleSignOut = async () => {
-		const title = isAllAccountsMode
-			? m.mob_settings_sign_out_all_title()
-			: m.mob_settings_sign_out();
-		const description = isAllAccountsMode
-			? m.mob_settings_sign_out_all_description()
-			: m.mob_settings_sign_out_description();
+		const title = m.mob_settings_sign_out();
+		const description = m.mob_settings_sign_out_description();
 
 		Alert.alert(title, description, [
 			{ text: m.mob_settings_cancel(), style: "cancel" },
@@ -279,12 +251,8 @@ export default function SettingsScreen() {
 				text: m.mob_settings_sign_out(),
 				style: "destructive",
 				onPress: async () => {
-					if (isAllAccountsMode) {
-						for (const account of allAccounts) {
-							await removeAccount(account.email);
-						}
-					} else if (activeAccount) {
-						await removeAccount(activeAccount.email);
+					if (activeAccount) {
+						await removeAccount(activeAccount.accountId);
 					}
 					await refreshAccounts();
 					router.replace("/(auth)/login");
@@ -293,7 +261,7 @@ export default function SettingsScreen() {
 		]);
 	};
 
-	const handleRemoveAccount = (email: string) => {
+	const handleRemoveAccount = (accountId: string, email: string) => {
 		Alert.alert(
 			m.mob_settings_remove_account_title(),
 			m.mob_settings_remove_account_message({ email }),
@@ -303,7 +271,7 @@ export default function SettingsScreen() {
 					text: m.mob_settings_remove_account_confirm(),
 					style: "destructive",
 					onPress: async () => {
-						await removeAccount(email);
+						await removeAccount(accountId);
 						if (allAccounts.length <= 1) {
 							router.replace("/(auth)/login");
 						}
@@ -591,9 +559,7 @@ export default function SettingsScreen() {
 				{accountsForList.length > 0 && (
 					<Surface variant="secondary" className="mb-6 gap-0 p-0">
 						<Text className="px-4 pt-5 pb-2 font-semibold text-sm text-surface-foreground uppercase">
-							{isAllAccountsMode
-								? m.mob_settings_section_accounts()
-								: m.mob_settings_section_other_accounts()}
+							{m.mob_settings_section_other_accounts()}
 						</Text>
 						{accountsForList.map((account) => (
 							<View key={account.email}>
@@ -601,13 +567,17 @@ export default function SettingsScreen() {
 									icon={StyledUser}
 									label={account.name || account.email.split("@")[0]}
 									value={account.email}
-									onPress={() => handleRemoveAccount(account.email)}
+									onPress={() =>
+										handleRemoveAccount(account.accountId, account.email)
+									}
 									rightElement={
 										<Button
 											isIconOnly
 											variant="ghost"
 											size="sm"
-											onPress={() => handleRemoveAccount(account.email)}
+											onPress={() =>
+												handleRemoveAccount(account.accountId, account.email)
+											}
 										>
 											<StyledTrash2 size={18} className="text-danger" />
 										</Button>
@@ -625,16 +595,8 @@ export default function SettingsScreen() {
 					</Text>
 					<SettingRow
 						icon={StyledLogOut}
-						label={
-							isAllAccountsMode
-								? m.mob_settings_sign_out_all()
-								: m.mob_settings_sign_out()
-						}
-						value={
-							isAllAccountsMode
-								? m.mob_settings_sign_out_all_value()
-								: m.mob_settings_sign_out_value()
-						}
+						label={m.mob_settings_sign_out()}
+						value={m.mob_settings_sign_out_value()}
 						onPress={handleSignOut}
 						destructive
 					/>

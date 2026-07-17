@@ -1,16 +1,14 @@
 /**
  * useVaultSearch Hook
  *
- * Client-side search across all vaults and items.
+ * Client-side search across the active account's vaults and items.
  * Performs zero-knowledge search through decrypted item data.
- * Context-aware: searches across all accounts when activeAccount = "all".
  */
 
 import type { ItemCategory } from "@bittery/shared/types";
 import { useMemo } from "react";
 import { useAllVaultKeys } from "./use-all-vault-keys";
 import { useCrossVaultTags } from "./use-cross-vault-tags";
-import type { MultiAccountItem } from "./use-items";
 import { useItems } from "./use-items";
 import { useVaultInfo } from "./use-vault-info";
 import { useVaultItems } from "./use-vault-items";
@@ -63,13 +61,12 @@ export interface SingleVaultSearchResult {
 /**
  * Hook to perform client-side search across all vaults and items.
  * Searches through decrypted item data for true zero-knowledge search.
- * Context-aware: searches across multiple accounts when in "All Accounts" mode.
  *
  * @param query - Search query string
  * @returns Search results containing matching vaults and items
  */
 export function useVaultSearch(query: string): SearchResult {
-	const { items, isAllAccountsMode } = useItems();
+	const { items } = useItems();
 	const { vaultKeys } = useAllVaultKeys({});
 	const { tags } = useCrossVaultTags(items);
 
@@ -106,10 +103,6 @@ export function useVaultSearch(query: string): SearchResult {
 					item.email,
 					// Include tags in search
 					...(item.tags || []),
-					// Include account email in search for multi-account mode
-					isAllAccountsMode && "account" in item
-						? (item as MultiAccountItem).account?.email
-						: undefined,
 				]
 					.filter(Boolean)
 					.join(" ")
@@ -139,7 +132,7 @@ export function useVaultSearch(query: string): SearchResult {
 			items: matchingItems,
 			tags: matchingTags,
 		};
-	}, [query, items, isAllAccountsMode, vaultKeys, tags]);
+	}, [query, items, vaultKeys, tags]);
 }
 
 /**
@@ -154,11 +147,10 @@ export function useSingleVaultSearch(
 	vaultId: string,
 	query: string,
 ): SingleVaultSearchResult {
-	// Get vault info - automatically handles single-account vs all-accounts mode
+	// Get vault info for the active account
 	const { vaultInfo: currentVault } = useVaultInfo(vaultId);
 
-	// Get decrypted items for this vault
-	// useVaultItems automatically handles single-account vs all-accounts mode
+	// Get decrypted items for this vault (active account)
 	const { items: decryptedItems } = useVaultItems(vaultId);
 
 	return useMemo(() => {

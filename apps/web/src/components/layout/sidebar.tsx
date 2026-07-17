@@ -88,10 +88,10 @@ function UserNav() {
 					<DropdownMenuTrigger asChild>
 						<SidebarMenuButton
 							size="lg"
-							className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+							className="text-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground"
 						>
-							<Avatar className="h-8 w-8 rounded-lg">
-								<AvatarFallback className="rounded-lg text-xs">
+							<Avatar className="h-7 w-7 rounded-md">
+								<AvatarFallback className="rounded-md bg-linear-to-br from-primary to-primary-deep font-semibold text-[10.5px] text-white shadow-[inset_0_0_0_1px_oklch(1_0_0/0.12)]">
 									{initials}
 								</AvatarFallback>
 							</Avatar>
@@ -103,7 +103,7 @@ function UserNav() {
 									{user?.email || ""}
 								</span>
 							</div>
-							<ChevronsUpDown className="ml-auto size-4" />
+							<ChevronsUpDown className="ml-auto size-3.5 text-muted-foreground" />
 						</SidebarMenuButton>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent
@@ -160,8 +160,12 @@ export function AppSidebar() {
 	});
 
 	return (
-		<Sidebar variant="inset" collapsible="icon">
-			<SidebarHeader>
+		<Sidebar collapsible="icon">
+			<div
+				aria-hidden
+				className="pointer-events-none absolute inset-x-0 top-0 h-44 bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_8%,transparent),transparent_65%)] dark:bg-[radial-gradient(120%_100%_at_30%_0%,color-mix(in_oklab,var(--color-primary-deep)_14%,transparent),transparent_65%)]"
+			/>
+			<SidebarHeader className="relative">
 				<SidebarMenu>
 					<SidebarMenuItem>
 						<SidebarMenuButton
@@ -202,19 +206,26 @@ export function AppSidebar() {
 				</SidebarMenu>
 			</SidebarHeader>
 
-			<SidebarContent>
+			<SidebarContent className="relative">
 				<SidebarGroup>
 					<SidebarGroupLabel>{m.nav_group_navigation()}</SidebarGroupLabel>
 					<SidebarGroupContent>
 						<SidebarMenu>
 							{navItems.map((item) => {
 								const label = getNavLabel(item.path, m);
+								const isActive = currentPath.startsWith(item.path);
 
 								return (
 									<SidebarMenuItem key={item.path}>
+										{isActive && (
+											<span
+												aria-hidden
+												className="absolute top-[6px] bottom-[6px] -left-2 z-10 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+											/>
+										)}
 										<SidebarMenuButton
 											asChild
-											isActive={currentPath.startsWith(item.path)}
+											isActive={isActive}
 											tooltip={label}
 										>
 											<Link to={item.path} onClick={handleMobileLinkClick}>

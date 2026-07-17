@@ -1,6 +1,6 @@
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { AccountResolver } from "./account-resolver";
-import { getTravelModeService } from "./travel-mode-service";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 import { type RpcVaultClient, refreshVaultKeys } from "./vault-service";
 
@@ -15,21 +15,21 @@ export interface TravelModeSyncRestoreOptions {
 }
 
 export async function restoreAfterTravelModeDisabled(
-	email: string,
+	accountId: string,
 	storage: IStorageAdapter,
 	coordinator: VaultRepositoryCoordinator,
 	{ rpcClient, accounts }: TravelModeSyncRestoreOptions,
 ): Promise<void> {
-	await refreshVaultKeys(rpcClient, storage, email);
+	await refreshVaultKeys(rpcClient, storage, accountId);
 
-	const vaultKeys = await storage.getVaultKeys(email);
+	const vaultKeys = await storage.getVaultKeys(accountId);
 	if (vaultKeys) {
-		await coordinator.syncVaultKeys(vaultKeys, email);
+		await coordinator.syncVaultKeys(vaultKeys, accountId);
 	}
 
 	const { accountsInfo } = await accounts.resolveAccounts();
 	const account = accountsInfo.find(
-		(candidate) => candidate.email.toLowerCase() === email.toLowerCase(),
+		(candidate) => candidate.accountId === accountId,
 	);
 	if (account) {
 		await coordinator.refreshFromServer([account]);
@@ -38,7 +38,7 @@ export async function restoreAfterTravelModeDisabled(
 
 export async function handleTravelModeSyncEvent(
 	event: TravelModeSyncEvent,
-	email: string,
+	accountId: string,
 	storage: IStorageAdapter,
 	coordinator?: VaultRepositoryCoordinator,
 	restoreOptions?: TravelModeSyncRestoreOptions,
@@ -47,19 +47,20 @@ export async function handleTravelModeSyncEvent(
 		return;
 	}
 
-	const travelMode = getTravelModeService(storage);
-	const previousConfig = travelMode.getConfig(email);
-	await travelMode.applySyncEventMetadata(email, event.metadata);
-	const config = travelMode.getConfig(email);
+	const enforcer = getTravelModeEnforcer(storage, coordinator);
+	const previousConfig = enforcer.getConfig(accountId);
+	const config = await enforcer.applySyncEventMetadata(
+		accountId,
+		event.metadata,
+	);
 
 	if (config.enabled) {
-		coordinator?.purgeHiddenVaultsForEmail(email, config.hiddenVaultIds);
 		return;
 	}
 
 	if (previousConfig.enabled && coordinator && restoreOptions) {
 		await restoreAfterTravelModeDisabled(
-			email,
+			accountId,
 			storage,
 			coordinator,
 			restoreOptions,

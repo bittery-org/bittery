@@ -12,20 +12,18 @@ import {
 } from "lucide-react";
 import { motion } from "motion/react";
 import { Button } from "@/components/ui/button";
+import { seo } from "@/lib/seo";
 import { signupUrl } from "@/lib/urls";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/contact")({
 	component: ContactPage,
 	head: () => ({
-		meta: [
-			{ title: "Contact — Bittery" },
-			{
-				name: "description",
-				content:
-					"Get in touch with the Bittery team. Reach out for support, partnerships, security reports, or general questions.",
-			},
-		],
+		meta: seo({
+			title: "Contact — Bittery",
+			description:
+				"Get in touch with the Bittery team. Reach out for support, partnerships, security reports, or general questions.",
+		}),
 	}),
 });
 

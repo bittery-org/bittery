@@ -1,17 +1,20 @@
-import {
-	createAccountRpcClient,
-	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ActiveAccount } from "@bittery/storage/types";
+import {
+	createStoredAccountRpcClient,
+	type DefaultRpcClient,
+} from "./rpc-client";
 
-export type DefaultRpcClient = ReturnType<typeof createAccountRpcClient>;
+export type { DefaultRpcClient };
+export { createStoredAccountRpcClient };
 
 /**
  * Complete account information including metadata, credentials, and RPC client.
  */
 export interface AccountInfo {
+	accountId: string;
 	email: string;
 	userId: string;
 	name: string;
@@ -25,7 +28,6 @@ export interface AccountInfo {
 export interface ResolveAccountsResult {
 	activeAccount: ActiveAccount;
 	accountsInfo: AccountInfo[];
-	isAllAccountsMode: boolean;
 }
 
 export interface ItemWithOptionalAccount extends ItemContextMetadata {
@@ -54,27 +56,19 @@ export function findAccountForItem(
 }
 
 /**
- * Returns an account-specific RPC client when accountEmail is provided.
+ * Returns an account-specific RPC client when accountId is provided.
  */
 export async function getClientForAccount(
 	storage: IStorageAdapter,
-	defaultClient: DefaultRpcClient,
-	accountEmail?: string,
+	_defaultClient: DefaultRpcClient,
+	accountId: string,
 ): Promise<DefaultRpcClient> {
-	if (!accountEmail) {
-		return defaultClient;
+	const client = await createStoredAccountRpcClient(storage, accountId);
+	if (!client) {
+		throw new Error(`No authenticated RPC client for account ${accountId}`);
 	}
 
-	const [authToken, serverUrl] = await Promise.all([
-		storage.getAuthToken(accountEmail),
-		storage.getServerUrl(accountEmail),
-	]);
-
-	if (!authToken) {
-		return defaultClient;
-	}
-
-	return createAccountRpcClient(authToken, serverUrl);
+	return client;
 }
 
 /**
@@ -95,22 +89,41 @@ export class AccountResolver {
 			return {
 				activeAccount,
 				accountsInfo: [],
-				isAllAccountsMode: false,
 			};
 		}
 
-		const emails =
-			activeAccount.type === "single"
-				? [activeAccount.email]
-				: ((await this.storage.getUnlockedAccounts?.()) ?? []);
+		const accountIds = [activeAccount.accountId];
 
+		const accountsInfo = await this.buildAccountInfos(accountIds);
+
+		return {
+			activeAccount,
+			accountsInfo,
+		};
+	}
+
+	/**
+	 * Resolves every currently-unlocked account into full `AccountInfo`.
+	 *
+	 * View-mode independent: used by the item Move dialog to surface
+	 * cross-account move targets while a single account stays active. Does not
+	 * change the active account or the coordinator's active-account set.
+	 */
+	async resolveUnlockedAccounts(): Promise<AccountInfo[]> {
+		const accountIds = (await this.storage.getUnlockedAccounts?.()) ?? [];
+		return this.buildAccountInfos(accountIds);
+	}
+
+	private async buildAccountInfos(
+		accountIds: string[],
+	): Promise<AccountInfo[]> {
 		const infos = await Promise.all(
-			emails.map(async (email): Promise<AccountInfo | null> => {
+			accountIds.map(async (accountId): Promise<AccountInfo | null> => {
 				try {
 					const [metadata, authToken, serverUrl] = await Promise.all([
-						this.storage.getAccountMetadata?.(email),
-						this.storage.getAuthToken(email),
-						this.storage.getServerUrl(email),
+						this.storage.getAccountMetadata?.(accountId),
+						this.storage.getAuthToken(accountId),
+						this.storage.getServerUrl(accountId),
 					]);
 
 					if (!metadata || !authToken) {
@@ -118,12 +131,16 @@ export class AccountResolver {
 					}
 
 					const resolvedServerUrl = serverUrl || getDefaultServerUrl();
-					const rpcClient = createAccountRpcClient(
-						authToken,
-						resolvedServerUrl,
+					const rpcClient = await createStoredAccountRpcClient(
+						this.storage,
+						accountId,
 					);
+					if (!rpcClient) {
+						return null;
+					}
 
 					return {
+						accountId: metadata.accountId,
 						email: metadata.email,
 						userId: metadata.userId,
 						name: metadata.name,
@@ -135,7 +152,7 @@ export class AccountResolver {
 					};
 				} catch (error) {
 					console.error(
-						`[AccountResolver] Failed to load account info for ${email}:`,
+						`[AccountResolver] Failed to load account info for ${accountId}:`,
 						error,
 					);
 					return null;
@@ -143,18 +160,15 @@ export class AccountResolver {
 			}),
 		);
 
-		return {
-			activeAccount,
-			accountsInfo: infos.filter((info): info is AccountInfo => info !== null),
-			isAllAccountsMode: activeAccount.type === "all",
-		};
+		return infos.filter((info): info is AccountInfo => info !== null);
 	}
 
 	async getClientForAccount(
 		defaultClient: DefaultRpcClient,
-		accountEmail?: string,
+		accountId?: string,
 	): Promise<DefaultRpcClient> {
-		return getClientForAccount(this.storage, defaultClient, accountEmail);
+		if (!accountId) return defaultClient;
+		return getClientForAccount(this.storage, defaultClient, accountId);
 	}
 
 	findAccountForItem(

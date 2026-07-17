@@ -1,7 +1,6 @@
 import { useI18n } from "@bittery/i18n/react";
 import { useState } from "react";
-import { IconCheckOutlineDuo18, IconPlusOutlineDuo18, IconTagsOutlineDuo18 } from "../icons";
-import { Button } from "./button";
+import { IconCheckOutlineDuo18, IconPlusOutlineDuo18 } from "../icons";
 import {
 	Command,
 	CommandEmpty,
@@ -70,39 +69,30 @@ export function TagInput({
 		!availableTags.some((t) => t.toLowerCase() === searchValue.toLowerCase());
 
 	return (
-		<div className="space-y-2">
-			{tags.length > 0 && (
-				<div className="flex flex-wrap gap-1">
-					{tags.map((tag) => (
-						<TagBadge
-							key={tag}
-							name={tag}
-							onRemove={disabled ? undefined : () => handleSelectTag(tag)}
-							onClick={onTagClick ? () => onTagClick(tag) : undefined}
-						/>
-					))}
-				</div>
-			)}
+		<div className="flex flex-wrap items-center gap-1.5">
+			{tags.map((tag) => (
+				<TagBadge
+					key={tag}
+					name={tag}
+					onRemove={disabled ? undefined : () => handleSelectTag(tag)}
+					onClick={onTagClick ? () => onTagClick(tag) : undefined}
+				/>
+			))}
 
-			{!disabled && (
-				<Popover open={open} onOpenChange={setOpen}>
-					<PopoverTrigger asChild>
-						<Button variant="outline" size="sm" className="h-8 gap-1">
-							<IconTagsOutlineDuo18 className="h-3.5 w-3.5" />
-							<span>
-								{tags.length > 0
-									? tags.length === 1
-										? m.vaults_detail_items_tag_input_button_count_single({
-												count: tags.length,
-											})
-										: m.vaults_detail_items_tag_input_button_count_plural({
-												count: tags.length,
-											})
-									: m.vaults_detail_items_tag_input_button_default()}
-							</span>
-						</Button>
-					</PopoverTrigger>
-					<PopoverContent className="w-64 p-0" align="start">
+			<Popover open={open} onOpenChange={setOpen}>
+				<PopoverTrigger asChild>
+					<button
+						type="button"
+						disabled={disabled}
+						className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 font-medium text-muted-foreground text-xs outline-none transition-colors hover:border-strong hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50"
+					>
+						<IconPlusOutlineDuo18 className="size-3" />
+						{tags.length > 0
+							? m.vaults_detail_items_tag_input_button_add()
+							: m.vaults_detail_items_tag_input_button_default()}
+					</button>
+				</PopoverTrigger>
+				<PopoverContent className="w-64 p-0" align="start">
 						<Command>
 							<CommandInput
 								placeholder={m.vaults_detail_items_tag_input_search_placeholder()}
@@ -157,9 +147,8 @@ export function TagInput({
 								)}
 							</CommandList>
 						</Command>
-					</PopoverContent>
-				</Popover>
-			)}
+				</PopoverContent>
+			</Popover>
 		</div>
 	);
 }

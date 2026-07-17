@@ -5,7 +5,7 @@
  * Wraps the core performSRPUnlock utility with React Query mutation.
  */
 
-import { useRPCClient } from "@bittery/shared/rpc";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	performSRPUnlock,
@@ -17,6 +17,7 @@ import {
 	usePlatformCrypto,
 	usePlatformStorage,
 } from "../../context/platform-context";
+import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
 
 /**
  * Options for useQuickUnlock hook
@@ -63,30 +64,37 @@ export interface QuickUnlockInput extends SRPUnlockInput {
 export function useQuickUnlock(
 	options: UseQuickUnlockOptions = {},
 ): UseMutationResult<UnlockResult, Error, QuickUnlockInput> {
-	const rpcClient = useRPCClient();
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
 
 	return useMutation({
 		mutationFn: async (input: QuickUnlockInput) => {
+			// Build a per-account RPC client so travel mode can be re-verified
+			// against the server during unlock. Without this, storeUnlockSession
+			// silently trusts stale local cache (travel mode fail-open).
+			const serverUrl =
+				(await storage.getServerUrl?.(input.accountId)) ||
+				getDefaultServerUrl();
+			const accountRpcClient = await createStaticStoredAccountRpcClient(
+				storage,
+				input.accountId,
+			);
+
 			// Perform SRP unlock
 			const result = await performSRPUnlock(
 				{
-					email: input.email,
+					accountId: input.accountId,
 					password: input.password,
 				},
-				{ crypto, rpcClient, storage },
+				{ crypto, rpcClient: accountRpcClient, storage },
 			);
 
-			// Store unlock session data
-			await storeUnlockSession(result, storage, input.email, {
-				travelModeRpcClient: rpcClient,
+			// Store unlock session data, re-verifying travel mode against the
+			// server via the account RPC client.
+			await storeUnlockSession(result, storage, input.accountId, {
+				travelModeRpcClient: accountRpcClient,
+				serverUrl,
 			});
-
-			// For multi-account platforms, set this as the active account
-			if (storage.supportsMultiAccount) {
-				await storage.setActiveAccount({ type: "single", email: input.email });
-			}
 
 			return result;
 		},

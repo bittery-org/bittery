@@ -52,6 +52,7 @@ export class DesktopClient {
 	private authTokenCache = new Map<
 		string,
 		CachedData<{
+			accountId: string;
 			email: string;
 			authToken: string;
 			expiresAt?: number;
@@ -120,8 +121,8 @@ export class DesktopClient {
 		}
 	}
 
-	async getAuthToken(email: string): Promise<string | null> {
-		const cacheKey = email.toLowerCase();
+	async getAuthToken(accountId: string): Promise<string | null> {
+		const cacheKey = accountId;
 		const cached = this.authTokenCache.get(cacheKey);
 		if (cached && this.isFresh(cached.timestamp)) {
 			return cached.data.authToken;
@@ -130,7 +131,7 @@ export class DesktopClient {
 		try {
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_AUTH_TOKEN",
-				email,
+				accountId,
 			});
 			if (response.type !== "DESKTOP_AUTH_TOKEN") {
 				return null;
@@ -146,8 +147,10 @@ export class DesktopClient {
 		}
 	}
 
-	async getVaultKeys(email: string): Promise<DesktopVaultKeysResponse | null> {
-		const cacheKey = email.toLowerCase();
+	async getVaultKeys(
+		accountId: string,
+	): Promise<DesktopVaultKeysResponse | null> {
+		const cacheKey = accountId;
 		const cached = this.vaultKeysCache.get(cacheKey);
 		if (cached && this.isFresh(cached.timestamp)) {
 			return cached.data;
@@ -156,7 +159,7 @@ export class DesktopClient {
 		try {
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_VAULT_KEYS",
-				email,
+				accountId,
 			});
 			if (response.type !== "DESKTOP_VAULT_KEYS") {
 				return null;
@@ -173,12 +176,12 @@ export class DesktopClient {
 	}
 
 	async getItemsSnapshot(
-		emails?: string[],
+		accountIds?: string[],
 	): Promise<DesktopItemsSnapshotResponse | null> {
-		const normalizedEmails = emails
-			?.map((email) => email.toLowerCase())
+		const normalizedAccountIds = accountIds
+			?.slice()
 			.sort((left, right) => left.localeCompare(right));
-		const cacheKey = normalizedEmails?.join(",") ?? "__all__";
+		const cacheKey = normalizedAccountIds?.join(",") ?? "__all__";
 		const cached = this.itemsSnapshotCache.get(cacheKey);
 		if (cached && this.isFresh(cached.timestamp)) {
 			return cached.data;
@@ -187,11 +190,11 @@ export class DesktopClient {
 		try {
 			const response = await this.nativeClient.request({
 				type: "GET_DESKTOP_ITEMS_SNAPSHOT",
-				emails: normalizedEmails,
+				accountIds: normalizedAccountIds,
 			});
 			if (response.type === "ERROR") {
 				console.warn("[desktop-client] Desktop snapshot request failed", {
-					emails: normalizedEmails,
+					accountIds: normalizedAccountIds,
 					message: response.message,
 				});
 				return null;
@@ -236,10 +239,9 @@ export class DesktopClient {
 		this.itemsSnapshotCache.clear();
 	}
 
-	clearAccountCache(email: string): void {
-		const key = email.toLowerCase();
-		this.vaultKeysCache.delete(key);
-		this.authTokenCache.delete(key);
+	clearAccountCache(accountId: string): void {
+		this.vaultKeysCache.delete(accountId);
+		this.authTokenCache.delete(accountId);
 	}
 }
 

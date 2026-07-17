@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { OutboundQueue } from "../outbound-queue";
+import {
+	OutboundQueue,
+	type OutboundQueueClient,
+	type PendingMutation,
+} from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
 import { SyncOrchestrator } from "../sync-orchestrator";
 import type { SyncEvent, SyncStorage } from "../types";
@@ -324,6 +328,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 1,
 			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			timestamp: 1,
 			retryCount: 0,
 		});
@@ -334,6 +339,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 2,
 			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			timestamp: 2,
 			retryCount: 0,
 		});
@@ -349,6 +355,7 @@ describe("sync engine regressions", () => {
 			},
 			baseVersion: 3,
 			accountEmail: "alice@example.com",
+			accountId: "account-alice",
 			timestamp: 3,
 			retryCount: 0,
 		});
@@ -410,6 +417,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 1,
 			accountEmail: firstEmail,
+			accountId: "account-first",
 			timestamp: 1,
 			retryCount: 0,
 		});
@@ -420,6 +428,7 @@ describe("sync engine regressions", () => {
 			vaultId: "vault_1",
 			baseVersion: 1,
 			accountEmail: secondEmail,
+			accountId: "account-second",
 			timestamp: 2,
 			retryCount: 0,
 		});
@@ -429,9 +438,9 @@ describe("sync engine regressions", () => {
 		const restored = new OutboundQueue(storage, "self_client");
 		await restored.restore();
 
-		const perEmailItemIds = new Map<string, string[]>();
-		await restored.drain((email) => {
-			perEmailItemIds.set(email, []);
+		const perAccountItemIds = new Map<string, string[]>();
+		await restored.drain((accountId) => {
+			perAccountItemIds.set(accountId, []);
 			return {
 				vault: {
 					createItem: {
@@ -439,40 +448,40 @@ describe("sync engine regressions", () => {
 					},
 					updateItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					deleteItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					permanentlyDeleteItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					restoreItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					moveItem: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 					toggleFavorite: {
 						mutate: async (input) => {
-							perEmailItemIds.get(email)?.push(input.itemId);
+							perAccountItemIds.get(accountId)?.push(input.itemId);
 						},
 					},
 				},
 			};
 		});
 
-		expect(perEmailItemIds.get(firstEmail.toLowerCase())).toEqual(["item_1"]);
-		expect(perEmailItemIds.get(secondEmail.toLowerCase())).toEqual(["item_2"]);
+		expect(perAccountItemIds.get("account-first")).toEqual(["item_1"]);
+		expect(perAccountItemIds.get("account-second")).toEqual(["item_2"]);
 	});
 
 	test("migrates legacy outbound queue keys to collision-safe keys", async () => {
@@ -480,7 +489,7 @@ describe("sync engine regressions", () => {
 		const email = "a+b@example.com";
 		const normalizedEmail = email.toLowerCase();
 		const legacyKey = `bittery_pending_mutations_${normalizedEmail.replace(/[^a-z0-9]/g, "_")}`;
-		const nextKey = `bittery_pending_mutations_${encodeURIComponent(normalizedEmail)}`;
+		const nextKey = "bittery_pending_mutations_v2_account-legacy";
 
 		await storage.set("bittery_pending_mutation_accounts", [normalizedEmail]);
 		await storage.set(legacyKey, [
@@ -496,11 +505,142 @@ describe("sync engine regressions", () => {
 			},
 		]);
 
-		const queue = new OutboundQueue(storage, "self_client");
+		const queue = new OutboundQueue(
+			storage,
+			"self_client",
+			async () => "account-legacy",
+		);
 		await queue.restore();
 
 		expect(queue.getPendingCount()).toBe(1);
 		expect(await storage.get(legacyKey)).toBeNull();
 		expect(await storage.get(nextKey)).not.toBeNull();
+	});
+
+	test("preserves and refuses to drain an ambiguous legacy queue", async () => {
+		const storage = new MemoryStorage();
+		const email = "same@example.com";
+		const legacyKey = `bittery_pending_mutations_${email.replace(/[^a-z0-9]/g, "_")}`;
+		await storage.set("bittery_pending_mutation_accounts", [email]);
+		await storage.set(legacyKey, [
+			{
+				id: "m_legacy",
+				type: "delete",
+				entityId: "item_legacy",
+				vaultId: "vault_1",
+				baseVersion: 1,
+				accountEmail: email,
+				timestamp: 1,
+				retryCount: 0,
+			},
+		]);
+		const queue = new OutboundQueue(storage, "self_client", async () => {
+			throw new Error("Ambiguous account email");
+		});
+		await queue.restore();
+		expect(await storage.get(legacyKey)).not.toBeNull();
+		expect(
+			queue.drain(async () => {
+				throw new Error("must not resolve a client");
+			}),
+		).rejects.toThrow("Cannot drain ambiguous legacy queues");
+	});
+});
+
+function buildDeleteMutation(
+	accountId: string,
+	entityId: string,
+	overrides: Partial<PendingMutation> = {},
+): PendingMutation {
+	return {
+		accountId,
+		id: `m_${accountId}_${entityId}`,
+		type: "delete",
+		entityId,
+		vaultId: "vault_1",
+		baseVersion: 1,
+		timestamp: 1,
+		retryCount: 0,
+		...overrides,
+	};
+}
+
+function networkError(): Error {
+	const error = new Error("network down") as Error & { status: number };
+	error.status = 503;
+	return error;
+}
+
+describe("outbound queue multi-account drain isolation", () => {
+	test("one account's failure does not starve other accounts' queues", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+
+		// account_a sorts before account_b, so it is drained first.
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		queue.enqueue(buildDeleteMutation("account_b", "item_b"));
+
+		const deletedByAccount = new Map<string, string[]>();
+		const makeClient = (accountId: string, shouldFail: boolean) =>
+			({
+				vault: {
+					deleteItem: {
+						mutate: async ({ itemId }: { itemId: string }) => {
+							if (shouldFail) {
+								throw networkError();
+							}
+							const done = deletedByAccount.get(accountId) ?? [];
+							done.push(itemId);
+							deletedByAccount.set(accountId, done);
+							return {};
+						},
+					},
+				},
+			}) as unknown as OutboundQueueClient;
+
+		await queue.drain((accountId) =>
+			makeClient(accountId, accountId === "account_a"),
+		);
+
+		// account_a hit a network error and was retained for retry, but the
+		// failure must NOT prevent account_b from draining.
+		expect(deletedByAccount.get("account_b")).toEqual(["item_b"]);
+		expect(queue.hasPendingForItem("item_a")).toBe(true);
+		expect(queue.hasPendingForItem("item_b")).toBe(false);
+		expect(queue.getPendingCount()).toBe(1);
+	});
+
+	test("serializes concurrent drains so mutations are not double-sent", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		queue.enqueue(buildDeleteMutation("account_b", "item_b"));
+
+		const deleteCalls: string[] = [];
+		let inFlight = 0;
+		let observedConcurrency = 0;
+		const client = {
+			vault: {
+				deleteItem: {
+					mutate: async ({ itemId }: { itemId: string }) => {
+						inFlight += 1;
+						observedConcurrency = Math.max(observedConcurrency, inFlight);
+						await new Promise((resolve) => setTimeout(resolve, 5));
+						deleteCalls.push(itemId);
+						inFlight -= 1;
+						return {};
+					},
+				},
+			},
+		} as unknown as OutboundQueueClient;
+
+		// Kick off two overlapping drains against the shared queue.
+		await Promise.all([queue.drain(() => client), queue.drain(() => client)]);
+
+		// Each mutation is processed exactly once and never concurrently.
+		expect(deleteCalls.sort()).toEqual(["item_a", "item_b"]);
+		expect(observedConcurrency).toBe(1);
+		expect(queue.getPendingCount()).toBe(0);
 	});
 });

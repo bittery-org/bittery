@@ -233,11 +233,15 @@ export function RegenerateSecretKeyDialog({
 			});
 
 			// 8. Update local state — store new secret key and new MUK
-			await storage.storeSecretKey(newSecretKey, userEmail);
-			await storage.setMasterUnlockKey(newMasterUnlockKey, userEmail);
-			const existingSession = await storage.getStoredSessionData?.(userEmail);
+			const activeAccount = await storage.getActiveAccount();
+			const accountId =
+				activeAccount?.type === "single" ? activeAccount.accountId : userEmail;
+			await storage.storeSecretKey(newSecretKey, accountId);
+			await storage.setMasterUnlockKey(newMasterUnlockKey, accountId);
+			const existingSession = await storage.getStoredSessionData?.(accountId);
 			await storage.storeSessionData(
 				newMasterUnlockKey,
+				accountId,
 				userEmail,
 				currentUserId,
 				existingSession?.expiresAt,

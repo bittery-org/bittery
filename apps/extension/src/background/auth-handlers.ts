@@ -11,11 +11,13 @@ import {
 	storeLoginSession,
 	storeUnlockSession,
 } from "@bittery/core";
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
-import { desktopSync } from "./desktop-sync";
+import { isDesktopUnlockedNow } from "./desktop-status";
 import { rpcClient } from "./rpc-client";
+import { resolveEmailFromAccountId } from "./services/account-resolution";
 import {
 	isUnlocked,
 	lock,
@@ -27,27 +29,16 @@ import type { MessageResponse } from "./types";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
 
-async function getAccountRpcClient(email: string) {
-	const token = await storage.getAuthToken(email);
+async function getAccountRpcClient(accountId: string) {
+	const token = await storage.getAuthToken(accountId);
 	if (!token) {
 		return rpcClient;
 	}
 	const serverUrl =
-		(await storage.getServerUrl(email)) ??
+		(await storage.getServerUrl(accountId)) ??
 		(await storage.getServerUrl()) ??
 		DEFAULT_SERVER_URL;
 	return createAccountRpcClient(token, serverUrl);
-}
-
-async function isDesktopUnlockedNow(): Promise<boolean> {
-	const status =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-
-	return !!(
-		status?.available &&
-		!status.locked &&
-		(status.unlockedAccounts?.length ?? 0) > 0
-	);
 }
 
 /**
@@ -62,13 +53,13 @@ export async function handleLogin(payload: {
 
 	// Perform SRP login using shared utility
 	const result = await performSRPLogin(
-		{ email, password, secretKey },
+		{ email, password, secretKey, serverUrl: DEFAULT_SERVER_URL },
 		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
 	await storeLoginSession(result, secretKey, storage, email, {
-		travelModeRpcClient: rpcClient,
+		serverUrl: DEFAULT_SERVER_URL,
 	});
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
@@ -97,16 +88,14 @@ export async function handleQuickUnlock(payload: {
 		throw new Error("Quick unlock not available - no active account");
 	}
 
-	const email = activeAccount.email;
-
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
-		{ email, password },
+		{ accountId: activeAccount.accountId, password },
 		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(result, storage, email, {
+	await storeUnlockSession(result, storage, activeAccount.accountId, {
 		travelModeRpcClient: rpcClient,
 	});
 
@@ -177,22 +166,19 @@ async function ensureActiveAccountSet(): Promise<void> {
 			if (!firstAccount) return; // Should never happen but satisfies TS
 			await storage.setActiveAccount({
 				type: "single",
-				email: firstAccount.email,
+				accountId: firstAccount.accountId,
 			});
 		} else {
 			// Multiple accounts - check if any are unlocked
-			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+			const unlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
 
-			if (unlockedEmails.length > 1) {
-				// Multiple unlocked - use "all" mode
-				await storage.setActiveAccount({ type: "all" });
-			} else if (unlockedEmails.length === 1) {
-				// One unlocked - use that one
-				const unlockedEmail = unlockedEmails[0];
-				if (!unlockedEmail) return; // Should never happen but satisfies TS
+			if (unlockedAccountIds.length >= 1) {
+				// One or more unlocked - use the first unlocked account as active
+				const unlockedAccountId = unlockedAccountIds[0];
+				if (!unlockedAccountId) return; // Should never happen but satisfies TS
 				await storage.setActiveAccount({
 					type: "single",
-					email: unlockedEmail,
+					accountId: unlockedAccountId,
 				});
 			} else {
 				// None unlocked - default to first account
@@ -200,7 +186,7 @@ async function ensureActiveAccountSet(): Promise<void> {
 				if (!firstAccount) return; // Should never happen but satisfies TS
 				await storage.setActiveAccount({
 					type: "single",
-					email: firstAccount.email,
+					accountId: firstAccount.accountId,
 				});
 			}
 		}
@@ -218,14 +204,16 @@ async function tryRestoreAllSessions(): Promise<void> {
 		const accounts = await storage.getAccountsList();
 		if (accounts.length === 0) return;
 
-		const restoredEmails: string[] = [];
+		const restoredAccountIds: string[] = [];
 
 		// Try to restore each account's session
 		for (const account of accounts) {
 			try {
-				const restored = await storage.tryRestoreSession(false, account.email);
+				const restored = await getAccountSessionManager({
+					storage,
+				}).unlockAccount(account.accountId, false);
 				if (restored) {
-					restoredEmails.push(account.email);
+					restoredAccountIds.push(account.accountId);
 				}
 			} catch (error) {
 				console.error(
@@ -237,11 +225,11 @@ async function tryRestoreAllSessions(): Promise<void> {
 
 		// If we restored any sessions, set the session manager's global MUK
 		// (just a sentinel value indicating "at least one account is unlocked")
-		if (restoredEmails.length > 0) {
+		if (restoredAccountIds.length > 0) {
 			// Update activity timestamp FIRST to prevent immediate auto-lock
 			await updateActivity();
 
-			const muk = await storage.getMasterUnlockKey(restoredEmails[0]);
+			const muk = await storage.getMasterUnlockKey(restoredAccountIds[0]);
 			if (muk) {
 				setMasterUnlockKey(muk);
 			}
@@ -275,7 +263,10 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 	const userId = await storage.getActiveAccountUserId();
 	const sessionValid = await storage.isSessionValid();
 
-	const email = activeAccount?.type === "single" ? activeAccount.email : null;
+	const email =
+		activeAccount?.type === "single"
+			? await resolveEmailFromAccountId(activeAccount.accountId)
+			: null;
 
 	return {
 		success: true,
@@ -337,31 +328,33 @@ export async function handleQuickUnlockAll(payload: {
 	for (const account of accounts) {
 		try {
 			// Check if account has stored secret key
-			const hasSecretKey = await storage.hasStoredSecretKey?.(account.email);
+			const hasSecretKey = await storage.hasStoredSecretKey?.(
+				account.accountId,
+			);
 			if (!hasSecretKey) {
-				failed.push(account.email);
+				failed.push(account.accountId);
 				continue;
 			}
 
 			// Perform SRP unlock for this account
 			const result = await performSRPUnlock(
-				{ email: account.email, password },
+				{ accountId: account.accountId, password },
 				{ crypto: cryptoAdapter, rpcClient, storage },
 			);
 
 			// Store unlock session data
-			const accountRpcClient = await getAccountRpcClient(account.email);
-			await storeUnlockSession(result, storage, account.email, {
+			const accountRpcClient = await getAccountRpcClient(account.accountId);
+			await storeUnlockSession(result, storage, account.accountId, {
 				travelModeRpcClient: accountRpcClient,
 			});
 
-			unlocked.push(account.email);
+			unlocked.push(account.accountId);
 		} catch (error) {
 			console.error(
 				`[QUICK_UNLOCK_ALL] Failed to unlock ${account.email}:`,
 				error,
 			);
-			failed.push(account.email);
+			failed.push(account.accountId);
 		}
 	}
 
@@ -370,17 +363,21 @@ export async function handleQuickUnlockAll(payload: {
 		throw new Error("Failed to unlock any accounts");
 	}
 
-	// Set active account mode
-	if (accounts.length > 1) {
-		await storage.setActiveAccount({ type: "all" });
-	} else {
-		const firstUnlocked = unlocked[0];
-		if (!firstUnlocked) throw new Error("No unlocked accounts found");
-		await storage.setActiveAccount({ type: "single", email: firstUnlocked });
+	// `unlocked` holds accountIds (UUIDs), not emails.
+	const firstUnlockedAccountId = unlocked[0];
+	if (!firstUnlockedAccountId) {
+		throw new Error("No unlocked accounts found");
 	}
 
+	// Set the active account to the first unlocked account. Other accounts stay
+	// unlocked in the background but only the active one is surfaced.
+	await storage.setActiveAccount({
+		type: "single",
+		accountId: firstUnlockedAccountId,
+	});
+
 	// Set MUK for first unlocked account in session manager
-	const activeMuk = await storage.getMasterUnlockKey(unlocked[0]);
+	const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);
 	if (activeMuk) {
 		setMasterUnlockKey(activeMuk);
 	}

@@ -34,13 +34,12 @@ export function LoginPage() {
 		};
 	}, []);
 
-	const persistServerUrl = async (email?: string) => {
+	const persistServerUrl = async () => {
 		const normalized = normalizeServerUrl(serverUrl);
 		if (!normalized) {
 			toast.error(m.ext_login_toast_invalid_server_url());
 			return null;
 		}
-		await storage.storeServerUrl(normalized, email);
 		if (normalized !== serverUrl) {
 			setServerUrl(normalized);
 		}
@@ -54,7 +53,7 @@ export function LoginPage() {
 			secretKey: "",
 		},
 		onSubmit: async ({ value }) => {
-			const persisted = await persistServerUrl(value.email);
+			const persisted = await persistServerUrl();
 			if (!persisted) {
 				return;
 			}
@@ -111,7 +110,7 @@ export function LoginPage() {
 							className="absolute top-4 left-4"
 						>
 							<IconArrowLeftOutlineDuo18 className="mr-2 size-4" />
-							Back
+							{m.ext_login_back()}
 						</Button>
 					)}
 					<div className="flex flex-col items-center space-y-3 text-center">

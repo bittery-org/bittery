@@ -14,6 +14,7 @@ import type {
 	ItemCacheMetadata,
 	KdfParams,
 } from "@bittery/types";
+import { generateAccountId } from "../account-id";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
 import { resolveStoredSessionExpiryTimestamp } from "../session";
@@ -45,6 +46,7 @@ const ITEM_CACHE_VAULTS_STORE = "vaults";
 const ITEM_CACHE_ATTACHMENTS_STORE = "attachments";
 const ITEM_CACHE_METADATA_STORE = "metadata";
 const ITEM_CACHE_META_KEY = "item_cache_meta";
+const WEB_ACCOUNT_ID_KEY = "bittery_web_account_id";
 
 // In-memory cache for Master Unlock Key
 let masterUnlockKeyCache: Uint8Array | null = null;
@@ -63,6 +65,19 @@ function waitForTransaction(transaction: IDBTransaction): Promise<void> {
 		transaction.onerror = () => reject(transaction.error);
 		transaction.onabort = () => reject(transaction.error);
 	});
+}
+
+function getOrCreateWebAccountId(): string {
+	if (typeof window === "undefined") {
+		return generateAccountId();
+	}
+	const stored = localStorage.getItem(WEB_ACCOUNT_ID_KEY);
+	if (stored) {
+		return stored;
+	}
+	const id = generateAccountId();
+	localStorage.setItem(WEB_ACCOUNT_ID_KEY, id);
+	return id;
 }
 
 /**
@@ -227,6 +242,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async storeSessionData(
 		masterUnlockKey: Uint8Array,
+		_accountId: string,
 		email: string,
 		userId: string,
 		expiresAt?: string | Date | number,
@@ -252,10 +268,15 @@ export class WebStorageAdapter implements IStorageAdapter {
 		};
 
 		localStorage.setItem(SESSION_DATA_STORAGE, JSON.stringify(sessionData));
+		localStorage.setItem(
+			WEB_ACCOUNT_ID_KEY,
+			_accountId || getOrCreateWebAccountId(),
+		);
 	}
 
 	async storeSessionDataWithMasterUnlockKeyHandle(
 		keyHandle: number,
+		_accountId: string,
 		email: string,
 		userId: string,
 		expiresAt?: string | Date | number,
@@ -290,7 +311,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async tryRestoreSession(
 		_skipBiometric?: boolean,
-		_email?: string,
+		_accountId?: string,
 	): Promise<boolean> {
 		if (!(await this.isSessionValid())) {
 			return false;
@@ -317,7 +338,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		return true;
 	}
 
-	async isSessionValid(_email?: string): Promise<boolean> {
+	async isSessionValid(_accountId?: string): Promise<boolean> {
 		const sessionData = await this.getStoredSessionData();
 		const token = await this.getAuthToken();
 		if (!sessionData || !token) return false;
@@ -382,7 +403,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async storeVaultKeys(
 		vaultKeys: VaultKeyData[],
-		_email?: string,
+		_accountId?: string,
 	): Promise<void> {
 		if (typeof window !== "undefined") {
 			sessionStorage.setItem(VAULT_KEYS_KEY, JSON.stringify(vaultKeys));
@@ -447,7 +468,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 	async getActiveAccount(): Promise<ActiveAccount> {
 		const sessionData = await this.getStoredSessionData();
 		if (!sessionData?.email) return null;
-		return { type: "single", email: sessionData.email };
+		return { type: "single", accountId: getOrCreateWebAccountId() };
 	}
 
 	async getActiveAccountUserId(): Promise<string | null> {
@@ -466,6 +487,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 		return [
 			{
+				accountId: getOrCreateWebAccountId(),
 				email: sessionData.email,
 				userId: sessionData.userId,
 				name: "", // Not stored on web
@@ -822,6 +844,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		if (!sessionData) return null;
 
 		return {
+			accountId: getOrCreateWebAccountId(),
 			email: sessionData.email,
 			userId: sessionData.userId,
 			name: "",
@@ -840,7 +863,7 @@ export class WebStorageAdapter implements IStorageAdapter {
 		if (!masterUnlockKeyCache && !masterUnlockKeyHandleCache) return [];
 
 		const sessionData = await this.getStoredSessionData();
-		return sessionData ? [sessionData.email] : [];
+		return sessionData ? [getOrCreateWebAccountId()] : [];
 	}
 
 	// ============================================================================

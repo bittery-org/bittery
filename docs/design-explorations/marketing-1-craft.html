@@ -1,0 +1,745 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bittery — Marketing Variant 1 · Craft</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..800&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     PROTOTYPE — MARKETING VARIANT 1 · "CRAFT"
+     Question: which positioning angle should lead the new
+     marketing site? This variant tests the craft angle —
+     "the Linear of password managers" — design as proof of
+     engineering rigor. Throwaway code; see marketing-NOTES.md.
+     ============================================================ */
+  :root {
+    --bg:        oklch(0.126 0.008 282);
+    --bg-deep:   oklch(0.112 0.007 282);
+    --card:      oklch(0.172 0.013 283);
+    --sidebar:   oklch(0.148 0.011 283);
+    --popover:   oklch(0.196 0.015 284);
+
+    --border:        oklch(1 0 0 / 0.07);
+    --border-strong: oklch(1 0 0 / 0.11);
+
+    --text-1: oklch(0.935 0.005 288);
+    --text-2: oklch(0.715 0.010 288);
+    --text-3: oklch(0.535 0.013 288);
+
+    --primary:      oklch(0.70 0.165 288);
+    --primary-deep: oklch(0.58 0.185 292);
+    --primary-fg:   oklch(0.985 0.005 288);
+
+    --green: oklch(0.72 0.14 160);
+    --amber: oklch(0.78 0.13 75);
+    --red:   oklch(0.68 0.18 22);
+
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow-pop: 0 0 0 1px oklch(1 0 0 / 0.07), 0 10px 28px oklch(0 0 0 / 0.5), 0 2px 8px oklch(0 0 0 / 0.35);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    font-size: 15px; line-height: 1.55;
+    letter-spacing: -0.011em;
+    font-feature-settings: "cv05", "cv11";
+    background: var(--bg); color: var(--text-1);
+    -webkit-font-smoothing: antialiased;
+  }
+  svg { display: block; flex: none; }
+  a { color: inherit; text-decoration: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; letter-spacing: inherit; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 32px; }
+
+  /* ---------- staggered load reveal ---------- */
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  .rise { animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+  .d1 { animation-delay: 0.05s; } .d2 { animation-delay: 0.13s; } .d3 { animation-delay: 0.21s; }
+  .d4 { animation-delay: 0.29s; } .d5 { animation-delay: 0.42s; }
+
+  /* ================= NAV ================= */
+  .nav {
+    position: sticky; top: 0; z-index: 50;
+    backdrop-filter: blur(12px);
+    background: oklch(0.126 0.008 282 / 0.78);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-in { display: flex; align-items: center; gap: 28px; height: 56px; }
+  .logo { display: flex; align-items: center; gap: 9px; font-weight: 650; font-size: 15.5px; letter-spacing: -0.02em; }
+  .logo-tile {
+    width: 24px; height: 24px; border-radius: 7px;
+    background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305));
+    display: grid; place-items: center;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.18), 0 0 12px oklch(0.58 0.185 292 / 0.45);
+  }
+  .nav-links { display: flex; gap: 4px; margin-left: 8px; }
+  .nav-links a { padding: 6px 10px; border-radius: var(--radius-sm); font-size: 13.5px; color: var(--text-2); transition: color 0.12s, background 0.12s; }
+  .nav-links a:hover { color: var(--text-1); background: oklch(1 0 0 / 0.04); }
+  .nav-cta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+  .ghost { padding: 6px 11px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500; color: var(--text-2); transition: color 0.12s, background 0.12s; }
+  .ghost:hover { color: var(--text-1); background: oklch(1 0 0 / 0.04); }
+  .btn-primary {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 32px; padding: 0 14px;
+    border-radius: 8px;
+    background: linear-gradient(to bottom, oklch(0.72 0.165 286), oklch(0.63 0.18 293));
+    color: var(--primary-fg); font-size: 13.5px; font-weight: 550;
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 16px oklch(0.58 0.185 292 / 0.35);
+    transition: filter 0.12s, box-shadow 0.12s;
+  }
+  .btn-primary:hover { filter: brightness(1.08); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 24px oklch(0.58 0.185 292 / 0.5); }
+  .btn-primary.lg { height: 40px; padding: 0 20px; font-size: 14.5px; border-radius: 9px; }
+
+  /* ================= HERO ================= */
+  .hero { position: relative; padding: 96px 0 0; text-align: center; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: -40% -20% auto; height: 720px;
+    background:
+      radial-gradient(46% 58% at 50% 42%, oklch(0.58 0.185 292 / 0.15), transparent 70%),
+      radial-gradient(30% 40% at 62% 30%, oklch(0.70 0.165 288 / 0.07), transparent 70%);
+    pointer-events: none;
+  }
+  .hero > .wrap { position: relative; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 12px 5px 7px; border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: oklch(1 0 0 / 0.03);
+    font-size: 12.5px; font-weight: 500; color: var(--text-2);
+  }
+  .eyebrow .pill {
+    padding: 1.5px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 650;
+    letter-spacing: 0.05em; text-transform: uppercase;
+    background: oklch(0.70 0.165 288 / 0.14); color: var(--primary);
+    box-shadow: inset 0 0 0 1px oklch(0.70 0.165 288 / 0.25);
+  }
+  h1 {
+    margin: 26px auto 0; max-width: 15ch;
+    font-size: clamp(44px, 7vw, 74px); line-height: 1.02;
+    font-weight: 650; letter-spacing: -0.045em;
+  }
+  h1 em {
+    font-style: normal;
+    background: linear-gradient(100deg, oklch(0.80 0.13 288), oklch(0.66 0.19 292));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub {
+    margin: 22px auto 0; max-width: 54ch;
+    font-size: 17px; line-height: 1.6; color: var(--text-2); letter-spacing: -0.008em;
+  }
+  .hero-cta { display: flex; justify-content: center; align-items: center; gap: 14px; margin-top: 34px; }
+  .link-arrow { font-size: 14.5px; font-weight: 500; color: var(--text-2); transition: color 0.12s; }
+  .link-arrow:hover { color: var(--text-1); }
+  .link-arrow span { color: var(--primary); }
+  .trust { display: flex; justify-content: center; gap: 26px; margin-top: 30px; font-size: 12.5px; color: var(--text-3); }
+  .trust i { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--green); margin-right: 7px; vertical-align: 1.5px; box-shadow: 0 0 6px oklch(0.72 0.14 160 / 0.6); }
+
+  /* ================= APP SHOT ================= */
+  .shot-stage { position: relative; margin-top: 72px; padding-bottom: 110px; }
+  .shot-stage::after {
+    content: ""; position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%);
+    width: 70%; height: 220px;
+    background: radial-gradient(50% 100% at 50% 100%, oklch(0.58 0.185 292 / 0.14), transparent 70%);
+    pointer-events: none;
+  }
+  .window {
+    position: relative; z-index: 1;
+    max-width: 980px; margin: 0 auto;
+    border-radius: 14px;
+    background: var(--bg-deep);
+    box-shadow:
+      0 0 0 1px oklch(1 0 0 / 0.09),
+      0 30px 80px oklch(0 0 0 / 0.55),
+      0 0 90px oklch(0.58 0.185 292 / 0.12);
+    overflow: hidden;
+    font-size: 12.5px;
+    text-align: left;
+  }
+  .win-body { display: flex; height: 460px; }
+  .w-side { width: 196px; flex: none; background: var(--sidebar); border-right: 1px solid var(--border); position: relative; padding: 12px 8px; }
+  .w-side::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 150px;
+    background: radial-gradient(120% 100% at 30% 0%, oklch(0.58 0.185 292 / 0.14), transparent 65%);
+    pointer-events: none;
+  }
+  .w-traffic { display: flex; gap: 7px; padding: 2px 8px 12px; position: relative; }
+  .w-traffic i { width: 11px; height: 11px; border-radius: 50%; background: oklch(1 0 0 / 0.13); }
+  .w-acct { display: flex; align-items: center; gap: 8px; padding: 5px 8px; position: relative; }
+  .w-avatar {
+    width: 19px; height: 19px; border-radius: 5px;
+    background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305));
+    display: grid; place-items: center; color: var(--primary-fg);
+    font-size: 8.5px; font-weight: 650;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.18), 0 0 10px oklch(0.58 0.185 292 / 0.45);
+  }
+  .w-acct b { font-size: 12px; font-weight: 550; }
+  .w-nav { position: relative; margin-top: 6px; display: flex; flex-direction: column; gap: 1px; }
+  .w-item {
+    display: flex; align-items: center; gap: 8px; height: 27px; padding: 0 8px;
+    border-radius: 6px; color: var(--text-2); font-size: 12px; position: relative;
+  }
+  .w-item svg { color: var(--text-3); }
+  .w-item .n { margin-left: auto; font-size: 10.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .w-item.on {
+    background: oklch(0.70 0.165 288 / 0.11); color: var(--text-1); font-weight: 500;
+    box-shadow: inset 0 0 0 1px oklch(0.70 0.165 288 / 0.14);
+  }
+  .w-item.on::before {
+    content: ""; position: absolute; left: -8px; top: 6px; bottom: 6px; width: 2px; border-radius: 2px;
+    background: var(--primary); box-shadow: 0 0 8px oklch(0.70 0.165 288 / 0.8);
+  }
+  .w-item.on svg { color: var(--primary); }
+  .w-label { padding: 14px 8px 4px; font-size: 10px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); position: relative; }
+  .w-vault { width: 15px; height: 15px; border-radius: 4px; display: grid; place-items: center; font-size: 7.5px; font-weight: 650; color: #fff; box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.12); }
+
+  .w-main { flex: 1; min-width: 0; padding: 20px 24px; overflow: hidden; position: relative; }
+  .w-main::before {
+    content: ""; position: absolute; top: -60px; left: 20%; width: 380px; height: 200px;
+    background: radial-gradient(50% 60% at 50% 40%, oklch(0.58 0.185 292 / 0.09), transparent 70%);
+    pointer-events: none;
+  }
+  .w-head { display: flex; align-items: baseline; gap: 10px; position: relative; }
+  .w-head h3 { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; }
+  .w-head span { font-size: 11.5px; color: var(--text-3); }
+  .w-grid { display: grid; grid-template-columns: 230px 1fr; gap: 14px; margin-top: 16px; }
+  .w-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+  .score-card { display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .ring { position: relative; width: 128px; height: 128px; margin: 6px 0 10px; }
+  .ring svg { width: 128px; height: 128px; transform: rotate(-90deg); }
+  .ring .track { stroke: oklch(1 0 0 / 0.07); }
+  .ring .arc { stroke: url(#ringGrad); stroke-linecap: round; filter: drop-shadow(0 0 6px oklch(0.70 0.165 288 / 0.55)); }
+  .ring .val { position: absolute; inset: 0; display: grid; place-items: center; }
+  .ring .val b { font-size: 30px; font-weight: 650; letter-spacing: -0.03em; line-height: 1; }
+  .ring .val i { font-style: normal; font-size: 9.5px; color: var(--text-3); margin-top: 3px; }
+  .tier {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 999px;
+    font-size: 10px; font-weight: 700; letter-spacing: 0.08em;
+    background: oklch(0.72 0.14 160 / 0.12); color: var(--green);
+    box-shadow: inset 0 0 0 1px oklch(0.72 0.14 160 / 0.3);
+  }
+  .score-note { margin-top: 9px; font-size: 11px; color: var(--text-3); line-height: 1.5; }
+  .brief-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .brief-head b { font-size: 12.5px; font-weight: 600; }
+  .brief-head span { margin-left: auto; font-size: 10.5px; color: var(--text-3); }
+  .b-row { display: flex; align-items: center; gap: 10px; padding: 8.5px 6px; border-radius: 6px; }
+  .b-row + .b-row { border-top: 1px solid var(--border); }
+  .b-row:hover { background: oklch(1 0 0 / 0.03); }
+  .sev { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .sev.hi { background: var(--red); box-shadow: 0 0 7px oklch(0.68 0.18 22 / 0.55); }
+  .sev.md { background: var(--amber); box-shadow: 0 0 7px oklch(0.78 0.13 75 / 0.45); }
+  .sev.lo { background: oklch(0.72 0.12 230); }
+  .b-row .t { flex: 1; min-width: 0; }
+  .b-row .t b { display: block; font-size: 12px; font-weight: 550; }
+  .b-row .t span { font-size: 10.5px; color: var(--text-3); }
+  .b-chip { font-size: 10px; color: var(--text-3); border: 1px solid var(--border); border-radius: 4px; padding: 1.5px 6px; background: oklch(1 0 0 / 0.03); }
+  .w-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 14px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 11px 13px; }
+  .stat b { display: block; font-size: 19px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 10.5px; color: var(--text-3); }
+  .stat .up { color: var(--green); font-size: 10.5px; margin-left: 5px; }
+
+  /* ================= SECTIONS ================= */
+  section { padding: 96px 0; }
+  .sec-head { max-width: 560px; margin-bottom: 48px; }
+  .sec-head .kicker {
+    font-size: 12px; font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--primary); margin-bottom: 12px;
+  }
+  .sec-head h2 { font-size: clamp(30px, 4vw, 42px); font-weight: 650; letter-spacing: -0.035em; line-height: 1.1; }
+  .sec-head p { margin-top: 14px; font-size: 16px; color: var(--text-2); }
+
+  /* ---- bento ---- */
+  .bento { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+  .tile {
+    position: relative; overflow: hidden;
+    background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+    padding: 22px; min-height: 230px;
+    display: flex; flex-direction: column;
+    transition: border-color 0.15s ease;
+  }
+  .tile:hover { border-color: var(--border-strong); }
+  .tile h3 { font-size: 16.5px; font-weight: 600; letter-spacing: -0.02em; }
+  .tile > p { margin-top: 7px; font-size: 13.5px; color: var(--text-2); line-height: 1.55; max-width: 42ch; }
+  .t-3 { grid-column: span 3; } .t-2 { grid-column: span 2; } .t-4 { grid-column: span 4; }
+  .tile .art { margin-top: auto; padding-top: 18px; }
+
+  /* travel toggle art */
+  .travel-art { display: flex; align-items: center; gap: 14px; }
+  .toggle { width: 40px; height: 22px; border-radius: 999px; background: linear-gradient(to bottom, oklch(0.72 0.165 286), oklch(0.63 0.18 293)); position: relative; box-shadow: 0 0 14px oklch(0.58 0.185 292 / 0.4); flex: none; }
+  .toggle::after { content: ""; position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px oklch(0 0 0 / 0.4); }
+  .vault-rows { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .v-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); border: 1px solid var(--border); background: oklch(1 0 0 / 0.02); border-radius: 7px; padding: 6px 9px; }
+  .v-row .w-vault { width: 16px; height: 16px; }
+  .v-row.hidden-v { opacity: 0.45; }
+  .v-row.hidden-v .name { text-decoration: line-through; text-decoration-color: oklch(1 0 0 / 0.4); }
+  .v-row .st { margin-left: auto; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 600; color: var(--text-3); }
+  .v-row .st.on { color: var(--green); }
+
+  /* autofill art */
+  .fill-art { border: 1px solid var(--border); border-radius: 9px; background: var(--bg-deep); padding: 13px; }
+  .f-label { font-size: 10px; color: var(--text-3); margin-bottom: 4px; letter-spacing: 0.03em; }
+  .f-input { display: flex; align-items: center; gap: 8px; border: 1px solid oklch(0.70 0.165 288 / 0.5); background: oklch(1 0 0 / 0.03); border-radius: 6px; padding: 7px 9px; font-size: 12.5px; box-shadow: 0 0 0 3px oklch(0.70 0.165 288 / 0.13); }
+  .f-input .dots { letter-spacing: 2.5px; color: var(--text-1); }
+  .f-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 10px; font-weight: 600; color: var(--primary); }
+  .f-hint { margin-top: 9px; font-size: 10.5px; color: var(--text-3); }
+
+  /* passkey art */
+  .pk-art { display: flex; align-items: center; gap: 12px; }
+  .pk-key {
+    width: 44px; height: 44px; border-radius: 12px; flex: none;
+    background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305));
+    display: grid; place-items: center;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.16), 0 0 18px oklch(0.58 0.185 292 / 0.4);
+  }
+  .pk-lines { flex: 1; }
+  .pk-lines b { display: block; font-size: 12.5px; font-weight: 550; }
+  .pk-lines span { font-size: 11px; color: var(--text-3); }
+  .pk-ok { color: var(--green); font-size: 11px; font-weight: 600; }
+
+  /* share art */
+  .share-chip { display: flex; align-items: center; gap: 9px; border: 1px solid var(--border); background: var(--bg-deep); border-radius: 9px; padding: 10px 12px; font-size: 12px; }
+  .share-chip .url { color: var(--text-2); font-family: ui-monospace, "SF Mono", monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .share-chip .exp { margin-left: auto; flex: none; font-size: 10px; font-weight: 600; color: var(--amber); }
+
+  /* platforms art */
+  .plat-art { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .plat {
+    display: inline-flex; align-items: center; gap: 7px;
+    border: 1px solid var(--border); background: oklch(1 0 0 / 0.02);
+    border-radius: 8px; padding: 7px 12px; font-size: 12.5px; font-weight: 500; color: var(--text-2);
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .plat:hover { border-color: var(--border-strong); color: var(--text-1); }
+
+  /* ---- receipts ---- */
+  .receipts { border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: linear-gradient(to bottom, oklch(1 0 0 / 0.015), transparent); }
+  .r-grid { display: grid; grid-template-columns: repeat(4, 1fr); }
+  .r-cell { padding: 34px 26px; position: relative; }
+  .r-cell + .r-cell { border-left: 1px solid var(--border); }
+  .r-cell .mono {
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+    font-size: 12px; color: var(--primary); letter-spacing: 0;
+    margin-bottom: 10px; display: block;
+  }
+  .r-cell b { display: block; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; }
+  .r-cell p { margin-top: 6px; font-size: 12.5px; color: var(--text-3); line-height: 1.55; }
+  .r-foot { display: flex; align-items: center; gap: 8px; padding: 20px 26px; border-top: 1px solid var(--border); font-size: 13px; color: var(--text-2); }
+
+  /* ---- pricing ---- */
+  .plans { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: stretch; }
+  .plan { position: relative; background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px 22px; display: flex; flex-direction: column; }
+  .plan.hot {
+    border-color: oklch(0.70 0.165 288 / 0.4);
+    box-shadow: 0 0 0 1px oklch(0.70 0.165 288 / 0.2), 0 0 40px oklch(0.58 0.185 292 / 0.14);
+  }
+  .plan.hot::before {
+    content: ""; position: absolute; top: 0; left: 10%; right: 10%; height: 1px;
+    background: linear-gradient(to right, transparent, oklch(0.72 0.17 288 / 0.6), transparent);
+  }
+  .plan .p-name { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+  .plan.hot .p-name { color: var(--primary); }
+  .plan .p-price { margin-top: 10px; font-size: 30px; font-weight: 650; letter-spacing: -0.03em; }
+  .plan .p-price span { font-size: 12.5px; font-weight: 450; color: var(--text-3); letter-spacing: 0; }
+  .plan .p-for { margin-top: 3px; font-size: 12px; color: var(--text-3); }
+  .plan ul { list-style: none; margin: 18px 0 22px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .plan li { display: flex; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+  .plan li svg { margin-top: 2.5px; color: var(--green); }
+  .plan .btn-primary { justify-content: center; width: 100%; }
+  .btn-outline {
+    display: inline-flex; align-items: center; justify-content: center; width: 100%;
+    height: 32px; border-radius: 8px; border: 1px solid var(--border-strong);
+    font-size: 13px; font-weight: 550; color: var(--text-1);
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .btn-outline:hover { background: oklch(1 0 0 / 0.04); border-color: oklch(1 0 0 / 0.18); }
+  .self-host-note { margin-top: 22px; text-align: center; font-size: 13px; color: var(--text-3); }
+  .self-host-note a { color: var(--text-2); border-bottom: 1px solid var(--border-strong); }
+  .self-host-note a:hover { color: var(--text-1); }
+
+  /* ---- final cta ---- */
+  .final { position: relative; text-align: center; padding: 120px 0 130px; overflow: hidden; }
+  .final::before {
+    content: ""; position: absolute; inset: auto -20% -60%; height: 560px;
+    background: radial-gradient(46% 58% at 50% 50%, oklch(0.58 0.185 292 / 0.16), transparent 70%);
+    pointer-events: none;
+  }
+  .final h2 { font-size: clamp(32px, 4.6vw, 48px); font-weight: 650; letter-spacing: -0.04em; position: relative; }
+  .final p { margin: 16px auto 0; max-width: 44ch; color: var(--text-2); font-size: 16px; position: relative; }
+  .final .hero-cta { position: relative; }
+
+  /* ---- footer ---- */
+  footer { border-top: 1px solid var(--border); padding: 40px 0 90px; }
+  .foot { display: flex; align-items: flex-start; gap: 60px; }
+  .foot .cols { margin-left: auto; display: flex; gap: 60px; }
+  .foot h4 { font-size: 11px; font-weight: 650; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-3); margin-bottom: 12px; }
+  .foot ul { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  .foot li a { font-size: 13px; color: var(--text-2); }
+  .foot li a:hover { color: var(--text-1); }
+  .foot .fine { margin-top: 14px; font-size: 12px; color: var(--text-3); max-width: 30ch; line-height: 1.6; }
+
+  /* ================= PROTOTYPE SWITCHER (not part of the design) ================= */
+  .proto-bar {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 100;
+    display: flex; align-items: center; gap: 2px;
+    background: oklch(0.09 0.005 282 / 0.92); backdrop-filter: blur(8px);
+    border: 1px solid oklch(1 0 0 / 0.16); border-radius: 999px;
+    padding: 4px; box-shadow: 0 8px 24px oklch(0 0 0 / 0.6);
+    font-size: 12px; font-weight: 550;
+  }
+  .proto-bar a { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 999px; color: oklch(0.7 0 0); }
+  .proto-bar a:hover { background: oklch(1 0 0 / 0.09); color: #fff; }
+  .proto-bar .lbl { padding: 0 12px; color: #fff; white-space: nowrap; }
+  .proto-bar .lbl small { color: oklch(0.6 0 0); font-weight: 450; margin-left: 6px; }
+
+  @media (max-width: 900px) {
+    .bento, .plans, .r-grid, .w-stats { grid-template-columns: 1fr 1fr; }
+    .t-2, .t-3, .t-4 { grid-column: span 2; }
+    .r-cell + .r-cell { border-left: 0; border-top: 1px solid var(--border); }
+    .nav-links { display: none; }
+    .win-body { height: auto; } .w-side { display: none; }
+    .foot { flex-direction: column; gap: 30px; } .foot .cols { margin-left: 0; flex-wrap: wrap; gap: 40px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- =================== NAV =================== -->
+<div class="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#">
+      <span class="logo-tile">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </span>
+      Bittery
+    </a>
+    <nav class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#security">Security</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#">Docs</a>
+    </nav>
+    <div class="nav-cta">
+      <a class="ghost" href="#">Sign in</a>
+      <a class="btn-primary" href="#">Get Bittery free</a>
+    </div>
+  </div>
+</div>
+
+<!-- =================== HERO =================== -->
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow rise d1"><span class="pill">New</span> Travel Mode — hide vaults at border crossings</div>
+    <h1 class="rise d2">The password manager, <em>redesigned</em>.</h1>
+    <p class="sub rise d3">Bittery is end-to-end encrypted, built on a Rust crypto core, and designed like it matters — because the software holding everything you log in to should be software you love to open.</p>
+    <div class="hero-cta rise d4">
+      <a class="btn-primary lg" href="#pricing">Get Bittery free</a>
+      <a class="link-arrow" href="#security">See how it's built <span>→</span></a>
+    </div>
+    <div class="trust rise d4">
+      <span><i></i>Zero-knowledge encryption</span>
+      <span><i></i>Source-available</span>
+      <span><i></i>Self-hostable</span>
+    </div>
+  </div>
+
+  <!-- app screenshot, recreated -->
+  <div class="shot-stage">
+    <div class="window rise d5" aria-label="Bittery app showing the Sentinel security dashboard">
+      <div class="win-body">
+        <div class="w-side">
+          <div class="w-traffic"><i></i><i></i><i></i></div>
+          <div class="w-acct"><span class="w-avatar">JD</span><b>Jordan Diaz</b></div>
+          <nav class="w-nav">
+            <span class="w-item"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>All items <span class="n">128</span></span>
+            <span class="w-item"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15 8.5 22 9.3 17 14 18.5 21 12 17.5 5.5 21 7 14 2 9.3 9 8.5"/></svg>Favorites <span class="n">12</span></span>
+            <span class="w-item on"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>Sentinel</span>
+            <span class="w-item"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/></svg>Travel Mode</span>
+            <div class="w-label">Vaults</div>
+            <span class="w-item"><span class="w-vault" style="background:linear-gradient(135deg,oklch(0.65 0.15 250),oklch(0.5 0.16 265))">P</span>Personal <span class="n">86</span></span>
+            <span class="w-item"><span class="w-vault" style="background:linear-gradient(135deg,oklch(0.68 0.14 160),oklch(0.52 0.14 175))">F</span>Family <span class="n">31</span></span>
+            <span class="w-item"><span class="w-vault" style="background:linear-gradient(135deg,oklch(0.72 0.13 75),oklch(0.58 0.14 55))">W</span>Work <span class="n">11</span></span>
+          </nav>
+        </div>
+        <div class="w-main">
+          <div class="w-head"><h3>Sentinel</h3><span>Security posture, live and prioritized</span></div>
+          <div class="w-grid">
+            <div class="w-card score-card">
+              <div class="ring">
+                <svg viewBox="0 0 128 128" fill="none">
+                  <defs>
+                    <linearGradient id="ringGrad" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stop-color="oklch(0.75 0.15 285)"/>
+                      <stop offset="100%" stop-color="oklch(0.6 0.185 293)"/>
+                    </linearGradient>
+                  </defs>
+                  <circle class="track" cx="64" cy="64" r="56" stroke-width="9"/>
+                  <circle class="arc" cx="64" cy="64" r="56" stroke-width="9" stroke-dasharray="323.6" stroke-dashoffset="29.1"/>
+                </svg>
+                <div class="val"><b>91</b><i>SECURITY SCORE</i></div>
+              </div>
+              <span class="tier">FORTIFIED</span>
+              <p class="score-note">Up 14 points since last month. 2 recommendations remaining.</p>
+            </div>
+            <div class="w-card">
+              <div class="brief-head"><b>Sentinel briefing</b><span>Generated just now</span></div>
+              <div class="b-row"><span class="sev hi"></span><div class="t"><b>2 reused passwords</b><span>github.com and figma.com share a password</span></div><span class="b-chip">Fix</span></div>
+              <div class="b-row"><span class="sev md"></span><div class="t"><b>1 weak password</b><span>Crackable in under a day · streaming-box.local</span></div><span class="b-chip">Fix</span></div>
+              <div class="b-row"><span class="sev lo"></span><div class="t"><b>3 aging passwords</b><span>Unchanged for over a year</span></div><span class="b-chip">Review</span></div>
+              <div class="b-row"><span class="sev lo"></span><div class="t"><b>Passkey available</b><span>Replace your password on 4 sites that support passkeys</span></div><span class="b-chip">Upgrade</span></div>
+            </div>
+          </div>
+          <div class="w-stats">
+            <div class="stat"><b>118 <span class="up">▲</span></b><span>Healthy logins</span></div>
+            <div class="stat"><b>2</b><span>Reused</span></div>
+            <div class="stat"><b>1</b><span>Weak</span></div>
+            <div class="stat"><b>14</b><span>Passkeys active</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- =================== BENTO =================== -->
+<section id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Features</div>
+      <h2>Sweating the pixels.<br/>Sweating the crypto.</h2>
+      <p>Every detail is deliberate — from the hairline borders to the 96-bit IVs. The same care you can see went into everything you can't.</p>
+    </div>
+    <div class="bento">
+
+      <div class="tile t-4">
+        <h3>Sentinel — your whole security posture, live</h3>
+        <p>A prioritized briefing, not a wall of warnings. Sentinel scores every vault, flags weak, reused and aging passwords, and tells you exactly what to fix first.</p>
+        <div class="art">
+          <div class="b-row" style="border:1px solid var(--border); border-radius:9px; background:var(--bg-deep); margin-bottom:7px;"><span class="sev hi"></span><div class="t"><b>2 reused passwords</b><span>High priority · jumps straight to the items</span></div><span class="b-chip">Fix</span></div>
+          <div class="b-row" style="border:1px solid var(--border); border-radius:9px; background:var(--bg-deep);"><span class="sev md"></span><div class="t"><b>1 weak password</b><span>Crack-time estimate: under a day</span></div><span class="b-chip">Fix</span></div>
+        </div>
+      </div>
+
+      <div class="tile t-2">
+        <h3>Travel Mode</h3>
+        <p>Cross a border. Leave nothing to find. Marked vaults vanish from every device until you're through.</p>
+        <div class="art travel-art">
+          <span class="toggle" aria-hidden="true"></span>
+          <div class="vault-rows">
+            <div class="v-row"><span class="w-vault" style="background:linear-gradient(135deg,oklch(0.65 0.15 250),oklch(0.5 0.16 265))">P</span><span class="name">Personal</span><span class="st on">Safe</span></div>
+            <div class="v-row hidden-v"><span class="w-vault" style="background:linear-gradient(135deg,oklch(0.72 0.13 75),oklch(0.58 0.14 55))">W</span><span class="name">Work</span><span class="st">Hidden</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tile t-2">
+        <h3>Autofill that can't be phished at</h3>
+        <p>Isolated in its own Shadow DOM and iframe, matched by exact hostname. Fills, never leaks.</p>
+        <div class="art fill-art">
+          <div class="f-label">Password</div>
+          <div class="f-input"><span class="dots">••••••••••••</span><span class="f-badge"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Filled by Bittery</span></div>
+          <div class="f-hint">github.com · matched exactly</div>
+        </div>
+      </div>
+
+      <div class="tile t-2">
+        <h3>Passkeys, ready</h3>
+        <p>Passwords, passkeys, and everything after — one vault for the whole messy decade in between.</p>
+        <div class="art pk-art">
+          <span class="pk-key"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6"/><path d="m15.5 7.5 3 3L22 7l-3-3"/></svg></span>
+          <div class="pk-lines"><b>figma.com</b><span>Passkey · synced to 4 devices</span></div>
+          <span class="pk-ok">Active</span>
+        </div>
+      </div>
+
+      <div class="tile t-2">
+        <h3>Share a secret, not a screenshot</h3>
+        <p>Expiring links, one-time views, verified recipients — with an access log you can revoke from.</p>
+        <div class="art">
+          <div class="share-chip">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--text-3)"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+            <span class="url">bittery.com/s/x7Kf…q2</span>
+            <span class="exp">Expires in 59:41</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tile t-4">
+        <h3>Everywhere you are — even offline</h3>
+        <p>One encrypted vault on web, desktop and mobile, with autofill in your browser. Everything works offline and syncs when you're back.</p>
+        <div class="art plat-art">
+          <span class="plat">Web</span>
+          <span class="plat">macOS</span>
+          <span class="plat">Windows</span>
+          <span class="plat">iOS</span>
+          <span class="plat">Android</span>
+          <span class="plat">Chrome extension</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- =================== RECEIPTS =================== -->
+<section id="security" style="padding: 0;">
+  <div class="wrap" style="padding-top: 96px; padding-bottom: 40px;">
+    <div class="sec-head" style="margin-bottom: 0;">
+      <div class="kicker">How it's built</div>
+      <h2>We can't read your vault.<br/>Not won't — can't.</h2>
+      <p>Everything is encrypted on your device before it touches the network. Here are the receipts.</p>
+    </div>
+  </div>
+  <div class="receipts">
+    <div class="wrap" style="padding: 0;">
+      <div class="r-grid">
+        <div class="r-cell">
+          <span class="mono">AES-256-GCM</span>
+          <b>Encrypted on-device</b>
+          <p>Every item is sealed before it leaves your machine, with ciphertext bound to its vault so it can't be swapped or replayed.</p>
+        </div>
+        <div class="r-cell">
+          <span class="mono">PBKDF2 · 310,000 → HKDF</span>
+          <b>Two keys, not one</b>
+          <p>Your master password plus a device-held Secret Key derive your keys. Guessing one gets an attacker nothing.</p>
+        </div>
+        <div class="r-cell">
+          <span class="mono">SRP-6a</span>
+          <b>Password never transmitted</b>
+          <p>Login uses a zero-knowledge proof. Your password never crosses the wire — not even hashed.</p>
+        </div>
+        <div class="r-cell">
+          <span class="mono">Rust → WASM &amp; native</span>
+          <b>One audited crypto core</b>
+          <p>All cryptography lives in a single memory-safe Rust core, compiled for every platform. No JavaScript crypto.</p>
+        </div>
+      </div>
+      <div class="r-foot">
+        The full source is available to read, and so is the threat model.
+        <a class="link-arrow" href="#" style="margin-left:auto;">Read the security model <span>→</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- =================== PRICING =================== -->
+<section id="pricing">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Pricing</div>
+      <h2>Start free. Stay cheap.</h2>
+      <p>Every plan gets the same encryption, the same apps, and the same care. Paid plans just carry more.</p>
+    </div>
+    <div class="plans">
+      <div class="plan">
+        <div class="p-name">Free</div>
+        <div class="p-price">$0</div>
+        <div class="p-for">For getting started</div>
+        <ul>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>1 vault, 50 logins</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>2 devices</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Autofill &amp; passkeys</li>
+        </ul>
+        <a class="btn-outline" href="#">Get started</a>
+      </div>
+      <div class="plan hot">
+        <div class="p-name">Personal</div>
+        <div class="p-price">$3 <span>/ month</span></div>
+        <div class="p-for">For power users</div>
+        <ul>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Unlimited vaults &amp; items</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>All item types + attachments</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Sentinel security dashboard</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Travel Mode &amp; share links</li>
+        </ul>
+        <a class="btn-primary" href="#">Get Personal</a>
+      </div>
+      <div class="plan">
+        <div class="p-name">Family</div>
+        <div class="p-price">$7 <span>/ month</span></div>
+        <div class="p-for">For up to 6 people</div>
+        <ul>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Everything in Personal</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>5 shared vaults</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Role-based access</li>
+        </ul>
+        <a class="btn-outline" href="#">Get Family</a>
+      </div>
+      <div class="plan">
+        <div class="p-name">Team</div>
+        <div class="p-price">$6 <span>/ user / mo</span></div>
+        <div class="p-for">For small businesses</div>
+        <ul>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Everything in Family</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Admin console &amp; audit log</li>
+          <li><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>Custom policies</li>
+        </ul>
+        <a class="btn-outline" href="#">Contact us</a>
+      </div>
+    </div>
+    <p class="self-host-note">Prefer your own hardware? <a href="#">Self-host with Docker</a> — free forever, no subscription required.</p>
+  </div>
+</section>
+
+<!-- =================== FINAL CTA =================== -->
+<section class="final">
+  <div class="wrap">
+    <h2>Your passwords, truly yours.</h2>
+    <p>Set up in two minutes. Import from 1Password, Bitwarden or LastPass. Leave anytime — your data exports with you.</p>
+    <div class="hero-cta">
+      <a class="btn-primary lg" href="#">Get Bittery free</a>
+      <a class="link-arrow" href="#">Import from your current manager <span>→</span></a>
+    </div>
+  </div>
+</section>
+
+<!-- =================== FOOTER =================== -->
+<footer>
+  <div class="wrap foot">
+    <div>
+      <a class="logo" href="#">
+        <span class="logo-tile">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        </span>
+        Bittery
+      </a>
+      <p class="fine">Zero-knowledge password manager. Encrypted on your device, everywhere you are.</p>
+    </div>
+    <div class="cols">
+      <div>
+        <h4>Product</h4>
+        <ul><li><a href="#">Download</a></li><li><a href="#">Pricing</a></li><li><a href="#">Changelog</a></li><li><a href="#">Roadmap</a></li></ul>
+      </div>
+      <div>
+        <h4>Trust</h4>
+        <ul><li><a href="#">Security model</a></li><li><a href="#">Source code</a></li><li><a href="#">Self-hosting</a></li><li><a href="#">Status</a></li></ul>
+      </div>
+      <div>
+        <h4>Company</h4>
+        <ul><li><a href="#">About</a></li><li><a href="#">Docs</a></li><li><a href="#">Privacy</a></li><li><a href="#">Terms</a></li></ul>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- prototype switcher — not part of the design -->
+<nav class="proto-bar" aria-label="Prototype variant switcher">
+  <a href="marketing-3-engineering.html" aria-label="Previous variant">‹</a>
+  <span class="lbl">1 / 3 · Craft <small>PROTOTYPE</small></span>
+  <a href="marketing-2-privacy.html" aria-label="Next variant">›</a>
+</nav>
+<script>
+  document.addEventListener('keydown', (e) => {
+    if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) || document.activeElement.isContentEditable) return;
+    if (e.key === 'ArrowLeft') location.href = 'marketing-3-engineering.html';
+    if (e.key === 'ArrowRight') location.href = 'marketing-2-privacy.html';
+  });
+</script>
+
+</body>
+</html>

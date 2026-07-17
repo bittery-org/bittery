@@ -100,33 +100,41 @@ function getInitials(name: string): string {
 	return name.slice(0, 2).toUpperCase();
 }
 
-function getAvatarColor(name: string): string {
-	const colors = [
-		"bg-red-500",
-		"bg-orange-500",
-		"bg-amber-500",
-		"bg-yellow-500",
-		"bg-lime-500",
-		"bg-green-500",
-		"bg-emerald-500",
-		"bg-teal-500",
-		"bg-cyan-500",
-		"bg-sky-500",
-		"bg-blue-500",
-		"bg-indigo-500",
-		"bg-violet-500",
-		"bg-purple-500",
-		"bg-fuchsia-500",
-		"bg-pink-500",
-		"bg-rose-500",
-	];
+// Deterministic per-vault gradient stops (mid -> deep), 135deg. Keeps the
+// existing recognizable hue-per-name behavior while replacing the flat
+// solid-fill tiles with a subtle brand-forward gradient.
+const AVATAR_GRADIENT_STOPS: Array<[string, string]> = [
+	["#ef4444", "#b91c1c"], // red
+	["#f97316", "#c2410c"], // orange
+	["#f59e0b", "#b45309"], // amber
+	["#eab308", "#a16207"], // yellow
+	["#84cc16", "#4d7c0f"], // lime
+	["#22c55e", "#15803d"], // green
+	["#10b981", "#047857"], // emerald
+	["#14b8a6", "#0f766e"], // teal
+	["#06b6d4", "#0e7490"], // cyan
+	["#0ea5e9", "#0369a1"], // sky
+	["#3b82f6", "#1d4ed8"], // blue
+	["#6366f1", "#4338ca"], // indigo
+	["#8b5cf6", "#6d28d9"], // violet
+	["#a855f7", "#7e22ce"], // purple
+	["#d946ef", "#a21caf"], // fuchsia
+	["#ec4899", "#be185d"], // pink
+	["#f43f5e", "#be123c"], // rose
+];
 
+function getAvatarGradient(name: string): [string, string] {
 	let hash = 0;
 	for (let i = 0; i < name.length; i++) {
 		hash = name.charCodeAt(i) + ((hash << 5) - hash);
 	}
 
-	return colors[Math.abs(hash) % colors.length] ?? "bg-gray-500";
+	return (
+		AVATAR_GRADIENT_STOPS[Math.abs(hash) % AVATAR_GRADIENT_STOPS.length] ?? [
+			"#6b7280",
+			"#374151",
+		]
+	);
 }
 
 export function VaultAvatar({
@@ -154,20 +162,39 @@ export function VaultAvatar({
 		xl: 40,
 	};
 
+	const radiusClasses = {
+		xs: "rounded-[5px]",
+		sm: "rounded-md",
+		md: "rounded-lg",
+		lg: "rounded-lg",
+		xl: "rounded-xl",
+	};
+
 	const Icon = icon ? vaultIconMap[icon as VaultIconName] : undefined;
 	const showImage = Boolean(imageUrl && erroredImageUrl !== imageUrl);
 	const showIcon = Boolean(!showImage && Icon);
 	const initials = getInitials(name);
-	const avatarColor = getAvatarColor(name || "Vault");
+	const showGradient = !showImage;
+	const [gradientMid, gradientDeep] = getAvatarGradient(name || "Vault");
 
 	return (
 		<div
 			className={cn(
-				"flex shrink-0 items-center justify-center overflow-hidden rounded-md border",
+				"flex shrink-0 items-center justify-center overflow-hidden",
 				sizeClasses[size],
-				showImage || showIcon ? "bg-muted/40" : avatarColor,
+				radiusClasses[size],
+				showGradient
+					? "shadow-[inset_0_0_0_1px_oklch(1_0_0/0.12)]"
+					: "border bg-muted/40",
 				className,
 			)}
+			style={
+				showGradient
+					? {
+							background: `linear-gradient(135deg, ${gradientMid}, ${gradientDeep})`,
+						}
+					: undefined
+			}
 		>
 			{showImage ? (
 				<img
@@ -177,7 +204,7 @@ export function VaultAvatar({
 					onError={() => setErroredImageUrl(imageUrl ?? null)}
 				/>
 			) : showIcon && Icon ? (
-				<Icon className="text-muted-foreground" size={iconSizes[size]} />
+				<Icon className="text-white" size={iconSizes[size]} />
 			) : (
 				<span className="select-none font-semibold text-white">{initials}</span>
 			)}

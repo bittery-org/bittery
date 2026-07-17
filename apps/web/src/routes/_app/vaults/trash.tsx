@@ -6,6 +6,7 @@ import {
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import {
+	Badge,
 	Button,
 	Dialog,
 	DialogContent,
@@ -94,122 +95,127 @@ function VaultTrashPage() {
 	};
 
 	return (
-		<div className="flex flex-1 flex-col overflow-hidden">
+		<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 			{/* Header */}
-			<div className="flex items-center justify-between border-b bg-background px-8 py-4">
-				<div className="flex items-center gap-3">
-					<Archive className="size-5 text-muted-foreground" />
-					<div>
-						<h2 className="font-semibold text-lg">
-							{m.vaults_trash_hero_heading()}
-						</h2>
-						<p className="text-muted-foreground text-sm">
-							{m.vaults_trash_hero_description()}
-						</p>
-					</div>
-				</div>
+			<div className="flex h-11 shrink-0 items-center gap-2 border-b px-4 xl:h-12">
+				<Archive className="size-4 shrink-0 text-muted-foreground" />
+				<span className="truncate font-medium text-sm">
+					{m.vaults_trash_hero_heading()}
+				</span>
 				{!isLoading && sortedItems.length > 0 && (
-					<span className="text-muted-foreground text-sm">
-						{sortedItems.length === 1
-							? m.vaults_trash_list_count_single({ count: sortedItems.length })
-							: m.vaults_trash_list_count_plural({ count: sortedItems.length })}
-					</span>
+					<Badge variant="secondary" className="ml-auto shrink-0">
+						{sortedItems.length}
+					</Badge>
 				)}
 			</div>
 
 			{/* Content */}
-			<div className="flex-1 overflow-y-auto p-8">
+			<div className="flex-1 overflow-y-auto">
 				{isLoading ? (
-					<div className="mx-auto max-w-4xl space-y-2">
+					<div className="mx-auto w-full max-w-3xl space-y-2 px-6 py-8">
 						{[1, 2, 3].map((i) => (
-							<Skeleton key={i} className="h-20" />
+							<Skeleton key={i} className="h-14 rounded-lg" />
 						))}
 					</div>
 				) : sortedItems.length === 0 ? (
-					<div className="flex h-full flex-col items-center justify-center text-center">
-						<div className="mb-4 inline-flex rounded-full bg-muted p-6">
-							<Archive className="size-12 text-muted-foreground" />
+					<div className="flex h-full flex-col items-center justify-center p-8 text-center">
+						<div
+							aria-hidden
+							className="mb-4 flex size-12 items-center justify-center rounded-lg border bg-card"
+						>
+							<Archive className="size-5 text-muted-foreground" />
 						</div>
-						<h3 className="mb-2 font-semibold text-lg">
+						<h3 className="mb-1 font-semibold text-sm">
 							{m.vaults_trash_empty_title()}
 						</h3>
-						<p className="text-muted-foreground text-sm">
+						<p className="max-w-64 text-muted-foreground text-sm">
 							{m.vaults_trash_empty_description()}
 						</p>
 					</div>
 				) : (
-					<div className="mx-auto max-w-4xl space-y-2">
-						{sortedItems.map((item) => {
-							const maskedCardNumber = item.cardNumber
-								? maskCardNumber(item.cardNumber)
-								: undefined;
-							const title = item.title || m.vaults_trash_item_untitled();
-							const secondaryText =
-								item.username || item.email || maskedCardNumber || item.url;
+					<div className="mx-auto w-full max-w-3xl px-6 py-8">
+						<p className="mb-4 text-muted-foreground text-sm">
+							{m.vaults_trash_hero_description()}
+						</p>
+						<div className="divide-y overflow-hidden rounded-lg border bg-card">
+							{sortedItems.map((item) => {
+								const maskedCardNumber = item.cardNumber
+									? maskCardNumber(item.cardNumber)
+									: undefined;
+								const title = item.title || m.vaults_trash_item_untitled();
+								const secondaryText =
+									item.username || item.email || maskedCardNumber || item.url;
 
-							return (
-								<div
-									key={item.id}
-									className="flex items-center justify-between rounded-lg border bg-card p-4 transition-colors hover:bg-muted/30"
-								>
-									<div className="flex min-w-0 flex-1 items-center gap-4">
-										<Favicon item={item} title={title} size="md" />
+								return (
+									<div
+										key={item.id}
+										className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-foreground/4"
+									>
+										<Favicon item={item} title={title} size="sm" />
 										<div className="min-w-0 flex-1">
-											<div className="font-medium">{title}</div>
+											<div className="truncate font-medium text-sm">
+												{title}
+											</div>
 											{secondaryText && (
-												<div className="mt-0.5 truncate text-muted-foreground text-sm">
+												<div className="mt-0.5 truncate text-muted-foreground text-xs">
 													{secondaryText}
 												</div>
 											)}
-											<div className="mt-1 flex items-center gap-1.5 text-muted-foreground text-xs">
-												<VaultAvatar
-													name={item.vault.name}
-													icon={item.vault.icon}
-													imageUrl={item.vault.imageUrl}
-													size="xs"
-												/>
-												<span className="truncate">{item.vault.name}</span>
-												<span>·</span>
-												<span>
-													{m.vaults_trash_item_deleted_at({
-														date: formatDeletedDate(
-															item.deletedAt,
-															m.vaults_trash_item_deleted_recently(),
-														),
-													})}
-												</span>
-											</div>
+										</div>
+										<div className="flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs">
+											<VaultAvatar
+												name={item.vault.name}
+												icon={item.vault.icon}
+												imageUrl={item.vault.imageUrl}
+												size="xs"
+											/>
+											<span className="max-w-32 truncate">
+												{item.vault.name}
+											</span>
+											<span aria-hidden>·</span>
+											<span>
+												{m.vaults_trash_item_deleted_at({
+													date: formatDeletedDate(
+														item.deletedAt,
+														m.vaults_trash_item_deleted_recently(),
+													),
+												})}
+											</span>
+										</div>
+										<div className="ml-1 flex shrink-0 items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+											<Button
+												variant="ghost"
+												size="sm"
+												className="size-7 p-0"
+												onClick={() => handleRestore(item.id, item.vaultId)}
+												disabled={restoreItem.isPending}
+												title={m.vaults_trash_item_action_restore()}
+												aria-label={m.vaults_trash_item_action_restore()}
+											>
+												<Restore className="size-4" />
+											</Button>
+											<Button
+												variant="ghost"
+												size="sm"
+												className="size-7 p-0 hover:text-destructive"
+												onClick={() =>
+													setItemToDelete({
+														id: item.id,
+														vaultId: item.vaultId,
+														title: item.title || m.vaults_trash_item_untitled(),
+													})
+												}
+												disabled={permanentDeleteItem.isPending}
+												title={m.vaults_trash_item_action_delete_forever()}
+												aria-label={m.vaults_trash_item_action_delete_forever()}
+											>
+												<Trash className="size-4" />
+											</Button>
 										</div>
 									</div>
-									<div className="ml-4 flex shrink-0 items-center gap-2">
-										<Button
-											variant="outline"
-											size="sm"
-											onClick={() => handleRestore(item.id, item.vaultId)}
-											disabled={restoreItem.isPending}
-										>
-											<Restore className="size-4" />
-											{m.vaults_trash_item_action_restore()}
-										</Button>
-										<Button
-											variant="destructive"
-											size="sm"
-											onClick={() =>
-												setItemToDelete({
-													id: item.id,
-													vaultId: item.vaultId,
-													title: item.title || m.vaults_trash_item_untitled(),
-												})
-											}
-											disabled={permanentDeleteItem.isPending}
-										>
-											<Trash className="size-4" />
-											{m.vaults_trash_item_action_delete_forever()}
-										</Button>
-									</div>
-								</div>
-							);
-						})}
+								);
+							})}
+						</div>
 					</div>
 				)}
 			</div>

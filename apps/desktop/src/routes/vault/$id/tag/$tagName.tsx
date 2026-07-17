@@ -25,7 +25,6 @@ function TagRouteComponent() {
 	const tagColor = getTagColorFromName(decodedTagName);
 
 	// Fetch and decrypt items for the selected vault
-	// useVaultItems automatically handles single-account vs all-accounts mode
 	const { items: decryptedItems, isLoading } = useVaultItems(vaultId || "");
 
 	// Filter items by tag

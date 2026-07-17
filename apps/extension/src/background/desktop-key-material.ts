@@ -1,8 +1,14 @@
+/**
+ * Hydrate extension local account material from desktop while desktop mode is active.
+ * Storage and desktop IPC are both scoped by accountId.
+ */
+
 import type { VaultKeyData } from "../lib/storage";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
-import { desktopSync } from "./desktop-sync";
+import { isDesktopUnlockedNow } from "./desktop-status";
 import { handleNativeBiometricUnlockAll } from "./native-messaging";
+import { resolveAccountIdFromEmail } from "./services/account-resolution";
 
 function isNonEmptyVaultKeys(value: unknown): value is VaultKeyData[] {
 	return (
@@ -18,21 +24,11 @@ function isNonEmptyVaultKeys(value: unknown): value is VaultKeyData[] {
 	);
 }
 
-async function isDesktopUnlockedNow(): Promise<boolean> {
-	const status =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-	return !!(
-		status?.available &&
-		!status.locked &&
-		(status.unlockedAccounts?.length ?? 0) > 0
-	);
-}
-
-async function hasLocalWriteCapability(email: string): Promise<boolean> {
+async function hasLocalWriteCapability(accountId: string): Promise<boolean> {
 	const [authToken, vaultKeys, muk] = await Promise.all([
-		storage.getAuthToken(email),
-		storage.getVaultKeys(email),
-		storage.getMasterUnlockKey(email),
+		storage.getAuthToken(accountId),
+		storage.getVaultKeys(accountId),
+		storage.getMasterUnlockKey(accountId),
 	]);
 
 	return !!(
@@ -54,30 +50,32 @@ export async function hydrateDesktopAccountMaterial(
 	email: string,
 ): Promise<void> {
 	const normalizedEmail = email.toLowerCase();
+	const accountId = await resolveAccountIdFromEmail(normalizedEmail);
+	if (!accountId) {
+		return;
+	}
 
 	if (!(await isDesktopUnlockedNow())) {
 		return;
 	}
 
-	// Keep local token in sync for account-scoped RPC clients.
-	const localToken = await storage.getAuthToken(normalizedEmail);
+	const localToken = await storage.getAuthToken(accountId);
 	if (!localToken) {
-		const desktopToken = await desktopClient.getAuthToken(normalizedEmail);
+		const desktopToken = await desktopClient.getAuthToken(accountId);
 		if (desktopToken) {
-			await storage.storeAuthToken(desktopToken, normalizedEmail);
+			await storage.storeAuthToken(desktopToken, accountId);
 		}
 	}
 
-	// Hydrate vault keys from desktop if missing locally.
-	const localVaultKeys = await storage.getVaultKeys(normalizedEmail);
+	const localVaultKeys = await storage.getVaultKeys(accountId);
 	if (!localVaultKeys || localVaultKeys.length === 0) {
-		const vaultKeysResponse = await desktopClient.getVaultKeys(normalizedEmail);
+		const vaultKeysResponse = await desktopClient.getVaultKeys(accountId);
 		const rawVaultKeys = vaultKeysResponse?.vaultKeys;
 		if (rawVaultKeys) {
 			try {
 				const parsed = JSON.parse(rawVaultKeys);
 				if (isNonEmptyVaultKeys(parsed)) {
-					await storage.storeVaultKeys(parsed, normalizedEmail);
+					await storage.storeVaultKeys(parsed, accountId);
 				}
 			} catch (error) {
 				console.warn(
@@ -88,9 +86,8 @@ export async function hydrateDesktopAccountMaterial(
 		}
 	}
 
-	// Best-effort MUK restore for account-scoped encryption/decryption operations.
 	try {
-		await storage.tryRestoreSession?.(false, normalizedEmail);
+		await storage.tryRestoreSession?.(false, accountId);
 	} catch (error) {
 		console.warn(
 			`[desktop-key-material] Session restore failed for ${normalizedEmail}:`,
@@ -110,10 +107,15 @@ export async function ensureDesktopWriteCapability(
 	},
 ): Promise<boolean> {
 	const normalizedEmail = email.toLowerCase();
+	const accountId = await resolveAccountIdFromEmail(normalizedEmail);
+	if (!accountId) {
+		return false;
+	}
+
 	const allowBiometricPrompt = options?.allowBiometricPrompt ?? true;
 
 	await hydrateDesktopAccountMaterial(normalizedEmail);
-	if (await hasLocalWriteCapability(normalizedEmail)) {
+	if (await hasLocalWriteCapability(accountId)) {
 		return true;
 	}
 
@@ -138,5 +140,5 @@ export async function ensureDesktopWriteCapability(
 	}
 
 	await hydrateDesktopAccountMaterial(normalizedEmail);
-	return hasLocalWriteCapability(normalizedEmail);
+	return hasLocalWriteCapability(accountId);
 }

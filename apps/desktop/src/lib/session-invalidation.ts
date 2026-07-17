@@ -13,29 +13,61 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
 }
 
 export async function invalidateDesktopAccountSession(
-	email: string,
+	accountId: string,
 ): Promise<void> {
-	const normalizedEmail = email.toLowerCase();
-
-	// Keep secret key/account metadata but clear session-bearing local state.
-	await storage.clearSession(normalizedEmail);
-	await storage.clearStoredSession(normalizedEmail);
-	await storage.storeAuthToken("", normalizedEmail);
-	await storage.storeVaultKeys([], normalizedEmail);
-	await storage.storeEncryptedPrivateKey("", normalizedEmail);
+	await storage.clearSession(accountId);
+	await storage.clearStoredSession(accountId);
+	await storage.storeAuthToken("", accountId);
+	await storage.storeVaultKeys([], accountId);
+	await storage.storeEncryptedPrivateKey("", accountId);
 }
 
-export async function findAccountEmailBySessionId(
+export async function findAccountIdBySessionId(
 	sessionId: string,
 ): Promise<string | null> {
 	const accounts = await storage.getAccountsList();
 
 	for (const account of accounts) {
-		const sessionData = await storage.getStoredSessionData(account.email);
+		const sessionData = await storage.getStoredSessionData(account.accountId);
 		if (sessionData?.sessionId === sessionId) {
-			return account.email.toLowerCase();
+			return account.accountId;
 		}
 	}
 
 	return null;
+}
+
+/** @deprecated Use findAccountIdBySessionId */
+export async function findAccountEmailBySessionId(
+	sessionId: string,
+): Promise<string | null> {
+	const accountId = await findAccountIdBySessionId(sessionId);
+	if (!accountId) {
+		return null;
+	}
+	const accounts = await storage.getAccountsList();
+	return (
+		accounts.find((account) => account.accountId === accountId)?.email ?? null
+	);
+}
+
+export async function handleDesktopUnauthorizedError(): Promise<{
+	prefillEmail?: string;
+	shouldRedirect: boolean;
+}> {
+	const activeAccount = await storage.getActiveAccount();
+
+	if (activeAccount?.type === "single") {
+		const accounts = await storage.getAccountsList();
+		const meta = accounts.find(
+			(account) => account.accountId === activeAccount.accountId,
+		);
+		await invalidateDesktopAccountSession(activeAccount.accountId);
+		return {
+			prefillEmail: meta?.email,
+			shouldRedirect: true,
+		};
+	}
+
+	return { shouldRedirect: false };
 }

@@ -1,36 +1,19 @@
 import type {
 	PasswordIssue,
-	SecurityRecommendation,
 	SecurityReport,
 } from "@bittery/shared/password-analysis";
 import {
 	strengthToLabel,
 	strengthToTextColor,
 } from "@bittery/shared/password-analysis";
-import {
-	Badge,
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-	cn,
-	ScrollArea,
-	Skeleton,
-	Tabs,
-	TabsContent,
-	TabsList,
-	TabsTrigger,
-} from "@bittery/ui";
+import { Badge, cn, Skeleton } from "@bittery/ui";
 import {
 	IconCircleWarningOutlineDuo18 as AlertCircle,
 	IconTriangleWarningOutlineDuo18 as AlertTriangle,
-	IconVShapedArrowRightOutlineDuo18 as ArrowRight,
 	IconCircleCheck2OutlineDuo18 as CheckCircle,
 	IconClockTimeOutlineDuo18 as Clock,
 	IconCopyOutlineDuo18 as Copy,
 	IconExternalLinkOutlineDuo18 as ExternalLink,
-	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
 	IconCircleWarningOutlineDuo18 as ShieldAlert,
 	IconMagicShieldOutlineDuo18 as ShieldCheck,
 } from "@bittery/ui/icons";
@@ -38,6 +21,7 @@ import { Link } from "@tanstack/react-router";
 import { type ComponentType, useMemo, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
 import { Favicon } from "../vault/favicon";
+import { ScoreRing } from "./score-ring";
 
 interface SecurityDashboardProps {
 	report: SecurityReport;
@@ -49,6 +33,8 @@ type DashboardIcon = ComponentType<{
 	className?: string;
 	strokeWidth?: number;
 }>;
+
+type SectionKey = "weak" | "reused" | "old" | "briefing";
 
 interface DistributionBucket {
 	label: "healthy" | "aging" | "reused" | "weak";
@@ -69,573 +55,85 @@ function getVaultName(
 	return vaults.find((v) => v.id === vaultId)?.name || unknownVaultName;
 }
 
-function getScorePalette(score: number) {
+function getScoreTier(score: number) {
 	if (score >= 85) {
-		return {
-			tier: "fortified" as const,
-			textClassName: "text-emerald-300",
-			ringClassName: "from-emerald-400 via-teal-300 to-cyan-300",
-		};
+		return "fortified" as const;
 	}
 
 	if (score >= 70) {
-		return {
-			tier: "stable" as const,
-			textClassName: "text-lime-300",
-			ringClassName: "from-lime-400 via-emerald-300 to-cyan-300",
-		};
+		return "stable" as const;
 	}
 
 	if (score >= 50) {
-		return {
-			tier: "exposed" as const,
-			textClassName: "text-amber-300",
-			ringClassName: "from-amber-400 via-orange-300 to-yellow-300",
-		};
+		return "exposed" as const;
 	}
 
 	if (score >= 30) {
-		return {
-			tier: "at_risk" as const,
-			textClassName: "text-orange-300",
-			ringClassName: "from-orange-400 via-rose-300 to-red-300",
-		};
+		return "at_risk" as const;
 	}
 
-	return {
-		tier: "critical" as const,
-		textClassName: "text-rose-300",
-		ringClassName: "from-rose-400 via-red-400 to-orange-400",
-	};
+	return "critical" as const;
 }
 
+/** Buckets every monitored password once, with weak > reused > old precedence. */
 function getDistribution(report: SecurityReport): DistributionBucket[] {
 	const total = Math.max(report.totalPasswords, 0);
-	if (total === 0) {
-		return [
-			{
-				label: "healthy",
-				count: 0,
-				percentage: 0,
-				barClassName: "bg-emerald-400",
-				dotClassName: "bg-emerald-400",
-			},
-			{
-				label: "aging",
-				count: 0,
-				percentage: 0,
-				barClassName: "bg-amber-400",
-				dotClassName: "bg-amber-400",
-			},
-			{
-				label: "reused",
-				count: 0,
-				percentage: 0,
-				barClassName: "bg-orange-400",
-				dotClassName: "bg-orange-400",
-			},
-			{
-				label: "weak",
-				count: 0,
-				percentage: 0,
-				barClassName: "bg-rose-400",
-				dotClassName: "bg-rose-400",
-			},
-		];
-	}
 
 	const weakIds = new Set(report.weakPasswords.map((issue) => issue.item.id));
-	const reusedIds = new Set(
-		report.reusedPasswords.map((issue) => issue.item.id),
-	);
-	const oldIds = new Set(report.oldPasswords.map((issue) => issue.item.id));
-
-	const classifiedIds = new Set<string>();
-	const weakCount = weakIds.size;
-	for (const id of weakIds) {
-		classifiedIds.add(id);
-	}
+	const classified = new Set<string>(weakIds);
 
 	let reusedCount = 0;
-	for (const id of reusedIds) {
-		if (!classifiedIds.has(id)) {
+	for (const issue of report.reusedPasswords) {
+		if (!classified.has(issue.item.id)) {
 			reusedCount += 1;
-			classifiedIds.add(id);
+			classified.add(issue.item.id);
 		}
 	}
 
 	let oldCount = 0;
-	for (const id of oldIds) {
-		if (!classifiedIds.has(id)) {
+	for (const issue of report.oldPasswords) {
+		if (!classified.has(issue.item.id)) {
 			oldCount += 1;
-			classifiedIds.add(id);
+			classified.add(issue.item.id);
 		}
 	}
 
-	const healthyCount = Math.max(total - classifiedIds.size, 0);
+	const healthyCount = Math.max(total - classified.size, 0);
+	const pct = (count: number) => (total > 0 ? (count / total) * 100 : 0);
 
 	return [
 		{
 			label: "healthy",
 			count: healthyCount,
-			percentage: (healthyCount / total) * 100,
-			barClassName: "bg-emerald-400",
-			dotClassName: "bg-emerald-400",
+			percentage: pct(healthyCount),
+			barClassName: "bg-success",
+			dotClassName: "bg-success",
 		},
 		{
 			label: "aging",
 			count: oldCount,
-			percentage: (oldCount / total) * 100,
-			barClassName: "bg-amber-400",
-			dotClassName: "bg-amber-400",
+			percentage: pct(oldCount),
+			barClassName: "bg-success/60",
+			dotClassName: "bg-success/60",
 		},
 		{
 			label: "reused",
 			count: reusedCount,
-			percentage: (reusedCount / total) * 100,
-			barClassName: "bg-orange-400",
-			dotClassName: "bg-orange-400",
+			percentage: pct(reusedCount),
+			barClassName: "bg-warning",
+			dotClassName: "bg-warning",
 		},
 		{
 			label: "weak",
-			count: weakCount,
-			percentage: (weakCount / total) * 100,
-			barClassName: "bg-rose-400",
-			dotClassName: "bg-rose-400",
+			count: weakIds.size,
+			percentage: pct(weakIds.size),
+			barClassName: "bg-destructive",
+			dotClassName: "bg-destructive",
 		},
 	];
 }
 
-function ScoreRing({
-	score,
-	gaugeLabel,
-}: {
-	score: number;
-	gaugeLabel: string;
-}) {
-	const normalizedScore = Math.max(0, Math.min(100, score));
-	const radius = 66;
-	const circumference = 2 * Math.PI * radius;
-	const strokeOffset = circumference - (normalizedScore / 100) * circumference;
-	const scorePalette = getScorePalette(normalizedScore);
-
-	return (
-		<div className="relative h-36 w-36 sm:h-44 sm:w-44">
-			<svg
-				viewBox="0 0 176 176"
-				className="h-full w-full -rotate-90"
-				aria-hidden="true"
-			>
-				<circle
-					cx="88"
-					cy="88"
-					r="66"
-					stroke="currentColor"
-					strokeWidth="14"
-					className="text-white/15"
-					fill="none"
-				/>
-				<circle
-					cx="88"
-					cy="88"
-					r="66"
-					stroke="currentColor"
-					strokeWidth="14"
-					strokeLinecap="round"
-					fill="none"
-					strokeDasharray={circumference}
-					strokeDashoffset={strokeOffset}
-					className={cn(
-						scorePalette.textClassName,
-						"transition-[stroke-dashoffset]",
-						"duration-700",
-						"ease-out",
-					)}
-				/>
-			</svg>
-			<div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-				<span
-					className={cn(
-						"font-semibold",
-						"text-5xl",
-						"leading-none",
-						scorePalette.textClassName,
-					)}
-				>
-					{normalizedScore}
-				</span>
-				<span className="mt-1 text-[11px] text-white/60 tracking-[0.28em]">
-					{gaugeLabel}
-				</span>
-			</div>
-			<div
-				className={cn(
-					"pointer-events-none",
-					"absolute",
-					"inset-0",
-					"-z-10",
-					"rounded-full",
-					"bg-gradient-to-br",
-					"opacity-35",
-					"blur-2xl",
-					scorePalette.ringClassName,
-				)}
-			/>
-		</div>
-	);
-}
-
-function SentinelOverview({
-	report,
-	isLoading,
-}: {
-	report: SecurityReport;
-	isLoading: boolean;
-}) {
-	const { m } = useI18n();
-	const distribution = useMemo(() => getDistribution(report), [report]);
-	const total = report.totalPasswords;
-	const uniqueRiskCount = useMemo(() => {
-		const riskIds = new Set([
-			...report.weakPasswords.map((issue) => issue.item.id),
-			...report.reusedPasswords.map((issue) => issue.item.id),
-			...report.oldPasswords.map((issue) => issue.item.id),
-		]);
-		return riskIds.size;
-	}, [report]);
-	const healthyCount = Math.max(total - uniqueRiskCount, 0);
-	const healthCoverage =
-		total > 0 ? Math.round((healthyCount / total) * 100) : 0;
-	const highPriorityCount = report.recommendations.filter(
-		(recommendation) => recommendation.priority === "high",
-	).length;
-	const scorePalette = getScorePalette(report.securityScore);
-	const scoreTierLabel = {
-		fortified: m.sentinel_score_tier_fortified_label(),
-		stable: m.sentinel_score_tier_stable_label(),
-		exposed: m.sentinel_score_tier_exposed_label(),
-		at_risk: m.sentinel_score_tier_at_risk_label(),
-		critical: m.sentinel_score_tier_critical_label(),
-	}[scorePalette.tier];
-	const scoreTierDescription = {
-		fortified: m.sentinel_score_tier_fortified_description(),
-		stable: m.sentinel_score_tier_stable_description(),
-		exposed: m.sentinel_score_tier_exposed_description(),
-		at_risk: m.sentinel_score_tier_at_risk_description(),
-		critical: m.sentinel_score_tier_critical_description(),
-	}[scorePalette.tier];
-	const distributionLabels = {
-		healthy: m.sentinel_distribution_healthy(),
-		aging: m.sentinel_distribution_aging(),
-		reused: m.sentinel_distribution_reused(),
-		weak: m.sentinel_distribution_weak(),
-	} as const;
-
-	if (isLoading) {
-		return (
-			<Card className="overflow-hidden border-border/60">
-				<CardContent className="space-y-6 p-6 md:p-8">
-					<Skeleton className="h-6 w-40" />
-					<Skeleton className="h-9 w-80" />
-					<div className="grid gap-4 sm:grid-cols-3">
-						<Skeleton className="h-20 w-full" />
-						<Skeleton className="h-20 w-full" />
-						<Skeleton className="h-20 w-full" />
-					</div>
-					<Skeleton className="h-32 w-full" />
-				</CardContent>
-			</Card>
-		);
-	}
-
-	return (
-		<Card className="relative overflow-hidden border-slate-900/80 bg-[radial-gradient(circle_at_15%_20%,rgba(16,185,129,0.28),transparent_38%),radial-gradient(circle_at_90%_10%,rgba(34,211,238,0.18),transparent_30%),linear-gradient(130deg,#020617_0%,#0f172a_45%,#022c22_100%)] text-slate-100 shadow-[0_24px_70px_-45px_rgba(16,185,129,0.85)]">
-			<div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(148,163,184,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(148,163,184,0.06)_1px,transparent_1px)] bg-[size:28px_28px]" />
-			<CardContent className="relative space-y-5 p-5 md:p-8 lg:space-y-8">
-				<div className="flex flex-wrap items-center gap-2">
-					<Badge
-						variant="outline"
-						className="border-emerald-300/40 bg-emerald-300/10 px-2.5 py-0.5 font-medium text-[11px] text-emerald-100 tracking-[0.2em]"
-					>
-						{m.sentinel_overview_badge_watch()}
-					</Badge>
-					<Badge
-						variant="outline"
-						className="border-cyan-300/35 bg-cyan-300/10 px-2.5 py-0.5 font-medium text-[11px] text-cyan-100 tracking-[0.16em]"
-					>
-						{scoreTierLabel}
-					</Badge>
-				</div>
-
-				<div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-center">
-					<div className="space-y-6">
-						<div className="space-y-2">
-							<h2 className="font-semibold text-2xl tracking-tight sm:text-3xl">
-								{m.sentinel_overview_heading()}
-							</h2>
-							<p className="max-w-2xl text-slate-300 text-sm leading-relaxed sm:text-base">
-								{scoreTierDescription}
-							</p>
-						</div>
-
-						<div className="flex flex-col gap-2 sm:grid sm:grid-cols-3 sm:gap-3 lg:grid-cols-1 xl:grid-cols-3">
-							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm lg:flex lg:items-center lg:justify-between xl:block">
-								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em] lg:text-xs lg:normal-case lg:tracking-normal xl:text-[11px] xl:uppercase xl:tracking-[0.16em]">
-									{m.sentinel_overview_stat_passwords_monitored()}
-								</p>
-								<p className="mt-2 font-semibold text-3xl leading-none lg:mt-0 xl:mt-2">
-									{total}
-								</p>
-							</div>
-							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm lg:flex lg:items-center lg:justify-between xl:block">
-								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em] lg:text-xs lg:normal-case lg:tracking-normal xl:text-[11px] xl:uppercase xl:tracking-[0.16em]">
-									{m.sentinel_overview_stat_at_risk_items()}
-								</p>
-								<p className="mt-2 font-semibold text-3xl text-rose-200 leading-none lg:mt-0 xl:mt-2">
-									{uniqueRiskCount}
-								</p>
-							</div>
-							<div className="rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm lg:flex lg:items-center lg:justify-between xl:block">
-								<p className="text-[11px] text-slate-300 uppercase tracking-[0.16em] lg:text-xs lg:normal-case lg:tracking-normal xl:text-[11px] xl:uppercase xl:tracking-[0.16em]">
-									{m.sentinel_overview_stat_high_priority_actions()}
-								</p>
-								<p className="mt-2 font-semibold text-3xl text-amber-100 leading-none lg:mt-0 xl:mt-2">
-									{highPriorityCount}
-								</p>
-							</div>
-						</div>
-
-						<div className="space-y-3 rounded-xl border border-white/15 bg-white/8 p-4 backdrop-blur-sm">
-							<div className="flex items-center justify-between gap-2 text-[11px] text-slate-300 uppercase tracking-[0.12em] sm:tracking-[0.16em]">
-								<span className="shrink-0">
-									{m.sentinel_overview_health_mix_title()}
-								</span>
-								<span className="truncate text-right">
-									{m.sentinel_overview_health_mix_monitored({
-										count: total,
-									})}
-								</span>
-							</div>
-
-							{total > 0 ? (
-								<>
-									<div className="flex h-3 w-full overflow-hidden rounded-full bg-white/12">
-										{distribution
-											.filter((bucket) => bucket.percentage > 0)
-											.map((bucket) => (
-												<div
-													key={bucket.label}
-													className={cn(
-														"h-full",
-														bucket.barClassName,
-														"transition-all",
-														"duration-700",
-													)}
-													style={{ width: `${bucket.percentage}%` }}
-													title={`${distributionLabels[bucket.label]}: ${bucket.count}`}
-												/>
-											))}
-									</div>
-									<div className="flex flex-wrap gap-x-4 gap-y-2 text-slate-200 text-xs">
-										{distribution.map((bucket) => (
-											<span
-												key={bucket.label}
-												className="inline-flex items-center gap-1.5"
-											>
-												<span
-													className={cn(
-														"h-2",
-														"w-2",
-														"rounded-full",
-														bucket.dotClassName,
-													)}
-												/>
-												{distributionLabels[bucket.label]} ({bucket.count})
-											</span>
-										))}
-									</div>
-								</>
-							) : (
-								<p className="text-slate-300 text-sm">
-									{m.sentinel_overview_health_mix_empty()}
-								</p>
-							)}
-						</div>
-					</div>
-
-					<div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-white/15 bg-white/10 p-4 backdrop-blur-sm sm:gap-4 sm:p-6">
-						<ScoreRing
-							score={report.securityScore}
-							gaugeLabel={m.sentinel_score_gauge_label()}
-						/>
-						<div className="text-center">
-							<p className="font-semibold text-base">
-								{m.sentinel_overview_score_title()}
-							</p>
-							<p className="text-slate-300 text-xs uppercase tracking-[0.16em]">
-								{m.sentinel_overview_score_coverage({
-									percent: healthCoverage,
-								})}
-							</p>
-						</div>
-					</div>
-				</div>
-			</CardContent>
-		</Card>
-	);
-}
-
-function IssueCard({
-	count,
-	title,
-	description,
-	icon: Icon,
-	isLoading,
-	tone,
-	onViewItems,
-}: {
-	count: number;
-	title: string;
-	description: string;
-	icon: DashboardIcon;
-	isLoading: boolean;
-	tone: "weak" | "reused" | "old";
-	onViewItems?: () => void;
-}) {
-	const { m } = useI18n();
-	const hasIssues = count > 0;
-
-	const toneConfig = {
-		weak: {
-			accent: "from-rose-500/70 via-rose-500/30 to-transparent",
-			iconShell: "border-rose-500/25 bg-rose-500/10",
-			iconColor: "text-rose-500",
-			pillClassName: "border-rose-500/30 bg-rose-500/10 text-rose-600",
-		},
-		reused: {
-			accent: "from-orange-500/70 via-orange-500/30 to-transparent",
-			iconShell: "border-orange-500/25 bg-orange-500/10",
-			iconColor: "text-orange-500",
-			pillClassName: "border-orange-500/30 bg-orange-500/10 text-orange-600",
-		},
-		old: {
-			accent: "from-amber-500/70 via-amber-500/30 to-transparent",
-			iconShell: "border-amber-500/25 bg-amber-500/10",
-			iconColor: "text-amber-600",
-			pillClassName: "border-amber-500/30 bg-amber-500/10 text-amber-700",
-		},
-	} as const;
-
-	const config = toneConfig[tone];
-
-	return (
-		<Card className="relative overflow-hidden border-border/60 py-1">
-			<CardContent className="p-4">
-				<div className="flex items-center gap-3">
-					<div className={cn("rounded-lg", "border", "p-2", config.iconShell)}>
-						<Icon
-							className={cn("h-4", "w-4", config.iconColor)}
-							strokeWidth={1.6}
-						/>
-					</div>
-					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm leading-none">{title}</p>
-						<p className="mt-1 text-muted-foreground text-xs">{description}</p>
-					</div>
-					<div className="shrink-0 text-right">
-						{isLoading ? (
-							<Skeleton className="h-7 w-10" />
-						) : (
-							<p
-								className={cn(
-									"font-semibold text-2xl tabular-nums leading-none",
-									hasIssues ? config.iconColor : "text-emerald-500",
-								)}
-							>
-								{count}
-							</p>
-						)}
-					</div>
-				</div>
-				{!isLoading && (
-					<div className="mt-3 border-t pt-3">
-						{hasIssues && onViewItems ? (
-							<button
-								type="button"
-								onClick={onViewItems}
-								className="inline-flex w-full items-center justify-between text-muted-foreground text-xs transition-colors hover:text-foreground"
-							>
-								{m.sentinel_issue_action_review_items()}
-								<ArrowRight className="h-3.5 w-3.5" />
-							</button>
-						) : (
-							<span className="inline-flex w-full items-center justify-between text-muted-foreground text-xs">
-								{m.sentinel_issue_action_no_active_issues()}
-								<CheckCircle className="h-3.5 w-3.5 text-emerald-500" />
-							</span>
-						)}
-					</div>
-				)}
-			</CardContent>
-		</Card>
-	);
-}
-
-function IssueCardsSection({
-	report,
-	isLoading,
-	onViewIssues,
-}: {
-	report: SecurityReport;
-	isLoading: boolean;
-	onViewIssues: (tab: "weak" | "reused" | "old") => void;
-}) {
-	const { m } = useI18n();
-
-	return (
-		<div className="grid gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
-			<IssueCard
-				count={report.weakPasswords.length}
-				title={m.sentinel_issue_weak_title()}
-				description={m.sentinel_issue_weak_description()}
-				icon={ShieldAlert}
-				isLoading={isLoading}
-				tone="weak"
-				onViewItems={
-					report.weakPasswords.length > 0
-						? () => onViewIssues("weak")
-						: undefined
-				}
-			/>
-			<IssueCard
-				count={report.reusedPasswords.length}
-				title={m.sentinel_issue_reused_title()}
-				description={m.sentinel_issue_reused_description()}
-				icon={Copy}
-				isLoading={isLoading}
-				tone="reused"
-				onViewItems={
-					report.reusedPasswords.length > 0
-						? () => onViewIssues("reused")
-						: undefined
-				}
-			/>
-			<IssueCard
-				count={report.oldPasswords.length}
-				title={m.sentinel_issue_old_title()}
-				description={m.sentinel_issue_old_description()}
-				icon={Clock}
-				isLoading={isLoading}
-				tone="old"
-				onViewItems={
-					report.oldPasswords.length > 0 ? () => onViewIssues("old") : undefined
-				}
-			/>
-		</div>
-	);
-}
-
-function PasswordIssueItem({
+function IssueRow({
 	issue,
 	vaults,
 }: {
@@ -655,250 +153,223 @@ function PasswordIssueItem({
 			to="/vaults/$vaultId"
 			params={{ vaultId: item.vaultId }}
 			search={{ itemId: item.id }}
-			className="group block"
+			className="group flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-foreground/4"
 		>
-			<div className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/50 p-3 transition-all hover:border-primary/45 hover:bg-muted/40">
-				<Favicon item={item} size="sm" />
-				<div className="min-w-0 flex-1 space-y-1">
-					<div className="flex items-center gap-2">
-						<span className="truncate font-medium">{item.title}</span>
-						{issue.analysis && (
-							<Badge
-								variant="outline"
-								className={cn(
-									"text-[11px]",
-									strengthToTextColor(issue.analysis.strength),
-								)}
-							>
-								{strengthToLabel(issue.analysis.strength)}
-							</Badge>
-						)}
-					</div>
-					<div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
-						<span className="truncate">{vaultName}</span>
-						{issue.issueType === "reused" && issue.reusedCount ? (
-							<span>
-								{m.sentinel_issue_detail_used_in_items({
-									count: issue.reusedCount,
-								})}
-							</span>
-						) : null}
-						{issue.issueType === "old" && issue.daysSinceUpdate ? (
-							<span>
-								{m.sentinel_issue_detail_days_old({
-									days: issue.daysSinceUpdate,
-								})}
-							</span>
-						) : null}
-						{issue.analysis?.crackTime ? (
-							<span>
-								{m.sentinel_issue_detail_crack_time({
-									time: issue.analysis.crackTime,
-								})}
-							</span>
-						) : null}
-					</div>
+			<Favicon item={item} size="sm" />
+			<div className="min-w-0 flex-1">
+				<div className="flex items-center gap-2">
+					<span className="truncate font-medium text-sm">{item.title}</span>
+					{issue.analysis ? (
+						<Badge
+							variant="outline"
+							className={cn(
+								"px-1.5 py-0 text-[10px]",
+								strengthToTextColor(issue.analysis.strength),
+							)}
+						>
+							{strengthToLabel(issue.analysis.strength)}
+						</Badge>
+					) : null}
 				</div>
-				<ExternalLink className="h-4 w-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground" />
+				<div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-muted-foreground text-xs">
+					<span className="truncate">{vaultName}</span>
+					{issue.issueType === "reused" && issue.reusedCount ? (
+						<span>
+							{m.sentinel_issue_detail_used_in_items({
+								count: issue.reusedCount,
+							})}
+						</span>
+					) : null}
+					{issue.issueType === "old" && issue.daysSinceUpdate ? (
+						<span>
+							{m.sentinel_issue_detail_days_old({
+								days: issue.daysSinceUpdate,
+							})}
+						</span>
+					) : null}
+					{issue.analysis?.crackTime ? (
+						<span>
+							{m.sentinel_issue_detail_crack_time({
+								time: issue.analysis.crackTime,
+							})}
+						</span>
+					) : null}
+				</div>
 			</div>
+			<ExternalLink
+				className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-hover:opacity-100"
+				strokeWidth={1.6}
+			/>
 		</Link>
 	);
 }
 
-function PasswordIssuesList({
+function IssueSection({
+	id,
+	icon: Icon,
+	iconClassName,
+	title,
+	description,
 	issues,
 	vaults,
 	emptyMessage,
-	emptyIcon: EmptyIcon,
 }: {
+	id: string;
+	icon: DashboardIcon;
+	iconClassName: string;
+	title: string;
+	description: string;
 	issues: PasswordIssue[];
 	vaults: Array<{ id: string; name: string }>;
 	emptyMessage: string;
-	emptyIcon: DashboardIcon;
 }) {
-	if (issues.length === 0) {
-		return (
-			<div className="flex flex-col items-center justify-center rounded-xl border border-emerald-500/20 bg-emerald-500/5 py-10 text-center">
-				<EmptyIcon
-					className="mb-2 h-12 w-12 text-emerald-500"
-					strokeWidth={1.6}
-				/>
-				<p className="text-muted-foreground text-sm">{emptyMessage}</p>
-			</div>
-		);
-	}
-
 	return (
-		<ScrollArea className="h-[320px] pr-4">
-			<div className="space-y-2.5">
-				{issues.map((issue) => (
-					<PasswordIssueItem
-						key={`${issue.item.id}-${issue.issueType}`}
-						issue={issue}
-						vaults={vaults}
-					/>
-				))}
+		<section id={id} className="scroll-mt-14 rounded-lg border bg-card">
+			<div className="flex items-start gap-3 border-b p-4">
+				<div className="rounded-md border bg-foreground/3 p-2">
+					<Icon className={cn("h-4", "w-4", iconClassName)} strokeWidth={1.6} />
+				</div>
+				<div className="min-w-0 flex-1">
+					<div className="flex items-center gap-2">
+						<h3 className="font-medium text-sm">{title}</h3>
+						{issues.length > 0 ? (
+							<span className="rounded-[4px] border bg-foreground/3 px-1.5 text-[10px] text-muted-foreground tabular-nums">
+								{issues.length}
+							</span>
+						) : null}
+					</div>
+					<p className="mt-0.5 text-muted-foreground text-xs leading-relaxed">
+						{description}
+					</p>
+				</div>
 			</div>
-		</ScrollArea>
+			{issues.length > 0 ? (
+				<div className="divide-y">
+					{issues.map((issue) => (
+						<IssueRow
+							key={`${issue.item.id}-${issue.issueType}`}
+							issue={issue}
+							vaults={vaults}
+						/>
+					))}
+				</div>
+			) : (
+				<div className="flex items-center gap-2 px-4 py-3 text-muted-foreground text-sm">
+					<CheckCircle className="h-4 w-4 text-success" strokeWidth={1.6} />
+					{emptyMessage}
+				</div>
+			)}
+		</section>
 	);
 }
 
-function SentinelRecommendations({ report }: { report: SecurityReport }) {
+function BriefingSection({ report }: { report: SecurityReport }) {
 	const { m } = useI18n();
 
 	const priorityConfig = {
 		high: {
 			icon: AlertCircle,
-			iconClassName: "text-rose-600",
+			iconClassName: "text-destructive",
 			label: m.sentinel_recommendations_priority_high(),
-			cardClassName: "border-rose-500/25 bg-rose-500/6",
-			pillClassName: "border-rose-500/30 bg-rose-500/10 text-rose-600",
 		},
 		medium: {
 			icon: AlertTriangle,
-			iconClassName: "text-amber-600",
+			iconClassName: "text-warning",
 			label: m.sentinel_recommendations_priority_medium(),
-			cardClassName: "border-amber-500/25 bg-amber-500/6",
-			pillClassName: "border-amber-500/30 bg-amber-500/10 text-amber-700",
 		},
 		low: {
 			icon: CheckCircle,
-			iconClassName: "text-emerald-600",
+			iconClassName: "text-success",
 			label: m.sentinel_recommendations_priority_low(),
-			cardClassName: "border-emerald-500/25 bg-emerald-500/6",
-			pillClassName: "border-emerald-500/30 bg-emerald-500/10 text-emerald-700",
 		},
 	} as const;
 
-	const getRecommendationCopy = (recommendation: SecurityRecommendation) => {
-		switch (recommendation.key) {
+	const getRecommendationTitle = (key: string, count: number) => {
+		switch (key) {
 			case "weak_passwords":
-				return {
-					title:
-						(recommendation.count ?? 0) === 1
-							? m.sentinel_recommendations_item_weak_title_single({
-									count: recommendation.count ?? 0,
-								})
-							: m.sentinel_recommendations_item_weak_title_plural({
-									count: recommendation.count ?? 0,
-								}),
-					description: m.sentinel_recommendations_item_weak_description(),
-				};
+				return count === 1
+					? m.sentinel_recommendations_item_weak_title_single({ count })
+					: m.sentinel_recommendations_item_weak_title_plural({ count });
 			case "reused_passwords":
-				return {
-					title:
-						(recommendation.count ?? 0) === 1
-							? m.sentinel_recommendations_item_reused_title_single({
-									count: recommendation.count ?? 0,
-								})
-							: m.sentinel_recommendations_item_reused_title_plural({
-									count: recommendation.count ?? 0,
-								}),
-					description: m.sentinel_recommendations_item_reused_description(),
-				};
+				return count === 1
+					? m.sentinel_recommendations_item_reused_title_single({ count })
+					: m.sentinel_recommendations_item_reused_title_plural({ count });
 			case "old_passwords":
-				return {
-					title:
-						(recommendation.count ?? 0) === 1
-							? m.sentinel_recommendations_item_old_title_single({
-									count: recommendation.count ?? 0,
-								})
-							: m.sentinel_recommendations_item_old_title_plural({
-									count: recommendation.count ?? 0,
-								}),
-					description: m.sentinel_recommendations_item_old_description(),
-				};
+				return count === 1
+					? m.sentinel_recommendations_item_old_title_single({ count })
+					: m.sentinel_recommendations_item_old_title_plural({ count });
 			case "good_practices":
-				return {
-					title: m.sentinel_recommendations_item_good_title(),
-					description: m.sentinel_recommendations_item_good_description(),
-				};
+				return m.sentinel_recommendations_item_good_title();
 			case "add_passwords":
-				return {
-					title: m.sentinel_recommendations_item_add_title(),
-					description: m.sentinel_recommendations_item_add_description(),
-				};
+				return m.sentinel_recommendations_item_add_title();
 			default:
-				return {
-					title: m.sentinel_recommendations_empty_title(),
-					description: m.sentinel_recommendations_empty_description(),
-				};
+				return m.sentinel_recommendations_empty_title();
 		}
 	};
 
 	return (
-		<Card className="border-border/60">
-			<CardHeader>
-				<CardTitle className="flex items-center gap-2">
-					<div className="rounded-lg border border-primary/20 bg-primary/10 p-2">
-						<ShieldCheck className="h-5 w-5 text-primary" />
-					</div>
-					{m.sentinel_recommendations_title()}
-				</CardTitle>
-				<CardDescription>
-					{m.sentinel_recommendations_description()}
-				</CardDescription>
-			</CardHeader>
-			<CardContent>
-				{report.recommendations.length === 0 ? (
-					<div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4">
-						<p className="font-medium text-emerald-700 text-sm dark:text-emerald-400">
-							{m.sentinel_recommendations_empty_title()}
-						</p>
-						<p className="mt-1 text-muted-foreground text-sm">
-							{m.sentinel_recommendations_empty_description()}
-						</p>
-					</div>
-				) : (
-					<div className="space-y-3">
-						{report.recommendations.map((recommendation, index) => {
-							const config = priorityConfig[recommendation.priority];
-							const Icon = config.icon;
-							const copy = getRecommendationCopy(recommendation);
+		<section
+			id="sentinel-section-briefing"
+			className="scroll-mt-14 rounded-lg border bg-card"
+		>
+			<div className="flex items-start gap-3 border-b p-4">
+				<div className="rounded-md border bg-foreground/3 p-2">
+					<ShieldCheck
+						className="h-4 w-4 text-muted-foreground"
+						strokeWidth={1.6}
+					/>
+				</div>
+				<div className="min-w-0 flex-1">
+					<h3 className="font-medium text-sm">
+						{m.sentinel_recommendations_title()}
+					</h3>
+					<p className="mt-0.5 text-muted-foreground text-xs leading-relaxed">
+						{m.sentinel_recommendations_description()}
+					</p>
+				</div>
+			</div>
+			{report.recommendations.length === 0 ? (
+				<div className="flex items-center gap-2 px-4 py-3 text-muted-foreground text-sm">
+					<CheckCircle className="h-4 w-4 text-success" strokeWidth={1.6} />
+					{m.sentinel_recommendations_empty_description()}
+				</div>
+			) : (
+				<div className="divide-y">
+					{report.recommendations.map((recommendation, index) => {
+						const config = priorityConfig[recommendation.priority];
+						const Icon = config.icon;
 
-							return (
-								<div
-									key={index}
-									className={cn(
-										"rounded-xl",
-										"border",
-										"p-4",
-										config.cardClassName,
+						return (
+							<div key={index} className="flex items-center gap-3 px-4 py-3">
+								<Icon
+									className={cn("h-4", "w-4", "shrink-0", config.iconClassName)}
+									strokeWidth={1.6}
+								/>
+								<p className="min-w-0 flex-1 truncate text-sm">
+									{getRecommendationTitle(
+										recommendation.key,
+										recommendation.count ?? 0,
 									)}
+								</p>
+								<Badge
+									variant="outline"
+									className="shrink-0 text-[10px] text-muted-foreground"
 								>
-									<div className="flex items-start gap-3">
-										<div className="rounded-lg bg-background/75 p-2">
-											<Icon
-												className={cn("h-4", "w-4", config.iconClassName)}
-											/>
-										</div>
-										<div className="min-w-0 flex-1 space-y-1">
-											<div className="flex items-center gap-2">
-												<p className="font-medium text-sm">{copy.title}</p>
-												<Badge
-													variant="outline"
-													className={config.pillClassName}
-												>
-													{config.label}
-												</Badge>
-											</div>
-											<p className="text-muted-foreground text-sm">
-												{copy.description}
-											</p>
-										</div>
-									</div>
-								</div>
-							);
-						})}
-					</div>
-				)}
-			</CardContent>
-		</Card>
+									{config.label}
+								</Badge>
+							</div>
+						);
+					})}
+				</div>
+			)}
+		</section>
 	);
 }
 
 /**
- * Main Security Dashboard component
+ * Main Security Dashboard component — a "security report" layout: a sticky
+ * rail (score, tier, health mix, section nav) beside always-visible sections
+ * for weak / reused / aging credentials and the Sentinel briefing.
  */
 export function SecurityDashboard({
 	report,
@@ -906,138 +377,222 @@ export function SecurityDashboard({
 	vaults = [],
 }: SecurityDashboardProps) {
 	const { m } = useI18n();
-	const [activeTab, setActiveTab] = useState<"weak" | "reused" | "old">("weak");
-	const [showDetails, setShowDetails] = useState(false);
+	const [activeSection, setActiveSection] = useState<SectionKey>("weak");
+	const distribution = useMemo(() => getDistribution(report), [report]);
 
-	const handleViewIssues = (tab: "weak" | "reused" | "old") => {
-		setActiveTab(tab);
-		setShowDetails(true);
-	};
+	const uniqueRiskCount = useMemo(() => {
+		const riskIds = new Set([
+			...report.weakPasswords.map((issue) => issue.item.id),
+			...report.reusedPasswords.map((issue) => issue.item.id),
+			...report.oldPasswords.map((issue) => issue.item.id),
+		]);
+		return riskIds.size;
+	}, [report]);
+	const healthCoverage =
+		report.totalPasswords > 0
+			? Math.round(
+					((report.totalPasswords - uniqueRiskCount) / report.totalPasswords) *
+						100,
+				)
+			: 0;
+
+	const tierLabel = {
+		fortified: m.sentinel_score_tier_fortified_label(),
+		stable: m.sentinel_score_tier_stable_label(),
+		exposed: m.sentinel_score_tier_exposed_label(),
+		at_risk: m.sentinel_score_tier_at_risk_label(),
+		critical: m.sentinel_score_tier_critical_label(),
+	}[getScoreTier(report.securityScore)];
+	const distributionLabels = {
+		healthy: m.sentinel_distribution_healthy(),
+		aging: m.sentinel_distribution_aging(),
+		reused: m.sentinel_distribution_reused(),
+		weak: m.sentinel_distribution_weak(),
+	} as const;
+
+	const sections: Array<{
+		key: SectionKey;
+		id: string;
+		label: string;
+		count: number | null;
+	}> = [
+		{
+			key: "weak",
+			id: "sentinel-section-weak",
+			label: m.sentinel_issue_weak_title(),
+			count: report.weakPasswords.length,
+		},
+		{
+			key: "reused",
+			id: "sentinel-section-reused",
+			label: m.sentinel_issue_reused_title(),
+			count: report.reusedPasswords.length,
+		},
+		{
+			key: "old",
+			id: "sentinel-section-old",
+			label: m.sentinel_issue_old_title(),
+			count: report.oldPasswords.length,
+		},
+		{
+			key: "briefing",
+			id: "sentinel-section-briefing",
+			label: m.sentinel_recommendations_title(),
+			count: null,
+		},
+	];
+
+	if (isLoading) {
+		return (
+			<div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
+				<Skeleton className="h-96 w-full rounded-lg" />
+				<div className="space-y-4">
+					<Skeleton className="h-48 w-full rounded-lg" />
+					<Skeleton className="h-48 w-full rounded-lg" />
+					<Skeleton className="h-48 w-full rounded-lg" />
+				</div>
+			</div>
+		);
+	}
 
 	return (
-		<div className="space-y-6">
-			<SentinelOverview report={report} isLoading={isLoading} />
+		<div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)] lg:items-start">
+			<aside className="rounded-lg border bg-card lg:sticky lg:top-0">
+				<div className="flex flex-col items-center gap-2 border-b p-4">
+					<ScoreRing
+						score={report.securityScore}
+						gaugeLabel={m.sentinel_score_gauge_label()}
+					/>
+					<Badge
+						variant="outline"
+						className="border-info/30 bg-info/10 px-2.5 py-0.5 font-medium text-[11px] text-info tracking-[0.16em]"
+					>
+						{tierLabel}
+					</Badge>
+					<p className="text-muted-foreground text-xs">
+						{m.sentinel_overview_score_coverage({ percent: healthCoverage })}
+					</p>
+				</div>
 
-			<IssueCardsSection
-				report={report}
-				isLoading={isLoading}
-				onViewIssues={handleViewIssues}
-			/>
-
-			{showDetails && !isLoading ? (
-				<Card className="border-border/60">
-					<CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
-						<div>
-							<CardTitle>{m.sentinel_drilldown_title()}</CardTitle>
-							<CardDescription>
-								{m.sentinel_drilldown_description()}
-							</CardDescription>
-						</div>
-						<button
-							type="button"
-							onClick={() => setShowDetails(false)}
-							className="text-muted-foreground text-sm transition-colors hover:text-foreground"
-						>
-							{m.sentinel_drilldown_hide_panel()}
-						</button>
-					</CardHeader>
-					<CardContent>
-						<Tabs
-							value={activeTab}
-							onValueChange={(value) => setActiveTab(value as typeof activeTab)}
-							className="w-full"
-						>
-							<TabsList className="grid w-full grid-cols-3 bg-muted/60 p-1">
-								<TabsTrigger value="weak" className="flex items-center gap-2">
-									<ShieldAlert className="h-4 w-4" />
-									{m.sentinel_drilldown_tab_weak()}
-									{report.weakPasswords.length > 0 ? (
-										<Badge variant="destructive" className="ml-1">
-											{report.weakPasswords.length}
-										</Badge>
-									) : null}
-								</TabsTrigger>
-								<TabsTrigger value="reused" className="flex items-center gap-2">
-									<Copy className="h-4 w-4" />
-									{m.sentinel_drilldown_tab_reused()}
-									{report.reusedPasswords.length > 0 ? (
-										<Badge
-											variant="secondary"
-											className="ml-1 bg-orange-100 text-orange-700 dark:bg-orange-500/20 dark:text-orange-300"
-										>
-											{report.reusedPasswords.length}
-										</Badge>
-									) : null}
-								</TabsTrigger>
-								<TabsTrigger value="old" className="flex items-center gap-2">
-									<Clock className="h-4 w-4" />
-									{m.sentinel_drilldown_tab_old()}
-									{report.oldPasswords.length > 0 ? (
-										<Badge
-											variant="secondary"
-											className="ml-1 bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
-										>
-											{report.oldPasswords.length}
-										</Badge>
-									) : null}
-								</TabsTrigger>
-							</TabsList>
-
-							<TabsContent value="weak" className="mt-4">
-								<PasswordIssuesList
-									issues={report.weakPasswords}
-									vaults={vaults}
-									emptyMessage={m.sentinel_drilldown_empty_weak()}
-									emptyIcon={ShieldCheck}
-								/>
-							</TabsContent>
-
-							<TabsContent value="reused" className="mt-4">
-								<PasswordIssuesList
-									issues={report.reusedPasswords}
-									vaults={vaults}
-									emptyMessage={m.sentinel_drilldown_empty_reused()}
-									emptyIcon={CheckCircle}
-								/>
-							</TabsContent>
-
-							<TabsContent value="old" className="mt-4">
-								<PasswordIssuesList
-									issues={report.oldPasswords}
-									vaults={vaults}
-									emptyMessage={m.sentinel_drilldown_empty_old()}
-									emptyIcon={RefreshCw}
-								/>
-							</TabsContent>
-						</Tabs>
-					</CardContent>
-				</Card>
-			) : (
-				!isLoading && (
-					<Card className="border-border/60">
-						<CardContent className="flex flex-col items-start gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
-							<div>
-								<p className="font-medium">
-									{m.sentinel_drilldown_hidden_title()}
-								</p>
-								<p className="text-muted-foreground text-sm">
-									{m.sentinel_drilldown_hidden_description()}
-								</p>
+				<div className="space-y-2.5 border-b p-4">
+					<div className="flex items-center justify-between font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
+						<span>{m.sentinel_overview_health_mix_title()}</span>
+						<span className="normal-case tabular-nums tracking-normal">
+							{m.sentinel_overview_health_mix_monitored({
+								count: report.totalPasswords,
+							})}
+						</span>
+					</div>
+					{report.totalPasswords > 0 ? (
+						distribution.map((bucket) => (
+							<div key={bucket.label} className="space-y-1">
+								<div className="flex items-center justify-between text-xs">
+									<span className="inline-flex items-center gap-1.5 text-muted-foreground">
+										<span
+											aria-hidden
+											className={cn(
+												"h-2",
+												"w-2",
+												"rounded-full",
+												bucket.dotClassName,
+											)}
+										/>
+										{distributionLabels[bucket.label]}
+									</span>
+									<span className="tabular-nums">{bucket.count}</span>
+								</div>
+								<div className="h-1 w-full overflow-hidden rounded-full bg-foreground/8">
+									<div
+										className={cn(
+											"h-full rounded-full transition-all duration-700",
+											bucket.barClassName,
+										)}
+										style={{ width: `${bucket.percentage}%` }}
+									/>
+								</div>
 							</div>
-							<button
-								type="button"
-								onClick={() => setShowDetails(true)}
-								className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 font-medium text-sm transition-colors hover:bg-muted"
-							>
-								{m.sentinel_drilldown_open()}
-								<ArrowRight className="h-4 w-4" />
-							</button>
-						</CardContent>
-					</Card>
-				)
-			)}
+						))
+					) : (
+						<p className="text-muted-foreground text-sm">
+							{m.sentinel_overview_health_mix_empty()}
+						</p>
+					)}
+				</div>
 
-			{!isLoading ? <SentinelRecommendations report={report} /> : null}
+				<nav className="space-y-0.5 p-2">
+					{sections.map((section) => {
+						const active = activeSection === section.key;
+
+						return (
+							<button
+								key={section.key}
+								type="button"
+								onClick={() => {
+									setActiveSection(section.key);
+									document
+										.getElementById(section.id)
+										?.scrollIntoView({ behavior: "smooth", block: "start" });
+								}}
+								className={cn(
+									"relative flex h-7 w-full items-center gap-2 rounded-sm px-2 text-sm transition-colors",
+									active
+										? "bg-selected shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+										: "text-muted-foreground hover:bg-accent hover:text-foreground",
+								)}
+							>
+								{active ? (
+									<span
+										aria-hidden
+										className="absolute top-[6px] bottom-[6px] -left-0.5 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
+									/>
+								) : null}
+								<span className="min-w-0 flex-1 truncate text-left">
+									{section.label}
+								</span>
+								{section.count !== null && section.count > 0 ? (
+									<span className="rounded-[4px] border bg-foreground/3 px-1.5 text-[10px] text-muted-foreground tabular-nums">
+										{section.count}
+									</span>
+								) : null}
+							</button>
+						);
+					})}
+				</nav>
+			</aside>
+
+			<div className="min-w-0 space-y-4">
+				<IssueSection
+					id="sentinel-section-weak"
+					icon={ShieldAlert}
+					iconClassName="text-destructive"
+					title={m.sentinel_issue_weak_title()}
+					description={m.sentinel_issue_weak_description()}
+					issues={report.weakPasswords}
+					vaults={vaults}
+					emptyMessage={m.sentinel_drilldown_empty_weak()}
+				/>
+				<IssueSection
+					id="sentinel-section-reused"
+					icon={Copy}
+					iconClassName="text-warning"
+					title={m.sentinel_issue_reused_title()}
+					description={m.sentinel_issue_reused_description()}
+					issues={report.reusedPasswords}
+					vaults={vaults}
+					emptyMessage={m.sentinel_drilldown_empty_reused()}
+				/>
+				<IssueSection
+					id="sentinel-section-old"
+					icon={Clock}
+					iconClassName="text-info"
+					title={m.sentinel_issue_old_title()}
+					description={m.sentinel_issue_old_description()}
+					issues={report.oldPasswords}
+					vaults={vaults}
+					emptyMessage={m.sentinel_drilldown_empty_old()}
+				/>
+				<BriefingSection report={report} />
+			</div>
 		</div>
 	);
 }

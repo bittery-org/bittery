@@ -68,6 +68,8 @@ import type { LeaveTeamInput } from "./LeaveTeamInput.ts";
 import type { LinkIdInput } from "./LinkIdInput.ts";
 import type { LogoutResponse } from "./LogoutResponse.ts";
 import type { LookupVaultUserInput } from "./LookupVaultUserInput.ts";
+import type { MemberAccessInput } from "./MemberAccessInput.ts";
+import type { MemberAccessResponse } from "./MemberAccessResponse.ts";
 import type { MeResponse } from "./MeResponse.ts";
 import type { MoveItemInput } from "./MoveItemInput.ts";
 import type { PendingTeamInvitationResponse } from "./PendingTeamInvitationResponse.ts";
@@ -220,6 +222,11 @@ export type { LoginKdfParamsResponse } from "./LoginKdfParamsResponse.ts";
 export type { LoginUserResponse } from "./LoginUserResponse.ts";
 export type { LogoutResponse } from "./LogoutResponse.ts";
 export type { LookupVaultUserInput } from "./LookupVaultUserInput.ts";
+export type { MemberAccessInput } from "./MemberAccessInput.ts";
+export type { MemberAccessResponse } from "./MemberAccessResponse.ts";
+export type { MemberDevice } from "./MemberDevice.ts";
+export type { MemberShareLink } from "./MemberShareLink.ts";
+export type { MemberVaultAccess } from "./MemberVaultAccess.ts";
 export type { MeResponse } from "./MeResponse.ts";
 export type { MoveItemInput } from "./MoveItemInput.ts";
 export type { PendingTeamInvitationResponse } from "./PendingTeamInvitationResponse.ts";
@@ -551,6 +558,10 @@ export type QubitServer = {
 			list: Query<
 				[input: TeamIdInput],
 				{ Ok: Array<TeamMemberResponse> } | { Err: AppError }
+			>;
+			access: Query<
+				[input: MemberAccessInput],
+				{ Ok: MemberAccessResponse } | { Err: AppError }
 			>;
 			getTeamRotationData: Query<
 				[input: TeamRotationInput],

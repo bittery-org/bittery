@@ -21,6 +21,7 @@ import {
 	getArticleBySlug,
 	getArticlesByCategory,
 } from "@/lib/docs";
+import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/docs/$")({
 	component: DocsSplatPage,
@@ -31,18 +32,18 @@ export const Route = createFileRoute("/docs/$")({
 
 		if (article) {
 			return {
-				meta: [
-					{ title: `${article.frontmatter.title} — Bittery Docs` },
-					{ name: "description", content: article.frontmatter.description },
-				],
+				meta: seo({
+					title: `${article.frontmatter.title} — Bittery Docs`,
+					description: article.frontmatter.description,
+				}),
 			};
 		}
 		if (category) {
 			return {
-				meta: [
-					{ title: `${category.title} — Bittery Docs` },
-					{ name: "description", content: category.description },
-				],
+				meta: seo({
+					title: `${category.title} — Bittery Docs`,
+					description: category.description,
+				}),
 			};
 		}
 		return {

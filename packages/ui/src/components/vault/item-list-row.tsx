@@ -44,19 +44,23 @@ export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps
 			<div
 				ref={ref}
 				className={cn(
-					"relative flex w-full min-w-0 cursor-pointer items-center gap-3 rounded-md px-3 py-2.5 transition-colors",
+					"relative flex w-full min-w-0 cursor-pointer items-center gap-2.5 rounded-md px-2.5 py-2 transition-colors",
 					isSelected
-						? "bg-primary text-primary-foreground"
+						? "bg-selected shadow-[inset_0_0_0_1px_oklch(0.70_0.165_288/0.16)]"
 						: isChecked
-							? "border border-primary/30 bg-primary/5"
+							? "border border-primary/30 bg-selected"
 							: isAnyItemDragging
-								? "hover:bg-primary/10 opacity-60"
-								: "hover:bg-primary/10",
+								? "hover:bg-foreground/4 opacity-60"
+								: "hover:bg-foreground/4",
 					isDragging && "opacity-40",
 					className,
 				)}
 				{...props}
 			>
+				{isSelected && (
+					<div className="pointer-events-none absolute top-[7px] bottom-[7px] left-0 z-10 w-[2px] rounded-full bg-primary shadow-[0_0_8px] shadow-primary/50" />
+				)}
+
 				{selectionMode && (
 					<div className="relative z-10">
 						<Checkbox
@@ -74,20 +78,20 @@ export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps
 					aria-label={ariaLabel}
 				/>
 
-				<div className="pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-3">
+				<div className="pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2.5">
 					{leadingVisual}
 					<div className="min-w-0 flex-1">
 						<div className="flex items-center gap-1.5">
-							<span className="truncate font-medium text-sm">{itemTitle}</span>
+							<span className="truncate font-medium text-foreground text-sm">
+								{itemTitle}
+							</span>
 							{indicators}
 						</div>
 						{secondaryText && (
 							<div
 								className={cn(
 									"mt-0.5 truncate text-xs",
-									isSelected
-										? "text-primary-foreground"
-										: "text-muted-foreground",
+									isSelected ? "text-foreground/70" : "text-muted-foreground",
 								)}
 							>
 								{secondaryText}
@@ -97,9 +101,7 @@ export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps
 							<div
 								className={cn(
 									"mt-0.5 truncate text-xs",
-									isSelected
-										? "text-primary-foreground"
-										: "text-muted-foreground",
+									isSelected ? "text-foreground/70" : "text-muted-foreground",
 								)}
 							>
 								{tertiaryText}

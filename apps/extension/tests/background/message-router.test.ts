@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { routeRuntimeMessage } from "../../src/background/message-router";
+import { routeRuntimeMessage } from "../../src/background/router";
 
 const originalChrome = globalThis.chrome;
 

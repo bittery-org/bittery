@@ -129,6 +129,7 @@ export interface DecryptedItem extends DecryptedItemData {
 }
 
 export interface ItemAccountContext {
+	accountId?: string;
 	email?: string;
 	userId?: string;
 	name?: string;
@@ -138,6 +139,7 @@ export interface ItemAccountContext {
 }
 
 export interface ItemContextMetadata {
+	accountId?: string;
 	accountEmail?: string;
 	serverUrl?: string;
 	account?: ItemAccountContext | null;

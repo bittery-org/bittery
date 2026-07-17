@@ -55,17 +55,6 @@ pub struct StorageObjectHead {
     pub content_type: Option<String>,
 }
 
-pub fn public_url(key: String) -> String {
-    let endpoint = env::var("BITTERY_STORAGE_PUBLIC_URL")
-        .or_else(|_| env::var("BITTERY_STORAGE_ENDPOINT"))
-        .unwrap_or_default();
-    if endpoint.trim().is_empty() {
-        key
-    } else {
-        format!("{}/{}", endpoint.trim_end_matches('/'), key)
-    }
-}
-
 pub fn public_asset_url(key: &str) -> Option<String> {
     let normalized_key = key.trim().trim_start_matches('/');
     if normalized_key.is_empty()

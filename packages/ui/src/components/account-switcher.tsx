@@ -14,14 +14,13 @@
 import {
 	CheckIcon,
 	LockIcon,
-	LockOpenIcon,
-	LogOutIcon,
 	PlusIcon,
 	SettingsIcon,
 	SmartphoneIcon,
 	UsersIcon,
 } from "lucide-react";
 import type React from "react";
+import { useState } from "react";
 import { cn } from "../lib/utils.js";
 import { Avatar, AvatarFallback, AvatarImage } from "./avatar.js";
 import { Button } from "./button.js";
@@ -35,6 +34,7 @@ import {
 } from "./dropdown-menu.js";
 
 export interface AccountSwitcherAccount {
+	accountId: string;
 	email: string;
 	name: string;
 	userId: string;
@@ -46,32 +46,28 @@ export interface AccountSwitcherLabels {
 	accountsLabel?: string;
 	noAccountLabel?: string;
 	noAccountsAdded?: string;
-	allAccountsLabel?: string;
-	unlockedCount?: (params: { count: number }) => string;
-	viewItemsFromAccounts?: (params: { count: number }) => string;
 	manageAccountsLabel?: string;
 	addAccountLabel?: string;
 	setupAnotherDeviceLabel?: string;
 	settingsLabel?: string;
 	lockAllAccountsLabel?: string;
-	removeAccountLabel?: string;
 }
 
 export interface AccountSwitcherProps {
 	/** List of all accounts */
 	accounts: AccountSwitcherAccount[];
 
-	/** Currently active account email (or "all" for All Accounts mode) */
-	activeEmail: string | null;
+	/** Currently active account ID */
+	activeAccountId: string | null;
 
-	/** List of unlocked account emails (with MUKs in memory) */
-	unlockedEmails: string[];
+	/** List of unlocked account IDs (with MUKs in memory) */
+	unlockedAccountIds: string[];
 
 	/** Loading state */
 	isLoading?: boolean;
 
 	/** Callback when user selects an account */
-	onAccountSelect: (email: string) => void;
+	onAccountSelect: (accountId: string) => void;
 
 	/** Optional: callback when user clicks "Add Account" */
 	onAddAccount?: () => void;
@@ -91,12 +87,6 @@ export interface AccountSwitcherProps {
 	/** Optional: show "Add Account" option */
 	showAddAccount?: boolean;
 
-	/** Optional: show "All Accounts" option */
-	showAllAccountsOption?: boolean;
-
-	/** Optional: callback when user selects "All Accounts" */
-	onAllAccountsSelect?: () => void;
-
 	/** Optional: show "Settings" option */
 	showSettings?: boolean;
 
@@ -109,12 +99,6 @@ export interface AccountSwitcherProps {
 	/** Optional: callback when user clicks "Set up another device" */
 	onSetupAnotherDevice?: () => void;
 
-	/** Optional: show "Remove Account" option */
-	showRemoveAccount?: boolean;
-
-	/** Optional: callback when user clicks "Remove Account" */
-	onRemoveAccount?: (email: string) => void;
-
 	/** Optional: custom trigger element */
 	trigger?: React.ReactNode;
 
@@ -125,16 +109,33 @@ export interface AccountSwitcherProps {
 	labels?: AccountSwitcherLabels;
 }
 
+// Same initials + gradient treatment as the desktop trigger avatar
+// (apps/desktop AccountAvatar) so the open menu matches the trigger.
+function getAccountInitials(account: AccountSwitcherAccount): string {
+	const source = account.teamName || account.name;
+	if (source) {
+		const parts = source.trim().split(/\s+/);
+		if (parts.length >= 2) {
+			return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+		}
+		return source.slice(0, 2).toUpperCase();
+	}
+	return account.email.slice(0, 2).toUpperCase();
+}
+
+const avatarFallbackClassName =
+	"bg-linear-to-br from-primary to-primary-deep font-semibold text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]";
+
 /**
  * Account switcher dropdown for multi-account platforms.
  *
  * @example
  * ```tsx
  * <AccountSwitcher
- *   accounts={accounts.data ?? []}
- *   activeEmail={activeEmail.data}
- *   unlockedEmails={unlockedEmails.data ?? []}
- *   onAccountSelect={(email) => switchAccount.mutate(email)}
+ *   accounts={accounts}
+ *   activeAccountId={activeAccountId}
+ *   unlockedAccountIds={unlockedAccountIds}
+ *   onAccountSelect={(accountId) => switchAccount.mutate(accountId)}
  *   onAddAccount={() => navigate('/login?add=true')}
  *   onLockAll={() => lockAllAccounts.mutate()}
  * />
@@ -142,8 +143,8 @@ export interface AccountSwitcherProps {
  */
 export function AccountSwitcher({
 	accounts,
-	activeEmail,
-	unlockedEmails,
+	activeAccountId,
+	unlockedAccountIds,
 	isLoading = false,
 	onAccountSelect,
 	onAddAccount,
@@ -152,45 +153,27 @@ export function AccountSwitcher({
 	showManageAccounts = false,
 	onManageAccounts,
 	showAddAccount = true,
-	showAllAccountsOption = false,
-	onAllAccountsSelect,
 	showSettings = false,
 	onSettings,
 	showSetupAnotherDevice = false,
 	onSetupAnotherDevice,
-	showRemoveAccount = false,
-	onRemoveAccount,
 	trigger,
 	align = "start",
 	labels,
 }: AccountSwitcherProps) {
-	const activeAccount = accounts.find((a) => a.email === activeEmail);
-	const isAllAccountsMode = activeEmail === "all";
+	const [open, setOpen] = useState(false);
+	const activeAccount = accounts.find((a) => a.accountId === activeAccountId);
 	const resolvedLabels: Required<AccountSwitcherLabels> = {
 		accountsLabel: "Accounts",
 		noAccountLabel: "No account",
 		noAccountsAdded: "No accounts added",
-		allAccountsLabel: "All Accounts",
-		unlockedCount: ({ count }) =>
-			count === 1 ? `${count} unlocked` : `${count} unlocked`,
-		viewItemsFromAccounts: ({ count }) =>
-			count === 1
-				? `View items from ${count} account`
-				: `View items from ${count} accounts`,
 		manageAccountsLabel: "Manage Accounts",
 		addAccountLabel: "Add Account",
 		setupAnotherDeviceLabel: "Set up another device",
 		settingsLabel: "Settings",
 		lockAllAccountsLabel: "Lock All Accounts",
-		removeAccountLabel: "Remove Account",
 		...labels,
 	};
-	const showAllAccountsAction = Boolean(
-		showAllAccountsOption &&
-			onAllAccountsSelect &&
-			accounts.length > 1 &&
-			unlockedEmails.length > 1,
-	);
 	const showManageAccountsAction = Boolean(
 		showManageAccounts && onManageAccounts,
 	);
@@ -200,139 +183,134 @@ export function AccountSwitcher({
 	);
 	const showSettingsAction = Boolean(showSettings && onSettings);
 	const showLockAllAction = Boolean(
-		showLockAll && accounts.length > 0 && unlockedEmails.length > 0,
-	);
-	const showRemoveAccountAction = Boolean(
-		showRemoveAccount &&
-			onRemoveAccount &&
-			activeAccount &&
-			!isAllAccountsMode,
+		showLockAll && accounts.length > 0 && unlockedAccountIds.length > 0,
 	);
 	const hasPrimaryActions =
-		showAllAccountsAction ||
 		showManageAccountsAction ||
 		showAddAccountAction ||
 		showSetupAnotherDeviceAction ||
 		showSettingsAction ||
 		showLockAllAction;
 	const hasActionsBeforeLockAll =
-		showAllAccountsAction ||
 		showManageAccountsAction ||
 		showAddAccountAction ||
 		showSetupAnotherDeviceAction ||
 		showSettingsAction;
 
-	// Default trigger: Avatar with email or "All Accounts"
+	// Default trigger: Avatar with email
 	const defaultTrigger = (
 		<Button
 			variant="ghost"
-			className="flex items-center gap-2 px-2 hover:bg-accent"
+			className="flex items-center gap-2 px-2 text-foreground hover:bg-accent"
 			disabled={isLoading}
 		>
-			{isAllAccountsMode ? (
-				<>
-					<div className="flex size-8 items-center justify-center rounded-full bg-primary/10">
-						<UsersIcon className="size-4 text-primary" />
-					</div>
-					<div className="flex flex-col items-start text-left">
-						<span className="font-medium text-sm">
-							{resolvedLabels.allAccountsLabel}
-						</span>
-						<span className="text-muted-foreground text-xs">
-							{resolvedLabels.unlockedCount({
-								count: unlockedEmails.length,
-							})}
-						</span>
-					</div>
-				</>
-			) : (
-				<>
-					<Avatar className="size-8">
-						{activeAccount?.teamAvatarUrl && (
-							<AvatarImage
-								src={activeAccount.teamAvatarUrl}
-								alt={activeAccount.teamName || activeAccount.name}
-							/>
-						)}
-						<AvatarFallback className="text-xs">
-							{activeAccount?.email.slice(0, 2).toUpperCase() ?? "?"}
-						</AvatarFallback>
-					</Avatar>
-					<div className="flex flex-col items-start text-left">
-						<span className="font-medium text-sm">
-							{activeAccount?.name ||
-								activeAccount?.email ||
-								resolvedLabels.noAccountLabel}
-						</span>
-						{activeAccount && (
-							<span className="text-muted-foreground text-xs">
-								{activeAccount.email}
-							</span>
-						)}
-					</div>
-				</>
-			)}
+			<Avatar className="size-8 rounded-md">
+				{activeAccount?.teamAvatarUrl && (
+					<AvatarImage
+						src={activeAccount.teamAvatarUrl}
+						alt={activeAccount.teamName || activeAccount.name}
+					/>
+				)}
+				<AvatarFallback
+					className={cn("rounded-md text-xs", avatarFallbackClassName)}
+				>
+					{activeAccount ? getAccountInitials(activeAccount) : "?"}
+				</AvatarFallback>
+			</Avatar>
+			<div className="flex flex-col items-start text-left">
+				<span className="font-medium text-sm">
+					{activeAccount?.name ||
+						activeAccount?.email ||
+						resolvedLabels.noAccountLabel}
+				</span>
+				{activeAccount && (
+					<span className="text-muted-foreground text-xs">
+						{activeAccount.email}
+					</span>
+				)}
+			</div>
 		</Button>
 	);
 
 	return (
-		<DropdownMenu>
+		<DropdownMenu open={open} onOpenChange={setOpen}>
 			<DropdownMenuTrigger asChild>
 				{trigger || defaultTrigger}
 			</DropdownMenuTrigger>
 
-			<DropdownMenuContent align={align} className="w-[280px]">
-				<DropdownMenuLabel className="text-muted-foreground text-xs">
+			<DropdownMenuContent
+				align={align}
+				className="relative w-[272px] overflow-hidden"
+			>
+				{/* Brand moment: faint purple gradient wash at the top of the menu */}
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-0 top-0 h-16 bg-linear-to-b from-primary-deep/10 to-transparent dark:from-primary-deep/20"
+				/>
+				<div
+					aria-hidden
+					className="pointer-events-none absolute top-0 right-[8%] left-[8%] h-px bg-linear-to-r from-transparent via-primary/55 to-transparent"
+				/>
+
+				<DropdownMenuLabel className="relative font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
 					{resolvedLabels.accountsLabel}
 				</DropdownMenuLabel>
 
 				{/* Account list */}
 				{accounts.map((account) => {
-					const isActive = account.email === activeEmail;
-					const isUnlocked = unlockedEmails.includes(account.email);
+					const isActive = account.accountId === activeAccountId;
+					const isUnlocked = unlockedAccountIds.includes(account.accountId);
+					const displayName =
+						account.teamName || account.name || account.email.split("@")[0];
 
 					return (
 						<DropdownMenuItem
-							key={account.email}
-							onClick={() => onAccountSelect(account.email)}
-							className={cn(
-								"flex cursor-pointer items-center gap-2 py-1.5",
-								isActive && "bg-accent",
-							)}
+							key={account.accountId}
+							onClick={() => onAccountSelect(account.accountId)}
+							className="relative flex cursor-pointer items-center gap-2.5 py-1.5"
 						>
-							<Avatar className="size-5">
+							<Avatar className="size-6 rounded-md">
 								{account.teamAvatarUrl && (
 									<AvatarImage
 										src={account.teamAvatarUrl}
 										alt={account.teamName || account.name}
 									/>
 								)}
-								<AvatarFallback className="text-[10px]">
-									{account.email.slice(0, 2).toUpperCase()}
+								<AvatarFallback
+									className={cn(
+										"rounded-md text-[10px]",
+										avatarFallbackClassName,
+									)}
+								>
+									{getAccountInitials(account)}
 								</AvatarFallback>
 							</Avatar>
 
 							<div className="flex min-w-0 flex-1 flex-col">
 								<div className="flex items-center gap-1.5">
-									<span className="truncate font-medium text-xs">
-										{account.email}
+									<span className="truncate font-medium text-sm leading-tight">
+										{displayName}
 									</span>
 									{isActive && (
-										<CheckIcon className="size-3 shrink-0 text-primary" />
+										<CheckIcon className="size-3.5 shrink-0 text-primary drop-shadow-[0_0_4px_var(--color-primary)]" />
 									)}
 								</div>
-								{account.teamName && (
-									<span className="truncate text-[10px] text-muted-foreground">
-										{account.teamName}
-									</span>
-								)}
+								<span className="truncate text-[11px] text-muted-foreground leading-tight">
+									{account.email}
+								</span>
 							</div>
 
-							{isUnlocked ? (
-								<LockOpenIcon className="size-3.5 shrink-0 text-green-600" />
-							) : (
-								<LockIcon className="size-3.5 shrink-0 text-muted-foreground" />
-							)}
+							{/* Quiet lock-state indicator */}
+							<span
+								aria-hidden
+								className={cn(
+									"size-1.5 shrink-0 rounded-full",
+									isUnlocked
+										? "bg-emerald-400 shadow-[0_0_6px_oklch(0.72_0.14_160/0.6)]"
+										: "bg-muted-foreground/50",
+								)}
+							/>
+
 						</DropdownMenuItem>
 					);
 				})}
@@ -345,39 +323,6 @@ export function AccountSwitcher({
 				)}
 
 				{hasPrimaryActions && <DropdownMenuSeparator />}
-
-				{/* All Accounts option (optional) */}
-				{showAllAccountsAction && (
-						<>
-							<DropdownMenuItem
-								onClick={onAllAccountsSelect!}
-								className={cn(
-									"flex cursor-pointer items-center gap-2",
-									isAllAccountsMode && "bg-accent",
-								)}
-							>
-								<div className="flex size-6 items-center justify-center rounded-full bg-primary/10">
-									<UsersIcon className="size-4 text-primary" />
-								</div>
-								<div className="flex min-w-0 flex-1 flex-col gap-0.5">
-									<div className="flex items-center gap-1.5">
-										<span className="font-medium text-sm">
-											{resolvedLabels.allAccountsLabel}
-										</span>
-										{isAllAccountsMode && (
-											<CheckIcon className="size-3 shrink-0 text-primary" />
-										)}
-									</div>
-									<span className="text-muted-foreground text-xs">
-										{resolvedLabels.viewItemsFromAccounts({
-											count: unlockedEmails.length,
-										})}
-									</span>
-								</div>
-							</DropdownMenuItem>
-							<DropdownMenuSeparator />
-						</>
-					)}
 
 				{/* Manage Accounts (optional) */}
 				{showManageAccountsAction && (
@@ -444,21 +389,6 @@ export function AccountSwitcher({
 					</DropdownMenuItem>
 				)}
 
-				{/* Remove Account (optional) */}
-				{showRemoveAccountAction && (
-						<>
-							<DropdownMenuSeparator />
-							<DropdownMenuItem
-								onClick={() => onRemoveAccount!(activeAccount!.email)}
-								className="flex cursor-pointer items-center gap-2 text-destructive focus:text-destructive"
-							>
-								<LogOutIcon className="size-4" />
-								<span className="text-sm">
-									{resolvedLabels.removeAccountLabel}
-								</span>
-							</DropdownMenuItem>
-						</>
-					)}
 			</DropdownMenuContent>
 		</DropdownMenu>
 	);

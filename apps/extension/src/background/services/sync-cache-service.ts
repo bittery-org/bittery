@@ -35,7 +35,7 @@ export type SyncConnectionContext = {
 	token: string;
 };
 
-type ActiveAccount = { type: "single"; email: string } | { type: "all" } | null;
+type ActiveAccount = { type: "single"; accountId: string } | null;
 
 type VaultKeyLike = {
 	vaultId: string;
@@ -44,12 +44,17 @@ type VaultKeyLike = {
 export interface SyncCacheStorage {
 	supportsItemCache: boolean;
 	getActiveAccount: () => Promise<ActiveAccount>;
-	getAccountsList: () => Promise<Array<{ email: string; userId?: string }>>;
-	getAuthToken: (email?: string) => Promise<string | null>;
-	storeAuthToken: (token: string, email?: string) => Promise<void>;
-	getServerUrl: (email?: string) => Promise<string | null>;
-	getVaultKeys: (email?: string) => Promise<VaultKeyLike[] | null>;
-	clearItemCache?: (email?: string) => Promise<void>;
+	getAccountsList: () => Promise<
+		Array<{ accountId: string; email: string; userId?: string }>
+	>;
+	getAuthToken: (accountId?: string) => Promise<string | null>;
+	storeAuthToken: (token: string, accountId?: string) => Promise<void>;
+	getServerUrl: (accountId?: string) => Promise<string | null>;
+	getVaultKeys: (accountId?: string) => Promise<VaultKeyLike[] | null>;
+	clearItemCache?: (accountId?: string) => Promise<void>;
+	getAccountMetadata?: (
+		accountId: string,
+	) => Promise<{ email?: string } | null | undefined>;
 }
 
 export interface SyncCacheDesktopClient {
@@ -87,7 +92,7 @@ export interface SyncCacheServiceDeps {
 	) => Promise<void>;
 	handleTravelModeSync?: (
 		event: SyncEvent,
-		email: string,
+		accountId: string,
 		accountClient: SyncEventQueryClient | null,
 	) => Promise<void>;
 	logger: Pick<Console, "debug" | "info" | "warn" | "error">;
@@ -101,11 +106,11 @@ const defaultDeps: SyncCacheServiceDeps = {
 	createAccountClient: (token, serverUrl) =>
 		createAccountRpcClient(token, serverUrl) as unknown as SyncEventQueryClient,
 	deltaSync: performDeltaSync,
-	handleTravelModeSync: async (event, email, accountClient) => {
+	handleTravelModeSync: async (event, accountId, accountClient) => {
 		const accounts = new AccountResolver(storage);
 		await handleTravelModeSyncEvent(
 			event,
-			email,
+			accountId,
 			storage,
 			core.vaultCoordinator as VaultRepositoryCoordinator,
 			accountClient
@@ -123,24 +128,23 @@ function normalizeEmail(email: string): string {
 	return email.trim().toLowerCase();
 }
 
-function uniqueEmails(emails: string[]): string[] {
-	return Array.from(new Set(emails.map(normalizeEmail)));
+function uniqueAccountIds(accountIds: string[]): string[] {
+	return Array.from(new Set(accountIds));
 }
 
 function buildOrderedCandidates(
-	preferredEmail: string | null,
-	allEmails: string[],
+	preferredAccountId: string | null,
+	allAccountIds: string[],
 ): string[] {
-	const uniqueOrdered = uniqueEmails(allEmails);
-	if (!preferredEmail) {
+	const uniqueOrdered = uniqueAccountIds(allAccountIds);
+	if (!preferredAccountId) {
 		return uniqueOrdered;
 	}
 
-	const normalizedPreferred = normalizeEmail(preferredEmail);
 	const withoutPreferred = uniqueOrdered.filter(
-		(email) => email !== normalizedPreferred,
+		(accountId) => accountId !== preferredAccountId,
 	);
-	return [normalizedPreferred, ...withoutPreferred];
+	return [preferredAccountId, ...withoutPreferred];
 }
 
 function shouldClearDesktopCacheForEvent(event: SyncEvent): boolean {
@@ -150,7 +154,7 @@ function shouldClearDesktopCacheForEvent(event: SyncEvent): boolean {
 export interface SyncCacheService {
 	resolveConnectionContext: () => Promise<SyncConnectionContext | null>;
 	getClientForEmail: (email?: string | null) => Promise<SyncEventQueryClient>;
-	resolveCandidateEmailsForEvent: (event: SyncEvent) => Promise<string[]>;
+	resolveCandidateAccountIdsForEvent: (event: SyncEvent) => Promise<string[]>;
 	applyDeltaSyncForEvent: (event: SyncEvent) => Promise<void>;
 	clearItemCachesForKnownAccounts: () => Promise<void>;
 }
@@ -163,48 +167,64 @@ export function createSyncCacheService(
 		...overrides,
 	};
 
-	async function clearItemCacheForEmail(email?: string): Promise<void> {
-		await deps.storage.clearItemCache?.(email);
+	async function clearItemCacheForAccountId(accountId?: string): Promise<void> {
+		await deps.storage.clearItemCache?.(accountId);
 		if (!deps.itemCache.clearItemCache) {
 			return;
 		}
 		try {
-			await deps.itemCache.clearItemCache(email);
+			await deps.itemCache.clearItemCache(accountId);
 		} catch (error) {
 			deps.logger.debug(
-				`[sync-cache-service] Item cache clear skipped for ${email ?? "global"}: ${String(error)}`,
+				`[sync-cache-service] Item cache clear skipped for ${accountId ?? "global"}: ${String(error)}`,
 			);
 		}
 	}
 
-	async function resolveActiveSingleEmail(): Promise<string | null> {
+	async function resolveActiveSingleAccountId(): Promise<string | null> {
 		const active = await deps.storage.getActiveAccount();
 		if (!active || active.type !== "single") {
 			return null;
 		}
-		return normalizeEmail(active.email);
+		return active.accountId;
 	}
 
-	async function getAllKnownEmails(): Promise<string[]> {
+	async function getAllKnownAccountIds(): Promise<string[]> {
 		const accounts = await deps.storage.getAccountsList();
-		return uniqueEmails(accounts.map((account) => account.email));
+		return uniqueAccountIds(accounts.map((account) => account.accountId));
 	}
 
-	async function getAuthTokenForEmail(email: string): Promise<string | null> {
-		const normalizedEmail = normalizeEmail(email);
+	async function resolveEmailForAccountId(
+		accountId: string,
+	): Promise<string | undefined> {
+		const metadata = await deps.storage.getAccountMetadata?.(accountId);
+		if (metadata?.email) {
+			return metadata.email;
+		}
 
-		const localToken = await deps.storage.getAuthToken(normalizedEmail);
+		const accounts = await deps.storage.getAccountsList();
+		return accounts.find((account) => account.accountId === accountId)?.email;
+	}
+
+	async function getAuthTokenForAccountId(
+		accountId: string,
+	): Promise<string | null> {
+		const localToken = await deps.storage.getAuthToken(accountId);
 		if (localToken) {
 			return localToken;
 		}
 
 		try {
-			const desktopToken =
-				await deps.desktopClient.getAuthToken(normalizedEmail);
+			const email = await resolveEmailForAccountId(accountId);
+			if (!email) {
+				return null;
+			}
+
+			const desktopToken = await deps.desktopClient.getAuthToken(accountId);
 			if (!desktopToken) {
 				return null;
 			}
-			await deps.storage.storeAuthToken(desktopToken, normalizedEmail);
+			await deps.storage.storeAuthToken(desktopToken, accountId);
 			return desktopToken;
 		} catch {
 			// Desktop bridge failures should not block fallback to other accounts.
@@ -212,11 +232,11 @@ export function createSyncCacheService(
 		}
 	}
 
-	async function getServerUrlForEmail(email?: string | null): Promise<string> {
-		if (email) {
-			const accountScoped = await deps.storage.getServerUrl(
-				normalizeEmail(email),
-			);
+	async function getServerUrlForAccountId(
+		accountId?: string | null,
+	): Promise<string> {
+		if (accountId) {
+			const accountScoped = await deps.storage.getServerUrl(accountId);
 			if (accountScoped) {
 				return accountScoped;
 			}
@@ -226,36 +246,36 @@ export function createSyncCacheService(
 		return globalServerUrl ?? DEFAULT_SERVER_URL;
 	}
 
-	async function getAccountClientForEmail(
-		email: string,
+	async function getAccountClientForAccountId(
+		accountId: string,
 	): Promise<SyncEventQueryClient | null> {
-		const normalizedEmail = normalizeEmail(email);
-		const token = await getAuthTokenForEmail(normalizedEmail);
+		const token = await getAuthTokenForAccountId(accountId);
 		if (!token) {
 			return null;
 		}
 
-		const serverUrl = await getServerUrlForEmail(normalizedEmail);
+		const serverUrl = await getServerUrlForAccountId(accountId);
 		return deps.createAccountClient(token, serverUrl);
 	}
 
 	async function resolveConnectionContext(): Promise<SyncConnectionContext | null> {
-		const activeEmail = await resolveActiveSingleEmail();
-		const knownEmails = await getAllKnownEmails();
-		const candidates = buildOrderedCandidates(activeEmail, knownEmails);
+		const activeAccountId = await resolveActiveSingleAccountId();
+		const knownAccountIds = await getAllKnownAccountIds();
+		const candidates = buildOrderedCandidates(activeAccountId, knownAccountIds);
 
-		for (const email of candidates) {
-			const token = await getAuthTokenForEmail(email);
+		for (const accountId of candidates) {
+			const token = await getAuthTokenForAccountId(accountId);
 			if (!token) {
 				continue;
 			}
 
-			const serverUrl = await getServerUrlForEmail(email);
+			const serverUrl = await getServerUrlForAccountId(accountId);
+			const email = await resolveEmailForAccountId(accountId);
 			deps.logger.info(
-				`[sync-cache-service] Selected account-scoped sync context: ${email}`,
+				`[sync-cache-service] Selected account-scoped sync context: ${accountId}`,
 			);
 			return {
-				email,
+				email: email ? normalizeEmail(email) : null,
 				serverUrl,
 				token,
 			};
@@ -270,7 +290,7 @@ export function createSyncCacheService(
 			return null;
 		}
 
-		const fallbackServerUrl = await getServerUrlForEmail(null);
+		const fallbackServerUrl = await getServerUrlForAccountId(null);
 		deps.logger.info(
 			"[sync-cache-service] Using fallback sync context without explicit account scope",
 		);
@@ -287,20 +307,30 @@ export function createSyncCacheService(
 		if (!email) {
 			return deps.defaultClient;
 		}
-		const client = await getAccountClientForEmail(email);
+
+		const normalizedEmail = normalizeEmail(email);
+		const accounts = await deps.storage.getAccountsList();
+		const matchedAccount = accounts.find(
+			(account) => normalizeEmail(account.email) === normalizedEmail,
+		);
+		if (!matchedAccount) {
+			return deps.defaultClient;
+		}
+
+		const client = await getAccountClientForAccountId(matchedAccount.accountId);
 		return client ?? deps.defaultClient;
 	}
 
-	async function resolveCandidateEmailsForEvent(
+	async function resolveCandidateAccountIdsForEvent(
 		event: SyncEvent,
 	): Promise<string[]> {
-		const activeSingleEmail = await resolveActiveSingleEmail();
-		if (activeSingleEmail) {
-			return [activeSingleEmail];
+		const activeSingleAccountId = await resolveActiveSingleAccountId();
+		if (activeSingleAccountId) {
+			return [activeSingleAccountId];
 		}
 
-		const allEmails = await getAllKnownEmails();
-		if (allEmails.length === 0) {
+		const allAccountIds = await getAllKnownAccountIds();
+		if (allAccountIds.length === 0) {
 			return [];
 		}
 
@@ -308,23 +338,23 @@ export function createSyncCacheService(
 			event.vaultId ??
 			(event.type === "vault_access_revoked" ? event.entityId : null);
 		if (!effectiveVaultId) {
-			return allEmails;
+			return allAccountIds;
 		}
 
 		const matched: string[] = [];
-		for (const email of allEmails) {
-			const vaultKeys = await deps.storage.getVaultKeys(email);
+		for (const accountId of allAccountIds) {
+			const vaultKeys = await deps.storage.getVaultKeys(accountId);
 			if (
 				vaultKeys?.some((vaultKey) => vaultKey.vaultId === effectiveVaultId)
 			) {
-				matched.push(email);
+				matched.push(accountId);
 			}
 		}
 
-		return matched.length > 0 ? matched : allEmails;
+		return matched.length > 0 ? matched : allAccountIds;
 	}
 
-	async function resolveTravelModeAccountEmail(
+	async function resolveTravelModeAccountId(
 		event: SyncEvent,
 	): Promise<string | null> {
 		const ownerUserId = event.userId || event.entityId;
@@ -343,7 +373,7 @@ export function createSyncCacheService(
 					`[sync-cache-service] Multiple accounts matched travel_mode_updated user ${ownerUserId}`,
 				);
 			}
-			return normalizeEmail(firstMatch.email);
+			return firstMatch.accountId;
 		}
 
 		deps.logger.warn(
@@ -352,7 +382,7 @@ export function createSyncCacheService(
 
 		const onlyAccount = accounts.at(0);
 		if (accounts.length === 1 && onlyAccount) {
-			return normalizeEmail(onlyAccount.email);
+			return onlyAccount.accountId;
 		}
 
 		const metadataEmail =
@@ -364,7 +394,7 @@ export function createSyncCacheService(
 			);
 			const onlyEmailMatch = emailMatches.at(0);
 			if (emailMatches.length === 1 && onlyEmailMatch) {
-				return normalizeEmail(onlyEmailMatch.email);
+				return onlyEmailMatch.accountId;
 			}
 		}
 
@@ -373,36 +403,36 @@ export function createSyncCacheService(
 
 	async function applyDeltaSyncForEvent(event: SyncEvent): Promise<void> {
 		if (event.type === "travel_mode_updated") {
-			const accountEmail = await resolveTravelModeAccountEmail(event);
-			if (!accountEmail) {
+			const accountId = await resolveTravelModeAccountId(event);
+			if (!accountId) {
 				return;
 			}
 
 			deps.logger.debug(
-				`[sync-cache-service] Applying travel_mode_updated for account: ${accountEmail}`,
+				`[sync-cache-service] Applying travel_mode_updated for account: ${accountId}`,
 			);
 
 			try {
-				const accountClient = await getAccountClientForEmail(accountEmail);
-				await deps.handleTravelModeSync?.(event, accountEmail, accountClient);
+				const accountClient = await getAccountClientForAccountId(accountId);
+				await deps.handleTravelModeSync?.(event, accountId, accountClient);
 			} catch (error) {
 				deps.logger.warn(
-					`[sync-cache-service] Travel mode sync failed for ${accountEmail}`,
+					`[sync-cache-service] Travel mode sync failed for ${accountId}`,
 					error,
 				);
 			}
 			return;
 		}
 
-		const candidateEmails = await resolveCandidateEmailsForEvent(event);
+		const candidateAccountIds = await resolveCandidateAccountIdsForEvent(event);
 
 		deps.logger.debug(
 			`[sync-cache-service] Applying ${event.type} for candidate accounts: ${
-				candidateEmails.join(", ") || "(global)"
+				candidateAccountIds.join(", ") || "(global)"
 			}`,
 		);
 
-		if (candidateEmails.length === 0) {
+		if (candidateAccountIds.length === 0) {
 			await deps.deltaSync(deps.defaultClient, deps.itemCache, event);
 			if (shouldClearDesktopCacheForEvent(event)) {
 				deps.desktopClient.clearCache();
@@ -411,21 +441,27 @@ export function createSyncCacheService(
 		}
 
 		let applied = 0;
-		for (const email of candidateEmails) {
+		for (const accountId of candidateAccountIds) {
 			try {
-				const accountClient = await getAccountClientForEmail(email);
+				const accountClient = await getAccountClientForAccountId(accountId);
 				if (!accountClient) {
 					deps.logger.debug(
-						`[sync-cache-service] Skipping ${email} (no token available)`,
+						`[sync-cache-service] Skipping ${accountId} (no token available)`,
 					);
 					continue;
 				}
 
-				await deps.deltaSync(accountClient, deps.itemCache, event, email);
+				const email = await resolveEmailForAccountId(accountId);
+				await deps.deltaSync(
+					accountClient,
+					deps.itemCache,
+					event,
+					email ? normalizeEmail(email) : undefined,
+				);
 				applied++;
 			} catch (error) {
 				deps.logger.warn(
-					`[sync-cache-service] Delta sync failed for ${email} (${event.type})`,
+					`[sync-cache-service] Delta sync failed for ${accountId} (${event.type})`,
 					error,
 				);
 			}
@@ -437,7 +473,9 @@ export function createSyncCacheService(
 			);
 			if (deps.storage.clearItemCache || deps.itemCache.clearItemCache) {
 				await Promise.all(
-					candidateEmails.map((email) => clearItemCacheForEmail(email)),
+					candidateAccountIds.map((accountId) =>
+						clearItemCacheForAccountId(accountId),
+					),
 				);
 			}
 			await deps.deltaSync(deps.defaultClient, deps.itemCache, event);
@@ -453,22 +491,27 @@ export function createSyncCacheService(
 			return;
 		}
 
-		const activeSingleEmail = await resolveActiveSingleEmail();
-		const allEmails = await getAllKnownEmails();
-		const candidates = buildOrderedCandidates(activeSingleEmail, allEmails);
+		const activeSingleAccountId = await resolveActiveSingleAccountId();
+		const allAccountIds = await getAllKnownAccountIds();
+		const candidates = buildOrderedCandidates(
+			activeSingleAccountId,
+			allAccountIds,
+		);
 
 		if (candidates.length === 0) {
-			await clearItemCacheForEmail();
+			await clearItemCacheForAccountId();
 			return;
 		}
 
-		await Promise.all(candidates.map((email) => clearItemCacheForEmail(email)));
+		await Promise.all(
+			candidates.map((accountId) => clearItemCacheForAccountId(accountId)),
+		);
 	}
 
 	return {
 		resolveConnectionContext,
 		getClientForEmail,
-		resolveCandidateEmailsForEvent,
+		resolveCandidateAccountIdsForEvent,
 		applyDeltaSyncForEvent,
 		clearItemCachesForKnownAccounts,
 	};

@@ -6,7 +6,7 @@ import {
 	AccordionTrigger,
 } from "@/components/ui/accordion";
 
-const faqs = [
+export const faqs = [
 	{
 		question: "How much does Bittery cost?",
 		answer:
@@ -33,9 +33,9 @@ const faqs = [
 			"Your data is encrypted on your device before it ever reaches our servers. We use end-to-end encryption, which means even our team can't read your passwords. The cloud just stores encrypted blobs — useless without your master password and Secret Key.",
 	},
 	{
-		question: "Can I use Bittery offline?",
+		question: "Do I need an internet connection to use Bittery?",
 		answer:
-			"Yes. Your vault is stored locally on each device, so you can access and use your passwords without an internet connection. Any changes you make offline will automatically sync across your devices when you're back online.",
+			"Yes — Bittery needs a connection to unlock and sync your vault. Decryption always happens on your device, never on our servers, and any change you make shows up on your other devices within seconds.",
 	},
 ];
 

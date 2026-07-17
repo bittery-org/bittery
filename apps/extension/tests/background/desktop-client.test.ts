@@ -58,7 +58,7 @@ describe("desktop-client native transport", () => {
 				type: "DESKTOP_STATUS" as const,
 				available: true,
 				locked: false,
-				unlockedAccounts: ["alice@example.com"],
+				unlockedAccounts: ["account-alice"],
 				timestamp: 123,
 				autolockTimeoutMs: 456,
 			}),
@@ -71,7 +71,7 @@ describe("desktop-client native transport", () => {
 		expect(status).toEqual({
 			available: true,
 			locked: false,
-			unlockedAccounts: ["alice@example.com"],
+			unlockedAccounts: ["account-alice"],
 			timestamp: 123,
 			autolockTimeoutMs: 456,
 		});
@@ -85,6 +85,7 @@ describe("desktop-client native transport", () => {
 				if (message.type === "GET_DESKTOP_AUTH_TOKEN") {
 					return {
 						type: "DESKTOP_AUTH_TOKEN" as const,
+						accountId: "account-alice",
 						email: "alice@example.com",
 						authToken: "token-1",
 					};
@@ -113,10 +114,10 @@ describe("desktop-client native transport", () => {
 
 		const client = new DesktopClient({ nativeClient });
 
-		await client.getAuthToken("alice@example.com");
-		await client.getAuthToken("alice@example.com");
-		await client.getItemsSnapshot(["alice@example.com"]);
-		await client.getItemsSnapshot(["alice@example.com"]);
+		await client.getAuthToken("account-alice");
+		await client.getAuthToken("account-alice");
+		await client.getItemsSnapshot(["account-alice"]);
+		await client.getItemsSnapshot(["account-alice"]);
 
 		expect(requests).toEqual([
 			"GET_DESKTOP_AUTH_TOKEN",
@@ -136,7 +137,7 @@ describe("desktop-client native transport", () => {
 		const client = new DesktopClient({ nativeClient });
 
 		await expect(
-			client.getItemsSnapshot(["alice@example.com"]),
+			client.getItemsSnapshot(["account-alice"]),
 		).resolves.toBeNull();
 	});
 });

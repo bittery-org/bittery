@@ -24,6 +24,7 @@ export interface MoveItemInput {
 	targetVaultId: string;
 	category: ItemCategory;
 	decryptedData: DecryptedItemData;
+	targetAccountId?: string;
 	targetAccountEmail?: string;
 }
 
@@ -41,13 +42,15 @@ export function useMoveItem() {
 			);
 			const targetAccountHint =
 				input.targetAccountEmail ?? sourceRepoTargetVault?.accountEmail;
-			const { accountEmail: targetAccountEmail } = requireRepositoryForVault(
-				core,
-				input.targetVaultId,
-				targetAccountHint,
-			);
+			const { accountId: targetAccountId, accountEmail: targetAccountEmail } =
+				requireRepositoryForVault(
+					core,
+					input.targetVaultId,
+					input.targetAccountId ?? sourceRepoTargetVault?.accountId,
+					targetAccountHint,
+				);
 
-			if (sourceContext.accountEmail !== targetAccountEmail) {
+			if (sourceContext.accountId !== targetAccountId) {
 				return core.items.moveItem(
 					{
 						...input,
@@ -58,15 +61,15 @@ export function useMoveItem() {
 				);
 			}
 
-			const resolvedAccounts = await core.accounts.resolveAccounts({
-				type: "single",
-				email: sourceContext.accountEmail,
-			});
+			const resolvedAccounts = await core.accounts.resolveAccounts();
 			const sourceAccount = resolvedAccounts.accountsInfo.find(
 				(account) =>
 					account.email.toLowerCase() ===
 					sourceContext.accountEmail.toLowerCase(),
 			);
+			if (!sourceAccount) {
+				throw new Error("Source account not found");
+			}
 			const contextUserId =
 				sourceAccount?.userId ??
 				sourceContext.item.lastModifiedBy ??

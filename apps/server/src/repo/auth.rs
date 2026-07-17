@@ -500,7 +500,10 @@ pub async fn load_auth_vault_keys(
             vault_name: row.vault_name,
             vault_type: row.vault_type,
             vault_icon: row.vault_icon,
-            vault_image_url: row.vault_image_key.map(storage::public_url),
+            vault_image_url: row
+                .vault_image_key
+                .as_deref()
+                .and_then(storage::public_asset_url),
             encrypted_vault_key: row.encrypted_vault_key,
             role: row.role,
         })

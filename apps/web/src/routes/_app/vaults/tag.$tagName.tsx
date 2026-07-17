@@ -167,13 +167,13 @@ function TagPage() {
 			{/* Middle pane: tagged items list */}
 			<div
 				className={cn(
-					"flex w-full shrink-0 flex-col border-r md:w-80",
+					"flex w-full shrink-0 flex-col border-r md:w-78",
 					selectedItemId && "hidden md:flex",
 				)}
 			>
-				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<TagIcon className="size-4 shrink-0" style={{ color: tagColor }} />
-					<span className="truncate font-medium">{tagName}</span>
+				<div className="flex h-11 shrink-0 items-center gap-2 border-b px-2.5 xl:h-12">
+					<TagIcon className="size-3.5 shrink-0" style={{ color: tagColor }} />
+					<span className="truncate font-medium text-sm">{tagName}</span>
 					<Badge variant="secondary" className="ml-auto shrink-0">
 						{taggedItems.length}
 					</Badge>

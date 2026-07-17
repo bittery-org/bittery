@@ -1,11 +1,16 @@
 import {
 	AccountResolver,
+	createStoredAccountRpcClient,
 	getOrCreateVaultRepositoryCoordinator,
 	handleTravelModeSyncEvent,
 	type RpcVaultClient,
 } from "@bittery/core";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
-import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
+import type {
+	OutboundQueueClient,
+	SyncSource,
+	SyncStorage,
+} from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
@@ -23,44 +28,74 @@ import {
 import * as tauriCrypto from "@/lib/tauri-crypto";
 
 interface SyncConnectionContext {
+	accountId: string | null;
 	email: string | null;
 	serverUrl: string;
+	rpcClient: SyncSource["rpcClient"];
 }
 
-async function resolveDesktopSyncContext(): Promise<SyncConnectionContext | null> {
-	const [activeAccount, accounts, unlocked] = await Promise.all([
+function areSyncContextsEquivalent(
+	left: SyncConnectionContext[],
+	right: SyncConnectionContext[],
+): boolean {
+	if (left.length !== right.length) {
+		return false;
+	}
+
+	return left.every((context, index) => {
+		const other = right[index];
+		return (
+			other &&
+			context.accountId === other.accountId &&
+			context.email === other.email &&
+			context.serverUrl === other.serverUrl
+		);
+	});
+}
+
+async function resolveDesktopSyncContexts(
+	clientId?: string,
+): Promise<SyncConnectionContext[]> {
+	const [activeAccount, accounts] = await Promise.all([
 		storage.getActiveAccount(),
 		storage.getAccountsList(),
-		storage.getUnlockedAccounts?.(),
 	]);
 
-	const candidates: string[] = [];
+	const accountById = new Map(
+		accounts.map((account) => [account.accountId, account]),
+	);
+	const candidateIds: string[] = [];
 	if (activeAccount?.type === "single") {
-		candidates.push(activeAccount.email.toLowerCase());
-	} else if (activeAccount?.type === "all") {
-		for (const email of unlocked ?? []) {
-			const normalized = email.toLowerCase();
-			if (!candidates.includes(normalized)) {
-				candidates.push(normalized);
-			}
-		}
+		candidateIds.push(activeAccount.accountId);
 	}
 
-	for (const account of accounts) {
-		const normalized = account.email.toLowerCase();
-		if (!candidates.includes(normalized)) {
-			candidates.push(normalized);
-		}
-	}
-
-	for (const email of candidates) {
+	const contexts: SyncConnectionContext[] = [];
+	for (const accountId of candidateIds) {
 		const [token, url] = await Promise.all([
-			storage.getAuthToken(email),
-			storage.getServerUrl(email),
+			storage.getAuthToken(accountId),
+			storage.getServerUrl(accountId),
 		]);
 		if (token && url) {
-			return { email, serverUrl: url };
+			const email = accountById.get(accountId)?.email ?? null;
+			const rpcClient = await createStoredAccountRpcClient(
+				storage,
+				accountId,
+				clientId,
+			);
+			if (!rpcClient) {
+				continue;
+			}
+			contexts.push({
+				accountId,
+				email,
+				serverUrl: url,
+				rpcClient: rpcClient as unknown as SyncSource["rpcClient"],
+			});
 		}
+	}
+
+	if (contexts.length > 0) {
+		return contexts;
 	}
 
 	const [fallbackToken, fallbackUrl] = await Promise.all([
@@ -68,10 +103,21 @@ async function resolveDesktopSyncContext(): Promise<SyncConnectionContext | null
 		storage.getServerUrl(),
 	]);
 	if (fallbackToken && fallbackUrl) {
-		return { email: null, serverUrl: fallbackUrl };
+		return [
+			{
+				accountId: null,
+				email: null,
+				serverUrl: fallbackUrl,
+				rpcClient: createAccountRpcClient(
+					fallbackToken,
+					fallbackUrl,
+					clientId,
+				) as unknown as SyncSource["rpcClient"],
+			},
+		];
 	}
 
-	return null;
+	return [];
 }
 
 /**
@@ -115,13 +161,15 @@ const crypto: ICrypto = {
 	validateServerKdfParams: tauriCrypto.validateServerKdfParams,
 };
 
+const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
+
 /**
  * Desktop-specific sync hook that integrates with Tauri storage
  */
 export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	const [clientId, setClientId] = useState<string>("");
 	const [serverUrl, setServerUrl] = useState<string>("");
-	const [syncAccountEmail, setSyncAccountEmail] = useState<string | null>(null);
+	const [syncContexts, setSyncContexts] = useState<SyncConnectionContext[]>([]);
 	const [isInitialized, setIsInitialized] = useState(false);
 
 	// Initialize and keep sync connection context fresh.
@@ -135,16 +183,16 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			}
 			resolving = true;
 			try {
-				const [id, context] = await Promise.all([
-					getOrCreateDesktopSyncClientId(),
-					resolveDesktopSyncContext(),
-				]);
+				const id = await getOrCreateDesktopSyncClientId();
+				const contexts = await resolveDesktopSyncContexts(id);
 				if (!mounted) {
 					return;
 				}
 				setClientId(id);
-				setServerUrl(context?.serverUrl ?? "");
-				setSyncAccountEmail(context?.email ?? null);
+				setServerUrl(contexts[0]?.serverUrl ?? "");
+				setSyncContexts((current) =>
+					areSyncContextsEquivalent(current, contexts) ? current : contexts,
+				);
 				setIsInitialized(true);
 			} finally {
 				resolving = false;
@@ -163,58 +211,69 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	}, []);
 
 	const getAuthToken = useCallback(async () => {
-		return storage.getAuthToken(syncAccountEmail ?? undefined);
-	}, [syncAccountEmail]);
+		return storage.getAuthToken(syncContexts[0]?.accountId ?? undefined);
+	}, [syncContexts]);
 
 	const getClientForAccount = useCallback(
-		async (email: string): Promise<OutboundQueueClient> => {
-			const normalizedEmail = email.toLowerCase();
+		async (accountId: string): Promise<OutboundQueueClient> => {
 			const [accountToken, accountServerUrl] = await Promise.all([
-				storage.getAuthToken(normalizedEmail),
-				storage.getServerUrl(normalizedEmail),
+				storage.getAuthToken(accountId),
+				storage.getServerUrl(accountId),
 			]);
 			if (accountToken) {
+				const client = await createStoredAccountRpcClient(
+					storage,
+					accountId,
+					clientId,
+				);
+				if (client) {
+					return client as unknown as OutboundQueueClient;
+				}
 				return createAccountRpcClient(
 					accountToken,
 					accountServerUrl || serverUrl || "http://localhost:3000",
 				) as unknown as OutboundQueueClient;
 			}
 
-			const fallbackToken = await getAuthToken();
-			if (!fallbackToken) {
-				throw new Error(
-					`No auth token available for account queue drain (${normalizedEmail})`,
-				);
-			}
-			return createAccountRpcClient(
-				fallbackToken,
-				serverUrl || "http://localhost:3000",
-			) as unknown as OutboundQueueClient;
+			throw new Error(
+				`No auth token available for account queue drain (${accountId})`,
+			);
 		},
-		[getAuthToken, serverUrl],
+		[clientId, serverUrl],
 	);
+
+	const resolveLegacyAccountId = useCallback(async (email: string) => {
+		const matches = (await storage.getAccountsList()).filter(
+			(account) => account.email.toLowerCase() === email.toLowerCase(),
+		);
+		if (matches.length !== 1) {
+			throw new Error(`Ambiguous legacy account queue for ${email}`);
+		}
+		return matches[0]?.accountId;
+	}, []);
 
 	const handleAccountSessionInvalidation = useCallback(
 		async (email: string) => {
 			const normalizedEmail = email.toLowerCase();
-			await invalidateDesktopAccountSession(normalizedEmail);
+			const accounts = await storage.getAccountsList();
+			const account = accounts.find(
+				(candidate) => candidate.email.toLowerCase() === normalizedEmail,
+			);
+			if (!account) {
+				return;
+			}
+
+			await invalidateDesktopAccountSession(account.accountId);
 			await queryClient.cancelQueries();
 			queryClient.clear();
 
 			const activeAccount = await storage.getActiveAccount();
 			if (
 				activeAccount?.type === "single" &&
-				activeAccount.email.toLowerCase() === normalizedEmail
+				activeAccount.accountId === account.accountId
 			) {
 				window.location.href = `/unlock?email=${encodeURIComponent(normalizedEmail)}`;
 				return;
-			}
-
-			if (activeAccount?.type === "all") {
-				const unlockedAccounts = await storage.getUnlockedAccounts?.();
-				if (!unlockedAccounts || unlockedAccounts.length === 0) {
-					window.location.href = "/unlock";
-				}
 			}
 		},
 		[queryClient],
@@ -228,11 +287,14 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			}
 
 			await handleAccountSessionInvalidation(revokedEmail);
-			if (syncAccountEmail?.toLowerCase() === revokedEmail.toLowerCase()) {
-				setSyncAccountEmail(null);
-			}
+			setSyncContexts((current) =>
+				current.filter(
+					(context) =>
+						context.email?.toLowerCase() !== revokedEmail.toLowerCase(),
+				),
+			);
 		},
-		[handleAccountSessionInvalidation, syncAccountEmail],
+		[handleAccountSessionInvalidation],
 	);
 
 	// Revalidate persisted sessions on startup/interval when online.
@@ -257,9 +319,9 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 
 				const email = account.email.toLowerCase();
 				const [token, url, sessionData] = await Promise.all([
-					storage.getAuthToken(email),
-					storage.getServerUrl(email),
-					storage.getStoredSessionData(email),
+					storage.getAuthToken(account.accountId),
+					storage.getServerUrl(account.accountId),
+					storage.getStoredSessionData(account.accountId),
 				]);
 
 				if (!token || !url || !sessionData?.sessionId) {
@@ -274,9 +336,9 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 					}
 
 					await handleAccountSessionInvalidation(email);
-					if (syncAccountEmail?.toLowerCase() === email) {
-						setSyncAccountEmail(null);
-					}
+					setSyncContexts((current) =>
+						current.filter((context) => context.email?.toLowerCase() !== email),
+					);
 				}
 			}
 		};
@@ -284,18 +346,13 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		void revalidateSessions();
 		const interval = setInterval(() => {
 			void revalidateSessions();
-		}, 30_000);
+		}, SESSION_REVALIDATION_INTERVAL_MS);
 
 		return () => {
 			cancelled = true;
 			clearInterval(interval);
 		};
-	}, [
-		enabled,
-		handleAccountSessionInvalidation,
-		isInitialized,
-		syncAccountEmail,
-	]);
+	}, [enabled, handleAccountSessionInvalidation, isInitialized]);
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const vaultCoordinator = useMemo(
@@ -304,15 +361,23 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	);
 
 	const onTravelModeEvent = useCallback(
-		async (event: { type: string; metadata?: Record<string, unknown> }) => {
-			if (!syncAccountEmail || event.type !== "travel_mode_updated") {
+		async (
+			event: { type: string; metadata?: Record<string, unknown> },
+			context?: {
+				accountId?: string | null;
+				accountEmail?: string | null;
+			},
+		) => {
+			const accountId = context?.accountId;
+			const accountEmail = context?.accountEmail;
+			if (!accountId || !accountEmail || event.type !== "travel_mode_updated") {
 				return;
 			}
-			const rpcClient = await getClientForAccount(syncAccountEmail);
+			const rpcClient = await getClientForAccount(accountId);
 			const accounts = new AccountResolver(storage);
 			await handleTravelModeSyncEvent(
 				event,
-				syncAccountEmail,
+				accountId,
 				storage,
 				vaultCoordinator,
 				{
@@ -321,7 +386,22 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				},
 			);
 		},
-		[getClientForAccount, syncAccountEmail, vaultCoordinator],
+		[getClientForAccount, vaultCoordinator],
+	);
+
+	const syncSources = useMemo<SyncSource[]>(
+		() =>
+			syncContexts.map((context) => ({
+				id: context.accountId ?? "legacy",
+				serverUrl: context.serverUrl,
+				getAuthToken: () =>
+					storage.getAuthToken(context.accountId ?? undefined),
+				rpcClient: context.rpcClient,
+				itemCacheAccountId: context.accountId,
+				itemCacheAccountEmail: context.email,
+				itemCacheServerUrl: context.serverUrl,
+			})),
+		[syncContexts],
 	);
 
 	const syncState = useSync({
@@ -330,11 +410,11 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		clientId,
 		queryClient,
 		storage: syncStorage,
-		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
+		enabled: enabled && isInitialized && !!clientId && syncSources.length > 0,
 		itemCacheAdapter: vaultCoordinator,
-		itemCacheAccountEmail: syncAccountEmail,
-		itemCacheServerUrl: syncAccountEmail ? serverUrl : null,
+		sources: syncSources,
 		getClientForAccount,
+		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed: onTravelModeEvent,
 	});

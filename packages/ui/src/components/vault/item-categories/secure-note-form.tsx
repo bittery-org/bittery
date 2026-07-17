@@ -3,6 +3,7 @@ import { useForm } from "@tanstack/react-form";
 import { toast } from "../../sonner";
 import {
 	type BaseFormProps,
+	FormSection,
 	FormWrapper,
 	NotesField,
 	TitleField,
@@ -25,6 +26,7 @@ export function SecureNoteForm({
 	onSubmit,
 	onCancel,
 	submitLabel,
+	cancelLabel,
 	isSubmitting = false,
 	vaults = [],
 	selectedVaultId,
@@ -62,23 +64,25 @@ export function SecureNoteForm({
 			onSubmit={form.handleSubmit}
 			onCancel={onCancel}
 			submitLabel={submitLabel}
+			cancelLabel={cancelLabel}
 			isSubmitting={isSubmitting}
 			vaults={vaults}
 			currentVaultId={currentVaultId}
 			onVaultChange={setCurrentVaultId}
 		>
-			<div>
+			<FormSection>
 				<form.Field name="title">
 					{(field) => (
 						<TitleField
 							field={field}
 							placeholder={m.vaults_detail_items_form_secure_note_placeholder_title()}
+							autoFocus={!field.state.value}
 						/>
 					)}
 				</form.Field>
-			</div>
+			</FormSection>
 
-			<div>
+			<FormSection>
 				<form.Field name="note">
 					{(field) => (
 						<NotesField
@@ -89,7 +93,7 @@ export function SecureNoteForm({
 						/>
 					)}
 				</form.Field>
-			</div>
+			</FormSection>
 		</FormWrapper>
 	);
 }

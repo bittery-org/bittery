@@ -24,6 +24,7 @@ import {
 import { VaultAvatar, vaultIconOptions } from "../vault-avatar";
 
 export interface AccountOption {
+	accountId: string;
 	email: string;
 	name?: string;
 	teamName?: string;
@@ -42,17 +43,17 @@ export function CreateVaultDialog({
 	onSubmit,
 	accounts,
 }: CreateVaultDialogProps) {
-	const defaultAccountEmail = accounts?.[0]?.email;
+	const defaultAccountId = accounts?.[0]?.accountId;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
 			{open ? (
 				<CreateVaultDialogForm
-					key={`${open ? "open" : "closed"}:${defaultAccountEmail ?? "none"}`}
+					key={`${open ? "open" : "closed"}:${defaultAccountId ?? "none"}`}
 					onOpenChange={onOpenChange}
 					onSubmit={onSubmit}
 					accounts={accounts}
-					defaultAccountEmail={defaultAccountEmail}
+					defaultAccountId={defaultAccountId}
 				/>
 			) : null}
 		</Dialog>
@@ -63,18 +64,18 @@ function CreateVaultDialogForm({
 	onOpenChange,
 	onSubmit,
 	accounts,
-	defaultAccountEmail,
+	defaultAccountId,
 }: Omit<CreateVaultDialogProps, "open"> & {
-	defaultAccountEmail?: string;
+	defaultAccountId?: string;
 }) {
 	const { m } = useI18n();
 	const [icon, setIcon] = useState("lock");
 	const [imageFile, setImageFile] = useState<File | undefined>(undefined);
 	const [imagePreview, setImagePreview] = useState<string | null>(null);
 	const [isDragging, setIsDragging] = useState(false);
-	const [selectedAccountEmail, setSelectedAccountEmail] = useState<
+	const [selectedAccountId, setSelectedAccountId] = useState<
 		string | undefined
-	>(defaultAccountEmail);
+	>(defaultAccountId);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const updateImagePreview = useCallback((nextPreview: string | null) => {
@@ -101,7 +102,7 @@ function CreateVaultDialogForm({
 					type: value.type,
 					icon,
 					imageFile,
-					accountEmail: accounts ? selectedAccountEmail : undefined,
+					accountId: selectedAccountId ?? "",
 				});
 				resetForm();
 				onOpenChange(false);
@@ -117,7 +118,7 @@ function CreateVaultDialogForm({
 		setIcon("lock");
 		setImageFile(undefined);
 		updateImagePreview(null);
-		setSelectedAccountEmail(defaultAccountEmail);
+		setSelectedAccountId(defaultAccountId);
 	};
 
 	const processFile = useCallback(
@@ -291,8 +292,8 @@ function CreateVaultDialogForm({
 							{m.vaults_create_dialog_field_account()}
 						</Label>
 						<Select
-							value={selectedAccountEmail}
-							onValueChange={setSelectedAccountEmail}
+							value={selectedAccountId}
+							onValueChange={setSelectedAccountId}
 							disabled={form.state.isSubmitting}
 						>
 							<SelectTrigger id="account" className="h-10">
@@ -302,7 +303,7 @@ function CreateVaultDialogForm({
 							</SelectTrigger>
 							<SelectContent>
 								{accounts.map((account) => (
-									<SelectItem key={account.email} value={account.email}>
+									<SelectItem key={account.accountId} value={account.accountId}>
 										<div className="flex flex-col">
 											<span className="font-medium">
 												{account.teamName || account.name || account.email}

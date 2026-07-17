@@ -85,43 +85,46 @@ export async function performDeltaSync(
 	rpcClient: DeltaSyncClient,
 	cache: ItemCacheAdapter,
 	event: SyncEvent,
-	accountEmail?: string,
+	accountScope?: string,
 	serverUrl?: string,
+	accountEmail?: string | null,
 ): Promise<void> {
 	if (event.type === "travel_mode_updated") {
 		return;
 	}
 
+	const itemAccountEmail = accountEmail ?? accountScope;
+
 	const upsertItem = async (item: CachedEncryptedItem) => {
 		if (cache.upsertEncrypted) {
-			await cache.upsertEncrypted(item, accountEmail);
+			await cache.upsertEncrypted(item, accountScope);
 			return;
 		}
-		await cache.upsertCachedItem?.(item, accountEmail);
+		await cache.upsertCachedItem?.(item, accountScope);
 	};
 
 	const removeItem = async (itemId: string) => {
 		if (cache.removeItem) {
-			await cache.removeItem(itemId, accountEmail);
+			await cache.removeItem(itemId, accountScope);
 			return;
 		}
-		await cache.removeCachedItem?.(itemId, accountEmail);
+		await cache.removeCachedItem?.(itemId, accountScope);
 	};
 
 	const upsertVault = async (vault: CachedVaultMetadata) => {
 		if (cache.upsertVault) {
-			await cache.upsertVault(vault, accountEmail);
+			await cache.upsertVault(vault, accountScope);
 			return;
 		}
-		await cache.upsertCachedVault?.(vault, accountEmail);
+		await cache.upsertCachedVault?.(vault, accountScope);
 	};
 
 	const removeVault = async (vaultId: string) => {
 		if (cache.removeVault) {
-			await cache.removeVault(vaultId, accountEmail);
+			await cache.removeVault(vaultId, accountScope);
 			return;
 		}
-		await cache.removeCachedVault?.(vaultId, accountEmail);
+		await cache.removeCachedVault?.(vaultId, accountScope);
 	};
 
 	const syncVaultKeysFromServer = async () => {
@@ -140,7 +143,7 @@ export async function performDeltaSync(
 				encryptedVaultKey: vault.encryptedVaultKey,
 				role: vault.role,
 			})),
-			accountEmail,
+			accountScope,
 		);
 	};
 
@@ -168,7 +171,7 @@ export async function performDeltaSync(
 			await upsertItem({
 				id: item.id,
 				vaultId: item.vaultId,
-				accountEmail,
+				accountEmail: itemAccountEmail,
 				serverUrl,
 				category: item.category,
 				favorite: item.favorite,
@@ -192,7 +195,7 @@ export async function performDeltaSync(
 				await upsertItem({
 					id: item.id,
 					vaultId: item.vaultId,
-					accountEmail,
+					accountEmail: itemAccountEmail,
 					serverUrl,
 					category: item.category,
 					favorite: item.favorite,
@@ -232,7 +235,7 @@ export async function performDeltaSync(
 					await upsertItem({
 						id: vaultItem.id,
 						vaultId: vaultItem.vaultId,
-						accountEmail,
+						accountEmail: itemAccountEmail,
 						serverUrl,
 						category: vaultItem.category,
 						favorite: vaultItem.favorite,
@@ -254,7 +257,7 @@ export async function performDeltaSync(
 			});
 			await upsertVault({
 				id: vault.id,
-				accountEmail,
+				accountEmail: itemAccountEmail,
 				serverUrl,
 				name: vault.name,
 				type: vault.type,

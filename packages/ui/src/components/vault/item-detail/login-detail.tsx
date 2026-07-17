@@ -13,7 +13,6 @@ import {
 } from "../../alert-dialog";
 import { Badge } from "../../badge";
 import { Button } from "../../button";
-import { Card } from "../../card";
 import { Label } from "../../label";
 import { InlineTotpDisplay } from "../../inline-totp-display";
 import { TagInput } from "../../tag-input";
@@ -21,8 +20,13 @@ import { IconCopyOutlineDuo18, IconTrash2OutlineDuo18, IconTriangleWarningOutlin
 import {
 	DetailCustomField,
 	DetailField,
+	DetailFieldActionButton,
+	DetailFieldGroup,
+	DetailGroupLabel,
 	DetailHeader,
+	DetailNoteField,
 	DetailPasswordField,
+	DetailRow,
 	DetailUrlField,
 } from "./field-components";
 import { type CategoryDetailProps, handleCopy, type LoginDisplayData } from "./shared";
@@ -144,46 +148,43 @@ export function LoginDetail({
 					)}
 				</div>
 
-				<div className="space-y-3">
-					<DetailUrlField
-						label={m.vaults_detail_items_detail_login_field_website()}
-						value={data.url}
-						copyLabel={m.vaults_detail_items_copy_label_url()}
-						onOpenUrl={onOpenUrl}
-					/>
-					<DetailField
-						label={m.vaults_detail_items_detail_login_field_username()}
-						value={data.username}
-						copyLabel={m.vaults_detail_items_copy_label_username()}
-					/>
-					<DetailPasswordField
-						label={m.vaults_detail_items_detail_login_field_password()}
-						value={data.password}
-						copyLabel={m.vaults_detail_items_copy_label_password()}
-					/>
+				<div className="space-y-3.5">
+					<DetailFieldGroup>
+						<DetailUrlField
+							label={m.vaults_detail_items_detail_login_field_website()}
+							value={data.url}
+							copyLabel={m.vaults_detail_items_copy_label_url()}
+							onOpenUrl={onOpenUrl}
+						/>
+						<DetailField
+							label={m.vaults_detail_items_detail_login_field_username()}
+							value={data.username}
+							copyLabel={m.vaults_detail_items_copy_label_username()}
+						/>
+						<DetailPasswordField
+							label={m.vaults_detail_items_detail_login_field_password()}
+							value={data.password}
+							copyLabel={m.vaults_detail_items_copy_label_password()}
+						/>
 
-					{data.totpSecret && (
-						<div className="space-y-2">
-							<Label>
-								{m.vaults_detail_items_detail_login_field_one_time_password()}
-							</Label>
+						{data.totpSecret && (
 							<InlineTotpDisplay
 								totpSecret={data.totpSecret}
 								totpAlgorithm={data.totpAlgorithm}
 								totpDigits={data.totpDigits}
 								totpPeriod={data.totpPeriod}
 							/>
-						</div>
-					)}
+						)}
+					</DetailFieldGroup>
 
 					{passkeys.length > 0 && (
-						<div className="space-y-2">
-							<Label className="font-medium text-sm">
+						<div>
+							<DetailGroupLabel>
 								{passkeys.length === 1
 									? m.vaults_detail_items_detail_login_passkeys_label_single({ count: passkeys.length })
 									: m.vaults_detail_items_detail_login_passkeys_label_plural({ count: passkeys.length })}
-							</Label>
-							<div className="space-y-2">
+							</DetailGroupLabel>
+							<DetailFieldGroup>
 								{passkeys.map((passkey, index) => {
 									const displayName =
 										passkey.userDisplayName ||
@@ -195,13 +196,45 @@ export function LoginDetail({
 										removingCredentialId === passkey.credentialId;
 
 									return (
-										<div
+										<DetailRow
 											key={`${passkey.credentialId}-${index}`}
-											className="flex items-start justify-between gap-3 rounded-md border px-3 py-2"
+											align="start"
+											actions={
+												<>
+													<DetailFieldActionButton
+														title={m.vaults_detail_items_detail_login_passkeys_action_copy_credential_id()}
+														onClick={() =>
+															handleCopy(
+																passkey.credentialId,
+																m.vaults_detail_items_copy_label_passkey_id(),
+																m,
+															)
+														}
+													>
+														<IconCopyOutlineDuo18 className="size-4" />
+													</DetailFieldActionButton>
+													{onRemovePasskey && (
+														<DetailFieldActionButton
+															className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+															title={m.vaults_detail_items_detail_login_passkeys_action_remove()}
+															disabled={isRemoving}
+															onClick={() =>
+																setPendingRemoval({ credentialId: passkey.credentialId, label: displayName })
+															}
+														>
+															{isRemoving ? (
+																<span className="text-[10px]">...</span>
+															) : (
+																<IconTrash2OutlineDuo18 className="size-4" />
+															)}
+														</DetailFieldActionButton>
+													)}
+												</>
+											}
 										>
 											<div className="min-w-0">
 												<div className="flex items-center gap-2">
-													<p className="truncate font-medium text-sm">{displayName}</p>
+													<p className="truncate text-sm text-foreground">{displayName}</p>
 													{isSuspect && (
 														<Badge variant="outline" className="border-destructive/40 text-destructive">
 															{m.vaults_detail_items_detail_login_passkeys_item_badge_suspect()}
@@ -231,84 +264,43 @@ export function LoginDetail({
 													</p>
 												)}
 											</div>
-											<div className="flex shrink-0 items-center gap-1">
-												<Button
-													type="button"
-													variant="ghost"
-													size="icon"
-													className="size-7"
-													title={m.vaults_detail_items_detail_login_passkeys_action_copy_credential_id()}
-													onClick={() =>
-														handleCopy(
-															passkey.credentialId,
-															m.vaults_detail_items_copy_label_passkey_id(),
-															m,
-														)
-													}
-												>
-													<IconCopyOutlineDuo18 className="size-4" />
-												</Button>
-												{onRemovePasskey && (
-													<Button
-														type="button"
-														variant="ghost"
-														size="icon"
-														className="size-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
-														title={m.vaults_detail_items_detail_login_passkeys_action_remove()}
-														disabled={isRemoving}
-														onClick={() =>
-															setPendingRemoval({ credentialId: passkey.credentialId, label: displayName })
-														}
-													>
-														{isRemoving ? (
-															<span className="text-[10px]">...</span>
-														) : (
-															<IconTrash2OutlineDuo18 className="size-4" />
-														)}
-													</Button>
-												)}
-											</div>
-										</div>
+										</DetailRow>
 									);
 								})}
-							</div>
+							</DetailFieldGroup>
 						</div>
 					)}
 
-					{data.notes && (
-						<div className="space-y-2">
-							<Label className="font-medium text-sm">
-								{m.vaults_detail_items_form_field_notes_label()}
-							</Label>
-							<Card>
-								<div className="whitespace-pre-wrap px-4 py-1 text-sm">{data.notes}</div>
-							</Card>
-						</div>
-					)}
+					<DetailNoteField
+						label={m.vaults_detail_items_form_field_notes_label()}
+						value={data.notes}
+					/>
 
 					{data.urls && data.urls.length > 0 && (
-						<div className="space-y-3">
-							<Label className="font-medium text-sm">
+						<div>
+							<DetailGroupLabel>
 								{m.vaults_detail_items_detail_login_field_additional_websites()}
-							</Label>
-							{data.urls.map((url) => (
-								<DetailUrlField
-									key={url}
-									label=""
-									value={url}
-									copyLabel={m.vaults_detail_items_copy_label_url()}
-									onOpenUrl={onOpenUrl}
-								/>
-							))}
+							</DetailGroupLabel>
+							<DetailFieldGroup>
+								{data.urls.map((url) => (
+									<DetailUrlField
+										key={url}
+										label=""
+										value={url}
+										copyLabel={m.vaults_detail_items_copy_label_url()}
+										onOpenUrl={onOpenUrl}
+									/>
+								))}
+							</DetailFieldGroup>
 						</div>
 					)}
 
 					{data.customFields && data.customFields.length > 0 && (
-						<div className="space-y-3">
+						<DetailFieldGroup>
 							{data.customFields.map((field) => (
 								<DetailCustomField key={field.id} field={field} onOpenUrl={onOpenUrl} />
 							))}
-						</div>
+						</DetailFieldGroup>
 					)}
 				</div>
 

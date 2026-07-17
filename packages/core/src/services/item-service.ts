@@ -8,6 +8,10 @@ import type {
 	DecryptedItemData,
 	ItemCategory,
 } from "@bittery/shared/types";
+import {
+	resolveAccountScopeId,
+	resolveUserIdForScope,
+} from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
 	CachedAttachment,
@@ -22,7 +26,14 @@ import type {
 	AccountResolver,
 	DefaultRpcClient,
 } from "./account-resolver";
+import {
+	decryptAttachmentParts,
+	encodeAttachmentBlobEnvelope,
+	encryptAttachmentParts,
+	parseAttachmentBlobEnvelope,
+} from "./attachment-crypto";
 import { buildItemEncryptionContext } from "./encryption-context";
+import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export type { RawEncryptedItem, RawEncryptedItemWithVault };
 
@@ -51,11 +62,6 @@ export interface MultiAccountItem extends DecryptedItem {
 		icon: string | null;
 		imageUrl: string | null;
 	};
-	account?: {
-		email: string;
-		userId: string;
-		name: string;
-	};
 }
 
 export interface MultiAccountDeletedItem {
@@ -74,20 +80,7 @@ export interface MultiAccountDeletedItem {
 		icon: string | null;
 		imageUrl: string | null;
 	};
-	account?: {
-		email: string;
-		userId: string;
-		name: string;
-	};
 	[key: string]: any;
-}
-
-export interface FetchItemsOptions {
-	isAllAccountsMode?: boolean;
-}
-
-export interface FetchDeletedItemsOptions {
-	isAllAccountsMode?: boolean;
 }
 
 export interface FetchDecryptedItemResult {
@@ -208,25 +201,8 @@ export class ItemService {
 		return `item_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
 	}
 
-	private async resolveUserId(email?: string): Promise<string> {
-		const sessionUserId = await this.storage.getStoredSessionData?.(email);
-		if (sessionUserId?.userId) {
-			return sessionUserId.userId;
-		}
-
-		if (email) {
-			const accountMetadata = await this.storage.getAccountMetadata?.(email);
-			if (accountMetadata?.userId) {
-				return accountMetadata.userId;
-			}
-		}
-
-		const activeUserId = await this.storage.getActiveAccountUserId();
-		if (activeUserId) {
-			return activeUserId;
-		}
-
-		throw new Error("User ID not available for encryption context");
+	private async resolveUserId(scope?: string): Promise<string> {
+		return resolveUserIdForScope(this.storage, scope);
 	}
 
 	async encryptItemData(
@@ -326,11 +302,12 @@ export class ItemService {
 
 	private async getVaultKey(
 		vaultId: string,
-		email?: string,
+		scope?: string,
 	): Promise<Uint8Array | null> {
+		const accountId = await resolveAccountScopeId(this.storage, scope);
 		return getDecryptedVaultKeyUtil({
 			vaultId,
-			email,
+			accountId,
 			storage: this.storage,
 			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
 		});
@@ -461,7 +438,6 @@ export class ItemService {
 
 	async fetchAndDecryptItems(
 		accounts: AccountInfo[],
-		options: FetchItemsOptions = {},
 	): Promise<MultiAccountItem[]> {
 		if (accounts.length === 0) return [];
 
@@ -471,8 +447,8 @@ export class ItemService {
 					let rawItems: RawEncryptedItemWithVault[];
 
 					const [cachedItems, cachedVaults] = await Promise.all([
-						this.storage.getCachedItems?.(account.email),
-						this.storage.getCachedVaults?.(account.email),
+						this.storage.getCachedItems?.(account.accountId),
+						this.storage.getCachedVaults?.(account.accountId),
 					]);
 
 					if (cachedItems && cachedVaults && cachedItems.length > 0) {
@@ -486,18 +462,26 @@ export class ItemService {
 						const cachedItems = this.toCachedItems(rawItems, account);
 						const cachedVaults = this.toCachedVaults(rawItems, account);
 						await Promise.all([
-							this.storage.setCachedItems?.(cachedItems, account.email),
-							this.storage.setCachedVaults?.(cachedVaults, account.email),
+							this.storage.setCachedItems?.(cachedItems, account.accountId),
+							this.storage.setCachedVaults?.(cachedVaults, account.accountId),
 							this.storage.setItemCacheMetadata?.(
 								{
 									lastFullSyncAt: Date.now(),
 									itemCount: cachedItems.length,
 									cacheVersion: 1,
 								},
-								account.email,
+								account.accountId,
 							),
 						]);
 					}
+
+					// Fail-closed travel-mode guard: require a verified policy and
+					// drop any items belonging to hidden vaults before decrypting,
+					// mirroring VaultRepository. Prevents hidden-vault leakage if
+					// this path is wired into a UI later.
+					const enforcer = getTravelModeEnforcer(this.storage);
+					enforcer.assertVerified(account.accountId);
+					rawItems = enforcer.filterItems(account.accountId, rawItems);
 
 					const vaultKeyCache = new Map<string, Uint8Array>();
 					const decrypted = await Promise.all(
@@ -507,7 +491,7 @@ export class ItemService {
 								if (!vaultKey) {
 									const fetchedKey = await this.getVaultKey(
 										rawItem.vaultId,
-										account.email,
+										account.accountId,
 									);
 									if (fetchedKey) {
 										vaultKey = fetchedKey;
@@ -548,15 +532,6 @@ export class ItemService {
 										icon: rawItem.vault.icon,
 										imageUrl: rawItem.vault.imageUrl,
 									},
-									...(options.isAllAccountsMode
-										? {
-												account: {
-													email: account.email,
-													userId: account.userId,
-													name: account.name,
-												},
-											}
-										: {}),
 								} as MultiAccountItem;
 							} catch (error) {
 								console.error(
@@ -594,7 +569,7 @@ export class ItemService {
 
 		let ownerAccount: AccountInfo | null = null;
 		for (const account of accounts) {
-			const vaultKeys = await this.storage.getVaultKeys(account.email);
+			const vaultKeys = await this.storage.getVaultKeys(account.accountId);
 			if (vaultKeys?.some((vaultKey) => vaultKey.vaultId === vaultId)) {
 				ownerAccount = account;
 				break;
@@ -606,7 +581,9 @@ export class ItemService {
 		}
 
 		let rawItems: RawEncryptedItem[];
-		const cachedItems = await this.storage.getCachedItems?.(ownerAccount.email);
+		const cachedItems = await this.storage.getCachedItems?.(
+			ownerAccount.accountId,
+		);
 		if (cachedItems && cachedItems.length > 0) {
 			const vaultItems = cachedItems.filter(
 				(item) => item.vaultId === vaultId && !item.deletedAt,
@@ -636,11 +613,18 @@ export class ItemService {
 			});
 		}
 
+		// Fail-closed travel-mode guard: require a verified policy for the owning
+		// account and drop items in hidden vaults (a hidden target vault yields no
+		// items) before decrypting, mirroring VaultRepository.
+		const enforcer = getTravelModeEnforcer(this.storage);
+		enforcer.assertVerified(ownerAccount.accountId);
+		rawItems = enforcer.filterItems(ownerAccount.accountId, rawItems);
+
 		if (rawItems.length === 0) {
 			return [];
 		}
 
-		const vaultKey = await this.getVaultKey(vaultId, ownerAccount.email);
+		const vaultKey = await this.getVaultKey(vaultId, ownerAccount.accountId);
 		if (!vaultKey) {
 			throw new Error(`No vault key found for vault ${vaultId}`);
 		}
@@ -696,7 +680,8 @@ export class ItemService {
 
 		let rawItem: RawEncryptedItemWithVersion | null = null;
 
-		const cachedItems = await this.storage.getCachedItems?.(accountEmail);
+		const accountId = await resolveAccountScopeId(this.storage, accountEmail);
+		const cachedItems = await this.storage.getCachedItems?.(accountId);
 		const cached = cachedItems?.find((item) => item.id === itemId);
 		if (cached) {
 			rawItem = {
@@ -717,9 +702,10 @@ export class ItemService {
 		}
 
 		if (!rawItem) {
+			if (!accountId) throw new Error("Account identity is required");
 			const client = await this.accounts.getClientForAccount(
 				defaultClient,
-				accountEmail,
+				accountId,
 			);
 			const fetched = await client.vault.getItem.query({ itemId });
 			rawItem = {
@@ -764,7 +750,6 @@ export class ItemService {
 
 	async fetchDeletedItems(
 		accounts: AccountInfo[],
-		options: FetchDeletedItemsOptions = {},
 	): Promise<MultiAccountDeletedItem[]> {
 		if (accounts.length === 0) return [];
 
@@ -774,8 +759,8 @@ export class ItemService {
 					let rawItems: RawEncryptedItemWithVault[];
 
 					const [cachedItems, cachedVaults] = await Promise.all([
-						this.storage.getCachedItems?.(account.email),
-						this.storage.getCachedVaults?.(account.email),
+						this.storage.getCachedItems?.(account.accountId),
+						this.storage.getCachedVaults?.(account.accountId),
 					]);
 
 					if (cachedItems && cachedVaults) {
@@ -797,6 +782,14 @@ export class ItemService {
 						).map((item) => normalizeRawItemWithVault(item));
 					}
 
+					// Fail-closed travel-mode guard: require a verified policy and
+					// drop items in hidden vaults before decrypting, mirroring
+					// VaultRepository, so deleted-item listings can't leak
+					// hidden-vault data if wired into a UI later.
+					const enforcer = getTravelModeEnforcer(this.storage);
+					enforcer.assertVerified(account.accountId);
+					rawItems = enforcer.filterItems(account.accountId, rawItems);
+
 					const vaultKeyCache = new Map<string, Uint8Array>();
 					const decrypted = await Promise.all(
 						rawItems.map(
@@ -806,7 +799,7 @@ export class ItemService {
 									if (!vaultKey) {
 										const fetchedKey = await this.getVaultKey(
 											rawItem.vaultId,
-											account.email,
+											account.accountId,
 										);
 										if (fetchedKey) {
 											vaultKey = fetchedKey;
@@ -850,15 +843,6 @@ export class ItemService {
 											icon: rawItem.vault.icon,
 											imageUrl: rawItem.vault.imageUrl,
 										},
-										...(options.isAllAccountsMode
-											? {
-													account: {
-														email: account.email,
-														userId: account.userId,
-														name: account.name,
-													},
-												}
-											: {}),
 									} as MultiAccountDeletedItem;
 								} catch (error) {
 									console.error(
@@ -911,9 +895,14 @@ export class ItemService {
 			context,
 		);
 
+		const accountId = await resolveAccountScopeId(
+			this.storage,
+			input.accountEmail,
+		);
+		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		const result = (await client.vault.createItem.mutate({
@@ -989,9 +978,14 @@ export class ItemService {
 			context,
 		);
 
+		const accountId = await resolveAccountScopeId(
+			this.storage,
+			input.accountEmail,
+		);
+		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		await client.vault.updateItem.mutate({
@@ -1006,16 +1000,168 @@ export class ItemService {
 		return { _encryptedData: encryptedData, _accountEmail: input.accountEmail };
 	}
 
+	/**
+	 * Copy every attachment from the source item onto the target item during a
+	 * cross-account move. Throws on the first failure so the caller can keep the
+	 * source intact. No-op (and no source vault-key lookup) when the item has no
+	 * attachments.
+	 */
+	private async migrateAttachmentsForCrossAccountMove(params: {
+		sourceClient: DefaultRpcClient;
+		targetClient: DefaultRpcClient;
+		sourceItemId: string;
+		targetItemId: string;
+		sourceVaultId: string;
+		targetVaultId: string;
+		sourceAccountEmail?: string;
+		targetVaultKey: Uint8Array;
+		targetUserId: string;
+	}): Promise<void> {
+		const attachments = await params.sourceClient.vault.listAttachments.query({
+			itemId: params.sourceItemId,
+		});
+		if (!attachments || attachments.length === 0) {
+			return;
+		}
+
+		const sourceVaultKey = await this.getVaultKey(
+			params.sourceVaultId,
+			params.sourceAccountEmail,
+		);
+		if (!sourceVaultKey) {
+			throw new Error(
+				"Cannot access the source vault key to migrate attachments. Please unlock the source account.",
+			);
+		}
+		const sourceUserId = await this.resolveUserId(params.sourceAccountEmail);
+
+		for (const attachment of attachments) {
+			// Fetch the encrypted blob envelope from object storage.
+			const download =
+				await params.sourceClient.vault.getAttachmentDownloadUrl.mutate({
+					attachmentId: attachment.id,
+				});
+			const response = await fetch(download.downloadUrl);
+			if (!response.ok) {
+				throw new Error(
+					`Failed to download attachment ${attachment.id} during cross-account move.`,
+				);
+			}
+			const blobEnvelope = parseAttachmentBlobEnvelope(await response.text());
+
+			// Decrypt under the SOURCE scope (source vault key + source AAD). The
+			// attachment's own uploader is used for context binding when present,
+			// mirroring the read paths in useItemAttachments.
+			const decrypted = await decryptAttachmentParts(
+				this.crypto,
+				sourceVaultKey,
+				{
+					vaultId: params.sourceVaultId,
+					attachmentKey: attachment.storageKey,
+					userId: attachment.uploadedBy || sourceUserId,
+				},
+				{
+					blobEnvelope,
+					encryptedName: attachment.encryptedName,
+					encryptedContentType: attachment.encryptedContentType,
+					encryptionIv: attachment.encryptionIv,
+					encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+					encryptionAlgorithm: attachment.encryptionAlgorithm,
+				},
+			);
+
+			// Mint a NEW server-signed storage key on the target. Quota errors
+			// (file-too-large / storage-limit-reached) reject here and propagate,
+			// aborting the move with the source left intact. The name/content-type
+			// passed here are only used for the storage object itself, so we keep
+			// them opaque (like useItemAttachments) to avoid leaking plaintext.
+			const upload =
+				await params.targetClient.vault.createAttachmentUpload.mutate({
+					itemId: params.targetItemId,
+					fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
+					contentType: "application/octet-stream",
+					fileSize: attachment.fileSize,
+				});
+
+			// Re-encrypt under the TARGET scope (target vault key + target AAD bound
+			// to the freshly-minted storage key).
+			const reEncrypted = await encryptAttachmentParts(
+				this.crypto,
+				params.targetVaultKey,
+				{
+					vaultId: params.targetVaultId,
+					attachmentKey: upload.key,
+					userId: params.targetUserId,
+				},
+				decrypted,
+			);
+
+			const putResponse = await fetch(upload.uploadUrl, {
+				method: "PUT",
+				headers: { "Content-Type": "application/octet-stream" },
+				body: encodeAttachmentBlobEnvelope(reEncrypted.blobEnvelope),
+			});
+			if (!putResponse.ok) {
+				throw new Error(
+					`Failed to upload migrated attachment for item ${params.targetItemId}.`,
+				);
+			}
+
+			await params.targetClient.vault.createAttachment.mutate({
+				itemId: params.targetItemId,
+				storageKey: upload.key,
+				encryptedName: reEncrypted.encryptedName,
+				encryptedContentType: reEncrypted.encryptedContentType,
+				encryptionIv: reEncrypted.encryptionIv,
+				encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
+				encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
+				fileSize: attachment.fileSize,
+			});
+		}
+	}
+
+	/**
+	 * Best-effort removal of a target item created during a cross-account move
+	 * whose attachment migration failed. Swallows errors: the invariant we care
+	 * about (the SOURCE item is never deleted on failure) is upheld by the caller,
+	 * so a lingering partial target is acceptable if cleanup can't complete.
+	 */
+	private async bestEffortDeleteTargetItem(
+		targetClient: DefaultRpcClient,
+		targetItemId: string,
+	): Promise<void> {
+		try {
+			await targetClient.vault.deleteItem.mutate({
+				itemId: targetItemId,
+				clientId: null,
+			});
+			await targetClient.vault.permanentlyDeleteItem.mutate({
+				itemId: targetItemId,
+				clientId: null,
+			});
+		} catch (cleanupError) {
+			console.error(
+				"[ItemService] Failed to clean up partial target item after attachment migration failure:",
+				cleanupError,
+			);
+		}
+	}
+
 	async moveItem(
 		input: MoveItemInput,
 		defaultClient: DefaultRpcClient,
 	): Promise<MoveItemResult> {
 		const sourceAccountEmail = input.sourceAccountEmail;
 		let targetAccountEmail = input.targetAccountEmail ?? sourceAccountEmail;
+		const sourceAccountId = await resolveAccountScopeId(
+			this.storage,
+			sourceAccountEmail,
+		);
+		if (!sourceAccountId)
+			throw new Error("Source account identity is required");
 
 		if (!input.targetAccountEmail) {
-			const sourceVaultKeys =
-				await this.storage.getVaultKeys(sourceAccountEmail);
+			const sourceVaultKeys = await this.storage.getVaultKeys(sourceAccountId);
 			const targetInSource = sourceVaultKeys?.some(
 				(vaultKey) => vaultKey.vaultId === input.targetVaultId,
 			);
@@ -1028,7 +1174,7 @@ export class ItemService {
 					if (account.email === sourceAccountEmail) {
 						continue;
 					}
-					const vaultKeys = await this.storage.getVaultKeys(account.email);
+					const vaultKeys = await this.storage.getVaultKeys(account.accountId);
 					if (
 						vaultKeys?.some(
 							(vaultKey) => vaultKey.vaultId === input.targetVaultId,
@@ -1042,6 +1188,12 @@ export class ItemService {
 		}
 
 		const isCrossAccount = sourceAccountEmail !== targetAccountEmail;
+		const targetAccountId = await resolveAccountScopeId(
+			this.storage,
+			targetAccountEmail,
+		);
+		if (!targetAccountId)
+			throw new Error("Target account identity is required");
 		const targetVaultKey = await this.getVaultKey(
 			input.targetVaultId,
 			targetAccountEmail,
@@ -1082,7 +1234,7 @@ export class ItemService {
 		if (isCrossAccount) {
 			const targetClient = await this.accounts.getClientForAccount(
 				defaultClient,
-				targetAccountEmail,
+				targetAccountId,
 			);
 			const createResult = (await targetClient.vault.createItem.mutate({
 				itemId: targetItemId,
@@ -1109,11 +1261,45 @@ export class ItemService {
 				throw new Error("Server returned mismatched item ID");
 			}
 
+			const sourceClient = await this.accounts.getClientForAccount(
+				defaultClient,
+				sourceAccountId,
+			);
+
+			// Migrate attachment blobs onto the newly-created target item BEFORE the
+			// source item is deleted. Attachment ciphertext cannot be copied as-is:
+			// the vault key, and the AAD's vaultId/userId/attachmentKey all differ on
+			// the target, so every attachment is downloaded, decrypted under the
+			// source scope and re-encrypted + re-uploaded under a fresh, server-minted
+			// target storage key.
+			//
+			// Partial-failure policy: the move is already non-atomic, so we optimise
+			// for NEVER losing data. If any attachment step throws (including target
+			// quota errors from createAttachmentUpload) we do NOT delete the source —
+			// its item and attachments stay intact for a retry — and we best-effort
+			// remove the partially-created target item so no orphan/duplicate lingers.
 			try {
-				const sourceClient = await this.accounts.getClientForAccount(
-					defaultClient,
+				await this.migrateAttachmentsForCrossAccountMove({
+					sourceClient,
+					targetClient,
+					sourceItemId: input.itemId,
+					targetItemId,
+					sourceVaultId: input.sourceVaultId,
+					targetVaultId: input.targetVaultId,
 					sourceAccountEmail,
-				);
+					targetVaultKey,
+					targetUserId,
+				});
+			} catch (error) {
+				await this.bestEffortDeleteTargetItem(targetClient, targetItemId);
+				throw error instanceof Error
+					? error
+					: new Error(
+							"Failed to migrate attachments during cross-account move. The original item was left intact.",
+						);
+			}
+
+			try {
 				await sourceClient.vault.deleteItem.mutate({
 					itemId: input.itemId,
 					clientId: null,
@@ -1143,7 +1329,7 @@ export class ItemService {
 
 		const sourceClient = await this.accounts.getClientForAccount(
 			defaultClient,
-			sourceAccountEmail,
+			sourceAccountId,
 		);
 		await sourceClient.vault.moveItem.mutate({
 			itemId: input.itemId,

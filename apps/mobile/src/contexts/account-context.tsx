@@ -1,10 +1,17 @@
 import {
+	type AccountSessionManager,
+	getAccountSessionManager,
+} from "@bittery/core/services/account-session-manager";
+import { useQueryClient } from "@tanstack/react-query";
+import {
 	createContext,
 	type ReactNode,
 	useCallback,
 	useContext,
 	useEffect,
+	useRef,
 	useState,
+	useSyncExternalStore,
 } from "react";
 
 import {
@@ -17,23 +24,19 @@ interface AccountContextValue {
 	allAccounts: AccountMetadata[];
 	activeAccountConfig: ActiveAccount;
 	activeAccount: AccountMetadata | null;
-	isAllAccountsMode: boolean;
 	isLoading: boolean;
 	refreshAccounts: () => Promise<void>;
-	switchAccount: (email: string) => Promise<void>;
-	switchAllAccounts: () => Promise<void>;
-	removeAccount: (email: string) => Promise<void>;
+	switchAccount: (accountId: string) => Promise<void>;
+	removeAccount: (accountId: string) => Promise<void>;
 }
 
 const AccountContext = createContext<AccountContextValue>({
 	allAccounts: [],
 	activeAccountConfig: null,
 	activeAccount: null,
-	isAllAccountsMode: false,
 	isLoading: true,
 	refreshAccounts: async () => {},
 	switchAccount: async () => {},
-	switchAllAccounts: async () => {},
 	removeAccount: async () => {},
 });
 
@@ -46,125 +49,54 @@ interface AccountProviderProps {
 }
 
 export function AccountProvider({ children }: AccountProviderProps) {
-	const [allAccounts, setAllAccounts] = useState<AccountMetadata[]>([]);
-	const [activeAccountConfig, setActiveAccountConfig] =
-		useState<ActiveAccount>(null);
-	const [activeAccount, setActiveAccount] = useState<AccountMetadata | null>(
-		null,
-	);
+	const queryClient = useQueryClient();
+	const queryClientRef = useRef(queryClient);
+	queryClientRef.current = queryClient;
+
+	const managerRef = useRef<AccountSessionManager | null>(null);
+	if (!managerRef.current) {
+		managerRef.current = getAccountSessionManager({
+			storage,
+			invalidateQueries: async (keys) => {
+				await Promise.all(
+					keys.map((key) =>
+						queryClientRef.current.invalidateQueries({ queryKey: key }),
+					),
+				);
+			},
+		});
+	}
+	const manager = managerRef.current;
+
 	const [isLoading, setIsLoading] = useState(true);
 
+	useSyncExternalStore(manager.subscribe, manager.getSnapshot);
+
+	useEffect(() => {
+		void manager.initialize().finally(() => setIsLoading(false));
+	}, [manager]);
+
+	const allAccounts = manager.getAccounts();
+	const activeAccountConfig = manager.getActiveAccount();
+	const activeAccount = manager.getActiveAccountMetadata();
+
 	const refreshAccounts = useCallback(async () => {
-		try {
-			const accountsList = await storage.getAccountsList();
-			setAllAccounts(accountsList);
-
-			const activeConfig = await storage.getActiveAccount();
-			setActiveAccountConfig(activeConfig);
-
-			if (accountsList.length === 0) {
-				setActiveAccount(null);
-				if (activeConfig) {
-					await storage.setActiveAccount(null);
-					setActiveAccountConfig(null);
-				}
-				return;
-			}
-
-			if (activeConfig?.type === "single") {
-				const active = accountsList.find(
-					(a) => a.email.toLowerCase() === activeConfig.email.toLowerCase(),
-				);
-				if (active) {
-					setActiveAccount(active);
-				} else {
-					const firstAccount = accountsList[0];
-					await storage.setActiveAccount({
-						type: "single",
-						email: firstAccount.email,
-					});
-					setActiveAccountConfig({
-						type: "single",
-						email: firstAccount.email,
-					});
-					setActiveAccount(firstAccount);
-				}
-				return;
-			}
-
-			if (activeConfig?.type === "all") {
-				// Keep all-accounts mode active without forcing a single account
-				setActiveAccount(null);
-				return;
-			}
-
-			// No active account set - default to first account
-			const firstAccount = accountsList[0];
-			await storage.setActiveAccount({
-				type: "single",
-				email: firstAccount.email,
-			});
-			setActiveAccountConfig({ type: "single", email: firstAccount.email });
-			setActiveAccount(firstAccount);
-		} catch (error) {
-			console.error("Error loading accounts:", error);
-		} finally {
-			setIsLoading(false);
-		}
-	}, []);
+		await manager.refresh();
+	}, [manager]);
 
 	const switchAccount = useCallback(
-		async (email: string) => {
-			await storage.setActiveAccount({ type: "single", email });
-			await refreshAccounts();
+		async (accountId: string) => {
+			await manager.switchAccount({ type: "single", accountId });
 		},
-		[refreshAccounts],
+		[manager],
 	);
-
-	const switchAllAccounts = useCallback(async () => {
-		await storage.setActiveAccount({ type: "all" });
-		await refreshAccounts();
-	}, [refreshAccounts]);
 
 	const removeAccount = useCallback(
-		async (email: string) => {
-			await storage.clearAccountData(email);
-
-			// If removing the active account, switch to another one
-			const remainingAccounts = allAccounts.filter(
-				(a) => a.email.toLowerCase() !== email.toLowerCase(),
-			);
-
-			if (
-				activeAccountConfig?.type === "single" &&
-				activeAccountConfig.email.toLowerCase() === email.toLowerCase()
-			) {
-				if (remainingAccounts.length > 0) {
-					await storage.setActiveAccount({
-						type: "single",
-						email: remainingAccounts[0].email,
-					});
-				} else {
-					await storage.setActiveAccount(null);
-				}
-			}
-
-			if (
-				activeAccountConfig?.type === "all" &&
-				remainingAccounts.length === 0
-			) {
-				await storage.setActiveAccount(null);
-			}
-
-			await refreshAccounts();
+		async (accountId: string) => {
+			await manager.removeAccount(accountId);
 		},
-		[activeAccountConfig, allAccounts, refreshAccounts],
+		[manager],
 	);
-
-	// Load accounts on mount
-	useEffect(() => {
-		refreshAccounts();
-	}, [refreshAccounts]);
 
 	return (
 		<AccountContext.Provider
@@ -172,11 +104,9 @@ export function AccountProvider({ children }: AccountProviderProps) {
 				allAccounts,
 				activeAccountConfig,
 				activeAccount,
-				isAllAccountsMode: activeAccountConfig?.type === "all",
 				isLoading,
 				refreshAccounts,
 				switchAccount,
-				switchAllAccounts,
 				removeAccount,
 			}}
 		>

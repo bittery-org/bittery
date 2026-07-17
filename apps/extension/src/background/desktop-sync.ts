@@ -5,6 +5,7 @@
  * for real-time lock/unlock synchronization.
  */
 
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { storage } from "../lib/storage";
 import { type DesktopStatus, desktopClient } from "./desktop-client";
 import type { DesktopEventPayload } from "./desktop-protocol";
@@ -35,7 +36,7 @@ export interface DesktopCloseEvent {
 }
 
 export interface ActiveAccountChangedEvent {
-	email: string;
+	accountId: string;
 	timestamp: number;
 }
 
@@ -88,14 +89,28 @@ class DesktopSyncService {
 				// Restore active account if available
 				if (previousState.activeAccount) {
 					try {
-						// Check if active account is "all" or a specific email
+						const accounts = await storage.getAccountsList();
+						// All-accounts mode was removed; collapse a legacy "all" pointer
+						// to a single active account (first unlocked, else first known).
 						if (previousState.activeAccount === "all") {
-							await storage.setActiveAccount({ type: "all" });
+							const unlocked = await storage.getUnlockedAccounts?.();
+							const accountId = unlocked?.[0] ?? accounts[0]?.accountId;
+							if (accountId) {
+								await storage.setActiveAccount({
+									type: "single",
+									accountId,
+								});
+							}
 						} else {
-							await storage.setActiveAccount({
-								type: "single",
-								email: previousState.activeAccount,
-							});
+							const account = accounts.find(
+								(item) => item.accountId === previousState.activeAccount,
+							);
+							if (account) {
+								await storage.setActiveAccount({
+									type: "single",
+									accountId: account.accountId,
+								});
+							}
 						}
 					} catch (error) {
 						console.error(
@@ -151,14 +166,14 @@ class DesktopSyncService {
 
 			// Add or update accounts from desktop
 			for (const desktopAccount of accountsData.accounts) {
-				const email = desktopAccount.email.toLowerCase();
+				const desktopAccountId = desktopAccount.accountId;
 				const existingAccount = currentAccounts.find(
-					(a) => a.email.toLowerCase() === email,
+					(a) => a.accountId === desktopAccountId,
 				);
 
 				if (!existingAccount) {
-					// Add new account
 					await storage.addAccount({
+						accountId: desktopAccountId,
 						email: desktopAccount.email,
 						userId: desktopAccount.userId,
 						name: desktopAccount.name,
@@ -168,7 +183,7 @@ class DesktopSyncService {
 						addedAt: desktopAccount.addedAt ?? Date.now(),
 						lastActiveAt: desktopAccount.lastActiveAt ?? Date.now(),
 						biometricEnabled: desktopAccount.biometricEnabled ?? false,
-					});
+					} as import("../lib/storage").AccountMetadata);
 				} else {
 					// Update existing account with latest data from desktop
 					// This ensures teamAvatarUrl and other fields stay in sync
@@ -188,14 +203,28 @@ class DesktopSyncService {
 
 			// Update active account if desktop has one set
 			if (accountsData.activeAccount) {
-				// Check if active account is "all" or a specific email
+				const refreshedAccounts = await storage.getAccountsList();
+				// All-accounts mode was removed; collapse a legacy "all" pointer to a
+				// single active account (first unlocked, else first known).
 				if (accountsData.activeAccount === "all") {
-					await storage.setActiveAccount({ type: "all" });
+					const unlocked = await storage.getUnlockedAccounts?.();
+					const accountId = unlocked?.[0] ?? refreshedAccounts[0]?.accountId;
+					if (accountId) {
+						await storage.setActiveAccount({
+							type: "single",
+							accountId,
+						});
+					}
 				} else {
-					await storage.setActiveAccount({
-						type: "single",
-						email: accountsData.activeAccount,
-					});
+					const active = refreshedAccounts.find(
+						(item) => item.accountId === accountsData.activeAccount,
+					);
+					if (active) {
+						await storage.setActiveAccount({
+							type: "single",
+							accountId: active.accountId,
+						});
+					}
 				}
 			}
 		} catch (error) {
@@ -341,9 +370,23 @@ class DesktopSyncService {
 
 		// Update active account in extension storage to match desktop
 		try {
-			await storage.setActiveAccount({ type: "single", email: event.email });
+			await storage.setActiveAccount({
+				type: "single",
+				accountId: event.accountId,
+			});
+			await getAccountSessionManager({ storage }).refresh();
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
+			return;
+		}
+
+		try {
+			chrome.runtime.sendMessage({
+				type: "ACTIVE_ACCOUNT_CHANGED",
+				accountId: event.accountId,
+			});
+		} catch (_error) {
+			// Ignore if no listeners
 		}
 	}
 
@@ -448,11 +491,7 @@ class DesktopSyncService {
 			const state: DesktopModeStateSnapshot = {
 				lastConnectedAt: Date.now(),
 				activeAccount:
-					activeAccount?.type === "single"
-						? activeAccount.email
-						: activeAccount?.type === "all"
-							? "all"
-							: null,
+					activeAccount?.type === "single" ? activeAccount.accountId : null,
 			};
 			await chrome.storage.local.set({ [STORAGE_KEY_DESKTOP_MODE]: state });
 		} catch (error) {

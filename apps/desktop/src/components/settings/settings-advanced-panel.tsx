@@ -45,7 +45,9 @@ export function SettingsAdvancedPanel({
 					await storage.clearItemCache();
 				} else {
 					await Promise.all(
-						accounts.map((account) => storage.clearItemCache(account.email)),
+						accounts.map((account) =>
+							storage.clearItemCache(account.accountId),
+						),
 					);
 				}
 

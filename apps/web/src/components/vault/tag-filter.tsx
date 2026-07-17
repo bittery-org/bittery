@@ -63,7 +63,8 @@ export function TagFilter({
 						size="sm"
 						className={cn(
 							"h-9 gap-1",
-							selectedTags.length > 0 && "border-primary/50 bg-primary/5",
+							selectedTags.length > 0 &&
+								"bg-selected shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]",
 						)}
 						disabled={disabled || tags.length === 0}
 					>

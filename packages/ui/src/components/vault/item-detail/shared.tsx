@@ -70,10 +70,7 @@ export function handleCopy(
 		showAutoClearMessage,
 		successMessage:
 			showAutoClearMessage && autoClearMs > 0
-				? m.vaults_detail_items_copy_toast_success_auto_clear({
-						label,
-						seconds: Math.round(autoClearMs / 1000),
-					})
+				? m.vaults_detail_items_copy_toast_success_auto_clear({ label })
 				: m.vaults_detail_items_copy_toast_success({ label }),
 		emptyErrorMessage: m.vaults_detail_items_copy_toast_empty({ label }),
 		copyErrorMessage: m.vaults_detail_items_copy_toast_failed(),

@@ -7,13 +7,12 @@ use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 use ts_rs::TS;
 
 use crate::{
-    config::bittery_mode,
     error::AppError,
     repo::audit::{
-        load_actor, load_audit_events, load_share_access_events, load_team_members,
-        AuditEventFilter, AuditEventRow, ShareAccessEventRow, TeamMemberRow,
+        load_audit_events, load_share_access_events, load_team_members, AuditEventFilter,
+        AuditEventRow, ShareAccessEventRow, TeamMemberRow,
     },
-    services::team_billing::team_management_enabled as shared_team_management_enabled,
+    services::team_admin::authorize_team_admin,
 };
 
 const DEFAULT_LIMIT: u32 = 50;
@@ -146,29 +145,7 @@ pub(crate) async fn get_team_events(
     user_id: &str,
     input: TeamEventsInput,
 ) -> Result<TeamEventsResponse, AppError> {
-    let actor = load_actor(pool, user_id).await?;
-    let team_id = actor
-        .team_id
-        .clone()
-        .ok_or_else(|| not_found_error("Team not found"))?;
-
-    if actor.role != "owner" && actor.role != "admin" {
-        return Err(forbidden_error(
-            "Only team owner or admin can access this console",
-        ));
-    }
-
-    if bittery_mode() != "self-hosted" && actor.billing_plan.as_deref() != Some("team") {
-        return Err(forbidden_error(
-            "This console is only available on Team plans",
-        ));
-    }
-
-    if !team_management_enabled(actor.billing_status.as_deref()) {
-        return Err(forbidden_error(
-            "Team management is unavailable until billing is active",
-        ));
-    }
+    let team_id = authorize_team_admin(pool, user_id).await?.team_id;
 
     let members = load_team_members(pool, &team_id).await?;
     let member_map = HashMap::<String, TeamMemberRow>::from_iter(
@@ -402,7 +379,7 @@ fn to_share_access_event(
 fn parse_metadata(metadata: Option<&str>) -> Option<Value> {
     metadata
         .and_then(|value| serde_json::from_str::<Value>(value).ok())
-        .and_then(|value| if value.is_object() { Some(value) } else { None })
+        .filter(|value| value.is_object())
 }
 
 fn action_group_for_action(action: &str) -> AuditActionGroup {
@@ -456,7 +433,7 @@ fn source_rank(source: EventSource) -> u8 {
     }
 }
 
-fn mask_ip(ip_address: Option<&str>) -> Option<String> {
+pub(crate) fn mask_ip(ip_address: Option<&str>) -> Option<String> {
     let ip_address = ip_address?;
     if ip_address.contains('.') {
         let segments = ip_address.split('.').collect::<Vec<_>>();
@@ -497,20 +474,8 @@ fn mask_user_agent(user_agent: Option<&str>) -> Option<String> {
     }
 }
 
-fn team_management_enabled(billing_status: Option<&str>) -> bool {
-    shared_team_management_enabled(bittery_mode(), Some("team"), billing_status)
-}
-
 fn bad_request_error(message: &str) -> AppError {
     AppError::bad_request(message)
-}
-
-fn forbidden_error(message: &str) -> AppError {
-    AppError::forbidden(message)
-}
-
-fn not_found_error(message: &str) -> AppError {
-    AppError::not_found(message)
 }
 
 #[derive(Debug, Clone)]

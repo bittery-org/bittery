@@ -1,4 +1,5 @@
 import { useLogin } from "@bittery/core/hooks";
+import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
 	Button,
@@ -17,7 +18,7 @@ import {
 	IconFingerprintOutlineDuo18,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
 import { triggerAuthRevealToVault } from "@/lib/auth-reveal-transition";
@@ -26,7 +27,7 @@ import {
 	setActiveAuthServerUrl,
 	subscribeActiveAuthServerUrl,
 } from "@/lib/auth-server";
-import { type AccountMetadata, storage } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface LoginSearchParams {
@@ -34,6 +35,51 @@ interface LoginSearchParams {
 }
 
 export const Route = createFileRoute("/login")({
+	beforeLoad: async ({ search }) => {
+		const prefillEmail =
+			typeof search.prefillEmail === "string" ? search.prefillEmail : undefined;
+		if (prefillEmail) {
+			return;
+		}
+
+		const accountsList = await storage.getAccountsList();
+		if (accountsList.length === 0) {
+			return;
+		}
+
+		let activeAccount = await storage.getActiveAccount();
+		if (!activeAccount) {
+			const firstAccount = accountsList[0];
+			if (!firstAccount) {
+				return;
+			}
+			activeAccount = {
+				type: "single",
+				accountId: firstAccount.accountId,
+			};
+			await storage.setActiveAccount(activeAccount);
+		}
+
+		const activeAccountMetadata = accountsList.find(
+			(account) => account.accountId === activeAccount.accountId,
+		);
+		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
+		if (sessionValid) {
+			const restored = await getAccountSessionManager({
+				storage,
+			}).unlockAccount(activeAccount.accountId, true);
+			if (restored) {
+				throw redirect({ to: "/vault" });
+			}
+		}
+
+		throw redirect({
+			to: "/unlock",
+			search: activeAccountMetadata?.email
+				? { email: activeAccountMetadata.email }
+				: undefined,
+		});
+	},
 	component: LoginPage,
 	validateSearch: (search: Record<string, unknown>): LoginSearchParams => ({
 		prefillEmail:
@@ -131,31 +177,17 @@ export function LoginPage() {
 
 	const loginMutation = useLogin({
 		enableBiometric: enableBiometric && !!biometricAvailable,
-		onSuccess: async (result, input) => {
-			const normalizedEmail = input.email.toLowerCase();
+		onSuccess: async (_result) => {
 			const normalizedServerUrl = normalizeServerUrl(serverUrl);
 
 			if (normalizedServerUrl) {
-				await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
-			}
-
-			const secretKeyHint = `${input.secretKey.substring(0, 5)}...`;
-			const accountMetadata: AccountMetadata = {
-				email: normalizedEmail,
-				userId: result.user.id,
-				name: result.user.name || normalizedEmail.split("@")[0],
-				teamName: result.user.teamName,
-				secretKeyHint,
-				addedAt: Date.now(),
-				lastActiveAt: Date.now(),
-				biometricEnabled: enableBiometric && !!biometricAvailable,
-			};
-
-			await storage.addAccountToList(accountMetadata);
-
-			// Clear stale item cache for this account (e.g. from a previous session)
-			if (storage.clearItemCache) {
-				await storage.clearItemCache(normalizedEmail);
+				const activeAccount = await storage.getActiveAccount();
+				if (activeAccount?.type === "single") {
+					await storage.storeServerUrl(
+						normalizedServerUrl,
+						activeAccount.accountId,
+					);
+				}
 			}
 
 			await Promise.all([
@@ -188,6 +220,7 @@ export function LoginPage() {
 			email,
 			password,
 			secretKey,
+			serverUrl: nextServerUrl,
 			enableBiometric: enableBiometric && !!biometricAvailable,
 		});
 	};

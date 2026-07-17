@@ -5,11 +5,13 @@
  */
 
 export {
+	type BiometricUnlockAvailability,
 	type CheckEmailResult,
 	checkEmailExists,
 	clearSession,
 	deriveSrpLoginProof,
 	type FinishLoginResponse,
+	getBiometricUnlockAvailability,
 	getSessionState,
 	type IAuthClient,
 	type LoginResult,

@@ -1122,6 +1122,18 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             Some("teams/team_router_main/custom-logo.png".to_string())
         );
 
+        let team_after_update = with_storage_env_async(app.rpc_call(
+            "team.get",
+            json!([{ "teamId": fixture.team_id }]),
+            owner_headers.clone(),
+        ))
+        .await;
+        assert_eq!(team_after_update.status, StatusCode::OK);
+        assert_eq!(
+            team_after_update.body["result"]["Ok"]["imageUrl"],
+            json!("https://cdn.example.invalid/assets/teams/team_router_main/custom-logo.png")
+        );
+
         let forbidden_upload = app
             .rpc_call(
                 "team.createImageUpload",

@@ -3,31 +3,14 @@
  * Shared helpers for vault operations.
  */
 
-import { filterItemsByTravelMode } from "@bittery/core";
-import type {
-	DecryptedItemWithContext,
-	ItemCategory,
-	Passkey,
-} from "@bittery/shared/types";
+import type { MultiAccountItem } from "@bittery/core/services/item-service";
+import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
+import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
-import { desktopSync } from "./desktop-sync";
-
-type MultiAccountItem = DecryptedItemWithContext & {
-	vault: {
-		id: string;
-		name: string;
-		type: string;
-		icon: string | null;
-		imageUrl: string | null;
-	};
-	account?: {
-		email: string;
-		userId: string;
-		name: string;
-	};
-};
+import { parseDesktopSnapshotItem } from "./desktop-snapshot";
+import { isDesktopReadAvailable } from "./desktop-status";
 
 export function mergeItemCollections(
 	desktopItems: MultiAccountItem[],
@@ -46,222 +29,72 @@ export function mergeItemCollections(
 	return Array.from(merged.values());
 }
 
-function isItemCategory(value: unknown): value is ItemCategory {
-	return (
-		value === "login" ||
-		value === "secure-note" ||
-		value === "credit-card" ||
-		value === "identity" ||
-		value === "totp"
-	);
+export async function mergeDesktopAndLocalItemSources(
+	desktopItemsPromise: Promise<MultiAccountItem[]>,
+	localItemsPromise: Promise<MultiAccountItem[]>,
+): Promise<MultiAccountItem[]> {
+	const [desktopItems, localItems] = await Promise.all([
+		desktopItemsPromise,
+		localItemsPromise.catch((error) => {
+			console.warn(
+				"[vault-utils] Local items unavailable during desktop-backed read; using the desktop snapshot:",
+				error,
+			);
+			return [];
+		}),
+	]);
+	return mergeItemCollections(desktopItems, localItems);
 }
 
-function isPasskey(value: unknown): value is Passkey {
-	if (!value || typeof value !== "object") {
-		return false;
-	}
-
-	const candidate = value as Partial<Passkey>;
-	return (
-		typeof candidate.credentialId === "string" &&
-		typeof candidate.rpId === "string" &&
-		typeof candidate.rpName === "string" &&
-		typeof candidate.userHandle === "string" &&
-		typeof candidate.userName === "string" &&
-		typeof candidate.userDisplayName === "string" &&
-		typeof candidate.privateKey === "string" &&
-		typeof candidate.publicKey === "string" &&
-		typeof candidate.algorithm === "number" &&
-		typeof candidate.signCount === "number" &&
-		Array.isArray(candidate.transports) &&
-		candidate.transports.every((transport) => typeof transport === "string") &&
-		typeof candidate.createdAt === "string"
-	);
-}
-
-export function normalizeDesktopSnapshotItem(
-	item: Record<string, unknown>,
-	includeAccountContext: boolean,
-): MultiAccountItem | null {
-	if (typeof item.id !== "string" || typeof item.vaultId !== "string") {
-		return null;
-	}
-
-	const vault = item.vault as Record<string, unknown> | null | undefined;
-	if (
-		typeof vault !== "object" ||
-		vault === null ||
-		typeof vault.id !== "string" ||
-		typeof vault.name !== "string" ||
-		typeof vault.type !== "string"
-	) {
-		return null;
-	}
-
-	if (!isItemCategory(item.category)) {
-		return null;
-	}
-
-	if (typeof item.title !== "string") {
-		return null;
-	}
-
-	const normalized: MultiAccountItem = {
-		id: item.id,
-		vaultId: item.vaultId,
-		category: item.category,
-		favorite: Boolean(item.favorite),
-		createdAt:
-			typeof item.createdAt === "string"
-				? item.createdAt
-				: String(item.createdAt ?? ""),
-		updatedAt:
-			typeof item.updatedAt === "string"
-				? item.updatedAt
-				: String(item.updatedAt ?? ""),
-		title: item.title,
-		url: typeof item.url === "string" ? item.url : undefined,
-		urls: Array.isArray(item.urls)
-			? item.urls.filter((value): value is string => typeof value === "string")
-			: undefined,
-		username: typeof item.username === "string" ? item.username : undefined,
-		password: typeof item.password === "string" ? item.password : undefined,
-		passkeys: Array.isArray(item.passkeys)
-			? item.passkeys.filter(isPasskey)
-			: undefined,
-		notes: typeof item.notes === "string" ? item.notes : undefined,
-		note: typeof item.note === "string" ? item.note : undefined,
-		tags: Array.isArray(item.tags)
-			? item.tags.filter((value): value is string => typeof value === "string")
-			: undefined,
-		totpSecret:
-			typeof item.totpSecret === "string" ? item.totpSecret : undefined,
-		totpIssuer:
-			typeof item.totpIssuer === "string" ? item.totpIssuer : undefined,
-		totpAccountName:
-			typeof item.totpAccountName === "string"
-				? item.totpAccountName
-				: undefined,
-		vault: {
-			id: vault.id,
-			name: vault.name,
-			type: vault.type,
-			icon: typeof vault.icon === "string" ? vault.icon : null,
-			imageUrl: typeof vault.imageUrl === "string" ? vault.imageUrl : null,
-		},
-	};
-
-	if (includeAccountContext) {
-		const account = item.account as Record<string, unknown> | null | undefined;
-		if (
-			typeof account === "object" &&
-			account !== null &&
-			typeof account.email === "string"
-		) {
-			normalized.account = {
-				email: account.email,
-				userId: typeof account.userId === "string" ? account.userId : "",
-				name: typeof account.name === "string" ? account.name : account.email,
-			};
-		}
-	}
-
-	return normalized;
-}
-
-async function getDesktopTargetEmails(): Promise<string[]> {
+async function getDesktopTargetAccountIds(): Promise<string[]> {
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount?.type === "single") {
-		return [activeAccount.email.toLowerCase()];
+		return [activeAccount.accountId];
 	}
 
-	const statusEmails = desktopSync
-		.getLastStatus()
-		?.unlockedAccounts?.map((email) => email.toLowerCase());
-	if (statusEmails && statusEmails.length > 0) {
-		return Array.from(new Set(statusEmails));
-	}
-
-	const accounts = await desktopClient.getAccounts();
-	if (!accounts) {
-		return [];
-	}
-
-	return Array.from(
-		new Set(accounts.unlockedAccounts.map((email) => email.toLowerCase())),
-	);
+	return [];
 }
 
 async function filterItemsForTravelMode(
 	items: MultiAccountItem[],
 ): Promise<MultiAccountItem[]> {
+	const enforcer = getTravelModeEnforcer(storage);
 	const activeAccount = await storage.getActiveAccount();
 
 	if (activeAccount?.type === "single") {
-		const normalizedEmail = activeAccount.email.toLowerCase();
-		const config =
-			(await storage.getTravelModeCache?.(normalizedEmail)) ?? null;
-		if (!config?.enabled) {
-			return items;
-		}
-		return filterItemsByTravelMode(items, config);
+		await enforcer.hydrateFromStorage(activeAccount.accountId);
+		return enforcer.filterItems(activeAccount.accountId, items);
 	}
 
-	const itemsByEmail = new Map<string, MultiAccountItem[]>();
-	const unassigned: MultiAccountItem[] = [];
-
-	for (const item of items) {
-		const email = item.account?.email;
-		if (!email) {
-			unassigned.push(item);
-			continue;
-		}
-		const normalizedEmail = email.toLowerCase();
-		const bucket = itemsByEmail.get(normalizedEmail) ?? [];
-		bucket.push(item);
-		itemsByEmail.set(normalizedEmail, bucket);
-	}
-
-	const filtered: MultiAccountItem[] = [...unassigned];
-
-	for (const [email, accountItems] of itemsByEmail) {
-		const config = (await storage.getTravelModeCache?.(email)) ?? null;
-		if (!config?.enabled) {
-			filtered.push(...accountItems);
-			continue;
-		}
-		filtered.push(...filterItemsByTravelMode(accountItems, config));
-	}
-
-	return filtered;
+	// No single active account means we cannot determine which account's travel
+	// rules apply. Fail closed and surface nothing rather than leaking items that
+	// may be blocked by travel mode.
+	return [];
 }
 
 async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
-	const activeAccount = await storage.getActiveAccount();
-	const targetEmails = await getDesktopTargetEmails();
-	if (targetEmails.length === 0) {
+	const targetAccountIds = await getDesktopTargetAccountIds();
+	if (targetAccountIds.length === 0) {
 		return [];
 	}
 
-	const includeAccountContext = activeAccount?.type === "all";
-	const snapshot = await desktopClient.getItemsSnapshot(targetEmails);
+	const snapshot = await desktopClient.getItemsSnapshot(targetAccountIds);
 	if (!snapshot) {
 		console.warn("[vault-utils] desktop snapshot unavailable", {
-			targetEmails,
+			targetAccountIds,
 		});
 		return [];
 	}
 
 	const normalizedItems = snapshot.items
-		.map((item) =>
-			normalizeDesktopSnapshotItem(
-				item as Record<string, unknown>,
-				includeAccountContext,
-			),
-		)
+		.map((item) => parseDesktopSnapshotItem(item as Record<string, unknown>))
 		.filter((item): item is MultiAccountItem => item !== null);
 
-	return filterItemsForTravelMode(normalizedItems);
+	// The desktop only exposes items whose vault keys survived its verified
+	// travel-mode enforcement. Applying the extension's separate local policy
+	// here can discard a valid snapshot after a service-worker restart, before
+	// the extension has rebuilt its own policy cache.
+	return normalizedItems;
 }
 
 async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
@@ -280,26 +113,17 @@ async function getLocalCoordinatorItems(): Promise<MultiAccountItem[]> {
 	}
 }
 
-/**
- * Get decrypted items for current runtime mode.
- * Uses desktop snapshots in desktop mode and falls back to core/local decryption.
- */
 export async function getDecryptedItemsForCurrentMode(): Promise<
 	Array<DecryptedItemWithContext | null>
 > {
-	const desktopStatus =
-		desktopSync.getLastStatus() ?? (await desktopSync.checkDesktopStatus());
-	const desktopReadAvailable = Boolean(
-		desktopStatus?.available && !desktopStatus.locked,
-	);
+	const desktopReadAvailable = await isDesktopReadAvailable();
 
 	if (desktopReadAvailable) {
 		try {
-			const [desktopItems, localItems] = await Promise.all([
+			const mergedItems = await mergeDesktopAndLocalItemSources(
 				getDesktopItemsSnapshot(),
 				getLocalCoordinatorItems(),
-			]);
-			const mergedItems = mergeItemCollections(desktopItems, localItems);
+			);
 			return mergedItems;
 		} catch (error) {
 			console.warn(
@@ -313,46 +137,4 @@ export async function getDecryptedItemsForCurrentMode(): Promise<
 	await core.vaultCoordinator.hydrate(accountsInfo);
 	const localItems = core.vaultCoordinator.getAll() as MultiAccountItem[];
 	return filterItemsForTravelMode(localItems);
-}
-
-/**
- * Helper function to get base domain from hostname
- */
-export function getBaseDomain(host: string): string {
-	const parts = host.split(".");
-	if (parts.length <= 2) return host;
-	return parts.slice(-2).join(".");
-}
-
-/**
- * Helper function to check if hostname matches
- */
-export function hostnameMatches(
-	itemUrl: string,
-	targetHostname: string,
-): boolean {
-	if (!itemUrl) return false;
-
-	try {
-		const itemUrlObj = new URL(
-			itemUrl.startsWith("http") ? itemUrl : `https://${itemUrl}`,
-		);
-		const itemHostname = itemUrlObj.hostname;
-
-		if (itemHostname === targetHostname) return true;
-
-		if (
-			itemHostname.endsWith(`.${targetHostname}`) ||
-			targetHostname.endsWith(`.${itemHostname}`)
-		) {
-			return true;
-		}
-
-		const itemBaseDomain = getBaseDomain(itemHostname);
-		const hostnameBaseDomain = getBaseDomain(targetHostname);
-
-		return itemBaseDomain === hostnameBaseDomain;
-	} catch {
-		return false;
-	}
 }

@@ -276,6 +276,8 @@ function getImportErrorMessage(
 			return m.vaults_import_error_parse_failed();
 		case "execution-failed":
 			return m.vaults_import_error_execution_failed();
+		case "create-vault-account-required":
+			return m.vaults_import_error_create_vault_account_required();
 		case "unsupported-file-type":
 			return m.vaults_import_error_unsupported_file_type();
 		case "archive-read-failed":

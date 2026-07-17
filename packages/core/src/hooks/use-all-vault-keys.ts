@@ -12,6 +12,7 @@ import { useVaultRepositorySync } from "./use-vault-repository-sync";
  * Vault key with associated account metadata
  */
 export interface VaultKeyWithAccount extends VaultKeyData {
+	accountId: string;
 	accountEmail?: string;
 	accountName?: string;
 	accountTeamName?: string;
@@ -23,38 +24,32 @@ export interface UseAllVaultKeysOptions {
 }
 
 /**
- * Hook to fetch all vault keys with account metadata.
- * Automatically handles single-account vs "All Accounts" mode.
+ * Hook to fetch the active account's vault keys.
  *
- * In single-account mode: Returns vault keys for one account
- * In all-accounts mode: Returns vault keys from all unlocked accounts with account metadata
+ * This is the DEFAULT vault source powering the normal single-account vault
+ * list and sidebar. It intentionally does NOT populate cross-account metadata
+ * (`accountEmail`/`accountName`/...): the active-account view is never grouped
+ * by account. For a view-mode-independent list of every unlocked account's
+ * vaults (used by the item Move dialog to surface cross-account targets), use
+ * `useMoveTargetVaults` instead.
  *
  * @param options - Query options
- * @returns Vault keys with account metadata, loading state, and error
+ * @returns Vault keys, loading state, and error
  *
  * @example
  * ```tsx
- * const { vaultKeys, isLoading, isAllAccountsMode } = useAllVaultKeys();
+ * const { vaultKeys, isLoading } = useAllVaultKeys();
  *
  * vaultKeys.map(vault => (
- *   <VaultItem
- *     key={vault.vaultId}
- *     name={vault.vaultName}
- *     accountEmail={vault.accountEmail} // Only present in multi-account mode
- *   />
+ *   <VaultItem key={vault.vaultId} name={vault.vaultName} />
  * ))
  * ```
  */
 export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
-	const {
-		accountsInfo,
-		isAllAccountsMode,
-		isLoading,
-		snapshot,
-		vaultCoordinator,
-	} = useVaultRepositorySync({
-		enabled: options.enabled,
-	});
+	const { accountsInfo, isLoading, snapshot, vaultCoordinator } =
+		useVaultRepositorySync({
+			enabled: options.enabled,
+		});
 
 	const vaultKeys = useMemo(() => {
 		// Snapshot is an invalidation signal from the coordinator store.
@@ -66,14 +61,18 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 
 		return accountsInfo.flatMap((account) =>
 			vaultCoordinator
-				.getRepositoryForEmail(account.email)
+				.getRepositoryForAccount(account.accountId)
 				.getVaultKeys()
 				.map((vaultKey) => ({
 					...vaultKey,
-					accountEmail: account.email,
-					accountName: account.name,
-					accountTeamName: account.teamName,
-					accountTeamAvatarUrl: account.teamAvatarUrl,
+					accountId: account.accountId,
+					// Cross-account metadata is intentionally left undefined for the
+					// single-account view. Consumers that need it (the Move dialog)
+					// use `useMoveTargetVaults`.
+					accountEmail: undefined,
+					accountName: undefined,
+					accountTeamName: undefined,
+					accountTeamAvatarUrl: undefined,
 				})),
 		);
 	}, [accountsInfo, snapshot, vaultCoordinator]);
@@ -82,6 +81,5 @@ export function useAllVaultKeys(options: UseAllVaultKeysOptions = {}) {
 		vaultKeys,
 		isLoading,
 		error: null,
-		isAllAccountsMode,
 	};
 }

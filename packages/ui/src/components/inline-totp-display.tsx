@@ -4,9 +4,11 @@ import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { useCallback, useEffect, useState } from "react";
 import { IconCopyOutlineDuo18 } from "../icons";
-import { cn } from "../lib/utils";
-import { Button } from "./button";
 import { copyWithToast } from "./clipboard";
+import {
+	DetailFieldActionButton,
+	DetailRow,
+} from "./vault/item-detail/field-components";
 
 interface InlineTotpDisplayProps {
 	totpSecret: string;
@@ -26,6 +28,14 @@ async function handleCopy(
 		copyErrorMessage: m.vaults_detail_items_copy_toast_failed(),
 	});
 }
+
+function formatCode(code: string) {
+	const half = Math.ceil(code.length / 2);
+	return `${code.slice(0, half)} ${code.slice(half)}`;
+}
+
+const RING_RADIUS = 6;
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 
 export function InlineTotpDisplay({
 	totpSecret,
@@ -64,70 +74,59 @@ export function InlineTotpDisplay({
 		handleCopy(totpResult?.code, m.vaults_detail_items_copy_label_code(), m);
 	};
 
-	const progress = totpResult?.progress || 0;
-	const circumference = 2 * Math.PI * 14;
-	const strokeDashoffset = circumference - (progress / 100) * circumference;
-
-	const getProgressColor = () => {
-		if (!totpResult) return "stroke-muted";
-		if (totpResult.remainingSeconds <= 5) return "stroke-destructive";
-		if (totpResult.remainingSeconds <= 10) return "stroke-yellow-500";
-		return "stroke-primary";
-	};
+	// progress is elapsed percent — the ring drains from full to empty over the period
+	const strokeDashoffset =
+		((totpResult?.progress ?? 0) / 100) * RING_CIRCUMFERENCE;
 
 	return (
-		<div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
-			<button
-				type="button"
-				onClick={handleCopyCode}
-				className="group flex cursor-pointer items-center gap-3 rounded-lg transition-colors hover:bg-muted/50"
-				title={m.vaults_detail_items_detail_totp_action_click_to_copy()}
-			>
-				<div className="relative flex size-9 items-center justify-center">
-					<svg className="size-9 -rotate-90" viewBox="0 0 32 32" aria-hidden="true">
+		<DetailRow
+			onClick={handleCopyCode}
+			actions={
+				<DetailFieldActionButton
+					onClick={handleCopyCode}
+					disabled={!totpResult?.code}
+				>
+					<IconCopyOutlineDuo18 className="size-4" />
+				</DetailFieldActionButton>
+			}
+		>
+			<div className="min-w-0">
+				<p className="truncate text-[10.5px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
+					{m.vaults_detail_items_detail_login_field_one_time_password()}
+				</p>
+				<div className="flex items-center gap-2.5">
+					<span className="font-medium font-mono text-base text-foreground tracking-[0.12em]">
+						{totpResult?.code ? formatCode(totpResult.code) : "--- ---"}
+					</span>
+					<svg
+						className="-rotate-90 size-4 shrink-0"
+						viewBox="0 0 16 16"
+						aria-hidden="true"
+					>
 						<circle
-							cx="16"
-							cy="16"
-							r="14"
+							cx="8"
+							cy="8"
+							r={RING_RADIUS}
 							fill="none"
-							stroke="currentColor"
 							strokeWidth="2.5"
-							className="text-muted/30"
+							className="stroke-foreground/12"
 						/>
 						<circle
-							cx="16"
-							cy="16"
-							r="14"
+							cx="8"
+							cy="8"
+							r={RING_RADIUS}
 							fill="none"
 							strokeWidth="2.5"
 							strokeLinecap="round"
-							className={cn("transition-all", "duration-300", getProgressColor())}
+							className="stroke-primary transition-[stroke-dashoffset] duration-500 ease-linear [filter:drop-shadow(0_0_3px_color-mix(in_oklab,var(--color-primary)_70%,transparent))]"
 							style={{
-								strokeDasharray: circumference,
+								strokeDasharray: RING_CIRCUMFERENCE,
 								strokeDashoffset,
 							}}
 						/>
 					</svg>
-					<span className="absolute font-medium font-mono text-xs">
-						{totpResult?.remainingSeconds || "--"}
-					</span>
 				</div>
-
-				<div className="flex flex-col">
-					<span className="font-bold font-mono text-2xl tracking-widest">
-						{totpResult?.code
-							? `${totpResult.code.slice(0, 3)} ${totpResult.code.slice(3)}`
-							: "--- ---"}
-					</span>
-					<span className="text-muted-foreground text-xs">
-						{m.vaults_detail_items_detail_login_field_one_time_password()}
-					</span>
-				</div>
-			</button>
-
-			<Button size="icon" variant="outline" onClick={handleCopyCode} disabled={!totpResult?.code}>
-				<IconCopyOutlineDuo18 size={16} />
-			</Button>
-		</div>
+			</div>
+		</DetailRow>
 	);
 }

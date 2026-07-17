@@ -18,8 +18,23 @@ import type {
 	KdfParams,
 } from "@bittery/types";
 import type { Store } from "@tauri-apps/plugin-store";
+import {
+	findAccountById,
+	findAccountByServerUser,
+	generateAccountId,
+} from "../account-id";
+import {
+	ACCOUNT_STORAGE_SUFFIXES,
+	getAccountKey,
+	getLegacyAccountKey,
+} from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import {
+	migrateEmailKeysToAccountIds,
+	parseStoredActiveAccount,
+	serializeActiveAccount,
+} from "../migrate-to-account-ids";
 import { resolveStoredSessionExpiryTimestamp } from "../session";
 import {
 	type AccountMetadata,
@@ -41,12 +56,6 @@ const MASTER_PASSWORD_REENTRY_PERIOD_KEY =
 	"bittery_master_password_reentry_period_ms";
 const LEGACY_SERVER_URL_STORAGE = "bittery_server_url"; // Legacy, now account-scoped
 
-// Helper to generate namespaced keys for each account
-function getAccountKey(email: string, suffix: string): string {
-	const sanitized = email.toLowerCase().replace(/[^a-z0-9]/g, "_");
-	return `bittery_account_${sanitized}_${suffix}`;
-}
-
 interface AccountsList {
 	accounts: AccountMetadata[];
 }
@@ -60,7 +69,7 @@ interface AccountCache {
 	cachedVaults: CachedVaultMetadata[] | null;
 }
 
-// In-memory caches - keyed by email
+// In-memory caches - keyed by accountId
 const accountCaches: Map<string, AccountCache> = new Map();
 
 // Cache for active account to avoid repeated IPC calls
@@ -126,16 +135,54 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			console.warn("[storage-tauri] Biometry module not available:", error);
 		}
 
-		// Pre-load active account into cache to avoid repeated IPC calls
+		// Migrate legacy email-keyed storage to accountId keys
 		if (this.store) {
-			const stored = await this.store.get<string>(ACTIVE_ACCOUNT_KEY);
-			if (!stored) {
-				cachedActiveAccount = null;
-			} else if (stored === "all") {
-				cachedActiveAccount = { type: "all" };
-			} else {
-				cachedActiveAccount = { type: "single", email: stored };
-			}
+			const store = this.store;
+			await migrateEmailKeysToAccountIds({
+				store: {
+					get: <T>(key: string) => store.get<T>(key),
+					set: (key, value) => store.set(key, value),
+					delete: async (key) => {
+						await store.delete(key);
+					},
+					save: () => store.save(),
+				},
+				activeAccountKey: ACTIVE_ACCOUNT_KEY,
+				accountsListKey: ACCOUNTS_LIST_KEY,
+				getAccountsList: async () =>
+					(await this.getAccountsListInternal()).accounts,
+				saveAccountsList: async (accounts) => {
+					const s = await this.getStore();
+					await s.set(ACCOUNTS_LIST_KEY, JSON.stringify({ accounts }));
+				},
+				copyKeychainKey: async (legacyEmail, accountId, suffix) => {
+					if (!this.invoke) return;
+					const legacyKey = getLegacyAccountKey(legacyEmail, suffix);
+					const newKey = getAccountKey(accountId, suffix);
+					const value = await this.invoke("keychain_get", {
+						key: legacyKey,
+					});
+					if (value) {
+						await this.invoke("keychain_set", { key: newKey, value });
+						const copied = await this.invoke("keychain_get", { key: newKey });
+						if (copied !== value) {
+							throw new Error(
+								`Failed to verify keychain migration for ${newKey}`,
+							);
+						}
+					}
+				},
+				deleteLegacyKeychainKey: async (legacyEmail, suffix) => {
+					if (!this.invoke) return;
+					await this.invoke("keychain_delete", {
+						key: getLegacyAccountKey(legacyEmail, suffix),
+					});
+				},
+			});
+
+			// Pre-load active account into cache to avoid repeated IPC calls
+			const stored = await store.get<string>(ACTIVE_ACCOUNT_KEY);
+			cachedActiveAccount = parseStoredActiveAccount(stored);
 		}
 	}
 
@@ -148,25 +195,25 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return this.store;
 	}
 
-	private getBearerTokenKey(email: string): string {
-		return getAccountKey(email, "jwt_token");
+	private getBearerTokenKey(accountId: string): string {
+		return getAccountKey(accountId, "jwt_token");
 	}
 
 	private async getBearerTokenFromKeychain(
-		email: string,
+		accountId: string,
 	): Promise<string | null> {
 		if (!this.invoke) {
 			throw new Error("Keychain is not available");
 		}
 
 		const keychainValue = await this.invoke("keychain_get", {
-			key: this.getBearerTokenKey(email),
+			key: this.getBearerTokenKey(accountId),
 		});
 		return keychainValue ?? null;
 	}
 
 	private async setBearerTokenInKeychain(
-		email: string,
+		accountId: string,
 		token: string,
 	): Promise<void> {
 		if (!this.invoke) {
@@ -174,32 +221,33 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 
 		await this.invoke("keychain_set", {
-			key: this.getBearerTokenKey(email),
+			key: this.getBearerTokenKey(accountId),
 			value: token,
 		});
 	}
 
-	private async deleteBearerTokenFromKeychain(email: string): Promise<void> {
+	private async deleteBearerTokenFromKeychain(
+		accountId: string,
+	): Promise<void> {
 		if (!this.invoke) {
 			return;
 		}
 
 		await this.invoke("keychain_delete", {
-			key: this.getBearerTokenKey(email),
+			key: this.getBearerTokenKey(accountId),
 		});
 	}
 
-	private async resolveEmail(email?: string): Promise<string | null> {
-		if (email) return email.toLowerCase();
+	private async resolveAccountId(accountId?: string): Promise<string | null> {
+		if (accountId) return accountId;
 
 		const account = await this.getActiveAccount();
-		if (!account || account.type === "all") return null;
-		return account.email;
+		if (!account) return null;
+		return account.accountId;
 	}
 
-	private getAccountCache(email: string): AccountCache {
-		const key = email.toLowerCase();
-		let cache = accountCaches.get(key);
+	private getAccountCache(accountId: string): AccountCache {
+		let cache = accountCaches.get(accountId);
 		if (!cache) {
 			cache = {
 				authToken: null,
@@ -208,13 +256,13 @@ export class TauriStorageAdapter implements IStorageAdapter {
 				cachedItems: null,
 				cachedVaults: null,
 			};
-			accountCaches.set(key, cache);
+			accountCaches.set(accountId, cache);
 		}
 		return cache;
 	}
 
-	private clearAccountCache(email: string): void {
-		accountCaches.delete(email.toLowerCase());
+	private clearAccountCache(accountId: string): void {
+		accountCaches.delete(accountId);
 	}
 
 	private async getDeviceKey(): Promise<Uint8Array> {
@@ -327,19 +375,19 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Session Management
 	// ============================================================================
 
-	async getMasterUnlockKey(email?: string): Promise<Uint8Array | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.masterUnlockKey) {
 			return cache.masterUnlockKey;
 		}
 
 		// Try to restore from persistent storage if session is still valid
-		if (await this.isSessionValid(resolvedEmail)) {
+		if (await this.isSessionValid(resolvedAccountId)) {
 			const restored = await this.decryptStoredMasterUnlockKey(
-				resolvedEmail,
+				resolvedAccountId,
 				false,
 			);
 			if (restored) {
@@ -351,11 +399,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return null;
 	}
 
-	async setMasterUnlockKey(key: Uint8Array, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async setMasterUnlockKey(key: Uint8Array, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.masterUnlockKey = key;
 
 		// Update lock state marker for Rust lock-status endpoint
@@ -372,11 +420,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async clearMasterUnlockKey(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearMasterUnlockKey(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.masterUnlockKey = null;
 
 		// Update lock state marker for Rust lock-status endpoint
@@ -385,12 +433,12 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async storeSessionData(
 		masterUnlockKey: Uint8Array,
+		accountId: string,
 		email: string,
 		userId: string,
 		expiresAt?: string | Date | number,
 		sessionId?: string,
 	): Promise<void> {
-		const resolvedEmail = email.toLowerCase();
 		const store = await this.getStore();
 		const deviceKey = await this.getDeviceKey();
 		const now = Date.now();
@@ -400,11 +448,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const encryptedMUK = await this.crypto.encrypt(mukBase64, deviceKey);
 
 		const biometricEnabled =
-			(await this.isBiometricEnabled?.(resolvedEmail)) ?? false;
+			(await this.isBiometricEnabled?.(accountId)) ?? false;
 
 		const sessionData: StoredSessionData = {
 			encryptedMasterUnlockKey: encryptedMUK,
-			email: resolvedEmail,
+			email: email.toLowerCase(),
 			userId,
 			sessionId,
 			expiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
@@ -413,24 +461,24 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			lastMasterPasswordEntry: now, // Track when user last entered master password
 		};
 
-		const key = getAccountKey(resolvedEmail, "session_data");
+		const key = getAccountKey(accountId, "session_data");
 		await store.set(key, JSON.stringify(sessionData));
 		await store.save();
 	}
 
 	async tryRestoreSession(
 		skipBiometric = false,
-		email?: string,
+		accountId?: string,
 	): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
-		if (!(await this.isSessionValid(resolvedEmail))) {
+		if (!(await this.isSessionValid(resolvedAccountId))) {
 			return false;
 		}
 
 		// First check if MUK is already in memory cache (e.g., after login)
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.masterUnlockKey) {
 			console.log("[storage-tauri] Session restored from memory cache");
 			return true;
@@ -438,23 +486,23 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		// Otherwise, try to decrypt from persistent storage
 		const masterUnlockKey = await this.decryptStoredMasterUnlockKey(
-			resolvedEmail,
+			resolvedAccountId,
 			skipBiometric,
 		);
 		if (!masterUnlockKey) {
 			return false;
 		}
 
-		await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
+		await this.setMasterUnlockKey(masterUnlockKey, resolvedAccountId);
 		return true;
 	}
 
-	async isSessionValid(email?: string): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+	async isSessionValid(accountId?: string): Promise<boolean> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
-		const sessionData = await this.getStoredSessionData(resolvedEmail);
-		const token = await this.getAuthToken(resolvedEmail);
+		const sessionData = await this.getStoredSessionData(resolvedAccountId);
+		const token = await this.getAuthToken(resolvedAccountId);
 		if (!sessionData || !token) return false;
 
 		const now = Date.now();
@@ -465,67 +513,67 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Credentials
 	// ============================================================================
 
-	async storeSecretKey(secretKey: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storeSecretKey(secretKey: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "secret_key");
+		const key = getAccountKey(resolvedAccountId, "secret_key");
 		await store.set(key, secretKey);
 		await store.save();
 	}
 
-	async getStoredSecretKey(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getStoredSecretKey(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "secret_key");
+		const key = getAccountKey(resolvedAccountId, "secret_key");
 		return (await store.get<string>(key)) ?? null;
 	}
 
-	async storeAuthToken(token: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storeAuthToken(token: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.authToken = token;
 
-		await this.setBearerTokenInKeychain(resolvedEmail, token);
+		await this.setBearerTokenInKeychain(resolvedAccountId, token);
 	}
 
-	async getAuthToken(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getAuthToken(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.authToken) {
 			return cache.authToken;
 		}
 
 		// Deduplicate concurrent reads for the same account
-		const existing = authTokenPromises.get(resolvedEmail);
+		const existing = authTokenPromises.get(resolvedAccountId);
 		if (existing) {
 			return existing;
 		}
 
-		const promise = this.getAuthTokenInternal(resolvedEmail);
-		authTokenPromises.set(resolvedEmail, promise);
+		const promise = this.getAuthTokenInternal(resolvedAccountId);
+		authTokenPromises.set(resolvedAccountId, promise);
 		try {
 			return await promise;
 		} finally {
-			authTokenPromises.delete(resolvedEmail);
+			authTokenPromises.delete(resolvedAccountId);
 		}
 	}
 
 	private async getAuthTokenInternal(
-		resolvedEmail: string,
+		resolvedAccountId: string,
 	): Promise<string | null> {
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 
 		let token: string | null = null;
 		try {
-			token = await this.getBearerTokenFromKeychain(resolvedEmail);
+			token = await this.getBearerTokenFromKeychain(resolvedAccountId);
 		} catch (error) {
 			console.error(
 				"[storage-tauri] Failed to read bearer token from keychain:",
@@ -536,12 +584,12 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		if (!token) {
 			const store = await this.getStore();
-			const legacyKey = this.getBearerTokenKey(resolvedEmail);
+			const legacyKey = this.getBearerTokenKey(resolvedAccountId);
 			const legacyToken = await store.get<string>(legacyKey);
 
 			if (legacyToken) {
 				try {
-					await this.setBearerTokenInKeychain(resolvedEmail, legacyToken);
+					await this.setBearerTokenInKeychain(resolvedAccountId, legacyToken);
 					await store.delete(legacyKey);
 					await store.save();
 					token = legacyToken;
@@ -564,10 +612,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async storeVaultKeys(
 		vaultKeys: VaultKeyData[],
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		console.log(
 			"[storage-tauri] Storing vault keys:",
@@ -575,26 +623,26 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			"keys",
 		);
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.vaultKeys = vaultKeys;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "vault_keys");
+		const key = getAccountKey(resolvedAccountId, "vault_keys");
 		await store.set(key, JSON.stringify(vaultKeys));
 		await store.save();
 	}
 
-	async getVaultKeys(email?: string): Promise<VaultKeyData[] | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getVaultKeys(accountId?: string): Promise<VaultKeyData[] | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.vaultKeys) {
 			return cache.vaultKeys;
 		}
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "vault_keys");
+		const key = getAccountKey(resolvedAccountId, "vault_keys");
 		const stored = await store.get<string>(key);
 		if (stored) {
 			cache.vaultKeys = JSON.parse(stored);
@@ -604,42 +652,45 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async storeEncryptedPrivateKey(
 		encryptedPrivateKey: string,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "encrypted_private_key");
+		const key = getAccountKey(resolvedAccountId, "encrypted_private_key");
 		await store.set(key, encryptedPrivateKey);
 		await store.save();
 	}
 
-	async getEncryptedPrivateKey(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getEncryptedPrivateKey(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "encrypted_private_key");
+		const key = getAccountKey(resolvedAccountId, "encrypted_private_key");
 		return (await store.get<string>(key)) ?? null;
 	}
 
-	async storePinnedKdfParams(params: KdfParams, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storePinnedKdfParams(
+		params: KdfParams,
+		accountId?: string,
+	): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
 		await store.set(key, JSON.stringify(params));
 		await store.save();
 	}
 
-	async getPinnedKdfParams(email?: string): Promise<KdfParams | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getPinnedKdfParams(accountId?: string): Promise<KdfParams | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "pinned_kdf_params");
+		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
 		const stored = await store.get<string>(key);
 		if (!stored) {
 			return null;
@@ -652,20 +703,19 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	async updateStoredSessionMetadata(
-		email: string,
+		accountId: string,
 		metadata: {
 			sessionId?: string;
 			expiresAt: string | Date | number;
 		},
 	): Promise<void> {
-		const resolvedEmail = email.toLowerCase();
-		const existing = await this.getStoredSessionData(resolvedEmail);
+		const existing = await this.getStoredSessionData(accountId);
 		if (!existing) {
 			return;
 		}
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "session_data");
+		const key = getAccountKey(accountId, "session_data");
 		const next: StoredSessionData = {
 			...existing,
 			sessionId: metadata.sessionId ?? existing.sessionId,
@@ -690,15 +740,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		const store = await this.getStore();
 		const stored = await store.get<string>(ACTIVE_ACCOUNT_KEY);
-
-		let account: ActiveAccount;
-		if (!stored) {
-			account = null;
-		} else if (stored === "all") {
-			account = { type: "all" };
-		} else {
-			account = { type: "single", email: stored };
-		}
+		const account = parseStoredActiveAccount(stored);
 
 		cachedActiveAccount = account;
 		return account;
@@ -706,19 +748,15 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async getActiveAccountUserId(): Promise<string | null> {
 		const account = await this.getActiveAccount();
-		if (!account || account.type === "all") return null;
+		if (!account) return null;
 
-		const sessionData = await this.getStoredSessionData(account.email);
+		const sessionData = await this.getStoredSessionData(account.accountId);
 		return sessionData?.userId ?? null;
 	}
 
 	async setActiveAccount(account: ActiveAccount): Promise<void> {
 		const store = await this.getStore();
-		const normalizedValue = !account
-			? null
-			: account.type === "all"
-				? "all"
-				: account.email.toLowerCase();
+		const normalizedValue = serializeActiveAccount(account);
 
 		if (normalizedValue) {
 			await store.set(ACTIVE_ACCOUNT_KEY, normalizedValue);
@@ -733,8 +771,9 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		// Update lastActiveAt if single account
 		if (account?.type === "single") {
 			const accountsList = await this.getAccountsListInternal();
-			const accountMeta = accountsList.accounts.find(
-				(a) => a.email.toLowerCase() === account.email.toLowerCase(),
+			const accountMeta = findAccountById(
+				accountsList.accounts,
+				account.accountId,
 			);
 			if (accountMeta) {
 				accountMeta.lastActiveAt = Date.now();
@@ -766,55 +805,71 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const store = await this.getStore();
 		const accountsList = await this.getAccountsListInternal();
 
-		const existingIndex = accountsList.accounts.findIndex(
-			(a) => a.email.toLowerCase() === metadata.email.toLowerCase(),
+		const accountWithId: AccountMetadata = metadata.accountId
+			? metadata
+			: { ...metadata, accountId: generateAccountId() };
+
+		const existingByServerUser =
+			accountWithId.serverUrl && accountWithId.userId
+				? findAccountByServerUser(
+						accountsList.accounts,
+						accountWithId.serverUrl,
+						accountWithId.userId,
+					)
+				: undefined;
+
+		const existingById = findAccountById(
+			accountsList.accounts,
+			accountWithId.accountId,
 		);
 
-		if (existingIndex >= 0) {
-			accountsList.accounts[existingIndex] = metadata;
+		const existing = existingById ?? existingByServerUser;
+
+		if (existing) {
+			const existingIndex = accountsList.accounts.findIndex(
+				(a) => a.accountId === existing.accountId,
+			);
+			accountsList.accounts[existingIndex] = {
+				...accountWithId,
+				accountId: existing.accountId,
+			};
 		} else {
-			accountsList.accounts.push(metadata);
+			accountsList.accounts.push(accountWithId);
 		}
 
 		await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
 		await store.save();
 	}
 
-	async removeAccount(email: string): Promise<void> {
-		const resolvedEmail = email.toLowerCase();
+	async removeAccount(accountId: string): Promise<void> {
 		const store = await this.getStore();
 
 		// Clear the active account cache if removing the active account
 		const currentAccount = await this.getActiveAccount();
 		if (
 			currentAccount?.type === "single" &&
-			currentAccount.email === resolvedEmail
+			currentAccount.accountId === accountId
 		) {
 			cachedActiveAccount = null;
 		}
 
-		// Delete all namespaced keys for this account
-		await store.delete(getAccountKey(resolvedEmail, "secret_key"));
-		await store.delete(getAccountKey(resolvedEmail, "session_data"));
-		await store.delete(getAccountKey(resolvedEmail, "vault_keys"));
-		await store.delete(getAccountKey(resolvedEmail, "pinned_kdf_params"));
-		await store.delete(getAccountKey(resolvedEmail, "biometric_enabled"));
-		await store.delete(getAccountKey(resolvedEmail, "last_biometric_auth"));
-		await store.delete(getAccountKey(resolvedEmail, "server_url"));
-		await store.delete(getAccountKey(resolvedEmail, "encrypted_private_key"));
-		await store.delete(getAccountKey(resolvedEmail, "cached_items"));
-		await store.delete(getAccountKey(resolvedEmail, "cached_vaults"));
-		await store.delete(getAccountKey(resolvedEmail, "item_cache_meta"));
-		await store.delete(getAccountKey(resolvedEmail, "travel_mode_cache"));
+		// Delete all namespaced keys for this account. Iterating the shared
+		// ACCOUNT_STORAGE_SUFFIXES keeps removal complete as suffixes are added
+		// (previously auto_lock_timeout/background_timestamp were leaked here).
+		// jwt_token lives in the OS keychain on Tauri, not the store, so its store
+		// delete is a harmless no-op and the keychain entry is cleared below.
+		for (const suffix of ACCOUNT_STORAGE_SUFFIXES) {
+			await store.delete(getAccountKey(accountId, suffix));
+		}
 		await store.save();
-		await this.deleteBearerTokenFromKeychain(resolvedEmail);
+		await this.deleteBearerTokenFromKeychain(accountId);
 
-		this.clearAccountCache(resolvedEmail);
+		this.clearAccountCache(accountId);
 
 		// Remove from accounts list
 		const accountsList = await this.getAccountsListInternal();
 		accountsList.accounts = accountsList.accounts.filter(
-			(a) => a.email.toLowerCase() !== resolvedEmail,
+			(a) => a.accountId !== accountId,
 		);
 		await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
 		await store.save();
@@ -826,7 +881,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async storeAutoLockTimeout(
 		timeoutMs: number,
-		_email?: string,
+		_accountId?: string,
 	): Promise<void> {
 		const store = await this.getStore();
 		await store.set(AUTO_LOCK_TIMEOUT_KEY, timeoutMs);
@@ -834,7 +889,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		await store.save();
 	}
 
-	async getAutoLockTimeout(email?: string): Promise<number | null> {
+	async getAutoLockTimeout(accountId?: string): Promise<number | null> {
 		const store = await this.getStore();
 		const globalTimeout = await store.get<number>(AUTO_LOCK_TIMEOUT_KEY);
 		if (typeof globalTimeout === "number") {
@@ -842,7 +897,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 
 		// Legacy migration: account-scoped timeout -> app-scoped timeout.
-		const legacyTimeout = await this.getLegacyAutoLockTimeout(email);
+		const legacyTimeout = await this.getLegacyAutoLockTimeout(accountId);
 		if (legacyTimeout === null) {
 			return null;
 		}
@@ -853,8 +908,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return legacyTimeout;
 	}
 
-	async getAutoLockTimeoutOrDefault(email?: string): Promise<number> {
-		const timeout = await this.getAutoLockTimeout(email);
+	async getAutoLockTimeoutOrDefault(accountId?: string): Promise<number> {
+		const timeout = await this.getAutoLockTimeout(accountId);
 		// Default: 10 minutes
 		return timeout ?? 10 * 60 * 1000;
 	}
@@ -875,29 +930,66 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	}
 
 	private async getLegacyAutoLockTimeout(
-		email?: string,
+		accountId?: string,
 	): Promise<number | null> {
 		const store = await this.getStore();
 		const candidateEmails = new Set<string>();
+		const candidateAccountIds = new Set<string>();
 
-		if (email) {
-			candidateEmails.add(email.toLowerCase());
+		if (accountId) {
+			candidateAccountIds.add(accountId);
+			const accountsList = await this.getAccountsListInternal();
+			const account = findAccountById(accountsList.accounts, accountId);
+			if (account) {
+				candidateEmails.add(account.email.toLowerCase());
+			}
 		}
 
-		const resolvedEmail = await this.resolveEmail(email);
-		if (resolvedEmail) {
-			candidateEmails.add(resolvedEmail);
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (resolvedAccountId) {
+			candidateAccountIds.add(resolvedAccountId);
+			if (resolvedAccountId !== accountId) {
+				const accountsList = await this.getAccountsListInternal();
+				const account = findAccountById(
+					accountsList.accounts,
+					resolvedAccountId,
+				);
+				if (account) {
+					candidateEmails.add(account.email.toLowerCase());
+				}
+			}
 		}
 
 		if (candidateEmails.size === 0) {
 			const accountsList = await this.getAccountsListInternal();
 			for (const account of accountsList.accounts) {
+				candidateAccountIds.add(account.accountId);
 				candidateEmails.add(account.email.toLowerCase());
 			}
 		}
 
+		// The shared account-id migration copies the legacy per-email timeout into
+		// an accountId-scoped key and then deletes the legacy email key. Tauri
+		// treats auto_lock_timeout as a GLOBAL setting and never persists to the
+		// accountId key itself, so that migrated value would otherwise be orphaned
+		// and the user's customized timeout would silently reset to the default.
+		// Read it back here so it can be promoted to the global key (M1).
+		for (const candidateAccountId of candidateAccountIds) {
+			const migratedKey = getAccountKey(
+				candidateAccountId,
+				"auto_lock_timeout",
+			);
+			const timeout = await store.get<number>(migratedKey);
+			if (typeof timeout === "number") {
+				return timeout;
+			}
+		}
+
 		for (const candidateEmail of candidateEmails) {
-			const legacyKey = getAccountKey(candidateEmail, "auto_lock_timeout");
+			const legacyKey = getLegacyAccountKey(
+				candidateEmail,
+				"auto_lock_timeout",
+			);
 			const timeout = await store.get<number>(legacyKey);
 			if (typeof timeout === "number") {
 				return timeout;
@@ -913,8 +1005,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		for (const account of accountsList.accounts) {
 			await store.delete(
-				getAccountKey(account.email.toLowerCase(), "auto_lock_timeout"),
+				getLegacyAccountKey(account.email.toLowerCase(), "auto_lock_timeout"),
 			);
+			// Remove the orphaned accountId-scoped key populated by the account-id
+			// migration once its value has been promoted to the global key.
+			await store.delete(getAccountKey(account.accountId, "auto_lock_timeout"));
 		}
 	}
 
@@ -923,22 +1018,22 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return `${days} day${days === 1 ? "" : "s"}`;
 	}
 
-	async storeServerUrl(serverUrl: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async storeServerUrl(serverUrl: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "server_url");
+		const key = getAccountKey(resolvedAccountId, "server_url");
 		await store.set(key, serverUrl);
 		await store.save();
 	}
 
-	async getServerUrl(email?: string): Promise<string | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getServerUrl(accountId?: string): Promise<string | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "server_url");
+		const key = getAccountKey(resolvedAccountId, "server_url");
 		return (await store.get<string>(key)) ?? null;
 	}
 
@@ -946,14 +1041,14 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Auth State
 	// ============================================================================
 
-	async isAuthenticated(email?: string): Promise<boolean> {
-		const token = await this.getAuthToken(email);
+	async isAuthenticated(accountId?: string): Promise<boolean> {
+		const token = await this.getAuthToken(accountId);
 		return token != null;
 	}
 
-	async canQuickUnlock(email?: string): Promise<boolean> {
-		const hasSecretKey = (await this.getStoredSecretKey(email)) !== null;
-		const sessionValid = await this.isSessionValid(email);
+	async canQuickUnlock(accountId?: string): Promise<boolean> {
+		const hasSecretKey = (await this.getStoredSecretKey(accountId)) !== null;
+		const sessionValid = await this.isSessionValid(accountId);
 		return hasSecretKey && sessionValid;
 	}
 
@@ -961,26 +1056,26 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Clear
 	// ============================================================================
 
-	async clearSession(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearSession(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		this.clearAccountCache(resolvedEmail);
+		this.clearAccountCache(resolvedAccountId);
 
 		// Clear item cache (items require MUK for vault key decryption)
-		await this.clearItemCache(resolvedEmail);
+		await this.clearItemCache(resolvedAccountId);
 
 		// Clear last biometric auth timestamp so biometric is required on next unlock
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+		const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
 		await store.delete(key);
 		await store.save();
 	}
 
-	async clearAllStoredData(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (resolvedEmail) {
-			await this.removeAccount(resolvedEmail);
+	async clearAllStoredData(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (resolvedAccountId) {
+			await this.removeAccount(resolvedAccountId);
 		}
 
 		// If no accounts remain, clear the device key cache
@@ -1034,51 +1129,51 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async isBiometricEnabled(email?: string): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+	async isBiometricEnabled(accountId?: string): Promise<boolean> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "biometric_enabled");
+		const key = getAccountKey(resolvedAccountId, "biometric_enabled");
 		const enabled = await store.get<boolean>(key);
 		return enabled === true;
 	}
 
-	async enableBiometric(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async enableBiometric(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "biometric_enabled");
+		const key = getAccountKey(resolvedAccountId, "biometric_enabled");
 		await store.set(key, true);
 		await store.save();
 	}
 
-	async disableBiometric(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) throw new Error("No account specified");
+	async disableBiometric(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) throw new Error("No account specified");
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "biometric_enabled");
+		const key = getAccountKey(resolvedAccountId, "biometric_enabled");
 		await store.set(key, false);
 		await store.save();
 	}
 
 	async authenticateWithBiometric(
 		reason = "Unlock Bittery",
-		email?: string,
+		accountId?: string,
 	): Promise<boolean> {
 		if (!this.biometryModule) return false;
 
 		try {
-			const resolvedEmail = await this.resolveEmail(email);
-			if (!resolvedEmail) return false;
+			const resolvedAccountId = await this.resolveAccountId(accountId);
+			if (!resolvedAccountId) return false;
 
 			await this.biometryModule.authenticate(reason);
 
 			// Update last biometric auth timestamp
 			const store = await this.getStore();
-			const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+			const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
 			await store.set(key, Date.now());
 			await store.save();
 
@@ -1089,16 +1184,16 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		}
 	}
 
-	async canBiometricUnlock(email?: string): Promise<boolean> {
+	async canBiometricUnlock(accountId?: string): Promise<boolean> {
 		const available = await this.isBiometricAvailable();
-		const enabled = await this.isBiometricEnabled(email);
-		const sessionValid = await this.isSessionValid(email);
+		const enabled = await this.isBiometricEnabled(accountId);
+		const sessionValid = await this.isSessionValid(accountId);
 		return available && enabled && sessionValid;
 	}
 
 	async authenticateWithBiometricEnhanced(
 		reason = "Unlock Bittery",
-		email?: string,
+		accountId?: string,
 	): Promise<{
 		success: boolean;
 		error?:
@@ -1114,8 +1209,8 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		message?: string;
 	}> {
 		try {
-			const resolvedEmail = await this.resolveEmail(email);
-			if (!resolvedEmail) {
+			const resolvedAccountId = await this.resolveAccountId(accountId);
+			if (!resolvedAccountId) {
 				return {
 					success: false,
 					error: "unknown",
@@ -1142,7 +1237,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			}
 
 			// Check if biometric is enabled for this account
-			const isEnabled = await this.isBiometricEnabled(resolvedEmail);
+			const isEnabled = await this.isBiometricEnabled(resolvedAccountId);
 			if (!isEnabled) {
 				return {
 					success: false,
@@ -1152,7 +1247,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			}
 
 			// Check if session is valid
-			if (!(await this.isSessionValid(resolvedEmail))) {
+			if (!(await this.isSessionValid(resolvedAccountId))) {
 				return {
 					success: false,
 					error: "session_expired",
@@ -1161,7 +1256,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			}
 
 			// Check if master password re-entry is required by configured policy
-			if (await this.isMasterPasswordReentryRequired(resolvedEmail)) {
+			if (await this.isMasterPasswordReentryRequired(resolvedAccountId)) {
 				const reentryPeriodMs = await this.getMasterPasswordReentryPeriodMs();
 				return {
 					success: false,
@@ -1174,7 +1269,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 			// Update last biometric auth timestamp
 			const store = await this.getStore();
-			const key = getAccountKey(resolvedEmail, "last_biometric_auth");
+			const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
 			await store.set(key, Date.now());
 			await store.save();
 
@@ -1205,11 +1300,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Master Password Re-entry (shared security feature for biometric platforms)
 	// ============================================================================
 
-	async isMasterPasswordReentryRequired(email?: string): Promise<boolean> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return false;
+	async isMasterPasswordReentryRequired(accountId?: string): Promise<boolean> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return false;
 
-		const sessionData = await this.getStoredSessionData(resolvedEmail);
+		const sessionData = await this.getStoredSessionData(resolvedAccountId);
 		if (!sessionData) return false;
 
 		// If biometric is not enabled, no re-entry requirement
@@ -1224,11 +1319,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return timeSinceLastEntry > reentryPeriodMs;
 	}
 
-	async updateLastMasterPasswordEntry(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async updateLastMasterPasswordEntry(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const sessionData = await this.getStoredSessionData(resolvedEmail);
+		const sessionData = await this.getStoredSessionData(resolvedAccountId);
 		if (!sessionData) return;
 
 		// Update the timestamp
@@ -1236,7 +1331,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 		// Persist the updated session data
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "session_data");
+		const key = getAccountKey(resolvedAccountId, "session_data");
 		await store.set(key, JSON.stringify(sessionData));
 		await store.save();
 	}
@@ -1245,39 +1340,39 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	 * Public wrapper for decrypting stored MUK
 	 */
 	async decryptStoredMasterUnlockKey(
-		email?: string,
+		accountId?: string,
 		skipBiometric = false,
 	): Promise<Uint8Array | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 		return this.decryptStoredMasterUnlockKeyInternal(
-			resolvedEmail,
+			resolvedAccountId,
 			skipBiometric,
 		);
 	}
 
 	private async decryptStoredMasterUnlockKeyInternal(
-		email: string,
+		accountId: string,
 		skipBiometric = false,
 	): Promise<Uint8Array | null> {
-		const sessionData = await this.getStoredSessionData(email);
+		const sessionData = await this.getStoredSessionData(accountId);
 		if (!sessionData) {
-			console.log("[storage-tauri] No session data found for:", email);
+			console.log("[storage-tauri] No session data found for:", accountId);
 			return null;
 		}
 
 		// Check if biometric authentication is required
 		if (!skipBiometric && sessionData.biometricEnabled) {
-			const authRequired = await this.isBiometricAuthRequired(email);
+			const authRequired = await this.isBiometricAuthRequired(accountId);
 			if (authRequired) {
 				const authenticated = await this.authenticateWithBiometric(
 					"Unlock your vault",
-					email,
+					accountId,
 				);
 				if (!authenticated) {
 					console.log(
 						"[storage-tauri] Biometric authentication failed for:",
-						email,
+						accountId,
 					);
 					return null;
 				}
@@ -1304,14 +1399,14 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	// Private Helpers
 	// ============================================================================
 
-	private async isBiometricAuthRequired(email: string): Promise<boolean> {
-		const sessionData = await this.getStoredSessionData(email);
+	private async isBiometricAuthRequired(accountId: string): Promise<boolean> {
+		const sessionData = await this.getStoredSessionData(accountId);
 		if (!sessionData || !sessionData.biometricEnabled) {
 			return false;
 		}
 
 		const store = await this.getStore();
-		const key = getAccountKey(email, "last_biometric_auth");
+		const key = getAccountKey(accountId, "last_biometric_auth");
 		const lastAuth = await store.get<number>(key);
 
 		if (!lastAuth) {
@@ -1328,31 +1423,33 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async setCachedItems(
 		items: CachedEncryptedItem[],
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.cachedItems = items;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "cached_items");
+		const key = getAccountKey(resolvedAccountId, "cached_items");
 		await store.set(key, JSON.stringify(items));
 		await store.save();
 	}
 
-	async getCachedItems(email?: string): Promise<CachedEncryptedItem[] | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getCachedItems(
+		accountId?: string,
+	): Promise<CachedEncryptedItem[] | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.cachedItems) {
 			return cache.cachedItems;
 		}
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "cached_items");
+		const key = getAccountKey(resolvedAccountId, "cached_items");
 		const stored = await store.get<string>(key);
 		if (stored) {
 			try {
@@ -1366,12 +1463,12 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		let items = await this.getCachedItems(resolvedEmail);
+		let items = await this.getCachedItems(resolvedAccountId);
 		if (!items) {
 			items = [];
 		}
@@ -1383,47 +1480,49 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			items.push(item);
 		}
 
-		await this.setCachedItems(items, resolvedEmail);
+		await this.setCachedItems(items, resolvedAccountId);
 	}
 
-	async removeCachedItem(itemId: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const items = await this.getCachedItems(resolvedEmail);
+		const items = await this.getCachedItems(resolvedAccountId);
 		if (!items) return;
 
 		const filtered = items.filter((i) => i.id !== itemId);
-		await this.setCachedItems(filtered, resolvedEmail);
+		await this.setCachedItems(filtered, resolvedAccountId);
 	}
 
 	async setCachedVaults(
 		vaults: CachedVaultMetadata[],
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.cachedVaults = vaults;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "cached_vaults");
+		const key = getAccountKey(resolvedAccountId, "cached_vaults");
 		await store.set(key, JSON.stringify(vaults));
 		await store.save();
 	}
 
-	async getCachedVaults(email?: string): Promise<CachedVaultMetadata[] | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getCachedVaults(
+		accountId?: string,
+	): Promise<CachedVaultMetadata[] | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		if (cache.cachedVaults) {
 			return cache.cachedVaults;
 		}
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "cached_vaults");
+		const key = getAccountKey(resolvedAccountId, "cached_vaults");
 		const stored = await store.get<string>(key);
 		if (stored) {
 			try {
@@ -1437,12 +1536,12 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async upsertCachedVault(
 		vault: CachedVaultMetadata,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		let vaults = await this.getCachedVaults(resolvedEmail);
+		let vaults = await this.getCachedVaults(resolvedAccountId);
 		if (!vaults) {
 			vaults = [];
 		}
@@ -1454,36 +1553,36 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			vaults.push(vault);
 		}
 
-		await this.setCachedVaults(vaults, resolvedEmail);
+		await this.setCachedVaults(vaults, resolvedAccountId);
 	}
 
-	async removeCachedVault(vaultId: string, email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
 		// Remove the vault metadata
-		const vaults = await this.getCachedVaults(resolvedEmail);
+		const vaults = await this.getCachedVaults(resolvedAccountId);
 		if (vaults) {
 			const filtered = vaults.filter((v) => v.id !== vaultId);
-			await this.setCachedVaults(filtered, resolvedEmail);
+			await this.setCachedVaults(filtered, resolvedAccountId);
 		}
 
 		// Also remove all items belonging to this vault
-		const items = await this.getCachedItems(resolvedEmail);
+		const items = await this.getCachedItems(resolvedAccountId);
 		if (items) {
 			const filtered = items.filter((i) => i.vaultId !== vaultId);
-			await this.setCachedItems(filtered, resolvedEmail);
+			await this.setCachedItems(filtered, resolvedAccountId);
 		}
 	}
 
 	async getItemCacheMetadata(
-		email?: string,
+		accountId?: string,
 	): Promise<ItemCacheMetadata | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "item_cache_meta");
+		const key = getAccountKey(resolvedAccountId, "item_cache_meta");
 		const stored = await store.get<string>(key);
 		if (!stored) return null;
 
@@ -1496,54 +1595,56 @@ export class TauriStorageAdapter implements IStorageAdapter {
 
 	async setItemCacheMetadata(
 		metadata: ItemCacheMetadata,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "item_cache_meta");
+		const key = getAccountKey(resolvedAccountId, "item_cache_meta");
 		await store.set(key, JSON.stringify(metadata));
 		await store.save();
 	}
 
-	async clearItemCache(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearItemCache(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
-		const cache = this.getAccountCache(resolvedEmail);
+		const cache = this.getAccountCache(resolvedAccountId);
 		cache.cachedItems = null;
 		cache.cachedVaults = null;
 
 		const store = await this.getStore();
-		await store.delete(getAccountKey(resolvedEmail, "cached_items"));
-		await store.delete(getAccountKey(resolvedEmail, "cached_vaults"));
-		await store.delete(getAccountKey(resolvedEmail, "item_cache_meta"));
+		await store.delete(getAccountKey(resolvedAccountId, "cached_items"));
+		await store.delete(getAccountKey(resolvedAccountId, "cached_vaults"));
+		await store.delete(getAccountKey(resolvedAccountId, "item_cache_meta"));
 		await store.save();
 	}
 
 	async storeTravelModeCache(
 		config: TravelModeConfig,
-		email?: string,
+		accountId?: string,
 	): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
 		const store = await this.getStore();
 		await store.set(
-			getAccountKey(resolvedEmail, "travel_mode_cache"),
+			getAccountKey(resolvedAccountId, "travel_mode_cache"),
 			JSON.stringify(config),
 		);
 		await store.save();
 	}
 
-	async getTravelModeCache(email?: string): Promise<TravelModeConfig | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+	async getTravelModeCache(
+		accountId?: string,
+	): Promise<TravelModeConfig | null> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		const store = await this.getStore();
 		const stored = await store.get<string>(
-			getAccountKey(resolvedEmail, "travel_mode_cache"),
+			getAccountKey(resolvedAccountId, "travel_mode_cache"),
 		);
 		if (!stored) return null;
 		try {
@@ -1577,12 +1678,12 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	/**
 	 * Clear server URL for an account
 	 */
-	async clearServerUrl(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearServerUrl(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedEmail, "server_url");
+		const key = getAccountKey(resolvedAccountId, "server_url");
 		await store.delete(key);
 		await store.save();
 	}
@@ -1590,7 +1691,7 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	/**
 	 * Clear app-wide auto-lock timeout preference
 	 */
-	async clearAutoLockTimeout(_email?: string): Promise<void> {
+	async clearAutoLockTimeout(_accountId?: string): Promise<void> {
 		const store = await this.getStore();
 		await store.delete(AUTO_LOCK_TIMEOUT_KEY);
 		await this.clearLegacyAutoLockTimeoutKeys();
@@ -1601,14 +1702,14 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	 * Get stored session data (public method for desktop)
 	 */
 	async getStoredSessionData(
-		email?: string,
+		accountId?: string,
 	): Promise<StoredSessionData | null> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return null;
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return null;
 
 		try {
 			const store = await this.getStore();
-			const key = getAccountKey(resolvedEmail, "session_data");
+			const key = getAccountKey(resolvedAccountId, "session_data");
 			const stored = await store.get<string>(key);
 
 			if (!stored) return null;
@@ -1628,24 +1729,24 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	/**
 	 * Unlock with biometric authentication
 	 */
-	async unlockWithBiometric(email?: string): Promise<boolean> {
+	async unlockWithBiometric(accountId?: string): Promise<boolean> {
 		try {
-			const resolvedEmail = await this.resolveEmail(email);
-			if (!resolvedEmail) return false;
+			const resolvedAccountId = await this.resolveAccountId(accountId);
+			if (!resolvedAccountId) return false;
 
-			if (!(await this.canBiometricUnlock(resolvedEmail))) {
+			if (!(await this.canBiometricUnlock(resolvedAccountId))) {
 				return false;
 			}
 
 			const masterUnlockKey = await this.decryptStoredMasterUnlockKey(
-				resolvedEmail,
+				resolvedAccountId,
 				false,
 			);
 			if (!masterUnlockKey) {
 				return false;
 			}
 
-			await this.setMasterUnlockKey(masterUnlockKey, resolvedEmail);
+			await this.setMasterUnlockKey(masterUnlockKey, resolvedAccountId);
 			return true;
 		} catch (error) {
 			console.error("[storage-tauri] Biometric unlock failed:", error);
@@ -1658,11 +1759,11 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	 * This marker reflects which accounts have MUKs in memory (true source of truth)
 	 */
 	private async updateLockStateMarker(): Promise<void> {
-		const unlockedEmails = await this.getUnlockedAccounts();
+		const unlockedAccountIds = await this.getUnlockedAccounts();
 		const store = await this.getStore();
 		await store.set(
 			"bittery_unlocked_accounts",
-			JSON.stringify(unlockedEmails),
+			JSON.stringify(unlockedAccountIds),
 		);
 		await store.save();
 	}
@@ -1679,7 +1780,10 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		const store = await this.getStore();
 		const accountsList = await this.getAccountsList();
 		for (const account of accountsList) {
-			const biometricKey = getAccountKey(account.email, "last_biometric_auth");
+			const biometricKey = getAccountKey(
+				account.accountId,
+				"last_biometric_auth",
+			);
 			await store.delete(biometricKey);
 		}
 
@@ -1691,34 +1795,34 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	/**
 	 * Unlock all accounts with biometric authentication
 	 * Shows ONE biometric prompt and unlocks all accounts that support biometric
-	 * Returns { unlocked: string[], failed: Array<{email: string, error: string}> }
+	 * Returns { unlocked: string[], failed: Array<{accountId: string, error: string}> }
 	 */
 	async unlockAllAccountsWithBiometric(): Promise<{
 		unlocked: string[];
-		failed: Array<{ email: string; error: string }>;
+		failed: Array<{ accountId: string; error: string }>;
 	}> {
 		const accountsList = await this.getAccountsList();
 		const unlocked: string[] = [];
-		const failed: Array<{ email: string; error: string }> = [];
+		const failed: Array<{ accountId: string; error: string }> = [];
 
 		if (accountsList.length === 0) {
 			return { unlocked, failed };
 		}
 
 		// Find first account that supports biometric
-		let firstAccountEmail: string | null = null;
+		let firstAccountId: string | null = null;
 		for (const account of accountsList) {
-			if (await this.canBiometricUnlock(account.email)) {
-				firstAccountEmail = account.email;
+			if (await this.canBiometricUnlock(account.accountId)) {
+				firstAccountId = account.accountId;
 				break;
 			}
 		}
 
-		if (!firstAccountEmail) {
+		if (!firstAccountId) {
 			// No account supports biometric
 			for (const account of accountsList) {
 				failed.push({
-					email: account.email,
+					accountId: account.accountId,
 					error: "Biometric authentication not available",
 				});
 			}
@@ -1729,14 +1833,14 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		// This ensures we ALWAYS show the prompt when explicitly unlocking
 		const authenticated = await this.authenticateWithBiometric(
 			"Unlock all accounts",
-			firstAccountEmail,
+			firstAccountId,
 		);
 
 		if (!authenticated) {
 			// Biometric authentication failed or was cancelled
 			for (const account of accountsList) {
 				failed.push({
-					email: account.email,
+					accountId: account.accountId,
 					error: "Biometric authentication failed or cancelled",
 				});
 			}
@@ -1749,22 +1853,22 @@ export class TauriStorageAdapter implements IStorageAdapter {
 			try {
 				// Decrypt MUK using device key (biometric was already authenticated)
 				const masterUnlockKey = await this.decryptStoredMasterUnlockKey(
-					account.email,
+					account.accountId,
 					true, // skipBiometric = true (we already authenticated above)
 				);
 
 				if (masterUnlockKey) {
-					await this.setMasterUnlockKey(masterUnlockKey, account.email);
-					unlocked.push(account.email);
+					await this.setMasterUnlockKey(masterUnlockKey, account.accountId);
+					unlocked.push(account.accountId);
 				} else {
 					failed.push({
-						email: account.email,
+						accountId: account.accountId,
 						error: "Could not decrypt session data",
 					});
 				}
 			} catch (error) {
 				failed.push({
-					email: account.email,
+					accountId: account.accountId,
 					error: error instanceof Error ? error.message : "Unknown error",
 				});
 			}
@@ -1776,53 +1880,50 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	/**
 	 * Check if Secret Key is stored
 	 */
-	async hasStoredSecretKey(email?: string): Promise<boolean> {
-		const secretKey = await this.getStoredSecretKey(email);
+	async hasStoredSecretKey(accountId?: string): Promise<boolean> {
+		const secretKey = await this.getStoredSecretKey(accountId);
 		return secretKey != null;
 	}
 
 	/**
 	 * Clear stored session data from disk
 	 */
-	async clearStoredSession(email?: string): Promise<void> {
-		const resolvedEmail = await this.resolveEmail(email);
-		if (!resolvedEmail) return;
+	async clearStoredSession(accountId?: string): Promise<void> {
+		const resolvedAccountId = await this.resolveAccountId(accountId);
+		if (!resolvedAccountId) return;
 
 		const store = await this.getStore();
-		await store.delete(getAccountKey(resolvedEmail, "session_data"));
-		await store.delete(getAccountKey(resolvedEmail, "last_biometric_auth"));
+		await store.delete(getAccountKey(resolvedAccountId, "session_data"));
+		await store.delete(getAccountKey(resolvedAccountId, "last_biometric_auth"));
 		await store.save();
 	}
 
 	/**
 	 * Get metadata for a specific account
 	 */
-	async getAccountMetadata(email: string): Promise<AccountMetadata | null> {
+	async getAccountMetadata(accountId: string): Promise<AccountMetadata | null> {
 		const accountsList = await this.getAccountsList();
-		return (
-			accountsList.find((a) => a.email.toLowerCase() === email.toLowerCase()) ??
-			null
-		);
+		return findAccountById(accountsList, accountId) ?? null;
 	}
 
 	/**
-	 * Get list of unlocked account emails (accounts with MUK currently in memory)
+	 * Get list of unlocked account IDs (accounts with MUK currently in memory)
 	 */
 	async getUnlockedAccounts(): Promise<string[]> {
-		const unlockedEmails: string[] = [];
-		for (const [email, cache] of accountCaches.entries()) {
+		const unlockedAccountIds: string[] = [];
+		for (const [accountId, cache] of accountCaches.entries()) {
 			if (cache.masterUnlockKey) {
-				unlockedEmails.push(email);
+				unlockedAccountIds.push(accountId);
 			}
 		}
-		return unlockedEmails;
+		return unlockedAccountIds;
 	}
 
 	/**
 	 * Get time until session expires (in milliseconds)
 	 */
-	async getTimeUntilExpiry(email?: string): Promise<number | null> {
-		const sessionData = await this.getStoredSessionData(email);
+	async getTimeUntilExpiry(accountId?: string): Promise<number | null> {
+		const sessionData = await this.getStoredSessionData(accountId);
 		if (!sessionData) return null;
 
 		const now = Date.now();
@@ -1833,25 +1934,28 @@ export class TauriStorageAdapter implements IStorageAdapter {
 	/**
 	 * Clear all data for a specific account
 	 */
-	async clearAccountData(email: string): Promise<void> {
-		await this.removeAccount(email);
+	async clearAccountData(accountId: string): Promise<void> {
+		await this.removeAccount(accountId);
 	}
 
 	// Aliases for backward compatibility
-	async storeMasterUnlockKey(key: Uint8Array, email?: string): Promise<void> {
-		return this.setMasterUnlockKey(key, email);
+	async storeMasterUnlockKey(
+		key: Uint8Array,
+		accountId?: string,
+	): Promise<void> {
+		return this.setMasterUnlockKey(key, accountId);
 	}
 
 	async addAccountToList(metadata: AccountMetadata): Promise<void> {
 		return this.addAccount(metadata);
 	}
 
-	async removeAccountFromList(email: string): Promise<void> {
+	async removeAccountFromList(accountId: string): Promise<void> {
 		// Note: This only removes from list, not all account data
 		const store = await this.getStore();
 		const accountsList = await this.getAccountsListInternal();
 		accountsList.accounts = accountsList.accounts.filter(
-			(a) => a.email.toLowerCase() !== email.toLowerCase(),
+			(a) => a.accountId !== accountId,
 		);
 		await store.set(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
 		await store.save();

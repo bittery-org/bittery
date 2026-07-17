@@ -16,7 +16,6 @@ function VaultItemComponent() {
 	const navigate = useNavigate();
 
 	// Get all items in vault for available tags
-	// useVaultItems automatically handles single-account vs all-accounts mode
 	const { items: allVaultItems } = useVaultItems(selectedVaultId);
 	const availableTags = useAvailableTags(allVaultItems);
 

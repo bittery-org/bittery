@@ -1,4 +1,5 @@
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
@@ -14,7 +15,7 @@ export interface CreateVaultInput {
 	icon: string;
 	imageFile?: ImageFileInput;
 	imageKey?: string;
-	accountEmail?: string;
+	accountId: string;
 }
 
 export interface CreateVaultResult {
@@ -27,14 +28,14 @@ export interface UpdateVaultInput {
 	icon?: string | null;
 	imageFile?: File;
 	removeImage?: boolean;
-	accountEmail?: string;
+	accountId: string;
 }
 
 export interface ConvertVaultTypeInput {
 	vaultId: string;
 	targetType: "personal" | "team";
 	personalEncryptedVaultKey?: string;
-	accountEmail?: string;
+	accountId: string;
 }
 
 export interface ConvertVaultTypeResult {
@@ -88,7 +89,7 @@ function normalizeVaultRole(
 export async function refreshVaultKeys(
 	rpcClient: RpcVaultClient,
 	storage: IStorageAdapter,
-	accountEmail?: string,
+	accountId?: string,
 ): Promise<void> {
 	const vaultList = await rpcClient.vault.list.query();
 	await storage.storeVaultKeys(
@@ -101,7 +102,7 @@ export async function refreshVaultKeys(
 			encryptedVaultKey: vault.encryptedVaultKey,
 			role: normalizeVaultRole(vault.role),
 		})),
-		accountEmail,
+		accountId,
 	);
 }
 
@@ -134,9 +135,10 @@ export class VaultService {
 			throw new Error("Vault name must be at least 2 characters");
 		}
 
+		const accountId = input.accountId;
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		let imageKey = input.imageKey;
@@ -171,19 +173,21 @@ export class VaultService {
 		}
 
 		const vaultKey = await this.crypto.generateEncryptionKey();
-		const masterUnlockKey = await this.storage.getMasterUnlockKey(
-			input.accountEmail,
-		);
+		const masterUnlockKey = await this.storage.getMasterUnlockKey(accountId);
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}
-		const currentUserId =
-			(input.accountEmail
-				? (await this.storage.getAccountMetadata?.(input.accountEmail))?.userId
-				: null) ?? (await this.storage.getActiveAccountUserId());
-		if (!currentUserId) {
-			throw new Error("Session data missing. Please sign in again.");
-		}
+		// Migrated to the canonical session→metadata→active triad
+		// (resolveUserIdForAccount). This is a superset of the previous
+		// metadata→active lookup: it also tries the account's live session
+		// first. Session userId and account metadata userId are written
+		// together at login (see storeLoginSession/registerLoginAccount), so
+		// for the same accountId they are always in sync — this is benign.
+		const currentUserId = await resolveUserIdForAccount(
+			this.storage,
+			accountId,
+			{ errorMessage: "Session data missing. Please sign in again." },
+		);
 		const vaultId = this.crypto.generateUuid
 			? await this.crypto.generateUuid()
 			: (globalThis.crypto?.randomUUID?.() ?? `vault_${Date.now()}`);
@@ -216,9 +220,10 @@ export class VaultService {
 		input: UpdateVaultInput,
 		defaultClient: DefaultRpcClient,
 	): Promise<void> {
+		const accountId = input.accountId;
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 
 		if (input.name !== undefined) {
@@ -269,9 +274,10 @@ export class VaultService {
 		input: ConvertVaultTypeInput,
 		defaultClient: DefaultRpcClient,
 	): Promise<ConvertVaultTypeResult> {
+		const accountId = input.accountId;
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			input.accountEmail,
+			accountId,
 		);
 		const result = await client.vault.convertType.mutate({
 			vaultId: input.vaultId,
@@ -295,23 +301,23 @@ export class VaultService {
 	async deleteVault(
 		vaultId: string,
 		defaultClient: DefaultRpcClient,
-		accountEmail?: string,
+		accountId: string,
 	): Promise<void> {
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			accountEmail,
+			accountId,
 		);
 		await client.vault.delete.mutate({ vaultId });
 	}
 
 	async refreshVaultKeys(
 		defaultClient: DefaultRpcClient,
-		accountEmail?: string,
+		accountId: string,
 	): Promise<void> {
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
-			accountEmail,
+			accountId,
 		);
-		await refreshVaultKeys(client, this.storage, accountEmail);
+		await refreshVaultKeys(client, this.storage, accountId);
 	}
 }

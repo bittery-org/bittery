@@ -24,7 +24,7 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { type AccountMetadata, storage } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface AddAccountDialogProps {
@@ -86,33 +86,7 @@ function AddAccountDialogForm({
 
 	const loginMutation = useLogin({
 		enableBiometric: enableBiometric && !!biometricAvailable,
-		onSuccess: async (result, input) => {
-			const normalizedEmail = input.email.toLowerCase();
-			const normalizedServerUrl = normalizeServerUrl(serverUrl);
-
-			if (normalizedServerUrl) {
-				await storage.storeServerUrl(normalizedServerUrl, normalizedEmail);
-			}
-
-			const secretKeyHint = `${input.secretKey.substring(0, 5)}...`;
-			const accountMetadata: AccountMetadata = {
-				email: normalizedEmail,
-				userId: result.user.id,
-				name: result.user.name || normalizedEmail.split("@")[0],
-				teamName: result.user.teamName,
-				secretKeyHint,
-				addedAt: Date.now(),
-				lastActiveAt: Date.now(),
-				biometricEnabled: enableBiometric && !!biometricAvailable,
-			};
-
-			await storage.addAccountToList(accountMetadata);
-
-			// Clear stale item cache for this account (e.g. from a previous session)
-			if (storage.clearItemCache) {
-				await storage.clearItemCache(normalizedEmail);
-			}
-
+		onSuccess: async (_result) => {
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["accounts"] }),
 				queryClient.invalidateQueries({ queryKey: ["items"] }),
@@ -146,13 +120,14 @@ function AddAccountDialogForm({
 			email,
 			password,
 			secretKey,
+			serverUrl: normalizedServerUrl,
 			enableBiometric: enableBiometric && !!biometricAvailable,
 		});
 	};
 
 	return (
-		<DialogContent className="sm:max-w-md">
-			<DialogHeader>
+		<DialogContent className="gap-0 p-0 sm:max-w-md">
+			<DialogHeader className="relative gap-1 px-5 pt-5 pb-4 text-left">
 				<DialogTitle>
 					{m.vaults_sidebar_account_switcher_menu_add_account()}
 				</DialogTitle>
@@ -161,7 +136,7 @@ function AddAccountDialogForm({
 				</DialogDescription>
 			</DialogHeader>
 
-			<form onSubmit={handleSubmit} className="space-y-4">
+			<form onSubmit={handleSubmit} className="flex flex-col gap-4 px-5 pb-5">
 				<div className="grid gap-1.5">
 					<Label htmlFor="add-serverUrl">{m.auth_footer_server_title()}</Label>
 					<Input
@@ -181,6 +156,7 @@ function AddAccountDialogForm({
 						}}
 						required
 						placeholder={m.auth_footer_server_placeholder()}
+						className="font-mono"
 					/>
 				</div>
 
@@ -252,7 +228,12 @@ function AddAccountDialogForm({
 				</div>
 
 				{biometricAvailable && (
-					<div className="flex items-center gap-2">
+					<Label
+						htmlFor="add-biometric"
+						className="flex cursor-pointer items-center gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+					>
+						<IconFingerprintOutlineDuo18 className="size-4 shrink-0 text-muted-foreground" />
+						<span className="flex-1">{m.auth_signin_biometric_enable()}</span>
 						<Checkbox
 							id="add-biometric"
 							checked={enableBiometric}
@@ -260,19 +241,12 @@ function AddAccountDialogForm({
 								setEnableBiometric(checked === true)
 							}
 						/>
-						<Label
-							htmlFor="add-biometric"
-							className="flex items-center gap-2 font-normal"
-						>
-							<IconFingerprintOutlineDuo18 className="h-4 w-4 text-muted-foreground" />
-							{m.auth_signin_biometric_enable()}
-						</Label>
-					</div>
+					</Label>
 				)}
 
 				<Button
 					type="submit"
-					className="w-full"
+					className="mt-1 w-full"
 					disabled={loginMutation.isPending}
 				>
 					{loginMutation.isPending

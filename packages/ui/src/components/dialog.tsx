@@ -36,7 +36,7 @@ function DialogOverlay({
 		<DialogPrimitive.Overlay
 			data-slot="dialog-overlay"
 			className={cn(
-				"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/50 data-[state=closed]:animate-out data-[state=open]:animate-in",
+				"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/60 data-[state=closed]:animate-out data-[state=open]:animate-in",
 				className,
 			)}
 			{...props}
@@ -44,13 +44,35 @@ function DialogOverlay({
 	);
 }
 
+/**
+ * Brand moment: faint purple gradient wash + hairline top line, shared by all
+ * dialogs (mirrors the account-switcher menu header). Rendered inside a
+ * positioned, overflow-hidden container.
+ */
+function DialogBrandAccent() {
+	return (
+		<>
+			<div
+				aria-hidden
+				className="pointer-events-none absolute inset-x-0 top-0 h-20 bg-linear-to-b from-primary-deep/10 to-transparent dark:from-primary-deep/20"
+			/>
+			<div
+				aria-hidden
+				className="pointer-events-none absolute top-0 right-[8%] left-[8%] h-px bg-linear-to-r from-transparent via-primary/55 to-transparent"
+			/>
+		</>
+	);
+}
+
 function DialogContent({
 	className,
 	children,
 	showCloseButton = true,
+	brandAccent = true,
 	...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
 	showCloseButton?: boolean;
+	brandAccent?: boolean;
 }) {
 	return (
 		<DialogPortal data-slot="dialog-portal">
@@ -58,11 +80,12 @@ function DialogContent({
 			<DialogPrimitive.Content
 				data-slot="dialog-content"
 				className={cn(
-					"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border bg-background p-6 shadow-lg duration-200 data-[state=closed]:animate-out data-[state=open]:animate-in sm:max-w-lg",
+					"data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-hidden rounded-xl border bg-popover p-6 shadow-pop duration-[130ms] data-[state=closed]:animate-out data-[state=open]:animate-in sm:max-w-lg",
 					className,
 				)}
 				{...props}
 			>
+				{brandAccent && <DialogBrandAccent />}
 				{children}
 				{showCloseButton && (
 					<DialogPrimitive.Close
@@ -108,7 +131,10 @@ function DialogTitle({
 	return (
 		<DialogPrimitive.Title
 			data-slot="dialog-title"
-			className={cn("font-semibold text-lg leading-none", className)}
+			className={cn(
+				"font-semibold text-base leading-none tracking-tight",
+				className,
+			)}
 			{...props}
 		/>
 	);
@@ -129,6 +155,7 @@ function DialogDescription({
 
 export {
 	Dialog,
+	DialogBrandAccent,
 	DialogClose,
 	DialogContent,
 	DialogDescription,

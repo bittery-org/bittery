@@ -15,7 +15,7 @@ export interface ConvertVaultTypeInput {
 	vaultId: string;
 	targetType: "personal" | "team";
 	personalEncryptedVaultKey?: string;
-	accountEmail?: string;
+	accountId: string;
 }
 
 export interface ConvertVaultTypeResult {
@@ -36,7 +36,7 @@ export function useConvertVaultType() {
 		): Promise<ConvertVaultTypeResult> =>
 			core.vaults.convertVaultType(input, defaultClient),
 		onSuccess: async (_data, variables) => {
-			await core.vaults.refreshVaultKeys(defaultClient, variables.accountEmail);
+			await core.vaults.refreshVaultKeys(defaultClient, variables.accountId);
 			const { accountsInfo } = await core.accounts.resolveAccounts();
 			if (accountsInfo.length > 0) {
 				await core.vaultCoordinator.refreshFromServer(accountsInfo);

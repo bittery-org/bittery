@@ -1,6 +1,7 @@
 import type { SyncStorage } from "./types";
 
 export interface PendingMutation {
+	accountId: string;
 	id: string;
 	type:
 		| "create"
@@ -21,7 +22,7 @@ export interface PendingMutation {
 	};
 	favorite?: boolean;
 	baseVersion: number;
-	accountEmail: string;
+	accountEmail?: string;
 	timestamp: number;
 	retryCount: number;
 }
@@ -29,7 +30,8 @@ export interface PendingMutation {
 export interface TempIdMapping {
 	tempId: string;
 	realId: string;
-	accountEmail: string;
+	accountId: string;
+	accountEmail?: string;
 }
 
 export interface OutboundQueueClient {
@@ -80,7 +82,8 @@ export interface OutboundQueueClient {
 	};
 }
 
-const QUEUE_INDEX_KEY = "bittery_pending_mutation_accounts";
+const QUEUE_INDEX_KEY = "bittery_pending_mutation_account_ids_v2";
+const LEGACY_QUEUE_INDEX_KEY = "bittery_pending_mutation_accounts";
 
 function normalizeEmail(email: string): string {
 	return email.toLowerCase();
@@ -92,6 +95,10 @@ function sanitizeEmailLegacy(email: string): string {
 
 function getQueueKeyForEmail(email: string): string {
 	return `bittery_pending_mutations_${encodeURIComponent(normalizeEmail(email))}`;
+}
+
+function getQueueKeyForAccountId(accountId: string): string {
+	return `bittery_pending_mutations_v2_${encodeURIComponent(accountId)}`;
 }
 
 function getLegacyQueueKeyForEmail(email: string): string {
@@ -145,36 +152,34 @@ function findLastIndexByEntityAndType(
 }
 
 export class OutboundQueue {
-	private readonly queuesByEmail = new Map<string, PendingMutation[]>();
+	private readonly queuesByAccountId = new Map<string, PendingMutation[]>();
+	private readonly unresolvedLegacyEmails = new Set<string>();
 	private readonly listeners = new Set<() => void>();
 	private latestMappings: TempIdMapping[] = [];
+	private draining = false;
+	private drainRequested = false;
 
 	constructor(
 		private readonly storage: SyncStorage,
 		private readonly clientId: string,
+		private readonly resolveLegacyAccountId?: (
+			email: string,
+		) => string | undefined | Promise<string | undefined>,
 	) {}
 
 	private async persistIndex(): Promise<void> {
-		const emails = Array.from(this.queuesByEmail.keys());
-		await this.storage.set(QUEUE_INDEX_KEY, emails);
+		const accountIds = Array.from(this.queuesByAccountId.keys());
+		await this.storage.set(QUEUE_INDEX_KEY, accountIds);
 	}
 
-	private async persistQueue(email: string): Promise<void> {
-		const normalized = normalizeEmail(email);
-		const queue = this.queuesByEmail.get(normalized) ?? [];
-		const queueKey = getQueueKeyForEmail(normalized);
-		const legacyQueueKey = getLegacyQueueKeyForEmail(normalized);
+	private async persistQueue(accountId: string): Promise<void> {
+		const queue = this.queuesByAccountId.get(accountId) ?? [];
+		const queueKey = getQueueKeyForAccountId(accountId);
 		if (queue.length === 0) {
 			await this.storage.remove(queueKey);
-			if (legacyQueueKey !== queueKey) {
-				await this.storage.remove(legacyQueueKey);
-			}
-			this.queuesByEmail.delete(normalized);
+			this.queuesByAccountId.delete(accountId);
 		} else {
 			await this.storage.set(queueKey, queue);
-			if (legacyQueueKey !== queueKey) {
-				await this.storage.remove(legacyQueueKey);
-			}
 		}
 		await this.persistIndex();
 	}
@@ -197,26 +202,39 @@ export class OutboundQueue {
 	}
 
 	enqueue(mutation: PendingMutation): void {
-		const normalized = normalizeEmail(mutation.accountEmail);
-		const queue = this.queuesByEmail.get(normalized) ?? [];
-		queue.push({
-			...mutation,
-			accountEmail: normalized,
-		});
+		const queue = this.queuesByAccountId.get(mutation.accountId) ?? [];
+		queue.push({ ...mutation });
 		queue.sort((a, b) => a.timestamp - b.timestamp);
-		this.queuesByEmail.set(normalized, queue);
-		void this.persistQueue(normalized);
+		this.queuesByAccountId.set(mutation.accountId, queue);
+		void this.persistQueue(mutation.accountId);
 		this.emit();
 	}
 
 	async restore(): Promise<void> {
-		this.queuesByEmail.clear();
+		this.queuesByAccountId.clear();
+		this.unresolvedLegacyEmails.clear();
+
+		const accountIds =
+			(await this.storage.get<string[]>(QUEUE_INDEX_KEY)) ?? [];
+		for (const accountId of accountIds) {
+			const queue =
+				(await this.storage.get<PendingMutation[]>(
+					getQueueKeyForAccountId(accountId),
+				)) ?? [];
+			if (queue.length > 0) {
+				this.queuesByAccountId.set(
+					accountId,
+					queue
+						.map((entry) => ({ ...entry, accountId }))
+						.sort((a, b) => a.timestamp - b.timestamp),
+				);
+			}
+		}
 
 		const emails =
-			(await this.storage.get<string[]>(QUEUE_INDEX_KEY))?.map(
+			(await this.storage.get<string[]>(LEGACY_QUEUE_INDEX_KEY))?.map(
 				normalizeEmail,
 			) ?? [];
-
 		for (const email of emails) {
 			const queueKey = getQueueKeyForEmail(email);
 			const legacyQueueKey = getLegacyQueueKeyForEmail(email);
@@ -226,36 +244,53 @@ export class OutboundQueue {
 					(await this.storage.get<PendingMutation[]>(legacyQueueKey)) ?? [];
 				if (legacyQueue.length > 0) {
 					queue = legacyQueue;
-					await this.storage.set(queueKey, legacyQueue);
-					await this.storage.remove(legacyQueueKey);
 				}
 			}
 			if (queue.length > 0) {
-				this.queuesByEmail.set(
-					email,
-					queue
-						.map((entry) => ({
-							...entry,
-							accountEmail: normalizeEmail(entry.accountEmail),
-						}))
-						.sort((a, b) => a.timestamp - b.timestamp),
+				let accountId: string | undefined;
+				try {
+					accountId = await this.resolveLegacyAccountId?.(email);
+				} catch {
+					accountId = undefined;
+				}
+				if (!accountId) {
+					this.unresolvedLegacyEmails.add(email);
+					continue;
+				}
+				const migrated = queue.map((entry) => ({
+					...entry,
+					accountId,
+					accountEmail: entry.accountEmail ?? email,
+				}));
+				const existing = this.queuesByAccountId.get(accountId) ?? [];
+				this.queuesByAccountId.set(
+					accountId,
+					[...existing, ...migrated].sort((a, b) => a.timestamp - b.timestamp),
 				);
+				await this.persistQueue(accountId);
+				await this.storage.remove(queueKey);
+				if (legacyQueueKey !== queueKey)
+					await this.storage.remove(legacyQueueKey);
 			}
 		}
+		await this.storage.set(
+			LEGACY_QUEUE_INDEX_KEY,
+			Array.from(this.unresolvedLegacyEmails),
+		);
 
 		this.emit();
 	}
 
 	getPendingCount(): number {
 		let count = 0;
-		for (const queue of this.queuesByEmail.values()) {
+		for (const queue of this.queuesByAccountId.values()) {
 			count += queue.length;
 		}
 		return count;
 	}
 
 	hasPendingForItem(itemId: string): boolean {
-		for (const queue of this.queuesByEmail.values()) {
+		for (const queue of this.queuesByAccountId.values()) {
 			if (queue.some((mutation) => mutation.entityId === itemId)) {
 				return true;
 			}
@@ -264,7 +299,7 @@ export class OutboundQueue {
 	}
 
 	getPendingForItem(itemId: string): PendingMutation | undefined {
-		for (const queue of this.queuesByEmail.values()) {
+		for (const queue of this.queuesByAccountId.values()) {
 			const found = queue.find((mutation) => mutation.entityId === itemId);
 			if (found) {
 				return found;
@@ -274,7 +309,7 @@ export class OutboundQueue {
 	}
 
 	rewritePendingIds(tempId: string, realId: string): void {
-		for (const [email, queue] of this.queuesByEmail.entries()) {
+		for (const [accountId, queue] of this.queuesByAccountId.entries()) {
 			let touched = false;
 			for (const mutation of queue) {
 				if (mutation.entityId === tempId) {
@@ -283,7 +318,7 @@ export class OutboundQueue {
 				}
 			}
 			if (touched) {
-				void this.persistQueue(email);
+				void this.persistQueue(accountId);
 			}
 		}
 		this.emit();
@@ -317,6 +352,7 @@ export class OutboundQueue {
 					this.latestMappings.push({
 						tempId: mutation.entityId,
 						realId,
+						accountId: mutation.accountId,
 						accountEmail: mutation.accountEmail,
 					});
 					this.rewritePendingIds(mutation.entityId, realId);
@@ -382,27 +418,56 @@ export class OutboundQueue {
 
 	async drain(
 		getClient: (
-			email: string,
+			accountId: string,
 		) => OutboundQueueClient | Promise<OutboundQueueClient>,
 	): Promise<void> {
-		this.latestMappings = [];
+		// Serialize drains across all callers (multiple sync sources may share
+		// this queue). A drain triggered while another is in flight is coalesced
+		// into a single follow-up pass so no request is lost.
+		if (this.draining) {
+			this.drainRequested = true;
+			return;
+		}
 
-		const accountEntries = Array.from(this.queuesByEmail.entries()).sort(
+		this.draining = true;
+		this.latestMappings = [];
+		try {
+			do {
+				this.drainRequested = false;
+				await this.drainOnce(getClient);
+			} while (this.drainRequested);
+		} finally {
+			this.draining = false;
+		}
+	}
+
+	private async drainOnce(
+		getClient: (
+			accountId: string,
+		) => OutboundQueueClient | Promise<OutboundQueueClient>,
+	): Promise<void> {
+		if (this.unresolvedLegacyEmails.size > 0) {
+			throw new Error(
+				`Cannot drain ambiguous legacy queues: ${Array.from(this.unresolvedLegacyEmails).join(", ")}`,
+			);
+		}
+
+		const accountEntries = Array.from(this.queuesByAccountId.entries()).sort(
 			(a, b) => a[0].localeCompare(b[0]),
 		);
 
-		for (const [email, queue] of accountEntries) {
+		for (const [accountId, queue] of accountEntries) {
 			while (queue.length > 0) {
 				const mutation = queue[0];
 				if (!mutation) {
 					break;
 				}
-				const client = await getClient(email);
+				const client = await getClient(accountId);
 
 				try {
 					await this.processMutation(client, mutation);
 					queue.shift();
-					await this.persistQueue(email);
+					await this.persistQueue(accountId);
 					this.emit();
 				} catch (error) {
 					const status = getHttpStatus(error);
@@ -411,7 +476,7 @@ export class OutboundQueue {
 						try {
 							await this.forcePushMutation(client, mutation);
 							queue.shift();
-							await this.persistQueue(email);
+							await this.persistQueue(accountId);
 							this.emit();
 							continue;
 						} catch (forceError) {
@@ -420,9 +485,9 @@ export class OutboundQueue {
 								forceError,
 							);
 							mutation.retryCount += 1;
-							await this.persistQueue(email);
+							await this.persistQueue(accountId);
 							this.emit();
-							return;
+							break;
 						}
 					}
 
@@ -431,16 +496,16 @@ export class OutboundQueue {
 							`[OutboundQueue] Discarding mutation ${mutation.id} (${mutation.type}) due to ${status}`,
 						);
 						queue.shift();
-						await this.persistQueue(email);
+						await this.persistQueue(accountId);
 						this.emit();
 						continue;
 					}
 
 					if (isNetworkError(error)) {
 						mutation.retryCount += 1;
-						await this.persistQueue(email);
+						await this.persistQueue(accountId);
 						this.emit();
-						return;
+						break;
 					}
 
 					console.error(
@@ -448,9 +513,9 @@ export class OutboundQueue {
 						error,
 					);
 					mutation.retryCount += 1;
-					await this.persistQueue(email);
+					await this.persistQueue(accountId);
 					this.emit();
-					return;
+					break;
 				}
 			}
 		}
@@ -463,7 +528,7 @@ export class OutboundQueue {
 	}
 
 	compact(): void {
-		for (const [email, sourceQueue] of this.queuesByEmail.entries()) {
+		for (const [accountId, sourceQueue] of this.queuesByAccountId.entries()) {
 			const sourceWithIndex = sourceQueue.map((mutation, index) => ({
 				mutation,
 				index,
@@ -537,27 +602,25 @@ export class OutboundQueue {
 			}
 
 			result.sort((a, b) => a.timestamp - b.timestamp);
-			this.queuesByEmail.set(email, result);
-			void this.persistQueue(email);
+			this.queuesByAccountId.set(accountId, result);
+			void this.persistQueue(accountId);
 		}
 
 		this.emit();
 	}
 
-	clear(email?: string): void {
-		if (email) {
-			const normalized = normalizeEmail(email);
-			this.queuesByEmail.delete(normalized);
-			void this.persistQueue(normalized);
+	clear(accountId?: string): void {
+		if (accountId) {
+			this.queuesByAccountId.delete(accountId);
+			void this.persistQueue(accountId);
 			this.emit();
 			return;
 		}
 
-		const emails = Array.from(this.queuesByEmail.keys());
-		this.queuesByEmail.clear();
-		for (const accountEmail of emails) {
-			void this.storage.remove(getQueueKeyForEmail(accountEmail));
-			void this.storage.remove(getLegacyQueueKeyForEmail(accountEmail));
+		const accountIds = Array.from(this.queuesByAccountId.keys());
+		this.queuesByAccountId.clear();
+		for (const queuedAccountId of accountIds) {
+			void this.storage.remove(getQueueKeyForAccountId(queuedAccountId));
 		}
 		void this.storage.remove(QUEUE_INDEX_KEY);
 		this.emit();

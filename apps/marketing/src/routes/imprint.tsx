@@ -1,18 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Scale } from "lucide-react";
 import { motion } from "motion/react";
+import { seo } from "@/lib/seo";
 
 export const Route = createFileRoute("/imprint")({
 	component: ImprintPage,
 	head: () => ({
-		meta: [
-			{ title: "Imprint — Bittery" },
-			{
-				name: "description",
-				content:
-					"Legal notice (Impressum) for Bittery — a zero-knowledge password manager operated by Bittery Software.",
-			},
-		],
+		meta: seo({
+			title: "Imprint — Bittery",
+			description:
+				"Legal notice (Impressum) for Bittery — a zero-knowledge password manager operated by Bittery Software.",
+		}),
 	}),
 });
 

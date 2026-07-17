@@ -92,7 +92,7 @@ function RootDocument() {
 					disableTransitionOnChange
 				>
 					<Outlet />
-					<Toaster richColors />
+					<Toaster />
 				</ThemeProvider>
 				{isDev && <TanStackRouterDevtools position="bottom-left" />}
 				{isDev && (

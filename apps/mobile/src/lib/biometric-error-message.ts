@@ -21,6 +21,8 @@ export function resolveBiometricErrorMessage(
 			return m.mob_biometric_error_master_password_required();
 		case "session_expired":
 			return m.mob_biometric_error_session_expired();
+		case "account_not_found":
+			return m.mob_biometric_error_account_not_found();
 		default:
 			return m.mob_biometric_error_unknown();
 	}

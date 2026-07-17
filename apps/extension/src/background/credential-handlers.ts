@@ -3,7 +3,16 @@
  * Handles saving and updating credentials (password capture).
  */
 
+import {
+	extractHostname,
+	hostnameMatches,
+	parseHostname,
+} from "../lib/hostname";
 import { core } from "./core-instance";
+import {
+	type CredentialErrorType,
+	classifyCredentialError,
+} from "./credential-error";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { rpcClient } from "./rpc-client";
 import {
@@ -19,25 +28,23 @@ import {
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
-import {
-	getDecryptedItemsForCurrentMode,
-	hostnameMatches,
-} from "./vault-utils";
+import { getDecryptedItemsForCurrentMode } from "./vault-utils";
 
-/**
- * Helper function to extract hostname from URL
- */
-function extractHostname(url: string): string {
-	try {
-		const urlObj = new URL(url.startsWith("http") ? url : `https://${url}`);
-		return urlObj.hostname;
-	} catch {
-		return url;
-	}
-}
+const CREDENTIAL_ERROR_MESSAGES: Partial<Record<CredentialErrorType, string>> =
+	{
+		network: "Network error. Check your connection and try again.",
+		encryption: "Encryption error. Please unlock and try again.",
+		auth: "Authentication error. Please re-authenticate.",
+		permission:
+			"Permission denied. You may not have write access to this vault.",
+		not_found: "Credential not found. It may have been deleted.",
+	};
 
-async function getAllItemsForMatching() {
-	return getDecryptedItemsForCurrentMode();
+function describeCredentialError(
+	errorType: CredentialErrorType,
+	fallback: string,
+): string {
+	return CREDENTIAL_ERROR_MESSAGES[errorType] ?? fallback;
 }
 
 /**
@@ -59,18 +66,15 @@ export async function handleCheckExistingCredentials(payload: {
 		};
 	}
 
-	let hostname: string;
-	try {
-		const urlObj = new URL(url.startsWith("http") ? url : `https://${url}`);
-		hostname = urlObj.hostname;
-	} catch {
+	const hostname = parseHostname(url);
+	if (!hostname) {
 		return {
 			success: false,
 			error: "Invalid URL",
 		};
 	}
 
-	const items = await getAllItemsForMatching();
+	const items = await getDecryptedItemsForCurrentMode();
 	const resolvedItems = items.filter(
 		(item): item is NonNullable<(typeof items)[number]> => item !== null,
 	);
@@ -184,42 +188,14 @@ export async function handleSaveNewCredential(payload: {
 		return { success: true, itemId: result.itemId };
 	} catch (error) {
 		console.error("Error saving credential:", error);
-		const errorMessageRaw =
-			error instanceof Error ? error.message : String(error);
-
-		let errorMessage = "Failed to save credentials. Please try again.";
-		let errorType = "unknown";
-
-		if (
-			errorMessageRaw.includes("network") ||
-			errorMessageRaw.includes("fetch")
-		) {
-			errorMessage = "Network error. Check your connection and try again.";
-			errorType = "network";
-		} else if (
-			errorMessageRaw.includes("decrypt") ||
-			errorMessageRaw.includes("encryption")
-		) {
-			errorMessage = "Encryption error. Please unlock and try again.";
-			errorType = "encryption";
-		} else if (
-			errorMessageRaw.includes("unauthorized") ||
-			errorMessageRaw.includes("auth")
-		) {
-			errorMessage = "Authentication error. Please re-authenticate.";
-			errorType = "auth";
-		} else if (
-			errorMessageRaw.includes("permission") ||
-			errorMessageRaw.includes("access")
-		) {
-			errorMessage =
-				"Permission denied. You may not have write access to this vault.";
-			errorType = "permission";
-		}
+		const errorType = classifyCredentialError(error);
 
 		return {
 			success: false,
-			error: errorMessage,
+			error: describeCredentialError(
+				errorType,
+				"Failed to save credentials. Please try again.",
+			),
 			errorType,
 		};
 	}
@@ -256,10 +232,7 @@ export async function handleUpdateExistingCredential(payload: {
 	}
 
 	try {
-		const accountEmail = await resolveAccountEmailForItemId(
-			itemId,
-			getAllItemsForMatching,
-		);
+		const accountEmail = await resolveAccountEmailForItemId(itemId);
 
 		if (!accountEmail) {
 			return {
@@ -303,45 +276,14 @@ export async function handleUpdateExistingCredential(payload: {
 		return { success: true };
 	} catch (error) {
 		console.error("Error updating credential:", error);
-		const errorMessageRaw =
-			error instanceof Error ? error.message : String(error);
-
-		let errorMessage = "Failed to update credentials. Please try again.";
-		let errorType = "unknown";
-
-		if (
-			errorMessageRaw.includes("network") ||
-			errorMessageRaw.includes("fetch")
-		) {
-			errorMessage = "Network error. Check your connection and try again.";
-			errorType = "network";
-		} else if (
-			errorMessageRaw.includes("decrypt") ||
-			errorMessageRaw.includes("encryption")
-		) {
-			errorMessage = "Encryption error. Please unlock and try again.";
-			errorType = "encryption";
-		} else if (
-			errorMessageRaw.includes("unauthorized") ||
-			errorMessageRaw.includes("auth")
-		) {
-			errorMessage = "Authentication error. Please re-authenticate.";
-			errorType = "auth";
-		} else if (
-			errorMessageRaw.includes("permission") ||
-			errorMessageRaw.includes("access")
-		) {
-			errorMessage =
-				"Permission denied. You may not have write access to this vault.";
-			errorType = "permission";
-		} else if (errorMessageRaw.includes("not found")) {
-			errorMessage = "Credential not found. It may have been deleted.";
-			errorType = "not_found";
-		}
+		const errorType = classifyCredentialError(error);
 
 		return {
 			success: false,
-			error: errorMessage,
+			error: describeCredentialError(
+				errorType,
+				"Failed to update credentials. Please try again.",
+			),
 			errorType,
 		};
 	}

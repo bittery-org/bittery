@@ -4,6 +4,7 @@ import {
 	useAvailableTags,
 	useCreateVault,
 	useDeleteVault,
+	useItemCounts,
 	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
@@ -23,6 +24,7 @@ import {
 	EditVaultDialog,
 	type UpdateVaultData,
 } from "@/components/vaults/edit-vault-dialog";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
 
@@ -37,8 +39,9 @@ function VaultsLayout() {
 	const currentVaultId = (params as { vaultId?: string }).vaultId;
 
 	const { vaultKeys } = useAllVaultKeys();
-	const { items } = useItems();
+	const { items, isLoading: isLoadingItems } = useItems();
 	const availableTags = useAvailableTags(items);
+	const itemCounts = useItemCounts(isLoadingItems ? undefined : items);
 	const createVault = useCreateVault();
 	const updateVault = useUpdateVault();
 	const deleteVault = useDeleteVault();
@@ -59,7 +62,12 @@ function VaultsLayout() {
 	} | null>(null);
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
-		const result = await createVault.mutateAsync(data);
+		const active = await storage.getActiveAccount();
+		if (active?.type !== "single") throw new Error();
+		const result = await createVault.mutateAsync({
+			...data,
+			accountId: active.accountId,
+		});
 		navigate({ to: "/vaults/$vaultId", params: { vaultId: result.vaultId } });
 	};
 
@@ -74,12 +82,17 @@ function VaultsLayout() {
 	};
 
 	const handleUpdateVault = async (vaultId: string, data: UpdateVaultData) => {
+		const accountId = vaultKeys.find(
+			(vault) => vault.vaultId === vaultId,
+		)?.accountId;
+		if (!accountId) throw new Error();
 		await updateVault.mutateAsync({
 			vaultId,
 			name: data.name,
 			icon: data.icon,
 			imageFile: data.imageFile,
 			removeImage: data.removeImage,
+			accountId,
 		});
 		setEditingVault(null);
 	};
@@ -90,7 +103,11 @@ function VaultsLayout() {
 	};
 
 	const handleDeleteVault = async (vaultId: string) => {
-		await deleteVault.mutateAsync({ vaultId });
+		const accountId = vaultKeys.find(
+			(vault) => vault.vaultId === vaultId,
+		)?.accountId;
+		if (!accountId) throw new Error();
+		await deleteVault.mutateAsync({ vaultId, accountId });
 		setDeletingVault(null);
 		if (currentVaultId === vaultId) {
 			navigate({ to: "/vaults" });
@@ -104,10 +121,12 @@ function VaultsLayout() {
 		<VaultDndProvider>
 			<div className="flex min-h-0 flex-1 overflow-hidden">
 				{/* Desktop sidebar */}
-				<aside className="hidden w-52 shrink-0 flex-col border-r pt-11 lg:flex xl:pt-12">
+				<aside className="hidden w-54 shrink-0 flex-col border-r lg:flex">
 					<VaultNavSidebar
+						hasHeaderInset
 						vaults={vaultKeys}
 						tags={tags}
+						itemCounts={itemCounts}
 						currentVaultId={currentVaultId}
 						onNewVault={() => setIsCreateVaultDialogOpen(true)}
 						onEditVault={handleOpenEditVault}
@@ -142,6 +161,7 @@ function VaultsLayout() {
 						<VaultNavSidebar
 							vaults={vaultKeys}
 							tags={tags}
+							itemCounts={itemCounts}
 							currentVaultId={currentVaultId}
 							onNewVault={() => {
 								setIsSidebarOpen(false);
