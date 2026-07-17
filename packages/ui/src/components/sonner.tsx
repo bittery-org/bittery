@@ -159,7 +159,8 @@ function fire(
 ): string | number {
 	return sonnerToast.custom(
 		(id) => (
-			// Sonner gives every toast a fixed-width slot; center the pill in it.
+			// Centres the pill in the toast's slot. Only works because the Toaster
+			// forces the slot full-width; custom toasts get no width from Sonner.
 			<div className="flex justify-center">
 				<BitteryToast
 					kind={kind}
@@ -208,6 +209,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
 			theme={theme as ToasterProps["theme"]}
 			position="bottom-center"
 			className="toaster group"
+			// Sonner only applies `width: var(--width)` to [data-styled=true], and
+			// toast.custom() renders with data-styled=false. Without a width the
+			// toast <li> is position:absolute and shrinks to its content, pinning it
+			// to the left edge of the centred --width slot. Force it full-width so
+			// the pill can centre itself inside (see `fire` below).
+			toastOptions={{ className: "w-full" }}
 			{...props}
 		/>
 	);
