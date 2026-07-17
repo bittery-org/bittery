@@ -4,6 +4,7 @@ import {
 	Check as IconCheck,
 	ChevronDown as IconChevronDown,
 	ChevronRight as IconChevronRight,
+	Clock as IconClock,
 	Copy as IconCopy,
 	Ellipsis as IconEllipsis,
 	Eye as IconEye,
@@ -16,7 +17,6 @@ import {
 	Plus as IconPlus,
 	Search as IconSearch,
 	Share2 as IconShare,
-	Smartphone as IconSmartphone,
 	ArrowDownNarrowWide as IconSortDescending,
 	Star as IconStar,
 	Trash2 as IconTrash,
@@ -399,7 +399,7 @@ function ItemList({ selectedId }: { selectedId: string }) {
 										{item.title}
 									</span>
 									{item.hasTotp ? (
-										<IconSmartphone className="size-3 shrink-0 text-muted-foreground" />
+										<IconClock className="size-3 shrink-0 text-muted-foreground" />
 									) : null}
 									{item.hasPasskey ? (
 										<IconPasskey className="size-3 shrink-0 text-muted-foreground" />

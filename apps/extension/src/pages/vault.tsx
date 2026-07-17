@@ -1,11 +1,11 @@
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, cn, Input, Skeleton, toast } from "@bittery/ui";
 import {
+	IconClock,
 	IconPasskey,
 	IconPlus,
 	IconSearch,
 	IconSettings,
-	IconSmartphone,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -86,7 +86,7 @@ function ItemListRow({
 						<span className="truncate font-medium text-sm">{title}</span>
 						{item.category === "login" && item.totpSecret && (
 							<span title={m.ext_vault_has_2fa()}>
-								<IconSmartphone className="size-3 shrink-0" />
+								<IconClock className="size-3 shrink-0" />
 							</span>
 						)}
 						{passkeyCount > 0 && (

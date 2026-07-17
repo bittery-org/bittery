@@ -1,7 +1,7 @@
 import { maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { VaultItemListRow } from "@bittery/ui";
-import { IconPasskey, IconSmartphone } from "@bittery/ui/icons";
+import { IconClock, IconPasskey } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback } from "react";
@@ -82,7 +82,7 @@ export function ItemListRow({
 				<>
 					{item.category === "login" && item.totpSecret && (
 						<span title={m.vaults_detail_items_list_item_badge_has_2fa()}>
-							<IconSmartphone className="size-3 shrink-0 text-muted-foreground" />
+							<IconClock className="size-3 shrink-0 text-muted-foreground" />
 						</span>
 					)}
 					{hasPasskeys && (
