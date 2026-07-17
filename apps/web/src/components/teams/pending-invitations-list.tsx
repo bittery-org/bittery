@@ -1,9 +1,9 @@
 import { useRPCClient } from "@bittery/shared/rpc";
 import { Badge, Button, cn, toast } from "@bittery/ui";
 import {
-	IconClockTimeOutlineDuo18 as Clock,
-	IconArrowsLeftRightTrailOutlineDuo18 as RefreshCw,
-	IconXmarkOutlineDuo18 as X,
+	IconClock as Clock,
+	IconArrowLeftRight as RefreshCw,
+	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { formatDate } from "@/lib/i18n-format";

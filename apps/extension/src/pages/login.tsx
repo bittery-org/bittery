@@ -1,10 +1,6 @@
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Button, Card, Input, Label, toast, VaultIcon } from "@bittery/ui";
-import {
-	IconArrowLeftOutlineDuo18,
-	IconEyeOutlineDuo18,
-	IconEyeSlashOutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconArrowLeft, IconEye, IconEyeOff } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch } from "@tanstack/react-router";
@@ -109,7 +105,7 @@ export function LoginPage() {
 							onClick={handleBackToVault}
 							className="absolute top-4 left-4"
 						>
-							<IconArrowLeftOutlineDuo18 className="mr-2 size-4" />
+							<IconArrowLeft className="mr-2 size-4" />
 							{m.ext_login_back()}
 						</Button>
 					)}
@@ -201,9 +197,9 @@ export function LoginPage() {
 												onClick={() => setShowPassword(!showPassword)}
 											>
 												{showPassword ? (
-													<IconEyeSlashOutlineDuo18 size={16} />
+													<IconEyeOff size={16} />
 												) : (
-													<IconEyeOutlineDuo18 size={16} />
+													<IconEye size={16} />
 												)}
 											</Button>
 										</div>
@@ -236,9 +232,9 @@ export function LoginPage() {
 												onClick={() => setShowSecretKey(!showSecretKey)}
 											>
 												{showSecretKey ? (
-													<IconEyeSlashOutlineDuo18 size={16} />
+													<IconEyeOff size={16} />
 												) : (
-													<IconEyeOutlineDuo18 size={16} />
+													<IconEye size={16} />
 												)}
 											</Button>
 										</div>

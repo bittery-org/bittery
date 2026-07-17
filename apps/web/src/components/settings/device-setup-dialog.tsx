@@ -15,10 +15,7 @@ import {
 	Input,
 	Label,
 } from "@bittery/ui";
-import {
-	IconCopyOutlineDuo18,
-	IconLoader2OutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconCopy, IconLoaderCircle } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { QRCodeSVG } from "qrcode.react";
 import { useMemo } from "react";
@@ -109,7 +106,7 @@ function WebDeviceSetupDialogContent({
 			<div className="space-y-3">
 				<div className="flex min-h-64 items-center justify-center rounded-md bg-muted/20 p-4">
 					{isLoading ? (
-						<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin text-muted-foreground" />
+						<IconLoaderCircle className="h-5 w-5 animate-spin text-muted-foreground" />
 					) : setupPreview.qrUri ? (
 						<div className="flex flex-col items-center gap-4">
 							<div className="rounded-md bg-white p-2.5">
@@ -170,7 +167,7 @@ function WebDeviceSetupDialogContent({
 							onClick={handleCopyLink}
 							disabled={!setupPreview.linkUri}
 						>
-							<IconCopyOutlineDuo18 className="h-4 w-4" />
+							<IconCopy className="h-4 w-4" />
 						</Button>
 					</div>
 				</div>

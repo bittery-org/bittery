@@ -9,8 +9,8 @@ import {
 	VaultItemListRow,
 } from "@bittery/ui";
 import {
-	IconKeyOutlineDuo18 as Key,
-	IconMobileOutlineDuo18 as Smartphone,
+	IconKey as Key,
+	IconSmartphone as Smartphone,
 } from "@bittery/ui/icons";
 import { useDraggable } from "@dnd-kit/core";
 import { useCallback } from "react";

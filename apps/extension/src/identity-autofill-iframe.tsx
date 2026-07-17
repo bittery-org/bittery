@@ -1,6 +1,6 @@
 import "./index.css";
 import type { DecryptedItem } from "@bittery/shared/types";
-import { IconUserOutlineDuo18 } from "@bittery/ui/icons";
+import { IconUser } from "@bittery/ui/icons";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import type { AutofillIframeConfig } from "@/components/autofill-iframe-base";
@@ -34,7 +34,7 @@ function IdentityAutofillIframe() {
 		preprocessItems: (items: DecryptedItem[]) =>
 			items.filter((item) => item.category === "identity"),
 		defaultFieldType: "firstName",
-		emptyIcon: <IconUserOutlineDuo18 size={14} />,
+		emptyIcon: <IconUser size={14} />,
 		emptyText: m.ext_autofill_identity_empty(),
 		unlockText: m.ext_autofill_identity_unlock(),
 		itemNounSingular: m.ext_autofill_identity_singular(),
@@ -46,7 +46,7 @@ function IdentityAutofillIframe() {
 			return (
 				<div className="flex items-center gap-2.5">
 					<div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-						<IconUserOutlineDuo18 size={16} />
+						<IconUser size={16} />
 					</div>
 					<div className="min-w-0 flex-1">
 						<p className="truncate font-medium text-sm">{displayName}</p>

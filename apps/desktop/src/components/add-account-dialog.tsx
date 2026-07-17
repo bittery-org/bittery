@@ -16,11 +16,7 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import {
-	IconEyeOutlineDuo18,
-	IconEyeSlashOutlineDuo18,
-	IconFingerprintOutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconEye, IconEyeOff, IconFingerprint } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
@@ -192,9 +188,9 @@ function AddAccountDialogForm({
 								onClick={() => setShowSecretKey(!showSecretKey)}
 							>
 								{showSecretKey ? (
-									<IconEyeSlashOutlineDuo18 className="h-3.5 w-3.5" />
+									<IconEyeOff className="h-3.5 w-3.5" />
 								) : (
-									<IconEyeOutlineDuo18 className="h-3.5 w-3.5" />
+									<IconEye className="h-3.5 w-3.5" />
 								)}
 							</InputGroupButton>
 						</InputGroupAddon>
@@ -218,9 +214,9 @@ function AddAccountDialogForm({
 								onClick={() => setShowPassword(!showPassword)}
 							>
 								{showPassword ? (
-									<IconEyeSlashOutlineDuo18 className="h-3.5 w-3.5" />
+									<IconEyeOff className="h-3.5 w-3.5" />
 								) : (
-									<IconEyeOutlineDuo18 className="h-3.5 w-3.5" />
+									<IconEye className="h-3.5 w-3.5" />
 								)}
 							</InputGroupButton>
 						</InputGroupAddon>
@@ -232,7 +228,7 @@ function AddAccountDialogForm({
 						htmlFor="add-biometric"
 						className="flex cursor-pointer items-center gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
 					>
-						<IconFingerprintOutlineDuo18 className="size-4 shrink-0 text-muted-foreground" />
+						<IconFingerprint className="size-4 shrink-0 text-muted-foreground" />
 						<span className="flex-1">{m.auth_signin_biometric_enable()}</span>
 						<Checkbox
 							id="add-biometric"

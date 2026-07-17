@@ -1,5 +1,5 @@
 import { useI18n } from "@bittery/i18n/react";
-import { IconHistoryOutlineDuo18 } from "@bittery/ui/icons";
+import { IconHistory } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Button } from "../button";
@@ -40,7 +40,7 @@ export function ShareHistoryDialog({
 				<DialogTrigger asChild>
 					{trigger || (
 						<Button size="sm" variant="outline">
-							<IconHistoryOutlineDuo18 className="mr-2 size-4" />
+							<IconHistory className="mr-2 size-4" />
 							{m.sharing_history_dialog_trigger()}
 						</Button>
 					)}

@@ -23,12 +23,12 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconPen2OutlineDuo18 as Edit2,
-	IconConnectedDots3OutlineDuo18 as Extension,
-	IconEarthOutlineDuo18 as Globe,
-	IconArrowDoorOutOutlineDuo18 as LogOut,
-	IconSquareTerminalOutlineDuo18 as Monitor,
-	IconMobileOutlineDuo18 as Smartphone,
+	IconPencil as Edit2,
+	IconNetwork as Extension,
+	IconEarth as Globe,
+	IconLogOut as LogOut,
+	IconSquareTerminal as Monitor,
+	IconSmartphone as Smartphone,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";

@@ -5,9 +5,9 @@ import {
 	SidebarMenuItem,
 } from "@bittery/ui";
 import {
-	IconUpload4OutlineDuo18 as Upload,
-	IconVault3OutlineDuo18 as Vault,
-	IconXmarkOutlineDuo18 as X,
+	IconUpload as Upload,
+	IconVault as Vault,
+	IconX as X,
 } from "@bittery/ui/icons";
 import { useState } from "react";
 import { useImportOnboardingState } from "@/hooks/use-import-onboarding-state";

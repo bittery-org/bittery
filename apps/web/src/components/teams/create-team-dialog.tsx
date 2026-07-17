@@ -12,7 +12,7 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import { IconPlusOutlineDuo18 as Plus } from "@bittery/ui/icons";
+import { IconPlus as Plus } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { useQueryInvalidator } from "../../providers/sync-provider";

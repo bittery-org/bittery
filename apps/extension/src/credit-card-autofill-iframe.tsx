@@ -1,7 +1,7 @@
 import "./index.css";
 import { detectCardBrand, maskCardNumber } from "@bittery/shared/credit-card";
 import type { DecryptedItem } from "@bittery/shared/types";
-import { IconCreditCardLockOutlineDuo18 } from "@bittery/ui/icons";
+import { IconCreditCard } from "@bittery/ui/icons";
 import React from "react";
 import ReactDOM from "react-dom/client";
 import type { AutofillIframeConfig } from "@/components/autofill-iframe-base";
@@ -57,7 +57,7 @@ function CreditCardAutofillIframe() {
 				(item) => item.category === "credit-card" && item.cardNumber,
 			),
 		defaultFieldType: "cardNumber",
-		emptyIcon: <IconCreditCardLockOutlineDuo18 size={14} />,
+		emptyIcon: <IconCreditCard size={14} />,
 		emptyText: m.ext_autofill_card_empty(),
 		unlockText: m.ext_autofill_card_unlock(),
 		itemNounSingular: m.ext_autofill_card_singular(),

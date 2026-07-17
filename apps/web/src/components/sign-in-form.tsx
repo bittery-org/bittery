@@ -5,10 +5,10 @@ import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Input, Label, toast } from "@bittery/ui";
 import {
-	IconClockTimeOutlineDuo18 as Clock,
-	IconEyeOutlineDuo18 as Eye,
-	IconEyeSlashOutlineDuo18 as EyeOff,
-	IconLoader2OutlineDuo18 as Loader2,
+	IconClock as Clock,
+	IconEye as Eye,
+	IconEyeOff as EyeOff,
+	IconLoaderCircle as Loader2,
 } from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";

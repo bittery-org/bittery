@@ -1,10 +1,10 @@
 import { useRPC } from "@bittery/shared/rpc";
 import { Button } from "@bittery/ui";
 import {
-	IconConnectedDots3OutlineDuo18 as Extension,
-	IconEarthOutlineDuo18 as Globe,
-	IconSquareTerminalOutlineDuo18 as Monitor,
-	IconMobileOutlineDuo18 as Smartphone,
+	IconNetwork as Extension,
+	IconEarth as Globe,
+	IconSquareTerminal as Monitor,
+	IconSmartphone as Smartphone,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";

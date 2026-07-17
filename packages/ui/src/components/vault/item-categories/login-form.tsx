@@ -7,12 +7,12 @@ import { useForm } from "@tanstack/react-form";
 import { nanoid } from "nanoid";
 import { useState } from "react";
 import {
-	IconCircleKeyOutlineDuo18,
-	IconEyeOutlineDuo18,
-	IconEyeSlashOutlineDuo18,
-	IconPlusOutlineDuo18,
-	IconTrash2OutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconPasskey,
+	IconEye,
+	IconEyeOff,
+	IconPlus,
+	IconTrash,
+	IconX,
 } from "../../../icons";
 import { Button } from "../../button";
 import { ButtonGroup } from "../../button-group";
@@ -268,9 +268,9 @@ export function LoginForm({
 											}
 										>
 											{showPassword ? (
-												<IconEyeSlashOutlineDuo18 className="size-4" />
+												<IconEyeOff className="size-4" />
 											) : (
-												<IconEyeOutlineDuo18 className="size-4" />
+												<IconEye className="size-4" />
 											)}
 										</InputGroupButton>
 										<PasswordGenerator
@@ -282,7 +282,7 @@ export function LoginForm({
 													size="icon-sm"
 													aria-label={m.vaults_detail_items_form_login_action_generate_password()}
 												>
-													<IconCircleKeyOutlineDuo18 className="size-4" />
+													<IconPasskey className="size-4" />
 												</InputGroupButton>
 											}
 										/>
@@ -323,13 +323,13 @@ export function LoginForm({
 											onClick={() => removeAdditionalUrl(index)}
 											aria-label={m.vaults_detail_items_form_login_action_remove_website()}
 										>
-											<IconXmarkOutlineDuo18 className="size-4" />
+											<IconX className="size-4" />
 										</InputGroupButton>
 									</InputGroupAddon>
 								</InputGroup>
 							))}
 							<FormAddRow onClick={addAdditionalUrl}>
-								<IconPlusOutlineDuo18 className="size-3.5" />
+								<IconPlus className="size-3.5" />
 								{m.vaults_detail_items_form_login_action_add_website()}
 							</FormAddRow>
 						</div>
@@ -400,7 +400,7 @@ export function LoginForm({
 										onClick={() => removeCustomField(field.id)}
 										aria-label={m.vaults_detail_items_form_login_action_remove_custom_field()}
 									>
-										<IconTrash2OutlineDuo18 size={16} />
+										<IconTrash size={16} />
 									</Button>
 								</div>
 								<Input
@@ -416,7 +416,7 @@ export function LoginForm({
 					</div>
 				)}
 				<FormAddRow onClick={addCustomField}>
-					<IconPlusOutlineDuo18 className="size-3.5" />
+					<IconPlus className="size-3.5" />
 					{m.vaults_detail_items_form_login_action_add_custom_field()}
 				</FormAddRow>
 			</FormSection>

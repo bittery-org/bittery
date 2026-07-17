@@ -9,7 +9,7 @@ import {
 	useUpdateVault,
 } from "@bittery/core/hooks";
 import { Button, Sheet, SheetContent, toast } from "@bittery/ui";
-import { IconVault3OutlineDuo18 as VaultIcon } from "@bittery/ui/icons";
+import { IconVault as VaultIcon } from "@bittery/ui/icons";
 import {
 	createFileRoute,
 	Outlet,

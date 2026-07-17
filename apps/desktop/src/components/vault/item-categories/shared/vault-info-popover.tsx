@@ -6,7 +6,7 @@ import {
 	Separator,
 	VaultAvatar,
 } from "@bittery/ui";
-import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
+import { IconChevronDown } from "@bittery/ui/icons";
 
 interface VaultInfoPopoverProps {
 	vaultName: string;
@@ -45,7 +45,7 @@ export function VaultInfoPopover({
 						className="shrink-0 border-none bg-transparent"
 					/>
 					<span className="mr-0.5 shrink text-sm">{vaultName}</span>
-					<IconChevronDownOutlineDuo18 className="size-3.5 shrink-0 opacity-50" />
+					<IconChevronDown className="size-3.5 shrink-0 opacity-50" />
 				</Button>
 			</PopoverTrigger>
 			<PopoverContent align="start" className="w-64 p-0">

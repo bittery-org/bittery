@@ -13,12 +13,12 @@ import {
 	VaultAvatar,
 } from "@bittery/ui";
 import {
-	IconBoxArchive3OutlineDuo18 as Archive,
-	IconDotsOutlineDuo18 as Dots,
-	IconGrid2OutlineDuo18 as Grid,
-	IconPen2OutlineDuo18 as Pen,
-	IconStarOutlineDuo18 as Star,
-	IconTrash2OutlineDuo18 as Trash,
+	IconArchive as Archive,
+	IconEllipsis as Dots,
+	IconLayoutGrid as Grid,
+	IconPencil as Pen,
+	IconStar as Star,
+	IconTrash as Trash,
 } from "@bittery/ui/icons";
 import { useDroppable } from "@dnd-kit/core";
 import { Link, useLocation, useParams } from "@tanstack/react-router";

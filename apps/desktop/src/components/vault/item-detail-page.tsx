@@ -30,14 +30,14 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconArrowsLeftRightTrailOutlineDuo18,
-	IconCopyOutlineDuo18,
-	IconDotsOutlineDuo18,
-	IconHistoryOutlineDuo18,
-	IconPen2OutlineDuo18,
-	IconShareLeft2OutlineDuo18,
-	IconStarOutlineDuo18,
-	IconTrash2OutlineDuo18,
+	IconArrowLeftRight,
+	IconCopy,
+	IconEllipsis,
+	IconHistory,
+	IconPencil,
+	IconShare,
+	IconStar,
+	IconTrash,
 } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -289,7 +289,7 @@ export function ItemDetailPage({
 					</div>
 					<div className="flex shrink-0 items-center gap-1">
 						<Button variant="ghost" size="sm" onClick={handleShare}>
-							<IconShareLeft2OutlineDuo18 />
+							<IconShare />
 							{m.sharing_item_dialog_trigger()}
 						</Button>
 						<Button
@@ -297,13 +297,13 @@ export function ItemDetailPage({
 							size="sm"
 							onClick={() => setIsEditDialogOpen(true)}
 						>
-							<IconPen2OutlineDuo18 />
+							<IconPencil />
 							{m.vaults_detail_items_detail_action_edit()}
 						</Button>
 						<DropdownMenu>
 							<DropdownMenuTrigger asChild>
 								<Button variant="ghost" size="sm" className="size-7 p-0">
-									<IconDotsOutlineDuo18 className="size-4" />
+									<IconEllipsis className="size-4" />
 								</Button>
 							</DropdownMenuTrigger>
 							<DropdownMenuContent align="end">
@@ -311,11 +311,11 @@ export function ItemDetailPage({
 									onClick={handleDuplicate}
 									disabled={createItem.isPending}
 								>
-									<IconCopyOutlineDuo18 className="size-4" />
+									<IconCopy className="size-4" />
 									{m.vaults_detail_items_detail_page_action_duplicate()}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsMoveDialogOpen(true)}>
-									<IconArrowsLeftRightTrailOutlineDuo18 className="size-4" />
+									<IconArrowLeftRight className="size-4" />
 									{m.vaults_detail_items_move_dialog_action_open()}
 								</DropdownMenuItem>
 								<DropdownMenuItem
@@ -342,7 +342,7 @@ export function ItemDetailPage({
 									}}
 									disabled={toggleFavorite.isPending}
 								>
-									<IconStarOutlineDuo18
+									<IconStar
 										className="size-4"
 										fill={rawItem?.favorite ? "currentColor" : "none"}
 									/>
@@ -351,14 +351,14 @@ export function ItemDetailPage({
 										: m.vaults_detail_items_list_item_action_add_favorite()}
 								</DropdownMenuItem>
 								<DropdownMenuItem onClick={() => setIsShareHistoryOpen(true)}>
-									<IconHistoryOutlineDuo18 className="size-4" />
+									<IconHistory className="size-4" />
 									{m.sharing_history_dialog_title()}
 								</DropdownMenuItem>
 								{rawItem?.category === "login" && (
 									<DropdownMenuItem
 										onClick={() => setIsPasswordHistoryOpen(true)}
 									>
-										<IconHistoryOutlineDuo18 className="size-4" />
+										<IconHistory className="size-4" />
 										{m.vaults_detail_items_password_history_dialog_title()}
 									</DropdownMenuItem>
 								)}
@@ -367,7 +367,7 @@ export function ItemDetailPage({
 									onClick={handleDelete}
 									className="text-destructive focus:text-destructive"
 								>
-									<IconTrash2OutlineDuo18 className="size-4" />
+									<IconTrash className="size-4" />
 									{m.vaults_detail_items_detail_action_delete()}
 								</DropdownMenuItem>
 							</DropdownMenuContent>

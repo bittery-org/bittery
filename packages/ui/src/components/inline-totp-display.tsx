@@ -3,7 +3,7 @@ import { useI18n } from "@bittery/i18n/react";
 import { generateTotp, type TotpResult } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { useCallback, useEffect, useState } from "react";
-import { IconCopyOutlineDuo18 } from "../icons";
+import { IconCopy } from "../icons";
 import { copyWithToast } from "./clipboard";
 import {
 	DetailFieldActionButton,
@@ -86,7 +86,7 @@ export function InlineTotpDisplay({
 					onClick={handleCopyCode}
 					disabled={!totpResult?.code}
 				>
-					<IconCopyOutlineDuo18 className="size-4" />
+					<IconCopy className="size-4" />
 				</DetailFieldActionButton>
 			}
 		>

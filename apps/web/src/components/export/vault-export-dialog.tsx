@@ -8,10 +8,10 @@ import {
 	Progress,
 } from "@bittery/ui";
 import {
-	IconCircleWarningOutlineDuo18 as AlertCircle,
-	IconCircleCheck2OutlineDuo18 as CheckCircle,
-	IconArchiveExport2OutlineDuo18 as Download,
-	IconLoader2OutlineDuo18 as Loader2,
+	IconCircleAlert as AlertCircle,
+	IconCircleCheck as CheckCircle,
+	IconDownload as Download,
+	IconLoaderCircle as Loader2,
 } from "@bittery/ui/icons";
 import { useCallback } from "react";
 import { useVaultExport } from "@/hooks/use-vault-export";

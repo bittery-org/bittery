@@ -1,18 +1,18 @@
 import { type CloudPlanId, planInfo } from "@bittery/shared/pricing";
 import { Badge, Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
-	IconArrowLeftOutlineDuo18 as ArrowLeft,
-	IconSuitcase3OutlineDuo18 as Briefcase,
-	IconCheckOutlineDuo18 as Check,
-	IconCircleCheck2OutlineDuo18 as CheckCircle2,
-	IconClipboardArrowInOutlineDuo18 as Download,
-	IconEyeOutlineDuo18 as Eye,
-	IconEyeSlashOutlineDuo18 as EyeOff,
-	IconHeartOutlineDuo18 as Heart,
-	IconLoader2OutlineDuo18 as Loader2,
-	IconLockOutlineDuo18 as Lock,
-	IconMagicShieldOutlineDuo18 as Shield,
-	IconStarSparkle2OutlineDuo18 as Sparkle,
+	IconArrowLeft as ArrowLeft,
+	IconBriefcase as Briefcase,
+	IconCheck as Check,
+	IconCircleCheck as CheckCircle2,
+	IconClipboardPaste as Download,
+	IconEye as Eye,
+	IconEyeOff as EyeOff,
+	IconHeart as Heart,
+	IconLoaderCircle as Loader2,
+	IconLock as Lock,
+	IconShieldCheck as Shield,
+	IconSparkles as Sparkle,
 } from "@bittery/ui/icons";
 import { useState } from "react";
 import { useSignupForm } from "@/hooks/use-signup-form";

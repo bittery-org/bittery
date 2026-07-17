@@ -14,9 +14,9 @@ import {
 	TagBadge,
 } from "@bittery/ui";
 import {
-	IconCheckOutlineDuo18 as Check,
-	IconChevronDownOutlineDuo18 as ChevronDown,
-	IconSortObjTopToBottomOutlineDuo18 as Filter,
+	IconCheck as Check,
+	IconChevronDown as ChevronDown,
+	IconSortDescending as Filter,
 } from "@bittery/ui/icons";
 import { useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";

@@ -3,18 +3,18 @@ import type { ItemCategory } from "@bittery/shared/types";
 import type { ComponentType } from "react";
 import { useMemo, useState } from "react";
 import {
-	IconCalendarOutlineDuo18,
-	IconCreditCardLockOutlineDuo18,
-	IconFileLockOutlineDuo18,
-	IconGrid2OutlineDuo18,
-	IconIdBadge2OutlineDuo18,
-	IconKeyOutlineDuo18,
-	IconMagnifier3OutlineDuo18,
-	IconMobileOutlineDuo18,
-	IconSortObjTopToBottomOutlineDuo18,
-	IconVShapedArrowDownOutlineDuo18,
-	IconVShapedArrowUpOutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconCalendar,
+	IconCreditCard,
+	IconFileLock,
+	IconLayoutGrid,
+	IconContact,
+	IconKey,
+	IconSearch,
+	IconSmartphone,
+	IconSortDescending,
+	IconChevronDown,
+	IconChevronUp,
+	IconX,
 } from "../../icons";
 import { cn } from "../../lib/utils";
 import { Button } from "../button";
@@ -50,32 +50,32 @@ interface CategoryOption {
 const CATEGORY_OPTIONS: CategoryOption[] = [
 	{
 		value: "all",
-		icon: IconGrid2OutlineDuo18,
+		icon: IconLayoutGrid,
 		label: (m) => m.vaults_detail_items_list_filter_category_all(),
 	},
 	{
 		value: "login",
-		icon: IconKeyOutlineDuo18,
+		icon: IconKey,
 		label: (m) => m.vaults_detail_items_list_filter_category_logins(),
 	},
 	{
 		value: "secure-note",
-		icon: IconFileLockOutlineDuo18,
+		icon: IconFileLock,
 		label: (m) => m.vaults_detail_items_list_filter_category_secure_notes(),
 	},
 	{
 		value: "credit-card",
-		icon: IconCreditCardLockOutlineDuo18,
+		icon: IconCreditCard,
 		label: (m) => m.vaults_detail_items_list_filter_category_credit_cards(),
 	},
 	{
 		value: "identity",
-		icon: IconIdBadge2OutlineDuo18,
+		icon: IconContact,
 		label: (m) => m.vaults_detail_items_list_filter_category_identities(),
 	},
 	{
 		value: "totp",
-		icon: IconMobileOutlineDuo18,
+		icon: IconSmartphone,
 		label: (m) => m.vaults_detail_items_list_filter_category_totp(),
 	},
 ];
@@ -150,12 +150,12 @@ export function VaultItemListControls({
 							)}
 							aria-label={m.vaults_detail_items_list_search_toggle()}
 						>
-							<IconMagnifier3OutlineDuo18 className="size-3.5" />
+							<IconSearch className="size-3.5" />
 						</Button>
 					</PopoverTrigger>
 					<PopoverContent align="end" className="w-64 overflow-hidden p-0" sideOffset={6}>
 						<div className="flex h-9 items-center gap-2 px-3">
-							<IconMagnifier3OutlineDuo18 className="size-3.5 shrink-0 text-muted-foreground" />
+							<IconSearch className="size-3.5 shrink-0 text-muted-foreground" />
 							<input
 								autoFocus
 								value={searchQuery}
@@ -170,7 +170,7 @@ export function VaultItemListControls({
 									aria-label={m.vaults_detail_items_list_search_clear()}
 									className="grid size-5 shrink-0 place-items-center rounded-sm text-muted-foreground transition-colors hover:bg-overlay hover:text-foreground"
 								>
-									<IconXmarkOutlineDuo18 className="size-3.5" />
+									<IconX className="size-3.5" />
 								</button>
 							) : null}
 						</div>
@@ -185,7 +185,7 @@ export function VaultItemListControls({
 							className="size-7 rounded-md p-0 data-[state=open]:bg-accent data-[state=open]:text-foreground dark:data-[state=open]:bg-accent/50"
 							aria-label={m.vaults_detail_items_list_sort_toggle()}
 						>
-							<IconSortObjTopToBottomOutlineDuo18 className="size-3.5" />
+							<IconSortDescending className="size-3.5" />
 						</Button>
 					</DropdownMenuTrigger>
 					<DropdownMenuContent align="end" className="w-48">
@@ -197,15 +197,15 @@ export function VaultItemListControls({
 							onValueChange={(value) => onSortFieldChange(value as ItemListSortField)}
 						>
 							<DropdownMenuRadioItem value="title">
-								<IconSortObjTopToBottomOutlineDuo18 className="size-3.5" />
+								<IconSortDescending className="size-3.5" />
 								{m.vaults_detail_items_list_sort_field_title()}
 							</DropdownMenuRadioItem>
 							<DropdownMenuRadioItem value="createdAt">
-								<IconCalendarOutlineDuo18 className="size-3.5" />
+								<IconCalendar className="size-3.5" />
 								{m.vaults_detail_items_list_sort_field_created_at()}
 							</DropdownMenuRadioItem>
 							<DropdownMenuRadioItem value="updatedAt">
-								<IconCalendarOutlineDuo18 className="size-3.5" />
+								<IconCalendar className="size-3.5" />
 								{m.vaults_detail_items_list_sort_field_updated_at()}
 							</DropdownMenuRadioItem>
 						</DropdownMenuRadioGroup>
@@ -220,11 +220,11 @@ export function VaultItemListControls({
 							}
 						>
 							<DropdownMenuRadioItem value="asc">
-								<IconVShapedArrowUpOutlineDuo18 className="size-3.5" />
+								<IconChevronUp className="size-3.5" />
 								{m.vaults_detail_items_list_sort_direction_asc()}
 							</DropdownMenuRadioItem>
 							<DropdownMenuRadioItem value="desc">
-								<IconVShapedArrowDownOutlineDuo18 className="size-3.5" />
+								<IconChevronDown className="size-3.5" />
 								{m.vaults_detail_items_list_sort_direction_desc()}
 							</DropdownMenuRadioItem>
 						</DropdownMenuRadioGroup>

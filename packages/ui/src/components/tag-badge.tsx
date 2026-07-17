@@ -1,4 +1,4 @@
-import { IconXmarkOutlineDuo18 } from "../icons";
+import { IconX } from "../icons";
 import { cn } from "../lib/utils";
 
 interface TagBadgeProps {
@@ -63,7 +63,7 @@ export function TagBadge({
 					}}
 					className="ml-0.5 rounded-full hover:bg-accent"
 				>
-					<IconXmarkOutlineDuo18
+					<IconX
 						className={cn(size === "sm" ? "h-3 w-3" : "h-3.5 w-3.5")}
 					/>
 				</button>

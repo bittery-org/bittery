@@ -9,10 +9,10 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconArrowDoorOutOutlineDuo18,
-	IconArrowLeftOutlineDuo18,
-	IconClockTimeOutlineDuo18,
-	IconGear3OutlineDuo18,
+	IconArrowLeft,
+	IconClock,
+	IconLogOut,
+	IconSettings,
 } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -115,11 +115,11 @@ export function SettingsPage() {
 						size="icon"
 						onClick={() => navigate({ to: "/vault" })}
 					>
-						<IconArrowLeftOutlineDuo18 className="size-4" />
+						<IconArrowLeft className="size-4" />
 					</Button>
 					<div className="flex items-center gap-3">
 						<div className="flex size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-							<IconGear3OutlineDuo18 className="size-4" />
+							<IconSettings className="size-4" />
 						</div>
 						<div>
 							<div className="text-muted-foreground text-xs uppercase tracking-wide">
@@ -142,7 +142,7 @@ export function SettingsPage() {
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
 								<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-									<IconClockTimeOutlineDuo18 className="size-5 text-muted-foreground" />
+									<IconClock className="size-5 text-muted-foreground" />
 								</div>
 								<div>
 									<Label className="font-medium text-sm">
@@ -192,7 +192,7 @@ export function SettingsPage() {
 						<div className="flex items-center justify-between rounded-lg border p-4">
 							<div className="flex items-center gap-3">
 								<div className="flex size-10 items-center justify-center rounded-lg bg-muted">
-									<IconArrowDoorOutOutlineDuo18 className="size-5 text-muted-foreground" />
+									<IconLogOut className="size-5 text-muted-foreground" />
 								</div>
 								<div>
 									<Label className="font-medium text-sm">

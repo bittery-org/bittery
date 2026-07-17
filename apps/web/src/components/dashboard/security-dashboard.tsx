@@ -8,14 +8,14 @@ import {
 } from "@bittery/shared/password-analysis";
 import { Badge, cn, Skeleton } from "@bittery/ui";
 import {
-	IconCircleWarningOutlineDuo18 as AlertCircle,
-	IconTriangleWarningOutlineDuo18 as AlertTriangle,
-	IconCircleCheck2OutlineDuo18 as CheckCircle,
-	IconClockTimeOutlineDuo18 as Clock,
-	IconCopyOutlineDuo18 as Copy,
-	IconExternalLinkOutlineDuo18 as ExternalLink,
-	IconCircleWarningOutlineDuo18 as ShieldAlert,
-	IconMagicShieldOutlineDuo18 as ShieldCheck,
+	IconCircleAlert as AlertCircle,
+	IconTriangleAlert as AlertTriangle,
+	IconCircleCheck as CheckCircle,
+	IconClock as Clock,
+	IconCopy as Copy,
+	IconExternalLink as ExternalLink,
+	IconCircleAlert as ShieldAlert,
+	IconShieldCheck as ShieldCheck,
 } from "@bittery/ui/icons";
 import { Link } from "@tanstack/react-router";
 import { type ComponentType, useMemo, useState } from "react";

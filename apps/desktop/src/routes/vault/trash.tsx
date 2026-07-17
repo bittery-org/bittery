@@ -18,9 +18,9 @@ import {
 	VaultAvatar,
 } from "@bittery/ui";
 import {
-	IconBoxArchive3OutlineDuo18 as Archive,
-	IconShareLeft2OutlineDuo18 as Restore,
-	IconTrash2OutlineDuo18 as Trash,
+	IconArchive as Archive,
+	IconArchiveRestore as Restore,
+	IconTrash as Trash,
 } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";

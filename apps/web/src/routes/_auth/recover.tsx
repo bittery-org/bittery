@@ -3,12 +3,12 @@ import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
-	IconCheckOutlineDuo18 as Check,
-	IconCopyOutlineDuo18 as Copy,
-	IconClipboardArrowInOutlineDuo18 as Download,
-	IconEyeOutlineDuo18 as Eye,
-	IconEyeSlashOutlineDuo18 as EyeOff,
-	IconLoader2OutlineDuo18 as Loader2,
+	IconCheck as Check,
+	IconCopy as Copy,
+	IconClipboardPaste as Download,
+	IconEye as Eye,
+	IconEyeOff as EyeOff,
+	IconLoaderCircle as Loader2,
 } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useMemo, useState } from "react";

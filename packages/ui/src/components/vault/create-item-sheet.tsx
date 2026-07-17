@@ -2,13 +2,13 @@ import type { CompiledMessages } from "@bittery/i18n";
 import { useI18n } from "@bittery/i18n/react";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import {
-	IconChevronLeftOutlineDuo18,
-	IconChevronRightOutlineDuo18,
-	IconCreditCardLockOutlineDuo18,
-	IconFileLockOutlineDuo18,
-	IconIdBadge2OutlineDuo18,
-	IconKeyOutlineDuo18,
-	IconMobileOutlineDuo18,
+	IconChevronLeft,
+	IconChevronRight,
+	IconCreditCard,
+	IconFileLock,
+	IconContact,
+	IconKey,
+	IconSmartphone,
 } from "../../icons";
 import { useState } from "react";
 import { Button } from "../button";
@@ -39,23 +39,23 @@ interface CreateItemSheetProps {
 const categories = [
 	{
 		type: "login" as const,
-		icon: IconKeyOutlineDuo18,
+		icon: IconKey,
 	},
 	{
 		type: "totp" as const,
-		icon: IconMobileOutlineDuo18,
+		icon: IconSmartphone,
 	},
 	{
 		type: "secure-note" as const,
-		icon: IconFileLockOutlineDuo18,
+		icon: IconFileLock,
 	},
 	{
 		type: "credit-card" as const,
-		icon: IconCreditCardLockOutlineDuo18,
+		icon: IconCreditCard,
 	},
 	{
 		type: "identity" as const,
-		icon: IconIdBadge2OutlineDuo18,
+		icon: IconContact,
 	},
 ];
 
@@ -114,7 +114,7 @@ export function CreateItemSheet({
 
 	const SelectedCategoryIcon =
 		categories.find((category) => category.type === selectedCategory)?.icon ??
-		IconKeyOutlineDuo18;
+		IconKey;
 
 	const handleReset = () => {
 		setStep(1);
@@ -194,7 +194,7 @@ export function CreateItemSheet({
 								data-testid="create-item-back-button"
 								className="-ml-1.5 size-7 shrink-0 text-muted-foreground"
 							>
-								<IconChevronLeftOutlineDuo18 className="size-4" />
+								<IconChevronLeft className="size-4" />
 							</Button>
 							<span
 								aria-hidden
@@ -238,7 +238,7 @@ export function CreateItemSheet({
 											{getCategoryDescription(category.type, m)}
 										</span>
 									</span>
-									<IconChevronRightOutlineDuo18 className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+									<IconChevronRight className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
 								</button>
 							))}
 						</div>

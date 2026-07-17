@@ -28,7 +28,7 @@ import {
 	toast,
 	type VaultOption,
 } from "@bittery/ui";
-import { IconTagOutlineDuo18 as TagIcon } from "@bittery/ui/icons";
+import { IconTag as TagIcon } from "@bittery/ui/icons";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { z } from "zod";

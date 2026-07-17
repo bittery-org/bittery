@@ -17,7 +17,7 @@ import {
 	AccountSwitcher as SharedAccountSwitcher,
 	toast,
 } from "@bittery/ui";
-import { IconChevronDownOutlineDuo18 } from "@bittery/ui/icons";
+import { IconChevronDown } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { ArrowLeftRight, CheckIcon, Copy, Plus, Trash2 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
@@ -214,7 +214,7 @@ export function AccountSwitcher() {
 					</div>
 				</>
 			) : null}
-			<IconChevronDownOutlineDuo18 className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+			<IconChevronDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
 		</Button>
 	);
 

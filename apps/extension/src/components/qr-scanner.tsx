@@ -7,13 +7,13 @@ import type { ParsedOtpAuthUri } from "@bittery/shared/totp";
 import { isValidBase32, parseOtpAuthUri } from "@bittery/shared/totp";
 import { Button, Card, toast } from "@bittery/ui";
 import {
-	IconCameraOutlineDuo18,
-	IconCircleCheck2OutlineDuo18,
-	IconCircleWarningOutlineDuo18,
-	IconLoader2OutlineDuo18,
-	IconQrcodeOutlineDuo18,
-	IconScanOutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconCamera,
+	IconCircleAlert,
+	IconCircleCheck,
+	IconLoaderCircle,
+	IconQrCode,
+	IconScan,
+	IconX,
 } from "@bittery/ui/icons";
 import jsQR from "jsqr";
 import { useCallback, useState } from "react";
@@ -194,7 +194,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 		<Card className="p-4">
 			<div className="mb-4 flex items-center justify-between">
 				<div className="flex items-center gap-2">
-					<IconQrcodeOutlineDuo18 className="h-5 w-5 text-primary" />
+					<IconQrCode className="h-5 w-5 text-primary" />
 					<h3 className="font-medium text-sm">{m.ext_qr_scan_title()}</h3>
 				</div>
 				<Button
@@ -203,7 +203,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 					onClick={onCancel}
 					className="h-8 w-8"
 				>
-					<IconXmarkOutlineDuo18 className="h-4 w-4" />
+					<IconX className="h-4 w-4" />
 				</Button>
 			</div>
 
@@ -218,7 +218,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 						className="w-full gap-2"
 						variant="default"
 					>
-						<IconScanOutlineDuo18 className="h-4 w-4" />
+						<IconScan className="h-4 w-4" />
 						{m.ext_qr_scan_button()}
 					</Button>
 				</div>
@@ -226,7 +226,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 
 			{status === "scanning" && (
 				<div className="flex flex-col items-center gap-3 py-4">
-					<IconLoader2OutlineDuo18 className="h-8 w-8 animate-spin text-primary" />
+					<IconLoaderCircle className="h-8 w-8 animate-spin text-primary" />
 					<p className="text-muted-foreground text-sm">{m.ext_qr_scanning()}</p>
 				</div>
 			)}
@@ -234,7 +234,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 			{status === "success" && scanResult && (
 				<div className="space-y-3">
 					<div className="flex items-center gap-2 text-green-600">
-						<IconCircleCheck2OutlineDuo18 className="h-5 w-5" />
+						<IconCircleCheck className="h-5 w-5" />
 						<span className="font-medium text-sm">{m.ext_qr_found()}</span>
 					</div>
 					{scanResult.issuer && (
@@ -259,7 +259,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 			{(status === "error" || status === "no-qr-found") && (
 				<div className="space-y-3">
 					<div className="flex items-center gap-2 text-destructive">
-						<IconCircleWarningOutlineDuo18 className="h-5 w-5" />
+						<IconCircleAlert className="h-5 w-5" />
 						<span className="font-medium text-sm">
 							{status === "no-qr-found"
 								? m.ext_qr_no_qr_found()
@@ -273,7 +273,7 @@ export function QRScanner({ onScanComplete, onCancel }: QRScannerProps) {
 							variant="outline"
 							className="flex-1 gap-2"
 						>
-							<IconCameraOutlineDuo18 className="h-4 w-4" />
+							<IconCamera className="h-4 w-4" />
 							{m.ext_qr_try_again()}
 						</Button>
 						<Button onClick={onCancel} variant="ghost" className="flex-1">

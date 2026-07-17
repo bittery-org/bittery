@@ -1,6 +1,6 @@
 import { useItemListFilters, useItems } from "@bittery/core/hooks";
 import { Badge, VaultItemListControls } from "@bittery/ui";
-import { IconStarOutlineDuo18 } from "@bittery/ui/icons";
+import { IconStar } from "@bittery/ui/icons";
 import { createFileRoute, Outlet, useParams } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 import { ItemListRow } from "../../../components/vault/item-list-row";
@@ -47,10 +47,7 @@ function RouteComponent() {
 			<div className="flex w-78 flex-col border-r bg-background">
 				{/* Header */}
 				<div className="flex items-center gap-2 border-b px-4 py-3">
-					<IconStarOutlineDuo18
-						className="size-4 text-yellow-500"
-						fill="currentColor"
-					/>
+					<IconStar className="size-4 text-yellow-500" fill="currentColor" />
 					<span className="font-medium">{m.vaults_favorites_title()}</span>
 					<Badge variant="secondary" className="ml-auto">
 						{favoriteItems.length}

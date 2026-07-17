@@ -1,5 +1,5 @@
 import { getTagColorFromName } from "@bittery/ui";
-import { IconTagOutlineDuo18 } from "@bittery/ui/icons";
+import { IconTag } from "@bittery/ui/icons";
 import { createFileRoute } from "@tanstack/react-router";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -20,10 +20,7 @@ function TagIndexComponent() {
 					className="mb-4 inline-flex rounded-full p-6"
 					style={{ backgroundColor: `${tagColor}20` }}
 				>
-					<IconTagOutlineDuo18
-						className="size-12"
-						style={{ color: tagColor }}
-					/>
+					<IconTag className="size-12" style={{ color: tagColor }} />
 				</div>
 				<h3 className="mb-2 font-semibold text-lg">{decodedTagName}</h3>
 				<p className="text-muted-foreground text-sm">

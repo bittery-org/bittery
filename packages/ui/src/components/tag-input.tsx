@@ -1,6 +1,6 @@
 import { useI18n } from "@bittery/i18n/react";
 import { useState } from "react";
-import { IconCheckOutlineDuo18, IconPlusOutlineDuo18 } from "../icons";
+import { IconCheck, IconPlus } from "../icons";
 import {
 	Command,
 	CommandEmpty,
@@ -86,7 +86,7 @@ export function TagInput({
 						disabled={disabled}
 						className="inline-flex items-center gap-1 rounded-md border border-dashed px-2 py-0.5 font-medium text-muted-foreground text-xs outline-none transition-colors hover:border-strong hover:bg-accent hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:pointer-events-none disabled:opacity-50"
 					>
-						<IconPlusOutlineDuo18 className="size-3" />
+						<IconPlus className="size-3" />
 						{tags.length > 0
 							? m.vaults_detail_items_tag_input_button_add()
 							: m.vaults_detail_items_tag_input_button_default()}
@@ -111,7 +111,7 @@ export function TagInput({
 											onSelect={handleCreateTag}
 											className="flex items-center gap-2"
 										>
-											<IconPlusOutlineDuo18 className="h-4 w-4" />
+											<IconPlus className="h-4 w-4" />
 											<span>
 												{m.vaults_detail_items_tag_input_action_create({
 													tag: searchValue.trim(),
@@ -138,7 +138,7 @@ export function TagInput({
 													/>
 													<span className="flex-1">{tag}</span>
 													{isSelected && (
-														<IconCheckOutlineDuo18 className="h-4 w-4 text-primary" />
+														<IconCheck className="h-4 w-4 text-primary" />
 													)}
 												</CommandItem>
 											);

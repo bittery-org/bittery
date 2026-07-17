@@ -4,13 +4,13 @@ import { getAttachmentUploadErrorCode, useItemAttachments } from "@bittery/core/
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef, useState } from "react";
 import {
-	IconCheckOutlineDuo18 as Check,
-	IconFileLockOutlineDuo18 as FileIcon,
-	IconLoader2Fill18 as Loader,
-	IconPen2OutlineDuo18 as Pencil,
-	IconTrash2OutlineDuo18 as Trash,
-	IconUpload4OutlineDuo18 as Upload,
-	IconXmarkOutlineDuo18 as X,
+	IconCheck as Check,
+	IconFileLock as FileIcon,
+	IconLoaderCircle as Loader,
+	IconPencil as Pencil,
+	IconTrash as Trash,
+	IconUpload as Upload,
+	IconX as X,
 } from "../../../icons";
 import { Button } from "../../button";
 import { Input } from "../../input";

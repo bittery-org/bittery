@@ -1,6 +1,6 @@
 import { useItems } from "@bittery/core/hooks";
 import { Button } from "@bittery/ui";
-import { IconVShapedArrowRightOutlineDuo18 as ArrowRight } from "@bittery/ui/icons";
+import { IconChevronRight as ArrowRight } from "@bittery/ui/icons";
 import { Link } from "@tanstack/react-router";
 import { formatDistanceToNow } from "date-fns";
 import { de as dateFnsDe, enUS as dateFnsEnUS } from "date-fns/locale";

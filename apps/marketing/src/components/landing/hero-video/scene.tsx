@@ -1,29 +1,28 @@
 import {
-	IconBoxArchive3OutlineDuo18,
-	IconCheckOutlineDuo18,
-	IconChevronDownOutlineDuo18,
-	IconChevronRightOutlineDuo18,
-	IconCircleKeyOutlineDuo18,
-	IconCopyOutlineDuo18,
-	IconDotsOutlineDuo18,
-	IconEyeOutlineDuo18,
-	IconFileLockOutlineDuo18,
-	IconGrid2OutlineDuo18,
-	IconLockOutlineDuo18,
-	IconMagnifier3OutlineDuo18,
-	IconMobileOutlineDuo18,
-	IconOpenExternalOutlineDuo18,
-	IconPen2OutlineDuo18,
-	IconPlusOutlineDuo18,
-	IconShareLeft2OutlineDuo18,
-	IconSortObjTopToBottomOutlineDuo18,
-	IconStarOutlineDuo18,
-	IconSuitcase3OutlineDuo18,
-	IconTrash2OutlineDuo18,
-	IconUpload3OutlineDuo18,
-	IconVShapedArrowDownOutlineDuo18,
-	IconXmarkOutlineDuo18,
-} from "nucleo-ui-outline-duo-18";
+	Archive as IconArchive,
+	Briefcase as IconBriefcase,
+	Check as IconCheck,
+	ChevronDown as IconChevronDown,
+	ChevronRight as IconChevronRight,
+	Clock as IconClock,
+	Copy as IconCopy,
+	Ellipsis as IconEllipsis,
+	Eye as IconEye,
+	FileLock as IconFileLock,
+	LayoutGrid as IconLayoutGrid,
+	Lock as IconLock,
+	SquareArrowOutUpRight as IconOpenExternal,
+	KeyRound as IconPasskey,
+	Pencil as IconPencil,
+	Plus as IconPlus,
+	Search as IconSearch,
+	Share2 as IconShare,
+	ArrowDownNarrowWide as IconSortDescending,
+	Star as IconStar,
+	Trash2 as IconTrash,
+	Upload as IconUpload,
+	X as IconX,
+} from "lucide-react";
 import { cn } from "../../../lib/utils";
 
 /**
@@ -236,7 +235,7 @@ function ActiveIndicator() {
 function SectionLabel({ label }: { label: string }) {
 	return (
 		<div className="flex h-6 items-center gap-1 px-2 pt-3">
-			<IconChevronRightOutlineDuo18 className="size-3 rotate-90 text-muted-foreground" />
+			<IconChevronRight className="size-3 rotate-90 text-muted-foreground" />
 			<span className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
 				{label}
 			</span>
@@ -265,22 +264,19 @@ function Sidebar() {
 						JD
 					</span>
 					<span className="truncate font-medium text-sm">Jordan Diaz</span>
-					<IconChevronDownOutlineDuo18 className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
+					<IconChevronDown className="ml-auto size-3.5 shrink-0 text-muted-foreground" />
 				</div>
 			</div>
 
 			{/* Nav + vaults + tags */}
 			<div className="relative flex flex-1 flex-col overflow-hidden p-2">
 				<div className="flex h-7 items-center gap-2 rounded-sm px-2 text-muted-foreground text-sm">
-					<IconGrid2OutlineDuo18 className="size-3.5" />
+					<IconLayoutGrid className="size-3.5" />
 					All Objects
 					<SidebarCount count="128" />
 				</div>
 				<div className="flex h-7 items-center gap-2 rounded-sm px-2 text-muted-foreground text-sm">
-					<IconStarOutlineDuo18
-						className="size-3.5 text-yellow-500"
-						fill="currentColor"
-					/>
+					<IconStar className="size-3.5 text-yellow-500" fill="currentColor" />
 					Favorites
 					<SidebarCount count="12" />
 				</div>
@@ -292,7 +288,7 @@ function Sidebar() {
 						gradient={PERSONAL_GRADIENT}
 						className="size-5 rounded-[5px]"
 					>
-						<IconSuitcase3OutlineDuo18 className="size-3" />
+						<IconBriefcase className="size-3" />
 					</GradientTile>
 					<span className="truncate">Personal</span>
 					<SidebarCount count="86" />
@@ -302,7 +298,7 @@ function Sidebar() {
 						gradient={WORK_GRADIENT}
 						className="size-5 rounded-[5px]"
 					>
-						<IconLockOutlineDuo18 className="size-3" />
+						<IconLock className="size-3" />
 					</GradientTile>
 					<span className="truncate">Work</span>
 					<SidebarCount count="42" />
@@ -323,7 +319,7 @@ function Sidebar() {
 				</div>
 
 				<div className="mt-auto flex h-7 items-center gap-2 rounded-sm px-2 text-muted-foreground text-sm">
-					<IconBoxArchive3OutlineDuo18 className="size-3.5" />
+					<IconArchive className="size-3.5" />
 					Archive
 				</div>
 			</div>
@@ -338,7 +334,7 @@ function Header() {
 		<div className="flex h-12 shrink-0 items-center gap-4 border-b px-3">
 			<div className="w-full max-w-[360px]">
 				<div className="flex h-8 w-full items-center rounded-md border border-input bg-foreground/2 px-2.5 text-sm">
-					<IconMagnifier3OutlineDuo18 className="mr-2 size-3.5 shrink-0 text-muted-foreground" />
+					<IconSearch className="mr-2 size-3.5 shrink-0 text-muted-foreground" />
 					<span className="flex-1 text-muted-foreground">
 						Search vaults and items...
 					</span>
@@ -349,7 +345,7 @@ function Header() {
 			</div>
 			<div className="flex-1" />
 			<span className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-linear-to-b from-primary to-primary-deep px-3 font-medium text-primary-foreground text-sm shadow-[inset_0_1px_0_oklch(1_0_0/0.22),0_1px_2px_oklch(0_0_0/0.3)] dark:shadow-[inset_0_1px_0_oklch(1_0_0/0.22),0_1px_2px_oklch(0_0_0/0.4),0_0_14px_color-mix(in_oklab,var(--color-primary-deep)_35%,transparent)]">
-				<IconPlusOutlineDuo18 className="size-3.5" />
+				<IconPlus className="size-3.5" />
 				New Item
 			</span>
 		</div>
@@ -363,16 +359,16 @@ function ItemList({ selectedId }: { selectedId: string }) {
 		<div className="flex w-78 shrink-0 flex-col border-r bg-background">
 			<div className="flex h-9 shrink-0 items-center justify-between gap-1 border-b px-2">
 				<span className="flex h-7 items-center gap-1.5 rounded-md px-2 font-medium text-muted-foreground text-sm">
-					<IconGrid2OutlineDuo18 className="size-3.5" />
+					<IconLayoutGrid className="size-3.5" />
 					All Categories
-					<IconChevronDownOutlineDuo18 className="size-3" />
+					<IconChevronDown className="size-3" />
 				</span>
 				<span className="flex items-center">
 					<GhostIconButton>
-						<IconMagnifier3OutlineDuo18 className="size-3.5" />
+						<IconSearch className="size-3.5" />
 					</GhostIconButton>
 					<GhostIconButton>
-						<IconSortObjTopToBottomOutlineDuo18 className="size-3.5" />
+						<IconSortDescending className="size-3.5" />
 					</GhostIconButton>
 				</span>
 			</div>
@@ -403,10 +399,10 @@ function ItemList({ selectedId }: { selectedId: string }) {
 										{item.title}
 									</span>
 									{item.hasTotp ? (
-										<IconMobileOutlineDuo18 className="size-3 shrink-0 text-muted-foreground" />
+										<IconClock className="size-3 shrink-0 text-muted-foreground" />
 									) : null}
 									{item.hasPasskey ? (
-										<IconCircleKeyOutlineDuo18 className="size-3 shrink-0 text-muted-foreground" />
+										<IconPasskey className="size-3 shrink-0 text-muted-foreground" />
 									) : null}
 								</span>
 								<p
@@ -470,7 +466,7 @@ function TagChip({ color, name }: { color: string; name: string }) {
 		<span className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2 text-sm">
 			<i className="size-[7px] rounded-full" style={{ background: color }} />
 			{name}
-			<IconXmarkOutlineDuo18 className="size-3 text-muted-foreground" />
+			<IconX className="size-3 text-muted-foreground" />
 		</span>
 	);
 }
@@ -488,7 +484,7 @@ function GithubExtras() {
 					<TagChip color="#ec4899" name="dev" />
 					<TagChip color="#8b5cf6" name="infra" />
 					<span className="inline-flex h-7 items-center gap-1.5 rounded-md border border-dashed px-2 text-muted-foreground text-sm">
-						<IconPlusOutlineDuo18 className="size-3" />
+						<IconPlus className="size-3" />
 						Add
 					</span>
 				</div>
@@ -498,24 +494,24 @@ function GithubExtras() {
 				<div className="flex items-center justify-between">
 					<p className="font-medium text-sm">Attachments (1)</p>
 					<span className="inline-flex h-7 items-center gap-1.5 rounded-md border px-2.5 font-medium text-sm">
-						<IconUpload3OutlineDuo18 className="size-3.5 text-muted-foreground" />
+						<IconUpload className="size-3.5 text-muted-foreground" />
 						Attach file
 					</span>
 				</div>
 				<div className="mt-2 flex items-center gap-2.5 rounded-lg border bg-card px-3 py-2">
-					<IconFileLockOutlineDuo18 className="size-4 shrink-0 text-muted-foreground" />
+					<IconFileLock className="size-4 shrink-0 text-muted-foreground" />
 					<div className="min-w-0 flex-1">
 						<p className="truncate text-sm">recovery-codes.txt</p>
 						<p className="text-muted-foreground text-xs">2.1 kB</p>
 					</div>
 					<GhostIconButton>
-						<IconVShapedArrowDownOutlineDuo18 className="size-4" />
+						<IconChevronDown className="size-4" />
 					</GhostIconButton>
 					<GhostIconButton>
-						<IconPen2OutlineDuo18 className="size-4" />
+						<IconPencil className="size-4" />
 					</GhostIconButton>
 					<span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-destructive">
-						<IconTrash2OutlineDuo18 className="size-4" />
+						<IconTrash className="size-4" />
 					</span>
 				</div>
 			</div>
@@ -535,22 +531,22 @@ function DetailPane({ state }: { state: SceneState }) {
 						gradient={PERSONAL_GRADIENT}
 						className="size-5 rounded-[5px]"
 					>
-						<IconSuitcase3OutlineDuo18 className="size-3" />
+						<IconBriefcase className="size-3" />
 					</GradientTile>
 					<span className="font-medium text-sm">Personal</span>
-					<IconChevronDownOutlineDuo18 className="size-3 text-muted-foreground" />
+					<IconChevronDown className="size-3 text-muted-foreground" />
 				</span>
 				<span className="flex items-center gap-0.5">
 					<span className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground text-sm">
-						<IconShareLeft2OutlineDuo18 className="size-3.5" />
+						<IconShare className="size-3.5" />
 						Share
 					</span>
 					<span className="inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-muted-foreground text-sm">
-						<IconPen2OutlineDuo18 className="size-3.5" />
+						<IconPencil className="size-3.5" />
 						Edit
 					</span>
 					<GhostIconButton>
-						<IconDotsOutlineDuo18 className="size-4" />
+						<IconEllipsis className="size-4" />
 					</GhostIconButton>
 				</span>
 			</div>
@@ -592,10 +588,10 @@ function DetailPane({ state }: { state: SceneState }) {
 						actions={
 							<>
 								<GhostIconButton>
-									<IconOpenExternalOutlineDuo18 className="size-4" />
+									<IconOpenExternal className="size-4" />
 								</GhostIconButton>
 								<GhostIconButton>
-									<IconCopyOutlineDuo18 className="size-4" />
+									<IconCopy className="size-4" />
 								</GhostIconButton>
 							</>
 						}
@@ -606,7 +602,7 @@ function DetailPane({ state }: { state: SceneState }) {
 						actionsVisibility={0}
 						actions={
 							<GhostIconButton>
-								<IconCopyOutlineDuo18 className="size-4" />
+								<IconCopy className="size-4" />
 							</GhostIconButton>
 						}
 					/>
@@ -616,7 +612,7 @@ function DetailPane({ state }: { state: SceneState }) {
 						actions={
 							<>
 								<GhostIconButton>
-									<IconEyeOutlineDuo18 className="size-4" />
+									<IconEye className="size-4" />
 								</GhostIconButton>
 								<span
 									className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground"
@@ -624,7 +620,7 @@ function DetailPane({ state }: { state: SceneState }) {
 										backgroundColor: `color-mix(in oklab, var(--color-accent) ${Math.round(state.copyPressed * 100)}%, transparent)`,
 									}}
 								>
-									<IconCopyOutlineDuo18 className="size-4" />
+									<IconCopy className="size-4" />
 								</span>
 							</>
 						}
@@ -666,7 +662,7 @@ function CopiedToast({ visibility }: { visibility: number }) {
 				aria-hidden
 				className="absolute inset-0 bg-[radial-gradient(80%_120%_at_50%_0%,color-mix(in_oklab,var(--color-success)_7%,transparent),transparent_70%)]"
 			/>
-			<IconCheckOutlineDuo18 className="relative size-3.5 shrink-0 text-success" />
+			<IconCheck className="relative size-3.5 shrink-0 text-success" />
 			<span className="relative whitespace-nowrap font-medium text-sm">
 				Password copied
 			</span>

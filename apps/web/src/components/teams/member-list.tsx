@@ -19,7 +19,7 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
-import { IconUserOutlineDuo18 as UserMinus } from "@bittery/ui/icons";
+import { IconUser as UserMinus } from "@bittery/ui/icons";
 import { useState } from "react";
 import { formatDate } from "@/lib/i18n-format";
 import { storage } from "@/lib/storage";

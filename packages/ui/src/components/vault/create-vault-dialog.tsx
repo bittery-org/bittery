@@ -16,10 +16,10 @@ import {
 } from "../select";
 import { toast } from "../sonner";
 import {
-	IconImagePlusOutlineDuo18,
-	IconUserOutlineDuo18,
-	IconUsers6OutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconImagePlus,
+	IconUser,
+	IconUsers,
+	IconX,
 } from "../../icons";
 import { VaultAvatar, vaultIconOptions } from "../vault-avatar";
 
@@ -219,7 +219,7 @@ function CreateVaultDialogForm({
 									size="xl"
 								/>
 								<div className="absolute -right-1 -bottom-1 rounded-full bg-primary p-1.5 text-primary-foreground shadow-sm">
-									<IconImagePlusOutlineDuo18 className="size-3.5" />
+									<IconImagePlus className="size-3.5" />
 								</div>
 							</div>
 						)}
@@ -244,7 +244,7 @@ function CreateVaultDialogForm({
 							}}
 							className="h-7 gap-1.5 text-muted-foreground text-xs"
 						>
-							<IconXmarkOutlineDuo18 className="size-3" />
+							<IconX className="size-3" />
 							{m.vaults_create_dialog_image_action_remove()}
 						</Button>
 					) : (
@@ -373,7 +373,7 @@ function CreateVaultDialogForm({
 											: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground",
 									)}
 								>
-									<IconUserOutlineDuo18 className="size-4" />
+									<IconUser className="size-4" />
 									{m.vaults_create_dialog_type_personal()}
 								</button>
 								<button
@@ -397,7 +397,7 @@ function CreateVaultDialogForm({
 											: "border-border bg-background text-muted-foreground hover:border-muted-foreground/50 hover:text-foreground",
 									)}
 								>
-									<IconUsers6OutlineDuo18 className="size-4" />
+									<IconUsers className="size-4" />
 									{m.vaults_create_dialog_type_team()}
 								</button>
 							</div>

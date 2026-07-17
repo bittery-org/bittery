@@ -16,7 +16,7 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
-import { IconArrowDoorOutOutlineDuo18 as LogOut } from "@bittery/ui/icons";
+import { IconLogOut as LogOut } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { storage } from "@/lib/storage";

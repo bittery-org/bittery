@@ -10,15 +10,15 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconCircleCheck2OutlineDuo18 as CheckCircle,
-	IconCircleWarningOutlineDuo18 as CircleWarning,
-	IconCreditCardLockOutlineDuo18 as CreditCard,
-	IconExternalLinkOutlineDuo18 as ExternalLink,
-	IconFileLockOutlineDuo18 as FileIcon,
-	IconMagicShieldOutlineDuo18 as Shield,
-	IconStarSparkle2OutlineDuo18 as StarSparkle,
-	IconUserOutlineDuo18 as User,
-	IconUsers6OutlineDuo18 as Users,
+	IconCircleCheck as CheckCircle,
+	IconCircleAlert as CircleWarning,
+	IconCreditCard as CreditCard,
+	IconExternalLink as ExternalLink,
+	IconFileLock as FileIcon,
+	IconShieldCheck as Shield,
+	IconSparkles as StarSparkle,
+	IconUser as User,
+	IconUsers as Users,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";

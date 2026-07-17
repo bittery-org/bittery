@@ -8,8 +8,8 @@ import { Input } from "../input";
 import { Label } from "../label";
 import { toast } from "../sonner";
 import {
-	IconImagePlusOutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconImagePlus,
+	IconX,
 } from "../../icons";
 import { VaultAvatar, vaultIconOptions } from "../vault-avatar";
 
@@ -206,7 +206,7 @@ function EditVaultDialogForm({
 									size="xl"
 								/>
 								<div className="absolute -right-1 -bottom-1 rounded-full bg-primary p-1.5 text-primary-foreground shadow-sm">
-									<IconImagePlusOutlineDuo18 className="size-3.5" />
+									<IconImagePlus className="size-3.5" />
 								</div>
 							</div>
 						)}
@@ -230,7 +230,7 @@ function EditVaultDialogForm({
 							}}
 							className="h-7 gap-1.5 text-muted-foreground text-xs"
 						>
-							<IconXmarkOutlineDuo18 className="size-3" />
+							<IconX className="size-3" />
 							{m.vaults_edit_dialog_image_action_remove()}
 						</Button>
 					) : (

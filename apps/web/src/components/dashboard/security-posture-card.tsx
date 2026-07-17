@@ -3,11 +3,11 @@ import { usePasswordSecurity } from "@bittery/core/hooks/use-password-security";
 import type { SecurityRecommendation } from "@bittery/shared/password-analysis";
 import { Button, cn } from "@bittery/ui";
 import {
-	IconCircleWarningOutlineDuo18 as AlertCircle,
-	IconTriangleWarningOutlineDuo18 as AlertTriangle,
-	IconVShapedArrowRightOutlineDuo18 as ArrowRight,
-	IconCircleCheck2OutlineDuo18 as CheckCircle,
-	IconMagicShieldOutlineDuo18 as ShieldCheck,
+	IconCircleAlert as AlertCircle,
+	IconTriangleAlert as AlertTriangle,
+	IconChevronRight as ArrowRight,
+	IconCircleCheck as CheckCircle,
+	IconShieldCheck as ShieldCheck,
 } from "@bittery/ui/icons";
 import { Link } from "@tanstack/react-router";
 import { useDeferredValue, useMemo } from "react";

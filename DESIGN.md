@@ -90,6 +90,14 @@ Do not add new ambient purple without explicit user sign-off.
 - **Tags**: a 7px round color dot (`getTagColorFromName`) — in the sidebar the dot *replaces* the icon; in badges it sits inside a neutral chip. Tag chips are never fully colored.
 - **Favicons**: served via the server's `/favicon/{domain}` proxy (CORS `*`). Dark-icon legibility: `packages/ui/src/lib/favicon-luminance.ts` canvas-samples each favicon once per session; "dark" icons get a `dark:bg-white/90` tile. Detection degrades to no-op when pixels aren't readable — never let it break image loading (the displayed `<img>` must not set `crossOrigin`).
 
+## Iconography
+
+- **Lucide only**, via the barrel: `import { IconSearch } from "@bittery/ui/icons"`. Never import `lucide-react` directly in app code — the barrel is what keeps the icon set swappable and the licensing auditable. (The shadcn primitives in `packages/ui/src/components` still import it directly; that's legacy, not a pattern to copy.)
+- **Never override `strokeWidth`.** Lucide is a 24 viewBox at `strokeWidth 2` — a 1:12 stroke-to-grid ratio that reads correctly at every size we render. If an icon looks too faint, fix it with color or opacity at the call site, never by thickening the stroke.
+- **Size via `className`** (`size-3.5`, `size-4`), not the `size` prop. Tailwind's `size-*` emits CSS width/height, which beats the SVG's presentation attributes — so it wins regardless of the component's default. Bare icons inside `Button`/`SidebarMenuButton` are already clamped by `[&_svg]:size-*` rules; elsewhere, be explicit, because Lucide defaults to 24px.
+- **Flags are the documented exception**: `IconFlagGermany` / `IconFlagUnitedStates` are local SVGs in `packages/ui/src/icons/`, not Lucide. They carry literal national colors rather than `currentColor`, take a numeric `size` prop, and are the only icons allowed to hardcode hex.
+- Icons are **third-party artwork with licensing consequences**. Anything added here must be MIT-or-compatible and buildable from a clean checkout — no paid or license-gated icon packages, and no pasting exported artwork from one into the repo.
+
 ## Layout constants (desktop)
 
 - Sidebar `w-54` (216px); nav rows `h-7 px-2 gap-2 rounded-sm text-sm`.

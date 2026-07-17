@@ -8,8 +8,8 @@ import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { useForm } from "@tanstack/react-form";
 import { useCallback, useEffect, useState } from "react";
 import {
-	IconClipboardArrowInOutlineDuo18,
-	IconKeyOutlineDuo18,
+	IconClipboardPaste,
+	IconKey,
 } from "../../../icons";
 import { cn } from "../../../lib/utils";
 import { Button } from "../../button";
@@ -217,7 +217,7 @@ export function TotpForm({
 					<div className="space-y-4">
 						<div className="text-center">
 							<div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-lg border bg-foreground/3 text-foreground shadow-[0_0_20px_color-mix(in_oklab,var(--color-primary-deep)_16%,transparent)] dark:shadow-[0_0_24px_color-mix(in_oklab,var(--color-primary-deep)_28%,transparent)]">
-								<IconKeyOutlineDuo18 className="size-6" />
+								<IconKey className="size-6" />
 							</div>
 							<h3 className="font-semibold text-base">
 								{m.vaults_detail_items_form_totp_intro_title()}
@@ -233,7 +233,7 @@ export function TotpForm({
 							className="w-full gap-2"
 							onClick={() => handlePasteFromClipboard()}
 						>
-							<IconClipboardArrowInOutlineDuo18 className="size-5" />
+							<IconClipboardPaste className="size-5" />
 							{m.vaults_detail_items_form_totp_action_paste_from_clipboard()}
 						</Button>
 
@@ -340,7 +340,7 @@ export function TotpForm({
 									onClick={() => handlePasteFromClipboard()}
 									title={m.vaults_detail_items_form_totp_action_paste_from_clipboard()}
 								>
-									<IconClipboardArrowInOutlineDuo18 size={16} />
+									<IconClipboardPaste size={16} />
 									{m.vaults_detail_items_form_totp_action_paste()}
 								</Button>
 							</div>

@@ -17,9 +17,9 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconEyeOutlineDuo18 as Eye,
-	IconEyeSlashOutlineDuo18 as EyeOff,
-	IconEnvelopeOutlineDuo18 as Mail,
+	IconEye as Eye,
+	IconEyeOff as EyeOff,
+	IconMail as Mail,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";

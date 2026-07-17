@@ -10,11 +10,11 @@ import type {
 } from "@bittery/shared/types";
 import { cn } from "@bittery/ui";
 import {
-	IconCreditCardLockOutlineDuo18,
-	IconEarthOutlineDuo18,
-	IconFileLockOutlineDuo18,
-	IconMobileOutlineDuo18,
-	IconUserOutlineDuo18,
+	IconCreditCard,
+	IconEarth,
+	IconFileLock,
+	IconSmartphone,
+	IconUser,
 } from "@bittery/ui/icons";
 import { useState } from "react";
 
@@ -188,27 +188,18 @@ export function Favicon({
 					{initials}
 				</span>
 			) : resolvedCategory === "login" ? (
-				<IconEarthOutlineDuo18
-					className="text-muted-foreground"
-					size={iconSizes[size]}
-				/>
+				<IconEarth className="text-muted-foreground" size={iconSizes[size]} />
 			) : resolvedCategory === "credit-card" ? (
-				<IconCreditCardLockOutlineDuo18
-					className="text-white"
-					size={iconSizes[size]}
-				/>
+				<IconCreditCard className="text-white" size={iconSizes[size]} />
 			) : resolvedCategory === "identity" ? (
-				<IconUserOutlineDuo18
-					className="text-muted-foreground"
-					size={iconSizes[size]}
-				/>
+				<IconUser className="text-muted-foreground" size={iconSizes[size]} />
 			) : resolvedCategory === "totp" ? (
-				<IconMobileOutlineDuo18
+				<IconSmartphone
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>
 			) : (
-				<IconFileLockOutlineDuo18
+				<IconFileLock
 					className="text-muted-foreground"
 					size={iconSizes[size]}
 				/>

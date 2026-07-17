@@ -2,9 +2,9 @@ import { useI18n } from "@bittery/i18n/react";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import { useState } from "react";
 import {
-	IconGear3OutlineDuo18,
-	IconVShapedArrowDownOutlineDuo18,
-	IconVShapedArrowRightOutlineDuo18,
+	IconSettings,
+	IconChevronDown,
+	IconChevronRight,
 } from "../../../../icons";
 import { Input } from "../../../input";
 import { Label } from "../../../label";
@@ -46,15 +46,15 @@ export function TotpAdvancedSettings({
 				className="flex w-full items-center justify-between px-3 py-2.5 text-left transition-colors hover:bg-foreground/4 focus-visible:bg-foreground/4 focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 focus-visible:ring-inset"
 			>
 				<div className="flex items-center gap-2">
-					<IconGear3OutlineDuo18 className="size-4 text-muted-foreground" />
+					<IconSettings className="size-4 text-muted-foreground" />
 					<span className="font-medium text-sm">
 						{m.vaults_detail_items_totp_settings_title()}
 					</span>
 				</div>
 				{showAdvanced ? (
-					<IconVShapedArrowDownOutlineDuo18 className="size-4 text-muted-foreground" />
+					<IconChevronDown className="size-4 text-muted-foreground" />
 				) : (
-					<IconVShapedArrowRightOutlineDuo18 className="size-4 text-muted-foreground" />
+					<IconChevronRight className="size-4 text-muted-foreground" />
 				)}
 			</button>
 

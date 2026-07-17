@@ -18,12 +18,12 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconCopyOutlineDuo18,
-	IconEyeOutlineDuo18,
-	IconEyeSlashOutlineDuo18,
-	IconLoader2OutlineDuo18,
-	IconOpenExternalOutlineDuo18,
-	IconQrcodeOutlineDuo18,
+	IconCopy,
+	IconEye,
+	IconEyeOff,
+	IconLoaderCircle,
+	IconOpenExternal,
+	IconQrCode,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
@@ -165,7 +165,7 @@ function InlineTotpDisplay({
 				onClick={handleCopyCode}
 				disabled={!totpResult?.code}
 			>
-				<IconCopyOutlineDuo18 size={16} />
+				<IconCopy size={16} />
 			</Button>
 		</div>
 	);
@@ -277,13 +277,13 @@ function LoginItemDetail({
 									size="icon-sm"
 									onClick={() => handleCopy(item.url, "URL")}
 								>
-									<IconCopyOutlineDuo18 className="size-4" />
+									<IconCopy className="size-4" />
 								</InputGroupButton>
 								<InputGroupButton
 									size="icon-sm"
 									onClick={() => handleOpenUrl(item.url)}
 								>
-									<IconOpenExternalOutlineDuo18 className="size-4" />
+									<IconOpenExternal className="size-4" />
 								</InputGroupButton>
 							</ButtonGroup>
 						</InputGroupAddon>
@@ -303,7 +303,7 @@ function LoginItemDetail({
 								size="icon-sm"
 								onClick={() => handleCopy(item.username, "Username")}
 							>
-								<IconCopyOutlineDuo18 className="size-4" />
+								<IconCopy className="size-4" />
 							</InputGroupButton>
 						</InputGroupAddon>
 					</InputGroup>
@@ -329,16 +329,16 @@ function LoginItemDetail({
 									onClick={() => setShowPassword(!showPassword)}
 								>
 									{showPassword ? (
-										<IconEyeSlashOutlineDuo18 className="size-4" />
+										<IconEyeOff className="size-4" />
 									) : (
-										<IconEyeOutlineDuo18 className="size-4" />
+										<IconEye className="size-4" />
 									)}
 								</InputGroupButton>
 								<InputGroupButton
 									size="icon-sm"
 									onClick={() => handleCopy(item.password, "Password")}
 								>
-									<IconCopyOutlineDuo18 className="size-4" />
+									<IconCopy className="size-4" />
 								</InputGroupButton>
 							</ButtonGroup>
 						</InputGroupAddon>
@@ -379,7 +379,7 @@ function LoginItemDetail({
 									title={m.ext_detail_passkey_copy_id()}
 									onClick={() => handleCopy(passkey.credentialId, "Passkey ID")}
 								>
-									<IconCopyOutlineDuo18 className="size-4" />
+									<IconCopy className="size-4" />
 								</Button>
 							</div>
 						))}
@@ -402,7 +402,7 @@ function LoginItemDetail({
 				) : showQRScanner ? (
 					isSaving ? (
 						<Card className="flex items-center justify-center gap-2 p-4">
-							<IconLoader2OutlineDuo18 className="h-5 w-5 animate-spin" />
+							<IconLoaderCircle className="h-5 w-5 animate-spin" />
 							<span className="text-sm">{m.ext_detail_saving_totp()}</span>
 						</Card>
 					) : (
@@ -417,7 +417,7 @@ function LoginItemDetail({
 						className="w-full gap-2"
 						onClick={() => setShowQRScanner(true)}
 					>
-						<IconQrcodeOutlineDuo18 size={16} />
+						<IconQrCode size={16} />
 						{m.ext_detail_scan_qr()}
 					</Button>
 				)}

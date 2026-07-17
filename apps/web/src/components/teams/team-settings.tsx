@@ -13,11 +13,11 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconTriangleWarningOutlineDuo18 as AlertTriangle,
-	IconCalendarOutlineDuo18 as Calendar,
-	IconGear3OutlineDuo18 as Settings,
-	IconUpload4OutlineDuo18 as Upload,
-	IconXmarkOutlineDuo18 as X,
+	IconTriangleAlert as AlertTriangle,
+	IconCalendar as Calendar,
+	IconSettings as Settings,
+	IconUpload as Upload,
+	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";

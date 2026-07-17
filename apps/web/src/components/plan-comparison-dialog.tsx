@@ -15,14 +15,14 @@ import {
 } from "@bittery/ui";
 import { useIsMobile } from "@bittery/ui/hooks/use-mobile";
 import {
-	IconSuitcase3OutlineDuo18 as Briefcase,
-	IconCheckOutlineDuo18 as Check,
-	IconVShapedArrowLeftOutlineDuo18 as ChevronLeft,
-	IconVShapedArrowRightOutlineDuo18 as ChevronRight,
-	IconHeartOutlineDuo18 as Heart,
-	IconLockOutlineDuo18 as Lock,
-	IconStarSparkle2OutlineDuo18 as Sparkle,
-	IconXmarkOutlineDuo18 as X,
+	IconBriefcase as Briefcase,
+	IconCheck as Check,
+	IconChevronLeft as ChevronLeft,
+	IconChevronRight as ChevronRight,
+	IconHeart as Heart,
+	IconLock as Lock,
+	IconSparkles as Sparkle,
+	IconX as X,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 

@@ -1,11 +1,11 @@
 import { Badge, Button, cn, Input, Label } from "@bittery/ui";
 import {
-	IconCircleCheck2OutlineDuo18 as CheckCircle2,
-	IconClipboardArrowInOutlineDuo18 as Download,
-	IconEyeOutlineDuo18 as Eye,
-	IconEyeSlashOutlineDuo18 as EyeOff,
-	IconLoader2OutlineDuo18 as Loader2,
-	IconUsers6OutlineDuo18 as Users,
+	IconCircleCheck as CheckCircle2,
+	IconClipboardPaste as Download,
+	IconEye as Eye,
+	IconEyeOff as EyeOff,
+	IconLoaderCircle as Loader2,
+	IconUsers as Users,
 } from "@bittery/ui/icons";
 import { useSignupForm } from "@/hooks/use-signup-form";
 import { useI18n } from "@/providers/i18n-provider";

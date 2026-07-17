@@ -14,9 +14,9 @@ import {
 	TabsTrigger,
 } from "@bittery/ui";
 import {
-	IconEnvelopeOutlineDuo18 as Mail,
-	IconGear3OutlineDuo18 as Settings,
-	IconUsers6OutlineDuo18 as Users,
+	IconMail as Mail,
+	IconSettings as Settings,
+	IconUsers as Users,
 } from "@bittery/ui/icons";
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";

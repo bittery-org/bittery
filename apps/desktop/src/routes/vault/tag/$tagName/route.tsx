@@ -5,10 +5,7 @@ import {
 	getTagColorFromName,
 	VaultItemListControls,
 } from "@bittery/ui";
-import {
-	IconArrowLeftOutlineDuo18,
-	IconTagOutlineDuo18,
-} from "@bittery/ui/icons";
+import { IconArrowLeft, IconTag } from "@bittery/ui/icons";
 import {
 	createFileRoute,
 	Outlet,
@@ -72,9 +69,9 @@ function CrossVaultTagRouteComponent() {
 						className="size-6"
 						onClick={() => navigate({ to: "/vault/all-items" })}
 					>
-						<IconArrowLeftOutlineDuo18 className="size-4" />
+						<IconArrowLeft className="size-4" />
 					</Button>
-					<IconTagOutlineDuo18 className="size-4" style={{ color: tagColor }} />
+					<IconTag className="size-4" style={{ color: tagColor }} />
 					<span className="truncate font-medium">{decodedTagName}</span>
 					<Badge variant="secondary" className="ml-auto">
 						{sortedItems.length}

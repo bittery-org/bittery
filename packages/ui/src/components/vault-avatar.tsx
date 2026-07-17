@@ -1,18 +1,18 @@
 import {
-	IconCarSideOutlineDuo18,
-	IconFolderOutlineDuo18,
-	IconHeartOutlineDuo18,
-	IconKeyOutlineDuo18,
-	IconLockOutlineDuo18,
-	IconMagicShieldOutlineDuo18,
-	IconMoneyDollarOutlineDuo18,
-	IconMusicOutlineDuo18,
-	IconPiggyBankOutlineDuo18,
-	IconPlaneOutlineDuo18,
-	IconSquareTerminalOutlineDuo18,
-	IconStarSparkle2OutlineDuo18,
-	IconSuitcase3OutlineDuo18,
-	IconUsers6OutlineDuo18,
+	IconCar,
+	IconFolder,
+	IconHeart,
+	IconKey,
+	IconLock,
+	IconShieldCheck,
+	IconBanknote,
+	IconMusic,
+	IconPiggyBank,
+	IconPlane,
+	IconSquareTerminal,
+	IconSparkles,
+	IconBriefcase,
+	IconUsers,
 } from "../icons";
 import { cn } from "../lib/utils";
 import type { LucideIcon } from "lucide-react";
@@ -36,50 +36,50 @@ type VaultIconName =
 
 const vaultIconMap: Record<
 	VaultIconName,
-	LucideIcon | typeof IconLockOutlineDuo18
+	LucideIcon | typeof IconLock
 > = {
-	lock: IconLockOutlineDuo18,
-	shield: IconMagicShieldOutlineDuo18,
-	users: IconUsers6OutlineDuo18,
-	briefcase: IconSuitcase3OutlineDuo18,
-	key: IconKeyOutlineDuo18,
-	folder: IconFolderOutlineDuo18,
-	star: IconStarSparkle2OutlineDuo18,
-	heart: IconHeartOutlineDuo18,
-	car: IconCarSideOutlineDuo18,
-	piggy_bank: IconPiggyBankOutlineDuo18,
-	money_dollar: IconMoneyDollarOutlineDuo18,
-	music: IconMusicOutlineDuo18,
-	plane: IconPlaneOutlineDuo18,
-	square_terminal: IconSquareTerminalOutlineDuo18,
+	lock: IconLock,
+	shield: IconShieldCheck,
+	users: IconUsers,
+	briefcase: IconBriefcase,
+	key: IconKey,
+	folder: IconFolder,
+	star: IconSparkles,
+	heart: IconHeart,
+	car: IconCar,
+	piggy_bank: IconPiggyBank,
+	money_dollar: IconBanknote,
+	music: IconMusic,
+	plane: IconPlane,
+	square_terminal: IconSquareTerminal,
 };
 
 export const vaultIconOptions: Array<{
 	value: VaultIconName;
 	label: string;
-	Icon: LucideIcon | typeof IconLockOutlineDuo18;
+	Icon: LucideIcon | typeof IconLock;
 }> = [
-	{ value: "lock", label: "Lock", Icon: IconLockOutlineDuo18 },
-	{ value: "shield", label: "Shield", Icon: IconMagicShieldOutlineDuo18 },
-	{ value: "users", label: "Users", Icon: IconUsers6OutlineDuo18 },
-	{ value: "briefcase", label: "Briefcase", Icon: IconSuitcase3OutlineDuo18 },
-	{ value: "key", label: "Key", Icon: IconKeyOutlineDuo18 },
-	{ value: "folder", label: "Folder", Icon: IconFolderOutlineDuo18 },
-	{ value: "star", label: "Star", Icon: IconStarSparkle2OutlineDuo18 },
-	{ value: "heart", label: "Heart", Icon: IconHeartOutlineDuo18 },
-	{ value: "car", label: "Car", Icon: IconCarSideOutlineDuo18 },
-	{ value: "piggy_bank", label: "Piggy Bank", Icon: IconPiggyBankOutlineDuo18 },
+	{ value: "lock", label: "Lock", Icon: IconLock },
+	{ value: "shield", label: "Shield", Icon: IconShieldCheck },
+	{ value: "users", label: "Users", Icon: IconUsers },
+	{ value: "briefcase", label: "Briefcase", Icon: IconBriefcase },
+	{ value: "key", label: "Key", Icon: IconKey },
+	{ value: "folder", label: "Folder", Icon: IconFolder },
+	{ value: "star", label: "Star", Icon: IconSparkles },
+	{ value: "heart", label: "Heart", Icon: IconHeart },
+	{ value: "car", label: "Car", Icon: IconCar },
+	{ value: "piggy_bank", label: "Piggy Bank", Icon: IconPiggyBank },
 	{
 		value: "money_dollar",
 		label: "Money Dollar",
-		Icon: IconMoneyDollarOutlineDuo18,
+		Icon: IconBanknote,
 	},
-	{ value: "music", label: "Music", Icon: IconMusicOutlineDuo18 },
-	{ value: "plane", label: "Plane", Icon: IconPlaneOutlineDuo18 },
+	{ value: "music", label: "Music", Icon: IconMusic },
+	{ value: "plane", label: "Plane", Icon: IconPlane },
 	{
 		value: "square_terminal",
 		label: "Terminal",
-		Icon: IconSquareTerminalOutlineDuo18,
+		Icon: IconSquareTerminal,
 	},
 ];
 

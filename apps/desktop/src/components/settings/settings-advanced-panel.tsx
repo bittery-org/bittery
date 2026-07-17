@@ -11,7 +11,7 @@ import {
 	Button,
 	toast,
 } from "@bittery/ui";
-import { IconLoader2OutlineDuo18 } from "@bittery/ui/icons";
+import { IconLoaderCircle } from "@bittery/ui/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { SettingsField } from "@/components/settings/settings-field";
@@ -120,7 +120,7 @@ export function SettingsAdvancedPanel({
 						>
 							{clearCacheMutation.isPending ? (
 								<>
-									<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
+									<IconLoaderCircle className="h-4 w-4 animate-spin" />
 									{m.settings_dialog_clear_cache_confirm_action_clearing()}
 								</>
 							) : (

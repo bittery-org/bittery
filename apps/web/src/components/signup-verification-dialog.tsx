@@ -12,8 +12,8 @@ import {
 	Label,
 } from "@bittery/ui";
 import {
-	IconArrowLeftOutlineDuo18 as ArrowLeft,
-	IconLoader2OutlineDuo18 as Loader2,
+	IconArrowLeft as ArrowLeft,
+	IconLoaderCircle as Loader2,
 } from "@bittery/ui/icons";
 import { useI18n } from "@/providers/i18n-provider";
 

@@ -1,12 +1,12 @@
 import type { CloudPlanId, EntitlementKey } from "@bittery/shared/billing";
 import {
-	IconHistoryOutlineDuo18 as History,
-	IconGrid2OutlineDuo18 as Home,
-	IconLockOutlineDuo18 as Lock,
-	IconMoneyDollarOutlineDuo18 as Money,
-	IconGear3OutlineDuo18 as Settings,
-	IconMagicShieldOutlineDuo18 as ShieldCheck,
-	IconUsers6OutlineDuo18 as Users,
+	IconHistory as History,
+	IconLayoutGrid as Home,
+	IconLock as Lock,
+	IconBanknote as Money,
+	IconSettings as Settings,
+	IconShieldCheck as ShieldCheck,
+	IconUsers as Users,
 } from "@bittery/ui/icons";
 import type { ComponentType } from "react";
 import type { DeploymentMode } from "@/lib/route-guards";

@@ -28,9 +28,9 @@ import {
 	toast,
 } from "@bittery/ui";
 import {
-	IconCopyOutlineDuo18 as Copy,
-	IconMoneyDollarOutlineDuo18 as Receipt,
-	IconUsers6OutlineDuo18 as UserPlus,
+	IconCopy as Copy,
+	IconBanknote as Receipt,
+	IconUsers as UserPlus,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";

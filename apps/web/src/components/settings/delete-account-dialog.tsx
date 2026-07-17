@@ -13,7 +13,7 @@ import {
 	Label,
 	toast,
 } from "@bittery/ui";
-import { IconTrash2OutlineDuo18 as Trash2 } from "@bittery/ui/icons";
+import { IconTrash as Trash2 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";

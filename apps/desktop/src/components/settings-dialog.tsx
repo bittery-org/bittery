@@ -7,7 +7,7 @@ import {
 	DialogTitle,
 	toast,
 } from "@bittery/ui";
-import { IconLoader2OutlineDuo18 } from "@bittery/ui/icons";
+import { IconLoaderCircle } from "@bittery/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, HardDrive, Shield } from "lucide-react";
 import { useState } from "react";
@@ -49,7 +49,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 						showCloseButton={true}
 					>
 						<div className="flex flex-1 items-center justify-center">
-							<IconLoader2OutlineDuo18 className="h-6 w-6 animate-spin text-muted-foreground" />
+							<IconLoaderCircle className="h-6 w-6 animate-spin text-muted-foreground" />
 						</div>
 					</DialogContent>
 				) : settingsQuery.data ? (
@@ -243,7 +243,7 @@ function SettingsDialogContent({
 								<Button onClick={handleSave} disabled={isBusy}>
 									{saveMutation.isPending ? (
 										<>
-											<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
+											<IconLoaderCircle className="h-4 w-4 animate-spin" />
 											{m.settings_common_action_saving()}
 										</>
 									) : (

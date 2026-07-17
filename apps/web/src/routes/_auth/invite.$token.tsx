@@ -2,12 +2,12 @@ import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { Button, toast } from "@bittery/ui";
 import {
-	IconCircleWarningOutlineDuo18 as AlertCircle,
-	IconCheckOutlineDuo18 as Check,
-	IconClockTimeOutlineDuo18 as Clock,
-	IconLoader2OutlineDuo18 as Loader2,
-	IconUsers6OutlineDuo18 as Users,
-	IconXmarkOutlineDuo18 as X,
+	IconCircleAlert as AlertCircle,
+	IconCheck as Check,
+	IconClock as Clock,
+	IconLoaderCircle as Loader2,
+	IconUsers as Users,
+	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";

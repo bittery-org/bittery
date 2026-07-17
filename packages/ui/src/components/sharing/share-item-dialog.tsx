@@ -7,12 +7,12 @@ import {
 import { useI18n } from "@bittery/i18n/react";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
-	IconCopyOutlineDuo18,
-	IconLinkOutlineDuo18,
-	IconLoader2OutlineDuo18,
-	IconShareLeft2OutlineDuo18,
-	IconTriangleWarningOutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconCopy,
+	IconLink,
+	IconLoaderCircle,
+	IconShare,
+	IconTriangleAlert,
+	IconX,
 } from "@bittery/ui/icons";
 import { useState } from "react";
 import {
@@ -178,7 +178,7 @@ export function ShareItemDialog({
 				{!isControlled && (
 					<DialogTrigger asChild>
 						<Button size="sm" variant="outline">
-							<IconShareLeft2OutlineDuo18 className="mr-2 h-4 w-4" />
+							<IconShare className="mr-2 h-4 w-4" />
 							{m.sharing_item_dialog_trigger()}
 						</Button>
 					</DialogTrigger>
@@ -195,7 +195,7 @@ export function ShareItemDialog({
 						<div className="space-y-4">
 							<div className="rounded-lg border bg-muted/50 p-4">
 								<div className="flex items-center gap-2 text-green-600">
-									<IconLinkOutlineDuo18 className="h-4 w-4" />
+									<IconLink className="h-4 w-4" />
 									<span className="font-medium text-sm">
 										{m.sharing_item_dialog_generated_title()}
 									</span>
@@ -214,7 +214,7 @@ export function ShareItemDialog({
 									className="flex-1 font-mono text-xs"
 								/>
 								<Button onClick={handleCopyLink}>
-									<IconCopyOutlineDuo18 className="h-4 w-4" />
+									<IconCopy className="h-4 w-4" />
 								</Button>
 							</div>
 
@@ -289,7 +289,7 @@ export function ShareItemDialog({
 														onClick={() => handleRemoveEmail(email)}
 														className="hover:text-destructive"
 													>
-														<IconXmarkOutlineDuo18 className="h-3 w-3" />
+														<IconX className="h-3 w-3" />
 													</button>
 												</Badge>
 											))}
@@ -346,12 +346,12 @@ export function ShareItemDialog({
 								>
 									{createShare.isPending ? (
 										<>
-											<IconLoader2OutlineDuo18 className="h-4 w-4 animate-spin" />
+											<IconLoaderCircle className="h-4 w-4 animate-spin" />
 											{m.sharing_item_dialog_action_creating()}
 										</>
 									) : (
 										<>
-											<IconLinkOutlineDuo18 className="h-4 w-4" />
+											<IconLink className="h-4 w-4" />
 											{m.sharing_item_dialog_action_create_link()}
 										</>
 									)}
@@ -366,7 +366,7 @@ export function ShareItemDialog({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle className="flex items-center gap-2">
-							<IconTriangleWarningOutlineDuo18 className="h-5 w-5 text-amber-500" />
+							<IconTriangleAlert className="h-5 w-5 text-amber-500" />
 							{m.sharing_item_dialog_confirm_title()}
 						</AlertDialogTitle>
 						<AlertDialogDescription>

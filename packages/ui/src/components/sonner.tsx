@@ -8,12 +8,12 @@ import {
 	toast as sonnerToast,
 } from "sonner";
 import {
-	IconCircleCheck2OutlineDuo18,
-	IconCircleWarningOutlineDuo18,
-	IconCircleXmarkOutlineDuo18,
-	IconLoader2OutlineDuo18,
-	IconTriangleWarningOutlineDuo18,
-	IconXmarkOutlineDuo18,
+	IconCircleCheck,
+	IconCircleAlert,
+	IconCircleX,
+	IconLoaderCircle,
+	IconTriangleAlert,
+	IconX,
 } from "../icons";
 import { cn } from "../lib/utils";
 
@@ -36,7 +36,7 @@ type ToastKind =
 	| "loading";
 
 type KindConfig = {
-	Icon?: typeof IconCircleCheck2OutlineDuo18;
+	Icon?: typeof IconCircleCheck;
 	text: string;
 	hairline: string;
 	wash: string;
@@ -50,32 +50,32 @@ const KINDS: Record<ToastKind, KindConfig> = {
 		wash: "bg-[radial-gradient(120%_100%_at_50%_0%,color-mix(in_oklab,var(--color-foreground)_6%,transparent),transparent_70%)]",
 	},
 	success: {
-		Icon: IconCircleCheck2OutlineDuo18,
+		Icon: IconCircleCheck,
 		text: "text-success",
 		hairline: "via-success/60",
 		wash: "bg-[radial-gradient(120%_100%_at_50%_0%,color-mix(in_oklab,var(--color-success)_10%,transparent),transparent_70%)]",
 	},
 	error: {
-		Icon: IconCircleXmarkOutlineDuo18,
+		Icon: IconCircleX,
 		text: "text-destructive",
 		hairline: "via-destructive/60",
 		wash: "bg-[radial-gradient(120%_100%_at_50%_0%,color-mix(in_oklab,var(--color-destructive)_10%,transparent),transparent_70%)]",
 	},
 	warning: {
-		Icon: IconTriangleWarningOutlineDuo18,
+		Icon: IconTriangleAlert,
 		text: "text-warning",
 		hairline: "via-warning/60",
 		wash: "bg-[radial-gradient(120%_100%_at_50%_0%,color-mix(in_oklab,var(--color-warning)_10%,transparent),transparent_70%)]",
 	},
 	info: {
-		Icon: IconCircleWarningOutlineDuo18,
+		Icon: IconCircleAlert,
 		text: "text-info",
 		hairline: "via-info/60",
 		wash: "bg-[radial-gradient(120%_100%_at_50%_0%,color-mix(in_oklab,var(--color-info)_10%,transparent),transparent_70%)]",
 		iconClass: "rotate-180",
 	},
 	loading: {
-		Icon: IconLoader2OutlineDuo18,
+		Icon: IconLoaderCircle,
 		text: "text-muted-foreground",
 		hairline: "via-foreground/30",
 		wash: "bg-[radial-gradient(120%_100%_at_50%_0%,color-mix(in_oklab,var(--color-foreground)_6%,transparent),transparent_70%)]",
@@ -145,7 +145,7 @@ function BitteryToast({
 				onClick={onDismiss}
 				className="relative flex size-5.5 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 			>
-				<IconXmarkOutlineDuo18 className="size-3" />
+				<IconX className="size-3" />
 				<span className="sr-only">Close</span>
 			</button>
 		</div>
@@ -159,7 +159,8 @@ function fire(
 ): string | number {
 	return sonnerToast.custom(
 		(id) => (
-			// Sonner gives every toast a fixed-width slot; center the pill in it.
+			// Centres the pill in the toast's slot. Only works because the Toaster
+			// forces the slot full-width; custom toasts get no width from Sonner.
 			<div className="flex justify-center">
 				<BitteryToast
 					kind={kind}
@@ -208,6 +209,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
 			theme={theme as ToasterProps["theme"]}
 			position="bottom-center"
 			className="toaster group"
+			// Sonner only applies `width: var(--width)` to [data-styled=true], and
+			// toast.custom() renders with data-styled=false. Without a width the
+			// toast <li> is position:absolute and shrinks to its content, pinning it
+			// to the left edge of the centred --width slot. Force it full-width so
+			// the pill can centre itself inside (see `fire` below).
+			toastOptions={{ className: "w-full" }}
 			{...props}
 		/>
 	);
