@@ -23,6 +23,7 @@ A reviewed set of ready-to-implement, English-only copy specs (in-repo markdown 
 <!-- one line per closed ticket: gist + link to the ticket file holding the detail -->
 
 - [Bitwarden licensing & feature facts (cited)](tickets/02-bitwarden-facts-research.md) — core claim confirmed and sharpened: Bitwarden gates paid features behind a license file tied to a cloud subscription, its SSO/SCIM server code is source-available-only; Bittery's billing code verifiably unlocks everything self-hosted. Findings on branch `research/bitwarden-facts`. Fog surfaced: stale FSL mention in `docs/design-explorations/marketing-NOTES.md`.
+- [SEO landscape & site indexability audit](tickets/03-seo-landscape-research.md) — winning shapes per keyword identified (dedicated landing/comparison pages with tables); FAQ rich results deprecated May 2026; site's technical SEO baseline is solid, the strategic gap is exactly the keyword pages this map is specifying. Findings on branch `research/seo-landscape`.
 
 ## Not yet specified
 
