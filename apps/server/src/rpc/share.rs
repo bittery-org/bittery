@@ -14,8 +14,7 @@ pub async fn create(
     ctx: RefreshSessionContext,
     input: CreateShareLinkInput,
 ) -> Result<CreateShareLinkResponse, AppError> {
-    let pool = db_pool(&ctx.app_state)?;
-    share::create_share_link(pool, &ctx.session.user_id, input).await
+    share::create_share_link(&ctx.app_state, &ctx.session.user_id, input).await
 }
 
 #[allow(non_snake_case)]

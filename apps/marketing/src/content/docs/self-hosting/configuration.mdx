@@ -37,9 +37,24 @@ Never reuse `JWT_SECRET` across instances or commit it to version control. Rotat
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RATE_LIMIT_ADAPTER` | `auto` | Rate limiter backend. `auto` uses in-memory or Redis if available |
-| `RATE_LIMIT_REDIS_URL` | — | Redis/Valkey URL for distributed rate limiting |
-| `SHARE_LINK_DAILY_LIMIT` | `50` | Maximum shared links a user can create per day |
+| `RATE_LIMIT_ADAPTER` | `auto` | Rate limiter backend: `auto`, `postgres`, or `redis`. `auto` uses Redis when `RATE_LIMIT_REDIS_URL` is set, otherwise Postgres. `redis` requires `RATE_LIMIT_REDIS_URL` (fails at startup if unset). There is no in-memory backend |
+| `RATE_LIMIT_REDIS_URL` | — | Redis/Valkey URL for the Redis rate-limiting backend |
+| `SHARE_LINK_DAILY_LIMIT` | `50` | Maximum shared links a user can create in a rolling 24-hour window |
+
+### Tuning limits
+
+Override the maximum request counts below. The time windows are fixed in code; only the counts (and the recovery lockout duration) are configurable.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RATE_LIMIT_LOGIN_IP` | `20` | Login attempts per 15 minutes per IP |
+| `RATE_LIMIT_LOGIN_EMAIL` | `10` | Login attempts per 15 minutes per email |
+| `RATE_LIMIT_SIGNUP_IP` | `10` | Signups per hour per IP |
+| `RATE_LIMIT_SIGNUP_EMAIL` | `5` | Signups per hour per email |
+| `RATE_LIMIT_RECOVERY_REQUEST` | `5` | Recovery requests per hour |
+| `RATE_LIMIT_RECOVERY_VERIFY_MAX` | `5` | Recovery verification attempts before lockout |
+| `RATE_LIMIT_RECOVERY_LOCK_MINUTES` | `15` | Recovery lockout duration in minutes |
+| `RATE_LIMIT_AUTH_IP` | `30` | Requests per 15 minutes per IP for other auth endpoints |
 
 ## Object storage (S3-compatible)
 

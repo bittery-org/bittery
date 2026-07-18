@@ -1633,3 +1633,400 @@ async fn build_auth_invitation_fixture(pool: &PgPool, label: &str) -> AuthInvita
         invited_email,
     }
 }
+
+// ---------------------------------------------------------------------------
+// Rate limiting
+// ---------------------------------------------------------------------------
+
+const RATE_LIMITED_CODE: &str = "TOO_MANY_REQUESTS";
+
+/// Sets (and restores on drop) `RATE_LIMIT_*` env vars. Must be constructed while
+/// the env lock is held (e.g. inside `with_auth_test_env_async`).
+struct RateLimitEnvGuard {
+    previous: Vec<(String, Option<String>)>,
+}
+
+impl RateLimitEnvGuard {
+    fn set(vars: &[(&str, &str)]) -> Self {
+        let mut previous = Vec::new();
+        for (key, value) in vars {
+            previous.push(((*key).to_string(), std::env::var(key).ok()));
+            unsafe { std::env::set_var(key, value) };
+        }
+        Self { previous }
+    }
+}
+
+impl Drop for RateLimitEnvGuard {
+    fn drop(&mut self) {
+        for (key, previous) in &self.previous {
+            match previous {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+}
+
+fn headers_with_ip(ip: &str) -> HeaderMap {
+    let mut headers = unauthenticated_json_headers();
+    headers.insert(
+        "x-forwarded-for",
+        HeaderValue::from_str(ip).expect("ip header should build"),
+    );
+    headers
+}
+
+fn object_keys(value: &serde_json::Value) -> Vec<String> {
+    let mut keys: Vec<String> = value
+        .as_object()
+        .expect("expected an object")
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    keys
+}
+
+#[tokio::test]
+async fn verify_recovery_code_locks_out_after_repeated_failures() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app(
+            "rate_limit_recovery_verify_lockout",
+            |app| async move {
+                let _env = RateLimitEnvGuard::set(&[
+                    ("RATE_LIMIT_RECOVERY_VERIFY_MAX", "3"),
+                    ("RATE_LIMIT_RECOVERY_LOCK_MINUTES", "15"),
+                ]);
+                let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery").await;
+
+                let request = app
+                    .rpc_call(
+                        "auth.requestRecoveryVerification",
+                        json!([{ "email": fixture.email }]),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_eq!(request.status, StatusCode::OK);
+                let code = latest_recovery_code(&app.pool, &fixture.email).await;
+
+                // Two wrong attempts stay below the threshold.
+                for _ in 0..2 {
+                    let wrong = app
+                        .rpc_call(
+                            "auth.verifyRecoveryCode",
+                            json!([{ "email": fixture.email, "code": "000000" }]),
+                            unauthenticated_json_headers(),
+                        )
+                        .await;
+                    assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+                }
+
+                // Third wrong attempt trips the lockout.
+                let tripped = app
+                    .rpc_call(
+                        "auth.verifyRecoveryCode",
+                        json!([{ "email": fixture.email, "code": "000000" }]),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_handler_error(
+                    &tripped.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
+
+                // The correct code must still fail while locked.
+                let correct = app
+                    .rpc_call(
+                        "auth.verifyRecoveryCode",
+                        json!([{ "email": fixture.email, "code": code }]),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_handler_error(
+                    &correct.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
+
+                // The pending recovery_verification row is invalidated.
+                let invalidated = query_scalar::<_, i64>(
+                    "SELECT COUNT(*)::bigint FROM recovery_verification WHERE email = $1 AND used_at IS NOT NULL",
+                )
+                .bind(normalize_email(&fixture.email))
+                .fetch_one(&app.pool)
+                .await
+                .expect("recovery verification count should load");
+                assert!(invalidated >= 1);
+
+                // locked_until is set in rate_limit_state for the recovery scope.
+                let locked_until = query_scalar::<_, Option<OffsetDateTime>>(
+                    "SELECT locked_until FROM rate_limit_state WHERE scope = 'auth_recovery_verify'",
+                )
+                .fetch_one(&app.pool)
+                .await
+                .expect("lock row should load");
+                assert!(locked_until.is_some_and(|until| until > now_utc()));
+
+                // An audit event was recorded.
+                let audit_count = query_scalar::<_, i64>(
+                    "SELECT COUNT(*)::bigint FROM audit_log WHERE user_id = $1 AND action = 'recovery_verification_locked'",
+                )
+                .bind(&fixture.user_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("audit count should load");
+                assert_eq!(audit_count, 1);
+            },
+        )
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn start_login_is_rate_limited_per_ip() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_start_login_ip", |app| async move {
+            let _env = RateLimitEnvGuard::set(&[
+                ("RATE_LIMIT_LOGIN_IP", "3"),
+                ("RATE_LIMIT_LOGIN_EMAIL", "50"),
+            ]);
+            let ephemeral = build_login_ephemeral_fixture();
+            let email = "rl-login-ip@example.com";
+
+            for _ in 0..3 {
+                let response = app
+                    .rpc_call(
+                        "auth.startLogin",
+                        json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                        headers_with_ip("203.0.113.10"),
+                    )
+                    .await;
+                assert!(response.body["result"]["Ok"].is_object());
+            }
+
+            let blocked = app
+                .rpc_call(
+                    "auth.startLogin",
+                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                    headers_with_ip("203.0.113.10"),
+                )
+                .await;
+            assert_handler_error(
+                &blocked.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+
+            // A different IP is unaffected.
+            let other_ip = app
+                .rpc_call(
+                    "auth.startLogin",
+                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                    headers_with_ip("203.0.113.99"),
+                )
+                .await;
+            assert!(other_ip.body["result"]["Ok"].is_object());
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_start_login_email", |app| async move {
+            let _env = RateLimitEnvGuard::set(&[
+                ("RATE_LIMIT_LOGIN_IP", "50"),
+                ("RATE_LIMIT_LOGIN_EMAIL", "3"),
+            ]);
+            let ephemeral = build_login_ephemeral_fixture();
+            let unregistered = "rl-login-missing@example.com";
+
+            // The per-email counter increments even for an account that does not exist,
+            // across different IPs.
+            for index in 0..3 {
+                let response = app
+                    .rpc_call(
+                        "auth.startLogin",
+                        json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
+                        headers_with_ip(&format!("198.51.100.{index}")),
+                    )
+                    .await;
+                assert!(response.body["result"]["Ok"].is_object());
+            }
+            let blocked = app
+                .rpc_call(
+                    "auth.startLogin",
+                    json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
+                    headers_with_ip("198.51.100.200"),
+                )
+                .await;
+            assert_handler_error(
+                &blocked.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+
+            // Enumeration safety: registered and unregistered emails yield the same
+            // response shape.
+            let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_login_enum").await;
+            let registered_crypto = build_auth_crypto_fixture("rl-login-enum", "enum-password-123");
+            query("UPDATE \"user\" SET srp_salt = $1, srp_verifier = $2 WHERE id = $3")
+                .bind(&registered_crypto.srp_salt)
+                .bind(&registered_crypto.srp_verifier)
+                .bind(&fixture.user_id)
+                .execute(&app.pool)
+                .await
+                .expect("registered account SRP fixture should update");
+            let registered = app
+                .rpc_call(
+                    "auth.startLogin",
+                    json!([{ "email": fixture.email, "clientPublicKey": ephemeral.public_key }]),
+                    headers_with_ip("198.51.100.240"),
+                )
+                .await;
+            let fresh_missing = app
+                .rpc_call(
+                    "auth.startLogin",
+                    json!([{ "email": "rl-login-fresh-missing@example.com", "clientPublicKey": ephemeral.public_key }]),
+                    headers_with_ip("198.51.100.241"),
+                )
+                .await;
+            assert_eq!(
+                object_keys(&registered.body["result"]["Ok"]),
+                object_keys(&fresh_missing.body["result"]["Ok"]),
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn signup_is_rate_limited_per_ip_and_per_email() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_signup", |app| async move {
+            let crypto = build_auth_crypto_fixture("rl-signup", "signup-password-123");
+
+            // Per-IP: same IP, varying emails.
+            {
+                let _env = RateLimitEnvGuard::set(&[
+                    ("RATE_LIMIT_SIGNUP_IP", "2"),
+                    ("RATE_LIMIT_SIGNUP_EMAIL", "50"),
+                ]);
+                for index in 0..2 {
+                    let response = app
+                        .rpc_call(
+                            "auth.signup",
+                            signup_params(&crypto, &format!("rl-signup-ip-{index}@example.com")),
+                            headers_with_ip("192.0.2.10"),
+                        )
+                        .await;
+                    // Rejected for a non-rate-limit reason (missing verification), but counted.
+                    assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
+                }
+                let blocked = app
+                    .rpc_call(
+                        "auth.signup",
+                        signup_params(&crypto, "rl-signup-ip-blocked@example.com"),
+                        headers_with_ip("192.0.2.10"),
+                    )
+                    .await;
+                assert_eq!(
+                    blocked.body["result"]["Err"]["code"],
+                    json!(RATE_LIMITED_CODE)
+                );
+            }
+
+            // Per-email: same email, varying IPs.
+            {
+                let _env = RateLimitEnvGuard::set(&[
+                    ("RATE_LIMIT_SIGNUP_IP", "50"),
+                    ("RATE_LIMIT_SIGNUP_EMAIL", "2"),
+                ]);
+                let email = "rl-signup-email@example.com";
+                for index in 0..2 {
+                    let response = app
+                        .rpc_call(
+                            "auth.signup",
+                            signup_params(&crypto, email),
+                            headers_with_ip(&format!("192.0.2.{}", 100 + index)),
+                        )
+                        .await;
+                    assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
+                }
+                let blocked = app
+                    .rpc_call(
+                        "auth.signup",
+                        signup_params(&crypto, email),
+                        headers_with_ip("192.0.2.200"),
+                    )
+                    .await;
+                assert_eq!(
+                    blocked.body["result"]["Err"]["code"],
+                    json!(RATE_LIMITED_CODE)
+                );
+            }
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn request_recovery_verification_is_rate_limited() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_recovery_request", |app| async move {
+            let _env = RateLimitEnvGuard::set(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
+            let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery_req").await;
+
+            for _ in 0..2 {
+                let response = app
+                    .rpc_call(
+                        "auth.requestRecoveryVerification",
+                        json!([{ "email": fixture.email }]),
+                        headers_with_ip("192.0.2.55"),
+                    )
+                    .await;
+                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+            }
+
+            let blocked = app
+                .rpc_call(
+                    "auth.requestRecoveryVerification",
+                    json!([{ "email": fixture.email }]),
+                    headers_with_ip("192.0.2.55"),
+                )
+                .await;
+            assert_handler_error(
+                &blocked.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+fn signup_params(crypto: &AuthCryptoFixture, email: &str) -> serde_json::Value {
+    json!([{
+        "email": email,
+        "signupVerificationToken": "invalid-token",
+        "name": "Rate Limit Signup",
+        "plan": "personal",
+        "organizationName": null,
+        "secretKeyHint": crypto.secret_key_hint,
+        "srpSalt": crypto.srp_salt,
+        "srpVerifier": crypto.srp_verifier,
+        "publicKey": crypto.public_key,
+        "encryptedPrivateKey": crypto.encrypted_private_key,
+        "encryptedMasterKey": crypto.encrypted_master_key,
+        "recoveryKeyHint": crypto.recovery_key_hint,
+        "encryptedVaultKey": crypto.encrypted_vault_key,
+    }])
+}

@@ -764,6 +764,28 @@ pub async fn verify_recovery_code_attempt(
     Ok(false)
 }
 
+/// Returns true when an active (non-expired, unused) recovery verification row
+/// exists for the given email. Used to gate rate-limiter failure recording so a
+/// caller cannot drive the recovery lockout for an email with no pending code.
+pub async fn has_active_recovery_verification(
+    pool: &PgPool,
+    email: &str,
+) -> Result<bool, AppError> {
+    let now = OffsetDateTime::now_utc();
+    let exists = query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL)",
+    )
+    .bind(email)
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to check active recovery verification");
+        AppError::internal("Failed to check active recovery verification")
+    })?;
+    Ok(exists)
+}
+
 // ---------------------------------------------------------------------------
 // Invitation queries
 // ---------------------------------------------------------------------------

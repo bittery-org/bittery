@@ -1715,3 +1715,52 @@ async fn seed_share_email_verification(
 		.await
 		.expect("share email verification should seed");
 }
+
+#[tokio::test]
+async fn create_share_via_rpc_is_daily_rate_limited() {
+    let _guard = crate::test_support::acquire_env_lock_async().await;
+    let previous = std::env::var("SHARE_LINK_DAILY_LIMIT").ok();
+    unsafe { std::env::set_var("SHARE_LINK_DAILY_LIMIT", "2") };
+
+    with_rpc_test_app("share_create_daily_rate_limit", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+
+        let params = json!([{
+            "itemId": fixture.item_id,
+            "accessMode": "anyone",
+            "isOneTimeUse": false,
+            "expiresIn": "1day",
+            "allowedEmails": null,
+            "encryptedItemData": FIXTURE_ENCRYPTED_ITEM_DATA,
+            "encryptionIv": FIXTURE_ENCRYPTION_IV,
+            "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
+            "shareKeyIv": FIXTURE_SHARE_KEY_IV
+        }]);
+
+        for _ in 0..2 {
+            let response = app
+                .rpc_call("share.create", params.clone(), headers.clone())
+                .await;
+            assert_eq!(response.status, StatusCode::OK);
+            assert!(response.body["result"]["Ok"].is_object());
+        }
+
+        let blocked = app
+            .rpc_call("share.create", params.clone(), headers.clone())
+            .await;
+        assert_eq!(blocked.status, StatusCode::OK);
+        assert_handler_error(
+            &blocked.body,
+            "TOO_MANY_REQUESTS",
+            "Daily share link limit reached",
+        );
+    })
+    .await;
+
+    match previous {
+        Some(value) => unsafe { std::env::set_var("SHARE_LINK_DAILY_LIMIT", value) },
+        None => unsafe { std::env::remove_var("SHARE_LINK_DAILY_LIMIT") },
+    }
+}

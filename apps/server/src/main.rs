@@ -2,7 +2,7 @@ use std::env;
 
 use axum::{middleware, routing::get, Json, Router};
 use bittery_server::{
-    create_public_http_router, create_rpc_router, create_sync_http_router, db,
+    build_rate_limiter, create_public_http_router, create_rpc_router, create_sync_http_router, db,
     edge_http_middleware, http_trace_layer, init_redis, load_edge_http_config,
     rpc_request_context_middleware, rpc_request_guard_middleware, rpc_tracing_middleware, AppState,
     JobRunner, SyncPubSub,
@@ -36,7 +36,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut app_state = match db::connect_from_env().await? {
         Some(pool) => {
             db::run_migrations(&pool).await?;
-            AppState::from_pool(pool)
+            let rate_limiter = build_rate_limiter(&pool)
+                .await
+                .map_err(std::io::Error::other)?;
+            AppState::from_pool(pool).with_rate_limiter(rate_limiter)
         }
         None => AppState::default(),
     };

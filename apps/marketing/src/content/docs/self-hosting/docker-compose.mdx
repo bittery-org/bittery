@@ -117,6 +117,21 @@ RATE_LIMIT_REDIS_URL=valkey://valkey:6379
 COMPOSE_PROFILES=builtin-db,cache docker compose up -d
 ```
 
+`RATE_LIMIT_ADAPTER` accepts `auto`, `postgres`, or `redis`. With `auto` (the default) the server uses Redis when `RATE_LIMIT_REDIS_URL` is set and falls back to Postgres otherwise, so rate limiting works even without the `cache` profile. Setting `redis` requires `RATE_LIMIT_REDIS_URL` and fails at startup if it is missing. There is no in-memory backend.
+
+The per-endpoint limits can be tuned via optional environment variables (the time windows are fixed in code):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RATE_LIMIT_LOGIN_IP` | `20` | Login attempts per 15 minutes per IP |
+| `RATE_LIMIT_LOGIN_EMAIL` | `10` | Login attempts per 15 minutes per email |
+| `RATE_LIMIT_SIGNUP_IP` | `10` | Signups per hour per IP |
+| `RATE_LIMIT_SIGNUP_EMAIL` | `5` | Signups per hour per email |
+| `RATE_LIMIT_RECOVERY_REQUEST` | `5` | Recovery requests per hour |
+| `RATE_LIMIT_RECOVERY_VERIFY_MAX` | `5` | Recovery verification attempts before lockout |
+| `RATE_LIMIT_RECOVERY_LOCK_MINUTES` | `15` | Recovery lockout duration in minutes |
+| `RATE_LIMIT_AUTH_IP` | `30` | Requests per 15 minutes per IP for other auth endpoints |
+
 ## Reverse proxy
 
 The included Caddy configuration routes traffic as follows:
