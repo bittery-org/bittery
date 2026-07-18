@@ -12,6 +12,7 @@
 	},
 	"scripts": {
 		"preinstall": "node ./scripts/load-env.mjs",
+		"setup:worktree": "./scripts/setup-worktree.sh",
 		"check": "biome check . && pnpm --filter server check",
 		"check:fix": "biome check --write --unsafe . && pnpm --filter server format",
 		"check-types": "turbo check-types",
