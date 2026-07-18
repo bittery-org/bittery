@@ -22,11 +22,14 @@ A reviewed set of ready-to-implement, English-only copy specs (in-repo markdown 
 
 <!-- one line per closed ticket: gist + link to the ticket file holding the detail -->
 
+- [Bitwarden licensing & feature facts (cited)](tickets/02-bitwarden-facts-research.md) — core claim confirmed and sharpened: Bitwarden gates paid features behind a license file tied to a cloud subscription, its SSO/SCIM server code is source-available-only; Bittery's billing code verifiably unlocks everything self-hosted. Findings on branch `research/bitwarden-facts`. Fog surfaced: stale FSL mention in `docs/design-explorations/marketing-NOTES.md`.
+
 ## Not yet specified
 
 - Whether the download, about, and existing docs pages need copy alignment with the new positioning — depends on the tagline/positioning outcome.
 - Internal linking strategy between the homepage, comparison page, self-hosting page, and docs.
 - A final cross-spec consistency review before hand-off to execution.
+- Stale FSL license mention in `docs/design-explorations/marketing-NOTES.md` (surfaced by the Bitwarden facts research) — likely a one-line fix at execution time, or a small task ticket if specs need it gone sooner.
 
 ## Out of scope
 
