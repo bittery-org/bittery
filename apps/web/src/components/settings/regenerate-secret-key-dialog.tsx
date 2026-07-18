@@ -28,7 +28,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { storage } from "@/lib/storage";
+import { getActiveAccountKdfParams, storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeys,
@@ -82,11 +82,14 @@ export function RegenerateSecretKeyDialog({
 		setIsProcessing(true);
 
 		try {
-			// 1. Derive old keys to decrypt private key
+			// 1. Derive old keys to decrypt private key using the params the
+			// existing account was keyed with (not the current default).
+			const oldKdfParams = await getActiveAccountKdfParams();
 			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
 				currentPassword,
 				oldSecretKey,
 				userEmail,
+				oldKdfParams,
 			);
 
 			// 2. Decrypt private key with old master unlock key to verify password is correct
@@ -140,11 +143,14 @@ export function RegenerateSecretKeyDialog({
 		setIsProcessing(true);
 
 		try {
-			// 1. Derive old keys to decrypt private key
+			// 1. Derive old keys to decrypt private key using the params the
+			// existing account was keyed with (not the current default).
+			const oldKdfParams = await getActiveAccountKdfParams();
 			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
 				currentPassword,
 				oldSecretKey,
 				userEmail,
+				oldKdfParams,
 			);
 
 			// 2. Decrypt private key with old master unlock key

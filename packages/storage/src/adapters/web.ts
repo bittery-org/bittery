@@ -48,6 +48,17 @@ const ITEM_CACHE_METADATA_STORE = "metadata";
 const ITEM_CACHE_META_KEY = "item_cache_meta";
 const WEB_ACCOUNT_ID_KEY = "bittery_web_account_id";
 
+/**
+ * Pins are scoped per account so an account keyed at an older KDF iteration
+ * count keeps its own params. Falls back to the legacy shared key when no
+ * accountId is provided (backward compatible with pre-scoped rows).
+ */
+function pinnedKdfParamsKey(accountId?: string): string {
+	return accountId
+		? `${PINNED_KDF_PARAMS_STORAGE}_${accountId}`
+		: PINNED_KDF_PARAMS_STORAGE;
+}
+
 // In-memory cache for Master Unlock Key
 let masterUnlockKeyCache: Uint8Array | null = null;
 let masterUnlockKeyHandleCache: number | null = null;
@@ -439,18 +450,25 @@ export class WebStorageAdapter implements IStorageAdapter {
 
 	async storePinnedKdfParams(
 		params: KdfParams,
-		_email?: string,
+		accountId?: string,
 	): Promise<void> {
 		if (typeof window !== "undefined") {
-			localStorage.setItem(PINNED_KDF_PARAMS_STORAGE, JSON.stringify(params));
+			localStorage.setItem(
+				pinnedKdfParamsKey(accountId),
+				JSON.stringify(params),
+			);
 		}
 	}
 
-	async getPinnedKdfParams(_email?: string): Promise<KdfParams | null> {
+	async getPinnedKdfParams(accountId?: string): Promise<KdfParams | null> {
 		if (typeof window === "undefined") {
 			return null;
 		}
-		const stored = localStorage.getItem(PINNED_KDF_PARAMS_STORAGE);
+		// Prefer the per-account pin; fall back to the legacy shared key so rows
+		// written before pins were scoped still resolve.
+		const stored =
+			localStorage.getItem(pinnedKdfParamsKey(accountId)) ??
+			localStorage.getItem(PINNED_KDF_PARAMS_STORAGE);
 		if (!stored) {
 			return null;
 		}
@@ -780,11 +798,12 @@ export class WebStorageAdapter implements IStorageAdapter {
 		this.clearStoredSession();
 	}
 
-	async clearAllStoredData(_email?: string): Promise<void> {
+	async clearAllStoredData(accountId?: string): Promise<void> {
 		if (typeof window === "undefined") return;
 		localStorage.removeItem(SECRET_KEY_STORAGE);
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
+		localStorage.removeItem(pinnedKdfParamsKey(accountId));
 		localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		localStorage.removeItem(TRAVEL_MODE_CACHE_KEY);
 		await this.clearSession();

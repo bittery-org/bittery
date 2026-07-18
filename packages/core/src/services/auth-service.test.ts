@@ -8,6 +8,7 @@ import {
 	type IAuthClient,
 	type LoginResult,
 	performSRPLogin,
+	performSRPUnlock,
 	storeLoginSession,
 } from "./auth-service";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
@@ -219,6 +220,119 @@ describe("account-routed authentication", () => {
 		for (const write of Object.values(writes)) {
 			expect(write).not.toHaveBeenCalled();
 		}
+	});
+});
+
+describe("KDF agility on unlock", () => {
+	const pinned310k: KdfParams = {
+		schemaVersion: 1,
+		algorithm: "pbkdf2-sha256",
+		iterations: 310_000,
+		salt: "pin-salt",
+	};
+
+	function createCapturingCrypto(derivedParams: (KdfParams | undefined)[]) {
+		return {
+			validateSecretKey: mock(async () => true),
+			deriveKeys: mock(
+				async (
+					_password: string,
+					secretKey: string,
+					_email: string,
+					params?: KdfParams,
+				) => {
+					derivedParams.push(params);
+					return {
+						authKey: new TextEncoder().encode(`auth:${secretKey}`),
+						masterUnlockKey: new Uint8Array([1, 2, 3]),
+					};
+				},
+			),
+			decrypt: mock(async () => "{}"),
+			generateClientEphemeral: mock(async () => ({
+				publicKey: "client-public",
+				secret: "client-secret",
+			})),
+			deriveClientSession: mock(async () => ({ proof: "client-proof" })),
+			verifyServerSession: mock(async () => {}),
+			validateServerKdfParams: mock(async () => {}),
+		} as unknown as ICrypto;
+	}
+
+	it("derives unlock keys with the account's pinned KDF params, not the current default", async () => {
+		const derivedParams: (KdfParams | undefined)[] = [];
+		const crypto = createCapturingCrypto(derivedParams);
+		const storage = {
+			getAccountsList: mock(async () => [
+				account("acct", "user", "https://acct.example"),
+			]),
+			getStoredSecretKey: mock(async () => "secret"),
+			getPinnedKdfParams: mock(async () => pinned310k),
+			getEncryptedPrivateKey: mock(async () => null),
+			getStoredSessionData: mock(async () => ({
+				sessionId: "session",
+				expiresAt: Date.now() + 60_000,
+				userId: "user",
+				email: "same@example.com",
+			})),
+			getAuthToken: mock(async () => "token"),
+			getVaultKeys: mock(async () => []),
+			isSessionValid: mock(async () => true),
+			getAccountMetadata: mock(async () =>
+				account("acct", "user", "https://acct.example"),
+			),
+		} as unknown as IStorageAdapter;
+
+		const result = await performSRPUnlock(
+			{ accountId: "acct", password: "password" },
+			{
+				crypto,
+				storage,
+				createAuthClientForAccount: async () => createAuthClient([]),
+			},
+		);
+
+		expect(result.mode).toBe("local");
+		expect(derivedParams).toHaveLength(1);
+		expect(derivedParams[0]?.iterations).toBe(310_000);
+	});
+
+	it("derives SRP login proofs with the negotiated server KDF params, not the current default", async () => {
+		const derivedParams: (KdfParams | undefined)[] = [];
+		const crypto = createCapturingCrypto(derivedParams);
+		const storage = {
+			getAccountsList: mock(async () => [
+				account("acct", "user", "https://acct.example"),
+			]),
+			getStoredSecretKey: mock(async () => "secret"),
+			getPinnedKdfParams: mock(async () => pinned310k),
+		} as unknown as IStorageAdapter;
+
+		const authClient = {
+			auth: {
+				startLogin: {
+					mutate: mock(async () => ({
+						attemptId: "attempt",
+						salt: "srp-salt",
+						serverPublicKey: "server-public",
+						kdfParams: { ...pinned310k },
+					})),
+				},
+			},
+			vault: { list: { query: mock(async () => []) } },
+		} as unknown as IAuthClient;
+
+		await deriveSrpLoginProof(
+			{ accountId: "acct", password: "password" },
+			{
+				crypto,
+				storage,
+				createAuthClientForAccount: async () => authClient,
+			},
+		);
+
+		expect(derivedParams).toHaveLength(1);
+		expect(derivedParams[0]?.iterations).toBe(310_000);
 	});
 });
 

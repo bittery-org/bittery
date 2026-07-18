@@ -25,7 +25,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { storage } from "@/lib/storage";
+import { getActiveAccountKdfParams, storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeys,
@@ -88,11 +88,14 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 		setIsProcessing(true);
 
 		try {
-			// 1. Derive old keys with current email
+			// 1. Derive old keys with current email using the params the existing
+			// account was keyed with (not the current default).
+			const oldKdfParams = await getActiveAccountKdfParams();
 			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
 				currentPassword,
 				secretKey,
 				currentEmail,
+				oldKdfParams,
 			);
 
 			// 2. Decrypt private key with old MUK to verify password

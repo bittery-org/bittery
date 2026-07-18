@@ -666,6 +666,7 @@ async function deriveSrpPasswordForAccount(
 	password: string,
 	crypto: ICrypto,
 	storage: IStorageAdapter,
+	params?: KdfParams,
 ): Promise<string> {
 	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
@@ -678,6 +679,7 @@ async function deriveSrpPasswordForAccount(
 			password,
 			storedSecretKey,
 			email,
+			params,
 		);
 		try {
 			return await handleCrypto.deriveSrpPasswordFromHandle(
@@ -690,7 +692,12 @@ async function deriveSrpPasswordForAccount(
 		}
 	}
 
-	const derived = await crypto.deriveKeys(password, storedSecretKey, email);
+	const derived = await crypto.deriveKeys(
+		password,
+		storedSecretKey,
+		email,
+		params,
+	);
 	return new TextDecoder().decode(derived.authKey);
 }
 
@@ -706,22 +713,26 @@ export async function deriveSrpLoginProof(
 	const { crypto, storage } = deps;
 	const { email } = await resolveUnlockAccount(accountId, storage);
 	const authClient = await resolveAccountAuthClient(accountId, deps);
+	const clientEphemeral = await crypto.generateClientEphemeral();
+	const startResult = await authClient.auth.startLogin.mutate({
+		email,
+		clientPublicKey: clientEphemeral.publicKey,
+	});
+	// Validate the server login params against local policy + pin BEFORE running
+	// the account KDF, then derive with the negotiated params so an account keyed
+	// at an older iteration count still authenticates (issue #32).
+	await validateServerKdfParamsForAccount(
+		accountId,
+		startResult.kdfParams,
+		deps,
+	);
 	const srpPassword = await deriveSrpPasswordForAccount(
 		accountId,
 		email,
 		password,
 		crypto,
 		storage,
-	);
-	const clientEphemeral = await crypto.generateClientEphemeral();
-	const startResult = await authClient.auth.startLogin.mutate({
-		email,
-		clientPublicKey: clientEphemeral.publicKey,
-	});
-	await validateServerKdfParamsForAccount(
-		accountId,
 		startResult.kdfParams,
-		deps,
 	);
 	const clientSession = await crypto.deriveClientSession(
 		clientEphemeral.secret,
@@ -757,6 +768,16 @@ export async function performSRPUnlock(
 		throw new Error(m.auth_error_no_stored_secret_key());
 	}
 
+	// Unlock derives the account keys before it knows whether it can short-circuit
+	// on a locally valid session (offline) or must re-auth against the server, so
+	// it can't negotiate params from startLogin the way login does. Derive with the
+	// params pinned at login instead; for an existing account these are exactly the
+	// params the keys were created with, keeping the KDF agile (issue #32). When no
+	// pin exists (should not happen after a successful login) fall back to the
+	// crypto-core default via `undefined`.
+	const pinnedKdfParams =
+		(await storage.getPinnedKdfParams(accountId)) ?? undefined;
+
 	const handleCrypto = asHandleCapableCrypto(crypto);
 	let masterUnlockKey: Uint8Array | undefined;
 	let masterUnlockKeyHandle: number | undefined;
@@ -767,6 +788,7 @@ export async function performSRPUnlock(
 			password,
 			storedSecretKey,
 			email,
+			pinnedKdfParams,
 		);
 		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
 		try {
@@ -779,7 +801,12 @@ export async function performSRPUnlock(
 			}
 		}
 	} else {
-		const derived = await crypto.deriveKeys(password, storedSecretKey, email);
+		const derived = await crypto.deriveKeys(
+			password,
+			storedSecretKey,
+			email,
+			pinnedKdfParams,
+		);
 		masterUnlockKey = derived.masterUnlockKey;
 		srpPassword = new TextDecoder().decode(derived.authKey);
 	}

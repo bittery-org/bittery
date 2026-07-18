@@ -303,6 +303,7 @@ export async function deriveMasterKey(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
+	params?: KdfParams,
 ): Promise<Uint8Array> {
 	await autoInit();
 
@@ -310,6 +311,8 @@ export async function deriveMasterKey(
 		accountPassword,
 		secretKey,
 		email,
+		params?.iterations,
+		params?.algorithm,
 	);
 	return base64ToUint8Array(masterKeyBase64);
 }
