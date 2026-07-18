@@ -9,11 +9,12 @@ use bittery_crypto_core::{
     decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_credential_id,
     generate_encryption_key, generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key,
     get_secret_key_hint,
+    kdf_policy::KDF_ALGORITHM_PBKDF2_SHA256,
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_secret_key, AadContext, EncryptedData,
+    validate_secret_key, AadContext, EncryptedData, PBKDF2_ITERATIONS,
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -60,12 +61,18 @@ pub struct DerivedKeysResult {
     pub error: *mut c_char,
 }
 
-/// Derive authentication and master unlock keys
+/// Derive authentication and master unlock keys.
+///
+/// `algorithm` may be null to use the default (`pbkdf2-sha256`) and `iterations`
+/// may be 0 to use the default iteration count. This keeps the KDF agile (issue
+/// #32) while remaining backward compatible with callers that pass null/0.
 #[no_mangle]
 pub extern "C" fn bittery_derive_keys(
     account_password: *const c_char,
     secret_key: *const c_char,
     email: *const c_char,
+    algorithm: *const c_char,
+    iterations: u32,
 ) -> DerivedKeysResult {
     let password = match c_str_to_string(account_password) {
         Some(s) => s,
@@ -100,7 +107,15 @@ pub extern "C" fn bittery_derive_keys(
         }
     };
 
-    match derive_keys(&password, &secret, &email_str) {
+    let algorithm =
+        c_str_to_string(algorithm).unwrap_or_else(|| KDF_ALGORITHM_PBKDF2_SHA256.to_string());
+    let iterations = if iterations == 0 {
+        PBKDF2_ITERATIONS
+    } else {
+        iterations
+    };
+
+    match derive_keys(&password, &secret, &email_str, &algorithm, iterations) {
         Ok(keys) => {
             use base64::{engine::general_purpose::STANDARD, Engine};
             DerivedKeysResult {

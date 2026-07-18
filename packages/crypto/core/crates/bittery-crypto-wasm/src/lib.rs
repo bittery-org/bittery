@@ -8,8 +8,9 @@ use bittery_crypto_core::{
     generate_encryption_key, generate_uuid,
     generate_passkey_keypair, generate_recovery_key, generate_rsa_key_pair, generate_secret_key,
     get_secret_key_hint,
-    kdf_policy::KdfParams,
+    kdf_policy::{KdfParams, KDF_ALGORITHM_PBKDF2_SHA256},
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
+    PBKDF2_ITERATIONS,
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
@@ -206,14 +207,26 @@ impl From<JsAadContext> for AadContext {
 // Key Derivation
 // ============================================================================
 
+/// Resolve optional KDF params to concrete values, defaulting to the current
+/// PBKDF2-SHA256 baseline when the caller does not negotiate them.
+fn resolve_kdf_params(algorithm: Option<String>, iterations: Option<u32>) -> (String, u32) {
+    (
+        algorithm.unwrap_or_else(|| KDF_ALGORITHM_PBKDF2_SHA256.to_string()),
+        iterations.unwrap_or(PBKDF2_ITERATIONS),
+    )
+}
+
 /// Derive authentication and master unlock keys from password + secret key
 #[wasm_bindgen(js_name = deriveKeys)]
 pub fn js_derive_keys(
     account_password: &str,
     secret_key: &str,
     email: &str,
+    iterations: Option<u32>,
+    algorithm: Option<String>,
 ) -> Result<JsDerivedKeys, JsError> {
-    let keys = derive_keys(account_password, secret_key, email)
+    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
+    let keys = derive_keys(account_password, secret_key, email, &algorithm, iterations)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(JsDerivedKeys {
@@ -228,8 +241,11 @@ pub fn js_derive_keys_handle(
     account_password: &str,
     secret_key: &str,
     email: &str,
+    iterations: Option<u32>,
+    algorithm: Option<String>,
 ) -> Result<JsDerivedKeyHandles, JsError> {
-    let keys = derive_keys(account_password, secret_key, email)
+    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
+    let keys = derive_keys(account_password, secret_key, email, &algorithm, iterations)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     let auth_key_handle = insert_key_handle(&keys.auth_key);
@@ -247,9 +263,12 @@ pub fn js_derive_master_key(
     account_password: &str,
     secret_key: &str,
     email: &str,
+    iterations: Option<u32>,
+    algorithm: Option<String>,
 ) -> Result<String, JsError> {
-    let master_key =
-        derive_master_key(account_password, secret_key, email).map_err(|e| JsError::new(&e.to_string()))?;
+    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
+    let master_key = derive_master_key(account_password, secret_key, email, &algorithm, iterations)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(base64_encode(&master_key))
 }
 
@@ -259,9 +278,12 @@ pub fn js_derive_master_key_handle(
     account_password: &str,
     secret_key: &str,
     email: &str,
+    iterations: Option<u32>,
+    algorithm: Option<String>,
 ) -> Result<u64, JsError> {
-    let master_key =
-        derive_master_key(account_password, secret_key, email).map_err(|e| JsError::new(&e.to_string()))?;
+    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
+    let master_key = derive_master_key(account_password, secret_key, email, &algorithm, iterations)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(insert_key_handle(&master_key))
 }
 
@@ -1181,6 +1203,8 @@ mod tests {
             "password",
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
             "test@example.com",
+            None,
+            None,
         );
         assert!(result.is_ok());
     }
@@ -1210,6 +1234,8 @@ mod tests {
             "password",
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
             "test@example.com",
+            None,
+            None,
         )
         .unwrap();
 

@@ -57,6 +57,21 @@ pub struct CreateUserParams<'a> {
     pub encrypted_private_key: &'a str,
     pub encrypted_master_key: Option<&'a str>,
     pub recovery_key_hint: Option<&'a str>,
+    pub kdf_algorithm: &'a str,
+    pub kdf_iterations: i32,
+    pub kdf_schema_version: i32,
+}
+
+/// Per-user KDF parameters written alongside any credential rewrite.
+///
+/// Bundled into a struct so credential-mutation queries don't accrue extra
+/// positional arguments (keeps clippy's `too_many_arguments` happy and prevents
+/// accidental argument transposition).
+#[derive(Clone, Copy)]
+pub struct KdfParamsStorage<'a> {
+    pub algorithm: &'a str,
+    pub iterations: i32,
+    pub schema_version: i32,
 }
 
 pub async fn insert_user_account(
@@ -64,7 +79,7 @@ pub async fn insert_user_account(
     params: CreateUserParams<'_>,
 ) -> Result<(), AppError> {
     query(
-        "INSERT INTO \"user\" (id, email, name, email_verified, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, encrypted_master_key, recovery_key_hint) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        "INSERT INTO \"user\" (id, email, name, email_verified, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, encrypted_master_key, recovery_key_hint, kdf_algorithm, kdf_iterations, kdf_schema_version) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
     )
     .bind(params.user_id)
     .bind(params.email)
@@ -77,6 +92,9 @@ pub async fn insert_user_account(
     .bind(params.encrypted_private_key)
     .bind(params.encrypted_master_key)
     .bind(params.recovery_key_hint)
+    .bind(params.kdf_algorithm)
+    .bind(params.kdf_iterations)
+    .bind(params.kdf_schema_version)
     .execute(transaction.as_mut())
     .await
     .map_err(|e| {
@@ -207,6 +225,7 @@ pub async fn apply_encrypted_vault_key_updates(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update_user_email_data(
     pool: &PgPool,
     user_id: &str,
@@ -215,18 +234,22 @@ pub async fn update_user_email_data(
     srp_verifier: &str,
     encrypted_private_key: &str,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
+    kdf: KdfParamsStorage<'_>,
 ) -> Result<(), AppError> {
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start email update transaction");
         AppError::internal("Failed to start email update transaction")
     })?;
     query(
-        "UPDATE \"user\" SET email = $1, srp_salt = $2, srp_verifier = $3, encrypted_private_key = $4, encrypted_master_key = NULL, recovery_key_hint = NULL WHERE id = $5",
+        "UPDATE \"user\" SET email = $1, srp_salt = $2, srp_verifier = $3, encrypted_private_key = $4, encrypted_master_key = NULL, recovery_key_hint = NULL, kdf_algorithm = $5, kdf_iterations = $6, kdf_schema_version = $7 WHERE id = $8",
     )
     .bind(new_email)
     .bind(srp_salt)
     .bind(srp_verifier)
     .bind(encrypted_private_key)
+    .bind(kdf.algorithm)
+    .bind(kdf.iterations)
+    .bind(kdf.schema_version)
     .bind(user_id)
     .execute(transaction.as_mut())
     .await
@@ -249,17 +272,21 @@ pub async fn update_user_password_data(
     srp_verifier: &str,
     encrypted_private_key: &str,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
+    kdf: KdfParamsStorage<'_>,
 ) -> Result<(), AppError> {
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start password update transaction");
         AppError::internal("Failed to start password update transaction")
     })?;
     query(
-        "UPDATE \"user\" SET srp_salt = $1, srp_verifier = $2, encrypted_private_key = $3, encrypted_master_key = NULL, recovery_key_hint = NULL WHERE id = $4",
+        "UPDATE \"user\" SET srp_salt = $1, srp_verifier = $2, encrypted_private_key = $3, encrypted_master_key = NULL, recovery_key_hint = NULL, kdf_algorithm = $4, kdf_iterations = $5, kdf_schema_version = $6 WHERE id = $7",
     )
     .bind(srp_salt)
     .bind(srp_verifier)
     .bind(encrypted_private_key)
+    .bind(kdf.algorithm)
+    .bind(kdf.iterations)
+    .bind(kdf.schema_version)
     .bind(user_id)
     .execute(transaction.as_mut())
     .await
@@ -275,6 +302,7 @@ pub async fn update_user_password_data(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn update_user_secret_key_data(
     pool: &PgPool,
     user_id: &str,
@@ -283,18 +311,22 @@ pub async fn update_user_secret_key_data(
     srp_verifier: &str,
     encrypted_private_key: &str,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
+    kdf: KdfParamsStorage<'_>,
 ) -> Result<(), AppError> {
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start secret key transaction");
         AppError::internal("Failed to start secret key transaction")
     })?;
     query(
-        "UPDATE \"user\" SET secret_key_hint = $1, srp_salt = $2, srp_verifier = $3, encrypted_private_key = $4, encrypted_master_key = NULL, recovery_key_hint = NULL WHERE id = $5",
+        "UPDATE \"user\" SET secret_key_hint = $1, srp_salt = $2, srp_verifier = $3, encrypted_private_key = $4, encrypted_master_key = NULL, recovery_key_hint = NULL, kdf_algorithm = $5, kdf_iterations = $6, kdf_schema_version = $7 WHERE id = $8",
     )
     .bind(secret_key_hint)
     .bind(srp_salt)
     .bind(srp_verifier)
     .bind(encrypted_private_key)
+    .bind(kdf.algorithm)
+    .bind(kdf.iterations)
+    .bind(kdf.schema_version)
     .bind(user_id)
     .execute(transaction.as_mut())
     .await
@@ -325,6 +357,7 @@ pub async fn reset_user_password_with_recovery(
     recovery_key_hint: &str,
     secret_key_hint: Option<&str>,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
+    kdf: KdfParamsStorage<'_>,
 ) -> Result<(String, Vec<String>), AppError> {
     let now = OffsetDateTime::now_utc();
     let mut transaction = pool.begin().await.map_err(|e| {
@@ -364,7 +397,7 @@ pub async fn reset_user_password_with_recovery(
             })?;
 
     query(
-        "UPDATE \"user\" SET srp_salt = $1, srp_verifier = $2, encrypted_private_key = $3, encrypted_master_key = $4, recovery_key_hint = $5, secret_key_hint = COALESCE($6, secret_key_hint) WHERE id = $7",
+        "UPDATE \"user\" SET srp_salt = $1, srp_verifier = $2, encrypted_private_key = $3, encrypted_master_key = $4, recovery_key_hint = $5, secret_key_hint = COALESCE($6, secret_key_hint), kdf_algorithm = $7, kdf_iterations = $8, kdf_schema_version = $9 WHERE id = $10",
     )
     .bind(srp_salt)
     .bind(srp_verifier)
@@ -372,6 +405,9 @@ pub async fn reset_user_password_with_recovery(
     .bind(encrypted_master_key)
     .bind(recovery_key_hint)
     .bind(secret_key_hint)
+    .bind(kdf.algorithm)
+    .bind(kdf.iterations)
+    .bind(kdf.schema_version)
     .bind(&user_id)
     .execute(transaction.as_mut())
     .await

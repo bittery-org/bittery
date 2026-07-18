@@ -4,6 +4,7 @@ import type {
 	EncryptedData,
 	Ephemeral,
 	HashAlgorithm,
+	KdfParams,
 	PrimeGroup,
 	RsaKeyPair,
 	Session,
@@ -32,16 +33,25 @@ function base64ToUint8Array(base64: string): Uint8Array {
 
 /**
  * Derive authentication and master unlock keys from password, secret key, and email.
- * Uses PBKDF2 (100k iterations) + HKDF for key splitting.
+ * Uses PBKDF2-SHA256 + HKDF for key splitting. The iteration count and algorithm
+ * are threaded in via `params`; when omitted the native layer falls back to the
+ * default PBKDF2-SHA256 baseline.
  */
 export async function deriveKeys(
 	password: string,
 	secretKey: string,
 	email: string,
+	params?: KdfParams,
 ): Promise<DerivedKeys> {
 	try {
 		// Native module returns base64-encoded strings
-		const result = await NativeModule.deriveKeys(password, secretKey, email);
+		const result = await NativeModule.deriveKeys(
+			password,
+			secretKey,
+			email,
+			params?.algorithm ?? null,
+			params?.iterations ?? 0,
+		);
 		// Convert to Uint8Array to match DerivedKeys interface
 		return {
 			authKey: base64ToUint8Array(result.authKey),

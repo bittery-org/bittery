@@ -2,6 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
+import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
@@ -58,6 +59,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				vaultId: string;
 				encryptedVaultKey: string;
 			}>;
+			kdfParams: ReturnType<typeof defaultKdfParamsInput>;
 		}) => rpcClient.auth.changePassword.mutate(input),
 		onSuccess: () => {
 			toast.success(m.settings_change_password_dialog_toast_changed());
@@ -205,6 +207,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
+				kdfParams: defaultKdfParamsInput(),
 			});
 		} catch (error) {
 			console.error("Password change error:", error);

@@ -243,8 +243,18 @@ impl Drop for EnvVarGuard {
 }
 
 pub(crate) async fn seed_user(pool: &PgPool, user_id: &str, name: &str, email: &str) {
+    seed_user_with_kdf(pool, user_id, name, email, 310_000).await;
+}
+
+pub(crate) async fn seed_user_with_kdf(
+    pool: &PgPool,
+    user_id: &str,
+    name: &str,
+    email: &str,
+    kdf_iterations: i32,
+) {
     query(
-		"INSERT INTO \"user\" (id, name, email, email_verified, secret_key_hint, encrypted_master_key, recovery_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key) VALUES ($1, $2, $3, true, NULL, NULL, NULL, $4, $5, $6, $7)",
+		"INSERT INTO \"user\" (id, name, email, email_verified, secret_key_hint, encrypted_master_key, recovery_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version) VALUES ($1, $2, $3, true, NULL, NULL, NULL, $4, $5, $6, $7, 'pbkdf2-sha256', $8, 1)",
 	)
 	.bind(user_id)
 	.bind(name)
@@ -253,6 +263,7 @@ pub(crate) async fn seed_user(pool: &PgPool, user_id: &str, name: &str, email: &
 	.bind("verifier")
 	.bind("public-key")
 	.bind("encrypted-private-key")
+	.bind(kdf_iterations)
 	.execute(pool)
 	.await
 	.expect("user should seed");
@@ -354,6 +365,30 @@ pub(crate) async fn seed_item(
 	.execute(pool)
 	.await
 	.expect("item should seed");
+}
+
+/// Provision an empty test database WITHOUT running migrations.
+///
+/// Used by migration-level tests that need to apply the migration chain
+/// manually (e.g. to reproduce a legacy row shape before a backfill migration).
+pub(crate) async fn with_raw_test_db<T, F, Fut>(test_name: &str, test_fn: F) -> T
+where
+    F: FnOnce(PgPool) -> Fut,
+    Fut: Future<Output = T>,
+{
+    let database = TestDatabase::create(test_name).await;
+    let pool = db::connect(&database.database_url)
+        .await
+        .expect("test database should connect");
+
+    let result = std::panic::AssertUnwindSafe(test_fn(pool)).catch_unwind().await;
+
+    database.cleanup().await;
+
+    match result {
+        Ok(result) => result,
+        Err(panic_payload) => std::panic::resume_unwind(panic_payload),
+    }
 }
 
 pub(crate) async fn with_rpc_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T

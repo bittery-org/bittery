@@ -6,7 +6,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use bittery_crypto_core::{
     decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_encryption_key, generate_rsa_key_pair,
     generate_secret_key, generate_uuid, get_secret_key_hint, rsa_decrypt, rsa_encrypt, validate_secret_key,
-    validate_server_kdf_params, KdfParams,
+    validate_server_kdf_params, KdfParams, KDF_ALGORITHM_PBKDF2_SHA256, PBKDF2_ITERATIONS,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient},
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     AadContext, EncryptedData,
@@ -58,8 +58,12 @@ pub fn crypto_derive_keys(
     password: String,
     secret_key: String,
     email: String,
+    algorithm: Option<String>,
+    iterations: Option<u32>,
 ) -> Result<DerivedKeysResponse, String> {
-    let keys = derive_keys(&password, &secret_key, &email)
+    let algorithm = algorithm.unwrap_or_else(|| KDF_ALGORITHM_PBKDF2_SHA256.to_string());
+    let iterations = iterations.unwrap_or(PBKDF2_ITERATIONS);
+    let keys = derive_keys(&password, &secret_key, &email, &algorithm, iterations)
         .map_err(|e| e.to_string())?;
 
     Ok(DerivedKeysResponse {

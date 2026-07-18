@@ -295,6 +295,7 @@ interface HandleCapableCrypto extends ICrypto {
 		password: string,
 		secretKey: string,
 		email: string,
+		params?: KdfParams,
 	) => Promise<{ authKeyHandle: number; masterUnlockKeyHandle: number }>;
 	deriveSrpPasswordFromHandle: (authKeyHandle: number) => Promise<string>;
 	exportKeyHandle?: (keyHandle: number) => Promise<Uint8Array>;
@@ -419,7 +420,6 @@ async function persistPinnedKdfParamsIfNeeded(
 		pinned.iterations !== params.iterations ||
 		pinned.salt !== params.salt
 	) {
-		console.log("storing pinned kdf params", pinned);
 		await storage.storePinnedKdfParams(params, accountId);
 	}
 }
@@ -444,6 +444,23 @@ export async function performSRPLogin(
 	const handleCrypto = asHandleCapableCrypto(crypto);
 	let masterUnlockKey: Uint8Array | undefined;
 	let masterUnlockKeyHandle: number | undefined;
+
+	const clientEphemeral = await crypto.generateClientEphemeral();
+
+	const startResult = await authClient.auth.startLogin.mutate({
+		email,
+		clientPublicKey: clientEphemeral.publicKey,
+	});
+
+	// Validate the server-provided login KDF params against local policy and any
+	// pinned values BEFORE running the account KDF, then derive keys with those
+	// negotiated params so the KDF stays agile (issue #32).
+	await validateServerKdfParamsForAccount(
+		undefined,
+		startResult.kdfParams,
+		deps,
+	);
+
 	let srpPassword: string;
 
 	if (handleCrypto) {
@@ -451,6 +468,7 @@ export async function performSRPLogin(
 			password,
 			secretKey,
 			email,
+			startResult.kdfParams,
 		);
 		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
 		try {
@@ -463,25 +481,17 @@ export async function performSRPLogin(
 			}
 		}
 	} else {
-		const derived = await crypto.deriveKeys(password, secretKey, email);
+		const derived = await crypto.deriveKeys(
+			password,
+			secretKey,
+			email,
+			startResult.kdfParams,
+		);
 		masterUnlockKey = derived.masterUnlockKey;
 		srpPassword = new TextDecoder().decode(derived.authKey);
 	}
 
 	try {
-		const clientEphemeral = await crypto.generateClientEphemeral();
-
-		const startResult = await authClient.auth.startLogin.mutate({
-			email,
-			clientPublicKey: clientEphemeral.publicKey,
-		});
-
-		await validateServerKdfParamsForAccount(
-			undefined,
-			startResult.kdfParams,
-			deps,
-		);
-
 		const clientSession = await crypto.deriveClientSession(
 			clientEphemeral.secret,
 			{

@@ -25,7 +25,9 @@ pub fn default_login_kdf_params(salt: &str) -> KdfParams {
     KdfParams {
         schema_version: KDF_SCHEMA_VERSION,
         algorithm: KDF_ALGORITHM_PBKDF2_SHA256.to_string(),
-        iterations: MIN_PBKDF2_ITERATIONS,
+        // Serve the current client default (not the policy floor) so unknown-email
+        // login probes are indistinguishable from real accounts created today.
+        iterations: crate::key_derivation::PBKDF2_ITERATIONS,
         salt: salt.to_string(),
     }
 }

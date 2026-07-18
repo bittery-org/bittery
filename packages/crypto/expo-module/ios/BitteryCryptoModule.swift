@@ -16,9 +16,11 @@ public class BitteryCryptoModule: Module {
         // Key Derivation
         // ============================================================================
 
-        AsyncFunction("deriveKeys") { (password: String, secretKey: String, email: String, promise: Promise) in
+        AsyncFunction("deriveKeys") { (password: String, secretKey: String, email: String, algorithm: String?, iterations: Int?, promise: Promise) in
             DispatchQueue.global(qos: .userInitiated).async {
-                let result = bittery_derive_keys(password, secretKey, email)
+                // Pass nil algorithm and 0 iterations to let the native layer fall back
+                // to the default PBKDF2-SHA256 baseline.
+                let result = bittery_derive_keys(password, secretKey, email, algorithm, UInt32(iterations ?? 0))
 
                 if let error = result.error {
                     let errorStr = String(cString: error)

@@ -99,11 +99,14 @@ export async function deriveKeys(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
+	params?: KdfParams,
 ): Promise<DerivedKeys> {
 	const response = await invoke<DerivedKeysResponse>("crypto_derive_keys", {
 		password: accountPassword,
 		secretKey,
 		email,
+		algorithm: params?.algorithm ?? null,
+		iterations: params?.iterations ?? null,
 	});
 
 	return {

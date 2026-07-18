@@ -7,6 +7,7 @@ use axum::{
 use bittery_crypto_core::{
     default_login_kdf_params,
     srp6a::{HashAlgorithm, PrimeGroup, SrpServer},
+    validate_server_kdf_params, KdfParams,
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use qubit::server::{Extensions, FromRequestExtensions, RpcError};
@@ -151,6 +152,20 @@ pub struct VerifySignupVerificationResponse {
     pub signup_verification_token: Option<String>,
 }
 
+/// KDF parameters the client derived its SRP verifier with.
+///
+/// The salt is transported separately as `srp_salt`; these fields describe the
+/// algorithm/work factor so login can be reproduced and so the server can
+/// enforce the policy floor (see [`validate_kdf_params_against_floor`]).
+#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct KdfParamsInput {
+    pub schema_version: u32,
+    pub algorithm: String,
+    pub iterations: u32,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
@@ -170,6 +185,7 @@ pub struct SignupInput {
     pub encrypted_master_key: String,
     pub recovery_key_hint: String,
     pub encrypted_vault_key: String,
+    pub kdf_params: KdfParamsInput,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
@@ -190,6 +206,7 @@ pub struct SignupWithInvitationInput {
     pub encrypted_master_key: String,
     pub recovery_key_hint: String,
     pub encrypted_vault_key: String,
+    pub kdf_params: KdfParamsInput,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -355,6 +372,7 @@ pub struct ResetPasswordInput {
     pub recovery_key_hint: String,
     pub secret_key_hint: Option<String>,
     pub encrypted_vault_keys: Vec<EncryptedVaultKeyInput>,
+    pub kdf_params: KdfParamsInput,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -375,6 +393,7 @@ pub struct UpdateEmailInput {
     pub srp_verifier: String,
     pub encrypted_private_key: String,
     pub encrypted_vault_keys: Vec<EncryptedVaultKeyInput>,
+    pub kdf_params: KdfParamsInput,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
@@ -385,6 +404,7 @@ pub struct ChangePasswordInput {
     pub srp_verifier: String,
     pub encrypted_private_key: String,
     pub encrypted_vault_keys: Vec<EncryptedVaultKeyInput>,
+    pub kdf_params: KdfParamsInput,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
@@ -396,6 +416,7 @@ pub struct RegenerateSecretKeyInput {
     pub srp_verifier: String,
     pub encrypted_private_key: String,
     pub encrypted_vault_keys: Vec<EncryptedVaultKeyInput>,
+    pub kdf_params: KdfParamsInput,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, TS)]
@@ -599,6 +620,7 @@ pub(crate) async fn signup(
     input: SignupInput,
 ) -> Result<SignupResponse, AppError> {
     validate_signup_input(&input)?;
+    let (signup_kdf_iterations, signup_kdf_schema_version) = kdf_params_storage(&input.kdf_params);
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
 
@@ -696,6 +718,9 @@ pub(crate) async fn signup(
             encrypted_private_key: &input.encrypted_private_key,
             encrypted_master_key: Some(&input.encrypted_master_key),
             recovery_key_hint: Some(&input.recovery_key_hint),
+            kdf_algorithm: &input.kdf_params.algorithm,
+            kdf_iterations: signup_kdf_iterations,
+            kdf_schema_version: signup_kdf_schema_version,
         },
     )
     .await?;
@@ -764,6 +789,7 @@ pub(crate) async fn signup_with_invitation(
     input: SignupWithInvitationInput,
 ) -> Result<SignupResponse, AppError> {
     validate_signup_with_invitation_input(&input)?;
+    let (signup_kdf_iterations, signup_kdf_schema_version) = kdf_params_storage(&input.kdf_params);
     let pool = db_pool(app_state)?;
     // Unauthenticated endpoint: apply the generic per-IP throttle so it cannot be
     // hammered to probe invitation tokens / emails.
@@ -844,6 +870,9 @@ pub(crate) async fn signup_with_invitation(
             encrypted_private_key: &input.encrypted_private_key,
             encrypted_master_key: Some(&input.encrypted_master_key),
             recovery_key_hint: Some(&input.recovery_key_hint),
+            kdf_algorithm: &input.kdf_params.algorithm,
+            kdf_iterations: signup_kdf_iterations,
+            kdf_schema_version: signup_kdf_schema_version,
         },
     )
     .await?;
@@ -964,7 +993,7 @@ pub(crate) async fn start_login(
         })?;
 
     let user = query_as::<_, DbLoginUserRow>(
-		"SELECT id, email, name, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
+		"SELECT id, email, name, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
 	)
 	.bind(&normalized_email)
 	.fetch_optional(pool)
@@ -998,17 +1027,31 @@ pub(crate) async fn start_login(
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to create login attempt"); internal_handler_error("Failed to create login attempt") })?;
 
-    let kdf_params = default_login_kdf_params(&salt);
+    // Known users get their own stored KDF params so per-user work factors are
+    // honoured. Unknown emails fall back to the current default (which follows
+    // the crypto-core default constant) to preserve the enumeration defence.
+    let kdf_params = match user.as_ref() {
+        Some(existing) => LoginKdfParamsResponse {
+            schema_version: existing.kdf_schema_version.max(0) as u32,
+            algorithm: existing.kdf_algorithm.clone(),
+            iterations: existing.kdf_iterations.max(0) as u32,
+            salt: salt.clone(),
+        },
+        None => {
+            let defaults = default_login_kdf_params(&salt);
+            LoginKdfParamsResponse {
+                schema_version: defaults.schema_version,
+                algorithm: defaults.algorithm,
+                iterations: defaults.iterations,
+                salt: salt.clone(),
+            }
+        }
+    };
     Ok(StartLoginResponse {
         attempt_id,
-        salt: salt.clone(),
+        salt,
         server_public_key: ephemeral.public.clone(),
-        kdf_params: LoginKdfParamsResponse {
-            schema_version: kdf_params.schema_version,
-            algorithm: kdf_params.algorithm,
-            iterations: kdf_params.iterations,
-            salt,
-        },
+        kdf_params,
     })
 }
 
@@ -1041,7 +1084,7 @@ async fn verify_login_proof_and_get_user(
         return Err(AppError::unauthorized("Invalid credentials"));
     };
     let user = query_as::<_, DbLoginUserRow>(
-		"SELECT id, email, name, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key FROM \"user\" WHERE id = $1 LIMIT 1",
+		"SELECT id, email, name, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1 LIMIT 1",
 	)
 	.bind(user_id)
 	.fetch_optional(pool)
@@ -1325,6 +1368,7 @@ pub(crate) async fn reset_password(
 ) -> Result<ResetPasswordResponse, AppError> {
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_kdf_params_against_floor(&input.kdf_params, &input.srp_salt)?;
     let pool = db_pool(app_state)?;
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
@@ -1383,6 +1427,7 @@ pub(crate) async fn update_email(
 ) -> Result<LogoutResponse, AppError> {
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_kdf_params_against_floor(&input.kdf_params, &input.srp_salt)?;
     validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
     let pool = db_pool(app_state)?;
     let normalized_new_email = normalize_email(&input.new_email);
@@ -1440,6 +1485,7 @@ pub(crate) async fn change_password(
 ) -> Result<LogoutResponse, AppError> {
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_kdf_params_against_floor(&input.kdf_params, &input.srp_salt)?;
     validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
     let pool = db_pool(app_state)?;
 
@@ -1484,6 +1530,7 @@ pub(crate) async fn regenerate_secret_key(
 ) -> Result<LogoutResponse, AppError> {
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_kdf_params_against_floor(&input.kdf_params, &input.srp_salt)?;
     validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
     let pool = db_pool(app_state)?;
 
@@ -2277,6 +2324,7 @@ async fn reset_user_password_with_recovery(
     email: &str,
     input: &ResetPasswordInput,
 ) -> Result<(String, Vec<String>), AppError> {
+    let (iterations, schema_version) = kdf_params_storage(&input.kdf_params);
     repo_auth::reset_user_password_with_recovery(
         pool,
         email,
@@ -2287,6 +2335,11 @@ async fn reset_user_password_with_recovery(
         &input.recovery_key_hint,
         input.secret_key_hint.as_deref(),
         &input.encrypted_vault_keys,
+        repo_auth::KdfParamsStorage {
+            algorithm: &input.kdf_params.algorithm,
+            iterations,
+            schema_version,
+        },
     )
     .await
 }
@@ -2309,6 +2362,7 @@ async fn update_user_email_data(
     new_email: &str,
     input: &UpdateEmailInput,
 ) -> Result<(), AppError> {
+    let (iterations, schema_version) = kdf_params_storage(&input.kdf_params);
     repo_auth::update_user_email_data(
         pool,
         user_id,
@@ -2317,6 +2371,11 @@ async fn update_user_email_data(
         &input.srp_verifier,
         &input.encrypted_private_key,
         &input.encrypted_vault_keys,
+        repo_auth::KdfParamsStorage {
+            algorithm: &input.kdf_params.algorithm,
+            iterations,
+            schema_version,
+        },
     )
     .await
 }
@@ -2326,6 +2385,7 @@ async fn update_user_password_data(
     user_id: &str,
     input: &ChangePasswordInput,
 ) -> Result<(), AppError> {
+    let (iterations, schema_version) = kdf_params_storage(&input.kdf_params);
     repo_auth::update_user_password_data(
         pool,
         user_id,
@@ -2333,6 +2393,11 @@ async fn update_user_password_data(
         &input.srp_verifier,
         &input.encrypted_private_key,
         &input.encrypted_vault_keys,
+        repo_auth::KdfParamsStorage {
+            algorithm: &input.kdf_params.algorithm,
+            iterations,
+            schema_version,
+        },
     )
     .await
 }
@@ -2342,6 +2407,7 @@ async fn update_user_secret_key_data(
     user_id: &str,
     input: &RegenerateSecretKeyInput,
 ) -> Result<(), AppError> {
+    let (iterations, schema_version) = kdf_params_storage(&input.kdf_params);
     repo_auth::update_user_secret_key_data(
         pool,
         user_id,
@@ -2350,6 +2416,11 @@ async fn update_user_secret_key_data(
         &input.srp_verifier,
         &input.encrypted_private_key,
         &input.encrypted_vault_keys,
+        repo_auth::KdfParamsStorage {
+            algorithm: &input.kdf_params.algorithm,
+            iterations,
+            schema_version,
+        },
     )
     .await
 }
@@ -2454,6 +2525,9 @@ struct CreateUserParams<'a> {
     encrypted_private_key: &'a str,
     encrypted_master_key: Option<&'a str>,
     recovery_key_hint: Option<&'a str>,
+    kdf_algorithm: &'a str,
+    kdf_iterations: i32,
+    kdf_schema_version: i32,
 }
 
 async fn insert_user_account(
@@ -2474,6 +2548,9 @@ async fn insert_user_account(
             encrypted_private_key: params.encrypted_private_key,
             encrypted_master_key: params.encrypted_master_key,
             recovery_key_hint: params.recovery_key_hint,
+            kdf_algorithm: params.kdf_algorithm,
+            kdf_iterations: params.kdf_iterations,
+            kdf_schema_version: params.kdf_schema_version,
         },
     )
     .await
@@ -2577,6 +2654,7 @@ fn validate_signup_input(input: &SignupInput) -> Result<(), AppError> {
     }
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_kdf_params_against_floor(&input.kdf_params, &input.srp_salt)?;
     Ok(())
 }
 
@@ -2592,6 +2670,7 @@ fn validate_signup_with_invitation_input(
     }
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_kdf_params_against_floor(&input.kdf_params, &input.srp_salt)?;
     Ok(())
 }
 
@@ -2606,6 +2685,34 @@ fn validate_resource_id(value: &str) -> Result<(), AppError> {
     } else {
         Err(bad_request_handler_error("Invalid resource ID"))
     }
+}
+
+/// Validate client-submitted KDF params against the server policy floor.
+///
+/// Reuses the crypto core baseline check (via `validate_server_kdf_params` with
+/// no pinned params) so the floor stays single-sourced in `kdf_policy.rs`. The
+/// `salt` is the SRP salt the client derived with; the baseline check also
+/// validates it, which is why callers pass the already-validated `srp_salt`.
+fn validate_kdf_params_against_floor(
+    params: &KdfParamsInput,
+    salt: &str,
+) -> Result<(), AppError> {
+    let candidate = KdfParams {
+        schema_version: params.schema_version,
+        algorithm: params.algorithm.clone(),
+        iterations: params.iterations,
+        salt: salt.to_string(),
+    };
+    validate_server_kdf_params(&candidate, None)
+        .map_err(|_| bad_request_handler_error("Invalid KDF parameters"))
+}
+
+/// Convert client-submitted KDF params into the Postgres `integer` storage type.
+fn kdf_params_storage(params: &KdfParamsInput) -> (i32, i32) {
+    (
+        params.iterations.min(i32::MAX as u32) as i32,
+        params.schema_version.min(i32::MAX as u32) as i32,
+    )
 }
 
 fn validate_hex_string(value: &str, message: &str) -> Result<(), AppError> {

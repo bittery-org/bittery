@@ -2,6 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
+import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
@@ -230,6 +231,7 @@ export function RegenerateSecretKeyDialog({
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
+				kdfParams: defaultKdfParamsInput(),
 			});
 
 			// 8. Update local state — store new secret key and new MUK

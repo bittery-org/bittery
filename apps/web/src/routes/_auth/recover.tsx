@@ -1,5 +1,6 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
 import { useRPCClient } from "@bittery/shared/rpc";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
@@ -361,6 +362,7 @@ function RecoverRouteComponent() {
 				recoveryKeyHint,
 				secretKeyHint,
 				encryptedVaultKeys,
+				kdfParams: defaultKdfParamsInput(),
 			});
 
 			await storage.storeAuthToken(resetResult.token);

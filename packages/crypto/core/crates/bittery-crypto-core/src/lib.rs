@@ -21,7 +21,9 @@ pub use encryption::{
     EncryptedData,
 };
 pub use error::CryptoError;
-pub use key_derivation::{derive_keys, derive_keys_from_master_key, derive_master_key, DerivedKeys};
+pub use key_derivation::{
+    derive_keys, derive_keys_from_master_key, derive_master_key, DerivedKeys, PBKDF2_ITERATIONS,
+};
 pub use kdf_policy::{
     default_login_kdf_params, validate_server_kdf_params, KdfParams, KDF_ALGORITHM_PBKDF2_SHA256,
     KDF_SCHEMA_VERSION, MIN_PBKDF2_ITERATIONS,

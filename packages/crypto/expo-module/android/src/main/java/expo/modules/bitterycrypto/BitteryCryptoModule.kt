@@ -31,10 +31,12 @@ class BitteryCryptoModule : Module() {
         // Key Derivation
         // ============================================================================
 
-        AsyncFunction("deriveKeys") { password: String, secretKey: String, email: String, promise: Promise ->
+        AsyncFunction("deriveKeys") { password: String, secretKey: String, email: String, algorithm: String?, iterations: Int?, promise: Promise ->
             scope.launch {
                 try {
-                    val result = nativeDeriveKeys(password, secretKey, email)
+                    // Empty algorithm and 0 iterations tell the native layer to use the
+                    // default PBKDF2-SHA256 baseline.
+                    val result = nativeDeriveKeys(password, secretKey, email, algorithm ?: "", iterations ?: 0)
                     if (result.error != null) {
                         promise.reject(CodedException("KEY_DERIVATION_FAILED", result.error, null))
                     } else {
@@ -418,7 +420,7 @@ class BitteryCryptoModule : Module() {
     // ============================================================================
 
     // Key Derivation
-    private external fun nativeDeriveKeys(password: String, secretKey: String, email: String): DerivedKeysResult
+    private external fun nativeDeriveKeys(password: String, secretKey: String, email: String, algorithm: String, iterations: Int): DerivedKeysResult
 
     // Encryption
     private external fun nativeEncrypt(plaintext: String, keyBase64: String): EncryptResult

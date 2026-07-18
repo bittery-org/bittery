@@ -159,6 +159,8 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     password: JString<'a>,
     secret_key: JString<'a>,
     email: JString<'a>,
+    algorithm: JString<'a>,
+    iterations: jint,
 ) -> JObject<'a> {
     let password_str = match get_string(&mut env, password) {
         Some(s) => s,
@@ -176,9 +178,18 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use bittery_crypto_core::derive_keys;
+    use bittery_crypto_core::{derive_keys, KDF_ALGORITHM_PBKDF2_SHA256, PBKDF2_ITERATIONS};
 
-    match derive_keys(&password_str, &secret_str, &email_str) {
+    // `algorithm` may be empty/null and `iterations` may be 0 to use defaults.
+    let algorithm_str =
+        get_string(&mut env, algorithm).unwrap_or_else(|| KDF_ALGORITHM_PBKDF2_SHA256.to_string());
+    let iterations = if iterations <= 0 {
+        PBKDF2_ITERATIONS
+    } else {
+        iterations as u32
+    };
+
+    match derive_keys(&password_str, &secret_str, &email_str, &algorithm_str, iterations) {
         Ok(keys) => {
             let auth_key = STANDARD.encode(&keys.auth_key);
             let muk = STANDARD.encode(&keys.master_unlock_key);
@@ -1107,9 +1118,16 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use bittery_crypto_core::derive_keys;
+    use bittery_crypto_core::{derive_keys, KDF_ALGORITHM_PBKDF2_SHA256, PBKDF2_ITERATIONS};
 
-    match derive_keys(&password_str, &secret_str, &email_str) {
+    // The credential-provider autofill path uses the default KDF baseline.
+    match derive_keys(
+        &password_str,
+        &secret_str,
+        &email_str,
+        KDF_ALGORITHM_PBKDF2_SHA256,
+        PBKDF2_ITERATIONS,
+    ) {
         Ok(keys) => {
             let auth_key = STANDARD.encode(&keys.auth_key);
             let muk = STANDARD.encode(&keys.master_unlock_key);

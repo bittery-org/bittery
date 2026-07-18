@@ -8,6 +8,7 @@ import type {
 	EncryptedData,
 	EncryptionContext,
 	ICrypto,
+	KdfParams,
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPServerChallenge,
@@ -83,12 +84,14 @@ export class WorkerCrypto implements ICrypto {
 		password: string,
 		secretKey: string,
 		email: string,
+		params?: KdfParams,
 	): Promise<DerivedKeys> {
 		const result = await this.call({
 			type: "deriveKeys",
 			password,
 			secretKey,
 			email,
+			params,
 		});
 		return {
 			authKey: base64ToUint8Array(result.authKey),
@@ -100,12 +103,14 @@ export class WorkerCrypto implements ICrypto {
 		password: string,
 		secretKey: string,
 		email: string,
+		params?: KdfParams,
 	): Promise<WorkerDerivedKeyHandles> {
 		return this.call({
 			type: "deriveKeyHandles",
 			password,
 			secretKey,
 			email,
+			params,
 		});
 	}
 

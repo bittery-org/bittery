@@ -1,5 +1,6 @@
 import { m } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { toast } from "@bittery/ui";
@@ -172,6 +173,7 @@ export function useSignupForm({
 					encryptedMasterKey: input.encryptedMasterKey,
 					recoveryKeyHint: input.recoveryKeyHint,
 					encryptedVaultKey: input.encryptedVaultKey,
+					kdfParams: defaultKdfParamsInput(),
 				});
 			}
 
@@ -191,6 +193,7 @@ export function useSignupForm({
 				encryptedMasterKey: input.encryptedMasterKey,
 				recoveryKeyHint: input.recoveryKeyHint,
 				encryptedVaultKey: input.encryptedVaultKey,
+				kdfParams: defaultKdfParamsInput(),
 			});
 		},
 		onSuccess: async (data, variables) => {

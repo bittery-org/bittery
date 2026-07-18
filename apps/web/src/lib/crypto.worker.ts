@@ -35,7 +35,7 @@ import init, {
 } from "@bittery/crypto-wasm";
 import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
 import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
-import type { EncryptionContext } from "@bittery/types";
+import type { EncryptionContext, KdfParams } from "@bittery/types";
 
 let initialized = false;
 let srpClient: JsSrpClient | null = null;
@@ -84,12 +84,19 @@ type WorkerRequest = {
 } & (
 	| { type: "validateSecretKey"; secretKey: string }
 	| { type: "validateRecoveryKey"; recoveryKey: string }
-	| { type: "deriveKeys"; password: string; secretKey: string; email: string }
+	| {
+			type: "deriveKeys";
+			password: string;
+			secretKey: string;
+			email: string;
+			params?: KdfParams;
+	  }
 	| {
 			type: "deriveKeyHandles";
 			password: string;
 			secretKey: string;
 			email: string;
+			params?: KdfParams;
 	  }
 	| { type: "deriveSrpPasswordFromHandle"; authKeyHandle: number }
 	| { type: "cloneKeyHandle"; keyHandle: number }
@@ -196,7 +203,13 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 				break;
 			}
 			case "deriveKeys": {
-				const derived = wasmDeriveKeys(msg.password, msg.secretKey, msg.email);
+				const derived = wasmDeriveKeys(
+					msg.password,
+					msg.secretKey,
+					msg.email,
+					msg.params?.iterations,
+					msg.params?.algorithm,
+				);
 				result = {
 					authKey: derived.auth_key,
 					masterUnlockKey: derived.master_unlock_key,
@@ -208,6 +221,8 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 					msg.password,
 					msg.secretKey,
 					msg.email,
+					msg.params?.iterations,
+					msg.params?.algorithm,
 				);
 				result = {
 					authKeyHandle: fromWasmHandle(handles.auth_key_handle),

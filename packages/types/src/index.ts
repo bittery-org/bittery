@@ -38,6 +38,7 @@ export interface ICrypto {
 		password: string,
 		secretKey: string,
 		email: string,
+		params?: KdfParams,
 	): Promise<DerivedKeys>;
 	validateServerKdfParams?(
 		serverParams: KdfParams,

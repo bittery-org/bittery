@@ -2,6 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
+import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
@@ -174,6 +175,7 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
+				kdfParams: defaultKdfParamsInput(),
 			});
 
 			toast.success(m.settings_change_email_dialog_toast_updated());

@@ -10,6 +10,40 @@ const REQUIRED_KDF_ALGORITHM = "pbkdf2-sha256";
 const MIN_KDF_ITERATIONS = 310_000;
 const MIN_KDF_SALT_BYTES = 16;
 
+/**
+ * Current client default PBKDF2 iteration count.
+ *
+ * This is the work factor new accounts are created with and that mutating
+ * flows (password/email change, secret-key regen, recovery) upgrade to. It
+ * must stay in sync with the crypto core default (`PBKDF2_ITERATIONS`) and the
+ * server's `default_login_kdf_params`. The floor (`MIN_KDF_ITERATIONS`) is a
+ * separate, lower value and intentionally does not move with this default.
+ */
+export const DEFAULT_KDF_ITERATIONS = 600_000;
+
+/**
+ * KDF params (minus salt) the client sends alongside a freshly derived SRP
+ * verifier. Matches the generated `KdfParamsInput` shape (camelCase, no salt —
+ * the salt travels separately as `srpSalt`).
+ */
+export interface KdfParamsInputValues {
+	schemaVersion: number;
+	algorithm: string;
+	iterations: number;
+}
+
+/**
+ * Build the default KDF params describing how the client derived its keys when
+ * it did not negotiate params (i.e. used the crypto core default).
+ */
+export function defaultKdfParamsInput(): KdfParamsInputValues {
+	return {
+		schemaVersion: REQUIRED_KDF_SCHEMA_VERSION,
+		algorithm: REQUIRED_KDF_ALGORITHM,
+		iterations: DEFAULT_KDF_ITERATIONS,
+	};
+}
+
 function isHex(value: string): boolean {
 	return /^[0-9a-fA-F]+$/.test(value);
 }

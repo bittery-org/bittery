@@ -58,7 +58,9 @@ export type { HashAlgorithm, PrimeGroup };
 
 /**
  * Derive authentication and master unlock keys using native Rust crypto.
- * Uses PBKDF2 (100k iterations) + HKDF for key splitting.
+ * Uses PBKDF2-SHA256 + HKDF for key splitting. The iteration count and algorithm
+ * are threaded in via `params`; when omitted the native layer falls back to the
+ * default PBKDF2-SHA256 baseline.
  *
  * Returns Uint8Array for compatibility with existing @bittery/crypto interface.
  */
@@ -66,9 +68,10 @@ export async function deriveKeys(
 	password: string,
 	secretKey: string,
 	email: string,
+	params?: KdfParams,
 ): Promise<DerivedKeys> {
 	// Native module already returns Uint8Array values
-	return nativeDeriveKeys(password, secretKey, email);
+	return nativeDeriveKeys(password, secretKey, email, params);
 }
 
 // ============================================================================

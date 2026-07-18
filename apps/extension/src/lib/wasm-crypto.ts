@@ -39,6 +39,7 @@ import type {
 	DerivedKeys,
 	EncryptedData,
 	EncryptionContext,
+	KdfParams,
 	SRPClientEphemeral,
 	SRPClientSession,
 	SRPServerChallenge,
@@ -173,10 +174,17 @@ export async function deriveKeys(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
+	params?: KdfParams,
 ): Promise<DerivedKeys> {
 	await autoInit();
 
-	const result = wasmDeriveKeys(accountPassword, secretKey, email);
+	const result = wasmDeriveKeys(
+		accountPassword,
+		secretKey,
+		email,
+		params?.iterations,
+		params?.algorithm,
+	);
 
 	return {
 		authKey: base64ToUint8Array(result.auth_key),
