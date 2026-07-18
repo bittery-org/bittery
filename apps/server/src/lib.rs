@@ -20,7 +20,7 @@ use std::sync::Arc;
 use fred::prelude::Pool as RedisPool;
 use serde::Serialize;
 
-use services::rate_limit::{NoopRateLimiter, PostgresRateLimiter, RateLimiter};
+use services::rate_limit::{NoopRateLimiter, PostgresRateLimiter};
 
 pub use http::middleware::{
     edge_http_middleware, http_trace_layer, load_edge_http_config, rpc_request_guard_middleware,
@@ -39,7 +39,7 @@ pub use rpc::travel_mode::create_travel_mode_router;
 pub use rpc::vault::create_vault_router;
 pub use services::auth::rpc_request_context_middleware;
 pub use services::connection_registry::ConnectionRegistry;
-pub use services::rate_limit::build_rate_limiter;
+pub use services::rate_limit::{build_rate_limiter, RateLimiter};
 pub use services::redis::init_redis;
 pub use services::session::{SeededSession, SessionService};
 pub use services::sync_pubsub::SyncPubSub;

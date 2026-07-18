@@ -39,7 +39,7 @@ Never reuse `JWT_SECRET` across instances or commit it to version control. Rotat
 |----------|---------|-------------|
 | `RATE_LIMIT_ADAPTER` | `auto` | Rate limiter backend: `auto`, `postgres`, or `redis`. `auto` uses Redis when `RATE_LIMIT_REDIS_URL` is set, otherwise Postgres. `redis` requires `RATE_LIMIT_REDIS_URL` (fails at startup if unset). There is no in-memory backend |
 | `RATE_LIMIT_REDIS_URL` | — | Redis/Valkey URL for the Redis rate-limiting backend |
-| `SHARE_LINK_DAILY_LIMIT` | `50` | Maximum shared links a user can create in a rolling 24-hour window |
+| `SHARE_LINK_DAILY_LIMIT` | `50` | Maximum shared links a user can create per fixed 24-hour window |
 
 ### Tuning limits
 

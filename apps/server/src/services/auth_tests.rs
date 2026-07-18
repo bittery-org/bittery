@@ -1642,31 +1642,7 @@ const RATE_LIMITED_CODE: &str = "TOO_MANY_REQUESTS";
 
 /// Sets (and restores on drop) `RATE_LIMIT_*` env vars. Must be constructed while
 /// the env lock is held (e.g. inside `with_auth_test_env_async`).
-struct RateLimitEnvGuard {
-    previous: Vec<(String, Option<String>)>,
-}
-
-impl RateLimitEnvGuard {
-    fn set(vars: &[(&str, &str)]) -> Self {
-        let mut previous = Vec::new();
-        for (key, value) in vars {
-            previous.push(((*key).to_string(), std::env::var(key).ok()));
-            unsafe { std::env::set_var(key, value) };
-        }
-        Self { previous }
-    }
-}
-
-impl Drop for RateLimitEnvGuard {
-    fn drop(&mut self) {
-        for (key, previous) in &self.previous {
-            match previous {
-                Some(value) => unsafe { std::env::set_var(key, value) },
-                None => unsafe { std::env::remove_var(key) },
-            }
-        }
-    }
-}
+use crate::test_support::EnvVarGuard as RateLimitEnvGuard;
 
 fn headers_with_ip(ip: &str) -> HeaderMap {
     let mut headers = unauthenticated_json_headers();
@@ -2000,6 +1976,86 @@ async fn request_recovery_verification_is_rate_limited() {
                     "auth.requestRecoveryVerification",
                     json!([{ "email": fixture.email }]),
                     headers_with_ip("192.0.2.55"),
+                )
+                .await;
+            assert_handler_error(
+                &blocked.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Rotating the client IP must not mint a fresh budget: the email dimension is
+/// keyed on the email hash alone, so it still trips.
+#[tokio::test]
+async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_recovery_req_ip_rotation", |app| async move {
+            let _env = RateLimitEnvGuard::set(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
+            let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_rec_ip_rot").await;
+
+            for ip in ["198.51.100.1", "198.51.100.2"] {
+                let response = app
+                    .rpc_call(
+                        "auth.requestRecoveryVerification",
+                        json!([{ "email": fixture.email }]),
+                        headers_with_ip(ip),
+                    )
+                    .await;
+                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+            }
+
+            // A third, previously unseen IP still hits the per-email counter.
+            let blocked = app
+                .rpc_call(
+                    "auth.requestRecoveryVerification",
+                    json!([{ "email": fixture.email }]),
+                    headers_with_ip("198.51.100.3"),
+                )
+                .await;
+            assert_handler_error(
+                &blocked.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Rotating the email must not mint a fresh budget either: the IP dimension is
+/// keyed on the client IP alone, so a single source still trips.
+#[tokio::test]
+async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_recovery_req_email_rotation", |app| async move {
+            let _env = RateLimitEnvGuard::set(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
+            let first = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_a").await;
+            let second = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_b").await;
+            let third = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_c").await;
+
+            for email in [&first.email, &second.email] {
+                let response = app
+                    .rpc_call(
+                        "auth.requestRecoveryVerification",
+                        json!([{ "email": email }]),
+                        headers_with_ip("203.0.113.9"),
+                    )
+                    .await;
+                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+            }
+
+            // A third, previously unseen email still hits the per-IP counter.
+            let blocked = app
+                .rpc_call(
+                    "auth.requestRecoveryVerification",
+                    json!([{ "email": third.email }]),
+                    headers_with_ip("203.0.113.9"),
                 )
                 .await;
             assert_handler_error(

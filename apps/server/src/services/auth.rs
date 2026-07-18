@@ -1118,18 +1118,21 @@ pub(crate) async fn request_recovery_verification(
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
 
-    // Per-account + IP: keyed on the email hash combined with the client IP so an
-    // attacker cannot exhaust the email-send budget for an account, while a shared
-    // NAT does not lock out unrelated accounts.
-    let recovery_key = format!(
-        "{}:{}",
-        hash_normalized_email(&normalized_email),
-        request_ip_key(request)
-    );
+    // Two independent counters rather than one composite `email:ip` key: a composite
+    // key mints a fresh budget for every new pair, so rotating IPs for one email (or
+    // emails from one IP) would bypass the limit entirely. The email dimension caps
+    // the per-account email-send budget; the IP dimension caps a single source.
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
-        rate_limit::SCOPE_RECOVERY_REQUEST,
-        &recovery_key,
+        rate_limit::SCOPE_RECOVERY_REQUEST_EMAIL,
+        &hash_normalized_email(&normalized_email),
+        recovery_request_limit(),
+    )
+    .await?;
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        rate_limit::SCOPE_RECOVERY_REQUEST_IP,
+        &request_ip_key(request),
         recovery_request_limit(),
     )
     .await?;

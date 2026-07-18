@@ -31,7 +31,8 @@ pub const SCOPE_LOGIN_IP: &str = "auth_login_ip";
 pub const SCOPE_LOGIN_EMAIL: &str = "auth_login_email";
 pub const SCOPE_SIGNUP_IP: &str = "auth_signup_ip";
 pub const SCOPE_SIGNUP_EMAIL: &str = "auth_signup_email";
-pub const SCOPE_RECOVERY_REQUEST: &str = "auth_recovery_request";
+pub const SCOPE_RECOVERY_REQUEST_EMAIL: &str = "auth_recovery_request_email";
+pub const SCOPE_RECOVERY_REQUEST_IP: &str = "auth_recovery_request_ip";
 pub const SCOPE_RECOVERY_VERIFY: &str = "auth_recovery_verify";
 pub const SCOPE_GENERIC_IP: &str = "auth_generic_ip";
 pub const SCOPE_SHARE_CREATE_DAILY: &str = "share_create_daily";
@@ -436,6 +437,11 @@ return 0
 "#;
 
 /// Atomic failure/lockout: returns 1 when locked (already or newly), else 0.
+/// How long an un-tripped attempt counter is retained. Long enough that a
+/// drip-fed brute force still accumulates toward the lock, short enough that
+/// abandoned counters evict themselves.
+const ATTEMPTS_RETENTION: Duration = Duration::from_secs(24 * 60 * 60);
+
 const FAILURE_SCRIPT: &str = r#"
 local akey = KEYS[1]
 local lkey = KEYS[2]
@@ -445,10 +451,16 @@ if redis.call('EXISTS', lkey) == 1 then
   return 1
 end
 local a = redis.call('INCR', akey)
--- Refresh the attempts TTL on every increment so a slow drip of failures still
--- accumulates toward the lock (matching the Postgres backend, where attempts
--- persist until the lock trips or clear() is called).
-redis.call('EXPIRE', akey, lock_secs)
+-- Set the retention TTL once, on the first failure, instead of refreshing it on
+-- every increment. Refreshing per-increment made the counter expire `lock_secs`
+-- after the LAST failure, so failures drip-fed slower than that reset forever and
+-- never reached the lock. Setting it once means attempts accumulate for a fixed
+-- retention window regardless of pacing, approximating the Postgres backend
+-- (where attempts persist until the lock trips or clear() is called) while still
+-- letting idle keys self-evict.
+if a == 1 then
+  redis.call('EXPIRE', akey, tonumber(ARGV[3]))
+end
 if a >= max then
   redis.call('SET', lkey, '1', 'EX', lock_secs)
   redis.call('DEL', akey)
@@ -483,12 +495,15 @@ impl RedisRateLimiter {
         format!("rl:c:{scope}:{key}")
     }
 
+    // The attempts and lock keys are passed together as multiple KEYS to
+    // FAILURE_SCRIPT and to clear(), so they share a hash tag to stay in the same
+    // slot on a clustered Redis (otherwise those calls fail with CROSSSLOT).
     fn attempts_key(scope: &str, key: &str) -> String {
-        format!("rl:a:{scope}:{key}")
+        format!("rl:a:{{{scope}:{key}}}")
     }
 
     fn lock_key(scope: &str, key: &str) -> String {
-        format!("rl:l:{scope}:{key}")
+        format!("rl:l:{{{scope}:{key}}}")
     }
 }
 
@@ -535,7 +550,11 @@ impl RateLimiter for RedisRateLimiter {
             .eval(
                 FAILURE_SCRIPT,
                 vec![attempts_key, lock_key],
-                vec![max_attempts, lock_duration.as_secs() as i64],
+                vec![
+                    max_attempts,
+                    lock_duration.as_secs() as i64,
+                    ATTEMPTS_RETENTION.as_secs() as i64,
+                ],
             )
             .await
             .map_err(|e| {

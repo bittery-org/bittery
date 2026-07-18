@@ -305,5 +305,13 @@ async fn heartbeat_updates_last_active_timestamp() {
         .expect("current device should exist")
         .last_active_at;
 
-    assert!(after >= before);
+    // Compare parsed instants, not the RFC3339 strings: `time` trims trailing
+    // zeros from subseconds, so a later timestamp can sort lexicographically
+    // BEFORE an earlier one (e.g. "…00.51Z" < "…00.5Z", since '1' < 'Z').
+    assert!(parse_rfc3339(&after) >= parse_rfc3339(&before));
+}
+
+fn parse_rfc3339(value: &str) -> OffsetDateTime {
+    OffsetDateTime::parse(value, &time::format_description::well_known::Rfc3339)
+        .expect("timestamp should be valid RFC3339")
 }
