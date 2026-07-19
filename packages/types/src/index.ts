@@ -38,11 +38,11 @@ export interface ICrypto {
 		password: string,
 		secretKey: string,
 		email: string,
-		params?: KdfParams,
+		profile: KdfProfile,
 	): Promise<DerivedKeys>;
-	validateServerKdfParams?(
-		serverParams: KdfParams,
-		pinnedParams?: KdfParams | null,
+	validateKdfProfile?(
+		profile: KdfProfile,
+		pinnedProfile?: KdfProfile | null,
 	): Promise<void> | void;
 	generateClientEphemeral(): SRPClientEphemeral | Promise<SRPClientEphemeral>;
 	deriveClientSession(
@@ -95,13 +95,14 @@ export interface EncryptionContext {
 }
 
 /**
- * Login KDF params provided by the server and pinned locally.
+ * Login KDF profile provided by the server and pinned locally.
  */
-export interface KdfParams {
-	schemaVersion: number;
-	algorithm: string;
+export type KdfAlgorithm = "pbkdf2-sha256";
+
+export interface KdfProfile {
+	schemaVersion: 1;
+	algorithm: KdfAlgorithm;
 	iterations: number;
-	salt: string;
 }
 
 // ============================================================================
@@ -144,7 +145,7 @@ export interface SRPClientEphemeral {
 export interface SRPServerChallenge {
 	salt: string;
 	serverPublicKey: string;
-	kdfParams: KdfParams;
+	kdfParams: KdfProfile;
 }
 
 /**

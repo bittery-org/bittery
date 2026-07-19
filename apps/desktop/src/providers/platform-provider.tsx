@@ -32,7 +32,7 @@ const crypto: ICrypto = {
 	deriveClientSession: tauriCrypto.deriveClientSession,
 	verifyServerSession: tauriCrypto.verifyServerSession,
 	validateSecretKey: tauriCrypto.validateSecretKey,
-	validateServerKdfParams: tauriCrypto.validateServerKdfParams,
+	validateKdfProfile: tauriCrypto.validateKdfProfile,
 };
 
 /**

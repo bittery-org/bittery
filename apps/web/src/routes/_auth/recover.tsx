@@ -1,7 +1,9 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
-import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
+import { currentKdfProfile } from "@bittery/shared/kdf-policy";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { useRPCClient } from "@bittery/shared/rpc";
+import { resolveOrCreateAccountId } from "@bittery/storage/account-id";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconCheck as Check,
@@ -305,10 +307,12 @@ function RecoverRouteComponent() {
 
 			const newSecretKey = await generateSecretKeyAsync();
 
+			const newProfile = currentKdfProfile();
 			const newMasterKey = await workerCrypto.deriveMasterKey(
 				newPassword,
 				newSecretKey,
 				email,
+				newProfile,
 			);
 			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
 				await workerCrypto.deriveKeysFromMasterKey(newMasterKey, email);
@@ -362,23 +366,29 @@ function RecoverRouteComponent() {
 				recoveryKeyHint,
 				secretKeyHint,
 				encryptedVaultKeys,
-				kdfParams: defaultKdfParamsInput(),
+				kdfParams: newProfile,
 			});
 
-			await storage.storeAuthToken(resetResult.token);
+			const serverUrl = getDefaultServerUrl();
+			const accountId = resolveOrCreateAccountId(
+				await storage.getAccountsList(),
+				serverUrl,
+				resetResult.userId,
+			);
+			await storage.storeAuthToken(resetResult.token, accountId);
+			await storage.storeServerUrl(serverUrl, accountId);
 
 			const vaultList = await rpcClient.vault.list.query();
-			await storage.storeVaultKeys(vaultList.map(normalizeVaultListEntry));
+			await storage.storeVaultKeys(
+				vaultList.map(normalizeVaultListEntry),
+				accountId,
+			);
 
 			await storage.storeEncryptedPrivateKey(
 				JSON.stringify(newEncryptedPrivateKey),
+				accountId,
 			);
-			const activeAccount = await storage.getActiveAccount();
-			const accountId =
-				activeAccount?.type === "single"
-					? activeAccount.accountId
-					: crypto.randomUUID();
-			await storage.storeSecretKey(newSecretKey);
+			await storage.storeSecretKey(newSecretKey, accountId);
 			await storage.storeSessionData(
 				newMasterUnlockKey,
 				accountId,
@@ -387,7 +397,8 @@ function RecoverRouteComponent() {
 				resetResult.expiresAt,
 				resetResult.sessionId,
 			);
-			await storage.setMasterUnlockKey(newMasterUnlockKey);
+			await storage.setMasterUnlockKey(newMasterUnlockKey, accountId);
+			await storage.storePinnedKdfProfile(newProfile, accountId);
 
 			setGeneratedSecretKey(newSecretKey);
 			setStep("newSecretKey");

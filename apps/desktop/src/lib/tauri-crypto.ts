@@ -11,7 +11,7 @@ import type {
 	DerivedKeys,
 	EncryptedData,
 	EncryptionContext,
-	KdfParams,
+	KdfProfile,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
@@ -99,14 +99,15 @@ export async function deriveKeys(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
-	params?: KdfParams,
+	profile: KdfProfile,
 ): Promise<DerivedKeys> {
 	const response = await invoke<DerivedKeysResponse>("crypto_derive_keys", {
 		password: accountPassword,
 		secretKey,
 		email,
-		algorithm: params?.algorithm ?? null,
-		iterations: params?.iterations ?? null,
+		schemaVersion: profile.schemaVersion,
+		algorithm: profile.algorithm,
+		iterations: profile.iterations,
 	});
 
 	return {
@@ -201,13 +202,13 @@ export async function decrypt(
 	}
 }
 
-export async function validateServerKdfParams(
-	serverParams: KdfParams,
-	pinnedParams?: KdfParams | null,
+export async function validateKdfProfile(
+	profile: KdfProfile,
+	pinnedProfile?: KdfProfile | null,
 ): Promise<void> {
-	await invoke<void>("crypto_validate_server_kdf_params", {
-		serverParamsJson: JSON.stringify(serverParams),
-		pinnedParamsJson: pinnedParams ? JSON.stringify(pinnedParams) : null,
+	await invoke<void>("crypto_validate_kdf_profile", {
+		profileJson: JSON.stringify(profile),
+		pinnedProfileJson: pinnedProfile ? JSON.stringify(pinnedProfile) : null,
 	});
 }
 

@@ -4,8 +4,8 @@
  * KDF parameters the client derived its SRP verifier with.
  *
  * The salt is transported separately as `srp_salt`; these fields describe the
- * algorithm/work factor so login can be reproduced and so the server can
- * enforce the policy floor (see [`validate_kdf_params_against_floor`]).
+ * algorithm/work factor so login can be reproduced and so verifier-producing
+ * RPCs can enforce the exact current server profile.
  */
 export type KdfParamsInput = {
 	schemaVersion: number;

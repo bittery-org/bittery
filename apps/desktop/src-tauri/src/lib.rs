@@ -1705,7 +1705,7 @@ pub fn run() {
 			crypto_commands::crypto_encrypt_with_context,
 			crypto_commands::crypto_decrypt,
 			crypto_commands::crypto_decrypt_with_context,
-			crypto_commands::crypto_validate_server_kdf_params,
+			crypto_commands::crypto_validate_kdf_profile,
             crypto_commands::crypto_generate_encryption_key,
             crypto_commands::crypto_generate_uuid,
             crypto_commands::crypto_generate_rsa_key_pair,

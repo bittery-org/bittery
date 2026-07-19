@@ -1,6 +1,6 @@
 import { m } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
-import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
+import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { toast } from "@bittery/ui";
@@ -8,6 +8,7 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import type { KdfProfile } from "@bittery/types";
 
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { normalizeAuthVaultKey } from "@/lib/rpc-normalizers";
@@ -45,6 +46,7 @@ type SignupMutationInput = {
 	encryptedMasterKey: string;
 	recoveryKeyHint: string;
 	encryptedVaultKey: string;
+	kdfProfile: KdfProfile;
 	organizationName?: string;
 	token?: string;
 };
@@ -173,7 +175,7 @@ export function useSignupForm({
 					encryptedMasterKey: input.encryptedMasterKey,
 					recoveryKeyHint: input.recoveryKeyHint,
 					encryptedVaultKey: input.encryptedVaultKey,
-					kdfParams: defaultKdfParamsInput(),
+					kdfParams: input.kdfProfile,
 				});
 			}
 
@@ -193,7 +195,7 @@ export function useSignupForm({
 				encryptedMasterKey: input.encryptedMasterKey,
 				recoveryKeyHint: input.recoveryKeyHint,
 				encryptedVaultKey: input.encryptedVaultKey,
-				kdfParams: defaultKdfParamsInput(),
+				kdfParams: input.kdfProfile,
 			});
 		},
 		onSuccess: async (data, variables) => {
@@ -261,10 +263,12 @@ export function useSignupForm({
 				return;
 			}
 
+			const kdfProfile = currentKdfProfile();
 			const masterKey = await workerCrypto.deriveMasterKey(
 				value.password,
 				secretKey,
 				email,
+				kdfProfile,
 			);
 			const { authKey, masterUnlockKey } =
 				await workerCrypto.deriveKeysFromMasterKey(masterKey, email);
@@ -322,14 +326,17 @@ export function useSignupForm({
 				encryptedMasterKey: JSON.stringify(encryptedMasterKey),
 				recoveryKeyHint,
 				encryptedVaultKey: JSON.stringify(encryptedVaultKey),
+				kdfProfile,
 			});
 
 			const accountId = crypto.randomUUID();
-			await storage.setMasterUnlockKey(masterUnlockKey);
+			await storage.storePinnedKdfProfile(kdfProfile, accountId);
+			await storage.setMasterUnlockKey(masterUnlockKey, accountId);
 			await storage.storeEncryptedPrivateKey(
 				JSON.stringify(encryptedPrivateKey),
+				accountId,
 			);
-			await storage.storeSecretKey(secretKey);
+			await storage.storeSecretKey(secretKey, accountId);
 			await storage.storeSessionData(
 				masterUnlockKey,
 				accountId,

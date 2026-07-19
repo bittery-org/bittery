@@ -325,10 +325,19 @@ export function useCredentialProviderSync(
 
 			for (const account of accountsInfo) {
 				seenAccountIds.add(account.userId);
-				const vaultKeys = await storage.getVaultKeys(account.accountId);
+				const [vaultKeys, secretKey, kdfProfile] = await Promise.all([
+					storage.getVaultKeys(account.accountId),
+					storage.getStoredSecretKey(account.accountId),
+					storage.getPinnedKdfProfile(account.accountId),
+				]);
 				if (!vaultKeys || vaultKeys.length === 0) {
 					lastVaultSyncSignatureByAccountRef.current.delete(account.userId);
 					continue;
+				}
+				if (!secretKey || !kdfProfile) {
+					throw new Error(
+						`Credential-provider sync requires reauthentication for account ${account.accountId}`,
+					);
 				}
 
 				const vaultIdsWithKeys = new Set(vaultKeys.map((vk) => vk.vaultId));
@@ -340,7 +349,7 @@ export function useCredentialProviderSync(
 				const vaultKeysSignature = buildVaultKeysSignature(vaultKeys);
 				const accountItemsSignature =
 					buildLoginItemsSignature(accountLoginItems);
-				const nextSignature = `${vaultKeysSignature}|${accountItemsSignature}`;
+				const nextSignature = `${vaultKeysSignature}|${accountItemsSignature}|${kdfProfile.schemaVersion}:${kdfProfile.algorithm}:${kdfProfile.iterations}`;
 				const previousSignature =
 					lastVaultSyncSignatureByAccountRef.current.get(account.userId);
 
@@ -441,6 +450,9 @@ export function useCredentialProviderSync(
 
 				const syncData = {
 					userId: account.userId,
+					email: account.email,
+					secretKey,
+					kdfProfile,
 					vaultKeys: vaultKeysData,
 					items: itemsData,
 				};

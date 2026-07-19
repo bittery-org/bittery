@@ -2,7 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
-import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
+import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
@@ -28,7 +28,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { getActiveAccountKdfParams, storage } from "@/lib/storage";
+import { getActiveAccountKdfProfile, storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeys,
@@ -84,12 +84,12 @@ export function RegenerateSecretKeyDialog({
 		try {
 			// 1. Derive old keys to decrypt private key using the params the
 			// existing account was keyed with (not the current default).
-			const oldKdfParams = await getActiveAccountKdfParams();
+			const { profile: oldProfile } = await getActiveAccountKdfProfile();
 			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
 				currentPassword,
 				oldSecretKey,
 				userEmail,
-				oldKdfParams,
+				oldProfile,
 			);
 
 			// 2. Decrypt private key with old master unlock key to verify password is correct
@@ -145,12 +145,13 @@ export function RegenerateSecretKeyDialog({
 		try {
 			// 1. Derive old keys to decrypt private key using the params the
 			// existing account was keyed with (not the current default).
-			const oldKdfParams = await getActiveAccountKdfParams();
+			const { accountId, profile: oldProfile } =
+				await getActiveAccountKdfProfile();
 			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
 				currentPassword,
 				oldSecretKey,
 				userEmail,
-				oldKdfParams,
+				oldProfile,
 			);
 
 			// 2. Decrypt private key with old master unlock key
@@ -163,8 +164,14 @@ export function RegenerateSecretKeyDialog({
 			);
 
 			// 3. Derive new keys with new secret key
+			const newProfile = currentKdfProfile();
 			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
-				await deriveKeys(currentPassword, newSecretKey, userEmail);
+				await deriveKeys(
+					currentPassword,
+					newSecretKey,
+					userEmail,
+					newProfile,
+				);
 
 			// 4. Generate new SRP credentials
 			const authKeyString = new TextDecoder().decode(newAuthKey);
@@ -237,13 +244,11 @@ export function RegenerateSecretKeyDialog({
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
-				kdfParams: defaultKdfParamsInput(),
+				kdfParams: newProfile,
 			});
+			await storage.storePinnedKdfProfile(newProfile, accountId);
 
 			// 8. Update local state — store new secret key and new MUK
-			const activeAccount = await storage.getActiveAccount();
-			const accountId =
-				activeAccount?.type === "single" ? activeAccount.accountId : userEmail;
 			await storage.storeSecretKey(newSecretKey, accountId);
 			await storage.setMasterUnlockKey(newMasterUnlockKey, accountId);
 			const existingSession = await storage.getStoredSessionData?.(accountId);

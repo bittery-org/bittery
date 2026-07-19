@@ -24,7 +24,7 @@ import {
 	generateEncryptionKey as nativeGenerateEncryptionKey,
 	rsaDecrypt,
 	validateSecretKey,
-	validateServerKdfParams,
+	validateKdfProfile,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
 import { storage } from "../services/storage";
@@ -50,7 +50,7 @@ const crypto: ICrypto = {
 	deriveClientSession,
 	verifyServerSession,
 	validateSecretKey,
-	validateServerKdfParams,
+	validateKdfProfile,
 };
 
 /**

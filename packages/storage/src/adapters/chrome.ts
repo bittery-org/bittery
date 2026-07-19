@@ -13,7 +13,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
-	KdfParams,
+	KdfProfile,
 } from "@bittery/types";
 import {
 	findAccountById,
@@ -28,6 +28,7 @@ import {
 } from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { parseStoredKdfProfile } from "../kdf-profile";
 import {
 	migrateEmailKeysToAccountIds,
 	parseStoredActiveAccount,
@@ -655,34 +656,22 @@ export class ChromeStorageAdapter implements IStorageAdapter {
 		return (result[key] as string | undefined) || null;
 	}
 
-	async storePinnedKdfParams(
-		params: KdfParams,
-		accountId?: string,
+	async storePinnedKdfProfile(
+		profile: KdfProfile,
+		accountId: string,
 	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) {
-			throw new Error("No account specified");
-		}
-		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
-		await chrome.storage.local.set({ [key]: JSON.stringify(params) });
+		const key = getAccountKey(accountId, "pinned_kdf_params");
+		await chrome.storage.local.set({ [key]: JSON.stringify(profile) });
 	}
 
-	async getPinnedKdfParams(accountId?: string): Promise<KdfParams | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) {
-			return null;
-		}
-		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
+	async getPinnedKdfProfile(accountId: string): Promise<KdfProfile | null> {
+		const key = getAccountKey(accountId, "pinned_kdf_params");
 		const result = await chrome.storage.local.get(key);
 		const stored = result[key];
 		if (!stored) {
 			return null;
 		}
-		try {
-			return JSON.parse(stored as string) as KdfParams;
-		} catch {
-			return null;
-		}
+		return parseStoredKdfProfile(stored);
 	}
 
 	async updateStoredSessionMetadata(

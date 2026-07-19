@@ -9,12 +9,12 @@ use bittery_crypto_core::{
     decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_credential_id,
     generate_encryption_key, generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key,
     get_secret_key_hint,
-    kdf_policy::KDF_ALGORITHM_PBKDF2_SHA256,
+    kdf_policy::KdfProfile,
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_secret_key, AadContext, EncryptedData, PBKDF2_ITERATIONS,
+    validate_secret_key, AadContext, EncryptedData,
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -63,14 +63,14 @@ pub struct DerivedKeysResult {
 
 /// Derive authentication and master unlock keys.
 ///
-/// `algorithm` may be null to use the default (`pbkdf2-sha256`) and `iterations`
-/// may be 0 to use the default iteration count. This keeps the KDF agile (issue
-/// #32) while remaining backward compatible with callers that pass null/0.
+/// The caller must provide the complete canonical profile. Null algorithms,
+/// zero sentinels, and out-of-policy iteration counts are rejected.
 #[no_mangle]
 pub extern "C" fn bittery_derive_keys(
     account_password: *const c_char,
     secret_key: *const c_char,
     email: *const c_char,
+    schema_version: u32,
     algorithm: *const c_char,
     iterations: u32,
 ) -> DerivedKeysResult {
@@ -107,15 +107,23 @@ pub extern "C" fn bittery_derive_keys(
         }
     };
 
-    let algorithm =
-        c_str_to_string(algorithm).unwrap_or_else(|| KDF_ALGORITHM_PBKDF2_SHA256.to_string());
-    let iterations = if iterations == 0 {
-        PBKDF2_ITERATIONS
-    } else {
-        iterations
+    let algorithm = match c_str_to_string(algorithm) {
+        Some(value) => value,
+        None => {
+            return DerivedKeysResult {
+                auth_key: ptr::null_mut(),
+                master_unlock_key: ptr::null_mut(),
+                error: string_to_c_str("Invalid KDF algorithm".to_string()),
+            }
+        }
+    };
+    let profile = KdfProfile {
+        schema_version,
+        algorithm,
+        iterations,
     };
 
-    match derive_keys(&password, &secret, &email_str, &algorithm, iterations) {
+    match derive_keys(&password, &secret, &email_str, &profile) {
         Ok(keys) => {
             use base64::{engine::general_purpose::STANDARD, Engine};
             DerivedKeysResult {

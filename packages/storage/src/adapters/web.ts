@@ -12,11 +12,12 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
-	KdfParams,
+	KdfProfile,
 } from "@bittery/types";
 import { generateAccountId } from "../account-id";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { parseStoredKdfProfile } from "../kdf-profile";
 import { resolveStoredSessionExpiryTimestamp } from "../session";
 import {
 	type AccountMetadata,
@@ -49,14 +50,11 @@ const ITEM_CACHE_META_KEY = "item_cache_meta";
 const WEB_ACCOUNT_ID_KEY = "bittery_web_account_id";
 
 /**
- * Pins are scoped per account so an account keyed at an older KDF iteration
- * count keeps its own params. Falls back to the legacy shared key when no
- * accountId is provided (backward compatible with pre-scoped rows).
+ * Pins are scoped per stable account ID. The obsolete shared key is retained
+ * only as a cleanup target and is never used as a read fallback.
  */
-function pinnedKdfParamsKey(accountId?: string): string {
-	return accountId
-		? `${PINNED_KDF_PARAMS_STORAGE}_${accountId}`
-		: PINNED_KDF_PARAMS_STORAGE;
+function pinnedKdfProfileKey(accountId: string): string {
+	return `${PINNED_KDF_PARAMS_STORAGE}_${accountId}`;
 }
 
 // In-memory cache for Master Unlock Key
@@ -448,35 +446,25 @@ export class WebStorageAdapter implements IStorageAdapter {
 		return null;
 	}
 
-	async storePinnedKdfParams(
-		params: KdfParams,
-		accountId?: string,
+	async storePinnedKdfProfile(
+		profile: KdfProfile,
+		accountId: string,
 	): Promise<void> {
 		if (typeof window !== "undefined") {
-			localStorage.setItem(
-				pinnedKdfParamsKey(accountId),
-				JSON.stringify(params),
-			);
+			localStorage.setItem(pinnedKdfProfileKey(accountId), JSON.stringify(profile));
+			localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		}
 	}
 
-	async getPinnedKdfParams(accountId?: string): Promise<KdfParams | null> {
+	async getPinnedKdfProfile(accountId: string): Promise<KdfProfile | null> {
 		if (typeof window === "undefined") {
 			return null;
 		}
-		// Prefer the per-account pin; fall back to the legacy shared key so rows
-		// written before pins were scoped still resolve.
-		const stored =
-			localStorage.getItem(pinnedKdfParamsKey(accountId)) ??
-			localStorage.getItem(PINNED_KDF_PARAMS_STORAGE);
+		const stored = localStorage.getItem(pinnedKdfProfileKey(accountId));
 		if (!stored) {
 			return null;
 		}
-		try {
-			return JSON.parse(stored) as KdfParams;
-		} catch {
-			return null;
-		}
+		return parseStoredKdfProfile(stored);
 	}
 
 	// ============================================================================
@@ -803,7 +791,9 @@ export class WebStorageAdapter implements IStorageAdapter {
 		localStorage.removeItem(SECRET_KEY_STORAGE);
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
-		localStorage.removeItem(pinnedKdfParamsKey(accountId));
+		if (accountId) {
+			localStorage.removeItem(pinnedKdfProfileKey(accountId));
+		}
 		localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		localStorage.removeItem(TRAVEL_MODE_CACHE_KEY);
 		await this.clearSession();

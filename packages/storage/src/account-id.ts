@@ -29,6 +29,40 @@ export function findAccountById(
 	return accounts.find((a) => a.accountId === accountId);
 }
 
+/** Canonicalize a server URL for local account identity comparisons. */
+export function normalizeAccountServerUrl(serverUrl: string): string {
+	const trimmed = serverUrl.trim();
+	try {
+		return new URL(trimmed).toString().replace(/\/+$/, "");
+	} catch {
+		return trimmed.replace(/\/+$/, "");
+	}
+}
+
+/**
+ * Resolve one existing account by normalized server URL + normalized email.
+ * Ambiguous metadata is rejected instead of guessing which downgrade pin to use.
+ */
+export function findAccountByServerEmail(
+	accounts: AccountMetadata[],
+	serverUrl: string,
+	email: string,
+): AccountMetadata | undefined {
+	const normalizedUrl = normalizeAccountServerUrl(serverUrl);
+	const normalizedEmail = email.trim().toLowerCase();
+	const matches = accounts.filter(
+		(account) =>
+			normalizeAccountServerUrl(account.serverUrl ?? "") === normalizedUrl &&
+			account.email.trim().toLowerCase() === normalizedEmail,
+	);
+	if (matches.length > 1) {
+		throw new Error(
+			`Ambiguous account for server and email: ${normalizedUrl} ${normalizedEmail}`,
+		);
+	}
+	return matches[0];
+}
+
 /** Find accountId for a display email within a known accounts list. */
 export function resolveAccountIdFromEmailInList(
 	accounts: AccountMetadata[],
@@ -82,11 +116,11 @@ export function findAccountByServerUser(
 	serverUrl: string,
 	userId: string,
 ): AccountMetadata | undefined {
-	const normalizedUrl = serverUrl.replace(/\/$/, "");
+	const normalizedUrl = normalizeAccountServerUrl(serverUrl);
 	return accounts.find(
 		(a) =>
 			a.userId === userId &&
-			(a.serverUrl ?? "").replace(/\/$/, "") === normalizedUrl,
+			normalizeAccountServerUrl(a.serverUrl ?? "") === normalizedUrl,
 	);
 }
 
@@ -114,7 +148,7 @@ export function resolveOrCreateAccountId(
 	}
 	const legacyCandidate = legacyCandidates[0];
 	if (legacyCandidate) {
-		legacyCandidate.serverUrl = serverUrl.replace(/\/$/, "");
+		legacyCandidate.serverUrl = normalizeAccountServerUrl(serverUrl);
 		return legacyCandidate.accountId;
 	}
 	return generateAccountId();

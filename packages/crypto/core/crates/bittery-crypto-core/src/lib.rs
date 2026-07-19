@@ -5,8 +5,8 @@
 
 pub mod encryption;
 pub mod error;
-pub mod key_derivation;
 pub mod kdf_policy;
+pub mod key_derivation;
 pub mod key_rotation;
 pub mod passkey;
 pub mod recovery;
@@ -21,18 +21,18 @@ pub use encryption::{
     EncryptedData,
 };
 pub use error::CryptoError;
+pub use kdf_policy::{
+    current_kdf_profile, is_current_kdf_profile, maximum_iterations, minimum_iterations,
+    validate_kdf_profile, KdfProfile,
+};
 pub use key_derivation::{
     derive_keys, derive_keys_from_master_key, derive_master_key, DerivedKeys, PBKDF2_ITERATIONS,
-};
-pub use kdf_policy::{
-    default_login_kdf_params, validate_server_kdf_params, KdfParams, KDF_ALGORITHM_PBKDF2_SHA256,
-    KDF_SCHEMA_VERSION, MIN_PBKDF2_ITERATIONS,
 };
 pub use key_rotation::{
     decrypt_vault_key_with_muk, encrypt_vault_key_for_member, encrypt_vault_key_with_muk,
     perform_key_rotation, re_encrypt_item, validate_rotation_data, ItemData, KeyRotationResult,
-    MemberEncryptedKey, MemberKeyData, ReEncryptedItem, ValidationResult,
-    VaultKeyWrapContext, WrappedVaultKeyData, VAULT_KEY_WRAP_ENTITY_TYPE, VAULT_KEY_WRAP_PURPOSE,
+    MemberEncryptedKey, MemberKeyData, ReEncryptedItem, ValidationResult, VaultKeyWrapContext,
+    WrappedVaultKeyData, VAULT_KEY_WRAP_ENTITY_TYPE, VAULT_KEY_WRAP_PURPOSE,
 };
 pub use passkey::{
     build_attestation_object, build_authenticator_data, build_passkey_attestation_object,

@@ -2,7 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
-import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
+import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
@@ -25,7 +25,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { getActiveAccountKdfParams, storage } from "@/lib/storage";
+import { getActiveAccountKdfProfile, storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeys,
@@ -90,12 +90,13 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 		try {
 			// 1. Derive old keys with current email using the params the existing
 			// account was keyed with (not the current default).
-			const oldKdfParams = await getActiveAccountKdfParams();
+			const { accountId, profile: oldProfile } =
+				await getActiveAccountKdfProfile();
 			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
 				currentPassword,
 				secretKey,
 				currentEmail,
-				oldKdfParams,
+				oldProfile,
 			);
 
 			// 2. Decrypt private key with old MUK to verify password
@@ -109,8 +110,14 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 
 			// 3. Derive new keys with new email (same password, same secret key)
 			const normalizedNewEmail = newEmail.trim().toLowerCase();
+			const newProfile = currentKdfProfile();
 			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
-				await deriveKeys(currentPassword, secretKey, normalizedNewEmail);
+				await deriveKeys(
+					currentPassword,
+					secretKey,
+					normalizedNewEmail,
+					newProfile,
+				);
 
 			// 4. Generate new SRP credentials
 			const authKeyString = new TextDecoder().decode(newAuthKey);
@@ -178,8 +185,9 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
-				kdfParams: defaultKdfParamsInput(),
+				kdfParams: newProfile,
 			});
+			await storage.storePinnedKdfProfile(newProfile, accountId);
 
 			toast.success(m.settings_change_email_dialog_toast_updated());
 			setOpen(false);

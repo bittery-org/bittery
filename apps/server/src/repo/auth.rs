@@ -6,7 +6,9 @@ use crate::{
     error::AppError,
     integrations::storage,
     repo::common::generate_resource_id,
-    services::auth::{AuthVaultKeyResponse, EncryptedVaultKeyInput, RecoveryVaultKeyResponse},
+    services::auth::{
+        AuthVaultKeyResponse, EncryptedVaultKeyInput, RecoveryVaultKeyResponse, ValidatedKdfProfile,
+    },
 };
 
 // ---------------------------------------------------------------------------
@@ -57,21 +59,7 @@ pub struct CreateUserParams<'a> {
     pub encrypted_private_key: &'a str,
     pub encrypted_master_key: Option<&'a str>,
     pub recovery_key_hint: Option<&'a str>,
-    pub kdf_algorithm: &'a str,
-    pub kdf_iterations: i32,
-    pub kdf_schema_version: i32,
-}
-
-/// Per-user KDF parameters written alongside any credential rewrite.
-///
-/// Bundled into a struct so credential-mutation queries don't accrue extra
-/// positional arguments (keeps clippy's `too_many_arguments` happy and prevents
-/// accidental argument transposition).
-#[derive(Clone, Copy)]
-pub struct KdfParamsStorage<'a> {
-    pub algorithm: &'a str,
-    pub iterations: i32,
-    pub schema_version: i32,
+    pub kdf_profile: ValidatedKdfProfile,
 }
 
 pub async fn insert_user_account(
@@ -92,9 +80,9 @@ pub async fn insert_user_account(
     .bind(params.encrypted_private_key)
     .bind(params.encrypted_master_key)
     .bind(params.recovery_key_hint)
-    .bind(params.kdf_algorithm)
-    .bind(params.kdf_iterations)
-    .bind(params.kdf_schema_version)
+    .bind(params.kdf_profile.algorithm)
+    .bind(params.kdf_profile.iterations)
+    .bind(params.kdf_profile.schema_version)
     .execute(transaction.as_mut())
     .await
     .map_err(|e| {
@@ -234,7 +222,7 @@ pub async fn update_user_email_data(
     srp_verifier: &str,
     encrypted_private_key: &str,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
-    kdf: KdfParamsStorage<'_>,
+    kdf: ValidatedKdfProfile,
 ) -> Result<(), AppError> {
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start email update transaction");
@@ -272,7 +260,7 @@ pub async fn update_user_password_data(
     srp_verifier: &str,
     encrypted_private_key: &str,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
-    kdf: KdfParamsStorage<'_>,
+    kdf: ValidatedKdfProfile,
 ) -> Result<(), AppError> {
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start password update transaction");
@@ -311,7 +299,7 @@ pub async fn update_user_secret_key_data(
     srp_verifier: &str,
     encrypted_private_key: &str,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
-    kdf: KdfParamsStorage<'_>,
+    kdf: ValidatedKdfProfile,
 ) -> Result<(), AppError> {
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start secret key transaction");
@@ -357,7 +345,7 @@ pub async fn reset_user_password_with_recovery(
     recovery_key_hint: &str,
     secret_key_hint: Option<&str>,
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
-    kdf: KdfParamsStorage<'_>,
+    kdf: ValidatedKdfProfile,
 ) -> Result<(String, Vec<String>), AppError> {
     let now = OffsetDateTime::now_utc();
     let mut transaction = pool.begin().await.map_err(|e| {

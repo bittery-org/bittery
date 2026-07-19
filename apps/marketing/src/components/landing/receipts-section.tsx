@@ -8,7 +8,7 @@ const RECEIPTS = [
 		body: "Every item is sealed before it leaves your machine, with ciphertext bound to its vault so it can't be swapped or replayed.",
 	},
 	{
-		mono: "PBKDF2 · 310,000 → HKDF",
+		mono: "PBKDF2 · 600,000 → HKDF",
 		title: "Two keys, not one",
 		body: "Your master password plus a device-held Secret Key derive your keys. Guessing one gets an attacker nothing.",
 	},

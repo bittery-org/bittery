@@ -84,12 +84,18 @@ object NativeCrypto {
     fun deriveKeys(
         password: String,
         secretKey: String,
-        email: String
+        email: String,
+        schemaVersion: Int,
+        algorithm: String,
+        iterations: Int
     ): DerivedKeysResult {
         if (!isAvailable) {
             return DerivedKeysResult(null, null, "Native crypto library not available")
         }
-        return nativeDeriveKeys(password, secretKey, email)
+        if (schemaVersion != 1 || algorithm != "pbkdf2-sha256" || iterations !in 600_000..1_200_000) {
+            return DerivedKeysResult(null, null, "Invalid KDF profile")
+        }
+        return nativeDeriveKeys(password, secretKey, email, schemaVersion, algorithm, iterations)
     }
 
     // ============================================================================
@@ -295,7 +301,10 @@ object NativeCrypto {
     private external fun nativeDeriveKeys(
         password: String,
         secretKey: String,
-        email: String
+        email: String,
+        schemaVersion: Int,
+        algorithm: String,
+        iterations: Int
     ): DerivedKeysResult
 
     private external fun nativeEncrypt(

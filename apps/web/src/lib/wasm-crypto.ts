@@ -50,7 +50,7 @@ import type {
 	DerivedKeys,
 	EncryptedData,
 	EncryptionContext,
-	KdfParams,
+	KdfProfile,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
@@ -205,7 +205,7 @@ export async function deriveKeys(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
-	params?: KdfParams,
+	profile: KdfProfile,
 ): Promise<DerivedKeys> {
 	await autoInit();
 
@@ -213,8 +213,9 @@ export async function deriveKeys(
 		accountPassword,
 		secretKey,
 		email,
-		params?.iterations,
-		params?.algorithm,
+		profile.schemaVersion,
+		profile.algorithm,
+		profile.iterations,
 	);
 
 	return {
@@ -230,7 +231,7 @@ export async function deriveKeyHandles(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
-	params?: KdfParams,
+	profile: KdfProfile,
 ): Promise<DerivedKeyHandles> {
 	await autoInit();
 
@@ -238,8 +239,9 @@ export async function deriveKeyHandles(
 		accountPassword,
 		secretKey,
 		email,
-		params?.iterations,
-		params?.algorithm,
+		profile.schemaVersion,
+		profile.algorithm,
+		profile.iterations,
 	);
 
 	return {
@@ -303,7 +305,7 @@ export async function deriveMasterKey(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
-	params?: KdfParams,
+	profile: KdfProfile,
 ): Promise<Uint8Array> {
 	await autoInit();
 
@@ -311,8 +313,9 @@ export async function deriveMasterKey(
 		accountPassword,
 		secretKey,
 		email,
-		params?.iterations,
-		params?.algorithm,
+		profile.schemaVersion,
+		profile.algorithm,
+		profile.iterations,
 	);
 	return base64ToUint8Array(masterKeyBase64);
 }

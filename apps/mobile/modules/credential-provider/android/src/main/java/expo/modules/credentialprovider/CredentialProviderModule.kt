@@ -670,6 +670,9 @@ class CredentialProviderModule : Module() {
          *
          * @param dataJson JSON string containing:
          *   - userId: String
+         *   - email: String
+         *   - secretKey: String
+         *   - kdfProfile: { schemaVersion, algorithm, iterations }
          *   - vaultKeys: List of vault key objects
          *   - items: List of item objects (login items only)
          */
@@ -682,9 +685,20 @@ class CredentialProviderModule : Module() {
                     // Parse JSON string
                     val jsonObject = JSONObject(dataJson)
                     val userId = jsonObject.optString("userId", "")
+                    val email = jsonObject.optString("email", "")
+                    val secretKey = jsonObject.optString("secretKey", "")
+                    val kdfProfile = jsonObject.optJSONObject("kdfProfile")
 
-                    if (userId.isBlank()) {
-                        promise.reject("INVALID_PARAMS", "userId is required", null)
+                    if (userId.isBlank() || email.isBlank() || secretKey.isBlank() || kdfProfile == null) {
+                        promise.reject("INVALID_PARAMS", "Complete account and KDF profile data is required", null)
+                        return@launch
+                    }
+
+                    val kdfSchemaVersion = kdfProfile.optInt("schemaVersion", -1)
+                    val kdfAlgorithm = kdfProfile.optString("algorithm", "")
+                    val kdfIterations = kdfProfile.optInt("iterations", -1)
+                    if (kdfSchemaVersion != 1 || kdfAlgorithm != "pbkdf2-sha256" || kdfIterations !in 600_000..1_200_000) {
+                        promise.reject("INVALID_PARAMS", "Invalid KDF profile", null)
                         return@launch
                     }
 
@@ -705,22 +719,32 @@ class CredentialProviderModule : Module() {
                     Log.d(TAG, "syncVaultData: Syncing ${vaultKeysData.size} vault keys and ${itemsData.size} items for user $userId")
 
 	                    withContext(Dispatchers.IO) {
-                        // Ensure AuthDataEntity exists for this user
-                        // If it doesn't exist, create a minimal one
+                        // Real account synchronization always replaces nullable
+                        // placeholder profile metadata with a complete profile.
                         val existingAuthData = database.authDataDao().getByUserId(userId)
-                        if (existingAuthData == null) {
-                            Log.d(TAG, "Creating minimal AuthDataEntity for user $userId")
-                            val authData = AuthDataEntity(
-                                email = "", // Will be updated when we have the email
+                        val authData = if (existingAuthData == null) {
+                            AuthDataEntity(
+                                email = email,
                                 userId = userId,
-                                secretKey = "", // Placeholder
+                                secretKey = secretKey,
                                 srpSalt = "",
                                 publicKey = "",
                                 encryptedPrivateKey = "",
-                                encryptedPrivateKeyIv = ""
+                                encryptedPrivateKeyIv = "",
+                                kdfSchemaVersion = kdfSchemaVersion,
+                                kdfAlgorithm = kdfAlgorithm,
+                                kdfIterations = kdfIterations
                             )
-                            database.authDataDao().insert(authData)
+                        } else {
+                            existingAuthData.copy(
+                                email = email,
+                                secretKey = secretKey,
+                                kdfSchemaVersion = kdfSchemaVersion,
+                                kdfAlgorithm = kdfAlgorithm,
+                                kdfIterations = kdfIterations
+                            )
                         }
+                        database.authDataDao().insert(authData)
 
                         // Parse and insert vault keys
                         val vaultKeys = vaultKeysData.mapNotNull { keyData ->

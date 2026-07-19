@@ -54,13 +54,21 @@ object KeyDerivation {
     fun deriveKeys(
         accountPassword: String,
         secretKey: String,
-        email: String
+        email: String,
+        schemaVersion: Int?,
+        algorithm: String?,
+        iterations: Int?
     ): DerivedKeys {
         if (!NativeCrypto.isAvailable) {
             throw RuntimeException("Native crypto library not available")
         }
 
-        val result = NativeCrypto.deriveKeys(accountPassword, secretKey, email)
+        if (schemaVersion == null || algorithm == null || iterations == null) {
+            throw RuntimeException("Reauthentication required: missing KDF profile")
+        }
+        val result = NativeCrypto.deriveKeys(
+            accountPassword, secretKey, email, schemaVersion, algorithm, iterations
+        )
 
         if (!result.isSuccess || result.authKey == null || result.masterUnlockKey == null) {
             throw RuntimeException("Key derivation failed: ${result.error ?: "Unknown error"}")

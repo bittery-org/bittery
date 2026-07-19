@@ -35,7 +35,7 @@ import init, {
 } from "@bittery/crypto-wasm";
 import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
 import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
-import type { EncryptionContext, KdfParams } from "@bittery/types";
+import type { EncryptionContext, KdfProfile } from "@bittery/types";
 
 let initialized = false;
 let srpClient: JsSrpClient | null = null;
@@ -89,14 +89,14 @@ type WorkerRequest = {
 			password: string;
 			secretKey: string;
 			email: string;
-			params?: KdfParams;
+			profile: KdfProfile;
 	  }
 	| {
 			type: "deriveKeyHandles";
 			password: string;
 			secretKey: string;
 			email: string;
-			params?: KdfParams;
+			profile: KdfProfile;
 	  }
 	| { type: "deriveSrpPasswordFromHandle"; authKeyHandle: number }
 	| { type: "cloneKeyHandle"; keyHandle: number }
@@ -107,6 +107,7 @@ type WorkerRequest = {
 			password: string;
 			secretKey: string;
 			email: string;
+			profile: KdfProfile;
 	  }
 	| { type: "deriveKeysFromMasterKey"; masterKeyBase64: string; email: string }
 	| { type: "generateClientEphemeral" }
@@ -207,8 +208,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 					msg.password,
 					msg.secretKey,
 					msg.email,
-					msg.params?.iterations,
-					msg.params?.algorithm,
+					msg.profile.schemaVersion,
+					msg.profile.algorithm,
+					msg.profile.iterations,
 				);
 				result = {
 					authKey: derived.auth_key,
@@ -221,8 +223,9 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 					msg.password,
 					msg.secretKey,
 					msg.email,
-					msg.params?.iterations,
-					msg.params?.algorithm,
+					msg.profile.schemaVersion,
+					msg.profile.algorithm,
+					msg.profile.iterations,
 				);
 				result = {
 					authKeyHandle: fromWasmHandle(handles.auth_key_handle),
@@ -252,7 +255,14 @@ self.onmessage = async (e: MessageEvent<WorkerRequest>) => {
 				break;
 			}
 			case "deriveMasterKey": {
-				result = wasmDeriveMasterKey(msg.password, msg.secretKey, msg.email);
+				result = wasmDeriveMasterKey(
+					msg.password,
+					msg.secretKey,
+					msg.email,
+					msg.profile.schemaVersion,
+					msg.profile.algorithm,
+					msg.profile.iterations,
+				);
 				break;
 			}
 			case "deriveKeysFromMasterKey": {

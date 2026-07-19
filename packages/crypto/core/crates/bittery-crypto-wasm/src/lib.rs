@@ -3,19 +3,16 @@
 //! Exposes the core crypto library to JavaScript/TypeScript via wasm-bindgen.
 
 use bittery_crypto_core::{
-    decrypt, decrypt_master_key, derive_keys, derive_keys_from_master_key, derive_master_key,
-    decrypt_with_aad, encrypt, encrypt_master_key, encrypt_with_aad, generate_credential_id,
-    generate_encryption_key, generate_uuid,
-    generate_passkey_keypair, generate_recovery_key, generate_rsa_key_pair, generate_secret_key,
-    get_secret_key_hint,
-    kdf_policy::{KdfParams, KDF_ALGORITHM_PBKDF2_SHA256},
+    decrypt, decrypt_master_key, decrypt_with_aad, derive_keys, derive_keys_from_master_key,
+    derive_master_key, encrypt, encrypt_master_key, encrypt_with_aad, generate_credential_id,
+    generate_encryption_key, generate_passkey_keypair, generate_recovery_key,
+    generate_rsa_key_pair, generate_secret_key, generate_uuid, get_secret_key_hint,
+    kdf_policy::KdfProfile,
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
-    PBKDF2_ITERATIONS,
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_recovery_key, validate_secret_key, validate_server_kdf_params, AadContext,
-    EncryptedData,
+    validate_kdf_profile, validate_recovery_key, validate_secret_key, AadContext, EncryptedData,
 };
 use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
@@ -207,13 +204,12 @@ impl From<JsAadContext> for AadContext {
 // Key Derivation
 // ============================================================================
 
-/// Resolve optional KDF params to concrete values, defaulting to the current
-/// PBKDF2-SHA256 baseline when the caller does not negotiate them.
-fn resolve_kdf_params(algorithm: Option<String>, iterations: Option<u32>) -> (String, u32) {
-    (
-        algorithm.unwrap_or_else(|| KDF_ALGORITHM_PBKDF2_SHA256.to_string()),
-        iterations.unwrap_or(PBKDF2_ITERATIONS),
-    )
+fn profile(schema_version: u32, algorithm: String, iterations: u32) -> KdfProfile {
+    KdfProfile {
+        schema_version,
+        algorithm,
+        iterations,
+    }
 }
 
 /// Derive authentication and master unlock keys from password + secret key
@@ -222,12 +218,17 @@ pub fn js_derive_keys(
     account_password: &str,
     secret_key: &str,
     email: &str,
-    iterations: Option<u32>,
-    algorithm: Option<String>,
+    schema_version: u32,
+    algorithm: String,
+    iterations: u32,
 ) -> Result<JsDerivedKeys, JsError> {
-    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
-    let keys = derive_keys(account_password, secret_key, email, &algorithm, iterations)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let keys = derive_keys(
+        account_password,
+        secret_key,
+        email,
+        &profile(schema_version, algorithm, iterations),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(JsDerivedKeys {
         auth_key: base64_encode(&keys.auth_key),
@@ -241,12 +242,17 @@ pub fn js_derive_keys_handle(
     account_password: &str,
     secret_key: &str,
     email: &str,
-    iterations: Option<u32>,
-    algorithm: Option<String>,
+    schema_version: u32,
+    algorithm: String,
+    iterations: u32,
 ) -> Result<JsDerivedKeyHandles, JsError> {
-    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
-    let keys = derive_keys(account_password, secret_key, email, &algorithm, iterations)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let keys = derive_keys(
+        account_password,
+        secret_key,
+        email,
+        &profile(schema_version, algorithm, iterations),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
 
     let auth_key_handle = insert_key_handle(&keys.auth_key);
     let master_unlock_key_handle = insert_key_handle(&keys.master_unlock_key);
@@ -263,12 +269,17 @@ pub fn js_derive_master_key(
     account_password: &str,
     secret_key: &str,
     email: &str,
-    iterations: Option<u32>,
-    algorithm: Option<String>,
+    schema_version: u32,
+    algorithm: String,
+    iterations: u32,
 ) -> Result<String, JsError> {
-    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
-    let master_key = derive_master_key(account_password, secret_key, email, &algorithm, iterations)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let master_key = derive_master_key(
+        account_password,
+        secret_key,
+        email,
+        &profile(schema_version, algorithm, iterations),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(base64_encode(&master_key))
 }
 
@@ -278,12 +289,17 @@ pub fn js_derive_master_key_handle(
     account_password: &str,
     secret_key: &str,
     email: &str,
-    iterations: Option<u32>,
-    algorithm: Option<String>,
+    schema_version: u32,
+    algorithm: String,
+    iterations: u32,
 ) -> Result<u64, JsError> {
-    let (algorithm, iterations) = resolve_kdf_params(algorithm, iterations);
-    let master_key = derive_master_key(account_password, secret_key, email, &algorithm, iterations)
-        .map_err(|e| JsError::new(&e.to_string()))?;
+    let master_key = derive_master_key(
+        account_password,
+        secret_key,
+        email,
+        &profile(schema_version, algorithm, iterations),
+    )
+    .map_err(|e| JsError::new(&e.to_string()))?;
     Ok(insert_key_handle(&master_key))
 }
 
@@ -360,15 +376,15 @@ pub fn js_derive_srp_password_from_handle(auth_key_handle: u64) -> Result<String
 // KDF Policy Validation
 // ============================================================================
 
-#[wasm_bindgen(js_name = validateServerKdfParams)]
-pub fn js_validate_server_kdf_params(
-    server_params: JsValue,
-    pinned_params: Option<JsValue>,
+#[wasm_bindgen(js_name = validateKdfProfile)]
+pub fn js_validate_kdf_profile(
+    profile: JsValue,
+    pinned_profile: Option<JsValue>,
 ) -> Result<(), JsError> {
-    let server: KdfParams = serde_wasm_bindgen::from_value(server_params)
-        .map_err(|e| JsError::new(&format!("Invalid server KDF params: {}", e)))?;
+    let profile: KdfProfile = serde_wasm_bindgen::from_value(profile)
+        .map_err(|e| JsError::new(&format!("Invalid KDF profile: {}", e)))?;
 
-    let pinned: Option<KdfParams> = match pinned_params {
+    let pinned: Option<KdfProfile> = match pinned_profile {
         Some(value) => Some(
             serde_wasm_bindgen::from_value(value)
                 .map_err(|e| JsError::new(&format!("Invalid pinned KDF params: {}", e)))?,
@@ -376,8 +392,7 @@ pub fn js_validate_server_kdf_params(
         None => None,
     };
 
-    validate_server_kdf_params(&server, pinned.as_ref())
-        .map_err(|e| JsError::new(&e.to_string()))
+    validate_kdf_profile(&profile, pinned.as_ref()).map_err(|e| JsError::new(&e.to_string()))
 }
 
 // ============================================================================
@@ -641,8 +656,8 @@ pub fn js_encrypt_master_key(
     email: &str,
 ) -> Result<JsEncryptedData, JsError> {
     let master_key = base64_decode(master_key_base64)?;
-    let encrypted =
-        encrypt_master_key(&master_key, recovery_key, email).map_err(|e| JsError::new(&e.to_string()))?;
+    let encrypted = encrypt_master_key(&master_key, recovery_key, email)
+        .map_err(|e| JsError::new(&e.to_string()))?;
 
     Ok(JsEncryptedData {
         ciphertext: encrypted.ciphertext,
@@ -1203,8 +1218,9 @@ mod tests {
             "password",
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
             "test@example.com",
-            None,
-            None,
+            1,
+            "pbkdf2-sha256".to_string(),
+            600_000,
         );
         assert!(result.is_ok());
     }
@@ -1239,8 +1255,8 @@ mod tests {
         )
         .unwrap();
 
-        let encrypted = js_encrypt_master_key(&master_key, &recovery_key, "test@example.com")
-            .unwrap();
+        let encrypted =
+            js_encrypt_master_key(&master_key, &recovery_key, "test@example.com").unwrap();
         let decrypted =
             js_decrypt_master_key(encrypted, &recovery_key, "test@example.com").unwrap();
         assert_eq!(master_key, decrypted);

@@ -828,6 +828,9 @@ importers:
       '@bittery/rust-rpc':
         specifier: workspace:*
         version: link:../rust-rpc
+      '@bittery/types':
+        specifier: workspace:*
+        version: link:../types
       '@tanstack/react-query':
         specifier: ^5.85.5
         version: 5.90.19(react@19.1.0)

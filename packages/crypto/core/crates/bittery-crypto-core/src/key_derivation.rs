@@ -9,14 +9,12 @@ use sha2::Sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::CryptoError;
-use crate::kdf_policy::KDF_ALGORITHM_PBKDF2_SHA256;
+use crate::kdf_policy::{validate_kdf_profile, KdfProfile};
 
 /// Default number of PBKDF2 iterations.
 ///
-/// This is only the default used to build `KdfParams` when the caller does not
-/// negotiate a value. It is NOT read directly by the derivation functions; the
-/// actual iteration count is threaded in via the `iterations` parameter so the
-/// KDF stays agile (see issue #32).
+/// Current iteration count retained for compatibility with non-profile callers.
+/// Account key derivation receives the complete required `KdfProfile` instead.
 pub const PBKDF2_ITERATIONS: u32 = 600_000;
 
 /// Key length in bytes (256 bits)
@@ -57,11 +55,9 @@ pub fn derive_keys(
     account_password: &str,
     secret_key: &str,
     email: &str,
-    algorithm: &str,
-    iterations: u32,
+    profile: &KdfProfile,
 ) -> Result<DerivedKeys, CryptoError> {
-    let mut master_key =
-        derive_master_key(account_password, secret_key, email, algorithm, iterations)?;
+    let mut master_key = derive_master_key(account_password, secret_key, email, profile)?;
     let derived_keys = derive_keys_from_master_key(&master_key, email);
     master_key.zeroize();
     derived_keys
@@ -76,14 +72,9 @@ pub fn derive_master_key(
     account_password: &str,
     secret_key: &str,
     email: &str,
-    algorithm: &str,
-    iterations: u32,
+    profile: &KdfProfile,
 ) -> Result<[u8; KEY_LENGTH], CryptoError> {
-    if !algorithm.eq_ignore_ascii_case(KDF_ALGORITHM_PBKDF2_SHA256) {
-        return Err(CryptoError::InvalidInput(format!(
-            "Unsupported KDF algorithm: {algorithm}"
-        )));
-    }
+    validate_kdf_profile(profile, None)?;
 
     // Combine with length prefixes: [len(password)][password][len(secret)][secret]
     let password_bytes = account_password.as_bytes();
@@ -104,7 +95,7 @@ pub fn derive_master_key(
 
     // Derive master key using PBKDF2
     let mut master_key = [0u8; KEY_LENGTH];
-    pbkdf2_hmac::<Sha256>(&combined, &salt_bytes, iterations, &mut master_key);
+    pbkdf2_hmac::<Sha256>(&combined, &salt_bytes, profile.iterations, &mut master_key);
 
     combined.zeroize();
     salt_bytes.zeroize();
@@ -155,8 +146,14 @@ pub fn derive_keys_from_master_key(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::kdf_policy::current_kdf_profile;
 
-    const ALG: &str = KDF_ALGORITHM_PBKDF2_SHA256;
+    fn profile(iterations: u32) -> KdfProfile {
+        KdfProfile {
+            iterations,
+            ..current_kdf_profile()
+        }
+    }
 
     #[test]
     fn test_derive_keys_deterministic() {
@@ -164,11 +161,33 @@ mod tests {
         let secret_key = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
         let email = "test@example.com";
 
-        let keys1 = derive_keys(password, secret_key, email, ALG, PBKDF2_ITERATIONS).unwrap();
-        let keys2 = derive_keys(password, secret_key, email, ALG, PBKDF2_ITERATIONS).unwrap();
+        let keys1 = derive_keys(password, secret_key, email, &profile(PBKDF2_ITERATIONS)).unwrap();
+        let keys2 = derive_keys(password, secret_key, email, &profile(PBKDF2_ITERATIONS)).unwrap();
 
         assert_eq!(keys1.auth_key, keys2.auth_key);
         assert_eq!(keys1.master_unlock_key, keys2.master_unlock_key);
+    }
+
+    #[test]
+    fn test_derive_keys_matches_cross_platform_600k_vector() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+
+        let keys = derive_keys(
+            "testPassword123!",
+            "A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX",
+            "test@example.com",
+            &current_kdf_profile(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            STANDARD.encode(keys.auth_key),
+            "ZceGVJ8qMMsFI+KQQBwCkK36+s1tZcnalkgD5HX8JCk="
+        );
+        assert_eq!(
+            STANDARD.encode(keys.master_unlock_key),
+            "o3TQ32pQg8cRvihBOAZxiA+Hz+7+o4wqWSlt4s0McNo="
+        );
     }
 
     #[test]
@@ -177,9 +196,14 @@ mod tests {
         let secret_key = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
         let email = "test@example.com";
 
-        let keys1 = derive_keys(password, secret_key, email, ALG, PBKDF2_ITERATIONS).unwrap();
-        let keys2 =
-            derive_keys("different_password", secret_key, email, ALG, PBKDF2_ITERATIONS).unwrap();
+        let keys1 = derive_keys(password, secret_key, email, &profile(PBKDF2_ITERATIONS)).unwrap();
+        let keys2 = derive_keys(
+            "different_password",
+            secret_key,
+            email,
+            &profile(PBKDF2_ITERATIONS),
+        )
+        .unwrap();
 
         assert_ne!(keys1.auth_key, keys2.auth_key);
         assert_ne!(keys1.master_unlock_key, keys2.master_unlock_key);
@@ -191,13 +215,11 @@ mod tests {
         let secret_key = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
         let email = "test@example.com";
 
-        // The whole point of issue #32: the iteration count must actually flow
-        // into the derivation, so 310k and 600k produce different keys.
-        let keys_310k = derive_keys(password, secret_key, email, ALG, 310_000).unwrap();
-        let keys_600k = derive_keys(password, secret_key, email, ALG, 600_000).unwrap();
+        let keys_600k = derive_keys(password, secret_key, email, &profile(600_000)).unwrap();
+        let keys_1200k = derive_keys(password, secret_key, email, &profile(1_200_000)).unwrap();
 
-        assert_ne!(keys_310k.auth_key, keys_600k.auth_key);
-        assert_ne!(keys_310k.master_unlock_key, keys_600k.master_unlock_key);
+        assert_ne!(keys_600k.auth_key, keys_1200k.auth_key);
+        assert_ne!(keys_600k.master_unlock_key, keys_1200k.master_unlock_key);
     }
 
     #[test]
@@ -206,8 +228,10 @@ mod tests {
             "password",
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
             "test@example.com",
-            "argon2id",
-            PBKDF2_ITERATIONS,
+            &KdfProfile {
+                algorithm: "argon2id".to_string(),
+                ..current_kdf_profile()
+            },
         );
         assert!(matches!(result, Err(CryptoError::InvalidInput(_))));
     }
@@ -217,10 +241,20 @@ mod tests {
         let password = "test_password";
         let secret_key = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
 
-        let keys1 =
-            derive_keys(password, secret_key, "Test@Example.com", ALG, PBKDF2_ITERATIONS).unwrap();
-        let keys2 =
-            derive_keys(password, secret_key, "test@example.com", ALG, PBKDF2_ITERATIONS).unwrap();
+        let keys1 = derive_keys(
+            password,
+            secret_key,
+            "Test@Example.com",
+            &current_kdf_profile(),
+        )
+        .unwrap();
+        let keys2 = derive_keys(
+            password,
+            secret_key,
+            "test@example.com",
+            &current_kdf_profile(),
+        )
+        .unwrap();
 
         assert_eq!(keys1.auth_key, keys2.auth_key);
         assert_eq!(keys1.master_unlock_key, keys2.master_unlock_key);
@@ -228,8 +262,13 @@ mod tests {
 
     #[test]
     fn test_key_lengths() {
-        let keys =
-            derive_keys("password", "secret", "email@test.com", ALG, PBKDF2_ITERATIONS).unwrap();
+        let keys = derive_keys(
+            "password",
+            "secret",
+            "email@test.com",
+            &current_kdf_profile(),
+        )
+        .unwrap();
         assert_eq!(keys.auth_key.len(), 32);
         assert_eq!(keys.master_unlock_key.len(), 32);
     }
@@ -237,8 +276,8 @@ mod tests {
     #[test]
     fn test_length_prefixed_inputs_prevent_pipe_collisions() {
         let email = "test@example.com";
-        let keys1 = derive_keys("a|b", "c", email, ALG, PBKDF2_ITERATIONS).unwrap();
-        let keys2 = derive_keys("a", "b|c", email, ALG, PBKDF2_ITERATIONS).unwrap();
+        let keys1 = derive_keys("a|b", "c", email, &current_kdf_profile()).unwrap();
+        let keys2 = derive_keys("a", "b|c", email, &current_kdf_profile()).unwrap();
 
         assert_ne!(keys1.auth_key, keys2.auth_key);
         assert_ne!(keys1.master_unlock_key, keys2.master_unlock_key);
@@ -251,9 +290,9 @@ mod tests {
         let email = "test@example.com";
 
         let derived_direct =
-            derive_keys(password, secret_key, email, ALG, PBKDF2_ITERATIONS).unwrap();
+            derive_keys(password, secret_key, email, &current_kdf_profile()).unwrap();
         let master_key =
-            derive_master_key(password, secret_key, email, ALG, PBKDF2_ITERATIONS).unwrap();
+            derive_master_key(password, secret_key, email, &current_kdf_profile()).unwrap();
         let derived_from_master = derive_keys_from_master_key(&master_key, email).unwrap();
 
         assert_eq!(derived_direct.auth_key, derived_from_master.auth_key);

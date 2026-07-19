@@ -2,7 +2,7 @@ import {
 	buildVaultKeyEncryptionContext,
 	isAesEncryptedVaultKey,
 } from "@bittery/shared";
-import { defaultKdfParamsInput } from "@bittery/shared/kdf-policy";
+import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
@@ -25,7 +25,7 @@ import {
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { getActiveAccountKdfParams, storage } from "@/lib/storage";
+import { getActiveAccountKdfProfile, storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeys,
@@ -59,7 +59,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 				vaultId: string;
 				encryptedVaultKey: string;
 			}>;
-			kdfParams: ReturnType<typeof defaultKdfParamsInput>;
+			kdfParams: ReturnType<typeof currentKdfProfile>;
 		}) => rpcClient.auth.changePassword.mutate(input),
 		onSuccess: () => {
 			toast.success(m.settings_change_password_dialog_toast_changed());
@@ -119,12 +119,13 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 		try {
 			// 1. Derive old keys to decrypt private key using the params the
 			// existing account was keyed with (not the current default).
-			const oldKdfParams = await getActiveAccountKdfParams();
+			const { accountId, profile: oldProfile } =
+				await getActiveAccountKdfProfile();
 			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
 				currentPassword,
 				secretKey,
 				userEmail,
-				oldKdfParams,
+				oldProfile,
 			);
 
 			// 2. Decrypt private key with old master unlock key
@@ -138,8 +139,9 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			);
 
 			// 3. Derive new keys from new password
+			const newProfile = currentKdfProfile();
 			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
-				await deriveKeys(newPassword, secretKey, userEmail);
+				await deriveKeys(newPassword, secretKey, userEmail, newProfile);
 
 			// 4. Generate new SRP credentials
 			const authKeyString = new TextDecoder().decode(newAuthKey);
@@ -205,13 +207,14 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			}
 
 			// 7. Send to server
-			changePasswordMutation.mutate({
+			await changePasswordMutation.mutateAsync({
 				srpSalt,
 				srpVerifier,
 				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
 				encryptedVaultKeys,
-				kdfParams: defaultKdfParamsInput(),
+				kdfParams: newProfile,
 			});
+			await storage.storePinnedKdfProfile(newProfile, accountId);
 		} catch (error) {
 			console.error("Password change error:", error);
 			toast.error(m.settings_change_password_dialog_toast_change_failed());

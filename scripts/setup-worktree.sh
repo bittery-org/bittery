@@ -56,12 +56,13 @@ if ! docker exec "$PG_CONTAINER" pg_isready -U postgres >/dev/null 2>&1; then
 	exit 1
 fi
 
-# Name the database after the branch, sanitised to a legal identifier. The
-# 63-char identifier limit leaves 52 chars once 'bittery_wt_' is prefixed.
+# Name the database after the branch, sanitised to a legal identifier. A hash
+# of the absolute worktree Git directory keeps colliding slugs and duplicate
+# worktrees distinct. The helper enforces PostgreSQL's 63-character limit.
 branch="$(git branch --show-current || true)"
 [[ -n "$branch" ]] || branch="$(basename "$PWD")"
-slug="$(printf '%s' "$branch" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9' '_' | sed -e 's/__*/_/g' -e 's/^_//' -e 's/_$//' | cut -c1-52)"
-worktree_db="bittery_wt_${slug}"
+worktree_git_dir="$(git rev-parse --path-format=absolute --git-dir)"
+worktree_db="$(scripts/worktree-db-name.sh "$branch" "$worktree_git_dir")"
 
 if [[ "$(psql_db "SELECT 1 FROM pg_database WHERE datname = '$worktree_db'")" == "1" ]]; then
 	echo "setup-worktree: reusing existing database '$worktree_db'"

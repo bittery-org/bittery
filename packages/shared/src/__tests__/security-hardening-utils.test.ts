@@ -3,11 +3,9 @@ import {
 	attachVaultKeyWrapContext,
 	buildVaultKeyWrapContext,
 	type EncryptionContextEnvelopeInput,
-	type KdfParamsPolicyInput,
 	serializeEncryptionContext,
 	unwrapPlaintextWithContext,
 	VAULT_KEY_WRAP_PURPOSE,
-	validateServerKdfParamsOrThrow,
 	wrapPlaintextWithContext,
 } from "../index";
 
@@ -18,15 +16,6 @@ function testContext(): EncryptionContextEnvelopeInput {
 		entityType: "item",
 		version: 2,
 		userId: "user_1",
-	};
-}
-
-function testKdfParams(): KdfParamsPolicyInput {
-	return {
-		schemaVersion: 1,
-		algorithm: "pbkdf2-sha256",
-		iterations: 310_000,
-		salt: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
 	};
 }
 
@@ -53,35 +42,6 @@ describe("context envelope helpers", () => {
 		expect(serializeEncryptionContext(context)).toBe(
 			["vault_1", "item_1", "item", "2", "user_1"].join("\0"),
 		);
-	});
-});
-
-describe("kdf policy helper", () => {
-	test("accepts valid unpinned params", () => {
-		expect(() => validateServerKdfParamsOrThrow(testKdfParams())).not.toThrow();
-	});
-
-	test("rejects iteration downgrade against pin", () => {
-		const pinned = { ...testKdfParams(), iterations: 320_000 };
-		expect(() =>
-			validateServerKdfParamsOrThrow(
-				{ ...pinned, iterations: 315_000 },
-				pinned,
-			),
-		).toThrow("KDF iterations downgraded from pinned value");
-	});
-
-	test("rejects salt change against pin", () => {
-		const pinned = testKdfParams();
-		expect(() =>
-			validateServerKdfParamsOrThrow(
-				{
-					...pinned,
-					salt: "deadbeefdeadbeefdeadbeefdeadbeef",
-				},
-				pinned,
-			),
-		).toThrow("KDF salt changed from pinned value");
 	});
 });
 

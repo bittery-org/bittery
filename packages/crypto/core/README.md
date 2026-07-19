@@ -8,7 +8,7 @@ Unified Rust cryptographic core for the Bittery password manager. Compiles to mu
 
 ## Features
 
-- **Key Derivation**: PBKDF2 (310k iterations) + HKDF for deriving auth and master unlock keys
+- **Key Derivation**: PBKDF2-SHA256 (600k iterations) + HKDF for deriving auth and master unlock keys
 - **AES-256-GCM (`AES-GCM-AAD-V1`)**: Symmetric encryption with random IVs and entity context binding support
 - **RSA-4096 OAEP**: Asymmetric encryption for vault sharing
 - **Secret Key Generation**: 1Password-style A3-XXXXXX format
@@ -77,7 +77,14 @@ import init, {
 await init();
 
 // Key derivation
-const keys = deriveKeys('password', 'A3-XXXXXX-...', 'user@example.com');
+const keys = deriveKeys(
+  'password',
+  'A3-XXXXXX-...',
+  'user@example.com',
+  1,
+  'pbkdf2-sha256',
+  600_000,
+);
 console.log(keys.auth_key, keys.master_unlock_key);
 
 // Encryption
@@ -100,12 +107,13 @@ const verifier = client.deriveVerifier(privateKey);
 
 ```rust
 use bittery_crypto_core::{
-    derive_keys, encrypt, decrypt, generate_secret_key,
+    current_kdf_profile, derive_keys, encrypt, decrypt, generate_secret_key,
     srp6a::{SrpClient, SrpServer, HashAlgorithm, PrimeGroup},
 };
 
 // Key derivation
-let keys = derive_keys("password", "A3-XXXXXX-...", "user@example.com")?;
+let profile = current_kdf_profile();
+let keys = derive_keys("password", "A3-XXXXXX-...", "user@example.com", &profile)?;
 
 // Encryption
 let encrypted = encrypt("secret", &keys.master_unlock_key)?;

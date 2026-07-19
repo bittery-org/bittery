@@ -20,6 +20,7 @@
 	"auth_signin_secret_key_help": "Dein Secret Key wurde dir bei der Kontoerstellung bereitgestellt.",
 	"auth_error_travel_mode_verify_failed": "Reisemodus-Einstellungen konnten nicht überprüft werden. Überprüfe deine Verbindung und versuche es erneut.",
 	"auth_error_no_stored_secret_key": "Kein gespeicherter Secret Key gefunden. Bitte melde dich mit deinen vollständigen Zugangsdaten an.",
+	"auth_error_kdf_profile_missing": "Deine gespeicherten Anmelde-Sicherheitseinstellungen fehlen. Bitte melde dich erneut an.",
 	"auth_signin_label_password": "Passwort",
 	"auth_signin_placeholder_password": "Gib dein Passwort ein",
 	"auth_signin_biometric_enable": "Biometrisches Entsperren aktivieren",

@@ -2,7 +2,7 @@
 export type {
 	DerivedKeys,
 	EncryptedData,
-	KdfParams,
+	KdfProfile,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,

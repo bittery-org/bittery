@@ -243,7 +243,7 @@ impl Drop for EnvVarGuard {
 }
 
 pub(crate) async fn seed_user(pool: &PgPool, user_id: &str, name: &str, email: &str) {
-    seed_user_with_kdf(pool, user_id, name, email, 310_000).await;
+    seed_user_with_kdf(pool, user_id, name, email, 600_000).await;
 }
 
 pub(crate) async fn seed_user_with_kdf(

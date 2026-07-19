@@ -4,7 +4,7 @@
  */
 
 import { createWebStorageAdapter } from "@bittery/storage/adapters/web";
-import type { KdfParams } from "@bittery/types";
+import type { KdfProfile } from "@bittery/types";
 import {
 	decrypt,
 	decryptKeyHandleWithWrappingKey,
@@ -41,12 +41,19 @@ export const storage = createWebStorageAdapter(cryptoProvider);
  * decrypt its own data (issue #32). Returns `undefined` when no pin exists so
  * callers fall back to the default.
  */
-export async function getActiveAccountKdfParams(): Promise<
-	KdfParams | undefined
-> {
+export async function getActiveAccountKdfProfile(): Promise<{
+	accountId: string;
+	profile: KdfProfile;
+}> {
 	const active = await storage.getActiveAccount();
-	const accountId = active?.type === "single" ? active.accountId : undefined;
-	return (await storage.getPinnedKdfParams(accountId)) ?? undefined;
+	if (active?.type !== "single") {
+		throw new Error("No active account");
+	}
+	const profile = await storage.getPinnedKdfProfile(active.accountId);
+	if (!profile) {
+		throw new Error("Pinned KDF profile missing; sign in again");
+	}
+	return { accountId: active.accountId, profile };
 }
 
 // Re-export types for convenience

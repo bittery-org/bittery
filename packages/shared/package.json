@@ -39,6 +39,7 @@
 	"dependencies": {
 		"@bittery/device": "workspace:*",
 		"@bittery/rust-rpc": "workspace:*",
+		"@bittery/types": "workspace:*",
 		"@tanstack/react-query": "^5.85.5",
 		"jszip": "^3.10.1"
 	},

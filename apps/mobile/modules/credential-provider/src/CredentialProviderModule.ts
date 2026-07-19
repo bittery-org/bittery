@@ -93,7 +93,8 @@ declare class CredentialProviderModule extends NativeModule<CredentialProviderMo
 	clearEscrow(): boolean;
 
 	/**
-	 * Sync vault keys and items for the unified vault-based autofill system.
+	 * Sync account KDF metadata, vault keys, and items for the unified
+	 * vault-based autofill system. The native side rejects incomplete profiles.
 	 */
 	syncVaultData(dataJson: string): Promise<{
 		vaultKeys: number;

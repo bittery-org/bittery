@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import type { KdfParams } from "@bittery/types";
+import type { KdfProfile } from "@bittery/types";
 import { createWebStorageAdapter } from "./web";
 
 const LEGACY_PIN_KEY = "bittery_pinned_kdf_params";
@@ -22,14 +22,13 @@ class MemoryStorage {
 
 const dummyCrypto = {} as Parameters<typeof createWebStorageAdapter>[0];
 
-const params310k: KdfParams = {
+const profile600k: KdfProfile = {
 	schemaVersion: 1,
 	algorithm: "pbkdf2-sha256",
-	iterations: 310_000,
-	salt: "acct-salt",
+	iterations: 600_000,
 };
 
-describe("web adapter pinned KDF params are per-account", () => {
+describe("web adapter pinned KDF profiles are per-account", () => {
 	beforeEach(() => {
 		const memory = new MemoryStorage();
 		(globalThis as unknown as { window: unknown }).window = {};
@@ -42,28 +41,65 @@ describe("web adapter pinned KDF params are per-account", () => {
 			undefined;
 	});
 
-	it("returns the 310k pin stored for the active account, not the default", async () => {
+	it("returns the pin stored for the requested account", async () => {
 		const storage = createWebStorageAdapter(dummyCrypto);
 
-		await storage.storePinnedKdfParams(params310k, "acct-a");
+		await storage.storePinnedKdfProfile(profile600k, "acct-a");
 
-		expect(await storage.getPinnedKdfParams("acct-a")).toEqual(params310k);
+		expect(await storage.getPinnedKdfProfile("acct-a")).toEqual(profile600k);
 	});
 
 	it("isolates pins between accounts", async () => {
 		const storage = createWebStorageAdapter(dummyCrypto);
 
-		await storage.storePinnedKdfParams(params310k, "acct-a");
+		await storage.storePinnedKdfProfile(profile600k, "acct-a");
 
-		expect(await storage.getPinnedKdfParams("acct-b")).toBeNull();
+		expect(await storage.getPinnedKdfProfile("acct-b")).toBeNull();
 	});
 
-	it("falls back to a legacy shared pin when no per-account pin exists", async () => {
+	it("never returns the obsolete shared pin", async () => {
 		const storage = createWebStorageAdapter(dummyCrypto);
 		(
 			globalThis as unknown as { localStorage: MemoryStorage }
-		).localStorage.setItem(LEGACY_PIN_KEY, JSON.stringify(params310k));
+		).localStorage.setItem(LEGACY_PIN_KEY, JSON.stringify(profile600k));
 
-		expect(await storage.getPinnedKdfParams("acct-legacy")).toEqual(params310k);
+		expect(await storage.getPinnedKdfProfile("acct-legacy")).toBeNull();
+	});
+
+	it("removes the obsolete shared pin on a scoped write", async () => {
+		const storage = createWebStorageAdapter(dummyCrypto);
+		const localStorage = (
+			globalThis as unknown as { localStorage: MemoryStorage }
+		).localStorage;
+		localStorage.setItem(LEGACY_PIN_KEY, JSON.stringify(profile600k));
+
+		await storage.storePinnedKdfProfile(profile600k, "acct-a");
+
+		expect(localStorage.getItem(LEGACY_PIN_KEY)).toBeNull();
+	});
+
+	it("fails safely when a scoped pin is malformed", async () => {
+		const storage = createWebStorageAdapter(dummyCrypto);
+		(
+			globalThis as unknown as { localStorage: MemoryStorage }
+		).localStorage.setItem(`${LEGACY_PIN_KEY}_acct-a`, "not json");
+
+		expect(await storage.getPinnedKdfProfile("acct-a")).toBeNull();
+	});
+
+	it("fails safely when a scoped pin violates KDF policy", async () => {
+		const storage = createWebStorageAdapter(dummyCrypto);
+		(
+			globalThis as unknown as { localStorage: MemoryStorage }
+		).localStorage.setItem(
+			`${LEGACY_PIN_KEY}_acct-a`,
+			JSON.stringify({
+				schemaVersion: 1,
+				algorithm: "PBKDF2-SHA256",
+				iterations: 310_000,
+			}),
+		);
+
+		expect(await storage.getPinnedKdfProfile("acct-a")).toBeNull();
 	});
 });

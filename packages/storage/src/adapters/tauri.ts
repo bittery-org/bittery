@@ -15,7 +15,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
-	KdfParams,
+	KdfProfile,
 } from "@bittery/types";
 import type { Store } from "@tauri-apps/plugin-store";
 import {
@@ -30,6 +30,7 @@ import {
 } from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { parseStoredKdfProfile } from "../kdf-profile";
 import {
 	migrateEmailKeysToAccountIds,
 	parseStoredActiveAccount,
@@ -672,34 +673,24 @@ export class TauriStorageAdapter implements IStorageAdapter {
 		return (await store.get<string>(key)) ?? null;
 	}
 
-	async storePinnedKdfParams(
-		params: KdfParams,
-		accountId?: string,
+	async storePinnedKdfProfile(
+		profile: KdfProfile,
+		accountId: string,
 	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
-		await store.set(key, JSON.stringify(params));
+		const key = getAccountKey(accountId, "pinned_kdf_params");
+		await store.set(key, JSON.stringify(profile));
 		await store.save();
 	}
 
-	async getPinnedKdfParams(accountId?: string): Promise<KdfParams | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
+	async getPinnedKdfProfile(accountId: string): Promise<KdfProfile | null> {
 		const store = await this.getStore();
-		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
+		const key = getAccountKey(accountId, "pinned_kdf_params");
 		const stored = await store.get<string>(key);
 		if (!stored) {
 			return null;
 		}
-		try {
-			return JSON.parse(stored) as KdfParams;
-		} catch {
-			return null;
-		}
+		return parseStoredKdfProfile(stored);
 	}
 
 	async updateStoredSessionMetadata(
