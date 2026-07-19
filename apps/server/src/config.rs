@@ -41,6 +41,35 @@ fn env_flag(name: &str, default: bool) -> bool {
     }
 }
 
+/// How the client IP is derived, per `TRUST_PROXY_MODE`.
+///
+/// Forwarding headers are client-supplied: anything reaching the server without
+/// passing through a proxy that overwrites them can put an arbitrary value
+/// there. Since the per-IP rate limits key on the resulting address, believing
+/// them unconditionally would let a caller mint a fresh budget per forged
+/// header. Default to `None` (use the TCP peer address) and only opt in when
+/// the deployment really is behind such a proxy.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum TrustProxyMode {
+    /// Trust nothing; use the connection's peer address.
+    None,
+    /// Behind Cloudflare: prefer `CF-Connecting-IP`.
+    Cloudflare,
+    /// Behind a generic reverse proxy: use `X-Forwarded-For` / `X-Real-IP`.
+    Forwarded,
+}
+
+pub(crate) fn trust_proxy_mode() -> TrustProxyMode {
+    match std::env::var("TRUST_PROXY_MODE") {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "cloudflare" => TrustProxyMode::Cloudflare,
+            "forwarded" | "proxy" => TrustProxyMode::Forwarded,
+            _ => TrustProxyMode::None,
+        },
+        Err(_) => TrustProxyMode::None,
+    }
+}
+
 pub(crate) fn cloud_public_signup_enabled() -> bool {
     env_flag("BITTERY_CLOUD_PUBLIC_SIGNUP", true)
 }

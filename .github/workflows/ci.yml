@@ -43,8 +43,8 @@ jobs:
             exit 0
           fi
 
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-          changed_files="$(git diff --name-only "origin/${{ github.base_ref }}" "$GITHUB_SHA")"
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          changed_files="$(git diff --name-only "origin/$GITHUB_BASE_REF" "$GITHUB_SHA")"
 
           js=false
           server=false
@@ -78,6 +78,27 @@ jobs:
             echo "server=$server"
             echo "crypto_wasm=$crypto_wasm"
           } >> "$GITHUB_OUTPUT"
+
+  migrations:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # Needs the base branch to detect edits to already-merged migrations.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "$GITHUB_BASE_REF"
+            node scripts/check-migrations.mjs "origin/$GITHUB_BASE_REF"
+          else
+            node scripts/check-migrations.mjs
+          fi
 
   crypto-wasm:
     needs: changes

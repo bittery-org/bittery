@@ -3,6 +3,7 @@ pub(crate) mod audit;
 pub(crate) mod auth;
 pub(crate) mod billing;
 pub(crate) mod connection_registry;
+pub(crate) mod rate_limit;
 pub(crate) mod redis;
 pub(crate) mod session;
 pub(crate) mod session_control;

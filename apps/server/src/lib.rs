@@ -15,8 +15,12 @@ use qubit::{handler, Router};
 use sqlx::PgPool;
 use ts_rs::TS;
 
+use std::sync::Arc;
+
 use fred::prelude::Pool as RedisPool;
 use serde::Serialize;
+
+use services::rate_limit::{NoopRateLimiter, PostgresRateLimiter};
 
 pub use http::middleware::{
     edge_http_middleware, http_trace_layer, load_edge_http_config, rpc_request_guard_middleware,
@@ -35,6 +39,7 @@ pub use rpc::travel_mode::create_travel_mode_router;
 pub use rpc::vault::create_vault_router;
 pub use services::auth::rpc_request_context_middleware;
 pub use services::connection_registry::ConnectionRegistry;
+pub use services::rate_limit::{build_rate_limiter, RateLimiter};
 pub use services::redis::init_redis;
 pub use services::session::{SeededSession, SessionService};
 pub use services::sync_pubsub::SyncPubSub;
@@ -47,6 +52,7 @@ pub struct AppState {
     pub connection_registry: ConnectionRegistry,
     pub sync_pubsub: SyncPubSub,
     pub instance_id: String,
+    pub rate_limiter: Arc<dyn RateLimiter>,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -76,6 +82,7 @@ impl Default for AppState {
             connection_registry: ConnectionRegistry::none(),
             sync_pubsub: SyncPubSub::new(),
             instance_id: uuid::Uuid::new_v4().to_string(),
+            rate_limiter: Arc::new(NoopRateLimiter),
         }
     }
 }
@@ -85,11 +92,17 @@ impl AppState {
         Self {
             db_pool: Some(pool.clone()),
             redis: None,
-            sessions: SessionService::from_pool(pool),
+            sessions: SessionService::from_pool(pool.clone()),
             connection_registry: ConnectionRegistry::none(),
             sync_pubsub: SyncPubSub::new(),
             instance_id: uuid::Uuid::new_v4().to_string(),
+            rate_limiter: Arc::new(PostgresRateLimiter::new(pool)),
         }
+    }
+
+    pub fn with_rate_limiter(mut self, rate_limiter: Arc<dyn RateLimiter>) -> Self {
+        self.rate_limiter = rate_limiter;
+        self
     }
 
     pub fn with_redis(mut self, redis: Option<RedisPool>) -> Self {

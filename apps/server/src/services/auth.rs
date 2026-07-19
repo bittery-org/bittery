@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{header::HeaderName, HeaderValue, Request},
     middleware::Next,
     response::Response,
@@ -16,19 +16,28 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, query_scalar, PgPool};
+use std::net::SocketAddr;
 use std::sync::LazyLock;
 use time::{Duration, OffsetDateTime};
 use tracing::info;
 use ts_rs::TS;
 
 use crate::{
-    config::{bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool},
+    config::{
+        self, bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool,
+        TrustProxyMode,
+    },
     db::models::*,
     error::AppError,
     integrations::storage,
     repo::auth as repo_auth,
     repo::common::{generate_resource_id, insert_audit_event},
     services::billing::sync_team_seats_best_effort,
+    services::rate_limit::{
+        self, generic_ip_limit, login_email_limit, login_ip_limit, rate_limited_error,
+        recovery_request_limit, recovery_verify_lock_duration, recovery_verify_max_attempts,
+        signup_email_limit, signup_ip_limit, RateLimiter, WindowLimit,
+    },
     services::session::{
         format_rfc3339, generate_opaque_session_token, hash_token, is_grouped_client_session,
         now_utc, DeviceSessionResponse, RefreshSessionResponse, RenameDeviceInput, RequestMetadata,
@@ -592,6 +601,23 @@ pub(crate) async fn signup(
     validate_signup_input(&input)?;
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
+
+    let limiter = app_state.rate_limiter.as_ref();
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_SIGNUP_IP,
+        &request_ip_key(request),
+        signup_ip_limit(),
+    )
+    .await?;
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_SIGNUP_EMAIL,
+        &hash_normalized_email(&normalized_email),
+        signup_email_limit(),
+    )
+    .await?;
+
     let mode = bittery_mode();
     let self_hosted_mode = mode == "self-hosted";
 
@@ -739,6 +765,15 @@ pub(crate) async fn signup_with_invitation(
 ) -> Result<SignupResponse, AppError> {
     validate_signup_with_invitation_input(&input)?;
     let pool = db_pool(app_state)?;
+    // Unauthenticated endpoint: apply the generic per-IP throttle so it cannot be
+    // hammered to probe invitation tokens / emails.
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        rate_limit::SCOPE_GENERIC_IP,
+        &request_ip_key(request),
+        generic_ip_limit(),
+    )
+    .await?;
     let normalized_email = normalize_email(&input.email);
     let invitation = get_pending_signup_invitation(pool, &input.token, &normalized_email).await?;
 
@@ -895,11 +930,27 @@ pub(crate) async fn start_login(
     request: &RequestMetadata,
     input: StartLoginInput,
 ) -> Result<StartLoginResponse, AppError> {
-    let _request = request;
     validate_hex_string(&input.client_public_key, "Invalid client public key")?;
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
     let normalized_email_hash = hash_normalized_email(&normalized_email);
+
+    let limiter = app_state.rate_limiter.as_ref();
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_LOGIN_IP,
+        &request_ip_key(request),
+        login_ip_limit(),
+    )
+    .await?;
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_LOGIN_EMAIL,
+        &normalized_email_hash,
+        login_email_limit(),
+    )
+    .await?;
+
     let server = SrpServer::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
     let now = now_utc();
 
@@ -1034,6 +1085,13 @@ pub(crate) async fn finish_login(
     input: FinishLoginInput,
 ) -> Result<FinishLoginResponse, AppError> {
     let pool = db_pool(app_state)?;
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        rate_limit::SCOPE_GENERIC_IP,
+        &request_ip_key(request),
+        generic_ip_limit(),
+    )
+    .await?;
     let verified = verify_login_proof_and_get_user(pool, &input).await?;
     let session = app_state
         .sessions
@@ -1061,9 +1119,28 @@ pub(crate) async fn request_recovery_verification(
     request: &RequestMetadata,
     input: RequestRecoveryVerificationInput,
 ) -> Result<LogoutResponse, AppError> {
-    let _request = request;
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
+
+    // Two independent counters rather than one composite `email:ip` key: a composite
+    // key mints a fresh budget for every new pair, so rotating IPs for one email (or
+    // emails from one IP) would bypass the limit entirely. The email dimension caps
+    // the per-account email-send budget; the IP dimension caps a single source.
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        rate_limit::SCOPE_RECOVERY_REQUEST_EMAIL,
+        &hash_normalized_email(&normalized_email),
+        recovery_request_limit(),
+    )
+    .await?;
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        rate_limit::SCOPE_RECOVERY_REQUEST_IP,
+        &request_ip_key(request),
+        recovery_request_limit(),
+    )
+    .await?;
+
     let existing_user = query_as::<_, DbRecoveryUserDataRow>(
 		"SELECT id, encrypted_master_key, encrypted_private_key, secret_key_hint, recovery_key_hint FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
 	)
@@ -1089,22 +1166,125 @@ pub(crate) async fn verify_recovery_code(
     request: &RequestMetadata,
     input: VerifyRecoveryCodeInput,
 ) -> Result<VerifyRecoveryCodeResponse, AppError> {
-    let _request = request;
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
+    let email_hash = hash_normalized_email(&normalized_email);
+    let limiter = app_state.rate_limiter.as_ref();
+
+    // Generic per-IP throttle guards against high-volume guessing that spreads
+    // across many email addresses (which would otherwise dodge the per-email lock).
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_GENERIC_IP,
+        &request_ip_key(request),
+        generic_ip_limit(),
+    )
+    .await?;
+
+    // A correct code while locked out must still fail. Enumeration-safe: the lock is
+    // keyed on the email hash regardless of whether the account exists.
+    if limiter
+        .is_locked(rate_limit::SCOPE_RECOVERY_VERIFY, &email_hash)
+        .await?
+        .is_limited()
+    {
+        return Err(rate_limited_error());
+    }
+
+    // Capture whether a pending recovery code exists *before* attempting the code,
+    // because the attempt itself may consume/expire the row at the per-code cap.
+    // We only record failures toward the per-email lockout when there is actually an
+    // active pending code to guess. This prevents a caller from driving the lockout
+    // (and invalidating a future code / spamming audit events) for an email that has
+    // no pending recovery flow. The response is the same generic invalid-code error
+    // either way, so this does not leak whether a code exists.
+    let had_active_recovery =
+        repo_auth::has_active_recovery_verification(pool, &normalized_email).await?;
+
     let is_valid = verify_recovery_code_attempt(pool, &normalized_email, &input.code).await?;
 
-    if !is_valid {
+    if is_valid {
+        limiter
+            .clear(rate_limit::SCOPE_RECOVERY_VERIFY, &email_hash)
+            .await?;
+        return Ok(VerifyRecoveryCodeResponse {
+            success: true,
+            recovery_token: Some(create_recovery_token(&normalized_email)?),
+        });
+    }
+
+    if !had_active_recovery {
         return Ok(VerifyRecoveryCodeResponse {
             success: false,
             recovery_token: None,
         });
     }
 
+    let outcome = limiter
+        .record_failure(
+            rate_limit::SCOPE_RECOVERY_VERIFY,
+            &email_hash,
+            recovery_verify_max_attempts(),
+            recovery_verify_lock_duration(),
+        )
+        .await?;
+
+    if outcome.is_limited() {
+        // Threshold reached: invalidate any pending recovery code and record an audit
+        // event so the lockout is observable.
+        invalidate_pending_recovery_verifications(pool, &normalized_email).await?;
+        if let Some(user_id) = load_user_id_by_email(pool, &normalized_email).await? {
+            if let Err(error) = insert_audit_event(
+                pool,
+                &generate_resource_id("audit"),
+                &user_id,
+                "recovery_verification_locked",
+                "user",
+                &user_id,
+                None,
+            )
+            .await
+            {
+                tracing::error!(error = %error, "Failed to record recovery lockout audit event");
+            }
+        }
+        return Err(rate_limited_error());
+    }
+
     Ok(VerifyRecoveryCodeResponse {
-        success: true,
-        recovery_token: Some(create_recovery_token(&normalized_email)?),
+        success: false,
+        recovery_token: None,
     })
+}
+
+async fn invalidate_pending_recovery_verifications(
+    pool: &PgPool,
+    normalized_email: &str,
+) -> Result<(), AppError> {
+    query("UPDATE recovery_verification SET used_at = $1 WHERE email = $2 AND used_at IS NULL")
+        .bind(now_utc())
+        .bind(normalized_email)
+        .execute(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to invalidate recovery verification");
+            internal_handler_error("Failed to invalidate recovery verification")
+        })?;
+    Ok(())
+}
+
+async fn load_user_id_by_email(
+    pool: &PgPool,
+    normalized_email: &str,
+) -> Result<Option<String>, AppError> {
+    query_scalar::<_, String>("SELECT id FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1")
+        .bind(normalized_email)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load user for recovery lockout");
+            internal_handler_error("Failed to load user for recovery lockout")
+        })
 }
 
 pub(crate) async fn get_recovery_data(
@@ -1112,8 +1292,14 @@ pub(crate) async fn get_recovery_data(
     request: &RequestMetadata,
     input: GetRecoveryDataInput,
 ) -> Result<GetRecoveryDataResponse, AppError> {
-    let _request = request;
     let pool = db_pool(app_state)?;
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        rate_limit::SCOPE_GENERIC_IP,
+        &request_ip_key(request),
+        generic_ip_limit(),
+    )
+    .await?;
     let recovery_email = verify_recovery_token(&input.recovery_token)
         .await
         .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
@@ -1140,6 +1326,13 @@ pub(crate) async fn reset_password(
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let pool = db_pool(app_state)?;
+    enforce_window_limit(
+        app_state.rate_limiter.as_ref(),
+        rate_limit::SCOPE_GENERIC_IP,
+        &request_ip_key(request),
+        generic_ip_limit(),
+    )
+    .await?;
     let recovery_email = verify_recovery_token(&input.recovery_token)
         .await
         .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
@@ -1730,10 +1923,7 @@ pub async fn rpc_request_context_middleware(
         client_id: header_value(&request, CLIENT_ID_HEADER),
         app_platform: header_value(&request, APP_PLATFORM_HEADER),
         user_agent: header_value(&request, "user-agent"),
-        ip_address: header_value(&request, "x-forwarded-for")
-            .map(|v| v.split(',').next().unwrap_or("").trim().to_owned())
-            .filter(|v| !v.is_empty())
-            .or_else(|| header_value(&request, "x-real-ip")),
+        ip_address: client_ip_address(&request),
     };
 
     let auth_token = metadata.auth_token.clone();
@@ -1780,6 +1970,62 @@ fn header_value(request: &Request<axum::body::Body>, name: &str) -> Option<Strin
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+/// Resolves the client address the per-IP rate limits key on.
+///
+/// The forwarded-for headers are only consulted when `TRUST_PROXY_MODE` says the
+/// server sits behind a proxy that overwrites them; otherwise they are
+/// caller-controlled and a spoofed value would hand out a fresh limiter budget
+/// per request. Without that opt-in we use the TCP peer address, which the
+/// caller cannot forge.
+fn client_ip_address(request: &Request<axum::body::Body>) -> Option<String> {
+    let mode = config::trust_proxy_mode();
+
+    if mode == TrustProxyMode::Cloudflare {
+        if let Some(connecting_ip) = header_value(request, "cf-connecting-ip") {
+            return Some(connecting_ip);
+        }
+    }
+
+    if mode != TrustProxyMode::None {
+        if let Some(forwarded) = header_value(request, "x-forwarded-for")
+            .map(|v| v.split(',').next().unwrap_or("").trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .or_else(|| header_value(request, "x-real-ip"))
+        {
+            return Some(forwarded);
+        }
+    }
+
+    request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| addr.ip().to_string())
+}
+
+fn request_ip_key(request: &RequestMetadata) -> String {
+    request
+        .ip_address
+        .clone()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| rate_limit::UNKNOWN_IP_KEY.to_string())
+}
+
+async fn enforce_window_limit(
+    limiter: &dyn RateLimiter,
+    scope: &str,
+    key: &str,
+    limit: WindowLimit,
+) -> Result<(), AppError> {
+    if limiter
+        .check_and_increment(scope, key, limit.max, limit.window)
+        .await?
+        .is_limited()
+    {
+        return Err(rate_limited_error());
+    }
+    Ok(())
 }
 
 fn normalize_email(email: &str) -> String {

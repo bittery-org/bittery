@@ -241,6 +241,7 @@ name = "bittery-server"
 version = "0.1.1"
 dependencies = [
  "async-stream",
+ "async-trait",
  "axum",
  "base64",
  "bittery-crypto-core",

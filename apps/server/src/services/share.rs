@@ -1,4 +1,3 @@
-use chrono::{Local, TimeZone, Utc};
 use rand::Rng;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -6,7 +5,7 @@ use sqlx::{query, query_as, query_scalar, PgPool};
 use ts_rs::TS;
 
 use crate::{
-    config::{bittery_mode, format_timestamp},
+    config::{bittery_mode, db_pool, format_timestamp},
     db::models::*,
     error::AppError,
     repo::{
@@ -17,7 +16,9 @@ use crate::{
             log_share_access,
         },
     },
+    services::rate_limit,
     services::team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
+    AppState,
 };
 
 const SHARE_LINKS_UNAVAILABLE_MESSAGE: &str =
@@ -214,10 +215,11 @@ struct ShareLinksAccess {
 }
 
 pub(crate) async fn create_share_link(
-    pool: &PgPool,
+    app_state: &AppState,
     user_id: &str,
     input: CreateShareLinkInput,
 ) -> Result<CreateShareLinkResponse, AppError> {
+    let pool = db_pool(app_state)?;
     let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
     let Some(scoped_item) = scoped_item else {
         return Err(not_found_error("Item not found"));
@@ -229,7 +231,21 @@ pub(crate) async fn create_share_link(
 
     let share_links_access = assert_share_links_entitlement(pool, user_id).await?;
     validate_create_share_input(&input)?;
-    check_and_increment_share_rate_limit(pool, user_id).await?;
+    if app_state
+        .rate_limiter
+        .check_and_increment(
+            rate_limit::SCOPE_SHARE_CREATE_DAILY,
+            user_id,
+            share_link_daily_limit(),
+            rate_limit::share_create_daily_limit().window,
+        )
+        .await?
+        .is_limited()
+    {
+        return Err(AppError::too_many_requests(
+            "Daily share link limit reached",
+        ));
+    }
 
     let expires_at = calculate_expiration(&input.expires_in)?;
     let token = generate_secure_token();
@@ -1145,48 +1161,6 @@ async fn get_public_share_state(
     })
 }
 
-async fn check_and_increment_share_rate_limit(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<(), AppError> {
-    let namespace = "share_create_daily";
-    let now = time::OffsetDateTime::now_utc();
-    let window_start = start_of_local_day();
-    let limit = share_link_daily_limit();
-
-    query(
-		"INSERT INTO rate_limit_state (scope, key, subject, count, window_start_at, updated_at) VALUES ($1, $2, $3, 0, $4, $5) ON CONFLICT DO NOTHING",
-	)
-	.bind(namespace)
-	.bind(user_id)
-	.bind(user_id)
-	.bind(window_start)
-	.bind(now)
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to initialize share rate limit state"); internal_error("Failed to initialize share rate limit state") })?;
-
-    let count = query_scalar::<_, Option<i32>>(
-		"UPDATE rate_limit_state SET count = CASE WHEN window_start_at IS NULL OR window_start_at < $3 THEN 1 ELSE count + 1 END, window_start_at = CASE WHEN window_start_at IS NULL OR window_start_at < $3 THEN $3 ELSE window_start_at END, updated_at = $4 WHERE scope = $1 AND key = $2 AND ((window_start_at IS NULL OR window_start_at < $3) OR count < $5) RETURNING count",
-	)
-	.bind(namespace)
-	.bind(user_id)
-	.bind(window_start)
-	.bind(now)
-	.bind(limit as i32)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to increment share rate limit window"); internal_error("Failed to increment share rate limit window") })?;
-
-    if count.flatten().is_none() {
-        return Err(AppError::too_many_requests(
-            "Daily share link limit reached",
-        ));
-    }
-
-    Ok(())
-}
-
 fn unique_email_ids(ids: &[String]) -> Result<Vec<String>, AppError> {
     let mut unique = Vec::new();
     for id in ids {
@@ -1313,22 +1287,6 @@ fn share_link_daily_limit() -> i64 {
         .and_then(|value| value.trim().parse::<i64>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(DEFAULT_SHARE_LINK_DAILY_LIMIT)
-}
-
-fn start_of_local_day() -> time::OffsetDateTime {
-    let local_now = Local::now();
-    let naive_midnight = local_now
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .expect("midnight should be representable");
-    let local_midnight = Local
-        .from_local_datetime(&naive_midnight)
-        .earliest()
-        .or_else(|| Local.from_local_datetime(&naive_midnight).latest())
-        .expect("local midnight should resolve");
-    let utc_midnight = local_midnight.with_timezone(&Utc);
-    time::OffsetDateTime::from_unix_timestamp(utc_midnight.timestamp())
-        .unwrap_or_else(|_| time::OffsetDateTime::now_utc())
 }
 
 fn email_regex() -> &'static Regex {

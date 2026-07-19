@@ -214,6 +214,34 @@ pub(crate) async fn acquire_env_lock_async() -> EnvLockGuard {
     }
 }
 
+/// Sets env vars for the duration of a test and restores them on drop, so an
+/// assertion failure unwinding out of the test body cannot poison later tests.
+pub(crate) struct EnvVarGuard {
+    previous: Vec<(String, Option<String>)>,
+}
+
+impl EnvVarGuard {
+    pub(crate) fn set(vars: &[(&str, &str)]) -> Self {
+        let mut previous = Vec::new();
+        for (key, value) in vars {
+            previous.push(((*key).to_string(), std::env::var(key).ok()));
+            unsafe { std::env::set_var(key, value) };
+        }
+        Self { previous }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        for (key, previous) in &self.previous {
+            match previous {
+                Some(value) => unsafe { std::env::set_var(key, value) },
+                None => unsafe { std::env::remove_var(key) },
+            }
+        }
+    }
+}
+
 pub(crate) async fn seed_user(pool: &PgPool, user_id: &str, name: &str, email: &str) {
     query(
 		"INSERT INTO \"user\" (id, name, email, email_verified, secret_key_hint, encrypted_master_key, recovery_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key) VALUES ($1, $2, $3, true, NULL, NULL, NULL, $4, $5, $6, $7)",

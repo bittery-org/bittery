@@ -13,6 +13,10 @@ use crate::{
 const EXPIRED_SESSION_BATCH_SIZE: i64 = 1000;
 const PENDING_ATTACHMENT_UPLOAD_BATCH_SIZE: i64 = 100;
 const SYNC_EVENT_RETENTION_DAYS: i64 = 30;
+/// Comfortably longer than the longest limiter window (the 24h share-link
+/// counter) and the 24h Redis attempt retention it mirrors, so pruning can never
+/// reset a window that is still in force.
+const RATE_LIMIT_STATE_RETENTION_DAYS: i64 = 2;
 const TOMBSTONE_RETENTION_DAYS: i64 = 90;
 const TOMBSTONE_BATCH_SIZE: i64 = 200;
 
@@ -61,6 +65,33 @@ pub async fn prune_sync_events(pool: &PgPool) -> Result<u64, sqlx::Error> {
             deleted,
             retention_days = SYNC_EVENT_RETENTION_DAYS,
             "sync-event-pruning completed"
+        );
+    }
+
+    Ok(deleted)
+}
+
+/// Rate-limit keys are attacker-influenced (IPs, email hashes), so every new
+/// scope/key pair inserts a row that nothing else ever deletes. Evict rows that
+/// have been idle past the retention window, but never one that is still locked
+/// out — dropping a live `locked_until` would hand the caller a fresh budget.
+pub async fn prune_rate_limit_state(pool: &PgPool) -> Result<u64, sqlx::Error> {
+    let now = OffsetDateTime::now_utc();
+    let cutoff = now - Duration::days(RATE_LIMIT_STATE_RETENTION_DAYS);
+    let deleted = query(
+        "DELETE FROM rate_limit_state WHERE updated_at < $1 AND (locked_until IS NULL OR locked_until < $2)",
+    )
+    .bind(cutoff)
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    let deleted = deleted.rows_affected();
+    if deleted > 0 {
+        info!(
+            deleted,
+            retention_days = RATE_LIMIT_STATE_RETENTION_DAYS,
+            "rate-limit-state-pruning completed"
         );
     }
 

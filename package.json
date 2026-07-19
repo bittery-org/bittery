@@ -12,6 +12,7 @@
 	},
 	"scripts": {
 		"preinstall": "node ./scripts/load-env.mjs",
+		"setup:worktree": "./scripts/setup-worktree.sh",
 		"check": "biome check . && pnpm --filter server check",
 		"check:fix": "biome check --write --unsafe . && pnpm --filter server format",
 		"check-types": "turbo check-types",
@@ -41,6 +42,7 @@
 		"build:crypto-android": "pnpm --filter @bittery/crypto-nitro run build:android",
 		"build:crypto-ios": "pnpm --filter @bittery/crypto-nitro run build:ios",
 		"build:crypto": "pnpm run build:crypto-wasm && pnpm run build:crypto-napi && pnpm run build:crypto-android && pnpm run build:crypto-ios",
+		"db:check": "node ./scripts/check-migrations.mjs",
 		"db:create": "node ./scripts/create-rust-migration.mjs",
 		"db:migrate": "cargo run --manifest-path apps/server/Cargo.toml --bin migrate",
 		"db:start": "docker compose -f apps/server/docker-compose.db.yml up -d",
