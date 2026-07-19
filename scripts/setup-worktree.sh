@@ -17,10 +17,8 @@ if [[ ! -f .env && -f "$main_checkout/.env" && "$main_checkout" != "$PWD" ]]; th
 fi
 
 if [[ ! -f packages/crypto/wasm/package.json ]]; then
-	if ! command -v wasm-pack >/dev/null 2>&1; then
-		echo "setup-worktree: wasm-pack is required (https://rustwasm.github.io/wasm-pack/)" >&2
-		exit 1
-	fi
+	# build-wasm.sh installs wasm-pack itself when it is missing, so don't
+	# pre-empt that with our own hard failure.
 	(cd packages/crypto/core && ./build-wasm.sh)
 fi
 

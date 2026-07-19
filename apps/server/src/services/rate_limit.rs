@@ -299,7 +299,9 @@ impl RateLimiter for PostgresRateLimiter {
         // `rate_limit_state` until the lock trips (setting `locked_until`) or
         // `clear()` is called. There is no sliding expiry on the attempt count, so
         // a slow drip of failures still accumulates toward the lock. The Redis
-        // backend mirrors this by refreshing the attempts-key TTL on every failure.
+        // backend approximates this with a fixed `ATTEMPTS_RETENTION` TTL set once
+        // on the first failure (it cannot retain keys forever), so idle counters
+        // there self-evict after a day while paced attempts still accumulate.
         let now = OffsetDateTime::now_utc();
 
         let mut tx = self.pool.begin().await.map_err(|e| {

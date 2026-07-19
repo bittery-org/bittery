@@ -29,11 +29,21 @@ Never reuse `JWT_SECRET` across instances or commit it to version control. Rotat
 | `BITTERY_CLOUD_PUBLIC_SIGNUP` | `true` | Cloud-only flag. Set `false` on hosted Bittery Cloud to make signup invite-only |
 | `BITTERY_CLOUD_BILLING_ENABLED` | `true` | Cloud-only flag. Set `false` on hosted Bittery Cloud to disable Stripe billing |
 | `CORS_ORIGIN` | `https://${DOMAIN}` | Comma-separated list of allowed origins for API requests |
-| `TRUST_PROXY_MODE` | `none` | How to read client IPs. Options: `none`, `cloudflare`, `forwarded` |
+| `TRUST_PROXY_MODE` | `none` | How to read client IPs. Options: `none`, `cloudflare`, `forwarded`. See the warning under [Rate limiting](#rate-limiting) |
 | `PORT` | `3000` | Port the API server listens on |
 | `MIGRATIONS_FOLDER` | `/app/migrations` | Path to SQL migration files |
 
 ## Rate limiting
+
+The per-IP limits key on the client address resolved via `TRUST_PROXY_MODE`. With
+the default `none`, that is the TCP peer address, which a caller cannot forge.
+
+Only set `cloudflare` or `forwarded` if the server is genuinely behind a proxy
+that **overwrites** `CF-Connecting-IP` / `X-Forwarded-For` on every request. If
+the server is also reachable directly, those headers are attacker-controlled and
+rotating them hands out a fresh per-IP budget per request, defeating the limits
+below. Conversely, leaving it at `none` behind a proxy makes every request appear
+to come from the proxy, collapsing all clients onto one shared budget.
 
 | Variable | Default | Description |
 |----------|---------|-------------|

@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{ConnectInfo, State},
     http::{header::HeaderName, HeaderValue, Request},
     middleware::Next,
     response::Response,
@@ -16,13 +16,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, query_scalar, PgPool};
+use std::net::SocketAddr;
 use std::sync::LazyLock;
 use time::{Duration, OffsetDateTime};
 use tracing::info;
 use ts_rs::TS;
 
 use crate::{
-    config::{bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool},
+    config::{
+        self, bittery_mode, cloud_billing_enabled, cloud_public_signup_enabled, db_pool,
+        TrustProxyMode,
+    },
     db::models::*,
     error::AppError,
     integrations::storage,
@@ -1919,10 +1923,7 @@ pub async fn rpc_request_context_middleware(
         client_id: header_value(&request, CLIENT_ID_HEADER),
         app_platform: header_value(&request, APP_PLATFORM_HEADER),
         user_agent: header_value(&request, "user-agent"),
-        ip_address: header_value(&request, "x-forwarded-for")
-            .map(|v| v.split(',').next().unwrap_or("").trim().to_owned())
-            .filter(|v| !v.is_empty())
-            .or_else(|| header_value(&request, "x-real-ip")),
+        ip_address: client_ip_address(&request),
     };
 
     let auth_token = metadata.auth_token.clone();
@@ -1969,6 +1970,38 @@ fn header_value(request: &Request<axum::body::Body>, name: &str) -> Option<Strin
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
+}
+
+/// Resolves the client address the per-IP rate limits key on.
+///
+/// The forwarded-for headers are only consulted when `TRUST_PROXY_MODE` says the
+/// server sits behind a proxy that overwrites them; otherwise they are
+/// caller-controlled and a spoofed value would hand out a fresh limiter budget
+/// per request. Without that opt-in we use the TCP peer address, which the
+/// caller cannot forge.
+fn client_ip_address(request: &Request<axum::body::Body>) -> Option<String> {
+    let mode = config::trust_proxy_mode();
+
+    if mode == TrustProxyMode::Cloudflare {
+        if let Some(connecting_ip) = header_value(request, "cf-connecting-ip") {
+            return Some(connecting_ip);
+        }
+    }
+
+    if mode != TrustProxyMode::None {
+        if let Some(forwarded) = header_value(request, "x-forwarded-for")
+            .map(|v| v.split(',').next().unwrap_or("").trim().to_owned())
+            .filter(|v| !v.is_empty())
+            .or_else(|| header_value(request, "x-real-ip"))
+        {
+            return Some(forwarded);
+        }
+    }
+
+    request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|ConnectInfo(addr)| addr.ip().to_string())
 }
 
 fn request_ip_key(request: &RequestMetadata) -> String {

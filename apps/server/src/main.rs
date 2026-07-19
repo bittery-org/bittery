@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, net::SocketAddr};
 
 use axum::{middleware, routing::get, Json, Router};
 use bittery_server::{
@@ -107,6 +107,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("using database-backed session service");
     }
 
-    axum::serve(listener, app).await?;
+    // `ConnectInfo` carries the TCP peer address, which is the rate limiter's
+    // client identity whenever `TRUST_PROXY_MODE` does not opt into the
+    // forwarded-for headers.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }

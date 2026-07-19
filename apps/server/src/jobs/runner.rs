@@ -8,7 +8,7 @@ use tracing::{error, info};
 
 use super::sql::{
     cleanup_expired_sessions, cleanup_pending_attachment_uploads, cleanup_tombstones,
-    prune_sync_events,
+    prune_rate_limit_state, prune_sync_events,
 };
 use crate::integrations::favicon::{fetch_and_store_favicon, list_domains_to_refresh};
 
@@ -48,6 +48,12 @@ impl JobRunner {
                 "0 15 3 * * * *",
                 pool.clone(),
                 run_tombstone_cleanup,
+            )?,
+            spawn_job(
+                "rate-limit-state-pruning",
+                "0 30 3 * * * *",
+                pool.clone(),
+                run_rate_limit_state_pruning,
             )?,
             spawn_job(
                 "favicon-refresh",
@@ -117,6 +123,13 @@ fn run_sync_event_pruning(pool: PgPool) -> JobFuture {
 fn run_pending_attachment_cleanup(pool: PgPool) -> JobFuture {
     Box::pin(async move {
         cleanup_pending_attachment_uploads(&pool).await?;
+        Ok(())
+    })
+}
+
+fn run_rate_limit_state_pruning(pool: PgPool) -> JobFuture {
+    Box::pin(async move {
+        prune_rate_limit_state(&pool).await?;
         Ok(())
     })
 }

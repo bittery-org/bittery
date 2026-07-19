@@ -1644,6 +1644,15 @@ const RATE_LIMITED_CODE: &str = "TOO_MANY_REQUESTS";
 /// the env lock is held (e.g. inside `with_auth_test_env_async`).
 use crate::test_support::EnvVarGuard as RateLimitEnvGuard;
 
+/// These tests drive the per-IP limiter through `x-forwarded-for`, which the
+/// server only honours when `TRUST_PROXY_MODE` says it sits behind a proxy — so
+/// every rate-limit test opts in alongside its own tuning vars.
+fn rate_limit_env(vars: &[(&str, &str)]) -> RateLimitEnvGuard {
+    let mut all = vec![("TRUST_PROXY_MODE", "forwarded")];
+    all.extend_from_slice(vars);
+    RateLimitEnvGuard::set(&all)
+}
+
 fn headers_with_ip(ip: &str) -> HeaderMap {
     let mut headers = unauthenticated_json_headers();
     headers.insert(
@@ -1670,7 +1679,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
         with_rpc_test_app(
             "rate_limit_recovery_verify_lockout",
             |app| async move {
-                let _env = RateLimitEnvGuard::set(&[
+                let _env = rate_limit_env(&[
                     ("RATE_LIMIT_RECOVERY_VERIFY_MAX", "3"),
                     ("RATE_LIMIT_RECOVERY_LOCK_MINUTES", "15"),
                 ]);
@@ -1765,7 +1774,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 async fn start_login_is_rate_limited_per_ip() {
     with_auth_test_env_async(Some("cloud"), async {
         with_rpc_test_app("rate_limit_start_login_ip", |app| async move {
-            let _env = RateLimitEnvGuard::set(&[
+            let _env = rate_limit_env(&[
                 ("RATE_LIMIT_LOGIN_IP", "3"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "50"),
             ]);
@@ -1811,11 +1820,56 @@ async fn start_login_is_rate_limited_per_ip() {
     .await;
 }
 
+/// Without `TRUST_PROXY_MODE`, `x-forwarded-for` is caller-controlled: if the
+/// limiter keyed on it, rotating the header would mint a fresh per-IP budget on
+/// every request. All spoofed values must collapse onto the same key instead.
+#[tokio::test]
+async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_start_login_spoofed_ip", |app| async move {
+            let _env = RateLimitEnvGuard::set(&[
+                ("TRUST_PROXY_MODE", "none"),
+                ("RATE_LIMIT_LOGIN_IP", "3"),
+                ("RATE_LIMIT_LOGIN_EMAIL", "50"),
+            ]);
+            let ephemeral = build_login_ephemeral_fixture();
+            let email = "rl-login-spoof@example.com";
+
+            for index in 0..3 {
+                let response = app
+                    .rpc_call(
+                        "auth.startLogin",
+                        json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                        headers_with_ip(&format!("203.0.113.{index}")),
+                    )
+                    .await;
+                assert!(response.body["result"]["Ok"].is_object());
+            }
+
+            // A fourth forged address does not escape the per-IP window.
+            let blocked = app
+                .rpc_call(
+                    "auth.startLogin",
+                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                    headers_with_ip("203.0.113.250"),
+                )
+                .await;
+            assert_handler_error(
+                &blocked.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+        })
+        .await;
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() {
     with_auth_test_env_async(Some("cloud"), async {
         with_rpc_test_app("rate_limit_start_login_email", |app| async move {
-            let _env = RateLimitEnvGuard::set(&[
+            let _env = rate_limit_env(&[
                 ("RATE_LIMIT_LOGIN_IP", "50"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "3"),
             ]);
@@ -1890,7 +1944,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
 
             // Per-IP: same IP, varying emails.
             {
-                let _env = RateLimitEnvGuard::set(&[
+                let _env = rate_limit_env(&[
                     ("RATE_LIMIT_SIGNUP_IP", "2"),
                     ("RATE_LIMIT_SIGNUP_EMAIL", "50"),
                 ]);
@@ -1920,7 +1974,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
 
             // Per-email: same email, varying IPs.
             {
-                let _env = RateLimitEnvGuard::set(&[
+                let _env = rate_limit_env(&[
                     ("RATE_LIMIT_SIGNUP_IP", "50"),
                     ("RATE_LIMIT_SIGNUP_EMAIL", "2"),
                 ]);
@@ -1957,7 +2011,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
 async fn request_recovery_verification_is_rate_limited() {
     with_auth_test_env_async(Some("cloud"), async {
         with_rpc_test_app("rate_limit_recovery_request", |app| async move {
-            let _env = RateLimitEnvGuard::set(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
+            let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery_req").await;
 
             for _ in 0..2 {
@@ -1995,7 +2049,7 @@ async fn request_recovery_verification_is_rate_limited() {
 async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
     with_auth_test_env_async(Some("cloud"), async {
         with_rpc_test_app("rate_limit_recovery_req_ip_rotation", |app| async move {
-            let _env = RateLimitEnvGuard::set(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
+            let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_rec_ip_rot").await;
 
             for ip in ["198.51.100.1", "198.51.100.2"] {
@@ -2034,7 +2088,7 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
     with_auth_test_env_async(Some("cloud"), async {
         with_rpc_test_app("rate_limit_recovery_req_email_rotation", |app| async move {
-            let _env = RateLimitEnvGuard::set(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
+            let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let first = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_a").await;
             let second = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_b").await;
             let third = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_c").await;
