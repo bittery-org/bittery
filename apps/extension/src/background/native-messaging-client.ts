@@ -172,20 +172,21 @@ export class NativeMessagingClient {
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
 			try {
 				const port = this.ensurePort();
-				requestId = this.nextRequestId();
+				const nextRequestId = this.nextRequestId();
+				requestId = nextRequestId;
 				timeoutId = setTimeout(() => {
-					this.pendingRequests.delete(requestId);
+					this.pendingRequests.delete(nextRequestId);
 					reject(new Error("Native messaging timeout"));
 				}, timeoutMs);
 
-				this.pendingRequests.set(requestId, {
+				this.pendingRequests.set(nextRequestId, {
 					resolve: (value) => resolve(value as TResponse),
 					reject,
 					timeoutId,
 				});
 
 				port.postMessage({
-					requestId,
+					requestId: nextRequestId,
 					protocolVersion: DESKTOP_PROTOCOL_VERSION,
 					...message,
 				} satisfies DesktopEnvelope<DesktopRequest>);
