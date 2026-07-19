@@ -10,6 +10,7 @@ WORKDIR /build
 
 # Copy Rust workspace and build script
 COPY packages/crypto/core packages/crypto/core
+COPY packages/crypto/kdf-policy.json packages/crypto/kdf-policy.json
 RUN mkdir -p packages/crypto/wasm
 
 # Use the existing build script (installs wasm-pack + writes package.json)
