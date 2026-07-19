@@ -30,20 +30,39 @@ export function mergeItemCollections(
 }
 
 export async function mergeDesktopAndLocalItemSources(
-	desktopItemsPromise: Promise<MultiAccountItem[]>,
+	desktopItemsPromise: Promise<MultiAccountItem[] | null>,
 	localItemsPromise: Promise<MultiAccountItem[]>,
 ): Promise<MultiAccountItem[]> {
-	const [desktopItems, localItems] = await Promise.all([
+	const [desktopResult, localResult] = await Promise.allSettled([
 		desktopItemsPromise,
-		localItemsPromise.catch((error) => {
-			console.warn(
-				"[vault-utils] Local items unavailable during desktop-backed read; using the desktop snapshot:",
-				error,
-			);
-			return [];
-		}),
+		localItemsPromise,
 	]);
-	return mergeItemCollections(desktopItems, localItems);
+	if (desktopResult.status === "rejected") {
+		throw desktopResult.reason;
+	}
+	if (localResult.status === "fulfilled") {
+		return mergeItemCollections(desktopResult.value ?? [], localResult.value);
+	}
+	if (!desktopResult.value) {
+		throw localResult.reason;
+	}
+
+	const reason = localResult.reason;
+	if (
+		reason instanceof Error &&
+		(reason.message.startsWith("No verified travel mode policy") ||
+			reason.message.startsWith("Travel mode policy is not verified"))
+	) {
+		console.debug(
+			"[vault-utils] Skipping extension-local items because its verified travel-mode policy is unavailable",
+		);
+	} else {
+		console.warn(
+			"[vault-utils] Local items unavailable during desktop-backed read; using the desktop snapshot:",
+			reason,
+		);
+	}
+	return desktopResult.value;
 }
 
 async function getDesktopTargetAccountIds(): Promise<string[]> {
@@ -72,10 +91,10 @@ async function filterItemsForTravelMode(
 	return [];
 }
 
-async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
+async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[] | null> {
 	const targetAccountIds = await getDesktopTargetAccountIds();
 	if (targetAccountIds.length === 0) {
-		return [];
+		return null;
 	}
 
 	const snapshot = await desktopClient.getItemsSnapshot(targetAccountIds);
@@ -83,7 +102,7 @@ async function getDesktopItemsSnapshot(): Promise<MultiAccountItem[]> {
 		console.warn("[vault-utils] desktop snapshot unavailable", {
 			targetAccountIds,
 		});
-		return [];
+		return null;
 	}
 
 	const normalizedItems = snapshot.items

@@ -7,7 +7,7 @@ use std::sync::Arc;
 use base64::Engine;
 use desktop_ipc::{
     desktop_ipc_socket_path, write_frame, DesktopEnvelope, DesktopEventKind,
-    DesktopRequest, DesktopResponse,
+    DesktopRequest, DesktopResponse, DESKTOP_PROTOCOL_VERSION,
 };
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::broadcast;
@@ -1030,32 +1030,45 @@ where
             tokio::select! {
                 message = desktop_ipc::read_frame::<_, DesktopEnvelope<DesktopRequest>>(&mut reader) => {
                     let message = message.map_err(|error| error.to_string())?;
-                    match message.payload {
+					if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
+						eprintln!(
+							"[desktop-ipc] Protocol mismatch expected={} received={}",
+							DESKTOP_PROTOCOL_VERSION,
+							message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "legacy".to_string()),
+						);
+						let response = DesktopEnvelope::current(
+							message.request_id,
+							DesktopResponse::ProtocolMismatch {
+								expected_version: DESKTOP_PROTOCOL_VERSION,
+								received_version: message.protocol_version,
+							},
+						);
+						write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+					} else {
+						match message.payload {
                         DesktopRequest::UnsubscribeDesktopEvents => {
                             event_rx = None;
-                            let response = DesktopEnvelope {
-                                request_id: message.request_id,
-                                payload: DesktopResponse::DesktopEventSubscription { subscribed: false },
-                            };
+							let response = DesktopEnvelope::current(
+								message.request_id,
+								DesktopResponse::DesktopEventSubscription { subscribed: false },
+							);
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
                         request => {
                             let payload = handle_desktop_ipc_message(&app_handle, request).await;
-                            let response = DesktopEnvelope {
-                                request_id: message.request_id,
-                                payload,
-                            };
+							let response = DesktopEnvelope::current(message.request_id, payload);
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
-                    }
+						}
+					}
                 }
                 event = rx.recv() => {
                     match event {
                         Ok(event) => {
-                            let response = DesktopEnvelope {
-                                request_id: None,
-                                payload: lock_event_to_response(event),
-                            };
+							let response = DesktopEnvelope::current(
+								None,
+								lock_event_to_response(event),
+							);
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
@@ -1066,24 +1079,37 @@ where
         } else {
             let message: DesktopEnvelope<DesktopRequest> =
                 desktop_ipc::read_frame(&mut reader).await.map_err(|error| error.to_string())?;
-            match message.payload {
+			if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
+				eprintln!(
+					"[desktop-ipc] Protocol mismatch expected={} received={}",
+					DESKTOP_PROTOCOL_VERSION,
+					message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "legacy".to_string()),
+				);
+				let response = DesktopEnvelope::current(
+					message.request_id,
+					DesktopResponse::ProtocolMismatch {
+						expected_version: DESKTOP_PROTOCOL_VERSION,
+						received_version: message.protocol_version,
+					},
+				);
+				write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+			} else {
+				match message.payload {
                 DesktopRequest::SubscribeDesktopEvents => {
                     event_rx = Some(state.lock_events.subscribe());
-                    let response = DesktopEnvelope {
-                        request_id: message.request_id,
-                        payload: DesktopResponse::DesktopEventSubscription { subscribed: true },
-                    };
+					let response = DesktopEnvelope::current(
+						message.request_id,
+						DesktopResponse::DesktopEventSubscription { subscribed: true },
+					);
                     write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                 }
                 request => {
                     let payload = handle_desktop_ipc_message(&app_handle, request).await;
-                    let response = DesktopEnvelope {
-                        request_id: message.request_id,
-                        payload,
-                    };
+					let response = DesktopEnvelope::current(message.request_id, payload);
                     write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                 }
-            }
+				}
+			}
         }
     }
 

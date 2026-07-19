@@ -1,9 +1,11 @@
 import { NATIVE_HOST_NAME } from "./constants";
-import type {
-	DesktopEnvelope,
-	DesktopEventPayload,
-	DesktopRequest,
-	DesktopResponse,
+import {
+	DESKTOP_PROTOCOL_VERSION,
+	DesktopProtocolMismatchError,
+	type DesktopEnvelope,
+	type DesktopEventPayload,
+	type DesktopRequest,
+	type DesktopResponse,
 } from "./desktop-protocol";
 
 const REQUEST_TIMEOUT_MS = 30000;
@@ -38,6 +40,7 @@ export class NativeMessagingClient {
 	>();
 	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	private subscribedToDesktopEvents = false;
+	private protocolMismatchDetected = false;
 	private requestCounter = 0;
 
 	constructor(deps: NativeMessagingClientDeps = {}) {
@@ -50,8 +53,13 @@ export class NativeMessagingClient {
 	}
 
 	private ensurePort(): chrome.runtime.Port {
-		if (this.port) {
+		if (this.port && !this.protocolMismatchDetected) {
 			return this.port;
+		}
+		if (this.port) {
+			const incompatiblePort = this.port;
+			this.port = null;
+			incompatiblePort.disconnect();
 		}
 
 		const port = this.connectNativeImpl(NATIVE_HOST_NAME);
@@ -59,13 +67,26 @@ export class NativeMessagingClient {
 			this.handleMessage(message as DesktopEnvelope<DesktopResponse>);
 		});
 		port.onDisconnect.addListener(() => {
-			this.handleDisconnect();
+			this.handleDisconnect(port);
 		});
 		this.port = port;
+		this.protocolMismatchDetected = false;
 		return port;
 	}
 
 	private handleMessage(message: DesktopEnvelope<DesktopResponse>): void {
+		if (message.protocolVersion !== DESKTOP_PROTOCOL_VERSION) {
+			this.handleProtocolMismatch(message.protocolVersion);
+			return;
+		}
+		if (message.type === "PROTOCOL_MISMATCH") {
+			this.handleProtocolMismatch(
+				message.receivedVersion,
+				message.expectedVersion,
+			);
+			return;
+		}
+
 		if (message.type === "DESKTOP_EVENT") {
 			const event = message as unknown as DesktopEventPayload;
 			for (const listener of this.desktopEventListeners) {
@@ -88,7 +109,37 @@ export class NativeMessagingClient {
 		pending.resolve(message);
 	}
 
-	private handleDisconnect(): void {
+	private handleProtocolMismatch(
+		receivedVersion: number | undefined,
+		expectedVersion = DESKTOP_PROTOCOL_VERSION,
+	): void {
+		const error = new DesktopProtocolMismatchError(
+			expectedVersion,
+			receivedVersion,
+		);
+		console.error("[native-messaging-client] Desktop protocol mismatch", {
+			expectedVersion: error.expectedVersion,
+			receivedVersion: error.receivedVersion,
+		});
+
+		this.protocolMismatchDetected = true;
+		this.subscribedToDesktopEvents = false;
+		if (this.reconnectTimer) {
+			clearTimeout(this.reconnectTimer);
+			this.reconnectTimer = null;
+		}
+		for (const pending of this.pendingRequests.values()) {
+			clearTimeout(pending.timeoutId);
+			pending.reject(error);
+		}
+		this.pendingRequests.clear();
+	}
+
+	private handleDisconnect(disconnectedPort: chrome.runtime.Port): void {
+		if (this.port !== disconnectedPort) {
+			return;
+		}
+
 		const error = chrome.runtime.lastError;
 		const reason = error?.message || "Native host disconnected";
 
@@ -100,7 +151,11 @@ export class NativeMessagingClient {
 		this.port = null;
 		this.subscribedToDesktopEvents = false;
 
-		if (this.desktopEventListeners.size > 0 && !this.reconnectTimer) {
+		if (
+			!this.protocolMismatchDetected &&
+			this.desktopEventListeners.size > 0 &&
+			!this.reconnectTimer
+		) {
 			this.reconnectTimer = setTimeout(() => {
 				this.reconnectTimer = null;
 				void this.ensureDesktopEventSubscription();
@@ -113,9 +168,12 @@ export class NativeMessagingClient {
 		timeoutMs = REQUEST_TIMEOUT_MS,
 	): Promise<TResponse> {
 		return new Promise((resolve, reject) => {
+			let requestId: string | undefined;
+			let timeoutId: ReturnType<typeof setTimeout> | undefined;
 			try {
-				const requestId = this.nextRequestId();
-				const timeoutId = setTimeout(() => {
+				const port = this.ensurePort();
+				requestId = this.nextRequestId();
+				timeoutId = setTimeout(() => {
 					this.pendingRequests.delete(requestId);
 					reject(new Error("Native messaging timeout"));
 				}, timeoutMs);
@@ -126,11 +184,18 @@ export class NativeMessagingClient {
 					timeoutId,
 				});
 
-				this.ensurePort().postMessage({
+				port.postMessage({
 					requestId,
+					protocolVersion: DESKTOP_PROTOCOL_VERSION,
 					...message,
 				} satisfies DesktopEnvelope<DesktopRequest>);
 			} catch (error) {
+				if (requestId) {
+					this.pendingRequests.delete(requestId);
+				}
+				if (timeoutId) {
+					clearTimeout(timeoutId);
+				}
 				reject(error);
 			}
 		});
@@ -174,6 +239,9 @@ export class NativeMessagingClient {
 	): () => void {
 		this.desktopEventListeners.add(listener);
 		void this.ensureDesktopEventSubscription().catch((error) => {
+			if (error instanceof DesktopProtocolMismatchError) {
+				return;
+			}
 			console.error(
 				"[native-messaging-client] Failed to subscribe to desktop events:",
 				error,

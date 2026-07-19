@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { DesktopClient } from "../../src/background/desktop-client";
+import { DesktopProtocolMismatchError } from "../../src/background/desktop-protocol";
 import { NativeMessagingClient } from "../../src/background/native-messaging-client";
 
 type FakeListener<T> = (value: T) => void;
@@ -143,6 +144,20 @@ describe("desktop-client native transport", () => {
 });
 
 describe("native-messaging-client", () => {
+	test("includes the current desktop protocol version on requests", () => {
+		const fakePort = createFakePort();
+		const client = new NativeMessagingClient({
+			connectNative: () => fakePort.port,
+		});
+
+		void client.request({ type: "PING" }, 1).catch(() => {});
+
+		expect(fakePort.postedMessages[0]).toMatchObject({
+			protocolVersion: 1,
+			type: "PING",
+		});
+	});
+
 	test("reconnects after disconnect and routes the next request through a new port", async () => {
 		const firstPort = createFakePort();
 		const secondPort = createFakePort();
@@ -160,6 +175,7 @@ describe("native-messaging-client", () => {
 			requestId: string;
 		};
 		firstPort.emitMessage({
+			protocolVersion: 1,
 			requestId: firstEnvelope.requestId,
 			type: "DESKTOP_STATUS",
 			available: true,
@@ -177,6 +193,7 @@ describe("native-messaging-client", () => {
 			requestId: string;
 		};
 		secondPort.emitMessage({
+			protocolVersion: 1,
 			requestId: secondEnvelope.requestId,
 			type: "DESKTOP_STATUS",
 			available: true,
@@ -187,6 +204,7 @@ describe("native-messaging-client", () => {
 		});
 
 		await expect(secondRequest).resolves.toEqual({
+			protocolVersion: 1,
 			type: "DESKTOP_STATUS",
 			requestId: secondEnvelope.requestId,
 			available: true,
@@ -212,11 +230,13 @@ describe("native-messaging-client", () => {
 			requestId: string;
 		};
 		fakePort.emitMessage({
+			protocolVersion: 1,
 			requestId: subscribeEnvelope.requestId,
 			type: "DESKTOP_EVENT_SUBSCRIPTION",
 			subscribed: true,
 		});
 		fakePort.emitMessage({
+			protocolVersion: 1,
 			type: "DESKTOP_EVENT",
 			event: "unlock",
 			payload: {
@@ -228,5 +248,83 @@ describe("native-messaging-client", () => {
 		expect(events).toEqual(["unlock"]);
 
 		unsubscribe();
+	});
+
+	test("rejects a legacy response without waiting for the request timeout", async () => {
+		const fakePort = createFakePort();
+		const client = new NativeMessagingClient({
+			connectNative: () => fakePort.port,
+		});
+		const request = client.request({ type: "GET_DESKTOP_STATUS" });
+		const envelope = fakePort.postedMessages[0] as { requestId: string };
+
+		fakePort.emitMessage({
+			requestId: envelope.requestId,
+			type: "DESKTOP_STATUS",
+			available: true,
+			locked: false,
+			unlockedAccounts: [],
+			timestamp: 1,
+			autolockTimeoutMs: 2,
+		});
+
+		await expect(request).rejects.toEqual(
+			expect.objectContaining({
+				expectedVersion: 1,
+				receivedVersion: undefined,
+			}),
+		);
+	});
+
+	test("rejects all pending requests when a response has the wrong version", async () => {
+		const fakePort = createFakePort();
+		const client = new NativeMessagingClient({
+			connectNative: () => fakePort.port,
+		});
+		const firstRequest = client.request({ type: "GET_DESKTOP_STATUS" });
+		const secondRequest = client.request({ type: "GET_DESKTOP_ACCOUNTS" });
+		const firstEnvelope = fakePort.postedMessages[0] as { requestId: string };
+
+		fakePort.emitMessage({
+			protocolVersion: 99,
+			requestId: firstEnvelope.requestId,
+			type: "DESKTOP_STATUS",
+			available: true,
+			locked: false,
+			unlockedAccounts: [],
+			timestamp: 1,
+			autolockTimeoutMs: 2,
+		});
+
+		await expect(firstRequest).rejects.toBeInstanceOf(
+			DesktopProtocolMismatchError,
+		);
+		await expect(secondRequest).rejects.toBeInstanceOf(
+			DesktopProtocolMismatchError,
+		);
+	});
+
+	test("does not reconnect an event subscription after a protocol mismatch", async () => {
+		const fakePort = createFakePort();
+		let connectCount = 0;
+		const client = new NativeMessagingClient({
+			connectNative: () => {
+				connectCount += 1;
+				return fakePort.port;
+			},
+		});
+
+		client.subscribeToDesktopEvents(() => {});
+		const envelope = fakePort.postedMessages[0] as { requestId: string };
+		fakePort.emitMessage({
+			protocolVersion: 99,
+			requestId: envelope.requestId,
+			type: "DESKTOP_EVENT_SUBSCRIPTION",
+			subscribed: false,
+		});
+		fakePort.emitDisconnect();
+		await Bun.sleep(1100);
+
+		expect(connectCount).toBe(1);
 	});
 });

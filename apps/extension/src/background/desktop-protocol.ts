@@ -1,3 +1,5 @@
+export const DESKTOP_PROTOCOL_VERSION = 1;
+
 export type DesktopRequest =
 	| { type: "PING" }
 	| { type: "GET_DESKTOP_STATUS" }
@@ -32,6 +34,11 @@ export type DesktopEventPayload =
 	  };
 
 export type DesktopResponse =
+	| {
+			type: "PROTOCOL_MISMATCH";
+			expectedVersion: number;
+			receivedVersion?: number;
+	  }
 	| { type: "PONG"; version: string }
 	| {
 			type: "DESKTOP_STATUS";
@@ -117,5 +124,20 @@ export type DesktopResponse =
 	| { type: "ERROR"; message: string };
 
 export type DesktopEnvelope<T> = T & {
+	protocolVersion: number;
 	requestId?: string;
 };
+
+export class DesktopProtocolMismatchError extends Error {
+	readonly expectedVersion: number;
+	readonly receivedVersion: number | undefined;
+
+	constructor(expectedVersion: number, receivedVersion: number | undefined) {
+		super(
+			`Desktop protocol mismatch (expected ${expectedVersion}, received ${receivedVersion ?? "legacy"})`,
+		);
+		this.name = "DesktopProtocolMismatchError";
+		this.expectedVersion = expectedVersion;
+		this.receivedVersion = receivedVersion;
+	}
+}

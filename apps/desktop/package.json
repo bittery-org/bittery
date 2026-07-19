@@ -7,6 +7,7 @@
 		"check-types": "tsc --noEmit",
 		"dev": "tauri dev",
 		"dev:vite": "vite",
+		"build:native-host:dev": "cd src-tauri && cargo build --bin bittery-native-host",
 		"build:app": "tsc && vite build && tauri build",
 		"build:pre": "cd src-tauri && cargo build --release --bin bittery-native-host",
 		"build:prod": "BITTERY_EXTENSION_ID=$(grep BITTERY_EXTENSION_ID .env.production | cut -d '=' -f2) pnpm build",

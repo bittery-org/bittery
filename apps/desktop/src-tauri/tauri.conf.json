@@ -4,7 +4,7 @@
 	"version": "0.1.1",
 	"identifier": "com.bittery.desktop",
 	"build": {
-		"beforeDevCommand": "pnpm dev:vite",
+		"beforeDevCommand": "pnpm build:native-host:dev && pnpm dev:vite",
 		"devUrl": "http://localhost:3002",
 		"beforeBuildCommand": "tsc && vite build && cd src-tauri && cargo build --release --bin bittery-native-host",
 		"frontendDist": "../dist"

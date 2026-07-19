@@ -1,10 +1,31 @@
-import type { DesktopEventPayload, DesktopResponse } from "./desktop-protocol";
+import {
+	DesktopProtocolMismatchError,
+	type DesktopEventPayload,
+	type DesktopResponse,
+} from "./desktop-protocol";
 import {
 	type NativeMessagingClient,
 	nativeMessagingClient,
 } from "./native-messaging-client";
 
 const CACHE_TTL_MS = 5000;
+
+function describeSnapshotTransportError(error: unknown): string {
+	if (error instanceof DesktopProtocolMismatchError) {
+		return `protocol mismatch (expected ${error.expectedVersion}, received ${error.receivedVersion ?? "legacy"})`;
+	}
+	if (error instanceof Error) {
+		const normalizedMessage = error.message.toLowerCase();
+		if (normalizedMessage.includes("native host disconnected")) {
+			return "native host disconnected";
+		}
+		if (normalizedMessage.includes("native messaging timeout")) {
+			return "native messaging timeout";
+		}
+		return `transport error: ${error.message}`;
+	}
+	return "unknown transport error";
+}
 
 export interface DesktopStatus {
 	available: boolean;
@@ -195,11 +216,15 @@ export class DesktopClient {
 			if (response.type === "ERROR") {
 				console.warn("[desktop-client] Desktop snapshot request failed", {
 					accountIds: normalizedAccountIds,
-					message: response.message,
+					reason: `desktop error response: ${response.message}`,
 				});
 				return null;
 			}
 			if (response.type !== "DESKTOP_ITEMS_SNAPSHOT") {
+				console.warn("[desktop-client] Desktop snapshot request failed", {
+					accountIds: normalizedAccountIds,
+					reason: `unexpected response type: ${response.type}`,
+				});
 				return null;
 			}
 
@@ -208,7 +233,11 @@ export class DesktopClient {
 				timestamp: Date.now(),
 			});
 			return response;
-		} catch {
+		} catch (error) {
+			console.warn("[desktop-client] Desktop snapshot request failed", {
+				accountIds: normalizedAccountIds,
+				reason: describeSnapshotTransportError(error),
+			});
 			return null;
 		}
 	}
