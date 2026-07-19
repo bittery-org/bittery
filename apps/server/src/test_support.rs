@@ -381,7 +381,9 @@ where
         .await
         .expect("test database should connect");
 
-    let result = std::panic::AssertUnwindSafe(test_fn(pool)).catch_unwind().await;
+    let result = std::panic::AssertUnwindSafe(test_fn(pool))
+        .catch_unwind()
+        .await;
 
     database.cleanup().await;
 

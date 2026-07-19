@@ -2693,10 +2693,7 @@ fn validate_resource_id(value: &str) -> Result<(), AppError> {
 /// no pinned params) so the floor stays single-sourced in `kdf_policy.rs`. The
 /// `salt` is the SRP salt the client derived with; the baseline check also
 /// validates it, which is why callers pass the already-validated `srp_salt`.
-fn validate_kdf_params_against_floor(
-    params: &KdfParamsInput,
-    salt: &str,
-) -> Result<(), AppError> {
+fn validate_kdf_params_against_floor(params: &KdfParamsInput, salt: &str) -> Result<(), AppError> {
     let candidate = KdfParams {
         schema_version: params.schema_version,
         algorithm: params.algorithm.clone(),

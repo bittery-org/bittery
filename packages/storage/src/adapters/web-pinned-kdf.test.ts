@@ -60,10 +60,9 @@ describe("web adapter pinned KDF params are per-account", () => {
 
 	it("falls back to a legacy shared pin when no per-account pin exists", async () => {
 		const storage = createWebStorageAdapter(dummyCrypto);
-		(globalThis as unknown as { localStorage: MemoryStorage }).localStorage.setItem(
-			LEGACY_PIN_KEY,
-			JSON.stringify(params310k),
-		);
+		(
+			globalThis as unknown as { localStorage: MemoryStorage }
+		).localStorage.setItem(LEGACY_PIN_KEY, JSON.stringify(params310k));
 
 		expect(await storage.getPinnedKdfParams("acct-legacy")).toEqual(params310k);
 	});

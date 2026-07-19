@@ -2229,9 +2229,22 @@ async fn start_login_returns_each_users_own_kdf_iterations() {
     with_rpc_test_app("start_login_per_user_kdf", |app| async move {
         let low = build_auth_crypto_fixture("kdf-low", "pw-low");
         let high = build_auth_crypto_fixture("kdf-high", "pw-high");
-        insert_kdf_login_user(&app.pool, "kdf_user_low", "low-kdf@example.com", &low, 310_000).await;
-        insert_kdf_login_user(&app.pool, "kdf_user_high", "high-kdf@example.com", &high, 600_000)
-            .await;
+        insert_kdf_login_user(
+            &app.pool,
+            "kdf_user_low",
+            "low-kdf@example.com",
+            &low,
+            310_000,
+        )
+        .await;
+        insert_kdf_login_user(
+            &app.pool,
+            "kdf_user_high",
+            "high-kdf@example.com",
+            &high,
+            600_000,
+        )
+        .await;
 
         let low_start = start_login_ok(&app, "low-kdf@example.com").await;
         assert_eq!(low_start["kdfParams"]["iterations"], json!(310_000));
