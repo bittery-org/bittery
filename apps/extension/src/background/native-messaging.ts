@@ -216,10 +216,19 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 /**
  * Request desktop app to open
  */
-export async function handleOpenDesktopApp(): Promise<MessageResponse> {
+export async function handleOpenDesktopApp(payload?: {
+	intent?: "create_item" | "view_item";
+	url?: string;
+	itemId?: string;
+	vaultId?: string;
+}): Promise<MessageResponse> {
 	try {
 		const response = await sendNativeMessage({
 			type: "OPEN_DESKTOP_APP",
+			intent: payload?.intent,
+			url: payload?.url,
+			itemId: payload?.itemId,
+			vaultId: payload?.vaultId,
 		});
 
 		const responseData = response as any;

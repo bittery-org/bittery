@@ -1,26 +1,43 @@
+import { Button, toast, type VaultIconState } from "@bittery/ui";
 import {
-	Button,
-	Card,
-	Input,
-	Label,
-	toast,
-	VaultIcon,
-	type VaultIconState,
-} from "@bittery/ui";
-import { IconEye, IconEyeOff } from "@bittery/ui/icons";
+	IconEye,
+	IconEyeOff,
+	IconFingerprint,
+	IconKey,
+	IconLock,
+	IconTriangleAlert,
+} from "@bittery/ui/icons";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import iconMark from "../../icons/icon-128.png";
 import { storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
+
+/** teamName → name → email initials, never a raw-email slice artifact. */
+function getInitials(account: {
+	teamName?: string;
+	name: string;
+	email: string;
+}) {
+	const source = account.teamName || account.name;
+	if (source) {
+		const parts = source.trim().split(/\s+/);
+		if (parts.length >= 2) {
+			return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+		}
+		return source.slice(0, 2).toUpperCase();
+	}
+	return account.email.slice(0, 2).toUpperCase();
+}
 
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { m } = useI18n();
 	const [showPassword, setShowPassword] = useState(false);
-	const [biometricAttempted, setBiometricAttempted] = useState(false);
+	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const hasAttemptedBiometric = useRef(false);
 
@@ -165,11 +182,12 @@ export function UnlockPage() {
 				const desktopAvailable =
 					response.available && response.enabled && response.appRunning;
 
+				setBiometricAvailable(Boolean(desktopAvailable));
+
 				// Automatically trigger biometric unlock if desktop app is available (only once)
 				// The actual biometric unlock handler will check which accounts have biometric enabled
 				if (desktopAvailable && !hasAttemptedBiometric.current) {
 					hasAttemptedBiometric.current = true;
-					setBiometricAttempted(true);
 					// Use a small delay to ensure everything is initialized
 					setTimeout(() => {
 						biometricUnlockMutation.mutate();
@@ -194,12 +212,58 @@ export function UnlockPage() {
 		navigate({ to: "/login" });
 	};
 
+	const handleOpenDesktopApp = async () => {
+		try {
+			const response = await chrome.runtime.sendMessage({
+				type: "OPEN_DESKTOP_APP",
+			});
+			if (!response?.success) {
+				throw new Error(response?.error);
+			}
+		} catch {
+			toast.error(m.ext_vault_toast_desktop_open_failed());
+		}
+	};
+
+	// Full-screen aurora wash at the top of the auth surface.
+	const aurora = (
+		<div
+			aria-hidden
+			className="pointer-events-none absolute inset-x-0 top-0 h-60 bg-[radial-gradient(70%_100%_at_50%_0%,color-mix(in_oklab,var(--color-primary-deep)_8%,transparent),transparent_70%)] dark:bg-[radial-gradient(70%_100%_at_50%_0%,color-mix(in_oklab,var(--color-primary-deep)_14%,transparent),transparent_70%)]"
+		/>
+	);
+
+	const emblem = (
+		<div
+			aria-hidden
+			className="mb-4 flex size-16 items-center justify-center [filter:drop-shadow(0_4px_14px_oklch(0_0_0/0.2))_drop-shadow(0_0_28px_color-mix(in_oklab,var(--color-primary-deep)_30%,transparent))] dark:[filter:drop-shadow(0_4px_14px_oklch(0_0_0/0.35))_drop-shadow(0_0_28px_color-mix(in_oklab,var(--color-primary-deep)_50%,transparent))]"
+		>
+			<img
+				src={iconMark}
+				alt=""
+				className={`size-[58px] object-contain transition-transform duration-150 ${
+					vaultState === "unlocking" ? "scale-[1.06]" : "scale-100"
+				}`}
+			/>
+		</div>
+	);
+
 	if (accounts.length === 0) {
 		return (
-			<div className="flex min-h-[400px] items-center justify-center p-4">
-				<div className="text-center">
-					<p className="text-gray-600">{m.ext_unlock_no_accounts()}</p>
-					<Button onClick={handleFullLogin} className="mt-4">
+			<div className="relative flex min-h-[520px] flex-col items-center justify-center overflow-hidden p-6">
+				{aurora}
+				<div className="relative flex w-[300px] flex-col items-center text-center">
+					{emblem}
+					<h1 className="font-semibold text-base tracking-tight">
+						{m.ext_unlock_title_vault_locked()}
+					</h1>
+					<p className="mt-1.5 mb-4 text-muted-foreground text-xs">
+						{m.ext_unlock_no_accounts()}
+					</p>
+					<Button
+						onClick={handleFullLogin}
+						className="h-[34px] w-full rounded-lg"
+					>
 						{m.auth_signin_button_sign_in()}
 					</Button>
 				</div>
@@ -207,122 +271,145 @@ export function UnlockPage() {
 		);
 	}
 
+	const isSingle = accounts.length === 1;
+	const primaryAccount = accounts[0];
+	const isPending = unlockMutation.isPending || vaultState === "unlocking";
+
 	return (
-		<div className="flex min-h-[400px] items-center justify-center p-4">
-			<div className="w-full max-w-sm space-y-4">
-				<div className="flex flex-col items-center space-y-3 text-center">
-					<div style={{ width: 120, height: 120 }}>
-						<VaultIcon state={vaultState} size={120} />
-					</div>
-					<div>
-						<h1 className="font-semibold text-xl tracking-tight">
-							{m.auth_signin_title_quick_unlock()}
-						</h1>
-						{accounts.length === 1 ? (
-							<p className="mt-1 font-medium text-sm">{accounts[0]?.email}</p>
-						) : (
-							<p className="mt-1 text-muted-foreground text-sm">
-								{m.ext_unlock_accounts_count({ count: accounts.length })}
-							</p>
-						)}
-						<p className="mt-1 text-muted-foreground text-sm">
-							{vaultState === "unlocking"
-								? m.ext_unlock_unlocking()
-								: m.ext_unlock_enter_password()}
-						</p>
-					</div>
+		<div className="relative flex min-h-[520px] flex-col items-center justify-center overflow-hidden p-6">
+			{aurora}
+			<div className="relative flex w-[300px] flex-col items-center">
+				{emblem}
+				<h1 className="font-semibold text-base tracking-tight">
+					{m.ext_unlock_title_vault_locked()}
+				</h1>
+				<div className="mt-1.5 mb-[18px] flex items-center gap-1.5 text-muted-foreground text-xs">
+					{isSingle && primaryAccount ? (
+						<>
+							<span
+								aria-hidden
+								className="flex size-4 items-center justify-center rounded-[4.5px] bg-linear-to-br from-primary to-primary-deep font-semibold text-[7.5px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.18)]"
+							>
+								{getInitials(primaryAccount)}
+							</span>
+							<span className="max-w-[240px] truncate">
+								{primaryAccount.email}
+							</span>
+						</>
+					) : (
+						<span>
+							{m.ext_unlock_accounts_count({ count: accounts.length })}
+						</span>
+					)}
 				</div>
 
-				<Card className="border-0 bg-transparent p-6 shadow-none sm:border sm:bg-card sm:shadow-sm">
-					{/* Desktop app locked banner */}
-					{desktopStatus?.success &&
-						desktopStatus?.available &&
-						desktopStatus?.locked && (
-							<div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
-								<p className="text-center text-amber-800 text-sm dark:text-amber-200">
-									Desktop app is locked. Unlock in desktop app for best
-									experience, or use password below for extension-only access.
-								</p>
+				{/* Desktop app locked banner */}
+				{desktopStatus?.success &&
+					desktopStatus?.available &&
+					desktopStatus?.locked && (
+						<div className="mb-3.5 flex w-full items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 p-2.5 text-muted-foreground text-xs">
+							<IconTriangleAlert className="mt-px size-3.5 shrink-0 text-warning" />
+							<div>
+								<span className="font-medium text-foreground">
+									{m.ext_unlock_desktop_locked_lead()}
+								</span>{" "}
+								{m.ext_unlock_desktop_locked_body()}{" "}
+								<button
+									type="button"
+									onClick={handleOpenDesktopApp}
+									className="font-medium text-warning hover:underline"
+								>
+									{m.ext_unlock_open_desktop_app()}
+								</button>
 							</div>
-						)}
-
-					{biometricAttempted && !biometricUnlockMutation.isPending && (
-						<div className="mb-4 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950/30">
-							<p className="text-center text-blue-800 text-sm dark:text-blue-200">
-								{m.ext_unlock_biometric_fallback()}
-							</p>
 						</div>
 					)}
 
-					<form
-						onSubmit={(e) => {
-							e.preventDefault();
-							e.stopPropagation();
-							form.handleSubmit();
-						}}
-						className="space-y-4"
+				<form
+					onSubmit={(e) => {
+						e.preventDefault();
+						e.stopPropagation();
+						form.handleSubmit();
+					}}
+					className="w-full"
+				>
+					<form.Field name="password">
+						{(field) => (
+							<div className="mb-2.5 flex h-[34px] items-center gap-2 rounded-lg border bg-transparent px-2.5 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25 dark:bg-input/20">
+								<IconKey className="size-3.5 shrink-0 text-muted-foreground" />
+								<input
+									id={field.name}
+									name={field.name}
+									// biome-ignore lint/a11y/noAutofocus: password field is the primary action on unlock
+									autoFocus
+									type={showPassword ? "text" : "password"}
+									placeholder={m.ext_unlock_placeholder_master_password()}
+									autoComplete="current-password"
+									value={field.state.value}
+									onBlur={field.handleBlur}
+									onChange={(e) => field.handleChange(e.target.value)}
+									required
+									className="min-w-0 flex-1 bg-transparent text-foreground text-sm outline-none placeholder:text-muted-foreground"
+								/>
+								<button
+									type="button"
+									onClick={() => setShowPassword(!showPassword)}
+									className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+								>
+									{showPassword ? (
+										<IconEyeOff className="size-3.5" />
+									) : (
+										<IconEye className="size-3.5" />
+									)}
+								</button>
+							</div>
+						)}
+					</form.Field>
+
+					<Button
+						type="submit"
+						className="h-[34px] w-full rounded-lg"
+						disabled={isPending}
 					>
-						<div>
-							<form.Field name="password">
-								{(field) => (
-									<div className="space-y-2">
-										<Label htmlFor={field.name}>
-											{m.auth_signin_label_password()}
-										</Label>
-										<div className="relative">
-											<Input
-												id={field.name}
-												name={field.name}
-												type={showPassword ? "text" : "password"}
-												placeholder="••••••••"
-												value={field.state.value}
-												onBlur={field.handleBlur}
-												onChange={(e) => field.handleChange(e.target.value)}
-												required
-												autoFocus
-												className="h-10 pr-10"
-											/>
-											<Button
-												type="button"
-												variant="ghost"
-												size="icon"
-												className="absolute top-1/2 right-0 size-10 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-												onClick={() => setShowPassword(!showPassword)}
-											>
-												{showPassword ? (
-													<IconEyeOff size={16} />
-												) : (
-													<IconEye size={16} />
-												)}
-											</Button>
-										</div>
-									</div>
-								)}
-							</form.Field>
-						</div>
+						<IconLock className="size-3.5" />
+						{isPending
+							? m.ext_unlock_button_unlocking()
+							: isSingle
+								? m.auth_signin_button_unlock_vault()
+								: m.ext_unlock_button_unlock_all({ count: accounts.length })}
+					</Button>
 
-						<Button
-							type="submit"
-							className="h-10 w-full font-medium"
-							disabled={unlockMutation.isPending}
-						>
-							{unlockMutation.isPending
-								? m.ext_unlock_button_unlocking()
-								: accounts.length === 1
-									? m.auth_signin_button_unlock_vault()
-									: m.ext_unlock_button_unlock_all({ count: accounts.length })}
-						</Button>
+					{biometricAvailable && (
+						<>
+							<div className="my-3 flex items-center gap-2.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
+								<span aria-hidden className="h-px flex-1 bg-border" />
+								{m.ext_unlock_or()}
+								<span aria-hidden className="h-px flex-1 bg-border" />
+							</div>
+							<Button
+								type="button"
+								variant="outline"
+								className="h-[34px] w-full rounded-lg"
+								disabled={isPending}
+								onClick={() => biometricUnlockMutation.mutate()}
+							>
+								<IconFingerprint className="size-4 text-primary" />
+								{m.ext_unlock_touch_id()}
+							</Button>
+						</>
+					)}
+				</form>
 
-						<Button
-							type="button"
-							variant="link"
-							onClick={handleFullLogin}
-							className="w-full text-muted-foreground"
-						>
-							{m.auth_signin_button_different_account()}
-						</Button>
-					</form>
-				</Card>
+				<div className="mt-3.5 text-center text-muted-foreground text-xs">
+					{m.ext_unlock_not_you()}{" "}
+					<button
+						type="button"
+						onClick={handleFullLogin}
+						className="font-medium text-foreground/80 transition-colors hover:text-foreground"
+					>
+						{m.ext_unlock_use_different_account()}
+					</button>
+				</div>
 			</div>
 		</div>
 	);

@@ -177,14 +177,23 @@ export function ExtensionAccountSwitcher() {
 		(a) => a.accountId === activeAccountId,
 	);
 
-	// Helper to get avatar color
-	const getAvatarColor = (email: string) => {
-		let hash = 0;
-		for (let i = 0; i < email.length; i++) {
-			hash = email.charCodeAt(i) + ((hash << 5) - hash);
+	// Same initials precedence as the desktop app's AccountAvatar:
+	// team name → personal name → email prefix.
+	const getInitials = (account: {
+		teamName?: string;
+		name?: string;
+		email: string;
+	}) => {
+		const source = account.teamName || account.name;
+		if (source) {
+			return source
+				.split(" ")
+				.map((part) => part[0])
+				.join("")
+				.toUpperCase()
+				.slice(0, 2);
 		}
-		const hue = hash % 360;
-		return `hsl(${hue}, 70%, 50%)`;
+		return account.email.substring(0, 2).toUpperCase();
 	};
 
 	// Custom trigger with AvatarGroup support
@@ -197,18 +206,15 @@ export function ExtensionAccountSwitcher() {
 		>
 			{activeAccount ? (
 				<>
-					<Avatar className="h-6 w-6">
+					<Avatar className="size-6 rounded-md text-[10px]">
 						{activeAccount.teamAvatarUrl && (
 							<AvatarImage
 								src={activeAccount.teamAvatarUrl}
 								alt={activeAccount.teamName || activeAccount.name}
 							/>
 						)}
-						<AvatarFallback
-							className="font-medium text-white text-xs"
-							style={{ backgroundColor: getAvatarColor(activeAccount.email) }}
-						>
-							{activeAccount.email.slice(0, 2).toUpperCase()}
+						<AvatarFallback className="size-6 rounded-md bg-linear-to-br from-primary to-primary-deep font-semibold text-[10px] text-primary-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/0.15)]">
+							{getInitials(activeAccount)}
 						</AvatarFallback>
 					</Avatar>
 					<div className="flex flex-col items-start overflow-hidden">

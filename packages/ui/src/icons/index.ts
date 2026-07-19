@@ -32,6 +32,7 @@ export {
 	FileLock as IconFileLock,
 	Fingerprint as IconFingerprint,
 	Folder as IconFolder,
+	Globe as IconGlobe,
 	Heart as IconHeart,
 	History as IconHistory,
 	ImagePlus as IconImagePlus,
@@ -46,6 +47,8 @@ export {
 	LockOpen as IconLockOpen,
 	LogOut as IconLogOut,
 	Mail as IconMail,
+	Monitor as IconMonitor,
+	Moon as IconMoon,
 	Music as IconMusic,
 	Network as IconNetwork,
 	Pencil as IconPencil,
@@ -63,6 +66,7 @@ export {
 	SquareArrowOutUpRight as IconOpenExternal,
 	SquareTerminal as IconSquareTerminal,
 	Star as IconStar,
+	Sun as IconSun,
 	Tag as IconTag,
 	Trash2 as IconTrash,
 	TriangleAlert as IconTriangleAlert,
@@ -70,7 +74,9 @@ export {
 	User as IconUser,
 	Users as IconUsers,
 	Vault as IconVault,
+	WandSparkles as IconWand,
 	X as IconX,
+	Zap as IconZap,
 } from "lucide-react";
 export { default as IconFlagGermany } from "./IconFlagGermany";
 export { default as IconFlagUnitedStates } from "./IconFlagUnitedStates";

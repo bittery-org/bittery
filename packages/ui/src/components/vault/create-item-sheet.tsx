@@ -29,6 +29,8 @@ interface CreateItemSheetProps {
 	onOpenChange: (open: boolean) => void;
 	vaults: VaultOption[];
 	selectedVaultId?: string;
+	/** Pre-fills the website field of the login form (e.g. from the browser extension's active tab). */
+	initialUrl?: string;
 	onCreateItem: (
 		data: DecryptedItemData,
 		vaultId: string,
@@ -104,6 +106,7 @@ export function CreateItemSheet({
 	onOpenChange,
 	vaults,
 	selectedVaultId,
+	initialUrl,
 	onCreateItem,
 }: CreateItemSheetProps) {
 	const { m } = useI18n();
@@ -247,6 +250,11 @@ export function CreateItemSheet({
 					<div className="flex min-h-0 flex-1 flex-col">
 						<ItemForm
 							category={selectedCategory}
+							initialData={
+								selectedCategory === "login" && initialUrl
+									? { url: initialUrl }
+									: undefined
+							}
 							onSubmit={handleSubmit}
 							onCancel={handleCancel}
 							submitLabel={m.vaults_detail_items_form_action_create()}

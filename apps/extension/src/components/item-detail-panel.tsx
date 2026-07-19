@@ -4,19 +4,7 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import {
-	Button,
-	ButtonGroup,
-	Card,
-	cn,
-	copyWithToast,
-	InputGroup,
-	InputGroupAddon,
-	InputGroupButton,
-	InputGroupInput,
-	Label,
-	toast,
-} from "@bittery/ui";
+import { Button, Card, cn, copyWithToast, Label, toast } from "@bittery/ui";
 import {
 	IconCopy,
 	IconEye,
@@ -24,6 +12,7 @@ import {
 	IconLoaderCircle,
 	IconOpenExternal,
 	IconQrCode,
+	IconWand,
 } from "@bittery/ui/icons";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
@@ -40,25 +29,83 @@ const handleCopy = copyWithToast;
 interface ItemDetailPanelProps {
 	item: DecryptedItem;
 	onItemUpdated?: () => void;
+	/** True when the item matches the active tab's domain. */
+	matchesActiveTab?: boolean;
+	/** Trigger autofill of this item into the active tab. */
+	onAutofill?: () => void;
+	/** Open the item in the desktop app for editing. */
+	onOpenInApp?: () => void;
+}
+
+/** Hover-revealed size-7 icon action used inside field cards. */
+function FieldAction({
+	label,
+	onClick,
+	disabled,
+	children,
+}: {
+	label: string;
+	onClick: () => void;
+	disabled?: boolean;
+	children: React.ReactNode;
+}) {
+	return (
+		<Button
+			type="button"
+			variant="ghost"
+			size="icon"
+			className="size-7 text-muted-foreground opacity-0 transition-opacity focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100"
+			title={label}
+			disabled={disabled}
+			onClick={onClick}
+		>
+			{children}
+		</Button>
+	);
+}
+
+/** A single field row inside a `bg-card` field card. */
+function FieldRow({
+	label,
+	children,
+	actions,
+}: {
+	label: string;
+	children: React.ReactNode;
+	actions?: React.ReactNode;
+}) {
+	return (
+		<div className="group flex min-h-11 items-center gap-2 px-3 py-2 transition-colors hover:bg-accent">
+			<div className="min-w-0 flex-1">
+				<div className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
+					{label}
+				</div>
+				<div className="mt-px">{children}</div>
+			</div>
+			{actions ? <div className="flex gap-0.5">{actions}</div> : null}
+		</div>
+	);
 }
 
 /**
- * Inline TOTP Display Component
- * Shows the TOTP code with a countdown timer
+ * Inline TOTP row: mono code with a small countdown ring, rendered as a field
+ * row inside the login field card. Copy action is revealed on hover.
  */
-interface InlineTotpDisplayProps {
+interface InlineTotpRowProps {
 	totpSecret: string;
 	totpAlgorithm?: TotpAlgorithm;
 	totpDigits?: TotpDigits;
 	totpPeriod?: number;
+	label: string;
 }
 
-function InlineTotpDisplay({
+function InlineTotpRow({
 	totpSecret,
 	totpAlgorithm = "SHA1",
 	totpDigits = 6,
 	totpPeriod = 30,
-}: InlineTotpDisplayProps) {
+	label,
+}: InlineTotpRowProps) {
 	const { m } = useI18n();
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
 
@@ -78,96 +125,73 @@ function InlineTotpDisplay({
 
 	useEffect(() => {
 		generateCode();
-
-		const interval = setInterval(() => {
-			generateCode();
-		}, 1000);
-
+		const interval = setInterval(generateCode, 1000);
 		return () => clearInterval(interval);
 	}, [generateCode]);
 
-	const handleCopyCode = () => {
+	const handleCopyCode = () =>
 		copyWithToast(totpResult?.code, "Code", { showAutoClearMessage: false });
-	};
 
-	const progress = totpResult?.progress || 0;
-	const circumference = 2 * Math.PI * 14;
+	const progress = totpResult?.progress ?? 0;
+	const circumference = 2 * Math.PI * 6;
 	const strokeDashoffset = circumference - (progress / 100) * circumference;
-
-	const getProgressColor = () => {
-		if (!totpResult) return "stroke-muted";
-		if (totpResult.remainingSeconds <= 5) return "stroke-destructive";
-		if (totpResult.remainingSeconds <= 10) return "stroke-yellow-500";
-		return "stroke-primary";
-	};
+	const code = totpResult?.code
+		? `${totpResult.code.slice(0, 3)} ${totpResult.code.slice(3)}`
+		: "--- ---";
 
 	return (
-		<div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
-			<button
-				type="button"
-				onClick={handleCopyCode}
-				className="group flex cursor-pointer items-center gap-3 rounded-lg transition-colors hover:bg-muted/50"
-				title={m.ext_detail_click_to_copy()}
-			>
-				<div className="relative flex size-9 items-center justify-center">
-					<svg
-						className="size-9 -rotate-90"
-						viewBox="0 0 32 32"
-						aria-hidden="true"
-					>
-						<circle
-							cx="16"
-							cy="16"
-							r="14"
-							fill="none"
-							stroke="currentColor"
-							strokeWidth="2.5"
-							className="text-muted/30"
-						/>
-						<circle
-							cx="16"
-							cy="16"
-							r="14"
-							fill="none"
-							strokeWidth="2.5"
-							strokeLinecap="round"
-							className={cn(
-								"transition-all",
-								"duration-300",
-								getProgressColor(),
-							)}
-							style={{
-								strokeDasharray: circumference,
-								strokeDashoffset: strokeDashoffset,
-							}}
-						/>
-					</svg>
-					<span className="absolute font-medium font-mono text-xs">
-						{totpResult?.remainingSeconds || "--"}
-					</span>
-				</div>
-
-				<div className="flex flex-col">
-					<span className="font-bold font-mono text-xl tracking-widest">
-						{totpResult?.code
-							? `${totpResult.code.slice(0, 3)} ${totpResult.code.slice(3)}`
-							: "--- ---"}
-					</span>
-					<span className="text-muted-foreground text-xs">
-						{m.ext_detail_otp()}
-					</span>
-				</div>
-			</button>
-
-			<Button
-				size="icon"
-				variant="outline"
-				onClick={handleCopyCode}
-				disabled={!totpResult?.code}
-			>
-				<IconCopy size={16} />
-			</Button>
-		</div>
+		<FieldRow
+			label={label}
+			actions={
+				<FieldAction
+					label={m.ext_detail_action_copy()}
+					onClick={handleCopyCode}
+					disabled={!totpResult?.code}
+				>
+					<IconCopy className="size-3.5" />
+				</FieldAction>
+			}
+		>
+			<div className="flex items-center gap-2.5">
+				<span className="font-medium font-mono text-[15px] text-foreground tracking-[0.12em]">
+					{code}
+				</span>
+				<svg
+					className="size-[15px] -rotate-90"
+					viewBox="0 0 16 16"
+					aria-hidden="true"
+				>
+					<circle
+						cx="8"
+						cy="8"
+						r="6"
+						fill="none"
+						strokeWidth="2.5"
+						className="stroke-muted-foreground/35"
+					/>
+					<circle
+						cx="8"
+						cy="8"
+						r="6"
+						fill="none"
+						strokeWidth="2.5"
+						strokeLinecap="round"
+						className={cn(
+							"transition-all duration-300",
+							totpResult && totpResult.remainingSeconds <= 5
+								? "stroke-destructive"
+								: "stroke-primary",
+						)}
+						style={{
+							strokeDasharray: circumference,
+							strokeDashoffset,
+							filter:
+								"drop-shadow(0 0 3px color-mix(in oklab, var(--color-primary) 70%, transparent))",
+						}}
+					/>
+				</svg>
+			</div>
+		</FieldRow>
 	);
 }
 
@@ -219,7 +243,6 @@ function LoginItemDetail({
 			setIsSaving(true);
 
 			try {
-				// Send the TOTP data to the background to update the item
 				const response = await chrome.runtime.sendMessage({
 					type: "UPDATE_ITEM_TOTP",
 					payload: {
@@ -238,7 +261,6 @@ function LoginItemDetail({
 				if (response?.success) {
 					toast.success(m.ext_detail_totp_saved());
 					setShowQRScanner(false);
-					// Trigger a refresh of the item data
 					onItemUpdated?.();
 				} else {
 					toast.error(response?.error || m.ext_detail_totp_save_failed());
@@ -264,145 +286,136 @@ function LoginItemDetail({
 
 	return (
 		<div className="space-y-3">
-			{item.url && (
-				<div className="space-y-2">
-					<Label className="font-medium text-sm">
-						{m.ext_detail_label_website()}
-					</Label>
-					<InputGroup>
-						<InputGroupInput value={item.url} readOnly />
-						<InputGroupAddon align="inline-end">
-							<ButtonGroup>
-								<InputGroupButton
-									size="icon-sm"
+			<div className="divide-y overflow-hidden rounded-lg border bg-card">
+				{item.url && (
+					<FieldRow
+						label={m.ext_detail_label_website()}
+						actions={
+							<>
+								<FieldAction
+									label={m.ext_detail_action_copy()}
 									onClick={() => handleCopy(item.url, "URL")}
 								>
-									<IconCopy className="size-4" />
-								</InputGroupButton>
-								<InputGroupButton
-									size="icon-sm"
+									<IconCopy className="size-3.5" />
+								</FieldAction>
+								<FieldAction
+									label={m.ext_detail_action_open()}
 									onClick={() => handleOpenUrl(item.url)}
 								>
-									<IconOpenExternal className="size-4" />
-								</InputGroupButton>
-							</ButtonGroup>
-						</InputGroupAddon>
-					</InputGroup>
-				</div>
-			)}
+									<IconOpenExternal className="size-3.5" />
+								</FieldAction>
+							</>
+						}
+					>
+						<div className="truncate text-[13px] text-[color-mix(in_oklab,var(--color-primary)_55%,var(--color-foreground))]">
+							{item.url}
+						</div>
+					</FieldRow>
+				)}
 
-			{item.username && (
-				<div className="space-y-2">
-					<Label className="font-medium text-sm">
-						{m.ext_detail_label_username()}
-					</Label>
-					<InputGroup>
-						<InputGroupInput value={item.username} readOnly />
-						<InputGroupAddon align="inline-end">
-							<InputGroupButton
-								size="icon-sm"
+				{item.username && (
+					<FieldRow
+						label={m.ext_detail_label_username()}
+						actions={
+							<FieldAction
+								label={m.ext_detail_action_copy()}
 								onClick={() => handleCopy(item.username, "Username")}
 							>
-								<IconCopy className="size-4" />
-							</InputGroupButton>
-						</InputGroupAddon>
-					</InputGroup>
-				</div>
-			)}
+								<IconCopy className="size-3.5" />
+							</FieldAction>
+						}
+					>
+						<div className="truncate text-[13px] text-foreground">
+							{item.username}
+						</div>
+					</FieldRow>
+				)}
 
-			{item.password && (
-				<div className="space-y-2">
-					<Label className="font-medium text-sm">
-						{m.ext_detail_label_password()}
-					</Label>
-					<InputGroup>
-						<InputGroupInput
-							type={showPassword ? "text" : "password"}
-							value={item.password}
-							readOnly
-							className="font-mono"
-						/>
-						<InputGroupAddon align="inline-end">
-							<ButtonGroup>
-								<InputGroupButton
-									size="icon-sm"
+				{item.password && (
+					<FieldRow
+						label={m.ext_detail_label_password()}
+						actions={
+							<>
+								<FieldAction
+									label={
+										showPassword
+											? m.ext_detail_action_hide()
+											: m.ext_detail_action_reveal()
+									}
 									onClick={() => setShowPassword(!showPassword)}
 								>
 									{showPassword ? (
-										<IconEyeOff className="size-4" />
+										<IconEyeOff className="size-3.5" />
 									) : (
-										<IconEye className="size-4" />
+										<IconEye className="size-3.5" />
 									)}
-								</InputGroupButton>
-								<InputGroupButton
-									size="icon-sm"
+								</FieldAction>
+								<FieldAction
+									label={m.ext_detail_action_copy()}
 									onClick={() => handleCopy(item.password, "Password")}
 								>
-									<IconCopy className="size-4" />
-								</InputGroupButton>
-							</ButtonGroup>
-						</InputGroupAddon>
-					</InputGroup>
-				</div>
-			)}
+									<IconCopy className="size-3.5" />
+								</FieldAction>
+							</>
+						}
+					>
+						<div
+							className={cn(
+								"truncate font-mono text-[12.5px]",
+								showPassword
+									? "text-foreground tracking-[0.04em]"
+									: "text-muted-foreground tracking-[0.22em]",
+							)}
+						>
+							{showPassword ? item.password : "•".repeat(12)}
+						</div>
+					</FieldRow>
+				)}
 
-			{passkeys.length > 0 && (
-				<div className="space-y-2">
-					<Label className="font-medium text-sm">
-						{m.ext_detail_label_passkeys()}
-					</Label>
-					<div className="space-y-1">
-						{passkeys.map((passkey, index) => (
-							<div
-								key={`${passkey.credentialId}-${index}`}
-								className="flex items-center justify-between gap-2 rounded-md border px-2.5 py-2"
-							>
-								<div className="min-w-0">
-									<p className="truncate font-medium text-sm">
-										{passkey.userDisplayName || passkey.userName || "Passkey"}
-									</p>
-									<p className="truncate text-[11px] text-muted-foreground">
-										{passkey.rpId}
-										{" \u2022 "}
-										used{" "}
-										{formatPasskeyLastUsed(
-											passkey.lastUsedAt ?? passkey.createdAt,
-										)}
-										{" \u2022 "}#{passkey.signCount ?? 0}
-									</p>
-								</div>
-								<Button
-									type="button"
-									variant="ghost"
-									size="icon"
-									className="size-7 shrink-0"
-									title={m.ext_detail_passkey_copy_id()}
-									onClick={() => handleCopy(passkey.credentialId, "Passkey ID")}
-								>
-									<IconCopy className="size-4" />
-								</Button>
-							</div>
-						))}
-					</div>
-				</div>
-			)}
-
-			{/* TOTP Section */}
-			<div className="space-y-2">
-				<Label className="font-medium text-sm">
-					{m.ext_detail_label_2fa()}
-				</Label>
-				{item.totpSecret ? (
-					<InlineTotpDisplay
+				{item.totpSecret && (
+					<InlineTotpRow
 						totpSecret={item.totpSecret}
 						totpAlgorithm={item.totpAlgorithm}
 						totpDigits={item.totpDigits}
 						totpPeriod={item.totpPeriod}
+						label={m.ext_detail_otp()}
 					/>
-				) : showQRScanner ? (
+				)}
+
+				{passkeys.map((passkey, index) => (
+					<FieldRow
+						key={`${passkey.credentialId}-${index}`}
+						label={m.ext_detail_label_passkeys()}
+						actions={
+							<FieldAction
+								label={m.ext_detail_passkey_copy_id()}
+								onClick={() => handleCopy(passkey.credentialId, "Passkey ID")}
+							>
+								<IconCopy className="size-3.5" />
+							</FieldAction>
+						}
+					>
+						<div className="truncate text-[13px] text-foreground">
+							{passkey.userDisplayName ||
+								passkey.userName ||
+								m.ext_detail_passkey_fallback_name()}
+						</div>
+						<div className="truncate text-[11px] text-muted-foreground">
+							{passkey.rpId}
+							{" • "}
+							{m.ext_detail_passkey_used()}{" "}
+							{formatPasskeyLastUsed(passkey.lastUsedAt ?? passkey.createdAt)}
+						</div>
+					</FieldRow>
+				))}
+			</div>
+
+			{/* Add-2FA affordance when the item has no TOTP configured. */}
+			{!item.totpSecret &&
+				(showQRScanner ? (
 					isSaving ? (
 						<Card className="flex items-center justify-center gap-2 p-4">
-							<IconLoaderCircle className="h-5 w-5 animate-spin" />
+							<IconLoaderCircle className="size-5 animate-spin" />
 							<span className="text-sm">{m.ext_detail_saving_totp()}</span>
 						</Card>
 					) : (
@@ -414,23 +427,22 @@ function LoginItemDetail({
 				) : (
 					<Button
 						variant="outline"
-						className="w-full gap-2"
+						className="h-[34px] w-full gap-2"
 						onClick={() => setShowQRScanner(true)}
 					>
-						<IconQrCode size={16} />
+						<IconQrCode className="size-4" />
 						{m.ext_detail_scan_qr()}
 					</Button>
-				)}
-			</div>
+				))}
 
 			{notes && (
-				<div className="space-y-2">
-					<Label className="font-medium text-sm">
+				<div className="space-y-1.5">
+					<Label className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
 						{m.ext_detail_label_notes()}
 					</Label>
-					<Card>
-						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
-					</Card>
+					<div className="whitespace-pre-wrap rounded-lg border bg-card px-3 py-2.5 text-[13px]">
+						{notes}
+					</div>
 				</div>
 			)}
 		</div>
@@ -442,96 +454,126 @@ function SecureNoteDetail({ item }: { item: DecryptedItem }) {
 	const notes = getItemNotes(item);
 
 	return (
-		<div className="space-y-2">
-			<Label className="font-medium text-sm">{m.ext_detail_label_note()}</Label>
-			<Card>
-				<div className="whitespace-pre-wrap px-4 py-1 text-sm">
-					{notes || m.ext_detail_no_notes()}
-				</div>
-			</Card>
+		<div className="space-y-1.5">
+			<Label className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
+				{m.ext_detail_label_note()}
+			</Label>
+			<div className="whitespace-pre-wrap rounded-lg border bg-card px-3 py-2.5 text-[13px]">
+				{notes || m.ext_detail_no_notes()}
+			</div>
 		</div>
 	);
 }
 
-function CreditCardDetail({ item }: { item: DecryptedItem }) {
+function PlaceholderDetail({
+	item,
+	message,
+}: {
+	item: DecryptedItem;
+	message: string;
+}) {
 	const { m } = useI18n();
 	const notes = getItemNotes(item);
 
 	return (
 		<div className="space-y-3">
-			<div className="text-muted-foreground text-sm">
-				{m.ext_detail_credit_card_soon()}
+			<div className="rounded-lg border bg-card px-3 py-2.5 text-[13px] text-muted-foreground">
+				{message}
 			</div>
 			{notes && (
-				<div className="space-y-2">
-					<Label className="font-medium text-sm">
+				<div className="space-y-1.5">
+					<Label className="font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.05em]">
 						{m.ext_detail_label_notes()}
 					</Label>
-					<Card>
-						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
-					</Card>
+					<div className="whitespace-pre-wrap rounded-lg border bg-card px-3 py-2.5 text-[13px]">
+						{notes}
+					</div>
 				</div>
 			)}
 		</div>
 	);
 }
 
-function IdentityDetail({ item }: { item: DecryptedItem }) {
-	const { m } = useI18n();
-	const notes = getItemNotes(item);
-
-	return (
-		<div className="space-y-3">
-			<div className="text-muted-foreground text-sm">
-				{m.ext_detail_identity_soon()}
-			</div>
-			{notes && (
-				<div className="space-y-2">
-					<Label className="font-medium text-sm">
-						{m.ext_detail_label_notes()}
-					</Label>
-					<Card>
-						<div className="whitespace-pre-wrap px-4 py-1 text-sm">{notes}</div>
-					</Card>
-				</div>
-			)}
-		</div>
-	);
-}
-
-export function ItemDetailPanel({ item, onItemUpdated }: ItemDetailPanelProps) {
+export function ItemDetailPanel({
+	item,
+	onItemUpdated,
+	matchesActiveTab,
+	onAutofill,
+	onOpenInApp,
+}: ItemDetailPanelProps) {
 	const { m } = useI18n();
 	const isSecureNote = item.category === "secure-note";
+	const domain = item.url ?? null;
 
 	return (
-		<div className="space-y-4">
-			<div className="flex items-center gap-4">
+		<div className="relative p-[18px] pb-6">
+			{/* Brand moment: radial primary-deep glow behind the header — dark mode only. */}
+			<div
+				aria-hidden
+				className="pointer-events-none absolute -top-8 -left-5 hidden h-[170px] w-[300px] dark:block dark:bg-[radial-gradient(60%_60%_at_30%_40%,color-mix(in_oklab,var(--color-primary-deep)_9%,transparent),transparent_70%)]"
+			/>
+
+			<div className="relative mb-3.5 flex items-center gap-3">
 				<Favicon
 					item={isSecureNote ? { ...item, url: undefined } : item}
-					size="lg"
+					size="md"
+					className="size-10 rounded-[10px] shadow-[0_2px_8px_oklch(0_0_0/0.1),0_0_24px_color-mix(in_oklab,var(--color-primary-deep)_12%,transparent)] dark:shadow-[0_2px_8px_oklch(0_0_0/0.3),0_0_24px_color-mix(in_oklab,var(--color-primary-deep)_20%,transparent)]"
 				/>
 				<div className="min-w-0 flex-1">
-					<h2 className="truncate font-semibold text-lg tracking-tight">
+					<h1 className="truncate font-semibold text-[16px] tracking-[-0.015em]">
 						{item.title}
-					</h2>
-					{item.url ? (
-						<p className="mt-0.5 truncate text-muted-foreground text-xs">
-							{item.url}
+					</h1>
+					{domain ? (
+						<p className="truncate text-[11.5px] text-muted-foreground">
+							{domain}
 						</p>
 					) : isSecureNote ? (
-						<p className="mt-0.5 text-muted-foreground text-xs">
+						<p className="text-[11.5px] text-muted-foreground">
 							{m.ext_detail_secure_note()}
 						</p>
 					) : null}
 				</div>
+				{onOpenInApp && (
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon"
+						className="size-7 text-muted-foreground"
+						title={m.ext_vault_open_in_app()}
+						onClick={onOpenInApp}
+					>
+						<IconOpenExternal className="size-3.5" />
+					</Button>
+				)}
 			</div>
 
-			{item.category === "secure-note" && <SecureNoteDetail item={item} />}
-			{item.category === "login" && (
-				<LoginItemDetail item={item} onItemUpdated={onItemUpdated} />
+			{item.category === "login" && matchesActiveTab && onAutofill && (
+				<div className="relative mb-3.5">
+					<Button className="h-[34px] w-full gap-2" onClick={onAutofill}>
+						<IconWand className="size-3.5" />
+						{m.ext_vault_autofill_page()}
+					</Button>
+				</div>
 			)}
-			{item.category === "credit-card" && <CreditCardDetail item={item} />}
-			{item.category === "identity" && <IdentityDetail item={item} />}
+
+			<div className="relative">
+				{item.category === "secure-note" && <SecureNoteDetail item={item} />}
+				{item.category === "login" && (
+					<LoginItemDetail item={item} onItemUpdated={onItemUpdated} />
+				)}
+				{item.category === "credit-card" && (
+					<PlaceholderDetail
+						item={item}
+						message={m.ext_detail_credit_card_soon()}
+					/>
+				)}
+				{item.category === "identity" && (
+					<PlaceholderDetail
+						item={item}
+						message={m.ext_detail_identity_soon()}
+					/>
+				)}
+			</div>
 		</div>
 	);
 }

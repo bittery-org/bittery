@@ -67,7 +67,7 @@ fn summarize_message(message: &DesktopRequest) -> String {
             extension_id
         ),
         DesktopRequest::TriggerDesktopUnlock => "TRIGGER_DESKTOP_UNLOCK".to_string(),
-        DesktopRequest::OpenDesktopApp => "OPEN_DESKTOP_APP".to_string(),
+        DesktopRequest::OpenDesktopApp { .. } => "OPEN_DESKTOP_APP".to_string(),
     }
 }
 
@@ -214,11 +214,11 @@ fn open_desktop_app_system() -> Result<(), String> {
     }
 }
 
-async fn open_desktop_app() -> DesktopResponse {
+async fn open_desktop_app(payload: DesktopRequest) -> DesktopResponse {
     let request = NativeRequest {
 		protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
         request_id: None,
-        payload: DesktopRequest::OpenDesktopApp,
+        payload,
     };
 
     match send_ipc_request(request).await {
@@ -251,7 +251,7 @@ async fn handle_request(request: NativeRequest) -> NativeResponse {
         DesktopRequest::Ping => DesktopResponse::Pong {
             version: env!("CARGO_PKG_VERSION").to_string(),
         },
-        DesktopRequest::OpenDesktopApp => open_desktop_app().await,
+        request @ DesktopRequest::OpenDesktopApp { .. } => open_desktop_app(request).await,
         DesktopRequest::GetDesktopStatus => match send_ipc_request(NativeRequest {
 			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: request_id.clone(),
@@ -266,6 +266,7 @@ async fn handle_request(request: NativeRequest) -> NativeResponse {
                 unlocked_accounts: Vec::new(),
                 timestamp: now_timestamp_ms(),
                 autolock_timeout_ms: -1,
+                theme: None,
             },
         },
         DesktopRequest::CheckBiometricAvailable => match send_ipc_request(NativeRequest {

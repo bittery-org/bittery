@@ -21,7 +21,13 @@ import {
 	useNavigate,
 	useParams,
 } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
+import {
+	clearCreateItemIntent,
+	consumeViewItemIntent,
+	getCreateItemIntent,
+	subscribeCreateItemIntent,
+} from "@/lib/create-item-intent";
 import { storage } from "@/lib/storage";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
@@ -69,6 +75,16 @@ export const Route = createFileRoute("/vault")({
 				search: activeAccountEmail ? { email: activeAccountEmail } : undefined,
 			});
 		}
+
+		// Extension "view item" handoff that arrived while the app was locked
+		// (or on another route): consume it now that the session is valid.
+		const viewIntent = consumeViewItemIntent();
+		if (viewIntent) {
+			throw redirect({
+				to: "/vault/$id/$itemId",
+				params: { id: viewIntent.vaultId, itemId: viewIntent.itemId },
+			});
+		}
 	},
 });
 
@@ -91,6 +107,13 @@ function RouteComponent() {
 	const createItemMutation = useCreateItem();
 
 	const [isNewItemDialogOpen, setIsNewItemDialogOpen] = useState(false);
+	// Pending "new item" request from the browser extension (via native
+	// messaging). Presence of an intent forces the sheet open; closing the
+	// sheet or creating the item consumes it.
+	const createItemIntent = useSyncExternalStore(
+		subscribeCreateItemIntent,
+		getCreateItemIntent,
+	);
 	const [isNewVaultDialogOpen, setIsNewVaultDialogOpen] = useState(false);
 	const [isEditVaultDialogOpen, setIsEditVaultDialogOpen] = useState(false);
 	const [editingVault, setEditingVault] = useState<{
@@ -248,6 +271,7 @@ function RouteComponent() {
 
 			// Close dialog
 			setIsNewItemDialogOpen(false);
+			clearCreateItemIntent();
 
 			// Navigate to the newly created item
 			navigate({
@@ -289,8 +313,14 @@ function RouteComponent() {
 
 				{/* New Item Sheet */}
 				<CreateItemSheet
-					open={isNewItemDialogOpen}
-					onOpenChange={setIsNewItemDialogOpen}
+					open={isNewItemDialogOpen || createItemIntent !== null}
+					onOpenChange={(open) => {
+						setIsNewItemDialogOpen(open);
+						if (!open) {
+							clearCreateItemIntent();
+						}
+					}}
+					initialUrl={createItemIntent?.url}
 					vaults={
 						vaultKeys?.map((v) => ({
 							id: v.vaultId,

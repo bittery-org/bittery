@@ -15,6 +15,7 @@ import {
 	handleCheckAuth,
 	handleGetAuthToken,
 	handleGetSessionData,
+	handleGetSessionStatus,
 	handleLock,
 	handleLogin,
 	handleLogout,
@@ -99,6 +100,10 @@ export const routeRegistry: RouteRegistry = {
 
 	GET_SESSION_DATA: {
 		handle: () => handleGetSessionData(),
+	},
+
+	GET_SESSION_STATUS: {
+		handle: () => handleGetSessionStatus(),
 	},
 
 	LOGOUT: {
@@ -243,7 +248,12 @@ export const routeRegistry: RouteRegistry = {
 	},
 
 	OPEN_DESKTOP_APP: {
-		handle: () => handleOpenDesktopApp(),
+		handle: (payload?: {
+			intent?: "create_item" | "view_item";
+			url?: string;
+			itemId?: string;
+			vaultId?: string;
+		}) => handleOpenDesktopApp(payload),
 	},
 
 	// QR code scanning

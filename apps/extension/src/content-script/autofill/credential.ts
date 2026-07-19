@@ -5,6 +5,7 @@ import {
 	detectOTPFields,
 	isFieldVisible,
 } from "../../lib/field-detection";
+import { hostnameMatches } from "../../lib/hostname";
 import { contentState } from "../state";
 import type { CredentialField } from "../types";
 import { hideFieldIcon, showFieldIcon } from "./icon";
@@ -339,6 +340,83 @@ async function handleAutofillSelect(
 
 	hideAutofillOverlay(field);
 	contentState.currentFocusedField = null;
+}
+
+/**
+ * Fill a credential item into the current page without a focused field.
+ *
+ * Triggered by the popup's "Fill" / "Autofill on this page" actions via a
+ * runtime message. Locates the best visible username/password inputs (and any
+ * OTP inputs) on the page and fills them, mirroring the overlay-select flow.
+ * Returns `true` when at least one field was populated.
+ */
+export async function fillCredentialItem(
+	item: DecryptedItem,
+): Promise<boolean> {
+	// The popup resolved the item against the tab it saw at open time; the tab
+	// may have navigated since. Never write secrets to a non-matching origin.
+	if (!hostnameMatches(item.url ?? "", window.location.hostname)) {
+		return false;
+	}
+
+	await chrome.runtime.sendMessage({ type: "UPDATE_AUTOFILL_TIMESTAMP" });
+
+	contentState.isAutofilling = true;
+	let filled = false;
+
+	try {
+		const isFillable = (input: HTMLInputElement) =>
+			input.isConnected &&
+			!input.disabled &&
+			!input.readOnly &&
+			isFieldVisible(input);
+
+		const passwordInput = Array.from(
+			document.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+		).find(isFillable);
+
+		let usernameInput: HTMLInputElement | undefined;
+		for (const [input, detectedField] of contentState.detectedFields) {
+			if (
+				(detectedField.type === "username" || detectedField.type === "email") &&
+				isFillable(input)
+			) {
+				usernameInput = input;
+				break;
+			}
+		}
+
+		if (!usernameInput) {
+			const scope: ParentNode = passwordInput?.closest("form") ?? document;
+			usernameInput = Array.from(
+				scope.querySelectorAll<HTMLInputElement>(
+					'input[type="text"], input[type="email"], input:not([type])',
+				),
+			).find(isFillable);
+		}
+
+		if (usernameInput && item.username) {
+			fillInputWithEvents(usernameInput, item.username);
+			filled = true;
+		}
+
+		if (passwordInput && item.password) {
+			fillInputWithEvents(passwordInput, item.password);
+			filled = true;
+		}
+
+		const otpReference = passwordInput ?? usernameInput;
+		if (otpReference && item.totpSecret) {
+			const otpFilled = await autofillTotpCodeForItem(otpReference, item);
+			filled = filled || otpFilled;
+		}
+	} finally {
+		setTimeout(() => {
+			contentState.isAutofilling = false;
+		}, 100);
+	}
+
+	return filled;
 }
 
 // Show unlock prompt (when extension is locked)

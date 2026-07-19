@@ -19,6 +19,9 @@ import { isDesktopUnlockedNow } from "./desktop-status";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import {
+	getAutoLockTimeoutCached,
+	getLastActivityTimestamp,
+	isDesktopMode,
 	isUnlocked,
 	lock,
 	setDesktopModeSentinel,
@@ -282,6 +285,36 @@ export async function handleLogout(): Promise<MessageResponse> {
 	await storage.clearSession();
 	lock();
 	return { success: true };
+}
+
+/**
+ * Handle GET_SESSION_STATUS message - Report unlock/lock timing for the popup
+ * footer. Returns the remaining time before auto-lock when it can be computed
+ * cheaply from in-memory session state; otherwise `remainingMs` is null.
+ */
+export async function handleGetSessionStatus(): Promise<MessageResponse> {
+	const unlocked = isUnlocked();
+	const desktopMode = isDesktopMode();
+
+	// Desktop mode has no independent countdown (lock state follows the app),
+	// and a "never" timeout (-1) has no countdown either.
+	const timeoutMs = getAutoLockTimeoutCached();
+	let remainingMs: number | null = null;
+
+	if (unlocked && !desktopMode && timeoutMs !== -1) {
+		const lastActivity = getLastActivityTimestamp();
+		if (lastActivity > 0) {
+			remainingMs = Math.max(0, timeoutMs - (Date.now() - lastActivity));
+		}
+	}
+
+	return {
+		success: true,
+		unlocked,
+		desktopMode,
+		remainingMs,
+		timeoutMs,
+	};
 }
 
 /**

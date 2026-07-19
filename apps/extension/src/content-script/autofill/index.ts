@@ -1,5 +1,6 @@
 export { cleanupAutofillState, cleanupDetachedAutofillState } from "./cleanup";
 export {
+	fillCredentialItem,
 	handleFieldBlur,
 	handleFieldFocus,
 	hideAutofillOverlay,
