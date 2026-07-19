@@ -9,6 +9,7 @@ use sha2::Sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::CryptoError;
+use crate::identity::normalize_email;
 use crate::kdf_policy::{validate_kdf_profile, KdfProfile};
 
 /// Default number of PBKDF2 iterations.
@@ -90,8 +91,8 @@ pub fn derive_master_key(
     combined.extend_from_slice(&secret_len.to_be_bytes());
     combined.extend_from_slice(secret_bytes);
 
-    // Use lowercase email as salt for PBKDF2
-    let mut salt_bytes = email.to_lowercase().into_bytes();
+    // Use the canonical email as salt for PBKDF2.
+    let mut salt_bytes = normalize_email(email).into_bytes();
 
     // Derive master key using PBKDF2
     let mut master_key = [0u8; KEY_LENGTH];
@@ -117,7 +118,7 @@ pub fn derive_keys_from_master_key(
         });
     }
 
-    let mut salt_bytes = email.to_lowercase().into_bytes();
+    let mut salt_bytes = normalize_email(email).into_bytes();
 
     // Split master key into auth key and master unlock key using HKDF
     let hkdf = Hkdf::<Sha256>::new(Some(&salt_bytes), master_key);
@@ -258,6 +259,20 @@ mod tests {
 
         assert_eq!(keys1.auth_key, keys2.auth_key);
         assert_eq!(keys1.master_unlock_key, keys2.master_unlock_key);
+    }
+
+    #[test]
+    fn test_derive_keys_nfkc_normalizes_email_salt() {
+        let password = "test_password";
+        let secret_key = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+        let nfc = "müller@example.com";
+        let nfd = "mu\u{0308}ller@example.com";
+
+        let nfc_keys = derive_keys(password, secret_key, nfc, &current_kdf_profile()).unwrap();
+        let nfd_keys = derive_keys(password, secret_key, nfd, &current_kdf_profile()).unwrap();
+
+        assert_eq!(nfc_keys.auth_key, nfd_keys.auth_key);
+        assert_eq!(nfc_keys.master_unlock_key, nfd_keys.master_unlock_key);
     }
 
     #[test]

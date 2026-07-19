@@ -4,7 +4,10 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use bittery_crypto_core::srp6a::{HashAlgorithm, PrimeGroup, SrpServer};
+use bittery_crypto_core::{
+    normalize_email,
+    srp6a::{HashAlgorithm, PrimeGroup, SrpServer},
+};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use qubit::server::{Extensions, FromRequestExtensions, RpcError};
 use rand::Rng;
@@ -2102,10 +2105,6 @@ async fn enforce_window_limit(
         return Err(rate_limited_error());
     }
     Ok(())
-}
-
-fn normalize_email(email: &str) -> String {
-    email.trim().to_ascii_lowercase()
 }
 
 fn hash_normalized_email(normalized_email: &str) -> String {

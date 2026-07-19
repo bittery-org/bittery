@@ -5,6 +5,7 @@
 
 pub mod encryption;
 pub mod error;
+mod identity;
 pub mod kdf_policy;
 pub mod key_derivation;
 pub mod key_rotation;
@@ -21,6 +22,7 @@ pub use encryption::{
     EncryptedData,
 };
 pub use error::CryptoError;
+pub use identity::normalize_email;
 pub use kdf_policy::{
     current_kdf_profile, is_current_kdf_profile, maximum_iterations, minimum_iterations,
     validate_kdf_profile, KdfProfile,
