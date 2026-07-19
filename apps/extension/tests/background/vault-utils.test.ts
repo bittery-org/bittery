@@ -26,6 +26,19 @@ describe("vault-utils", () => {
 		expect(merged).toEqual(desktopItems);
 	});
 
+	test("fails closed when travel-mode policy is unavailable without a desktop snapshot", async () => {
+		const missingPolicy = new Error(
+			"No verified travel mode policy for account acc-1",
+		);
+
+		await expect(
+			mergeDesktopAndLocalItemSources(
+				Promise.resolve(null),
+				Promise.reject(missingPolicy),
+			),
+		).rejects.toBe(missingPolicy);
+	});
+
 	test("prefers local items over desktop snapshot items with the same id", () => {
 		const merged = mergeItemCollections(
 			[

@@ -4,9 +4,12 @@ use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 #[cfg(windows)]
 pub const DESKTOP_IPC_PIPE_NAME: &str = r"\\.\pipe\bittery-desktop-ipc";
 pub const DESKTOP_IPC_SOCKET_NAME: &str = "bittery-desktop-ipc.sock";
+pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProtocolEnvelope<T> {
+	#[serde(rename = "protocolVersion", default, skip_serializing_if = "Option::is_none")]
+	pub protocol_version: Option<u32>,
     #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
     #[serde(flatten)]
@@ -14,6 +17,16 @@ pub struct ProtocolEnvelope<T> {
 }
 
 pub type DesktopEnvelope<T> = ProtocolEnvelope<T>;
+
+impl<T> ProtocolEnvelope<T> {
+	pub fn current(request_id: Option<String>, payload: T) -> Self {
+		Self {
+			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+			request_id,
+			payload,
+		}
+	}
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
@@ -68,6 +81,13 @@ pub enum DesktopRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum DesktopResponse {
+	#[serde(rename = "PROTOCOL_MISMATCH")]
+	ProtocolMismatch {
+		#[serde(rename = "expectedVersion")]
+		expected_version: u32,
+		#[serde(rename = "receivedVersion", skip_serializing_if = "Option::is_none")]
+		received_version: Option<u32>,
+	},
     #[serde(rename = "PONG")]
     Pong {
         version: String,
@@ -251,6 +271,7 @@ mod tests {
     async fn frame_round_trip_preserves_payload() {
         let (mut writer, mut reader) = duplex(4096);
         let message = DesktopEnvelope {
+			protocol_version: Some(1),
             request_id: Some("req-1".to_string()),
             payload: DesktopRequest::GetDesktopItemsSnapshot {
 				account_ids: Some(vec!["account-1".to_string()]),
@@ -268,10 +289,32 @@ mod tests {
         assert_eq!(decoded, message);
     }
 
+	#[tokio::test]
+	async fn auth_token_request_round_trip_preserves_account_id_and_protocol_version() {
+		let (mut writer, mut reader) = duplex(4096);
+		let message = DesktopEnvelope {
+			protocol_version: Some(1),
+			request_id: Some("req-auth".to_string()),
+			payload: DesktopRequest::GetDesktopAuthToken {
+				account_id: "account-1".to_string(),
+			},
+		};
+
+		write_frame(&mut writer, &message)
+			.await
+			.expect("frame write should succeed");
+		let decoded: DesktopEnvelope<DesktopRequest> = read_frame(&mut reader)
+			.await
+			.expect("frame read should succeed");
+
+		assert_eq!(decoded, message);
+	}
+
     #[tokio::test]
     async fn response_event_frame_round_trip_preserves_payload() {
         let (mut writer, mut reader) = duplex(4096);
         let message = DesktopEnvelope {
+			protocol_version: Some(1),
             request_id: None,
             payload: DesktopResponse::DesktopEvent {
                 event: DesktopEventKind::Unlock,
@@ -291,5 +334,7 @@ mod tests {
             .expect("frame read should succeed");
 
         assert_eq!(decoded, message);
+		let serialized = serde_json::to_value(&decoded).expect("response should serialize");
+		assert_eq!(serialized["protocolVersion"], 1);
     }
 }
