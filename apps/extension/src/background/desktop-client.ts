@@ -1,6 +1,6 @@
 import {
-	DesktopProtocolMismatchError,
 	type DesktopEventPayload,
+	DesktopProtocolMismatchError,
 	type DesktopResponse,
 } from "./desktop-protocol";
 import {

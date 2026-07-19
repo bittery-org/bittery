@@ -1,9 +1,9 @@
 import { NATIVE_HOST_NAME } from "./constants";
 import {
 	DESKTOP_PROTOCOL_VERSION,
-	DesktopProtocolMismatchError,
 	type DesktopEnvelope,
 	type DesktopEventPayload,
+	DesktopProtocolMismatchError,
 	type DesktopRequest,
 	type DesktopResponse,
 } from "./desktop-protocol";
