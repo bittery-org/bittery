@@ -2405,7 +2405,9 @@ async fn migration_backfills_legacy_rows_with_default_kdf_params() {
         // as "the newest migration" silently retargets this test at whatever
         // migration someone adds next, and it would still pass while no longer
         // exercising the KDF backfill at all.
-        const BACKFILL_NAME: &str = "add_user_kdf_params";
+        // sqlx derives `description` from the filename slug, with `_` replaced by
+        // spaces (`..._add_user_kdf_params.sql` -> "add user kdf params").
+        const BACKFILL_NAME: &str = "add user kdf params";
         let backfill_version = migrator
             .iter()
             .find(|migration| migration.description == BACKFILL_NAME)
