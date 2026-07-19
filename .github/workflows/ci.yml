@@ -79,6 +79,27 @@ jobs:
             echo "crypto_wasm=$crypto_wasm"
           } >> "$GITHUB_OUTPUT"
 
+  migrations:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      # Needs the base branch to detect edits to already-merged migrations.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin "${{ github.base_ref }}"
+            node scripts/check-migrations.mjs "origin/${{ github.base_ref }}"
+          else
+            node scripts/check-migrations.mjs
+          fi
+
   crypto-wasm:
     needs: changes
     if: needs.changes.outputs.js == 'true' || needs.changes.outputs.crypto_wasm == 'true'

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const rawName = process.argv.slice(2).join(" ").trim();
@@ -23,16 +23,28 @@ if (!slug) {
 const migrationsDir = resolve("apps/server/migrations");
 mkdirSync(migrationsDir, { recursive: true });
 
-const versions = readdirSync(migrationsDir)
-	.map((fileName) => /^([0-9]+)_.*\.sql$/.exec(fileName)?.[1])
-	.filter(Boolean)
-	.map((version) => Number(version));
+// Versions are UTC timestamps (`YYYYMMDDHHMMSS`), matching sqlx's own
+// `sqlx migrate add`. A sequential `max(existing) + 1` counter reads only local
+// files, so two branches forking from the same point both pick the same number —
+// and because the filenames differ, git merges them without a conflict and the
+// collision only surfaces at migrate time. Timestamps make that near-impossible.
+//
+// The legacy `0000`-`0009` migrations keep their versions: sqlx stores versions
+// as i64 and applies them in numeric order, so a timestamp always sorts after
+// them and no already-applied migration is disturbed.
+const now = new Date();
+const version = [
+	now.getUTCFullYear(),
+	now.getUTCMonth() + 1,
+	now.getUTCDate(),
+	now.getUTCHours(),
+	now.getUTCMinutes(),
+	now.getUTCSeconds(),
+]
+	.map((part, index) => String(part).padStart(index === 0 ? 4 : 2, "0"))
+	.join("");
 
-const nextVersion = (versions.length ? Math.max(...versions) + 1 : 0)
-	.toString()
-	.padStart(4, "0");
-
-const fileName = `${nextVersion}_${slug}.sql`;
+const fileName = `${version}_${slug}.sql`;
 const filePath = join(migrationsDir, fileName);
 
 writeFileSync(filePath, "-- Write migration SQL here\n", { flag: "wx" });
