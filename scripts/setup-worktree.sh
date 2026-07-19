@@ -92,7 +92,7 @@ else
 	worktree_url="${base%/*}/${worktree_db}${query}"
 
 	tmp_env="$(mktemp)"
-	sed "s|^DATABASE_URL=.*|DATABASE_URL=\"$worktree_url\"|" .env >"$tmp_env"
+	awk -v url="$worktree_url" '/^DATABASE_URL=/ { print "DATABASE_URL=\"" url "\""; next } { print }' .env >"$tmp_env"
 	mv "$tmp_env" .env
 	echo "setup-worktree: .env now points at '$worktree_db'"
 
