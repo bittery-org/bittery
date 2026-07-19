@@ -451,7 +451,10 @@ export class WebStorageAdapter implements IStorageAdapter {
 		accountId: string,
 	): Promise<void> {
 		if (typeof window !== "undefined") {
-			localStorage.setItem(pinnedKdfProfileKey(accountId), JSON.stringify(profile));
+			localStorage.setItem(
+				pinnedKdfProfileKey(accountId),
+				JSON.stringify(profile),
+			);
 			localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		}
 	}

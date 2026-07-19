@@ -1,8 +1,8 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { useRPCClient } from "@bittery/shared/rpc";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { resolveOrCreateAccountId } from "@bittery/storage/account-id";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {

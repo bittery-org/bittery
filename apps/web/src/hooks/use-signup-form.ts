@@ -3,12 +3,12 @@ import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
+import type { KdfProfile } from "@bittery/types";
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import type { KdfProfile } from "@bittery/types";
 
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { normalizeAuthVaultKey } from "@/lib/rpc-normalizers";

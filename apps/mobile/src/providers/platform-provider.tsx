@@ -23,8 +23,8 @@ import {
 	generateUuid,
 	generateEncryptionKey as nativeGenerateEncryptionKey,
 	rsaDecrypt,
-	validateSecretKey,
 	validateKdfProfile,
+	validateSecretKey,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
 import { storage } from "../services/storage";

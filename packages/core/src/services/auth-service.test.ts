@@ -252,10 +252,7 @@ describe("account-routed authentication", () => {
 		);
 
 		expect(storage.getPinnedKdfProfile).toHaveBeenCalledWith("account-b");
-		expect(crypto.validateKdfProfile).toHaveBeenCalledWith(
-			kdfParams,
-			profileB,
-		);
+		expect(crypto.validateKdfProfile).toHaveBeenCalledWith(kdfParams, profileB);
 	});
 
 	it("rejects a full-login downgrade before deriving keys", async () => {

@@ -166,12 +166,7 @@ export function RegenerateSecretKeyDialog({
 			// 3. Derive new keys with new secret key
 			const newProfile = currentKdfProfile();
 			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
-				await deriveKeys(
-					currentPassword,
-					newSecretKey,
-					userEmail,
-					newProfile,
-				);
+				await deriveKeys(currentPassword, newSecretKey, userEmail, newProfile);
 
 			// 4. Generate new SRP credentials
 			const authKeyString = new TextDecoder().decode(newAuthKey);

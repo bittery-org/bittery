@@ -50,7 +50,9 @@ export function isCurrentKdfProfile(profile: UntrustedKdfProfile): boolean {
 	}
 }
 
-function validateBaseline(profile: UntrustedKdfProfile): asserts profile is KdfProfile {
+function validateBaseline(
+	profile: UntrustedKdfProfile,
+): asserts profile is KdfProfile {
 	if (profile.schemaVersion !== policy.schemaVersion) {
 		throw new Error("Unsupported KDF schema version");
 	}
