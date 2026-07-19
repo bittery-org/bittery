@@ -81,6 +81,9 @@ pub struct DbLoginUserRow {
     pub srp_verifier: String,
     pub public_key: String,
     pub encrypted_private_key: String,
+    pub kdf_algorithm: String,
+    pub kdf_iterations: i32,
+    pub kdf_schema_version: i32,
 }
 
 #[derive(Clone, Debug, FromRow)]

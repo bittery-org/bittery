@@ -67,5 +67,10 @@ data class AuthDataEntity(
     val biometricEnabled: Boolean = false,
 
     /** Custom server URL if not using default */
-    val serverUrl: String? = null
+    val serverUrl: String? = null,
+
+    /** KDF profile metadata is null only for resynchronizable placeholder rows. */
+    val kdfSchemaVersion: Int? = null,
+    val kdfAlgorithm: String? = null,
+    val kdfIterations: Int? = null
 )

@@ -18,11 +18,29 @@ use super::{
 use crate::services::session::now_utc;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
-    seed_vault_key, with_rpc_test_app, RpcTestApp,
+    seed_vault_key, with_raw_test_db, with_rpc_test_app, RpcTestApp,
 };
 use time::{Duration, OffsetDateTime};
 
 const TEST_SRP_ITERATIONS: u32 = 1_000;
+/// The server policy floor. Client-submitted KDF params (signup + credential
+/// mutations) must meet this, so test payloads submit it even though the SRP
+/// verifier itself is derived cheaply at [`TEST_SRP_ITERATIONS`]. The two are
+/// decoupled: `kdf_iterations` is metadata the server stores/echoes and does not
+/// affect SRP verification.
+const CURRENT_KDF_ITERATIONS: u32 = 600_000;
+
+fn floor_kdf_params_json() -> serde_json::Value {
+    kdf_params_json(CURRENT_KDF_ITERATIONS)
+}
+
+fn kdf_params_json(iterations: u32) -> serde_json::Value {
+    json!({
+        "schemaVersion": 1,
+        "algorithm": "pbkdf2-sha256",
+        "iterations": iterations,
+    })
+}
 
 #[derive(Clone)]
 struct AuthCryptoFixture {
@@ -158,6 +176,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                             "encryptedMasterKey": crypto.encrypted_master_key,
                             "recoveryKeyHint": crypto.recovery_key_hint,
                             "encryptedVaultKey": crypto.encrypted_vault_key,
+                            "kdfParams": floor_kdf_params_json(),
                         }]),
                         unauthenticated_json_headers(),
                     )
@@ -346,6 +365,7 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
                         "encryptedMasterKey": crypto.encrypted_master_key,
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
+                            "kdfParams": floor_kdf_params_json(),
                     }]),
                     unauthenticated_json_headers(),
                 )
@@ -392,6 +412,7 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
                         "encryptedMasterKey": crypto.encrypted_master_key,
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
+                            "kdfParams": floor_kdf_params_json(),
                     }]),
                     unauthenticated_json_headers(),
                 )
@@ -413,9 +434,9 @@ async fn auth_protected_handlers_require_authentication() {
     with_rpc_test_app("auth_protected_handlers_require_authentication", |app| async move {
 			let protected_calls = vec![
 				("auth.me", json!([])),
-				("auth.updateEmail", json!([{ "newEmail": "new@example.com", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [] }])),
-				("auth.changePassword", json!([{ "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [] }])),
-				("auth.regenerateSecretKey", json!([{ "secretKeyHint": "SK1-TEST", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [] }])),
+				("auth.updateEmail", json!([{ "newEmail": "new@example.com", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
+				("auth.changePassword", json!([{ "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
+				("auth.regenerateSecretKey", json!([{ "secretKeyHint": "SK1-TEST", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
 				("auth.storeRecoveryKey", json!([{ "encryptedMasterKey": "master", "recoveryKeyHint": "hint" }])),
 				("auth.deleteAccount", json!([{ "confirmEmail": "user@example.com" }])),
 				("auth.listDevices", json!([])),
@@ -566,6 +587,7 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
                         "encryptedMasterKey": crypto.encrypted_master_key,
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
+                            "kdfParams": floor_kdf_params_json(),
                     }]),
                     unauthenticated_json_headers(),
                 )
@@ -621,6 +643,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                             "encryptedMasterKey": missing_crypto.encrypted_master_key,
                             "recoveryKeyHint": missing_crypto.recovery_key_hint,
                             "encryptedVaultKey": missing_crypto.encrypted_vault_key,
+                            "kdfParams": floor_kdf_params_json(),
                         }]),
                         unauthenticated_json_headers(),
                     )
@@ -656,6 +679,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                             "encryptedMasterKey": crypto.encrypted_master_key,
                             "recoveryKeyHint": crypto.recovery_key_hint,
                             "encryptedVaultKey": crypto.encrypted_vault_key,
+                            "kdfParams": floor_kdf_params_json(),
                         }]),
                         unauthenticated_json_headers(),
                     )
@@ -775,6 +799,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                                 "vaultId": fixture.vault_id,
                                 "encryptedVaultKey": "rotated-recovery-vault-key"
                             }],
+                            "kdfParams": floor_kdf_params_json(),
                         }]),
                         unauthenticated_json_headers(),
                     )
@@ -832,6 +857,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "vaultId": fixture.vault_id,
                             "encryptedVaultKey": "updated-vault-key"
                         }],
+                        "kdfParams": floor_kdf_params_json(),
                     }]),
                     authenticated_json_headers(&update_session.token),
                 )
@@ -851,6 +877,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "vaultId": fixture.vault_id,
                             "encryptedVaultKey": "updated-vault-key"
                         }],
+                        "kdfParams": floor_kdf_params_json(),
                     }]),
                     authenticated_json_headers(&update_session.token),
                 )
@@ -886,6 +913,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "vaultId": fixture.vault_id,
                             "encryptedVaultKey": "password-rotated-vault-key"
                         }],
+                        "kdfParams": floor_kdf_params_json(),
                     }]),
                     authenticated_json_headers(&change_session.token),
                 )
@@ -915,6 +943,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "vaultId": fixture.vault_id,
                             "encryptedVaultKey": "secret-key-rotated-vault-key"
                         }],
+                        "kdfParams": floor_kdf_params_json(),
                     }]),
                     authenticated_json_headers(&current_session.token),
                 )
@@ -2138,5 +2167,478 @@ fn signup_params(crypto: &AuthCryptoFixture, email: &str) -> serde_json::Value {
         "encryptedMasterKey": crypto.encrypted_master_key,
         "recoveryKeyHint": crypto.recovery_key_hint,
         "encryptedVaultKey": crypto.encrypted_vault_key,
+        "kdfParams": floor_kdf_params_json(),
     }])
+}
+
+// ---------------------------------------------------------------------------
+// KDF-agility helpers + tests
+// ---------------------------------------------------------------------------
+
+/// Insert a login-capable user directly, with a real (hex) SRP verifier/salt so
+/// `startLogin` can build an ephemeral, and an explicit stored KDF work factor.
+async fn insert_kdf_login_user(
+    pool: &PgPool,
+    user_id: &str,
+    email: &str,
+    crypto: &AuthCryptoFixture,
+    kdf_iterations: i32,
+) {
+    query(
+        "INSERT INTO \"user\" (id, name, email, email_verified, secret_key_hint, srp_salt, srp_verifier, public_key, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version) VALUES ($1, $2, $3, true, $4, $5, $6, $7, $8, 'pbkdf2-sha256', $9, 1)",
+    )
+    .bind(user_id)
+    .bind(user_id)
+    .bind(normalize_email(email))
+    .bind(&crypto.secret_key_hint)
+    .bind(&crypto.srp_salt)
+    .bind(&crypto.srp_verifier)
+    .bind(&crypto.public_key)
+    .bind(&crypto.encrypted_private_key)
+    .bind(kdf_iterations)
+    .execute(pool)
+    .await
+    .expect("kdf login user should seed");
+}
+
+async fn start_login_ok(app: &RpcTestApp, email: &str) -> serde_json::Value {
+    let ephemeral = build_login_ephemeral_fixture();
+    let response = app
+        .rpc_call(
+            "auth.startLogin",
+            json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+            unauthenticated_json_headers(),
+        )
+        .await;
+    assert_eq!(response.status, StatusCode::OK);
+    response.body["result"]["Ok"].clone()
+}
+
+async fn stored_kdf_row(pool: &PgPool, user_id: &str) -> (String, i32, i32) {
+    sqlx::query_as::<_, (String, i32, i32)>(
+        "SELECT kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await
+    .expect("kdf row should load")
+}
+
+#[tokio::test]
+async fn start_login_known_and_unknown_emails_return_identical_kdf_profiles() {
+    with_rpc_test_app("start_login_indistinguishable_kdf", |app| async move {
+        let known = build_auth_crypto_fixture("kdf-known", "pw-known");
+        insert_kdf_login_user(
+            &app.pool,
+            "kdf_user_known",
+            "known-kdf@example.com",
+            &known,
+            600_000,
+        )
+        .await;
+
+        let known_start = start_login_ok(&app, "known-kdf@example.com").await;
+        let unknown_start = start_login_ok(&app, "unknown-kdf@example.com").await;
+        assert_eq!(known_start["kdfParams"], unknown_start["kdfParams"]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn start_login_unknown_email_returns_stable_default_kdf_params() {
+    with_rpc_test_app("start_login_unknown_kdf", |app| async move {
+        let first = start_login_ok(&app, "ghost-kdf@example.com").await;
+        let second = start_login_ok(&app, "ghost-kdf@example.com").await;
+
+        // Unknown emails receive the current client default (not the floor) so
+        // enumeration probes look identical to accounts created today.
+        assert_eq!(
+            first["kdfParams"]["iterations"],
+            json!(bittery_crypto_core::PBKDF2_ITERATIONS)
+        );
+        assert_eq!(first["kdfParams"]["algorithm"], json!("pbkdf2-sha256"));
+        assert_eq!(first["kdfParams"]["schemaVersion"], json!(1));
+
+        // Enumeration defence: identical, deterministic response across calls.
+        assert_eq!(first["kdfParams"], second["kdfParams"]);
+        assert_eq!(first["salt"], second["salt"]);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn signup_persists_only_the_exact_current_kdf_profile() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("signup_kdf_round_trip", |app| async move {
+            let email = "kdf-signup@example.com";
+            let crypto = build_auth_crypto_fixture("kdf-signup", "kdf-signup-pass");
+            let signup_verification_token =
+                issue_signup_verification_token(&app, email, None).await;
+
+            let signup = app
+                .rpc_call(
+                    "auth.signup",
+                    json!([{
+                        "email": email,
+                        "signupVerificationToken": signup_verification_token,
+                        "name": "KDF Signup User",
+                        "plan": "personal",
+                        "organizationName": null,
+                        "secretKeyHint": crypto.secret_key_hint,
+                        "srpSalt": crypto.srp_salt,
+                        "srpVerifier": crypto.srp_verifier,
+                        "publicKey": crypto.public_key,
+                        "encryptedPrivateKey": crypto.encrypted_private_key,
+                        "encryptedMasterKey": crypto.encrypted_master_key,
+                        "recoveryKeyHint": crypto.recovery_key_hint,
+                        "encryptedVaultKey": crypto.encrypted_vault_key,
+                        "kdfParams": kdf_params_json(CURRENT_KDF_ITERATIONS),
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(signup.status, StatusCode::OK);
+            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
+            let user_id = signup.body["result"]["Ok"]["userId"]
+                .as_str()
+                .expect("signup should return a user id")
+                .to_string();
+
+            let (algorithm, iterations, schema_version) = stored_kdf_row(&app.pool, &user_id).await;
+            assert_eq!(algorithm, "pbkdf2-sha256");
+            assert_eq!(iterations, CURRENT_KDF_ITERATIONS as i32);
+            assert_eq!(schema_version, 1);
+
+            // Login echoes the stored params back for this user.
+            let start = start_login_ok(&app, email).await;
+            assert_eq!(
+                start["kdfParams"]["iterations"],
+                json!(CURRENT_KDF_ITERATIONS)
+            );
+
+            // Below-floor submission is rejected before the account is created.
+            let below_floor = app
+                .rpc_call(
+                    "auth.signup",
+                    json!([{
+                        "email": "kdf-weak@example.com",
+                        "signupVerificationToken": "unused",
+                        "name": "Weak KDF User",
+                        "plan": "personal",
+                        "organizationName": null,
+                        "secretKeyHint": crypto.secret_key_hint,
+                        "srpSalt": crypto.srp_salt,
+                        "srpVerifier": crypto.srp_verifier,
+                        "publicKey": crypto.public_key,
+                        "encryptedPrivateKey": crypto.encrypted_private_key,
+                        "encryptedMasterKey": crypto.encrypted_master_key,
+                        "recoveryKeyHint": crypto.recovery_key_hint,
+                        "encryptedVaultKey": crypto.encrypted_vault_key,
+                        "kdfParams": kdf_params_json(310_000),
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(below_floor.status, StatusCode::OK);
+            assert_handler_error(&below_floor.body, "BAD_REQUEST", "Invalid KDF parameters");
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn change_password_rewrites_kdf_params_alongside_verifier() {
+    with_rpc_test_app("change_password_kdf", |app| async move {
+        let original = build_auth_crypto_fixture("kdf-change-orig", "orig-pass");
+        insert_kdf_login_user(
+            &app.pool,
+            "kdf_change_user",
+            "kdf-change@example.com",
+            &original,
+            CURRENT_KDF_ITERATIONS as i32,
+        )
+        .await;
+        let session = app.issue_session("kdf_change_user").await;
+
+        let next = build_auth_crypto_fixture("kdf-change-next", "next-pass");
+        let change = app
+            .rpc_call(
+                "auth.changePassword",
+                json!([{
+                    "srpSalt": next.srp_salt,
+                    "srpVerifier": next.srp_verifier,
+                    "encryptedPrivateKey": next.encrypted_private_key,
+                    "encryptedVaultKeys": [],
+                    "kdfParams": kdf_params_json(600_000),
+                }]),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(change.status, StatusCode::OK);
+        assert_eq!(change.body["result"]["Ok"]["success"], json!(true));
+
+        // Params written in the same transaction as the new verifier.
+        let (algorithm, iterations, schema_version) =
+            stored_kdf_row(&app.pool, "kdf_change_user").await;
+        assert_eq!(algorithm, "pbkdf2-sha256");
+        assert_eq!(iterations, 600_000);
+        assert_eq!(schema_version, 1);
+
+        // A subsequent login receives the new work factor.
+        let start = start_login_ok(&app, "kdf-change@example.com").await;
+        assert_eq!(start["kdfParams"]["iterations"], json!(600_000));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
+    with_rpc_test_app("verifier_mutation_kdf_policy", |app| async move {
+        seed_user(
+            &app.pool,
+            "kdf_policy_user",
+            "KDF Policy User",
+            "kdf-policy@example.com",
+        )
+        .await;
+        let session = app.issue_session("kdf_policy_user").await;
+        let invalid_profiles = [
+            kdf_params_json(310_000),
+            kdf_params_json(1_200_001),
+            kdf_params_json(u32::MAX),
+            json!({
+                "schemaVersion": 1,
+                "algorithm": "PBKDF2-SHA256",
+                "iterations": CURRENT_KDF_ITERATIONS,
+            }),
+            json!({
+                "schemaVersion": 2,
+                "algorithm": "pbkdf2-sha256",
+                "iterations": CURRENT_KDF_ITERATIONS,
+            }),
+        ];
+
+        for profile in invalid_profiles {
+            let mutations = [
+                (
+                    "auth.updateEmail",
+                    json!({
+                        "newEmail": "kdf-policy-new@example.com",
+                        "srpSalt": "aa",
+                        "srpVerifier": "bb",
+                        "encryptedPrivateKey": "cipher",
+                        "encryptedVaultKeys": [],
+                        "kdfParams": profile.clone(),
+                    }),
+                ),
+                (
+                    "auth.changePassword",
+                    json!({
+                        "srpSalt": "aa",
+                        "srpVerifier": "bb",
+                        "encryptedPrivateKey": "cipher",
+                        "encryptedVaultKeys": [],
+                        "kdfParams": profile.clone(),
+                    }),
+                ),
+                (
+                    "auth.regenerateSecretKey",
+                    json!({
+                        "secretKeyHint": "SK1-TEST",
+                        "srpSalt": "aa",
+                        "srpVerifier": "bb",
+                        "encryptedPrivateKey": "cipher",
+                        "encryptedVaultKeys": [],
+                        "kdfParams": profile.clone(),
+                    }),
+                ),
+            ];
+
+            for (method, payload) in mutations {
+                let response = app
+                    .rpc_call(
+                        method,
+                        json!([payload]),
+                        authenticated_json_headers(&session.token),
+                    )
+                    .await;
+                assert_handler_error(&response.body, "BAD_REQUEST", "Invalid KDF parameters");
+            }
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failure() {
+    with_rpc_test_app("change_password_kdf_rollback", |app| async move {
+        let original = build_auth_crypto_fixture("kdf-rollback-orig", "orig-pass");
+        insert_kdf_login_user(
+            &app.pool,
+            "kdf_rollback_user",
+            "kdf-rollback@example.com",
+            &original,
+            CURRENT_KDF_ITERATIONS as i32,
+        )
+        .await;
+        seed_vault(
+            &app.pool,
+            "kdf_rollback_vault",
+            "Rollback Vault",
+            "personal",
+            "kdf_rollback_user",
+            None,
+        )
+        .await;
+        seed_vault_key(
+            &app.pool,
+            "kdf_rollback_key",
+            "kdf_rollback_vault",
+            "kdf_rollback_user",
+            "original-vault-key",
+            "owner",
+        )
+        .await;
+        query(
+            "CREATE FUNCTION fail_kdf_vault_update() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected late failure'; END $$",
+        )
+        .execute(&app.pool)
+        .await
+        .expect("failure function should install");
+        query(
+            "CREATE TRIGGER fail_kdf_vault_update BEFORE UPDATE ON vault_key FOR EACH ROW EXECUTE FUNCTION fail_kdf_vault_update()",
+        )
+        .execute(&app.pool)
+        .await
+        .expect("failure trigger should install");
+
+        let before = sqlx::query_as::<_, (String, String, String, String, i32, i32)>(
+            "SELECT srp_salt, srp_verifier, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1",
+        )
+        .bind("kdf_rollback_user")
+        .fetch_one(&app.pool)
+        .await
+        .expect("credentials should load");
+        let session = app.issue_session("kdf_rollback_user").await;
+        let next = build_auth_crypto_fixture("kdf-rollback-next", "next-pass");
+        let response = app
+            .rpc_call(
+                "auth.changePassword",
+                json!([{
+                    "srpSalt": next.srp_salt,
+                    "srpVerifier": next.srp_verifier,
+                    "encryptedPrivateKey": next.encrypted_private_key,
+                    "encryptedVaultKeys": [{
+                        "vaultId": "kdf_rollback_vault",
+                        "encryptedVaultKey": "replacement-vault-key",
+                    }],
+                    "kdfParams": floor_kdf_params_json(),
+                }]),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_handler_error(&response.body, "INTERNAL_SERVER_ERROR", "Failed to update vault keys");
+
+        let after = sqlx::query_as::<_, (String, String, String, String, i32, i32)>(
+            "SELECT srp_salt, srp_verifier, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1",
+        )
+        .bind("kdf_rollback_user")
+        .fetch_one(&app.pool)
+        .await
+        .expect("credentials should reload");
+        assert_eq!(after, before);
+        let vault_key = query_scalar::<_, String>(
+            "SELECT encrypted_vault_key FROM vault_key WHERE id = 'kdf_rollback_key'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("vault key should reload");
+        assert_eq!(vault_key, "original-vault-key");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn empty_database_kdf_migration_succeeds() {
+    use sqlx::migrate::Migrator;
+
+    with_raw_test_db("kdf_empty_migration", |pool| async move {
+        let migrations_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let migrator = Migrator::new(migrations_dir)
+            .await
+            .expect("migrator should load migration chain");
+        migrator
+            .run(&pool)
+            .await
+            .expect("empty database should accept KDF migration");
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn populated_legacy_database_kdf_migration_requires_reset() {
+    use sqlx::migrate::{Migrate, Migrator};
+
+    with_raw_test_db("kdf_reset_required", |pool| async move {
+        let migrations_dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+        let migrator = Migrator::new(migrations_dir)
+            .await
+            .expect("migrator should load migration chain");
+
+        // Pin the migration under test by name, not by max(version): deriving it
+        // as "the newest migration" silently retargets this test at whatever
+        // migration someone adds next, and it would still pass while no longer
+        // exercising the KDF reset guard at all.
+        // sqlx derives `description` from the filename slug, with `_` replaced by
+        // spaces (`..._add_user_kdf_params.sql` -> "add user kdf params").
+        const MIGRATION_NAME: &str = "add user kdf params";
+        let migration_version = migrator
+            .iter()
+            .find(|migration| migration.description == MIGRATION_NAME)
+            .unwrap_or_else(|| panic!("migration '{MIGRATION_NAME}' should exist in the chain"))
+            .version;
+
+        let mut conn = pool.acquire().await.expect("connection should acquire");
+        conn.ensure_migrations_table()
+            .await
+            .expect("migrations table should initialize");
+
+        // Apply everything BEFORE the KDF migration so the user table exists in
+        // its legacy (pre-KDF-columns) shape.
+        for migration in migrator.iter() {
+            if migration.version < migration_version {
+                conn.apply(migration)
+                    .await
+                    .expect("legacy migration should apply");
+            }
+        }
+
+        // Insert a legacy-shaped row (no KDF columns yet).
+        query(
+            "INSERT INTO \"user\" (id, name, email, email_verified, srp_salt, srp_verifier, public_key, encrypted_private_key) VALUES ($1, $2, $3, true, $4, $5, $6, $7)",
+        )
+        .bind("legacy_kdf_user")
+        .bind("Legacy User")
+        .bind("legacy-kdf@example.com")
+        .bind("salt")
+        .bind("verifier")
+        .bind("public-key")
+        .bind("encrypted-private-key")
+        .execute(&mut *conn)
+        .await
+        .expect("legacy user should insert");
+
+        let migration = migrator
+            .iter()
+            .find(|migration| migration.version == migration_version)
+            .expect("KDF migration should exist");
+        let error = conn
+            .apply(migration)
+            .await
+            .expect_err("populated legacy database must be reset first");
+        assert!(error.to_string().contains("reset the database before applying the KDF migration"));
+    })
+    .await;
 }

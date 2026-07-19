@@ -12,11 +12,12 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
-	KdfParams,
+	KdfProfile,
 } from "@bittery/types";
 import { generateAccountId } from "../account-id";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { parseStoredKdfProfile } from "../kdf-profile";
 import { resolveStoredSessionExpiryTimestamp } from "../session";
 import {
 	type AccountMetadata,
@@ -47,6 +48,14 @@ const ITEM_CACHE_ATTACHMENTS_STORE = "attachments";
 const ITEM_CACHE_METADATA_STORE = "metadata";
 const ITEM_CACHE_META_KEY = "item_cache_meta";
 const WEB_ACCOUNT_ID_KEY = "bittery_web_account_id";
+
+/**
+ * Pins are scoped per stable account ID. The obsolete shared key is retained
+ * only as a cleanup target and is never used as a read fallback.
+ */
+function pinnedKdfProfileKey(accountId: string): string {
+	return `${PINNED_KDF_PARAMS_STORAGE}_${accountId}`;
+}
 
 // In-memory cache for Master Unlock Key
 let masterUnlockKeyCache: Uint8Array | null = null;
@@ -437,28 +446,28 @@ export class WebStorageAdapter implements IStorageAdapter {
 		return null;
 	}
 
-	async storePinnedKdfParams(
-		params: KdfParams,
-		_email?: string,
+	async storePinnedKdfProfile(
+		profile: KdfProfile,
+		accountId: string,
 	): Promise<void> {
 		if (typeof window !== "undefined") {
-			localStorage.setItem(PINNED_KDF_PARAMS_STORAGE, JSON.stringify(params));
+			localStorage.setItem(
+				pinnedKdfProfileKey(accountId),
+				JSON.stringify(profile),
+			);
+			localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		}
 	}
 
-	async getPinnedKdfParams(_email?: string): Promise<KdfParams | null> {
+	async getPinnedKdfProfile(accountId: string): Promise<KdfProfile | null> {
 		if (typeof window === "undefined") {
 			return null;
 		}
-		const stored = localStorage.getItem(PINNED_KDF_PARAMS_STORAGE);
+		const stored = localStorage.getItem(pinnedKdfProfileKey(accountId));
 		if (!stored) {
 			return null;
 		}
-		try {
-			return JSON.parse(stored) as KdfParams;
-		} catch {
-			return null;
-		}
+		return parseStoredKdfProfile(stored);
 	}
 
 	// ============================================================================
@@ -780,11 +789,14 @@ export class WebStorageAdapter implements IStorageAdapter {
 		this.clearStoredSession();
 	}
 
-	async clearAllStoredData(_email?: string): Promise<void> {
+	async clearAllStoredData(accountId?: string): Promise<void> {
 		if (typeof window === "undefined") return;
 		localStorage.removeItem(SECRET_KEY_STORAGE);
 		localStorage.removeItem(SESSION_DATA_STORAGE);
 		localStorage.removeItem(DEVICE_KEY_STORAGE);
+		if (accountId) {
+			localStorage.removeItem(pinnedKdfProfileKey(accountId));
+		}
 		localStorage.removeItem(PINNED_KDF_PARAMS_STORAGE);
 		localStorage.removeItem(TRAVEL_MODE_CACHE_KEY);
 		await this.clearSession();

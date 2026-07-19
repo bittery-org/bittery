@@ -14,7 +14,7 @@ Bittery uses industry-standard cryptographic primitives, composed carefully to p
 | Primitive | Algorithm | Usage |
 |-----------|-----------|-------|
 | **Symmetric encryption** | AES-256-GCM (`AES-GCM-AAD-V1` format) | Vault items, vault keys, private keys |
-| **Key derivation** | PBKDF2-SHA256 (310k iter) | Derive keys from master password |
+| **Key derivation** | PBKDF2-SHA256 (600k iter) | Derive keys from master password |
 | **Key expansion** | HKDF-SHA256 | Split derived key into auth + unlock keys |
 | **Asymmetric encryption** | RSA-4096 OAEP | Vault sharing between users |
 | **Authentication** | SRP-6a | Password-authenticated key exchange |
@@ -46,7 +46,7 @@ SRP-6a is resistant to man-in-the-middle attacks and server compromise. Even if 
 
 ## Login KDF Policy and Pinning
 
-During login challenge (`startLogin`), the server returns explicit KDF parameters (`schemaVersion`, `algorithm`, `iterations`, `salt`).
+During login challenge (`startLogin`), the server returns an explicit KDF profile (`schemaVersion`, `algorithm`, and `iterations`) plus an independently validated SRP salt.
 
 Clients enforce:
 

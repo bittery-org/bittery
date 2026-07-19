@@ -1,0 +1,7 @@
+{
+	"schemaVersion": 1,
+	"algorithm": "pbkdf2-sha256",
+	"minimumIterations": 600000,
+	"defaultIterations": 600000,
+	"maximumIterations": 1200000
+}

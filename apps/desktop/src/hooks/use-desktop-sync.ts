@@ -158,7 +158,7 @@ const crypto: ICrypto = {
 	deriveClientSession: tauriCrypto.deriveClientSession,
 	verifyServerSession: tauriCrypto.verifyServerSession,
 	validateSecretKey: tauriCrypto.validateSecretKey,
-	validateServerKdfParams: tauriCrypto.validateServerKdfParams,
+	validateKdfProfile: tauriCrypto.validateKdfProfile,
 };
 
 const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;

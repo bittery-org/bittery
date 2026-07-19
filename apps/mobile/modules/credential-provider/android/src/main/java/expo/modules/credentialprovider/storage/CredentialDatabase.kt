@@ -30,7 +30,7 @@ import androidx.room.RoomDatabase
         ItemDomainEntity::class,
         PendingPasskeyMutationEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class CredentialDatabase : RoomDatabase() {

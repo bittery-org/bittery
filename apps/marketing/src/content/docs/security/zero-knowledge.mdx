@@ -24,7 +24,7 @@ In a zero-knowledge system:
 Master Password + Secret Key + Email
         │
         ▼
-   PBKDF2 (310,000 iterations, SHA-256)
+   PBKDF2 (600,000 iterations, SHA-256)
         │
         ▼
    HKDF Split
@@ -45,12 +45,12 @@ Master Password + Secret Key + Email
 
 Your **Master Unlock Key** is derived using:
 
-1. **PBKDF2** with SHA-256, 310,000 iterations, using your lowercase email as salt
+1. **PBKDF2** with SHA-256, 600,000 iterations, using your lowercase email as salt
 2. **HKDF** to split the derived key into an authentication key (for SRP login) and the Master Unlock Key (for encryption)
 
 This makes brute-force attacks computationally infeasible — even with powerful hardware.
 
-During login, clients also validate and pin server-provided KDF parameters (`algorithm`, `iterations`, `salt`) so downgraded or tampered login challenges are rejected.
+During login, clients validate and pin the server-provided KDF profile (`schemaVersion`, `algorithm`, and `iterations`) so downgraded or tampered login challenges are rejected. The independently validated SRP salt is not part of that pin.
 
 ## Vault encryption
 

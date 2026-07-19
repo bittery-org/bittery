@@ -26,6 +26,9 @@ class CryptoTestVectors {
         const val TEST_PASSWORD = "testPassword123!"
         const val TEST_SECRET_KEY = "A3-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"
         const val TEST_EMAIL = "test@example.com"
+        const val KDF_SCHEMA_VERSION = 1
+        const val KDF_ALGORITHM = "pbkdf2-sha256"
+        const val KDF_ITERATIONS = 600_000
 
         /**
          * Expected test vectors from TypeScript implementation.
@@ -44,12 +47,10 @@ class CryptoTestVectors {
          * console.log("masterUnlockKey:", arrayBufferToBase64(result.masterUnlockKey));
          * ```
          *
-         * TODO: Run TypeScript to generate actual test vectors and update these values.
-         * The current values are placeholders.
+         * Independently reproduced with Node's `pbkdf2Sync` and `hkdfSync`.
          */
-        // Placeholder - generate actual vectors from TypeScript
-        // const val EXPECTED_AUTH_KEY_BASE64 = "..."
-        // const val EXPECTED_MUK_BASE64 = "..."
+        const val EXPECTED_AUTH_KEY_BASE64 = "ZceGVJ8qMMsFI+KQQBwCkK36+s1tZcnalkgD5HX8JCk="
+        const val EXPECTED_MUK_BASE64 = "o3TQ32pQg8cRvihBOAZxiA+Hz+7+o4wqWSlt4s0McNo="
     }
 
     /**
@@ -58,7 +59,7 @@ class CryptoTestVectors {
      * This test verifies:
      * 1. Combined password format: "password|secretKey"
      * 2. Salt is lowercase email
-     * 3. PBKDF2: SHA-256, 100k iterations, 32 bytes
+     * 3. PBKDF2: SHA-256, 600k iterations, 32 bytes
      * 4. HKDF: SHA-256, info="bittery-auth-key" and "bittery-unlock-key"
      */
     @Test
@@ -66,7 +67,10 @@ class CryptoTestVectors {
         val result = KeyDerivation.deriveKeys(
             accountPassword = TEST_PASSWORD,
             secretKey = TEST_SECRET_KEY,
-            email = TEST_EMAIL
+            email = TEST_EMAIL,
+            schemaVersion = KDF_SCHEMA_VERSION,
+            algorithm = KDF_ALGORITHM,
+            iterations = KDF_ITERATIONS
         )
 
         // Verify key lengths
@@ -90,9 +94,8 @@ class CryptoTestVectors {
         println("MUK (Base64): $mukBase64")
         println("===================================")
 
-        // TODO: Once TypeScript test vectors are generated, uncomment these assertions:
-        // assertEquals("Auth key should match TypeScript", EXPECTED_AUTH_KEY_BASE64, authKeyBase64)
-        // assertEquals("MUK should match TypeScript", EXPECTED_MUK_BASE64, mukBase64)
+        assertEquals("Auth key should match the cross-platform vector", EXPECTED_AUTH_KEY_BASE64, authKeyBase64)
+        assertEquals("MUK should match the cross-platform vector", EXPECTED_MUK_BASE64, mukBase64)
     }
 
     /**
@@ -101,8 +104,8 @@ class CryptoTestVectors {
      */
     @Test
     fun testKeyDerivationDeterministic() {
-        val result1 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, TEST_EMAIL)
-        val result2 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, TEST_EMAIL)
+        val result1 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, TEST_EMAIL, KDF_SCHEMA_VERSION, KDF_ALGORITHM, KDF_ITERATIONS)
+        val result2 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, TEST_EMAIL, KDF_SCHEMA_VERSION, KDF_ALGORITHM, KDF_ITERATIONS)
 
         assertArrayEquals("Auth key should be deterministic", result1.authKey, result2.authKey)
         assertArrayEquals("MUK should be deterministic", result1.masterUnlockKey, result2.masterUnlockKey)
@@ -113,8 +116,8 @@ class CryptoTestVectors {
      */
     @Test
     fun testEmailCaseInsensitive() {
-        val result1 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, "Test@Example.com")
-        val result2 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, "test@example.com")
+        val result1 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, "Test@Example.com", KDF_SCHEMA_VERSION, KDF_ALGORITHM, KDF_ITERATIONS)
+        val result2 = KeyDerivation.deriveKeys(TEST_PASSWORD, TEST_SECRET_KEY, "test@example.com", KDF_SCHEMA_VERSION, KDF_ALGORITHM, KDF_ITERATIONS)
 
         assertArrayEquals("Keys should be same for different email case", result1.authKey, result2.authKey)
         assertArrayEquals("Keys should be same for different email case", result1.masterUnlockKey, result2.masterUnlockKey)

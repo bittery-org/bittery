@@ -24,13 +24,13 @@ import {
 	type PrimeGroup,
 } from "@bittery/crypto-nitro";
 import { unwrapPlaintextWithContext } from "@bittery/shared/crypto-context-envelope";
-import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
+import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
 import { attachVaultKeyWrapContext } from "@bittery/shared/vault-key-crypto";
 import type {
 	DerivedKeys,
 	EncryptedData,
 	EncryptionContext,
-	KdfParams,
+	KdfProfile,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
@@ -58,7 +58,7 @@ export type { HashAlgorithm, PrimeGroup };
 
 /**
  * Derive authentication and master unlock keys using native Rust crypto.
- * Uses PBKDF2 (100k iterations) + HKDF for key splitting.
+ * Uses the required, validated KDF profile exactly as supplied by the account.
  *
  * Returns Uint8Array for compatibility with existing @bittery/crypto interface.
  */
@@ -66,9 +66,10 @@ export async function deriveKeys(
 	password: string,
 	secretKey: string,
 	email: string,
+	profile: KdfProfile,
 ): Promise<DerivedKeys> {
 	// Native module already returns Uint8Array values
-	return nativeDeriveKeys(password, secretKey, email);
+	return nativeDeriveKeys(password, secretKey, email, profile);
 }
 
 // ============================================================================
@@ -167,11 +168,11 @@ export async function decrypt(
 	}
 }
 
-export function validateServerKdfParams(
-	serverParams: KdfParams,
-	pinnedParams?: KdfParams | null,
+export function validateKdfProfile(
+	profile: KdfProfile,
+	pinnedProfile?: KdfProfile | null,
 ): void {
-	validateServerKdfParamsOrThrow(serverParams, pinnedParams);
+	validateKdfProfileOrThrow(profile, pinnedProfile);
 }
 
 /**

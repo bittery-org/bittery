@@ -6,7 +6,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use bittery_crypto_core::{
     decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_encryption_key, generate_rsa_key_pair,
     generate_secret_key, generate_uuid, get_secret_key_hint, rsa_decrypt, rsa_encrypt, validate_secret_key,
-    validate_server_kdf_params, KdfParams,
+    validate_kdf_profile, KdfProfile,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient},
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     AadContext, EncryptedData,
@@ -58,8 +58,12 @@ pub fn crypto_derive_keys(
     password: String,
     secret_key: String,
     email: String,
+    schema_version: u32,
+    algorithm: String,
+    iterations: u32,
 ) -> Result<DerivedKeysResponse, String> {
-    let keys = derive_keys(&password, &secret_key, &email)
+    let profile = KdfProfile { schema_version, algorithm, iterations };
+    let keys = derive_keys(&password, &secret_key, &email, &profile)
         .map_err(|e| e.to_string())?;
 
     Ok(DerivedKeysResponse {
@@ -176,24 +180,24 @@ pub fn crypto_decrypt_with_context(
     decrypt_with_aad(&data, &key, &context).map_err(|e| e.to_string())
 }
 
-/// Validate server-provided KDF params against policy and optional pin.
+/// Validate a server-provided KDF profile against policy and an optional pin.
 #[tauri::command]
-pub fn crypto_validate_server_kdf_params(
-    server_params_json: String,
-    pinned_params_json: Option<String>,
+pub fn crypto_validate_kdf_profile(
+    profile_json: String,
+    pinned_profile_json: Option<String>,
 ) -> Result<(), String> {
-    let server: KdfParams =
-        serde_json::from_str(&server_params_json).map_err(|e| format!("Invalid server KDF params JSON: {}", e))?;
+    let profile: KdfProfile =
+        serde_json::from_str(&profile_json).map_err(|e| format!("Invalid KDF profile JSON: {}", e))?;
 
-    let pinned: Option<KdfParams> = match pinned_params_json {
+    let pinned: Option<KdfProfile> = match pinned_profile_json {
         Some(value) => Some(
             serde_json::from_str(&value)
-                .map_err(|e| format!("Invalid pinned KDF params JSON: {}", e))?,
+                .map_err(|e| format!("Invalid pinned KDF profile JSON: {}", e))?,
         ),
         None => None,
     };
 
-    validate_server_kdf_params(&server, pinned.as_ref()).map_err(|e| e.to_string())
+    validate_kdf_profile(&profile, pinned.as_ref()).map_err(|e| e.to_string())
 }
 
 /// Generate a random 256-bit encryption key

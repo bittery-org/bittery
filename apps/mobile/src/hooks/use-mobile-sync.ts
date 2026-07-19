@@ -23,8 +23,8 @@ import {
 	generateUuid,
 	generateEncryptionKey as nativeGenerateEncryptionKey,
 	rsaDecrypt,
+	validateKdfProfile,
 	validateSecretKey,
-	validateServerKdfParams,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
 import {
@@ -83,7 +83,7 @@ const crypto: ICrypto = {
 	deriveClientSession,
 	verifyServerSession,
 	validateSecretKey,
-	validateServerKdfParams,
+	validateKdfProfile,
 };
 
 /**

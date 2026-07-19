@@ -29,7 +29,7 @@ We are committed to your privacy. Bittery is designed so that we cannot access y
 
 • All vault data (passwords, secure notes, credit cards, identities, TOTP secrets) is encrypted on your device using AES-256-GCM before it is transmitted to our servers.
 • Your Master Password and Secret Key never leave your device in plaintext. Authentication uses the SRP-6a protocol, which allows us to verify your identity without ever seeing your password.
-• Your Master Unlock Key is derived locally via PBKDF2 (310,000 iterations) and HKDF. We do not store, transmit, or have access to this key.
+• Your Master Unlock Key is derived locally via PBKDF2 (600,000 iterations) and HKDF. We do not store, transmit, or have access to this key.
 • Encryption keys for shared vaults are exchanged using RSA-4096 key pairs generated on your device. Your private key is encrypted with your Master Unlock Key before storage.
 
 In practical terms: we cannot read your stored data, we cannot reset your Master Password, and we cannot recover your vault if you lose both your password and Secret Key.`,

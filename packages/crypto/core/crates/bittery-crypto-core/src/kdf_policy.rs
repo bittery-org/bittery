@@ -1,106 +1,99 @@
-//! KDF policy validation and pinning checks.
-//!
-//! Used to enforce server-provided login KDF parameters against local policy
-//! and previously pinned values.
+//! Canonical KDF profile policy shared with TypeScript.
 
 use serde::{Deserialize, Serialize};
+use std::sync::LazyLock;
 
 use crate::error::CryptoError;
 
-pub const KDF_SCHEMA_VERSION: u32 = 1;
-pub const KDF_ALGORITHM_PBKDF2_SHA256: &str = "pbkdf2-sha256";
-pub const MIN_PBKDF2_ITERATIONS: u32 = 310_000;
-pub const MIN_SALT_BYTES: usize = 16;
+const POLICY_JSON: &str = include_str!("../../../../kdf-policy.json");
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct KdfPolicy {
+    schema_version: u32,
+    algorithm: String,
+    minimum_iterations: u32,
+    default_iterations: u32,
+    maximum_iterations: u32,
+}
+
+static POLICY: LazyLock<KdfPolicy> = LazyLock::new(|| {
+    serde_json::from_str(POLICY_JSON).expect("packages/crypto/kdf-policy.json must be valid")
+});
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct KdfParams {
+pub struct KdfProfile {
     pub schema_version: u32,
     pub algorithm: String,
     pub iterations: u32,
-    pub salt: String,
 }
 
-pub fn default_login_kdf_params(salt: &str) -> KdfParams {
-    KdfParams {
-        schema_version: KDF_SCHEMA_VERSION,
-        algorithm: KDF_ALGORITHM_PBKDF2_SHA256.to_string(),
-        iterations: MIN_PBKDF2_ITERATIONS,
-        salt: salt.to_string(),
+pub fn current_kdf_profile() -> KdfProfile {
+    KdfProfile {
+        schema_version: POLICY.schema_version,
+        algorithm: POLICY.algorithm.clone(),
+        iterations: POLICY.default_iterations,
     }
 }
 
-pub fn validate_server_kdf_params(
-    server_params: &KdfParams,
-    pinned_params: Option<&KdfParams>,
+pub fn minimum_iterations() -> u32 {
+    POLICY.minimum_iterations
+}
+
+pub fn maximum_iterations() -> u32 {
+    POLICY.maximum_iterations
+}
+
+pub fn validate_kdf_profile(
+    profile: &KdfProfile,
+    pinned_profile: Option<&KdfProfile>,
 ) -> Result<(), CryptoError> {
-    validate_policy_baseline(server_params)?;
-
-    if let Some(pinned) = pinned_params {
-        validate_policy_baseline(pinned)?;
-
-        if server_params.schema_version != pinned.schema_version {
+    validate_baseline(profile)?;
+    if let Some(pinned) = pinned_profile {
+        validate_baseline(pinned)?;
+        if profile.schema_version != pinned.schema_version {
             return Err(CryptoError::InvalidInput(
                 "KDF schema version changed from pinned value".to_string(),
             ));
         }
-
-        if !server_params.algorithm.eq_ignore_ascii_case(&pinned.algorithm) {
+        if profile.algorithm != pinned.algorithm {
             return Err(CryptoError::InvalidInput(
                 "KDF algorithm changed from pinned value".to_string(),
             ));
         }
-
-        if server_params.iterations < pinned.iterations {
+        if profile.iterations < pinned.iterations {
             return Err(CryptoError::InvalidInput(
                 "KDF iterations downgraded below pinned value".to_string(),
             ));
         }
-
-        if server_params.salt != pinned.salt {
-            return Err(CryptoError::InvalidInput(
-                "KDF salt changed from pinned value".to_string(),
-            ));
-        }
     }
-
     Ok(())
 }
 
-fn validate_policy_baseline(params: &KdfParams) -> Result<(), CryptoError> {
-    if params.schema_version != KDF_SCHEMA_VERSION {
+pub fn is_current_kdf_profile(profile: &KdfProfile) -> bool {
+    validate_baseline(profile).is_ok() && profile == &current_kdf_profile()
+}
+
+fn validate_baseline(profile: &KdfProfile) -> Result<(), CryptoError> {
+    if profile.schema_version != POLICY.schema_version {
         return Err(CryptoError::InvalidInput(format!(
             "Unsupported KDF schema version: {}",
-            params.schema_version
+            profile.schema_version
         )));
     }
-
-    if !params
-        .algorithm
-        .eq_ignore_ascii_case(KDF_ALGORITHM_PBKDF2_SHA256)
-    {
+    if profile.algorithm != POLICY.algorithm {
         return Err(CryptoError::InvalidInput(format!(
             "Unsupported KDF algorithm: {}",
-            params.algorithm
+            profile.algorithm
         )));
     }
-
-    if params.iterations < MIN_PBKDF2_ITERATIONS {
+    if !(POLICY.minimum_iterations..=POLICY.maximum_iterations).contains(&profile.iterations) {
         return Err(CryptoError::InvalidInput(format!(
-            "KDF iterations below minimum: {}",
-            params.iterations
+            "KDF iterations outside supported range: {}",
+            profile.iterations
         )));
     }
-
-    let decoded_salt = hex::decode(&params.salt)
-        .map_err(|_| CryptoError::InvalidInput("KDF salt must be valid hex".to_string()))?;
-    if decoded_salt.len() < MIN_SALT_BYTES {
-        return Err(CryptoError::InvalidInput(format!(
-            "KDF salt too short: {} bytes",
-            decoded_salt.len()
-        )));
-    }
-
     Ok(())
 }
 
@@ -108,47 +101,51 @@ fn validate_policy_baseline(params: &KdfParams) -> Result<(), CryptoError> {
 mod tests {
     use super::*;
 
-    fn sample_salt() -> String {
-        "00112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF".to_string()
-    }
-
-    fn sample_params() -> KdfParams {
-        KdfParams {
-            schema_version: KDF_SCHEMA_VERSION,
-            algorithm: KDF_ALGORITHM_PBKDF2_SHA256.to_string(),
-            iterations: MIN_PBKDF2_ITERATIONS,
-            salt: sample_salt(),
+    fn profile(iterations: u32) -> KdfProfile {
+        KdfProfile {
+            schema_version: 1,
+            algorithm: "pbkdf2-sha256".to_string(),
+            iterations,
         }
     }
 
     #[test]
-    fn accepts_valid_params_without_pin() {
-        let params = sample_params();
-        assert!(validate_server_kdf_params(&params, None).is_ok());
+    fn canonical_policy_is_embedded() {
+        assert_eq!(current_kdf_profile(), profile(600_000));
+        assert!(is_current_kdf_profile(&profile(600_000)));
     }
 
     #[test]
-    fn rejects_iteration_downgrade_from_pin() {
-        let mut server = sample_params();
-        let pinned = sample_params();
-        server.iterations = MIN_PBKDF2_ITERATIONS - 1;
-        assert!(validate_server_kdf_params(&server, Some(&pinned)).is_err());
+    fn accepts_policy_bounds() {
+        assert!(validate_kdf_profile(&profile(600_000), None).is_ok());
+        assert!(validate_kdf_profile(&profile(1_200_000), None).is_ok());
     }
 
     #[test]
-    fn rejects_salt_change_from_pin() {
-        let mut server = sample_params();
-        let pinned = sample_params();
-        server.salt =
-            "AA112233445566778899AABBCCDDEEFF00112233445566778899AABBCCDDEEFF".to_string();
-        assert!(validate_server_kdf_params(&server, Some(&pinned)).is_err());
+    fn rejects_out_of_range_counts() {
+        for iterations in [0, 310_000, 599_999, 1_200_001, u32::MAX] {
+            assert!(validate_kdf_profile(&profile(iterations), None).is_err());
+        }
     }
 
     #[test]
-    fn rejects_algorithm_change_from_pin() {
-        let mut server = sample_params();
-        let pinned = sample_params();
-        server.algorithm = "pbkdf2-sha1".to_string();
-        assert!(validate_server_kdf_params(&server, Some(&pinned)).is_err());
+    fn rejects_noncanonical_algorithms() {
+        for algorithm in [
+            "PBKDF2-SHA256",
+            "pbkdf2-sha256 ",
+            " pbkdf2-sha256",
+            "pbkdf2_sha256",
+            "sha256",
+            "",
+        ] {
+            let mut candidate = profile(600_000);
+            candidate.algorithm = algorithm.to_string();
+            assert!(validate_kdf_profile(&candidate, None).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_downgrade_from_pin() {
+        assert!(validate_kdf_profile(&profile(600_000), Some(&profile(1_200_000))).is_err());
     }
 }

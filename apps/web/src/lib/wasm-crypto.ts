@@ -50,6 +50,7 @@ import type {
 	DerivedKeys,
 	EncryptedData,
 	EncryptionContext,
+	KdfProfile,
 	RsaKeyPair,
 	SRPClientEphemeral,
 	SRPClientSession,
@@ -204,10 +205,18 @@ export async function deriveKeys(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
+	profile: KdfProfile,
 ): Promise<DerivedKeys> {
 	await autoInit();
 
-	const result = wasmDeriveKeys(accountPassword, secretKey, email);
+	const result = wasmDeriveKeys(
+		accountPassword,
+		secretKey,
+		email,
+		profile.schemaVersion,
+		profile.algorithm,
+		profile.iterations,
+	);
 
 	return {
 		authKey: base64ToUint8Array(result.auth_key),
@@ -222,10 +231,18 @@ export async function deriveKeyHandles(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
+	profile: KdfProfile,
 ): Promise<DerivedKeyHandles> {
 	await autoInit();
 
-	const result = wasmDeriveKeysHandle(accountPassword, secretKey, email);
+	const result = wasmDeriveKeysHandle(
+		accountPassword,
+		secretKey,
+		email,
+		profile.schemaVersion,
+		profile.algorithm,
+		profile.iterations,
+	);
 
 	return {
 		authKeyHandle: fromWasmHandle(result.auth_key_handle),
@@ -288,6 +305,7 @@ export async function deriveMasterKey(
 	accountPassword: string,
 	secretKey: string,
 	email: string,
+	profile: KdfProfile,
 ): Promise<Uint8Array> {
 	await autoInit();
 
@@ -295,6 +313,9 @@ export async function deriveMasterKey(
 		accountPassword,
 		secretKey,
 		email,
+		profile.schemaVersion,
+		profile.algorithm,
+		profile.iterations,
 	);
 	return base64ToUint8Array(masterKeyBase64);
 }

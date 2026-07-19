@@ -57,8 +57,8 @@ function createMockStorage(
 		getVaultKeys: mock(async () => null),
 		storeEncryptedPrivateKey: mock(async () => {}),
 		getEncryptedPrivateKey: mock(async () => null),
-		storePinnedKdfParams: mock(async () => {}),
-		getPinnedKdfParams: mock(async () => null),
+		storePinnedKdfProfile: mock(async () => {}),
+		getPinnedKdfProfile: mock(async () => null),
 		getActiveAccount: mock(async () => active),
 		getActiveAccountUserId: mock(async () => "user-1"),
 		setActiveAccount: mock(async (account: ActiveAccount) => {

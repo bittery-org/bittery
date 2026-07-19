@@ -5,7 +5,7 @@
  */
 
 import { m } from "@bittery/i18n/paraglide/messages";
-import { validateServerKdfParamsOrThrow } from "@bittery/shared/kdf-policy";
+import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
 import {
 	createAccountRpcClient,
 	getDefaultServerUrl,
@@ -13,9 +13,11 @@ import {
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
 import {
 	findAccountById,
+	findAccountByServerEmail,
+	normalizeAccountServerUrl,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import type { EncryptedData, ICrypto, KdfParams } from "@bittery/types";
+import type { EncryptedData, ICrypto, KdfProfile } from "@bittery/types";
 import { peekAccountSessionManager } from "./account-session-manager";
 import { createStoredAccountRpcClient } from "./rpc-client";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
@@ -127,7 +129,7 @@ export interface LoginResult {
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey?: Uint8Array;
 	masterUnlockKeyHandle?: number;
-	kdfParams: KdfParams;
+	kdfParams: KdfProfile;
 	serverUrl: string;
 }
 
@@ -143,7 +145,7 @@ export interface UnlockResult {
 	vaultKeys: VaultKeyData[];
 	masterUnlockKey?: Uint8Array;
 	masterUnlockKeyHandle?: number;
-	kdfParams?: KdfParams;
+	kdfParams?: KdfProfile;
 }
 
 /**
@@ -181,7 +183,11 @@ export interface StartLoginResponse {
 	attemptId: string;
 	salt: string;
 	serverPublicKey: string;
-	kdfParams: KdfParams;
+	kdfParams: {
+		schemaVersion: number;
+		algorithm: string;
+		iterations: number;
+	};
 }
 
 /**
@@ -295,6 +301,7 @@ interface HandleCapableCrypto extends ICrypto {
 		password: string,
 		secretKey: string,
 		email: string,
+		profile: KdfProfile,
 	) => Promise<{ authKeyHandle: number; masterUnlockKeyHandle: number }>;
 	deriveSrpPasswordFromHandle: (authKeyHandle: number) => Promise<string>;
 	exportKeyHandle?: (keyHandle: number) => Promise<Uint8Array>;
@@ -390,37 +397,35 @@ async function validateDerivedUnlockKey(input: {
 	await input.crypto.decrypt(parsedEncryptedPrivateKey, validationKey);
 }
 
-async function validateServerKdfParamsForAccount(
+async function validateKdfProfileForAccount(
 	accountId: string | undefined,
-	serverParams: KdfParams,
+	serverProfile: StartLoginResponse["kdfParams"],
 	deps: SRPLoginDeps | SRPUnlockDeps,
-): Promise<void> {
-	const pinnedParams = accountId
-		? await deps.storage.getPinnedKdfParams(accountId)
+): Promise<KdfProfile> {
+	const pinnedProfile = accountId
+		? await deps.storage.getPinnedKdfProfile(accountId)
 		: null;
+	validateKdfProfileOrThrow(serverProfile, pinnedProfile);
 
-	if (deps.crypto.validateServerKdfParams) {
-		await deps.crypto.validateServerKdfParams(serverParams, pinnedParams);
-	} else {
-		validateServerKdfParamsOrThrow(serverParams, pinnedParams);
+	if (deps.crypto.validateKdfProfile) {
+		await deps.crypto.validateKdfProfile(serverProfile, pinnedProfile);
 	}
+	return serverProfile;
 }
 
-async function persistPinnedKdfParamsIfNeeded(
+async function persistPinnedKdfProfileIfNeeded(
 	accountId: string,
-	params: KdfParams,
+	profile: KdfProfile,
 	storage: IStorageAdapter,
 ): Promise<void> {
-	const pinned = await storage.getPinnedKdfParams(accountId);
+	const pinned = await storage.getPinnedKdfProfile(accountId);
 	if (
 		!pinned ||
-		pinned.schemaVersion !== params.schemaVersion ||
-		pinned.algorithm !== params.algorithm ||
-		pinned.iterations !== params.iterations ||
-		pinned.salt !== params.salt
+		pinned.schemaVersion !== profile.schemaVersion ||
+		pinned.algorithm !== profile.algorithm ||
+		pinned.iterations !== profile.iterations
 	) {
-		console.log("storing pinned kdf params", pinned);
-		await storage.storePinnedKdfParams(params, accountId);
+		await storage.storePinnedKdfProfile(profile, accountId);
 	}
 }
 
@@ -432,7 +437,7 @@ export async function performSRPLogin(
 	deps: SRPLoginDeps,
 ): Promise<LoginResult> {
 	const { email, password, secretKey } = input;
-	const serverUrl = input.serverUrl.replace(/\/$/, "");
+	const serverUrl = normalizeAccountServerUrl(input.serverUrl);
 	const { crypto } = deps;
 	const authClient = resolveAuthClient(deps);
 
@@ -444,6 +449,28 @@ export async function performSRPLogin(
 	const handleCrypto = asHandleCapableCrypto(crypto);
 	let masterUnlockKey: Uint8Array | undefined;
 	let masterUnlockKeyHandle: number | undefined;
+
+	const clientEphemeral = await crypto.generateClientEphemeral();
+
+	const startResult = await authClient.auth.startLogin.mutate({
+		email,
+		clientPublicKey: clientEphemeral.publicKey,
+	});
+	const matchingAccount = findAccountByServerEmail(
+		await deps.storage.getAccountsList(),
+		serverUrl,
+		email,
+	);
+
+	// Validate the server-provided login KDF profile against local policy and any
+	// pinned values BEFORE running the account KDF, then derive keys with those
+	// negotiated params so the KDF stays agile (issue #32).
+	const validatedProfile = await validateKdfProfileForAccount(
+		matchingAccount?.accountId,
+		startResult.kdfParams,
+		deps,
+	);
+
 	let srpPassword: string;
 
 	if (handleCrypto) {
@@ -451,6 +478,7 @@ export async function performSRPLogin(
 			password,
 			secretKey,
 			email,
+			validatedProfile,
 		);
 		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
 		try {
@@ -463,31 +491,23 @@ export async function performSRPLogin(
 			}
 		}
 	} else {
-		const derived = await crypto.deriveKeys(password, secretKey, email);
+		const derived = await crypto.deriveKeys(
+			password,
+			secretKey,
+			email,
+			validatedProfile,
+		);
 		masterUnlockKey = derived.masterUnlockKey;
 		srpPassword = new TextDecoder().decode(derived.authKey);
 	}
 
 	try {
-		const clientEphemeral = await crypto.generateClientEphemeral();
-
-		const startResult = await authClient.auth.startLogin.mutate({
-			email,
-			clientPublicKey: clientEphemeral.publicKey,
-		});
-
-		await validateServerKdfParamsForAccount(
-			undefined,
-			startResult.kdfParams,
-			deps,
-		);
-
 		const clientSession = await crypto.deriveClientSession(
 			clientEphemeral.secret,
 			{
 				salt: startResult.salt,
 				serverPublicKey: startResult.serverPublicKey,
-				kdfParams: startResult.kdfParams,
+				kdfParams: validatedProfile,
 			},
 			srpPassword,
 		);
@@ -520,7 +540,7 @@ export async function performSRPLogin(
 			vaultKeys,
 			masterUnlockKey,
 			masterUnlockKeyHandle,
-			kdfParams: startResult.kdfParams,
+			kdfParams: validatedProfile,
 			serverUrl,
 		};
 	} catch (error) {
@@ -542,7 +562,9 @@ export async function storeLoginSession(
 	options?: StoreAuthSessionOptions,
 ): Promise<string> {
 	const resolvedEmail = email ?? result.user.email;
-	const serverUrl = (options?.serverUrl ?? result.serverUrl).replace(/\/$/, "");
+	const serverUrl = normalizeAccountServerUrl(
+		options?.serverUrl ?? result.serverUrl,
+	);
 	const accountId = await resolveAccountIdForLogin(
 		storage,
 		resolvedEmail,
@@ -565,7 +587,7 @@ export async function storeLoginSession(
 
 	await storage.storeAuthToken(result.token, accountId);
 	await storage.storeServerUrl(serverUrl, accountId);
-	await persistPinnedKdfParamsIfNeeded(accountId, result.kdfParams, storage);
+	await persistPinnedKdfProfileIfNeeded(accountId, result.kdfParams, storage);
 	const vaultKeys = await travelMode.stripVaultKeysIfActive(
 		accountId,
 		result.vaultKeys,
@@ -656,6 +678,7 @@ async function deriveSrpPasswordForAccount(
 	password: string,
 	crypto: ICrypto,
 	storage: IStorageAdapter,
+	profile: KdfProfile,
 ): Promise<string> {
 	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
@@ -668,6 +691,7 @@ async function deriveSrpPasswordForAccount(
 			password,
 			storedSecretKey,
 			email,
+			profile,
 		);
 		try {
 			return await handleCrypto.deriveSrpPasswordFromHandle(
@@ -680,7 +704,12 @@ async function deriveSrpPasswordForAccount(
 		}
 	}
 
-	const derived = await crypto.deriveKeys(password, storedSecretKey, email);
+	const derived = await crypto.deriveKeys(
+		password,
+		storedSecretKey,
+		email,
+		profile,
+	);
 	return new TextDecoder().decode(derived.authKey);
 }
 
@@ -696,29 +725,33 @@ export async function deriveSrpLoginProof(
 	const { crypto, storage } = deps;
 	const { email } = await resolveUnlockAccount(accountId, storage);
 	const authClient = await resolveAccountAuthClient(accountId, deps);
+	const clientEphemeral = await crypto.generateClientEphemeral();
+	const startResult = await authClient.auth.startLogin.mutate({
+		email,
+		clientPublicKey: clientEphemeral.publicKey,
+	});
+	// Validate the server login params against local policy + pin BEFORE running
+	// the account KDF, then derive with the negotiated params so an account keyed
+	// at an older iteration count still authenticates (issue #32).
+	const validatedProfile = await validateKdfProfileForAccount(
+		accountId,
+		startResult.kdfParams,
+		deps,
+	);
 	const srpPassword = await deriveSrpPasswordForAccount(
 		accountId,
 		email,
 		password,
 		crypto,
 		storage,
-	);
-	const clientEphemeral = await crypto.generateClientEphemeral();
-	const startResult = await authClient.auth.startLogin.mutate({
-		email,
-		clientPublicKey: clientEphemeral.publicKey,
-	});
-	await validateServerKdfParamsForAccount(
-		accountId,
-		startResult.kdfParams,
-		deps,
+		validatedProfile,
 	);
 	const clientSession = await crypto.deriveClientSession(
 		clientEphemeral.secret,
 		{
 			salt: startResult.salt,
 			serverPublicKey: startResult.serverPublicKey,
-			kdfParams: startResult.kdfParams,
+			kdfParams: validatedProfile,
 		},
 		srpPassword,
 	);
@@ -747,6 +780,18 @@ export async function performSRPUnlock(
 		throw new Error(m.auth_error_no_stored_secret_key());
 	}
 
+	// Unlock derives the account keys before it knows whether it can short-circuit
+	// on a locally valid session (offline) or must re-auth against the server, so
+	// it can't negotiate a profile from startLogin the way full login does. Derive
+	// with the profile pinned after login. A missing pin fails closed and requires
+	// a full sign-in; an implicit current-profile fallback could corrupt access to
+	// an account created with a different valid work factor.
+	const pinnedKdfProfile = await storage.getPinnedKdfProfile(accountId);
+	if (!pinnedKdfProfile) {
+		throw new Error(m.auth_error_kdf_profile_missing());
+	}
+	validateKdfProfileOrThrow(pinnedKdfProfile);
+
 	const handleCrypto = asHandleCapableCrypto(crypto);
 	let masterUnlockKey: Uint8Array | undefined;
 	let masterUnlockKeyHandle: number | undefined;
@@ -757,6 +802,7 @@ export async function performSRPUnlock(
 			password,
 			storedSecretKey,
 			email,
+			pinnedKdfProfile,
 		);
 		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
 		try {
@@ -769,7 +815,12 @@ export async function performSRPUnlock(
 			}
 		}
 	} else {
-		const derived = await crypto.deriveKeys(password, storedSecretKey, email);
+		const derived = await crypto.deriveKeys(
+			password,
+			storedSecretKey,
+			email,
+			pinnedKdfProfile,
+		);
 		masterUnlockKey = derived.masterUnlockKey;
 		srpPassword = new TextDecoder().decode(derived.authKey);
 	}
@@ -825,7 +876,7 @@ export async function performSRPUnlock(
 			clientPublicKey: clientEphemeral.publicKey,
 		});
 
-		await validateServerKdfParamsForAccount(
+		const validatedProfile = await validateKdfProfileForAccount(
 			accountId,
 			startResult.kdfParams,
 			deps,
@@ -836,7 +887,7 @@ export async function performSRPUnlock(
 			{
 				salt: startResult.salt,
 				serverPublicKey: startResult.serverPublicKey,
-				kdfParams: startResult.kdfParams,
+				kdfParams: validatedProfile,
 			},
 			srpPassword,
 		);
@@ -872,7 +923,7 @@ export async function performSRPUnlock(
 			vaultKeys,
 			masterUnlockKey,
 			masterUnlockKeyHandle,
-			kdfParams: startResult.kdfParams,
+			kdfParams: validatedProfile,
 		};
 	} catch (error) {
 		if (masterUnlockKeyHandle && handleCrypto?.destroyKeyHandle) {
@@ -909,7 +960,7 @@ export async function storeUnlockSession(
 		await storage.storeAuthToken(result.token, accountId);
 		await storage.storeServerUrl(serverUrl, accountId);
 		if (result.kdfParams) {
-			await persistPinnedKdfParamsIfNeeded(
+			await persistPinnedKdfProfileIfNeeded(
 				accountId,
 				result.kdfParams,
 				storage,

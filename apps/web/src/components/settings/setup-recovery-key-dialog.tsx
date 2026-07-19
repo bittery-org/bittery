@@ -23,7 +23,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { storage } from "@/lib/storage";
+import { getActiveAccountKdfProfile, storage } from "@/lib/storage";
 import {
 	decrypt,
 	deriveKeysFromMasterKey,
@@ -90,10 +90,14 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 
 		setIsProcessing(true);
 		try {
+			// Derive the existing account's master key using the params it was
+			// keyed with (not the current default).
+			const { profile: oldProfile } = await getActiveAccountKdfProfile();
 			const masterKey = await deriveMasterKey(
 				currentPassword,
 				secretKey,
 				userEmail,
+				oldProfile,
 			);
 			const { masterUnlockKey } = await deriveKeysFromMasterKey(
 				masterKey,

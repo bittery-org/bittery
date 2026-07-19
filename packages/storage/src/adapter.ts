@@ -7,7 +7,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
-	KdfParams,
+	KdfProfile,
 } from "@bittery/types";
 import type { SessionExpiryInput } from "./session";
 import type {
@@ -180,12 +180,12 @@ export interface IStorageAdapter {
 	/**
 	 * Store pinned login KDF parameters for downgrade/tamper detection.
 	 */
-	storePinnedKdfParams(params: KdfParams, accountId?: string): Promise<void>;
+	storePinnedKdfProfile(profile: KdfProfile, accountId: string): Promise<void>;
 
 	/**
 	 * Get pinned login KDF parameters.
 	 */
-	getPinnedKdfParams(accountId?: string): Promise<KdfParams | null>;
+	getPinnedKdfProfile(accountId: string): Promise<KdfProfile | null>;
 
 	// ============================================================================
 	// Multi-Account (desktop/mobile)

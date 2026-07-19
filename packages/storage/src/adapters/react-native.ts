@@ -12,7 +12,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	ItemCacheMetadata,
-	KdfParams,
+	KdfProfile,
 } from "@bittery/types";
 import * as CryptoType from "expo-crypto";
 import * as LocalAuthenticationType from "expo-local-authentication";
@@ -30,6 +30,7 @@ import {
 } from "../account-keys";
 import type { IStorageAdapter } from "../adapter";
 import type { CryptoProvider } from "../crypto-provider";
+import { parseStoredKdfProfile } from "../kdf-profile";
 import {
 	migrateEmailKeysToAccountIds,
 	parseStoredActiveAccount,
@@ -555,29 +556,19 @@ export class ReactNativeStorageAdapter implements IStorageAdapter {
 		return this.getItem(key);
 	}
 
-	async storePinnedKdfParams(
-		params: KdfParams,
-		accountId?: string,
+	async storePinnedKdfProfile(
+		profile: KdfProfile,
+		accountId: string,
 	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
-		await this.setItem(key, JSON.stringify(params));
+		const key = getAccountKey(accountId, "pinned_kdf_params");
+		await this.setItem(key, JSON.stringify(profile));
 	}
 
-	async getPinnedKdfParams(accountId?: string): Promise<KdfParams | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "pinned_kdf_params");
+	async getPinnedKdfProfile(accountId: string): Promise<KdfProfile | null> {
+		const key = getAccountKey(accountId, "pinned_kdf_params");
 		const stored = await this.getItem(key);
 		if (!stored) return null;
-		try {
-			return JSON.parse(stored) as KdfParams;
-		} catch {
-			return null;
-		}
+		return parseStoredKdfProfile(stored);
 	}
 
 	async updateStoredSessionMetadata(

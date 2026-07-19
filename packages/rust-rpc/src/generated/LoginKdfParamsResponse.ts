@@ -4,5 +4,4 @@ export type LoginKdfParamsResponse = {
 	schemaVersion: number;
 	algorithm: string;
 	iterations: number;
-	salt: string;
 };

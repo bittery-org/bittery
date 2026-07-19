@@ -159,6 +159,9 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     password: JString<'a>,
     secret_key: JString<'a>,
     email: JString<'a>,
+    schema_version: jint,
+    algorithm: JString<'a>,
+    iterations: jint,
 ) -> JObject<'a> {
     let password_str = match get_string(&mut env, password) {
         Some(s) => s,
@@ -176,9 +179,25 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use bittery_crypto_core::derive_keys;
+    use bittery_crypto_core::{derive_keys, KdfProfile};
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(value) => value,
+        None => {
+            return create_derived_keys_result(&mut env, None, None, Some("Invalid KDF algorithm"))
+        }
+    };
+    if schema_version != 1 || !(600_000..=1_200_000).contains(&iterations) {
+        return create_derived_keys_result(&mut env, None, None, Some("Invalid KDF profile"));
+    }
+    let schema_version = schema_version as u32;
+    let iterations = iterations as u32;
+    let profile = KdfProfile {
+        schema_version,
+        algorithm: algorithm_str,
+        iterations,
+    };
 
-    match derive_keys(&password_str, &secret_str, &email_str) {
+    match derive_keys(&password_str, &secret_str, &email_str, &profile) {
         Ok(keys) => {
             let auth_key = STANDARD.encode(&keys.auth_key);
             let muk = STANDARD.encode(&keys.master_unlock_key);
@@ -1088,6 +1107,9 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     password: JString<'a>,
     secret_key: JString<'a>,
     email: JString<'a>,
+    schema_version: jint,
+    algorithm: JString<'a>,
+    iterations: jint,
 ) -> JObject<'a> {
     let password_str = match get_string(&mut env, password) {
         Some(s) => s,
@@ -1107,9 +1129,29 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
-    use bittery_crypto_core::derive_keys;
-
-    match derive_keys(&password_str, &secret_str, &email_str) {
+    use bittery_crypto_core::{derive_keys, KdfProfile};
+    let algorithm = match get_string(&mut env, algorithm) {
+        Some(value) => value,
+        None => {
+            return create_cp_derived_keys_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid KDF algorithm"),
+            )
+        }
+    };
+    if schema_version != 1 || !(600_000..=1_200_000).contains(&iterations) {
+        return create_cp_derived_keys_result(&mut env, None, None, Some("Invalid KDF profile"));
+    }
+    let schema_version = schema_version as u32;
+    let iterations = iterations as u32;
+    let profile = KdfProfile {
+        schema_version,
+        algorithm,
+        iterations,
+    };
+    match derive_keys(&password_str, &secret_str, &email_str, &profile) {
         Ok(keys) => {
             let auth_key = STANDARD.encode(&keys.auth_key);
             let muk = STANDARD.encode(&keys.master_unlock_key);
@@ -1210,7 +1252,13 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     let entity_type_str = match get_string(&mut env, entity_type) {
         Some(s) => s,
         None => {
-            return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid entity_type"))
+            return create_cp_encrypt_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some("Invalid entity_type"),
+            )
         }
     };
     let user_id_str = match get_string(&mut env, user_id) {
@@ -1591,11 +1639,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     let key = match STANDARD.decode(&key_str) {
         Ok(k) => k,
         Err(e) => {
-            return create_cp_result(
-                &mut env,
-                None,
-                Some(&format!("Invalid key base64: {}", e)),
-            )
+            return create_cp_result(&mut env, None, Some(&format!("Invalid key base64: {}", e)))
         }
     };
 

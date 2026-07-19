@@ -16,9 +16,17 @@ public class BitteryCryptoModule: Module {
         // Key Derivation
         // ============================================================================
 
-        AsyncFunction("deriveKeys") { (password: String, secretKey: String, email: String, promise: Promise) in
+        AsyncFunction("deriveKeys") { (password: String, secretKey: String, email: String, schemaVersion: Int, algorithm: String, iterations: Int, promise: Promise) in
             DispatchQueue.global(qos: .userInitiated).async {
-                let result = bittery_derive_keys(password, secretKey, email)
+                guard schemaVersion == 1,
+                      algorithm == "pbkdf2-sha256",
+                      (600_000...1_200_000).contains(iterations),
+                      let schema = UInt32(exactly: schemaVersion),
+                      let count = UInt32(exactly: iterations) else {
+                    promise.reject("KEY_DERIVATION_FAILED", "Invalid KDF profile")
+                    return
+                }
+                let result = bittery_derive_keys(password, secretKey, email, schema, algorithm, count)
 
                 if let error = result.error {
                     let errorStr = String(cString: error)
