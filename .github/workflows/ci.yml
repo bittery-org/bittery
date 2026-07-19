@@ -43,8 +43,8 @@ jobs:
             exit 0
           fi
 
-          git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
-          changed_files="$(git diff --name-only "origin/${{ github.base_ref }}" "$GITHUB_SHA")"
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          changed_files="$(git diff --name-only "origin/$GITHUB_BASE_REF" "$GITHUB_SHA")"
 
           js=false
           server=false
@@ -94,8 +94,8 @@ jobs:
         run: |
           set -euo pipefail
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags origin "${{ github.base_ref }}"
-            node scripts/check-migrations.mjs "origin/${{ github.base_ref }}"
+            git fetch --no-tags origin "$GITHUB_BASE_REF"
+            node scripts/check-migrations.mjs "origin/$GITHUB_BASE_REF"
           else
             node scripts/check-migrations.mjs
           fi
