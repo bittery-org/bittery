@@ -1766,6 +1766,7 @@
 	"ext_unlock_desktop_locked_body": "Unlock it to continue — that unlocks the extension too.",
 	"ext_unlock_button_unlock_desktop": "Unlock desktop app",
 	"ext_unlock_toast_pending_desktop": "Unlock the desktop app to continue",
+	"ext_unlock_toast_desktop_unreachable": "The desktop app isn't responding. Quit it to unlock the extension on its own.",
 	"ext_unlock_or": "or",
 	"ext_unlock_touch_id": "Unlock with Touch ID",
 	"ext_unlock_not_you": "Not you?",

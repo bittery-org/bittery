@@ -211,30 +211,39 @@ export function setDesktopModeSentinel(): void {
 }
 
 /**
+ * `isUnlocked` is a synchronous read on a hot path, so the locks it decides on
+ * are fired and forgotten. The MUK is dropped from memory synchronously inside
+ * `_lockInternal`, so the caller's `false` is already accurate.
+ */
+function autoLock(reason: string): void {
+	_lockInternal().catch((error) => {
+		console.error(`Failed to auto-lock (${reason}):`, error);
+	});
+}
+
+/**
  * Check if extension is unlocked
  */
 export function isUnlocked(): boolean {
 	if (!masterUnlockKey) return false;
 
-	// In desktop mode, check if sentinel exists and desktop is available AND unlocked
-	if (isDesktopMode()) {
-		const desktopAvailable = desktopSync.isDesktopAvailable();
-		const desktopStatus = desktopSync.getLastStatus();
-		const desktopLocked = desktopStatus?.locked ?? true;
+	const desktopAvailable = desktopSync.isDesktopAvailable();
+	const desktopLocked = desktopSync.getLastStatus()?.locked ?? true;
 
+	// A reachable but locked desktop app outranks whatever this side thinks,
+	// in either mode. Checking it only in desktop mode used to let a locally
+	// derived MUK (password unlock, biometric fallback) sit unlocked next to a
+	// locked desktop indefinitely, because a real MUK takes the standalone path.
+	if (desktopAvailable && desktopLocked) {
+		autoLock("desktop app is locked");
+		return false;
+	}
+
+	// In desktop mode the sentinel is only meaningful while the desktop answers.
+	if (isDesktopMode()) {
 		if (!desktopAvailable) {
 			// Desktop disconnected, lock extension
-			_lockInternal().catch((error) => {
-				console.error("Failed to auto-lock:", error);
-			});
-			return false;
-		}
-
-		if (desktopLocked) {
-			// Desktop is locked, extension should be locked too
-			_lockInternal().catch((error) => {
-				console.error("Failed to auto-lock:", error);
-			});
+			autoLock("desktop app disconnected");
 			return false;
 		}
 
@@ -251,10 +260,7 @@ export function isUnlocked(): boolean {
 	const timeSinceLastActivity = now - lastActivityTimestamp;
 
 	if (timeSinceLastActivity > cachedAutoLockTimeoutMs) {
-		// Auto-lock due to timeout (fire and forget)
-		_lockInternal().catch((error) => {
-			console.error("Failed to auto-lock:", error);
-		});
+		autoLock("auto-lock timeout elapsed");
 		return false;
 	}
 

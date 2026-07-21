@@ -75,6 +75,9 @@ describe("desktop-client native transport", () => {
 			unlockedAccounts: ["account-alice"],
 			timestamp: 123,
 			autolockTimeoutMs: 456,
+			// `theme` is additive on the desktop side, so a host that predates it
+			// still parses — the client normalizes the absence to null.
+			theme: null,
 		});
 	});
 

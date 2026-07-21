@@ -175,6 +175,7 @@ describe("handleQuickUnlockAll with a connected desktop app", () => {
 		expect(response).toEqual({
 			success: true,
 			status: "pending-desktop-unlock",
+			desktopReachable: true,
 		});
 		expect(triggerDesktopUnlockCalls).toBe(1);
 		// Nothing was unlocked on this side, so no session was seeded.
@@ -182,18 +183,21 @@ describe("handleQuickUnlockAll with a connected desktop app", () => {
 		expect(setActiveAccountCalls.length).toBe(0);
 	});
 
-	test("unlocks locally when the desktop refuses the handoff", async () => {
+	test("still refuses to unlock locally when the desktop is wedged", async () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
 		desktopStatus = { available: true, locked: true };
 		triggerDesktopUnlockResult = false;
 
 		const response = await handleQuickUnlockAll({ password: "pw" });
 
-		// A wedged desktop must not dead-end the user out of their vault.
-		expect(triggerDesktopUnlockCalls).toBe(1);
-		expect(response.success).toBe(true);
-		expect(response.result).toEqual({ unlocked: ["acc-uuid-1"], failed: [] });
-		expect(setMasterUnlockKeyCalls.length).toBe(1);
+		// Falling back to a local unlock here is exactly the divergence bug: the
+		// desktop is still reachable and still locked. Report it instead.
+		expect(response).toEqual({
+			success: true,
+			status: "pending-desktop-unlock",
+			desktopReachable: false,
+		});
+		expect(setMasterUnlockKeyCalls.length).toBe(0);
 	});
 
 	test("unlocks locally when the connected desktop is already unlocked", async () => {

@@ -8,10 +8,7 @@ import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforc
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { desktopSync } from "./desktop-sync";
-import {
-	handOffUnlockToDesktop,
-	PENDING_DESKTOP_UNLOCK,
-} from "./desktop-unlock";
+import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
 import { sendNativeMessage } from "./native-messaging-client";
 import {
 	setDesktopModeSentinel,
@@ -48,6 +45,35 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 			appRunning: false,
 		};
 	}
+}
+
+/**
+ * Check that a biometric-unlock response belongs to the challenge just sent.
+ *
+ * This is not a MAC. The desktop derives the value from data the extension
+ * already holds, so it authenticates nothing on its own — the transport is what
+ * establishes trust (an allowlisted native-messaging host over stdio, reaching
+ * the desktop through a user-owned local socket). What the binding does buy is
+ * that a response captured earlier cannot be replayed against a later request,
+ * which is the whole reason the challenge is generated per call.
+ *
+ * `challenge` is a UUID and `boundTo` is base64 or a count, so both are Latin-1
+ * and safe for `btoa`.
+ */
+function assertChallengeBinding(
+	label: string,
+	signature: unknown,
+	challenge: string,
+	boundTo: string | number,
+): void {
+	if (signature === btoa(`${challenge}:${boundTo}`)) {
+		return;
+	}
+
+	console.error(`[${label}] Response is not bound to the issued challenge`);
+	throw new Error(
+		"Desktop app returned a stale or mismatched unlock response. Please try again.",
+	);
 }
 
 /**
@@ -99,15 +125,12 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				).updateBiometricEnabled(activeAccount.accountId, true);
 			}
 
-			// Verify signature (challenge + encrypted_session)
-			const expectedSigData = `${challenge}:${responseData.encrypted_session}`;
-			const expectedSig = btoa(expectedSigData);
-			if (responseData.signature !== expectedSig) {
-				console.warn(
-					"[NATIVE_BIOMETRIC_UNLOCK] Signature mismatch (replay attack protection)",
-				);
-				// Don't fail on signature mismatch for now during development
-			}
+			assertChallengeBinding(
+				"NATIVE_BIOMETRIC_UNLOCK",
+				responseData.signature,
+				challenge,
+				responseData.encrypted_session,
+			);
 
 			// Decode the base64 encrypted session data (it's a JSON-encoded EncryptedData structure)
 			const encryptedSessionJson = atob(responseData.encrypted_session);
@@ -300,16 +323,24 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		// Desktop available but locked: it owns the unlock. Report the handoff as a
 		// status rather than a success, so the popup waits for the pushed
 		// `unlock` event instead of claiming the vault is open.
+		//
+		// `forceLocalUnlock` skips this, but only ever runs when the desktop is
+		// already unlocked (see `desktop-key-material.ensureDesktopWriteCapability`),
+		// so it cannot open a divergence.
 		if (!options?.forceLocalUnlock && desktopAvailable && desktopLocked) {
-			const handoff = await handOffUnlockToDesktop();
-			if (handoff.handedOff) {
-				return { success: true, status: PENDING_DESKTOP_UNLOCK };
+			const desktopUnlock = await requireDesktopUnlock();
+			if (desktopUnlock.required) {
+				return {
+					success: true,
+					status: PENDING_DESKTOP_UNLOCK,
+					desktopReachable: desktopUnlock.triggered,
+				};
 			}
-			// Desktop didn't accept the request — fall through and unlock locally.
 		}
 
-		// Fallback: Use native messaging (for standalone mode, or when the desktop
-		// could not take over the unlock)
+		// Standalone path: prompt for biometrics inside the desktop process and
+		// take the key material back. Only reached when no locked desktop is
+		// shadowing this side.
 		// Generate challenge for replay attack protection
 		const challenge = crypto.randomUUID();
 		const extensionId = chrome.runtime.id;
@@ -369,15 +400,12 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			throw new Error("Invalid response structure from desktop app");
 		}
 
-		// Verify signature (challenge + number of accounts)
-		const expectedSigData = `${challenge}:${responseData.accounts?.length || 0}`;
-		const expectedSig = btoa(expectedSigData);
-		if (responseData.signature !== expectedSig) {
-			console.warn(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Signature mismatch (replay attack protection)",
-			);
-			// Don't fail on signature mismatch for now during development
-		}
+		assertChallengeBinding(
+			"NATIVE_BIOMETRIC_UNLOCK_ALL",
+			responseData.signature,
+			challenge,
+			responseData.accounts?.length || 0,
+		);
 
 		// Decode device key from base64 (shared for all accounts)
 		const deviceKeyBase64 = responseData.device_key;

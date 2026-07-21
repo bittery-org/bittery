@@ -16,10 +16,7 @@ import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
 import { isDesktopUnlockedNow } from "./desktop-status";
-import {
-	handOffUnlockToDesktop,
-	PENDING_DESKTOP_UNLOCK,
-} from "./desktop-unlock";
+import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import {
@@ -90,9 +87,13 @@ export async function handleQuickUnlock(payload: {
 
 	// A connected-but-locked desktop owns the unlock; unlocking locally here
 	// would leave the desktop behind. See `desktop-unlock.ts`.
-	const handoff = await handOffUnlockToDesktop();
-	if (handoff.handedOff) {
-		return { success: true, status: PENDING_DESKTOP_UNLOCK };
+	const desktopUnlock = await requireDesktopUnlock();
+	if (desktopUnlock.required) {
+		return {
+			success: true,
+			status: PENDING_DESKTOP_UNLOCK,
+			desktopReachable: desktopUnlock.triggered,
+		};
 	}
 
 	// Get stored email for multi-account support
@@ -360,9 +361,13 @@ export async function handleQuickUnlockAll(payload: {
 
 	// A connected-but-locked desktop owns the unlock; unlocking locally here
 	// would leave the desktop behind. See `desktop-unlock.ts`.
-	const handoff = await handOffUnlockToDesktop();
-	if (handoff.handedOff) {
-		return { success: true, status: PENDING_DESKTOP_UNLOCK };
+	const desktopUnlock = await requireDesktopUnlock();
+	if (desktopUnlock.required) {
+		return {
+			success: true,
+			status: PENDING_DESKTOP_UNLOCK,
+			desktopReachable: desktopUnlock.triggered,
+		};
 	}
 
 	// Get list of all accounts

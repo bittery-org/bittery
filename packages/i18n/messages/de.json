@@ -1766,6 +1766,7 @@
 	"ext_unlock_desktop_locked_body": "Entsperre sie, um fortzufahren – damit wird auch die Erweiterung entsperrt.",
 	"ext_unlock_button_unlock_desktop": "Desktop-App entsperren",
 	"ext_unlock_toast_pending_desktop": "Entsperre die Desktop-App, um fortzufahren",
+	"ext_unlock_toast_desktop_unreachable": "Die Desktop-App antwortet nicht. Beende sie, um die Erweiterung allein zu entsperren.",
 	"ext_unlock_or": "oder",
 	"ext_unlock_touch_id": "Mit Touch ID entsperren",
 	"ext_unlock_not_you": "Nicht du?",

@@ -79,8 +79,15 @@ export function UnlockPage() {
 	 * yet — stay on this screen and let the pushed `DESKTOP_UNLOCKED` event (see
 	 * `popup.tsx`) navigate once the desktop is actually open.
 	 */
-	const handleDesktopHandoff = () => {
+	const handleDesktopHandoff = (response: { desktopReachable?: boolean }) => {
 		setVaultState("locked");
+		if (response.desktopReachable === false) {
+			// Desktop is connected but didn't raise its unlock screen. Unlocking
+			// here anyway would only unlock the extension, so say what's wrong
+			// instead — quitting the desktop app frees this side to unlock alone.
+			toast.error(m.ext_unlock_toast_desktop_unreachable());
+			return;
+		}
 		toast.info(m.ext_unlock_toast_pending_desktop());
 	};
 
@@ -102,7 +109,7 @@ export function UnlockPage() {
 		},
 		onSuccess: async (response) => {
 			if (response.status === PENDING_DESKTOP_UNLOCK) {
-				handleDesktopHandoff();
+				handleDesktopHandoff(response);
 				return;
 			}
 
@@ -159,7 +166,7 @@ export function UnlockPage() {
 		},
 		onSuccess: async (response) => {
 			if (response.status === PENDING_DESKTOP_UNLOCK) {
-				handleDesktopHandoff();
+				handleDesktopHandoff(response);
 				return;
 			}
 
