@@ -9,6 +9,7 @@ use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
 use zeroize::Zeroize;
 
+use crate::identity::normalize_email;
 use crate::secret_key::CHARSET;
 use crate::{decrypt, encrypt, CryptoError, EncryptedData};
 
@@ -81,7 +82,7 @@ pub fn derive_recovery_encryption_key(
     }
 
     let mut derived_key = [0u8; MASTER_KEY_LENGTH];
-    let mut salt_bytes = email.to_lowercase().into_bytes();
+    let mut salt_bytes = normalize_email(email).into_bytes();
 
     pbkdf2_hmac::<Sha256>(
         recovery_key.as_bytes(),
@@ -196,6 +197,15 @@ mod tests {
         let key1 = derive_recovery_encryption_key(TEST_RECOVERY_KEY, "Test@Example.com").unwrap();
         let key2 = derive_recovery_encryption_key(TEST_RECOVERY_KEY, "test@example.com").unwrap();
         assert_eq!(key1, key2);
+    }
+
+    #[test]
+    fn test_derive_recovery_encryption_key_nfkc_normalizes_email_salt() {
+        let nfc = derive_recovery_encryption_key(TEST_RECOVERY_KEY, "müller@example.com").unwrap();
+        let nfd =
+            derive_recovery_encryption_key(TEST_RECOVERY_KEY, "mu\u{0308}ller@example.com").unwrap();
+
+        assert_eq!(nfc, nfd);
     }
 
     #[test]

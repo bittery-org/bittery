@@ -1306,6 +1306,14 @@ fn fake_hint_is_case_insensitive() {
     assert_eq!(lower.len(), 11);
 }
 
+#[test]
+fn auth_email_normalization_uses_nfkc() {
+    assert_eq!(
+        normalize_email("  mu\u{0308}ller@EXAMPLE.com  "),
+        "müller@example.com"
+    );
+}
+
 fn build_auth_crypto_fixture(label: &str, auth_password: &str) -> AuthCryptoFixture {
     let client = SrpClient::new(super::HashAlgorithm::Sha256, super::PrimeGroup::G4096);
     let srp_salt = client.generate_salt();

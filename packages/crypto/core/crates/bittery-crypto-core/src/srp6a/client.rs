@@ -11,6 +11,7 @@ use super::bigint::SrpInt;
 use super::params::{get_params, HashAlgorithm, PrimeGroup};
 use super::{Ephemeral, Session};
 use crate::error::CryptoError;
+use crate::identity::normalize_srp_username;
 
 /// SRP Client for authentication
 pub struct SrpClient {
@@ -52,9 +53,7 @@ impl SrpClient {
         username: &str,
         password: &str,
     ) -> Result<String, CryptoError> {
-        // Normalize username and password (NFKC)
-        let username = username.to_owned(); // TODO: proper NFKC normalization
-        let password = password.to_owned();
+        let username = normalize_srp_username(username);
 
         // H(I | ':' | p)
         let identity_hash = self.hash_string(&format!("{}:{}", username, password));
@@ -186,7 +185,8 @@ impl SrpClient {
         let h_n = self.hash_values(&[&self.n]);
         let h_g = self.hash_values(&[&self.g]);
         let h_n_xor_h_g = h_n.xor(&h_g);
-        let h_i = self.hash_string(username);
+        let username = normalize_srp_username(username);
+        let h_i = self.hash_string(&username);
         let h_i_int = SrpInt::from_hex(&h_i)?;
 
         let big_m = self.hash_values(&[&h_n_xor_h_g, &h_i_int, &s, &big_a, &big_b, &big_k]);

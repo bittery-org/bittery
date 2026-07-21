@@ -9,6 +9,7 @@ use super::bigint::SrpInt;
 use super::params::{get_params, HashAlgorithm, PrimeGroup};
 use super::{Ephemeral, Session};
 use crate::error::CryptoError;
+use crate::identity::normalize_srp_username;
 
 /// SRP Server for authentication
 pub struct SrpServer {
@@ -119,7 +120,8 @@ impl SrpServer {
         let h_n = self.hash_values(&[&self.n]);
         let h_g = self.hash_values(&[&self.g]);
         let h_n_xor_h_g = h_n.xor(&h_g);
-        let h_i = self.hash_string(username);
+        let username = normalize_srp_username(username);
+        let h_i = self.hash_string(&username);
         let h_i_int = SrpInt::from_hex(&h_i)?;
 
         let expected_m = self.hash_values(&[&h_n_xor_h_g, &h_i_int, &s, &big_a, &big_b, &big_k]);
@@ -249,6 +251,57 @@ mod tests {
                 &server_session.proof,
             )
             .expect("Server proof verification failed");
+    }
+
+    #[test]
+    fn test_full_srp_flow_nfkc_normalizes_username() {
+        let hash_algorithm = HashAlgorithm::Sha256;
+        let prime_group = PrimeGroup::G1024;
+        let client = SrpClient::new(hash_algorithm, prime_group);
+        let server = SrpServer::new(hash_algorithm, prime_group);
+        let nfc_username = "müller@example.com";
+        let nfd_username = "mu\u{0308}ller@example.com";
+        let password = "secretpassword123";
+
+        let salt = client.generate_salt();
+        let registration_private_key = client
+            .derive_private_key(&salt, nfd_username, password)
+            .unwrap();
+        let verifier = client.derive_verifier(&registration_private_key).unwrap();
+
+        let login_private_key = client
+            .derive_private_key(&salt, nfc_username, password)
+            .unwrap();
+        let client_ephemeral = client.generate_ephemeral();
+        let server_ephemeral = server.generate_ephemeral(&verifier).unwrap();
+        let client_session = client
+            .derive_session(
+                &client_ephemeral.secret,
+                &server_ephemeral.public,
+                &salt,
+                nfc_username,
+                &login_private_key,
+            )
+            .unwrap();
+        let server_session = server
+            .derive_session(
+                &server_ephemeral.secret,
+                &client_ephemeral.public,
+                &salt,
+                nfd_username,
+                &verifier,
+                &client_session.proof,
+            )
+            .unwrap();
+
+        assert_eq!(client_session.key, server_session.key);
+        client
+            .verify_session(
+                &client_ephemeral.public,
+                &client_session,
+                &server_session.proof,
+            )
+            .unwrap();
     }
 
     #[test]
