@@ -54,7 +54,9 @@ export function filterIdentityItems(
 		{ value: item.title, weight: 50 },
 		{ value: item.middleName, weight: 40 },
 		...(item.addresses || []).map((addr) => ({
-			value: `${addr.street} ${addr.city} ${addr.state} ${addr.zip} ${addr.country}`,
+			value: [addr.street, addr.city, addr.state, addr.zip, addr.country]
+				.filter(Boolean)
+				.join(" "),
 			weight: 20,
 		})),
 	]);
