@@ -4,7 +4,15 @@ import type {
 	TotpAlgorithm,
 	TotpDigits,
 } from "@bittery/shared/types";
-import { Button, Card, cn, copyWithToast, Label, toast } from "@bittery/ui";
+import {
+	Button,
+	Card,
+	cn,
+	copyWithToast,
+	handleCopy as copyLocalizedField,
+	Label,
+	toast,
+} from "@bittery/ui";
 import {
 	IconCopy,
 	IconEye,
@@ -130,7 +138,12 @@ function InlineTotpRow({
 	}, [generateCode]);
 
 	const handleCopyCode = () =>
-		copyWithToast(totpResult?.code, "Code", { showAutoClearMessage: false });
+		copyLocalizedField(
+			totpResult?.code,
+			m.vaults_detail_items_copy_label_code(),
+			m,
+			{ showAutoClearMessage: false },
+		);
 
 	const progress = totpResult?.progress ?? 0;
 	const circumference = 2 * Math.PI * 6;
