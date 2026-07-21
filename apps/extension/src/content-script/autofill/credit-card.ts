@@ -3,14 +3,13 @@ import { contentState } from "../state";
 import type { CreditCardField } from "../types";
 import { hideAutofillOverlay } from "./credential";
 import { hideFieldIcon, showFieldIcon } from "./icon";
-import { updateAutofillTimestamp } from "./timestamp";
 import {
 	applyAutofillHighlight,
 	hideItemsOverlay,
+	showAuthStateOverlay,
 	showItemsOverlay,
-	showReauthPromptCard,
-	showUnlockIframePrompt,
 } from "./overlay-utils";
+import { updateAutofillTimestamp } from "./timestamp";
 
 // Handle credit card field focus
 export async function handleCreditCardFieldFocus(field: CreditCardField) {
@@ -102,8 +101,6 @@ function showCreditCardAutofillOverlay(
 			contentState.currentCreditCardIframe = iframe;
 		},
 		keyboardHandler: handleCreditCardKeyboardNavigation,
-		timeoutLog:
-			"Timeout waiting for credit card iframe ready, sending items anyway",
 		isAutofilling: () => contentState.isAutofilling,
 	});
 }
@@ -111,6 +108,7 @@ function showCreditCardAutofillOverlay(
 // Hide credit card autofill overlay
 export function hideCreditCardAutofillOverlay(field: CreditCardField) {
 	hideItemsOverlay(field, {
+		iframeSrc: "credit-card-autofill-iframe.html",
 		setCurrentIframe: () => {
 			contentState.currentCreditCardIframe = null;
 		},
@@ -244,16 +242,18 @@ async function handleCreditCardAutofillSelect(
 
 // Show unlock prompt for credit card fields
 function showCreditCardUnlockPrompt(field: CreditCardField) {
-	showUnlockIframePrompt(field, {
+	showAuthStateOverlay(field, {
 		iframeSrc: "credit-card-autofill-iframe.html",
 		readyMessageType: "CC_IFRAME_READY",
+		state: "NEEDS_UNLOCK",
 	});
 }
 
 // Show re-auth prompt for credit card fields
 function showCreditCardReauthPrompt(field: CreditCardField) {
-	showReauthPromptCard(
-		field,
-		"Please re-authenticate to use credit card autofill",
-	);
+	showAuthStateOverlay(field, {
+		iframeSrc: "credit-card-autofill-iframe.html",
+		readyMessageType: "CC_IFRAME_READY",
+		state: "NEEDS_REAUTH",
+	});
 }

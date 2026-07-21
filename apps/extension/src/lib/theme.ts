@@ -50,7 +50,7 @@ export function writeStoredThemePreference(preference: ThemePreference): void {
 	}
 }
 
-function readAppliedTheme(): ResolvedTheme | null {
+export function readAppliedTheme(): ResolvedTheme | null {
 	try {
 		const raw = globalThis.localStorage?.getItem(THEME_APPLIED_KEY);
 		return isResolvedTheme(raw) ? raw : null;
@@ -83,12 +83,30 @@ export function resolvePreference(preference: ThemePreference): ResolvedTheme {
 	return preference === "system" ? getSystemTheme() : preference;
 }
 
-/** Toggle the `.dark` class + `color-scheme` on the document root. */
-export function applyResolvedTheme(theme: ResolvedTheme): void {
+/**
+ * Toggle the `.dark` class on the document root.
+ *
+ * `colorScheme` is opt-in because it is *not* safe in the in-page overlay
+ * frames: `color-scheme: dark` makes the browser paint an opaque dark canvas
+ * for the document, which wins over `background: transparent` and puts a black
+ * box behind the floating card on the host page. The overlays get the `.dark`
+ * class (which is all the design tokens need) and leave `color-scheme` alone.
+ */
+function paintResolvedTheme(
+	theme: ResolvedTheme,
+	options?: { colorScheme?: boolean },
+): void {
 	const root = globalThis.document?.documentElement;
 	if (!root) return;
 	root.classList.toggle("dark", theme === "dark");
-	root.style.colorScheme = theme;
+	if (options?.colorScheme !== false) {
+		root.style.colorScheme = theme;
+	}
+}
+
+/** Paint the theme and record it as the no-flash cache for the next open. */
+export function applyResolvedTheme(theme: ResolvedTheme): void {
+	paintResolvedTheme(theme);
 	writeAppliedTheme(theme);
 }
 
@@ -100,4 +118,57 @@ export function applyResolvedTheme(theme: ResolvedTheme): void {
 export function applyEarlyTheme(): void {
 	const cached = readAppliedTheme();
 	applyResolvedTheme(cached ?? resolvePreference(readStoredThemePreference()));
+}
+
+/**
+ * Resolve the theme for an in-page overlay document (the autofill/passkey/save
+ * iframes). Those documents share the popup's extension origin, so the popup's
+ * `localStorage` is readable synchronously — no background round-trip, no flash.
+ *
+ * An explicit "light"/"dark" preference always wins. Under "system" we prefer
+ * the popup's last *resolved* theme, because that value also encodes a
+ * desktop-app-managed override the overlay can't see; it falls back to the OS
+ * setting when the popup has never run.
+ */
+function resolveOverlayTheme(): ResolvedTheme {
+	const preference = readStoredThemePreference();
+	if (preference !== "system") {
+		return preference;
+	}
+	return readAppliedTheme() ?? getSystemTheme();
+}
+
+/**
+ * Apply the overlay theme before first paint and keep it in sync afterwards.
+ *
+ * Both listeners are passive: the OS `matchMedia` change and the cross-document
+ * `storage` event (fired when the popup writes a new preference). Nothing polls,
+ * so an idle overlay costs zero frames.
+ */
+export function startOverlayTheme(): () => void {
+	// Never writes the applied-theme cache: the overlay is a *reader* of the
+	// popup's decision and must not overwrite a desktop-managed value it can't see.
+	paintResolvedTheme(resolveOverlayTheme(), { colorScheme: false });
+
+	const reapply = () =>
+		paintResolvedTheme(resolveOverlayTheme(), { colorScheme: false });
+
+	const media = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
+	media?.addEventListener("change", reapply);
+
+	const onStorage = (event: StorageEvent) => {
+		if (
+			event.key === null ||
+			event.key === THEME_PREFERENCE_KEY ||
+			event.key === THEME_APPLIED_KEY
+		) {
+			reapply();
+		}
+	};
+	globalThis.addEventListener?.("storage", onStorage);
+
+	return () => {
+		media?.removeEventListener("change", reapply);
+		globalThis.removeEventListener?.("storage", onStorage);
+	};
 }

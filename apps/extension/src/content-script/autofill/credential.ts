@@ -11,9 +11,8 @@ import type { CredentialField } from "../types";
 import { hideFieldIcon, showFieldIcon } from "./icon";
 import {
 	hideItemsOverlay,
+	showAuthStateOverlay,
 	showItemsOverlay,
-	showReauthPromptCard,
-	showUnlockIframePrompt,
 } from "./overlay-utils";
 import { updateAutofillTimestamp } from "./timestamp";
 
@@ -100,7 +99,6 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 			contentState.currentAutofillIframe = iframe;
 		},
 		keyboardHandler: handleKeyboardNavigation,
-		timeoutLog: "Timeout waiting for iframe ready, sending items anyway",
 		isAutofilling: () => contentState.isAutofilling,
 	});
 }
@@ -108,6 +106,7 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 // Hide autofill overlay
 export function hideAutofillOverlay(field: CredentialField) {
 	hideItemsOverlay(field, {
+		iframeSrc: "autofill-iframe.html",
 		setCurrentIframe: () => {
 			contentState.currentAutofillIframe = null;
 		},
@@ -420,13 +419,18 @@ export async function fillCredentialItem(
 
 // Show unlock prompt (when extension is locked)
 function showUnlockPrompt(field: CredentialField) {
-	showUnlockIframePrompt(field, {
+	showAuthStateOverlay(field, {
 		iframeSrc: "autofill-iframe.html",
 		readyMessageType: "IFRAME_READY",
+		state: "NEEDS_UNLOCK",
 	});
 }
 
 // Show re-authentication prompt
 function showReauthPrompt(field: CredentialField) {
-	showReauthPromptCard(field, "Please re-authenticate to use autofill");
+	showAuthStateOverlay(field, {
+		iframeSrc: "autofill-iframe.html",
+		readyMessageType: "IFRAME_READY",
+		state: "NEEDS_REAUTH",
+	});
 }

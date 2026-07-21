@@ -275,6 +275,23 @@ export const routeRegistry: RouteRegistry = {
 		}) => handleUpdateItemTotp(payload),
 	},
 
+	/**
+	 * Opened from an overlay's locked / re-auth state. `chrome.action.openPopup`
+	 * is only available on newer Chrome builds and can be rejected when the
+	 * gesture isn't attributed to the extension, so a failure is reported rather
+	 * than thrown — the toolbar icon is always there as a fallback.
+	 */
+	OPEN_POPUP: {
+		handle: async () => {
+			try {
+				await chrome.action.openPopup();
+				return { success: true };
+			} catch {
+				return { success: false };
+			}
+		},
+	},
+
 	// Settings
 	SETTINGS_CHANGED: {
 		before: () => refreshAutoLockTimeout(),

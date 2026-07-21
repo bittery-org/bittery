@@ -2,8 +2,13 @@ import type {
 	PasskeyCreateSaveDecision,
 	PasskeyUserInteractionRequest,
 } from "../passkey/types";
+import {
+	applyOverlayFrameChrome,
+	applyOverlayHostChrome,
+} from "./overlay-chrome";
 
 const PASSKEY_PROMPT_WIDTH_PX = 380;
+const PASSKEY_PROMPT_INSET_PX = 20;
 const PASSKEY_PROMPT_TIMEOUT_MS = 30_000;
 const PASSKEY_PROMPT_REOPEN_NO_ANIMATION_WINDOW_MS = 600;
 
@@ -83,14 +88,15 @@ async function showPrompt<TDecision>(
 
 	const shadowHost = document.createElement("div");
 	shadowHost.style.position = "fixed";
-	shadowHost.style.top = "20px";
-	shadowHost.style.right = "20px";
+	shadowHost.style.top = `${PASSKEY_PROMPT_INSET_PX}px`;
+	shadowHost.style.right = `${PASSKEY_PROMPT_INSET_PX}px`;
 	shadowHost.style.zIndex = "2147483647";
 	shadowHost.style.width = `${PASSKEY_PROMPT_WIDTH_PX}px`;
 	shadowHost.style.opacity = "0";
 	shadowHost.style.transform = "translateY(-8px)";
 	shadowHost.style.transition =
 		"opacity 0.15s ease-out, transform 0.15s ease-out";
+	applyOverlayHostChrome(shadowHost);
 	document.body.appendChild(shadowHost);
 
 	const shadowRoot = shadowHost.attachShadow({ mode: "open" });
@@ -98,13 +104,14 @@ async function showPrompt<TDecision>(
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
 	iframe.style.height = "0px";
-	iframe.style.minHeight = "56px";
+	iframe.style.minHeight = "64px";
 	iframe.style.display = "block";
 	// Keep the host iframe visually neutral so only the inner card surface is visible.
-	iframe.style.borderRadius = "0";
-	iframe.style.overflow = "visible";
-	iframe.style.boxShadow = "none";
+	applyOverlayFrameChrome(iframe);
 	iframe.style.background = "transparent";
+	iframe.style.colorScheme = "normal";
+	iframe.setAttribute("allowtransparency", "true");
+	iframe.setAttribute("title", "Bittery");
 	iframe.src = chrome.runtime.getURL(config.iframePath);
 	shadowRoot.appendChild(iframe);
 

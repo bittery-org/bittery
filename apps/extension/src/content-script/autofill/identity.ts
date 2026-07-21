@@ -4,14 +4,13 @@ import type { IdentityField } from "../types";
 import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon, showFieldIcon } from "./icon";
-import { updateAutofillTimestamp } from "./timestamp";
 import {
 	applyAutofillHighlight,
 	hideItemsOverlay,
+	showAuthStateOverlay,
 	showItemsOverlay,
-	showReauthPromptCard,
-	showUnlockIframePrompt,
 } from "./overlay-utils";
+import { updateAutofillTimestamp } from "./timestamp";
 
 // Handle identity field focus
 export async function handleIdentityFieldFocus(field: IdentityField) {
@@ -108,8 +107,6 @@ function showIdentityAutofillOverlay(
 			contentState.currentIdentityIframe = iframe;
 		},
 		keyboardHandler: handleIdentityKeyboardNavigation,
-		timeoutLog:
-			"Timeout waiting for identity iframe ready, sending items anyway",
 		isAutofilling: () => contentState.isAutofilling,
 	});
 }
@@ -117,6 +114,7 @@ function showIdentityAutofillOverlay(
 // Hide identity autofill overlay
 export function hideIdentityAutofillOverlay(field: IdentityField) {
 	hideItemsOverlay(field, {
+		iframeSrc: "identity-autofill-iframe.html",
 		setCurrentIframe: () => {
 			contentState.currentIdentityIframe = null;
 		},
@@ -340,16 +338,18 @@ async function handleIdentityAutofillSelect(
 
 // Show unlock prompt for identity fields
 function showIdentityUnlockPrompt(field: IdentityField) {
-	showUnlockIframePrompt(field, {
+	showAuthStateOverlay(field, {
 		iframeSrc: "identity-autofill-iframe.html",
 		readyMessageType: "IDENTITY_IFRAME_READY",
+		state: "NEEDS_UNLOCK",
 	});
 }
 
 // Show re-auth prompt for identity fields
 function showIdentityReauthPrompt(field: IdentityField) {
-	showReauthPromptCard(
-		field,
-		"Please re-authenticate to use identity autofill",
-	);
+	showAuthStateOverlay(field, {
+		iframeSrc: "identity-autofill-iframe.html",
+		readyMessageType: "IDENTITY_IFRAME_READY",
+		state: "NEEDS_REAUTH",
+	});
 }

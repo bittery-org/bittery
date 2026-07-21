@@ -1,20 +1,32 @@
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
-	appendNonceToIframeSrc,
-	createAutofillReadySchema,
 	createAutofillSelectSchema,
-	createIframeNonce,
+	openPopupMessageSchema,
 	resizeIframeMessageSchema,
 	validateIframeMessage,
 } from "../iframe-messages";
 import type { AutofillField } from "../types";
+import { type AnchorHandle, trackAnchor } from "./anchor-position";
+import { acquireOverlay, type PooledOverlay, peekOverlay } from "./iframe-pool";
 
-// Visual feedback styles for autofilled fields
-const AUTOFILL_HIGHLIGHT_STYLE = {
-	boxShadow: "0 0 0 2px rgba(34, 197, 94, 0.5)",
-	transition: "box-shadow 0.3s ease-out",
-};
-const AUTOFILL_SUCCESS_DURATION = 2000;
+/**
+ * The iframe is sized exactly to the card — no gutter. The drop shadow is drawn
+ * by the host element (see `overlay-chrome`), so nothing needs to paint outside
+ * the frame, and no band of transparent-but-clickable iframe covers the page.
+ */
+const OVERLAY_GAP_PX = 6;
+const OVERLAY_MIN_WIDTH_PX = 300;
+/** Below this much room under the field, the dropdown flips above it. */
+const FLIP_MARGIN_PX = 24;
+
+const FILTER_DEBOUNCE_MS = 90;
+
+/** Live geometry per field, so a resize can re-run the flip decision. */
+interface OverlayAnchorState {
+	handle: AnchorHandle | null;
+	height: number;
+}
+const anchorState = new WeakMap<HTMLElement, OverlayAnchorState>();
 
 export type OverlayShowConfig<TField extends AutofillField> = {
 	field: TField;
@@ -28,74 +40,59 @@ export type OverlayShowConfig<TField extends AutofillField> = {
 	onSelect: (field: TField, item: DecryptedItem) => void | Promise<void>;
 	setCurrentIframe: (iframe: HTMLIFrameElement | null) => void;
 	keyboardHandler: (event: KeyboardEvent) => void;
-	timeoutLog: string;
 	isAutofilling: () => boolean;
 };
 
-function createOverlayHost(field: AutofillField, minWidth = 300) {
-	const shadowHost = document.createElement("div");
-	shadowHost.style.position = "fixed";
-	shadowHost.style.zIndex = "2147483647";
-	shadowHost.style.opacity = "0";
-	shadowHost.style.transform = "translateY(-8px)";
-	shadowHost.style.transition =
-		"opacity 0.15s ease-out, transform 0.15s ease-out";
-	document.body.appendChild(shadowHost);
+/**
+ * Place the host under (or above) the anchor. Reads nothing — `rect` is supplied
+ * by the shared positioner, which batches all reads before any writes.
+ */
+function placeOverlay(host: HTMLElement, rect: DOMRect, height: number): void {
+	host.style.left = `${rect.left}px`;
+	host.style.width = `${Math.max(rect.width, OVERLAY_MIN_WIDTH_PX)}px`;
 
-	const shadow = shadowHost.attachShadow({ mode: "open" });
+	const roomBelow = window.innerHeight - rect.bottom - OVERLAY_GAP_PX;
+	const shouldFlip =
+		height > 0 &&
+		roomBelow < height + FLIP_MARGIN_PX &&
+		rect.top > height + OVERLAY_GAP_PX;
 
-	const positionOverlay = () => {
-		const rect = field.input.getBoundingClientRect();
-		shadowHost.style.top = `${rect.bottom}px`;
-		shadowHost.style.left = `${rect.left}px`;
-		shadowHost.style.width = `${Math.max(rect.width, minWidth)}px`;
-	};
-	positionOverlay();
-
-	let overlayRafId: number;
-	let lastBottom = field.input.getBoundingClientRect().bottom;
-	let lastLeft = field.input.getBoundingClientRect().left;
-	let lastWidth = field.input.getBoundingClientRect().width;
-	const trackOverlayPosition = () => {
-		if (!field.overlay || !field.input.isConnected) return;
-		const rect = field.input.getBoundingClientRect();
-		if (
-			rect.bottom !== lastBottom ||
-			rect.left !== lastLeft ||
-			rect.width !== lastWidth
-		) {
-			lastBottom = rect.bottom;
-			lastLeft = rect.left;
-			lastWidth = rect.width;
-			positionOverlay();
-		}
-		overlayRafId = requestAnimationFrame(trackOverlayPosition);
-	};
-	overlayRafId = requestAnimationFrame(trackOverlayPosition);
-	field.repositionCleanup = () => cancelAnimationFrame(overlayRafId);
-
-	return { shadowHost, shadow };
+	host.style.top = shouldFlip
+		? `${rect.top - height - OVERLAY_GAP_PX}px`
+		: `${rect.bottom + OVERLAY_GAP_PX}px`;
 }
 
-function createOverlayIframe(src: string) {
-	const iframe = document.createElement("iframe");
-	iframe.style.border = "none";
-	iframe.style.width = "100%";
-	iframe.style.height = "0px";
-	iframe.style.maxHeight = "240px";
-	iframe.style.display = "block";
-	iframe.style.overflow = "hidden";
-	iframe.style.background = "transparent";
-	iframe.setAttribute("allowtransparency", "true");
-	iframe.src = chrome.runtime.getURL(src);
-	return iframe;
+function attachOverlayToField(
+	field: AutofillField,
+	overlay: PooledOverlay,
+): void {
+	const state = { handle: null as AnchorHandle | null, height: 0 };
+
+	state.handle = trackAnchor({
+		element: field.input,
+		place: (rect) => placeOverlay(overlay.host, rect, state.height),
+		onDetached: () => {
+			overlay.hide();
+			field.overlay = undefined;
+		},
+	});
+
+	anchorState.set(field.input, state);
+
+	field.repositionCleanup = () => {
+		state.handle?.release();
+		anchorState.delete(field.input);
+	};
+	field.overlay = overlay.host;
+	overlay.show();
 }
 
-function animateOverlayIn(shadowHost: HTMLElement) {
-	setTimeout(() => {
-		shadowHost.style.opacity = "1";
-		shadowHost.style.transform = "translateY(0)";
-	}, 10);
+/** Record the frame's reported height and re-run the above/below decision. */
+function setOverlayHeight(field: AutofillField, height: number): void {
+	const state = anchorState.get(field.input);
+	if (!state || state.height === height) return;
+	state.height = height;
+	state.handle?.refresh();
 }
 
 export function showItemsOverlay<TField extends AutofillField>({
@@ -110,53 +107,24 @@ export function showItemsOverlay<TField extends AutofillField>({
 	onSelect,
 	setCurrentIframe,
 	keyboardHandler,
-	timeoutLog: _timeoutLog,
 	isAutofilling,
 }: OverlayShowConfig<TField>) {
-	if (field.overlay) {
-		field.overlay.remove();
+	const overlay = acquireOverlay(iframeSrc, readyMessageType);
+
+	if (field.messageHandler) {
+		window.removeEventListener("message", field.messageHandler);
 	}
-
-	const { shadowHost, shadow } = createOverlayHost(field);
-	const iframe = createOverlayIframe(iframeSrc);
-	const nonce = createIframeNonce();
-	iframe.src = appendNonceToIframeSrc(iframe.src, nonce);
-	const iframeOrigin = new URL(iframe.src).origin;
-	shadow.appendChild(iframe);
-
-	field.overlay = shadowHost;
-	setCurrentIframe(iframe);
-	animateOverlayIn(shadowHost);
+	field.repositionCleanup?.();
 
 	const messageHandler = (event: MessageEvent) => {
-		const readyMessage = validateIframeMessage(event, {
-			expectedSource: iframe.contentWindow,
-			expectedOrigin: iframeOrigin,
-			expectedNonce: nonce,
-			schema: createAutofillReadySchema(readyMessageType),
-		});
-		if (readyMessage) {
-			if (field.readyTimeout) {
-				clearTimeout(field.readyTimeout);
-				field.readyTimeout = undefined;
-			}
-
-			iframe.contentWindow?.postMessage(
-				{
-					type: itemsMessageType,
-					nonce,
-					items,
-					fieldType,
-				},
-				iframeOrigin,
-			);
-			return;
-		}
+		const expected = {
+			expectedSource: overlay.iframe.contentWindow,
+			expectedOrigin: overlay.origin,
+			expectedNonce: overlay.nonce,
+		};
 
 		const selectMessage = validateIframeMessage(event, {
-			expectedSource: iframe.contentWindow,
-			expectedOrigin: iframeOrigin,
-			expectedNonce: nonce,
+			...expected,
 			schema: createAutofillSelectSchema(selectMessageType),
 		});
 		if (selectMessage) {
@@ -165,51 +133,35 @@ export function showItemsOverlay<TField extends AutofillField>({
 		}
 
 		const resizeMessage = validateIframeMessage(event, {
-			expectedSource: iframe.contentWindow,
-			expectedOrigin: iframeOrigin,
-			expectedNonce: nonce,
+			...expected,
 			schema: resizeIframeMessageSchema,
 		});
 		if (resizeMessage) {
-			iframe.style.height = `${resizeMessage.height}px`;
+			overlay.setHeight(resizeMessage.height);
+			setOverlayHeight(field, resizeMessage.height);
 		}
 	};
 
 	field.messageHandler = messageHandler;
 	window.addEventListener("message", messageHandler);
 
-	field.readyTimeout = setTimeout(() => {
-		iframe.contentWindow?.postMessage(
-			{
-				type: itemsMessageType,
-				nonce,
-				items,
-				fieldType,
-			},
-			iframeOrigin,
-		);
-	}, 100);
+	// Queued transparently when the frame is still booting; instant on reuse.
+	overlay.post({ type: itemsMessageType, items, fieldType });
+
+	setCurrentIframe(overlay.iframe);
+	attachOverlayToField(field, overlay);
 
 	document.addEventListener("keydown", keyboardHandler, true);
 
-	let filterTimeout: NodeJS.Timeout;
+	let filterTimeout: ReturnType<typeof setTimeout>;
 	const inputHandler = (event: Event) => {
 		if (isAutofilling()) return;
-
-		const input = event.target as HTMLInputElement;
-		const query = input.value;
+		const query = (event.target as HTMLInputElement).value;
 
 		clearTimeout(filterTimeout);
 		filterTimeout = setTimeout(() => {
-			iframe.contentWindow?.postMessage(
-				{
-					type: filterMessageType,
-					nonce,
-					query,
-				},
-				iframeOrigin,
-			);
-		}, 150);
+			overlay.post({ type: filterMessageType, query });
+		}, FILTER_DEBOUNCE_MS);
 	};
 
 	field.inputHandler = inputHandler;
@@ -219,21 +171,21 @@ export function showItemsOverlay<TField extends AutofillField>({
 export function hideItemsOverlay(
 	field: AutofillField,
 	options: {
+		iframeSrc: string;
 		setCurrentIframe: () => void;
 		keyboardHandler: (event: KeyboardEvent) => void;
 	},
 ) {
 	if (field.overlay) {
-		field.overlay.remove();
+		peekOverlay(options.iframeSrc)?.hide();
 		field.overlay = undefined;
 	}
 
 	options.setCurrentIframe();
 
-	if (field.repositionCleanup) {
-		field.repositionCleanup();
-		field.repositionCleanup = undefined;
-	}
+	field.repositionCleanup?.();
+	field.repositionCleanup = undefined;
+
 	if (field.messageHandler) {
 		window.removeEventListener("message", field.messageHandler);
 		field.messageHandler = undefined;
@@ -242,151 +194,85 @@ export function hideItemsOverlay(
 		field.input.removeEventListener("input", field.inputHandler);
 		field.inputHandler = undefined;
 	}
-	if (field.readyTimeout) {
-		clearTimeout(field.readyTimeout);
-		field.readyTimeout = undefined;
-	}
 
 	document.removeEventListener("keydown", options.keyboardHandler, true);
 }
 
-export function showUnlockIframePrompt(
+/**
+ * Show the locked / re-authentication state of an overlay document.
+ *
+ * These used to be two different things: an iframe for "locked" and a slab of
+ * hand-written English HTML for "needs re-auth". Both are now states of the same
+ * themed, translated overlay.
+ */
+export function showAuthStateOverlay(
 	field: AutofillField,
 	options: {
 		iframeSrc: string;
 		readyMessageType: string;
+		state: "NEEDS_UNLOCK" | "NEEDS_REAUTH";
 	},
 ) {
-	if (field.overlay) {
-		field.overlay.remove();
+	const overlay = acquireOverlay(options.iframeSrc, options.readyMessageType);
+
+	if (field.messageHandler) {
+		window.removeEventListener("message", field.messageHandler);
 	}
-
-	const { shadowHost, shadow } = createOverlayHost(field);
-	const iframe = createOverlayIframe(options.iframeSrc);
-	const nonce = createIframeNonce();
-	iframe.src = appendNonceToIframeSrc(iframe.src, nonce);
-	const iframeOrigin = new URL(iframe.src).origin;
-	shadow.appendChild(iframe);
-
-	field.overlay = shadowHost;
-	animateOverlayIn(shadowHost);
+	field.repositionCleanup?.();
 
 	const messageHandler = (event: MessageEvent) => {
-		const readyMessage = validateIframeMessage(event, {
-			expectedSource: iframe.contentWindow,
-			expectedOrigin: iframeOrigin,
-			expectedNonce: nonce,
-			schema: createAutofillReadySchema(options.readyMessageType),
-		});
-		if (readyMessage) {
-			if (field.readyTimeout) {
-				clearTimeout(field.readyTimeout);
-				field.readyTimeout = undefined;
-			}
+		const expected = {
+			expectedSource: overlay.iframe.contentWindow,
+			expectedOrigin: overlay.origin,
+			expectedNonce: overlay.nonce,
+		};
 
-			iframe.contentWindow?.postMessage(
-				{
-					type: "NEEDS_UNLOCK",
-					nonce,
-				},
-				iframeOrigin,
-			);
+		if (
+			validateIframeMessage(event, {
+				...expected,
+				schema: openPopupMessageSchema,
+			})
+		) {
+			chrome.runtime.sendMessage({ type: "OPEN_POPUP" }).catch(() => {
+				// The popup can only be opened programmatically on newer Chrome
+				// builds; the toolbar icon remains the fallback either way.
+			});
+			overlay.hide();
+			field.overlay = undefined;
 			return;
 		}
 
 		const resizeMessage = validateIframeMessage(event, {
-			expectedSource: iframe.contentWindow,
-			expectedOrigin: iframeOrigin,
-			expectedNonce: nonce,
+			...expected,
 			schema: resizeIframeMessageSchema,
 		});
 		if (resizeMessage) {
-			iframe.style.height = `${resizeMessage.height}px`;
+			overlay.setHeight(resizeMessage.height);
+			setOverlayHeight(field, resizeMessage.height);
 		}
 	};
 
 	field.messageHandler = messageHandler;
 	window.addEventListener("message", messageHandler);
 
-	field.readyTimeout = setTimeout(() => {
-		iframe.contentWindow?.postMessage(
-			{
-				type: "NEEDS_UNLOCK",
-				nonce,
-			},
-			iframeOrigin,
-		);
-	}, 100);
+	overlay.post({ type: options.state });
+	attachOverlayToField(field, overlay);
 }
 
-export function showReauthPromptCard(field: AutofillField, subtitle: string) {
-	const shadowHost = document.createElement("div");
-	shadowHost.style.position = "fixed";
-	shadowHost.style.zIndex = "2147483647";
-	document.body.appendChild(shadowHost);
-
-	const shadow = shadowHost.attachShadow({ mode: "open" });
-
-	const rect = field.input.getBoundingClientRect();
-	shadowHost.style.top = `${rect.bottom}px`;
-	shadowHost.style.left = `${rect.left}px`;
-	shadowHost.style.width = `${Math.max(rect.width, 250)}px`;
-
-	const container = document.createElement("div");
-	container.style.cssText = `
-		background: white;
-		border: 1px solid #e2e8f0;
-		border-radius: 8px;
-		box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-		padding: 12px;
-		font-family: system-ui, -apple-system, sans-serif;
-		font-size: 13px;
-	`;
-
-	container.innerHTML = `
-		<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-			<span style="font-size: 16px;">🔒</span>
-			<span style="font-weight: 500;">Authentication Required</span>
-		</div>
-		<p style="margin: 0 0 8px 0; color: #64748b; font-size: 12px;">
-			${subtitle}
-		</p>
-		<button style="
-			width: 100%;
-			padding: 6px 12px;
-			background: #3b82f6;
-			color: white;
-			border: none;
-			border-radius: 6px;
-			font-size: 12px;
-			font-weight: 500;
-			cursor: pointer;
-		">
-			Open Bittery
-		</button>
-	`;
-
-	const button = container.querySelector("button");
-	button?.addEventListener("click", () => {
-		chrome.runtime.sendMessage({ type: "OPEN_POPUP" });
-		shadowHost.remove();
-	});
-
-	shadow.appendChild(container);
-	field.overlay = shadowHost;
-
-	setTimeout(() => {
-		shadowHost.remove();
-	}, 5000);
-}
+/**
+ * Flash a field that was just filled. Uses the brand purple rather than a raw
+ * green so it reads as "Bittery did this", and derives both the ring and its
+ * glow from `--color-primary` so it works on light and dark pages alike.
+ */
+const AUTOFILL_SUCCESS_DURATION = 1600;
 
 export function applyAutofillHighlight(input: HTMLInputElement) {
 	const originalBoxShadow = input.style.boxShadow;
 	const originalTransition = input.style.transition;
 
-	input.style.boxShadow = AUTOFILL_HIGHLIGHT_STYLE.boxShadow;
-	input.style.transition = AUTOFILL_HIGHLIGHT_STYLE.transition;
-
+	input.style.boxShadow =
+		"0 0 0 2px color-mix(in oklab, oklch(0.7 0.165 288) 55%, transparent), 0 0 12px color-mix(in oklab, oklch(0.7 0.165 288) 35%, transparent)";
+	input.style.transition = "box-shadow 0.3s ease-out";
 	input.setAttribute("data-bittery-autofilled", "true");
 
 	setTimeout(() => {

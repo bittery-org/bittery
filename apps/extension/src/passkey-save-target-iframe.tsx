@@ -1,14 +1,24 @@
 import "./index.css";
-import { Button, Card, cn } from "@bittery/ui";
+import { Button, cn } from "@bittery/ui";
 import { IconFolder, IconPasskey, IconPlus, IconUser } from "@bittery/ui/icons";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import ReactDOM from "react-dom/client";
+import { useEffect, useState } from "react";
 import { Favicon } from "@/components/favicon";
+import { mountOverlayApp } from "@/components/overlay/mount";
+import {
+	OverlayActions,
+	OverlayChip,
+	OverlayList,
+	OverlayPromptHeader,
+	OverlayRow,
+	OverlaySurface,
+	OverlayViewport,
+} from "@/components/overlay/overlay-surface";
+import { useOverlayHeight } from "@/components/overlay/use-overlay-height";
 import type {
 	PasskeyCreateSaveDecision,
 	PasskeyUserInteractionRequest,
 } from "@/passkey/types";
-import { I18nProvider, useI18n } from "@/providers/i18n-provider";
+import { useI18n } from "@/providers/i18n-provider";
 
 type SaveTargetData = Extract<
 	PasskeyUserInteractionRequest,
@@ -17,30 +27,49 @@ type SaveTargetData = Extract<
 
 type SaveMode = "attach-existing" | "create-new";
 
+/** Two-way segmented control following the selection recipe. */
+function ModeSwitch({
+	mode,
+	onChange,
+	options,
+}: {
+	mode: SaveMode;
+	onChange: (next: SaveMode) => void;
+	options: Array<{ value: SaveMode; label: string; icon: React.ReactNode }>;
+}) {
+	return (
+		<div className="mx-3 flex gap-0.5 rounded-md border bg-foreground/3 p-0.5">
+			{options.map((option) => {
+				const isActive = mode === option.value;
+				return (
+					<button
+						key={option.value}
+						type="button"
+						onClick={() => onChange(option.value)}
+						className={cn(
+							"flex flex-1 items-center justify-center gap-1.5 rounded-[5px] px-2 py-1 text-[11.5px] transition-colors",
+							isActive
+								? "bg-selected text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-primary)_14%,transparent)]"
+								: "text-muted-foreground hover:bg-overlay hover:text-foreground",
+						)}
+					>
+						{option.icon}
+						<span className="truncate">{option.label}</span>
+					</button>
+				);
+			})}
+		</div>
+	);
+}
+
 function PasskeySaveTargetIframe() {
 	const { m } = useI18n();
 	const [data, setData] = useState<SaveTargetData | null>(null);
 	const [mode, setMode] = useState<SaveMode>("create-new");
 	const [selectedItemId, setSelectedItemId] = useState<string>("");
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
-	const containerRef = useRef<HTMLDivElement>(null);
 
-	const updateHeight = React.useCallback(() => {
-		const height = document.body.scrollHeight;
-		window.parent.postMessage({ type: "RESIZE_IFRAME", height }, "*");
-	}, []);
-
-	useLayoutEffect(() => {
-		updateHeight();
-		const observer = new ResizeObserver(() => updateHeight());
-		if (document.body) {
-			observer.observe(document.body);
-		}
-		if (containerRef.current) {
-			observer.observe(containerRef.current);
-		}
-		return () => observer.disconnect();
-	}, [updateHeight]);
+	useOverlayHeight("");
 
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
@@ -107,189 +136,115 @@ function PasskeySaveTargetIframe() {
 	};
 
 	if (!data) {
-		return <div ref={containerRef} className="min-h-[56px] p-1" />;
+		return <OverlayViewport className="min-h-[64px]" />;
 	}
 
 	const canAttachExisting = data.existingItems.length > 0;
 	const canCreateNew = data.writableVaults.length > 0;
-	const selectedVault = data.writableVaults.find(
-		(vault) => vault.id === selectedVaultId,
-	);
+	const hasTarget = canAttachExisting || canCreateNew;
 
 	return (
-		<div ref={containerRef} className="w-full text-foreground">
-			<Card className="space-y-3 p-3">
-				<div className="flex items-start gap-2.5">
-					<div className="mt-0.5 rounded-full bg-primary/10 p-1.5 text-primary">
-						<IconPasskey size={16} />
-					</div>
-					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm">{m.ext_passkey_save_title()}</p>
-						<p className="truncate text-muted-foreground text-xs">
-							{data.userDisplayName || data.userName} on {data.rpId}
-						</p>
-					</div>
-				</div>
+		<OverlayViewport>
+			<OverlaySurface>
+				<OverlayPromptHeader
+					icon={<IconPasskey className="size-3.5" />}
+					title={m.ext_passkey_save_title()}
+					subtitle={`${data.userDisplayName || data.userName} · ${data.rpId}`}
+				/>
 
-				{canAttachExisting && (
-					<div className="space-y-1">
-						<button
-							type="button"
-							onClick={() => setMode("attach-existing")}
-							className={cn(
-								"flex",
-								"w-full",
-								"items-center",
-								"justify-between",
-								"rounded-md",
-								"border",
-								"px-2.5",
-								"py-2",
-								"text-left",
-								"transition-colors",
-								mode === "attach-existing"
-									? "border-primary bg-primary/5"
-									: "border-border hover:bg-accent/70",
-							)}
-						>
-							<span className="flex items-center gap-2 text-xs">
-								<IconUser size={14} />
-								{m.ext_passkey_save_attach()}
-							</span>
-							<span className="text-[10px] text-muted-foreground">
-								{data.existingItems.length}
-							</span>
-						</button>
-						<div className="max-h-[180px] space-y-1 overflow-y-auto">
-							{data.existingItems.map((item) => (
-								<button
-									key={item.itemId}
-									type="button"
-									onClick={() => {
-										setMode("attach-existing");
-										setSelectedItemId(item.itemId);
-									}}
-									className={cn(
-										"w-full",
-										"rounded-md",
-										"border",
-										"px-2",
-										"py-2",
-										"text-left",
-										"transition-colors",
-										mode === "attach-existing" && selectedItemId === item.itemId
-											? "border-primary bg-primary/5"
-											: "border-border hover:bg-accent/70",
-									)}
-								>
-									<div className="flex items-start gap-2">
-										<Favicon
-											url={item.itemUrl}
-											title={item.itemTitle || item.itemUrl || data.rpName}
-											serverUrl={item.serverUrl}
-											category="login"
-											size="sm"
-										/>
-										<div className="min-w-0 flex-1">
-											<p className="truncate font-medium text-xs">
-												{item.itemTitle || item.itemUrl || data.rpName}
-											</p>
-											<p className="truncate text-muted-foreground text-xs">
-												{item.itemUsername || data.userName}
-											</p>
-											<p className="truncate text-[10px] text-muted-foreground">
-												{item.vaultName || m.ext_passkey_save_vault_fallback()}
-												{item.accountEmail ? ` • ${item.accountEmail}` : ""}
-											</p>
-										</div>
-									</div>
-								</button>
-							))}
-						</div>
-					</div>
+				{canAttachExisting && canCreateNew && (
+					<ModeSwitch
+						mode={mode}
+						onChange={setMode}
+						options={[
+							{
+								value: "attach-existing",
+								label: m.ext_passkey_save_attach(),
+								icon: <IconUser className="size-3" />,
+							},
+							{
+								value: "create-new",
+								label: m.ext_passkey_save_create_new(),
+								icon: <IconPlus className="size-3" />,
+							},
+						]}
+					/>
 				)}
 
-				{canCreateNew && (
-					<div className="space-y-1">
-						<button
-							type="button"
-							onClick={() => setMode("create-new")}
-							className={cn(
-								"flex",
-								"w-full",
-								"items-center",
-								"justify-between",
-								"rounded-md",
-								"border",
-								"px-2.5",
-								"py-2",
-								"text-left",
-								"transition-colors",
-								mode === "create-new"
-									? "border-primary bg-primary/5"
-									: "border-border hover:bg-accent/70",
-							)}
-						>
-							<span className="flex items-center gap-2 text-xs">
-								<IconPlus size={14} />
-								{m.ext_passkey_save_create_new()}
-							</span>
-							<span className="text-[10px] text-muted-foreground">
-								{selectedVault?.name || m.ext_passkey_save_select_vault()}
-							</span>
-						</button>
-						{mode === "create-new" && (
-							<div className="space-y-1 rounded-md border p-2">
-								<p className="text-muted-foreground text-xs">
-									{m.ext_passkey_save_to_vault()}
-								</p>
-								<div className="space-y-1">
-									{data.writableVaults.map((vault) => (
-										<button
-											key={vault.id}
-											type="button"
-											onClick={() => setSelectedVaultId(vault.id)}
-											className={cn(
-												"flex",
-												"w-full",
-												"items-center",
-												"gap-2",
-												"rounded-md",
-												"px-2",
-												"py-1.5",
-												"text-left",
-												"text-xs",
-												"transition-colors",
-												selectedVaultId === vault.id
-													? "bg-accent text-accent-foreground"
-													: "hover:bg-accent/70",
-											)}
-										>
-											<IconFolder size={14} />
-											<span className="truncate">{vault.name}</span>
-											<span className="ml-auto text-[10px] text-muted-foreground">
-												{vault.type}
-											</span>
-										</button>
-									))}
-								</div>
-							</div>
-						)}
-					</div>
-				)}
-
-				{!canAttachExisting && !canCreateNew && (
-					<p className="text-muted-foreground text-xs">
-						No writable target available for this passkey.
+				{!hasTarget && (
+					<p className="px-3 pb-3 text-[11.5px] text-muted-foreground">
+						{m.ext_passkey_save_no_target()}
 					</p>
 				)}
 
-				<div className="flex gap-2">
+				{hasTarget && mode === "attach-existing" && canAttachExisting && (
+					<OverlayList className="max-h-[212px]">
+						{data.existingItems.map((item) => (
+							<OverlayRow
+								key={item.itemId}
+								selected={selectedItemId === item.itemId}
+								ariaPressed={selectedItemId === item.itemId}
+								onSelect={() => setSelectedItemId(item.itemId)}
+								leading={
+									<Favicon
+										url={item.itemUrl}
+										title={item.itemTitle || item.itemUrl || data.rpName}
+										serverUrl={item.serverUrl}
+										category="login"
+										size="sm"
+										className="size-[26px] rounded-[7px]"
+									/>
+								}
+								title={item.itemTitle || item.itemUrl || data.rpName}
+								subtitle={item.itemUsername || data.userName}
+								details={
+									<>
+										<OverlayChip>
+											<IconFolder className="size-2.5" />
+											{item.vaultName || m.ext_passkey_save_vault_fallback()}
+										</OverlayChip>
+										{item.accountEmail && (
+											<OverlayChip>{item.accountEmail}</OverlayChip>
+										)}
+									</>
+								}
+							/>
+						))}
+					</OverlayList>
+				)}
+
+				{hasTarget && mode === "create-new" && canCreateNew && (
+					<>
+						<p className="px-3 pt-2.5 pb-1 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
+							{m.ext_passkey_save_to_vault()}
+						</p>
+						<OverlayList className="max-h-[196px] pt-0">
+							{data.writableVaults.map((vault) => (
+								<OverlayRow
+									key={vault.id}
+									selected={selectedVaultId === vault.id}
+									ariaPressed={selectedVaultId === vault.id}
+									onSelect={() => setSelectedVaultId(vault.id)}
+									leading={
+										<span className="flex size-[26px] shrink-0 items-center justify-center rounded-[7px] border bg-foreground/3 text-muted-foreground">
+											<IconFolder className="size-3.5" />
+										</span>
+									}
+									title={vault.name}
+									trailing={<OverlayChip>{vault.type}</OverlayChip>}
+								/>
+							))}
+						</OverlayList>
+					</>
+				)}
+
+				<OverlayActions>
 					<Button
 						onClick={handleSubmit}
 						size="sm"
-						className="flex-1"
+						className="h-7 flex-1"
 						disabled={
+							!hasTarget ||
 							(mode === "attach-existing" && !selectedItemId) ||
 							(mode === "create-new" && !canCreateNew)
 						}
@@ -300,23 +255,14 @@ function PasskeySaveTargetIframe() {
 						onClick={handleCancel}
 						variant="ghost"
 						size="sm"
-						className="flex-1"
+						className="h-7 flex-1"
 					>
 						{m.ext_passkey_save_cancel()}
 					</Button>
-				</div>
-			</Card>
-		</div>
+				</OverlayActions>
+			</OverlaySurface>
+		</OverlayViewport>
 	);
 }
 
-const root = document.getElementById("root");
-if (root) {
-	ReactDOM.createRoot(root).render(
-		<React.StrictMode>
-			<I18nProvider>
-				<PasskeySaveTargetIframe />
-			</I18nProvider>
-		</React.StrictMode>,
-	);
-}
+mountOverlayApp(<PasskeySaveTargetIframe />);

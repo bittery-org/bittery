@@ -8,6 +8,10 @@ import {
 	updateExistingCredentialMessageSchema,
 	validateIframeMessage,
 } from "./iframe-messages";
+import {
+	applyOverlayFrameChrome,
+	applyOverlayHostChrome,
+} from "./overlay-chrome";
 import type { ActiveSavePrompt, CapturedCredentials } from "./types";
 
 let activeSavePrompt: ActiveSavePrompt | null = null;
@@ -124,7 +128,9 @@ export async function showSavePrompt(
 		// Continue with empty vaults array - UI will handle the error state
 	}
 
-	// Create shadow host
+	// Create shadow host. The host is sized exactly to the card and carries the
+	// drop shadow itself (see `overlay-chrome`), so nothing is clipped and no
+	// transparent band steals clicks from the page.
 	const shadowHost = document.createElement("div");
 	shadowHost.style.position = "fixed";
 	shadowHost.style.top = "20px";
@@ -135,21 +141,25 @@ export async function showSavePrompt(
 	shadowHost.style.transform = "translateY(-8px)";
 	shadowHost.style.transition =
 		"opacity 0.2s ease-out, transform 0.2s ease-out";
+	applyOverlayHostChrome(shadowHost);
 	document.body.appendChild(shadowHost);
 
 	// Attach shadow DOM
 	const shadow = shadowHost.attachShadow({ mode: "open" });
 
-	// Create iframe
+	// Create iframe. Kept visually neutral — the card inside owns the surface and
+	// border, and the host owns the drop shadow.
 	const iframe = document.createElement("iframe");
 	iframe.style.border = "none";
 	iframe.style.width = "100%";
 	iframe.style.height = "0px"; // Start with 0 height, allow content to dictate
-	iframe.style.minHeight = "50px";
+	iframe.style.minHeight = "56px";
 	iframe.style.display = "block";
-	iframe.style.borderRadius = "8px"; // Match popup radius
-	iframe.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)"; // Softer shadow
-	iframe.style.overflow = "hidden"; // Prevent scrollbars
+	iframe.style.background = "transparent";
+	iframe.style.colorScheme = "normal";
+	iframe.setAttribute("allowtransparency", "true");
+	iframe.setAttribute("title", "Bittery");
+	applyOverlayFrameChrome(iframe);
 	const nonce = createIframeNonce();
 	iframe.src = appendNonceToIframeSrc(
 		chrome.runtime.getURL("save-prompt-iframe.html"),

@@ -4,6 +4,7 @@ import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon } from "./icon";
 import { hideIdentityAutofillOverlay } from "./identity";
+import { destroyOverlayPool } from "./iframe-pool";
 
 function cleanupDetachedFields<T extends AutofillField>(
 	fields: Map<HTMLInputElement, T>,
@@ -65,4 +66,9 @@ export function cleanupAutofillState() {
 	contentState.detectedFields.clear();
 	contentState.detectedCreditCardFields.clear();
 	contentState.detectedIdentityFields.clear();
+
+	// Warm overlay frames outlive individual fields, so they have to be torn
+	// down explicitly — otherwise a navigation would leave decrypted items in a
+	// detached frame.
+	destroyOverlayPool();
 }

@@ -1,17 +1,29 @@
 import "./index.css";
-import { Button, cn } from "@bittery/ui";
+import { Button } from "@bittery/ui";
 import {
 	IconCircleCheck,
 	IconCircleX,
-	IconKey,
 	IconLoaderCircle,
 	IconLock,
+	IconTriangleAlert,
+	IconVault,
 } from "@bittery/ui/icons";
-import React, { useEffect, useLayoutEffect, useRef, useState } from "react";
-import ReactDOM from "react-dom/client";
+import { useCallback, useEffect, useState } from "react";
 import { Favicon } from "@/components/favicon";
-import { getIframeNonceFromLocation } from "@/content-script/iframe-messages";
-import { I18nProvider, useI18n } from "@/providers/i18n-provider";
+import { mountOverlayApp } from "@/components/overlay/mount";
+import {
+	OverlayActions,
+	OverlayChip,
+	OverlayList,
+	OverlayNotice,
+	OverlayPromptHeader,
+	OverlayRow,
+	OverlaySurface,
+	OverlayViewport,
+} from "@/components/overlay/overlay-surface";
+import { useOverlayHeight } from "@/components/overlay/use-overlay-height";
+import { getIframeNonceFromLocation } from "@/lib/iframe-nonce";
+import { useI18n } from "@/providers/i18n-provider";
 
 interface VaultOption {
 	id: string;
@@ -88,51 +100,15 @@ function SavePromptIframe() {
 	const [selectedVaultId, setSelectedVaultId] = useState<string>("");
 	const [state, setState] = useState<PromptState>("selecting");
 	const [errorMessage, setErrorMessage] = useState<string>("");
-	const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 	const [isUpdating, setIsUpdating] = useState(false);
-	const containerRef = useRef<HTMLDivElement>(null);
 
-	// Handle resizing
-	const updateHeight = React.useCallback(() => {
-		if (containerRef.current) {
-			// We use document.documentElement.scrollHeight to capture everything including absolute positioning if it expands the document
-			// But wrapper ref scrollHeight is safer for the main content.
-			// Let's use document.body.scrollHeight to be safe for the iframe
-			const height = document.body.scrollHeight;
-			window.parent.postMessage({ type: "RESIZE_IFRAME", height, nonce }, "*");
-		}
-	}, [nonce]);
+	useOverlayHeight(nonce);
 
-	useLayoutEffect(() => {
-		updateHeight();
-
-		const observer = new ResizeObserver(() => {
-			updateHeight();
-		});
-
-		if (document.body) {
-			observer.observe(document.body);
-		}
-		if (containerRef.current) {
-			observer.observe(containerRef.current);
-		}
-
-		return () => observer.disconnect();
-	}, [updateHeight]);
-
-	const handleCancel = React.useCallback(() => {
-		// Send cancel message to parent
-		window.parent.postMessage(
-			{
-				type: "CANCEL_SAVE",
-				nonce,
-			},
-			"*",
-		);
+	const handleCancel = useCallback(() => {
+		window.parent.postMessage({ type: "CANCEL_SAVE", nonce }, "*");
 	}, [nonce]);
 
 	useEffect(() => {
-		// Listen for save prompt data from parent
 		const handleMessage = (event: MessageEvent) => {
 			if (event.data?.nonce !== nonce) {
 				return;
@@ -171,43 +147,19 @@ function SavePromptIframe() {
 		return () => window.removeEventListener("message", handleMessage);
 	}, [handleCancel, nonce, m]);
 
-	const handleSave = () => {
-		if (!data || !selectedVaultId) return;
+	const submit = (updateExisting: boolean) => {
+		if (!data || !selectedVaultId || state === "saving") return;
 
-		// Prevent double-clicks
-		if (state === "saving") {
-			return;
-		}
-
+		setIsUpdating(updateExisting);
 		setState("saving");
 		setErrorMessage("");
 
-		if (
-			isUpdating &&
-			data.existingCredentials &&
-			data.existingCredentials.length > 0
-		) {
-			// Update existing credential
-			const existingCred = data.existingCredentials[0]; // Use the first match
-			if (existingCred) {
-				window.parent.postMessage(
-					{
-						type: "UPDATE_EXISTING_CREDENTIAL",
-						itemId: existingCred.id,
-						vaultId: selectedVaultId,
-						username: data.username,
-						password: data.password,
-						url: data.url,
-						nonce,
-					},
-					"*",
-				);
-			}
-		} else {
-			// Save new credential
+		const existingCred = data.existingCredentials?.[0];
+		if (updateExisting && existingCred) {
 			window.parent.postMessage(
 				{
-					type: "SAVE_CREDENTIAL",
+					type: "UPDATE_EXISTING_CREDENTIAL",
+					itemId: existingCred.id,
 					vaultId: selectedVaultId,
 					username: data.username,
 					password: data.password,
@@ -216,16 +168,24 @@ function SavePromptIframe() {
 				},
 				"*",
 			);
+			return;
 		}
-	};
 
-	const handleRetry = () => {
-		setState("selecting");
-		setErrorMessage("");
+		window.parent.postMessage(
+			{
+				type: "SAVE_CREDENTIAL",
+				vaultId: selectedVaultId,
+				username: data.username,
+				password: data.password,
+				url: data.url,
+				nonce,
+			},
+			"*",
+		);
 	};
 
 	if (!data) {
-		return <div ref={containerRef} className="min-h-[50px] p-1" />;
+		return <OverlayViewport className="min-h-[56px]" />;
 	}
 
 	const selectedVault = data.vaults.find((v) => v.id === selectedVaultId);
@@ -234,335 +194,208 @@ function SavePromptIframe() {
 	);
 	const hasWritableVaults = writableVaults.length > 0;
 
-	// Use a common wrapper for all states
-	const Wrapper = ({ children }: { children: React.ReactNode }) => (
-		<div
-			ref={containerRef}
-			className="w-full bg-background p-4 text-foreground"
-		>
-			{children}
-		</div>
-	);
-
-	// Saving state
 	if (state === "saving") {
 		return (
-			<Wrapper>
-				<div className="flex items-center gap-2.5">
-					<IconLoaderCircle
-						size={20}
-						className="shrink-0 animate-spin text-primary"
+			<OverlayViewport>
+				<OverlaySurface>
+					<OverlayNotice
+						tone="primary"
+						icon={<IconLoaderCircle className="size-3.5 animate-spin" />}
+						title={isUpdating ? m.ext_save_updating() : m.ext_save_saving()}
+						description={selectedVault?.name}
 					/>
-					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm">
-							{isUpdating ? m.ext_save_updating() : m.ext_save_saving()}
-						</p>
-						<p className="mt-0.5 text-muted-foreground text-xs">
-							{selectedVault?.name}
-						</p>
-					</div>
-				</div>
-			</Wrapper>
+				</OverlaySurface>
+			</OverlayViewport>
 		);
 	}
 
-	// Success state
 	if (state === "success") {
 		return (
-			<Wrapper>
-				<div className="flex items-center gap-2.5">
-					<IconCircleCheck size={20} className="shrink-0 text-green-600" />
-					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm">
-							{isUpdating ? m.ext_save_updated() : m.ext_save_saved()}
-						</p>
-						<p className="mt-0.5 text-muted-foreground text-xs">
-							{isUpdating
+			<OverlayViewport>
+				<OverlaySurface>
+					<OverlayNotice
+						tone="success"
+						icon={<IconCircleCheck className="size-3.5" />}
+						title={isUpdating ? m.ext_save_updated() : m.ext_save_saved()}
+						description={
+							isUpdating
 								? m.ext_save_updated_in({ vault: selectedVault?.name ?? "" })
-								: m.ext_save_saved_to({ vault: selectedVault?.name ?? "" })}
-						</p>
-					</div>
-				</div>
-			</Wrapper>
+								: m.ext_save_saved_to({ vault: selectedVault?.name ?? "" })
+						}
+					/>
+				</OverlaySurface>
+			</OverlayViewport>
 		);
 	}
 
-	// Error state
 	if (state === "error") {
 		return (
-			<Wrapper>
-				<div className="flex items-start gap-2.5">
-					<IconCircleX size={20} className="shrink-0 text-destructive" />
-					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm">
-							{isUpdating
-								? m.ext_save_failed_update()
-								: m.ext_save_failed_save()}
-						</p>
-						<p className="mt-0.5 text-muted-foreground text-xs">
-							{errorMessage}
-						</p>
-						{/* Show which credential failed */}
-						{data && (
-							<p className="mt-1 text-muted-foreground text-xs">
-								<span className="font-medium">{data.username}</span> •{" "}
-								{getHostname(data.url)}
-							</p>
-						)}
-					</div>
-				</div>
-				<div className="mt-3 flex gap-2">
-					<Button
-						onClick={handleRetry}
-						variant="outline"
-						size="sm"
-						className="flex-1"
-					>
-						{m.ext_save_try_again()}
-					</Button>
-					<Button
-						onClick={handleCancel}
-						variant="ghost"
-						size="sm"
-						className="flex-1"
-					>
-						{m.ext_save_cancel()}
-					</Button>
-				</div>
-			</Wrapper>
-		);
-	}
-
-	// No writable vaults
-	if (!hasWritableVaults) {
-		return (
-			<Wrapper>
-				<div className="flex items-start gap-2.5">
-					<IconLock size={20} className="shrink-0 text-amber-600" />
-					<div className="min-w-0 flex-1">
-						<p className="font-medium text-sm">{m.ext_save_cannot_save()}</p>
-						<p className="mt-0.5 text-muted-foreground text-xs">
-							{m.ext_save_no_write_access()}
-						</p>
-						{data && (
-							<p className="mt-1 text-muted-foreground text-xs">
-								<span className="font-medium">{data.username}</span> •{" "}
-								{getHostname(data.url)}
-							</p>
-						)}
-						<p className="mt-2 text-muted-foreground text-xs">
-							{m.ext_save_permissions_hint()}
-						</p>
-					</div>
-				</div>
-				<div className="mt-3">
-					<Button
-						onClick={handleCancel}
-						variant="outline"
-						size="sm"
-						className="w-full"
-					>
-						{m.ext_save_close()}
-					</Button>
-				</div>
-			</Wrapper>
-		);
-	}
-
-	// Main save prompt UI
-	return (
-		<Wrapper>
-			<div className="flex items-start gap-2.5">
-				<Favicon
-					url={data.url}
-					title={data.url}
-					serverUrl={data.serverUrl}
-					category="login"
-					size="sm"
-				/>
-				<div className="min-w-0 flex-1">
-					<p className="font-medium text-sm">
-						{data.hasDuplicates
-							? m.ext_save_update_or_save()
-							: m.ext_save_password_question()}
-					</p>
-					<p className="mt-0.5 truncate text-muted-foreground text-xs">
-						{data.username}
-					</p>
-					{data.hasDuplicates && (
-						<p className="mt-1 text-amber-600 text-xs">
-							{m.ext_save_duplicates_warning()}
-						</p>
-					)}
-				</div>
-			</div>
-
-			<div className="mt-3">
-				<span className="mb-1.5 block text-muted-foreground text-xs">
-					Save to vault
-				</span>
-				<div className="relative">
-					<button
-						type="button"
-						onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-						className="flex w-full items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-left text-sm transition-colors hover:bg-accent"
-					>
-						<div className="flex min-w-0 items-center gap-2">
-							<IconKey size={14} className="shrink-0 text-muted-foreground" />
-							<span className="truncate">
-								{selectedVault?.name || m.ext_save_select_vault()}
-							</span>
-							{selectedVault && (
-								<span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-									{selectedVault.type}
+			<OverlayViewport>
+				<OverlaySurface>
+					<OverlayNotice
+						tone="destructive"
+						icon={<IconCircleX className="size-3.5" />}
+						title={
+							isUpdating ? m.ext_save_failed_update() : m.ext_save_failed_save()
+						}
+						description={
+							<>
+								{errorMessage}
+								<span className="mt-1 block truncate">
+									<span className="font-medium">{data.username}</span> ·{" "}
+									{getHostname(data.url)}
 								</span>
-							)}
-						</div>
-						<svg
-							className="shrink-0 text-muted-foreground"
-							width="12"
-							height="12"
-							viewBox="0 0 12 12"
-							fill="none"
-							xmlns="http://www.w3.org/2000/svg"
-							aria-hidden="true"
-						>
-							<title>Dropdown arrow</title>
-							<path
-								d="M3 4.5L6 7.5L9 4.5"
-								stroke="currentColor"
-								strokeWidth="1.5"
-								strokeLinecap="round"
-								strokeLinejoin="round"
-							/>
-						</svg>
-					</button>
-
-					{isDropdownOpen && (
-						<div className="absolute top-full z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
-							<div className="max-h-[150px] overflow-y-auto p-1">
-								{writableVaults.map((vault) => (
-									<button
-										key={vault.id}
-										type="button"
-										onClick={() => {
-											setSelectedVaultId(vault.id);
-											setIsDropdownOpen(false);
-										}}
-										className={cn(
-											"flex",
-											"w-full",
-											"items-center",
-											"gap-2",
-											"rounded",
-											"px-2",
-											"py-1.5",
-											"text-left",
-											"text-sm",
-											"transition-colors",
-											"hover:bg-accent",
-											selectedVaultId === vault.id
-												? "bg-accent text-accent-foreground"
-												: "",
-										)}
-									>
-										<IconKey
-											size={14}
-											className="shrink-0 text-muted-foreground"
-										/>
-										<span className="truncate">{vault.name}</span>
-										<span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-											{vault.type}
-										</span>
-									</button>
-								))}
-							</div>
-						</div>
-					)}
-				</div>
-			</div>
-
-			{data.hasDuplicates ? (
-				// Show update/save new options when duplicates exist
-				<>
-					<div className="mt-3 flex gap-2">
+							</>
+						}
+					/>
+					<OverlayActions>
 						<Button
-							onClick={() => {
-								setIsUpdating(true);
-								handleSave();
-							}}
-							disabled={!selectedVaultId}
-							size="sm"
-							className="flex-1"
-						>
-							Update existing
-						</Button>
-						<Button
-							onClick={() => {
-								setIsUpdating(false);
-								handleSave();
-							}}
-							disabled={!selectedVaultId}
+							onClick={() => setState("selecting")}
 							variant="outline"
 							size="sm"
-							className="flex-1"
+							className="h-7 flex-1"
 						>
-							{m.ext_save_new()}
+							{m.ext_save_try_again()}
 						</Button>
-					</div>
-					<div className="mt-2">
 						<Button
 							onClick={handleCancel}
 							variant="ghost"
 							size="sm"
-							className="w-full"
+							className="h-7 flex-1"
 						>
 							{m.ext_save_cancel()}
 						</Button>
+					</OverlayActions>
+				</OverlaySurface>
+			</OverlayViewport>
+		);
+	}
+
+	if (!hasWritableVaults) {
+		return (
+			<OverlayViewport>
+				<OverlaySurface>
+					<OverlayNotice
+						tone="warning"
+						icon={<IconLock className="size-3.5" />}
+						title={m.ext_save_cannot_save()}
+						description={
+							<>
+								{m.ext_save_no_write_access()}
+								<span className="mt-1 block">
+									{m.ext_save_permissions_hint()}
+								</span>
+							</>
+						}
+					/>
+					<OverlayActions>
+						<Button
+							onClick={handleCancel}
+							variant="outline"
+							size="sm"
+							className="h-7 w-full"
+						>
+							{m.ext_save_close()}
+						</Button>
+					</OverlayActions>
+				</OverlaySurface>
+			</OverlayViewport>
+		);
+	}
+
+	return (
+		<OverlayViewport>
+			<OverlaySurface>
+				<OverlayPromptHeader
+					leading={
+						<Favicon
+							url={data.url}
+							title={data.url}
+							serverUrl={data.serverUrl}
+							category="login"
+							size="sm"
+							className="relative size-7 rounded-md"
+						/>
+					}
+					title={
+						data.hasDuplicates
+							? m.ext_save_update_or_save()
+							: m.ext_save_password_question()
+					}
+					subtitle={`${data.username} · ${getHostname(data.url)}`}
+				/>
+
+				{data.hasDuplicates && (
+					<div className="mx-3 mb-2 flex items-center gap-1.5 rounded-md border border-warning/30 bg-warning/10 px-2 py-1.5 text-[11px] text-warning">
+						<IconTriangleAlert className="size-3 shrink-0" />
+						<span className="truncate">{m.ext_save_duplicates_warning()}</span>
 					</div>
-				</>
-			) : (
-				// Show normal save/cancel options when no duplicates
-				<div className="mt-3 flex gap-2">
-					<Button
-						onClick={handleSave}
-						disabled={!selectedVaultId}
-						size="sm"
-						className="flex-1"
-					>
-						{m.ext_save_button()}
-					</Button>
+				)}
+
+				<p className="px-3 pb-1 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
+					{m.ext_save_to_vault()}
+				</p>
+				<OverlayList className="max-h-[168px] pt-0">
+					{writableVaults.map((vault) => (
+						<OverlayRow
+							key={vault.id}
+							selected={selectedVaultId === vault.id}
+							ariaPressed={selectedVaultId === vault.id}
+							onSelect={() => setSelectedVaultId(vault.id)}
+							leading={
+								<span className="flex size-[26px] shrink-0 items-center justify-center rounded-[7px] border bg-foreground/3 text-muted-foreground">
+									<IconVault className="size-3.5" />
+								</span>
+							}
+							title={vault.name}
+							trailing={<OverlayChip>{vault.type}</OverlayChip>}
+						/>
+					))}
+				</OverlayList>
+
+				<OverlayActions>
+					{data.hasDuplicates ? (
+						<>
+							<Button
+								onClick={() => submit(true)}
+								disabled={!selectedVaultId}
+								size="sm"
+								className="h-7 flex-1"
+							>
+								{m.ext_save_update_existing()}
+							</Button>
+							<Button
+								onClick={() => submit(false)}
+								disabled={!selectedVaultId}
+								variant="outline"
+								size="sm"
+								className="h-7 flex-1"
+							>
+								{m.ext_save_new()}
+							</Button>
+						</>
+					) : (
+						<Button
+							onClick={() => submit(false)}
+							disabled={!selectedVaultId}
+							size="sm"
+							className="h-7 flex-1"
+						>
+							{m.ext_save_button()}
+						</Button>
+					)}
 					<Button
 						onClick={handleCancel}
 						variant="ghost"
 						size="sm"
-						className="flex-1"
+						className="h-7 shrink-0 px-3"
 					>
 						{m.ext_save_cancel()}
 					</Button>
-				</div>
-			)}
-		</Wrapper>
+				</OverlayActions>
+			</OverlaySurface>
+		</OverlayViewport>
 	);
 }
 
-// Close dropdown when clicking outside
-if (typeof window !== "undefined") {
-	window.addEventListener("click", (e) => {
-		const target = e.target as HTMLElement;
-		if (!target.closest("[data-dropdown]")) {
-			window.postMessage({ type: "CLOSE_DROPDOWN" }, "*");
-		}
-	});
-}
-
-const root = document.getElementById("root");
-if (root) {
-	ReactDOM.createRoot(root).render(
-		<React.StrictMode>
-			<I18nProvider>
-				<SavePromptIframe />
-			</I18nProvider>
-		</React.StrictMode>,
-	);
-}
+mountOverlayApp(<SavePromptIframe />);
