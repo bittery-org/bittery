@@ -16,6 +16,10 @@ import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
 import { isDesktopUnlockedNow } from "./desktop-status";
+import {
+	handOffUnlockToDesktop,
+	PENDING_DESKTOP_UNLOCK,
+} from "./desktop-unlock";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import {
@@ -83,6 +87,13 @@ export async function handleQuickUnlock(payload: {
 	password: string;
 }): Promise<MessageResponse> {
 	const { password } = payload;
+
+	// A connected-but-locked desktop owns the unlock; unlocking locally here
+	// would leave the desktop behind. See `desktop-unlock.ts`.
+	const handoff = await handOffUnlockToDesktop();
+	if (handoff.handedOff) {
+		return { success: true, status: PENDING_DESKTOP_UNLOCK };
+	}
 
 	// Get stored email for multi-account support
 	const activeAccount = await storage.getActiveAccount();
@@ -346,6 +357,13 @@ export async function handleQuickUnlockAll(payload: {
 	password: string;
 }): Promise<MessageResponse> {
 	const { password } = payload;
+
+	// A connected-but-locked desktop owns the unlock; unlocking locally here
+	// would leave the desktop behind. See `desktop-unlock.ts`.
+	const handoff = await handOffUnlockToDesktop();
+	if (handoff.handedOff) {
+		return { success: true, status: PENDING_DESKTOP_UNLOCK };
+	}
 
 	// Get list of all accounts
 	const accounts = await storage.getAccountsList();

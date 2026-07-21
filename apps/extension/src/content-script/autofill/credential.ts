@@ -48,6 +48,8 @@ export async function handleFieldFocus(field: CredentialField) {
 
 		if (response.needsReauth) {
 			showReauthPrompt(field);
+		} else if (response.desktopLocked) {
+			showDesktopUnlockPrompt(field);
 		} else {
 			showUnlockPrompt(field);
 		}
@@ -423,6 +425,15 @@ function showUnlockPrompt(field: CredentialField) {
 		iframeSrc: "autofill-iframe.html",
 		readyMessageType: "IFRAME_READY",
 		state: "NEEDS_UNLOCK",
+	});
+}
+
+// Show desktop unlock prompt (when a connected desktop app holds the lock)
+function showDesktopUnlockPrompt(field: CredentialField) {
+	showAuthStateOverlay(field, {
+		iframeSrc: "autofill-iframe.html",
+		readyMessageType: "IFRAME_READY",
+		state: "NEEDS_DESKTOP_UNLOCK",
 	});
 }
 

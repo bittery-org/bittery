@@ -54,6 +54,17 @@ export const openPopupMessageSchema = z
 	})
 	.strict();
 
+/**
+ * Sent by an overlay's desktop-locked state. The popup can't resolve a locked
+ * desktop app, so this asks the desktop to raise its own unlock screen instead.
+ */
+export const unlockDesktopMessageSchema = z
+	.object({
+		type: z.literal("UNLOCK_DESKTOP"),
+		nonce: iframeNonceSchema,
+	})
+	.strict();
+
 export const cancelSaveMessageSchema = z
 	.object({
 		type: z.literal("CANCEL_SAVE"),

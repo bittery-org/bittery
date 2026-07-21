@@ -32,6 +32,13 @@ function getInitials(account: {
 	return account.email.slice(0, 2).toUpperCase();
 }
 
+/**
+ * The background returns this instead of unlocking when a connected desktop app
+ * is locked — the desktop was asked to raise its own unlock screen, and the
+ * popup waits for the pushed `DESKTOP_UNLOCKED` event (see `desktop-unlock.ts`).
+ */
+const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock";
+
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -63,6 +70,20 @@ export function UnlockPage() {
 		refetchInterval: 3000,
 	});
 
+	const desktopLocked = Boolean(
+		desktopStatus?.success && desktopStatus?.available && desktopStatus?.locked,
+	);
+
+	/**
+	 * The background handed the unlock to the desktop app. Nothing is unlocked
+	 * yet — stay on this screen and let the pushed `DESKTOP_UNLOCKED` event (see
+	 * `popup.tsx`) navigate once the desktop is actually open.
+	 */
+	const handleDesktopHandoff = () => {
+		setVaultState("locked");
+		toast.info(m.ext_unlock_toast_pending_desktop());
+	};
+
 	// Unlock all accounts with password
 	const unlockMutation = useMutation({
 		mutationFn: async (values: { password: string }) => {
@@ -80,6 +101,11 @@ export function UnlockPage() {
 			return response;
 		},
 		onSuccess: async (response) => {
+			if (response.status === PENDING_DESKTOP_UNLOCK) {
+				handleDesktopHandoff();
+				return;
+			}
+
 			// Refresh accounts queries
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
@@ -132,6 +158,11 @@ export function UnlockPage() {
 			return response;
 		},
 		onSuccess: async (response) => {
+			if (response.status === PENDING_DESKTOP_UNLOCK) {
+				handleDesktopHandoff();
+				return;
+			}
+
 			// Refresh accounts queries (including unlocked status)
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
@@ -162,12 +193,9 @@ export function UnlockPage() {
 		},
 		onError: (error: Error) => {
 			setVaultState("locked");
-			// Don't show error toast if desktop is locked (user will unlock in desktop)
-			if (!error.message?.includes("Desktop app is locked")) {
-				toast.error(
-					error.message || m.toast_auth_unlock_error_biometric_failed(),
-				);
-			}
+			toast.error(
+				error.message || m.toast_auth_unlock_error_biometric_failed(),
+			);
 		},
 	});
 
@@ -212,10 +240,14 @@ export function UnlockPage() {
 		navigate({ to: "/login" });
 	};
 
-	const handleOpenDesktopApp = async () => {
+	/**
+	 * Raise the desktop app's own unlock screen. Unlike `OPEN_DESKTOP_APP` this
+	 * also prompts for biometrics there, so one gesture unlocks both halves.
+	 */
+	const handleUnlockDesktopApp = async () => {
 		try {
 			const response = await chrome.runtime.sendMessage({
-				type: "OPEN_DESKTOP_APP",
+				type: "TRIGGER_DESKTOP_UNLOCK",
 			});
 			if (!response?.success) {
 				throw new Error(response?.error);
@@ -303,102 +335,107 @@ export function UnlockPage() {
 					)}
 				</div>
 
-				{/* Desktop app locked banner */}
-				{desktopStatus?.success &&
-					desktopStatus?.available &&
-					desktopStatus?.locked && (
+				{/*
+				 * A locked desktop app owns the lock. Unlocking here with a password
+				 * would only unlock the extension and leave the desktop behind, so the
+				 * password form gives way to a handoff instead of sitting alongside it.
+				 */}
+				{desktopLocked ? (
+					<>
 						<div className="mb-3.5 flex w-full items-start gap-2.5 rounded-lg border border-warning/30 bg-warning/10 p-2.5 text-muted-foreground text-xs">
 							<IconTriangleAlert className="mt-px size-3.5 shrink-0 text-warning" />
 							<div>
 								<span className="font-medium text-foreground">
 									{m.ext_unlock_desktop_locked_lead()}
 								</span>{" "}
-								{m.ext_unlock_desktop_locked_body()}{" "}
-								<button
-									type="button"
-									onClick={handleOpenDesktopApp}
-									className="font-medium text-warning hover:underline"
-								>
-									{m.ext_unlock_open_desktop_app()}
-								</button>
+								{m.ext_unlock_desktop_locked_body()}
 							</div>
 						</div>
-					)}
-
-				<form
-					onSubmit={(e) => {
-						e.preventDefault();
-						e.stopPropagation();
-						form.handleSubmit();
-					}}
-					className="w-full"
-				>
-					<form.Field name="password">
-						{(field) => (
-							<div className="mb-2.5 flex h-[34px] items-center gap-2 rounded-lg border bg-transparent px-2.5 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25 dark:bg-input/20">
-								<IconKey className="size-3.5 shrink-0 text-muted-foreground" />
-								<input
-									id={field.name}
-									name={field.name}
-									// biome-ignore lint/a11y/noAutofocus: password field is the primary action on unlock
-									autoFocus
-									type={showPassword ? "text" : "password"}
-									placeholder={m.ext_unlock_placeholder_master_password()}
-									autoComplete="current-password"
-									value={field.state.value}
-									onBlur={field.handleBlur}
-									onChange={(e) => field.handleChange(e.target.value)}
-									required
-									className="min-w-0 flex-1 bg-transparent text-foreground text-sm outline-none placeholder:text-muted-foreground"
-								/>
-								<button
-									type="button"
-									onClick={() => setShowPassword(!showPassword)}
-									className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
-								>
-									{showPassword ? (
-										<IconEyeOff className="size-3.5" />
-									) : (
-										<IconEye className="size-3.5" />
-									)}
-								</button>
-							</div>
-						)}
-					</form.Field>
-
-					<Button
-						type="submit"
-						className="h-[34px] w-full rounded-lg"
-						disabled={isPending}
+						<Button
+							type="button"
+							className="h-[34px] w-full rounded-lg"
+							onClick={handleUnlockDesktopApp}
+						>
+							<IconLock className="size-3.5" />
+							{m.ext_unlock_button_unlock_desktop()}
+						</Button>
+					</>
+				) : (
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							e.stopPropagation();
+							form.handleSubmit();
+						}}
+						className="w-full"
 					>
-						<IconLock className="size-3.5" />
-						{isPending
-							? m.ext_unlock_button_unlocking()
-							: isSingle
-								? m.auth_signin_button_unlock_vault()
-								: m.ext_unlock_button_unlock_all({ count: accounts.length })}
-					</Button>
+						<form.Field name="password">
+							{(field) => (
+								<div className="mb-2.5 flex h-[34px] items-center gap-2 rounded-lg border bg-transparent px-2.5 transition-[color,box-shadow] focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/25 dark:bg-input/20">
+									<IconKey className="size-3.5 shrink-0 text-muted-foreground" />
+									<input
+										id={field.name}
+										name={field.name}
+										// biome-ignore lint/a11y/noAutofocus: password field is the primary action on unlock
+										autoFocus
+										type={showPassword ? "text" : "password"}
+										placeholder={m.ext_unlock_placeholder_master_password()}
+										autoComplete="current-password"
+										value={field.state.value}
+										onBlur={field.handleBlur}
+										onChange={(e) => field.handleChange(e.target.value)}
+										required
+										className="min-w-0 flex-1 bg-transparent text-foreground text-sm outline-none placeholder:text-muted-foreground"
+									/>
+									<button
+										type="button"
+										onClick={() => setShowPassword(!showPassword)}
+										className="-mr-1 flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:text-foreground"
+									>
+										{showPassword ? (
+											<IconEyeOff className="size-3.5" />
+										) : (
+											<IconEye className="size-3.5" />
+										)}
+									</button>
+								</div>
+							)}
+						</form.Field>
 
-					{biometricAvailable && (
-						<>
-							<div className="my-3 flex items-center gap-2.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
-								<span aria-hidden className="h-px flex-1 bg-border" />
-								{m.ext_unlock_or()}
-								<span aria-hidden className="h-px flex-1 bg-border" />
-							</div>
-							<Button
-								type="button"
-								variant="outline"
-								className="h-[34px] w-full rounded-lg"
-								disabled={isPending}
-								onClick={() => biometricUnlockMutation.mutate()}
-							>
-								<IconFingerprint className="size-4 text-primary" />
-								{m.ext_unlock_touch_id()}
-							</Button>
-						</>
-					)}
-				</form>
+						<Button
+							type="submit"
+							className="h-[34px] w-full rounded-lg"
+							disabled={isPending}
+						>
+							<IconLock className="size-3.5" />
+							{isPending
+								? m.ext_unlock_button_unlocking()
+								: isSingle
+									? m.auth_signin_button_unlock_vault()
+									: m.ext_unlock_button_unlock_all({ count: accounts.length })}
+						</Button>
+
+						{biometricAvailable && (
+							<>
+								<div className="my-3 flex items-center gap-2.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]">
+									<span aria-hidden className="h-px flex-1 bg-border" />
+									{m.ext_unlock_or()}
+									<span aria-hidden className="h-px flex-1 bg-border" />
+								</div>
+								<Button
+									type="button"
+									variant="outline"
+									className="h-[34px] w-full rounded-lg"
+									disabled={isPending}
+									onClick={() => biometricUnlockMutation.mutate()}
+								>
+									<IconFingerprint className="size-4 text-primary" />
+									{m.ext_unlock_touch_id()}
+								</Button>
+							</>
+						)}
+					</form>
+				)}
 
 				<div className="mt-3.5 text-center text-muted-foreground text-xs">
 					{m.ext_unlock_not_you()}{" "}

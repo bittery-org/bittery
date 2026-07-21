@@ -9,7 +9,7 @@ import {
 } from "../lib/autofill-ranking";
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
-import { isDesktopUnlockedNow } from "./desktop-status";
+import { isDesktopLockedNow, isDesktopUnlockedNow } from "./desktop-status";
 import {
 	getLastActivityTimestamp,
 	isUnlocked,
@@ -33,7 +33,15 @@ export async function handleCheckAutofillAuth(): Promise<MessageResponse> {
 	}
 
 	if (!unlocked) {
-		return { success: true, authenticated: false, unlocked: false };
+		// A locked desktop is the reason the extension is locked, and the popup
+		// can't resolve it — only the desktop app can. Tell the overlay so it
+		// offers to unlock the desktop instead of opening the popup.
+		return {
+			success: true,
+			authenticated: false,
+			unlocked: false,
+			desktopLocked: await isDesktopLockedNow(),
+		};
 	}
 
 	const now = Date.now();

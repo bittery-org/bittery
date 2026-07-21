@@ -3,6 +3,7 @@ import {
 	createAutofillSelectSchema,
 	openPopupMessageSchema,
 	resizeIframeMessageSchema,
+	unlockDesktopMessageSchema,
 	validateIframeMessage,
 } from "../iframe-messages";
 import type { AutofillField } from "../types";
@@ -204,13 +205,17 @@ export function hideItemsOverlay(
  * These used to be two different things: an iframe for "locked" and a slab of
  * hand-written English HTML for "needs re-auth". Both are now states of the same
  * themed, translated overlay.
+ *
+ * `NEEDS_DESKTOP_UNLOCK` is the case where a connected desktop app is what's
+ * holding the lock. Opening the popup there is a dead end — it can only offer to
+ * unlock the desktop anyway — so that state asks the desktop directly.
  */
 export function showAuthStateOverlay(
 	field: AutofillField,
 	options: {
 		iframeSrc: string;
 		readyMessageType: string;
-		state: "NEEDS_UNLOCK" | "NEEDS_REAUTH";
+		state: "NEEDS_UNLOCK" | "NEEDS_REAUTH" | "NEEDS_DESKTOP_UNLOCK";
 	},
 ) {
 	const overlay = acquireOverlay(options.iframeSrc, options.readyMessageType);
@@ -237,6 +242,23 @@ export function showAuthStateOverlay(
 				// The popup can only be opened programmatically on newer Chrome
 				// builds; the toolbar icon remains the fallback either way.
 			});
+			overlay.hide();
+			field.overlay = undefined;
+			return;
+		}
+
+		if (
+			validateIframeMessage(event, {
+				...expected,
+				schema: unlockDesktopMessageSchema,
+			})
+		) {
+			chrome.runtime
+				.sendMessage({ type: "TRIGGER_DESKTOP_UNLOCK" })
+				.catch(() => {
+					// Desktop went away between the status read and the click; the
+					// overlay re-checks on the next focus either way.
+				});
 			overlay.hide();
 			field.overlay = undefined;
 			return;

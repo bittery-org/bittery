@@ -7,8 +7,11 @@ import { createStoredAccountRpcClient } from "@bittery/core/services/account-res
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
-import { desktopClient } from "./desktop-client";
 import { desktopSync } from "./desktop-sync";
+import {
+	handOffUnlockToDesktop,
+	PENDING_DESKTOP_UNLOCK,
+} from "./desktop-unlock";
 import { sendNativeMessage } from "./native-messaging-client";
 import {
 	setDesktopModeSentinel,
@@ -294,36 +297,19 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			};
 		}
 
-		// If desktop is available but locked, trigger unlock UI but DON'T return success
-		// The extension should wait for the unlock to complete via SSE events
-		if (desktopAvailable && desktopLocked) {
-			try {
-				const triggered = await desktopClient.triggerDesktopUnlock();
-				if (!triggered) {
-					throw new Error("Desktop unlock trigger failed");
-				}
-
-				// Don't return success - throw an error to let the UI know unlock is pending
-				throw new Error(
-					"Desktop app is locked. Please unlock in the desktop app.",
-				);
-			} catch (error) {
-				console.warn(
-					"[NATIVE_BIOMETRIC_UNLOCK_ALL] Desktop unlock trigger failed, falling back to native messaging:",
-					error,
-				);
-				// If we successfully triggered the desktop UI, re-throw the error
-				if (
-					error instanceof Error &&
-					error.message.includes("Desktop app is locked")
-				) {
-					throw error;
-				}
-				// Otherwise fall through to native messaging fallback
+		// Desktop available but locked: it owns the unlock. Report the handoff as a
+		// status rather than a success, so the popup waits for the pushed
+		// `unlock` event instead of claiming the vault is open.
+		if (!options?.forceLocalUnlock && desktopAvailable && desktopLocked) {
+			const handoff = await handOffUnlockToDesktop();
+			if (handoff.handedOff) {
+				return { success: true, status: PENDING_DESKTOP_UNLOCK };
 			}
+			// Desktop didn't accept the request — fall through and unlock locally.
 		}
 
-		// Fallback: Use native messaging (for standalone mode or if HTTP failed)
+		// Fallback: Use native messaging (for standalone mode, or when the desktop
+		// could not take over the unlock)
 		// Generate challenge for replay attack protection
 		const challenge = crypto.randomUUID();
 		const extensionId = chrome.runtime.id;

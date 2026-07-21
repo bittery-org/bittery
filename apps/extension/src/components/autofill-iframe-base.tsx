@@ -1,6 +1,6 @@
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button } from "@bittery/ui";
-import { IconLock, IconTriangleAlert } from "@bittery/ui/icons";
+import { IconLock, IconMonitor, IconTriangleAlert } from "@bittery/ui/icons";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getIframeNonceFromLocation } from "@/lib/iframe-nonce";
@@ -57,7 +57,7 @@ export interface AutofillIframeConfig {
 	renderTrailing?: (item: DecryptedItemWithContext) => ReactNode;
 }
 
-type AuthState = "ready" | "unlock" | "reauth";
+type AuthState = "ready" | "unlock" | "reauth" | "desktop-unlock";
 
 export function AutofillIframeBase({
 	config,
@@ -109,6 +109,9 @@ export function AutofillIframeBase({
 			} else if (event.data.type === "NEEDS_REAUTH") {
 				setAuthState("reauth");
 				reset();
+			} else if (event.data.type === "NEEDS_DESKTOP_UNLOCK") {
+				setAuthState("desktop-unlock");
+				reset();
 			} else if (event.data.type === "OVERLAY_CLEAR") {
 				// The overlay was hidden. Drop the decrypted items rather than keeping
 				// them alive in a pooled frame.
@@ -147,6 +150,10 @@ export function AutofillIframeBase({
 
 	const handleOpenPopup = useCallback(() => {
 		window.parent.postMessage({ type: "OPEN_POPUP", nonce }, "*");
+	}, [nonce]);
+
+	const handleUnlockDesktop = useCallback(() => {
+		window.parent.postMessage({ type: "UNLOCK_DESKTOP", nonce }, "*");
 	}, [nonce]);
 
 	// Keyboard navigation via native keydown and forwarded KEYBOARD_NAV messages
@@ -199,34 +206,47 @@ export function AutofillIframeBase({
 	}, [filteredItems, selectedIndex, handleSelect, nonce]);
 
 	if (authState !== "ready") {
-		const isLocked = authState === "unlock";
+		// The desktop-locked state deliberately does not offer the popup: the popup
+		// can't unlock a locked desktop app, it can only forward the same request.
+		const notice = {
+			unlock: {
+				icon: <IconLock className="size-3.5" />,
+				title: m.ext_autofill_unlock_required(),
+				description: config.unlockText,
+				actionLabel: m.ext_autofill_open_bittery(),
+				onAction: handleOpenPopup,
+			},
+			reauth: {
+				icon: <IconTriangleAlert className="size-3.5" />,
+				title: m.ext_autofill_reauth_required(),
+				description: m.ext_autofill_reauth_description(),
+				actionLabel: m.ext_autofill_open_bittery(),
+				onAction: handleOpenPopup,
+			},
+			"desktop-unlock": {
+				icon: <IconMonitor className="size-3.5" />,
+				title: m.ext_autofill_desktop_locked_title(),
+				description: m.ext_autofill_desktop_locked_description(),
+				actionLabel: m.ext_autofill_unlock_desktop(),
+				onAction: handleUnlockDesktop,
+			},
+		}[authState];
+
 		return (
 			<OverlayViewport>
 				<OverlaySurface>
 					<OverlayNotice
 						tone="primary"
-						icon={
-							isLocked ? (
-								<IconLock className="size-3.5" />
-							) : (
-								<IconTriangleAlert className="size-3.5" />
-							)
-						}
-						title={
-							isLocked
-								? m.ext_autofill_unlock_required()
-								: m.ext_autofill_reauth_required()
-						}
-						description={
-							isLocked ? config.unlockText : m.ext_autofill_reauth_description()
-						}
+						icon={notice.icon}
+						title={notice.title}
+						description={notice.description}
 						action={
 							<Button
 								size="sm"
 								className="h-7 w-full"
-								onClick={handleOpenPopup}
+								onClick={notice.onAction}
 							>
-								{m.ext_autofill_open_bittery()}
+								{notice.actionLabel}
 							</Button>
 						}
 					/>

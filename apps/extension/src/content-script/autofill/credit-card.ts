@@ -48,6 +48,8 @@ export async function handleCreditCardFieldFocus(field: CreditCardField) {
 
 		if (response.needsReauth) {
 			showCreditCardReauthPrompt(field);
+		} else if (response.desktopLocked) {
+			showCreditCardDesktopUnlockPrompt(field);
 		} else {
 			showCreditCardUnlockPrompt(field);
 		}
@@ -246,6 +248,15 @@ function showCreditCardUnlockPrompt(field: CreditCardField) {
 		iframeSrc: "credit-card-autofill-iframe.html",
 		readyMessageType: "CC_IFRAME_READY",
 		state: "NEEDS_UNLOCK",
+	});
+}
+
+// Show desktop unlock prompt for credit card fields
+function showCreditCardDesktopUnlockPrompt(field: CreditCardField) {
+	showAuthStateOverlay(field, {
+		iframeSrc: "credit-card-autofill-iframe.html",
+		readyMessageType: "CC_IFRAME_READY",
+		state: "NEEDS_DESKTOP_UNLOCK",
 	});
 }
 

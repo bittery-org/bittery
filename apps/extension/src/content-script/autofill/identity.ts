@@ -54,6 +54,8 @@ export async function handleIdentityFieldFocus(field: IdentityField) {
 
 		if (response.needsReauth) {
 			showIdentityReauthPrompt(field);
+		} else if (response.desktopLocked) {
+			showIdentityDesktopUnlockPrompt(field);
 		} else {
 			showIdentityUnlockPrompt(field);
 		}
@@ -342,6 +344,15 @@ function showIdentityUnlockPrompt(field: IdentityField) {
 		iframeSrc: "identity-autofill-iframe.html",
 		readyMessageType: "IDENTITY_IFRAME_READY",
 		state: "NEEDS_UNLOCK",
+	});
+}
+
+// Show desktop unlock prompt for identity fields
+function showIdentityDesktopUnlockPrompt(field: IdentityField) {
+	showAuthStateOverlay(field, {
+		iframeSrc: "identity-autofill-iframe.html",
+		readyMessageType: "IDENTITY_IFRAME_READY",
+		state: "NEEDS_DESKTOP_UNLOCK",
 	});
 }
 
