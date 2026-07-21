@@ -15,6 +15,7 @@ import {
 	showReauthPromptCard,
 	showUnlockIframePrompt,
 } from "./overlay-utils";
+import { updateAutofillTimestamp } from "./timestamp";
 
 // Handle field focus
 export async function handleFieldFocus(field: CredentialField) {
@@ -264,9 +265,7 @@ async function handleAutofillSelect(
 	field: CredentialField,
 	item: DecryptedItem,
 ) {
-	await chrome.runtime.sendMessage({
-		type: "UPDATE_AUTOFILL_TIMESTAMP",
-	});
+	await updateAutofillTimestamp();
 
 	contentState.isAutofilling = true;
 
@@ -359,7 +358,7 @@ export async function fillCredentialItem(
 		return false;
 	}
 
-	await chrome.runtime.sendMessage({ type: "UPDATE_AUTOFILL_TIMESTAMP" });
+	await updateAutofillTimestamp();
 
 	contentState.isAutofilling = true;
 	let filled = false;

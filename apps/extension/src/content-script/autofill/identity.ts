@@ -4,6 +4,7 @@ import type { IdentityField } from "../types";
 import { hideAutofillOverlay } from "./credential";
 import { hideCreditCardAutofillOverlay } from "./credit-card";
 import { hideFieldIcon, showFieldIcon } from "./icon";
+import { updateAutofillTimestamp } from "./timestamp";
 import {
 	applyAutofillHighlight,
 	hideItemsOverlay,
@@ -157,9 +158,7 @@ async function handleIdentityAutofillSelect(
 	field: IdentityField,
 	item: DecryptedItem,
 ) {
-	await chrome.runtime.sendMessage({
-		type: "UPDATE_AUTOFILL_TIMESTAMP",
-	});
+	await updateAutofillTimestamp();
 
 	contentState.isAutofilling = true;
 

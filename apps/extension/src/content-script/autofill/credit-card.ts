@@ -3,6 +3,7 @@ import { contentState } from "../state";
 import type { CreditCardField } from "../types";
 import { hideAutofillOverlay } from "./credential";
 import { hideFieldIcon, showFieldIcon } from "./icon";
+import { updateAutofillTimestamp } from "./timestamp";
 import {
 	applyAutofillHighlight,
 	hideItemsOverlay,
@@ -151,9 +152,7 @@ async function handleCreditCardAutofillSelect(
 	field: CreditCardField,
 	item: DecryptedItem,
 ) {
-	await chrome.runtime.sendMessage({
-		type: "UPDATE_AUTOFILL_TIMESTAMP",
-	});
+	await updateAutofillTimestamp();
 
 	contentState.isAutofilling = true;
 
