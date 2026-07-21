@@ -48,6 +48,13 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 }
 
 /**
+ * Error code for a response that is not bound to the issued challenge. The
+ * background worker has no access to the message bundles, so it hands the UI a
+ * stable code to translate instead of a hardcoded sentence.
+ */
+export const STALE_DESKTOP_UNLOCK_RESPONSE = "stale-desktop-unlock-response";
+
+/**
  * Check that a biometric-unlock response belongs to the challenge just sent.
  *
  * This is not a MAC. The desktop derives the value from data the extension
@@ -71,9 +78,7 @@ function assertChallengeBinding(
 	}
 
 	console.error(`[${label}] Response is not bound to the issued challenge`);
-	throw new Error(
-		"Desktop app returned a stale or mismatched unlock response. Please try again.",
-	);
+	throw new Error(STALE_DESKTOP_UNLOCK_RESPONSE);
 }
 
 /**
@@ -110,7 +115,16 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				throw new Error("Invalid response from desktop app");
 			}
 
-			// Sync biometric enabled status: if unlock succeeded, biometric must be enabled on desktop
+			assertChallengeBinding(
+				"NATIVE_BIOMETRIC_UNLOCK",
+				responseData.signature,
+				challenge,
+				responseData.encrypted_session,
+			);
+
+			// Sync biometric enabled status: if unlock succeeded, biometric must be
+			// enabled on desktop. Only after the binding check, so a stale or
+			// mismatched response never persists state.
 			if (
 				activeAccount.type === "single" &&
 				"updateBiometricEnabled" in storage
@@ -124,13 +138,6 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 					}
 				).updateBiometricEnabled(activeAccount.accountId, true);
 			}
-
-			assertChallengeBinding(
-				"NATIVE_BIOMETRIC_UNLOCK",
-				responseData.signature,
-				challenge,
-				responseData.encrypted_session,
-			);
 
 			// Decode the base64 encrypted session data (it's a JSON-encoded EncryptedData structure)
 			const encryptedSessionJson = atob(responseData.encrypted_session);
