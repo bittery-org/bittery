@@ -8,8 +8,8 @@ import {
 	Button,
 	Card,
 	cn,
-	copyWithToast,
 	handleCopy as copyLocalizedField,
+	copyWithToast,
 	Label,
 	toast,
 } from "@bittery/ui";
