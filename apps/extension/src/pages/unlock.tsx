@@ -39,6 +39,13 @@ function getInitials(account: {
  */
 const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock";
 
+/**
+ * Error codes the background raises instead of a sentence, because the service
+ * worker has no message bundles (see `native-messaging.ts`). Anything else it
+ * returns is already a human-readable string.
+ */
+const STALE_DESKTOP_UNLOCK_RESPONSE = "stale-desktop-unlock-response";
+
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
@@ -200,6 +207,10 @@ export function UnlockPage() {
 		},
 		onError: (error: Error) => {
 			setVaultState("locked");
+			if (error.message === STALE_DESKTOP_UNLOCK_RESPONSE) {
+				toast.error(m.ext_unlock_toast_stale_desktop_response());
+				return;
+			}
 			toast.error(
 				error.message || m.toast_auth_unlock_error_biometric_failed(),
 			);
