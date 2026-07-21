@@ -31,10 +31,20 @@ import {
 import {
 	applyOverlayFrameChrome,
 	applyOverlayHostChrome,
+	OVERLAY_MIN_WIDTH_PX,
 } from "../overlay-chrome";
 
 /** How long a hidden frame is kept warm before it is torn down. */
 const IDLE_EVICT_MS = 45_000;
+/**
+ * How long a *prewarmed* frame is kept before teardown.
+ *
+ * Longer than {@link IDLE_EVICT_MS}: this frame has never been shown, so the
+ * clock starts at page load rather than at the user's last interaction, and a
+ * user who lands on a login form may take a while to reach it. It also holds no
+ * decrypted items, so the only cost of keeping it is memory.
+ */
+const WARM_EVICT_MS = 180_000;
 /** Matches the overlay fade in `createEntry`. */
 const FADE_OUT_MS = 130;
 
@@ -151,6 +161,10 @@ function createEntry(src: string, readyMessageType: string): PoolEntry {
 			}
 			entry.visible = true;
 			entry.host.style.display = "block";
+			// Undo the prewarm parking spot (see `warmOverlay`). The caller has
+			// already positioned the host by the time `show` runs.
+			entry.host.style.visibility = "visible";
+			entry.host.style.pointerEvents = "auto";
 			// Force a style flush so the transition runs from the hidden state.
 			void entry.host.offsetHeight;
 			entry.host.style.opacity = "1";
@@ -203,6 +217,41 @@ export function acquireOverlay(
 	const entry = createEntry(src, readyMessageType);
 	pool.set(src, entry);
 	return entry;
+}
+
+/**
+ * Boot the frame for `src` ahead of time without showing it.
+ *
+ * The first open costs 300-400ms of iframe navigation plus React, Tailwind and
+ * the message bundle booting, and the user waits that out staring at a field
+ * they just clicked. Calling this once the page is known to *have* a fillable
+ * field moves that cost to load time, where nothing is waiting on it.
+ *
+ * Safe by construction: a warmed frame is never sent an items message, so there
+ * is nothing in it to clear. It is torn down after {@link WARM_EVICT_MS} unless
+ * `show()` claims it first.
+ */
+export function warmOverlay(src: string, readyMessageType: string): void {
+	if (pool.get(src)?.host.isConnected) return;
+
+	const entry = createEntry(src, readyMessageType);
+
+	// Deliberately *not* `display: none`, which is how an already-shown frame
+	// hides. A frame with no layout box reports a content height of zero, so the
+	// overlay's own ResizeObserver would have nothing to measure and the first
+	// show would paint an empty box. Park it off-screen instead: laid out and
+	// measured, but invisible and untouchable. `show()` undoes all three.
+	entry.host.style.display = "block";
+	entry.host.style.visibility = "hidden";
+	entry.host.style.pointerEvents = "none";
+	entry.host.style.top = "0px";
+	entry.host.style.left = "-10000px";
+	// Lay out at the width it will most likely be shown at, so the height the
+	// frame reports on boot is the height it will actually need.
+	entry.host.style.width = `${OVERLAY_MIN_WIDTH_PX}px`;
+
+	pool.set(src, entry);
+	entry.evictTimeout = setTimeout(() => destroyEntry(src), WARM_EVICT_MS);
 }
 
 /** Look up an already-warm frame without creating one. */

@@ -17,3 +17,4 @@ export {
 	hideIdentityAutofillOverlay,
 } from "./identity";
 export { setupOutsideClickHandler } from "./outside-click";
+export { prewarmOverlay, resetOverlayPrewarm } from "./prewarm";

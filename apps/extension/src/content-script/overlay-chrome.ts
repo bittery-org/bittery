@@ -21,6 +21,15 @@
 export const OVERLAY_RADIUS_PX = 10;
 
 /**
+ * Floor for the overlay's width, regardless of how narrow the anchored field is.
+ *
+ * Lives here rather than next to the positioning code because a prewarmed frame
+ * has to lay out at its eventual width before any field has anchored it — a
+ * frame measured at zero width reports a nonsense content height.
+ */
+export const OVERLAY_MIN_WIDTH_PX = 300;
+
+/**
  * Deliberately tighter than the popup's `shadow-pop`: this sits on someone
  * else's page, where a large ambient shadow reads as intrusive rather than
  * elevated. The card's own hairline border supplies the ring.

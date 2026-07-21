@@ -6,6 +6,7 @@ import {
 	unlockDesktopMessageSchema,
 	validateIframeMessage,
 } from "../iframe-messages";
+import { OVERLAY_MIN_WIDTH_PX } from "../overlay-chrome";
 import type { AutofillField } from "../types";
 import { type AnchorHandle, trackAnchor } from "./anchor-position";
 import { acquireOverlay, type PooledOverlay, peekOverlay } from "./iframe-pool";
@@ -16,7 +17,6 @@ import { acquireOverlay, type PooledOverlay, peekOverlay } from "./iframe-pool";
  * the frame, and no band of transparent-but-clickable iframe covers the page.
  */
 const OVERLAY_GAP_PX = 6;
-const OVERLAY_MIN_WIDTH_PX = 300;
 /** Below this much room under the field, the dropdown flips above it. */
 const FLIP_MARGIN_PX = 24;
 
