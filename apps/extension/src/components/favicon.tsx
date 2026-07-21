@@ -141,10 +141,12 @@ export function Favicon({
 		lg: 38,
 	};
 
+	// Relative sizing so the tile can be resized via `className` (e.g. the vault
+	// list's 26px tile / detail's 40px tile) without the glyph overflowing.
 	const imageSizes = {
-		sm: "w-7.75 h-7.75",
-		md: "w-9.75 h-9.75",
-		lg: "w-10.75 h-10.75",
+		sm: "size-[92%]",
+		md: "size-[92%]",
+		lg: "size-[90%]",
 	};
 
 	// Card brand colors

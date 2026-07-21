@@ -31,6 +31,10 @@ enum LockEvent {
         account_id: String,
         timestamp: i64,
     },
+    ThemeChanged {
+        theme: String,
+        timestamp: i64,
+    },
 }
 
 struct DesktopIpcState {
@@ -46,6 +50,11 @@ impl Default for DesktopIpcState {
 
 const ACTIVE_ACCOUNT_KEY: &str = "bittery_active_account";
 const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
+/// Persisted UI appearance preference ("light" | "dark" | "system"). Kept in
+/// the Rust-side store so the native host can report it to the extension even
+/// before the desktop frontend window has loaded (next-themes only writes the
+/// value to the webview's localStorage, which Rust cannot read).
+const UI_THEME_KEY: &str = "bittery_ui_theme";
 
 /// Build a namespaced storage key using the stable accountId (a UUID).
 /// Mirrors `getAccountKey` in the TypeScript storage layer; the accountId is
@@ -441,6 +450,13 @@ fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
                 "timestamp": timestamp,
             }),
         },
+        LockEvent::ThemeChanged { theme, timestamp } => DesktopResponse::DesktopEvent {
+            event: DesktopEventKind::ThemeChanged,
+            payload: serde_json::json!({
+                "theme": theme,
+                "timestamp": timestamp,
+            }),
+        },
     }
 }
 
@@ -804,6 +820,10 @@ async fn handle_desktop_ipc_message(
                     .get("autolock_timeout_ms")
                     .and_then(|v| v.as_i64())
                     .unwrap_or(600000),
+                theme: status
+                    .get("theme")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
             },
             Err(error) => DesktopResponse::Error { message: error },
         },
@@ -998,11 +1018,33 @@ async fn handle_desktop_ipc_message(
             };
             response
         }
-        DesktopRequest::OpenDesktopApp => match open_app_internal(app_handle) {
-            Ok(()) => DesktopResponse::OpenDesktopAppResult {
-                success: true,
-                error: None,
-            },
+        DesktopRequest::OpenDesktopApp {
+            intent,
+            url,
+            item_id,
+            vault_id,
+        } => match open_app_internal(app_handle) {
+            Ok(()) => {
+                match intent.as_deref() {
+                    Some("create_item") => {
+                        let _ = app_handle.emit(
+                            "open-create-item",
+                            serde_json::json!({ "url": url }),
+                        );
+                    }
+                    Some("view_item") => {
+                        let _ = app_handle.emit(
+                            "open-item",
+                            serde_json::json!({ "itemId": item_id, "vaultId": vault_id }),
+                        );
+                    }
+                    _ => {}
+                }
+                DesktopResponse::OpenDesktopAppResult {
+                    success: true,
+                    error: None,
+                }
+            }
             Err(error) => DesktopResponse::OpenDesktopAppResult {
                 success: false,
                 error: Some(error),
@@ -1568,6 +1610,10 @@ async fn get_lock_status_internal(
         .and_then(|v| v.as_i64())
         .unwrap_or(600000); // Default 10 minutes
 
+    // UI appearance preference (app-wide, mirrors the frontend's next-themes
+    // value). Absent until the frontend syncs it via `set_ui_theme`.
+    let theme = read_store_string(&store, UI_THEME_KEY);
+
     let locked = unlocked_accounts.is_empty();
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1579,6 +1625,7 @@ async fn get_lock_status_internal(
 		"unlocked_accounts": unlocked_accounts,
         "timestamp": timestamp,
         "autolock_timeout_ms": autolock_timeout_ms,
+        "theme": theme,
     }))
 }
 
@@ -1718,6 +1765,42 @@ fn broadcast_active_account_changed(
     Ok(())
 }
 
+/// Tauri command to persist the UI appearance preference and notify subscribed
+/// extensions. The desktop frontend calls this whenever its next-themes value
+/// changes so the value is available to the native host (and survives restarts)
+/// even before the frontend window has loaded.
+#[tauri::command]
+fn set_ui_theme(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<Arc<DesktopIpcState>>,
+    theme: String,
+) -> Result<(), String> {
+    use tauri_plugin_store::StoreExt;
+
+    // Only accept known values so the stored preference stays well-formed.
+    if !matches!(theme.as_str(), "light" | "dark" | "system") {
+        return Err(format!("Invalid theme value: {}", theme));
+    }
+
+    let store = app_handle
+        .store("store.json")
+        .map_err(|e| format!("Failed to access store: {}", e))?;
+    store.set(UI_THEME_KEY, serde_json::Value::String(theme.clone()));
+    store
+        .save()
+        .map_err(|e| format!("Failed to persist theme: {}", e))?;
+
+    let timestamp = now_timestamp_ms();
+    let event = LockEvent::ThemeChanged {
+        theme: theme.clone(),
+        timestamp,
+    };
+    let _ = state.lock_events.send(event);
+
+    eprintln!("[UI Theme] Set UI theme to {}", theme);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1760,6 +1843,7 @@ pub fn run() {
             broadcast_lock_event,
             broadcast_unlock_event,
             broadcast_active_account_changed,
+            set_ui_theme,
         ])
         .setup(|app| {
             // In development mode, always reinstall to pick up changes

@@ -16,9 +16,13 @@ import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { storage } from "../lib/storage";
 import { isDesktopUnlockedNow } from "./desktop-status";
+import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import {
+	getAutoLockTimeoutCached,
+	getLastActivityTimestamp,
+	isDesktopMode,
 	isUnlocked,
 	lock,
 	setDesktopModeSentinel,
@@ -80,6 +84,17 @@ export async function handleQuickUnlock(payload: {
 	password: string;
 }): Promise<MessageResponse> {
 	const { password } = payload;
+
+	// A connected-but-locked desktop owns the unlock; unlocking locally here
+	// would leave the desktop behind. See `desktop-unlock.ts`.
+	const desktopUnlock = await requireDesktopUnlock();
+	if (desktopUnlock.required) {
+		return {
+			success: true,
+			status: PENDING_DESKTOP_UNLOCK,
+			desktopReachable: desktopUnlock.triggered,
+		};
+	}
 
 	// Get stored email for multi-account support
 	const activeAccount = await storage.getActiveAccount();
@@ -285,6 +300,36 @@ export async function handleLogout(): Promise<MessageResponse> {
 }
 
 /**
+ * Handle GET_SESSION_STATUS message - Report unlock/lock timing for the popup
+ * footer. Returns the remaining time before auto-lock when it can be computed
+ * cheaply from in-memory session state; otherwise `remainingMs` is null.
+ */
+export async function handleGetSessionStatus(): Promise<MessageResponse> {
+	const unlocked = isUnlocked();
+	const desktopMode = isDesktopMode();
+
+	// Desktop mode has no independent countdown (lock state follows the app),
+	// and a "never" timeout (-1) has no countdown either.
+	const timeoutMs = getAutoLockTimeoutCached();
+	let remainingMs: number | null = null;
+
+	if (unlocked && !desktopMode && timeoutMs !== -1) {
+		const lastActivity = getLastActivityTimestamp();
+		if (lastActivity > 0) {
+			remainingMs = Math.max(0, timeoutMs - (Date.now() - lastActivity));
+		}
+	}
+
+	return {
+		success: true,
+		unlocked,
+		desktopMode,
+		remainingMs,
+		timeoutMs,
+	};
+}
+
+/**
  * Handle LOCK message - Manual lock (clears MUK but keeps vault keys)
  */
 export async function handleLock(): Promise<MessageResponse> {
@@ -313,6 +358,17 @@ export async function handleQuickUnlockAll(payload: {
 	password: string;
 }): Promise<MessageResponse> {
 	const { password } = payload;
+
+	// A connected-but-locked desktop owns the unlock; unlocking locally here
+	// would leave the desktop behind. See `desktop-unlock.ts`.
+	const desktopUnlock = await requireDesktopUnlock();
+	if (desktopUnlock.required) {
+		return {
+			success: true,
+			status: PENDING_DESKTOP_UNLOCK,
+			desktopReachable: desktopUnlock.triggered,
+		};
+	}
 
 	// Get list of all accounts
 	const accounts = await storage.getAccountsList();

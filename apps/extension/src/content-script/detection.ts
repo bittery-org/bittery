@@ -19,6 +19,7 @@ import {
 	handleFieldFocus,
 	handleIdentityFieldBlur,
 	handleIdentityFieldFocus,
+	prewarmOverlay,
 } from "./autofill";
 import {
 	disableChromeAutofill,
@@ -66,6 +67,7 @@ export function detectPasswordFields(root: Document | ShadowRoot = document) {
 			shadowRoot: enhancedField.shadowRoot,
 		};
 		contentState.detectedFields.set(input, field);
+		prewarmOverlay("credential");
 
 		// Aggressively disable browser's native autofill
 		// Chrome often ignores autocomplete="off", so we use multiple strategies
@@ -150,6 +152,7 @@ function detectCreditCardFieldsOnPage(root: Document | ShadowRoot = document) {
 			formGroup,
 		};
 		contentState.detectedCreditCardFields.set(input, field);
+		prewarmOverlay("creditCard");
 
 		// Aggressively disable browser's native credit card autofill
 		disableChromeAutofillForCreditCard(input);
@@ -204,6 +207,7 @@ function detectIdentityFieldsOnPage(root: Document | ShadowRoot = document) {
 			formGroup,
 		};
 		contentState.detectedIdentityFields.set(input, field);
+		prewarmOverlay("identity");
 
 		// Aggressively disable browser's native address/identity autofill
 		disableChromeAutofillForIdentity(input);
@@ -277,6 +281,7 @@ export function detectPasswordFieldsLegacy() {
 
 		const field: CredentialField = { input, type };
 		contentState.detectedFields.set(input, field);
+		prewarmOverlay("credential");
 
 		// Disable browser's native autofill
 		input.setAttribute("autocomplete", "off");

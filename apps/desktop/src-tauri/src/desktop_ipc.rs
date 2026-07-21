@@ -4,6 +4,9 @@ use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 #[cfg(windows)]
 pub const DESKTOP_IPC_PIPE_NAME: &str = r"\\.\pipe\bittery-desktop-ipc";
 pub const DESKTOP_IPC_SOCKET_NAME: &str = "bittery-desktop-ipc.sock";
+// Kept at 1: the `theme` field and `theme_changed` event are additive and
+// tolerated by older peers, so no version bump (a bump hard-breaks mixed
+// extension/desktop versions during staggered rollouts).
 pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -75,7 +78,18 @@ pub enum DesktopRequest {
     #[serde(rename = "TRIGGER_DESKTOP_UNLOCK")]
     TriggerDesktopUnlock,
     #[serde(rename = "OPEN_DESKTOP_APP")]
-    OpenDesktopApp,
+    OpenDesktopApp {
+        // Additive, protocol v1: older peers omit these and older hosts
+        // ignore them, simply opening the app without the intent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        intent: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        url: Option<String>,
+        #[serde(default, rename = "itemId", skip_serializing_if = "Option::is_none")]
+        item_id: Option<String>,
+        #[serde(default, rename = "vaultId", skip_serializing_if = "Option::is_none")]
+        vault_id: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -101,6 +115,8 @@ pub enum DesktopResponse {
         timestamp: i64,
         #[serde(rename = "autolockTimeoutMs")]
         autolock_timeout_ms: i64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        theme: Option<String>,
     },
     #[serde(rename = "DESKTOP_ACCOUNTS")]
     DesktopAccounts {
@@ -218,6 +234,7 @@ pub enum DesktopEventKind {
     Unlock,
     DesktopClose,
     ActiveAccountChanged,
+    ThemeChanged,
 }
 
 pub async fn read_frame<R, T>(reader: &mut R) -> io::Result<T>
@@ -288,6 +305,60 @@ mod tests {
 
         assert_eq!(decoded, message);
     }
+
+	#[test]
+	fn open_desktop_app_intent_survives_envelope_deserialization() {
+		// Exact wire shape the extension sends for the "new item" handoff.
+		let raw = r#"{"requestId":"desktop-1","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"create_item","url":"https://example.com/login"}"#;
+		let decoded: DesktopEnvelope<DesktopRequest> =
+			serde_json::from_str(raw).expect("envelope should deserialize");
+
+		assert_eq!(
+			decoded.payload,
+			DesktopRequest::OpenDesktopApp {
+				intent: Some("create_item".to_string()),
+				url: Some("https://example.com/login".to_string()),
+				item_id: None,
+				vault_id: None,
+			}
+		);
+	}
+
+	#[test]
+	fn open_desktop_app_view_item_intent_survives_envelope_deserialization() {
+		// Exact wire shape the extension sends for the "open in app" handoff.
+		let raw = r#"{"requestId":"desktop-2","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"view_item","itemId":"item-1","vaultId":"vault-1"}"#;
+		let decoded: DesktopEnvelope<DesktopRequest> =
+			serde_json::from_str(raw).expect("envelope should deserialize");
+
+		assert_eq!(
+			decoded.payload,
+			DesktopRequest::OpenDesktopApp {
+				intent: Some("view_item".to_string()),
+				url: None,
+				item_id: Some("item-1".to_string()),
+				vault_id: Some("vault-1".to_string()),
+			}
+		);
+	}
+
+	#[test]
+	fn open_desktop_app_without_intent_still_deserializes() {
+		// Older extensions send the bare request; it must keep working.
+		let raw = r#"{"protocolVersion":1,"type":"OPEN_DESKTOP_APP"}"#;
+		let decoded: DesktopEnvelope<DesktopRequest> =
+			serde_json::from_str(raw).expect("envelope should deserialize");
+
+		assert_eq!(
+			decoded.payload,
+			DesktopRequest::OpenDesktopApp {
+				intent: None,
+				url: None,
+				item_id: None,
+				vault_id: None,
+			}
+		);
+	}
 
 	#[tokio::test]
 	async fn auth_token_request_round_trip_preserves_account_id_and_protocol_version() {

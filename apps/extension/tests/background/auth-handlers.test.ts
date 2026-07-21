@@ -53,14 +53,35 @@ mock.module(path.join(bgDir, "rpc-client.ts"), () => ({
 	rpcClient: {},
 }));
 
+let desktopStatus: {
+	available: boolean;
+	locked: boolean;
+	unlockedAccounts?: string[];
+} | null = null;
+
 mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
 	desktopSync: {
-		getLastStatus: () => null,
-		checkDesktopStatus: async () => null,
+		getLastStatus: () => desktopStatus,
+		checkDesktopStatus: async () => desktopStatus,
+	},
+}));
+
+let triggerDesktopUnlockResult = true;
+let triggerDesktopUnlockCalls = 0;
+
+mock.module(path.join(bgDir, "desktop-client.ts"), () => ({
+	desktopClient: {
+		triggerDesktopUnlock: async () => {
+			triggerDesktopUnlockCalls++;
+			return triggerDesktopUnlockResult;
+		},
 	},
 }));
 
 mock.module(path.join(bgDir, "session-manager.ts"), () => ({
+	getAutoLockTimeoutCached: () => -1,
+	getLastActivityTimestamp: () => Date.now(),
+	isDesktopMode: () => false,
 	isUnlocked: () => false,
 	lock: () => {},
 	setDesktopModeSentinel: () => {},
@@ -96,6 +117,9 @@ beforeEach(() => {
 	setActiveAccountCalls.length = 0;
 	getMasterUnlockKeyCalls.length = 0;
 	setMasterUnlockKeyCalls.length = 0;
+	desktopStatus = null;
+	triggerDesktopUnlockResult = true;
+	triggerDesktopUnlockCalls = 0;
 });
 
 describe("handleQuickUnlockAll", () => {
@@ -133,5 +157,61 @@ describe("handleQuickUnlockAll", () => {
 		]);
 		// MUK is seeded from the first unlocked accountId.
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-1"]);
+	});
+});
+
+// Regression coverage for the extension and the desktop app drifting apart.
+// The bug: with the desktop app connected but locked, a password unlock in the
+// popup ran a plain SRP unlock and seeded a real MUK. The extension came up
+// unlocked while the desktop stayed locked, and nothing ever reconciled them —
+// the protocol has no extension -> desktop unlock message.
+describe("handleQuickUnlockAll with a connected desktop app", () => {
+	test("hands the unlock to a locked desktop instead of unlocking locally", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		desktopStatus = { available: true, locked: true };
+
+		const response = await handleQuickUnlockAll({ password: "pw" });
+
+		expect(response).toEqual({
+			success: true,
+			status: "pending-desktop-unlock",
+			desktopReachable: true,
+		});
+		expect(triggerDesktopUnlockCalls).toBe(1);
+		// Nothing was unlocked on this side, so no session was seeded.
+		expect(setMasterUnlockKeyCalls.length).toBe(0);
+		expect(setActiveAccountCalls.length).toBe(0);
+	});
+
+	test("still refuses to unlock locally when the desktop is wedged", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		desktopStatus = { available: true, locked: true };
+		triggerDesktopUnlockResult = false;
+
+		const response = await handleQuickUnlockAll({ password: "pw" });
+
+		// Falling back to a local unlock here is exactly the divergence bug: the
+		// desktop is still reachable and still locked. Report it instead.
+		expect(response).toEqual({
+			success: true,
+			status: "pending-desktop-unlock",
+			desktopReachable: false,
+		});
+		expect(setMasterUnlockKeyCalls.length).toBe(0);
+	});
+
+	test("unlocks locally when the connected desktop is already unlocked", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		desktopStatus = {
+			available: true,
+			locked: false,
+			unlockedAccounts: ["acc-uuid-1"],
+		};
+
+		const response = await handleQuickUnlockAll({ password: "pw" });
+
+		expect(triggerDesktopUnlockCalls).toBe(0);
+		expect(response.success).toBe(true);
+		expect(setMasterUnlockKeyCalls.length).toBe(1);
 	});
 });

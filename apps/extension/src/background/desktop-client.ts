@@ -2,6 +2,7 @@ import {
 	type DesktopEventPayload,
 	DesktopProtocolMismatchError,
 	type DesktopResponse,
+	type DesktopTheme,
 } from "./desktop-protocol";
 import {
 	type NativeMessagingClient,
@@ -33,6 +34,8 @@ export interface DesktopStatus {
 	unlockedAccounts: string[];
 	timestamp: number;
 	autolockTimeoutMs: number;
+	/** The desktop app's appearance setting; null when unknown. */
+	theme: DesktopTheme | null;
 }
 
 interface CachedData<T> {
@@ -113,6 +116,7 @@ export class DesktopClient {
 				unlockedAccounts: response.unlockedAccounts ?? [],
 				timestamp: response.timestamp ?? Date.now(),
 				autolockTimeoutMs: response.autolockTimeoutMs ?? -1,
+				theme: response.theme ?? null,
 			};
 		} catch {
 			return null;

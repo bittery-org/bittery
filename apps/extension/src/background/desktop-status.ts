@@ -56,3 +56,12 @@ export async function isDesktopReadAvailable(): Promise<boolean> {
 	const status = await getDesktopStatus();
 	return Boolean(status?.available && !status.locked);
 }
+
+/**
+ * True when a desktop app is connected but locked. This is the state where the
+ * extension must not unlock on its own — see `desktop-unlock.ts`.
+ */
+export async function isDesktopLockedNow(): Promise<boolean> {
+	const status = await getDesktopStatus();
+	return Boolean(status?.available && status.locked);
+}

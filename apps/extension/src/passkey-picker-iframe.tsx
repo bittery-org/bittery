@@ -1,24 +1,27 @@
 import "./index.css";
-import { Button, Card, cn } from "@bittery/ui";
+import { Button } from "@bittery/ui";
 import {
-	IconCircleCheck,
+	IconCheck,
 	IconClock,
 	IconMail,
 	IconPasskey,
-	IconUser,
+	IconVault,
 } from "@bittery/ui/icons";
-import React, {
-	useCallback,
-	useEffect,
-	useLayoutEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import ReactDOM from "react-dom/client";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Favicon } from "@/components/favicon";
+import { mountOverlayApp } from "@/components/overlay/mount";
+import {
+	OverlayActions,
+	OverlayChip,
+	OverlayList,
+	OverlayPromptHeader,
+	OverlayRow,
+	OverlaySurface,
+	OverlayViewport,
+} from "@/components/overlay/overlay-surface";
+import { useOverlayHeight } from "@/components/overlay/use-overlay-height";
 import type { PasskeyGetPromptOption } from "@/passkey/types";
-import { I18nProvider, useI18n } from "@/providers/i18n-provider";
+import { useI18n } from "@/providers/i18n-provider";
 
 type PickerData = {
 	kind: "get-picker";
@@ -30,7 +33,10 @@ function PasskeyPickerIframe() {
 	const { m } = useI18n();
 	const [data, setData] = useState<PickerData | null>(null);
 	const [selectedCredentialId, setSelectedCredentialId] = useState<string>("");
-	const containerRef = useRef<HTMLDivElement>(null);
+
+	// The passkey prompt protocol predates the nonce handshake used by the
+	// autofill overlays; the parent matches on `event.source` instead.
+	useOverlayHeight("");
 
 	const formatRelativeTime = useCallback(
 		(value?: string): string => {
@@ -62,23 +68,6 @@ function PasskeyPickerIframe() {
 		},
 		[m],
 	);
-
-	const updateHeight = React.useCallback(() => {
-		const height = document.body.scrollHeight;
-		window.parent.postMessage({ type: "RESIZE_IFRAME", height }, "*");
-	}, []);
-
-	useLayoutEffect(() => {
-		updateHeight();
-		const observer = new ResizeObserver(() => updateHeight());
-		if (document.body) {
-			observer.observe(document.body);
-		}
-		if (containerRef.current) {
-			observer.observe(containerRef.current);
-		}
-		return () => observer.disconnect();
-	}, [updateHeight]);
 
 	useEffect(() => {
 		const handleMessage = (event: MessageEvent) => {
@@ -121,71 +110,42 @@ function PasskeyPickerIframe() {
 	};
 
 	if (!data) {
-		return <div ref={containerRef} className="min-h-[56px] p-1" />;
+		return <OverlayViewport className="min-h-[64px]" />;
 	}
 
 	return (
-		<div ref={containerRef} className="w-full text-foreground">
-			<Card className="gap-2 space-y-3 border border-border/80 bg-card p-3 shadow-sm">
-				<div className="flex items-start gap-2.5">
-					<div className="mt-0.5 rounded-xl border border-primary/25 bg-primary/10 p-1.5 text-primary shadow-sm">
-						<IconPasskey size={16} />
-					</div>
-					<div className="min-w-0 flex-1">
-						<div className="flex items-center justify-between gap-2">
-							<p className="font-medium text-sm">{m.ext_passkey_choose()}</p>
-							<span className="shrink-0 rounded-full border border-border bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
-								{data.options.length}{" "}
-								{data.options.length === 1
-									? m.ext_passkey_option()
-									: m.ext_passkey_options()}
-							</span>
-						</div>
-						<p className="truncate font-medium text-[11px] text-primary/80">
-							{data.rpId}
-						</p>
-					</div>
-				</div>
+		<OverlayViewport>
+			<OverlaySurface>
+				<OverlayPromptHeader
+					icon={<IconPasskey className="size-3.5" />}
+					title={m.ext_passkey_choose()}
+					subtitle={data.rpId}
+					meta={
+						<OverlayChip>
+							{data.options.length}{" "}
+							{data.options.length === 1
+								? m.ext_passkey_option()
+								: m.ext_passkey_options()}
+						</OverlayChip>
+					}
+				/>
 
-				<div className="max-h-[228px] space-y-1.5 overflow-y-auto pr-0.5">
+				<OverlayList className="max-h-[236px] border-t pt-1">
 					{data.options.length === 0 && (
-						<p className="rounded-md border border-border border-dashed px-2.5 py-4 text-center text-muted-foreground text-xs">
+						<p className="rounded-sm border border-dashed px-2.5 py-5 text-center text-[11.5px] text-muted-foreground">
 							{m.ext_passkey_no_passkeys()}
 						</p>
 					)}
 
 					{data.options.map((option) => {
 						const isSelected = selectedCredentialId === option.credentialId;
-						const displayName =
-							option.passkeyUserDisplayName || option.passkeyUserName;
-						const username = option.itemUsername || option.passkeyUserName;
-
 						return (
-							<button
+							<OverlayRow
 								key={option.credentialId}
-								type="button"
-								aria-pressed={isSelected}
-								onClick={() => setSelectedCredentialId(option.credentialId)}
-								className={cn(
-									"group",
-									"relative",
-									"w-full",
-									"overflow-hidden",
-									"rounded-lg",
-									"border",
-									"px-2.5",
-									"py-2.5",
-									"text-left",
-									"transition-all",
-									"focus-visible:outline-none",
-									"focus-visible:ring-2",
-									"focus-visible:ring-primary/35",
-									isSelected
-										? "border-primary/45 bg-primary/10 shadow-sm"
-										: "border-border/80 bg-background/75 hover:border-primary/30 hover:bg-accent/70",
-								)}
-							>
-								<div className="flex items-start gap-2">
+								selected={isSelected}
+								ariaPressed={isSelected}
+								onSelect={() => setSelectedCredentialId(option.credentialId)}
+								leading={
 									<Favicon
 										url={option.itemUrl}
 										title={
@@ -196,90 +156,54 @@ function PasskeyPickerIframe() {
 										serverUrl={option.serverUrl}
 										category="login"
 										size="sm"
+										className="size-[26px] rounded-[7px]"
 									/>
-									<div className="min-w-0 flex-1">
-										<div className="flex items-start gap-2">
-											<p className="truncate font-medium text-xs">
-												{displayName}
-											</p>
-											<span
-												className={cn(
-													"ml-auto",
-													"inline-flex",
-													"h-4",
-													"w-4",
-													"shrink-0",
-													"items-center",
-													"justify-center",
-													"rounded-full",
-													"border",
-													"transition-colors",
-													isSelected
-														? "border-primary/40 bg-primary/15 text-primary"
-														: "border-border text-transparent",
-												)}
-											>
-												<IconCircleCheck size={11} />
-											</span>
-										</div>
-										<p className="mt-0.5 truncate text-muted-foreground text-xs">
-											{username}
-										</p>
-										<div className="mt-1.5 flex flex-wrap gap-1 text-[10px]">
-											<span
-												className={cn(
-													"inline-flex",
-													"items-center",
-													"gap-1",
-													"rounded-full",
-													"px-1.5",
-													"py-0.5",
-													isSelected
-														? "bg-primary/10 text-primary"
-														: "bg-muted/75 text-muted-foreground",
-												)}
-											>
-												<IconUser size={11} />
-												{option.vaultName || m.ext_passkey_vault_fallback()}
-											</span>
-											<span
-												className={cn(
-													"inline-flex",
-													"items-center",
-													"gap-1",
-													"rounded-full",
-													"px-1.5",
-													"py-0.5",
-													isSelected
-														? "bg-primary/10 text-primary"
-														: "bg-muted/75 text-muted-foreground",
-												)}
-											>
-												<IconClock size={11} />
-												{formatRelativeTime(
-													option.lastUsedAt || option.createdAt,
-												)}
-											</span>
-										</div>
-									</div>
-								</div>
-							</button>
+								}
+								title={option.passkeyUserDisplayName || option.passkeyUserName}
+								subtitle={option.itemUsername || option.passkeyUserName}
+								details={
+									<>
+										<OverlayChip>
+											<IconVault className="size-2.5" />
+											{option.vaultName || m.ext_passkey_vault_fallback()}
+										</OverlayChip>
+										<OverlayChip>
+											<IconClock className="size-2.5" />
+											{formatRelativeTime(
+												option.lastUsedAt || option.createdAt,
+											)}
+										</OverlayChip>
+									</>
+								}
+								trailing={
+									<span
+										aria-hidden
+										className={
+											isSelected
+												? "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground"
+												: "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border text-transparent"
+										}
+									>
+										<IconCheck className="size-2.5" />
+									</span>
+								}
+							/>
 						);
 					})}
-				</div>
+				</OverlayList>
 
 				{selectedOption?.accountEmail && (
-					<div className="flex items-center gap-1.5 rounded-md border border-border/70 bg-background/70 px-2 py-1.5 text-muted-foreground text-xs">
-						<IconMail size={12} className="shrink-0" />
+					<div className="flex items-center gap-1.5 border-t px-3 py-2 text-[11px] text-muted-foreground">
+						<IconMail className="size-3 shrink-0" />
 						<span className="truncate">{selectedOption.accountEmail}</span>
 					</div>
 				)}
 
-				<div className="flex gap-2">
+				<OverlayActions>
 					<Button
 						onClick={handleSelect}
 						size="sm"
-						className="flex-1 shadow-sm"
+						className="h-7 flex-1"
 						disabled={!selectedCredentialId}
 					>
 						{m.ext_passkey_use()}
@@ -288,23 +212,14 @@ function PasskeyPickerIframe() {
 						onClick={handleCancel}
 						variant="ghost"
 						size="sm"
-						className="flex-1 border border-transparent hover:border-border/80"
+						className="h-7 flex-1"
 					>
 						{m.ext_passkey_cancel()}
 					</Button>
-				</div>
-			</Card>
-		</div>
+				</OverlayActions>
+			</OverlaySurface>
+		</OverlayViewport>
 	);
 }
 
-const root = document.getElementById("root");
-if (root) {
-	ReactDOM.createRoot(root).render(
-		<React.StrictMode>
-			<I18nProvider>
-				<PasskeyPickerIframe />
-			</I18nProvider>
-		</React.StrictMode>,
-	);
-}
+mountOverlayApp(<PasskeyPickerIframe />);

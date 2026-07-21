@@ -1,3 +1,12 @@
+/** Attributes that can change whether an input is autofillable. */
+const RELEVANT_ATTRIBUTES: string[] = [
+	"type",
+	"name",
+	"id",
+	"autocomplete",
+	"hidden",
+];
+
 /**
  * Enhanced mutation observer for dynamic form detection
  */
@@ -6,8 +15,11 @@ export function createEnhancedObserver(
 	root: Document | ShadowRoot = document,
 ): MutationObserver {
 	const observer = new MutationObserver((mutations) => {
-		// Check if any mutations are relevant to form/input detection
-		const relevantMutations = mutations.filter((mutation) => {
+		// `some`, not `filter`: the callback only needs to know *whether* anything
+		// relevant happened, and the check below runs `querySelector` over every
+		// added subtree. On a busy SPA that is the difference between one subtree
+		// query and hundreds per mutation batch.
+		const isRelevant = mutations.some((mutation) => {
 			// Check added nodes
 			for (const node of mutation.addedNodes) {
 				if (node instanceof HTMLElement) {
@@ -30,30 +42,30 @@ export function createEnhancedObserver(
 				mutation.type === "attributes" &&
 				mutation.target instanceof HTMLInputElement
 			) {
-				const relevantAttrs = ["type", "name", "id", "autocomplete", "hidden"];
-				if (
-					mutation.attributeName &&
-					relevantAttrs.includes(mutation.attributeName)
-				) {
-					return true;
-				}
+				return RELEVANT_ATTRIBUTES.includes(mutation.attributeName ?? "");
 			}
 
 			return false;
 		});
 
-		if (relevantMutations.length > 0) {
-			callback(relevantMutations);
+		if (isRelevant) {
+			callback(mutations);
 		}
 	});
 
-	// Observe the root with comprehensive settings
+	// Observe the root with comprehensive settings.
+	//
+	// `style` is deliberately absent from the filter: nothing above treats it as
+	// relevant, but inline style writes are among the most common mutations on
+	// the web (animations, JS layout, ad scripts). Observing them woke this
+	// callback — and re-ran the whole subtree check — thousands of times per page
+	// for a result that was always "not relevant".
 	const targetNode = root === document ? document.body : root;
 	observer.observe(targetNode, {
 		childList: true,
 		subtree: true,
 		attributes: true,
-		attributeFilter: ["type", "name", "id", "autocomplete", "hidden", "style"],
+		attributeFilter: RELEVANT_ATTRIBUTES,
 	});
 
 	return observer;

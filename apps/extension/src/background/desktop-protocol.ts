@@ -1,4 +1,9 @@
+// Kept at 1: the `theme` field and `theme_changed` event are additive and
+// tolerated by older peers, so no version bump (a bump hard-breaks mixed
+// extension/desktop versions during staggered rollouts).
 export const DESKTOP_PROTOCOL_VERSION = 1;
+
+export type DesktopTheme = "light" | "dark" | "system";
 
 export type DesktopRequest =
 	| { type: "PING" }
@@ -22,7 +27,15 @@ export type DesktopRequest =
 			extension_id: string;
 	  }
 	| { type: "TRIGGER_DESKTOP_UNLOCK" }
-	| { type: "OPEN_DESKTOP_APP" };
+	// Intent fields are additive (protocol v1): older desktop hosts ignore
+	// them and simply open the app without acting on the intent.
+	| {
+			type: "OPEN_DESKTOP_APP";
+			intent?: "create_item" | "view_item";
+			url?: string;
+			itemId?: string;
+			vaultId?: string;
+	  };
 
 export type DesktopEventPayload =
 	| { event: "lock"; payload: { reason: string; timestamp: number } }
@@ -31,6 +44,10 @@ export type DesktopEventPayload =
 	| {
 			event: "active_account_changed";
 			payload: { accountId: string; timestamp: number };
+	  }
+	| {
+			event: "theme_changed";
+			payload: { theme: DesktopTheme; timestamp: number };
 	  };
 
 export type DesktopResponse =
@@ -47,6 +64,7 @@ export type DesktopResponse =
 			unlockedAccounts: string[];
 			timestamp: number;
 			autolockTimeoutMs: number;
+			theme?: DesktopTheme | null;
 	  }
 	| {
 			type: "DESKTOP_ACCOUNTS";

@@ -13,10 +13,16 @@ import {
 import React, { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { storage } from "./lib/storage";
+import { applyEarlyTheme } from "./lib/theme";
 import { I18nProvider } from "./providers/i18n-provider";
 import { ExtensionPlatformProvider } from "./providers/platform-provider";
 import { ExtensionSyncProvider } from "./providers/sync-provider";
+import { ThemeProvider } from "./providers/theme-provider";
 import { routeTree } from "./routeTree";
+
+// Apply the stored theme synchronously, before React renders, so the popup
+// never flashes the wrong theme on open.
+applyEarlyTheme();
 
 // Create TanStack Query client
 const queryClient = new QueryClient({
@@ -116,12 +122,14 @@ function Popup() {
 		<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
 			<QueryClientProvider client={queryClient}>
 				<I18nProvider>
-					<ExtensionSyncProvider queryClient={queryClient}>
-						<ExtensionPlatformProvider>
-							<RouterProvider router={router} />
-							<Toaster />
-						</ExtensionPlatformProvider>
-					</ExtensionSyncProvider>
+					<ThemeProvider>
+						<ExtensionSyncProvider queryClient={queryClient}>
+							<ExtensionPlatformProvider>
+								<RouterProvider router={router} />
+								<Toaster />
+							</ExtensionPlatformProvider>
+						</ExtensionSyncProvider>
+					</ThemeProvider>
 				</I18nProvider>
 			</QueryClientProvider>
 		</RpcProvider>

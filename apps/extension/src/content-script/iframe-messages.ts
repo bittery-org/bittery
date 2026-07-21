@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+export {
+	appendNonceToIframeSrc,
+	createIframeNonce,
+	getIframeNonceFromLocation,
+} from "../lib/iframe-nonce";
+
 const iframeNonceSchema = z.string().min(1).max(128);
 
 export const resizeIframeMessageSchema = z
@@ -40,6 +46,25 @@ export const updateExistingCredentialMessageSchema = z
 	})
 	.strict();
 
+/** Sent by an overlay's locked / re-auth state when the user asks to sign in. */
+export const openPopupMessageSchema = z
+	.object({
+		type: z.literal("OPEN_POPUP"),
+		nonce: iframeNonceSchema,
+	})
+	.strict();
+
+/**
+ * Sent by an overlay's desktop-locked state. The popup can't resolve a locked
+ * desktop app, so this asks the desktop to raise its own unlock screen instead.
+ */
+export const unlockDesktopMessageSchema = z
+	.object({
+		type: z.literal("UNLOCK_DESKTOP"),
+		nonce: iframeNonceSchema,
+	})
+	.strict();
+
 export const cancelSaveMessageSchema = z
 	.object({
 		type: z.literal("CANCEL_SAVE"),
@@ -74,26 +99,6 @@ export function createAutofillFilterSchema(filterMessageType: string) {
 			nonce: iframeNonceSchema,
 		})
 		.strict();
-}
-
-export function createIframeNonce(): string {
-	return crypto.randomUUID();
-}
-
-export function appendNonceToIframeSrc(src: string, nonce: string): string {
-	const url = new URL(src);
-	url.searchParams.set("nonce", nonce);
-	return url.toString();
-}
-
-export function getIframeNonceFromLocation(
-	locationHref: string = window.location.href,
-): string | null {
-	try {
-		return new URL(locationHref).searchParams.get("nonce");
-	} catch {
-		return null;
-	}
 }
 
 export function validateIframeMessage<T extends { nonce: string }>(

@@ -14,7 +14,6 @@ interface BaseAutofillField {
 	messageHandler?: (event: MessageEvent) => void;
 	inputHandler?: (event: Event) => void;
 	repositionCleanup?: () => void;
-	readyTimeout?: NodeJS.Timeout;
 	confidence?: number;
 	shadowRoot?: ShadowRoot;
 	hasItems?: boolean;

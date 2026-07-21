@@ -5,15 +5,16 @@ import {
 	detectOTPFields,
 	isFieldVisible,
 } from "../../lib/field-detection";
+import { hostnameMatches } from "../../lib/hostname";
 import { contentState } from "../state";
 import type { CredentialField } from "../types";
 import { hideFieldIcon, showFieldIcon } from "./icon";
 import {
 	hideItemsOverlay,
+	showAuthStateOverlay,
 	showItemsOverlay,
-	showReauthPromptCard,
-	showUnlockIframePrompt,
 } from "./overlay-utils";
+import { updateAutofillTimestamp } from "./timestamp";
 
 // Handle field focus
 export async function handleFieldFocus(field: CredentialField) {
@@ -47,6 +48,8 @@ export async function handleFieldFocus(field: CredentialField) {
 
 		if (response.needsReauth) {
 			showReauthPrompt(field);
+		} else if (response.desktopLocked) {
+			showDesktopUnlockPrompt(field);
 		} else {
 			showUnlockPrompt(field);
 		}
@@ -98,7 +101,6 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 			contentState.currentAutofillIframe = iframe;
 		},
 		keyboardHandler: handleKeyboardNavigation,
-		timeoutLog: "Timeout waiting for iframe ready, sending items anyway",
 		isAutofilling: () => contentState.isAutofilling,
 	});
 }
@@ -106,6 +108,7 @@ function showAutofillOverlay(field: CredentialField, items: DecryptedItem[]) {
 // Hide autofill overlay
 export function hideAutofillOverlay(field: CredentialField) {
 	hideItemsOverlay(field, {
+		iframeSrc: "autofill-iframe.html",
 		setCurrentIframe: () => {
 			contentState.currentAutofillIframe = null;
 		},
@@ -263,9 +266,7 @@ async function handleAutofillSelect(
 	field: CredentialField,
 	item: DecryptedItem,
 ) {
-	await chrome.runtime.sendMessage({
-		type: "UPDATE_AUTOFILL_TIMESTAMP",
-	});
+	await updateAutofillTimestamp();
 
 	contentState.isAutofilling = true;
 
@@ -341,15 +342,106 @@ async function handleAutofillSelect(
 	contentState.currentFocusedField = null;
 }
 
+/**
+ * Fill a credential item into the current page without a focused field.
+ *
+ * Triggered by the popup's "Fill" / "Autofill on this page" actions via a
+ * runtime message. Locates the best visible username/password inputs (and any
+ * OTP inputs) on the page and fills them, mirroring the overlay-select flow.
+ * Returns `true` when at least one field was populated.
+ */
+export async function fillCredentialItem(
+	item: DecryptedItem,
+): Promise<boolean> {
+	// The popup resolved the item against the tab it saw at open time; the tab
+	// may have navigated since. Never write secrets to a non-matching origin.
+	if (!hostnameMatches(item.url ?? "", window.location.hostname)) {
+		return false;
+	}
+
+	await updateAutofillTimestamp();
+
+	contentState.isAutofilling = true;
+	let filled = false;
+
+	try {
+		const isFillable = (input: HTMLInputElement) =>
+			input.isConnected &&
+			!input.disabled &&
+			!input.readOnly &&
+			isFieldVisible(input);
+
+		const passwordInput = Array.from(
+			document.querySelectorAll<HTMLInputElement>('input[type="password"]'),
+		).find(isFillable);
+
+		let usernameInput: HTMLInputElement | undefined;
+		for (const [input, detectedField] of contentState.detectedFields) {
+			if (
+				(detectedField.type === "username" || detectedField.type === "email") &&
+				isFillable(input)
+			) {
+				usernameInput = input;
+				break;
+			}
+		}
+
+		if (!usernameInput) {
+			const scope: ParentNode = passwordInput?.closest("form") ?? document;
+			usernameInput = Array.from(
+				scope.querySelectorAll<HTMLInputElement>(
+					'input[type="text"], input[type="email"], input:not([type])',
+				),
+			).find(isFillable);
+		}
+
+		if (usernameInput && item.username) {
+			fillInputWithEvents(usernameInput, item.username);
+			filled = true;
+		}
+
+		if (passwordInput && item.password) {
+			fillInputWithEvents(passwordInput, item.password);
+			filled = true;
+		}
+
+		const otpReference = passwordInput ?? usernameInput;
+		if (otpReference && item.totpSecret) {
+			const otpFilled = await autofillTotpCodeForItem(otpReference, item);
+			filled = filled || otpFilled;
+		}
+	} finally {
+		setTimeout(() => {
+			contentState.isAutofilling = false;
+		}, 100);
+	}
+
+	return filled;
+}
+
 // Show unlock prompt (when extension is locked)
 function showUnlockPrompt(field: CredentialField) {
-	showUnlockIframePrompt(field, {
+	showAuthStateOverlay(field, {
 		iframeSrc: "autofill-iframe.html",
 		readyMessageType: "IFRAME_READY",
+		state: "NEEDS_UNLOCK",
+	});
+}
+
+// Show desktop unlock prompt (when a connected desktop app holds the lock)
+function showDesktopUnlockPrompt(field: CredentialField) {
+	showAuthStateOverlay(field, {
+		iframeSrc: "autofill-iframe.html",
+		readyMessageType: "IFRAME_READY",
+		state: "NEEDS_DESKTOP_UNLOCK",
 	});
 }
 
 // Show re-authentication prompt
 function showReauthPrompt(field: CredentialField) {
-	showReauthPromptCard(field, "Please re-authenticate to use autofill");
+	showAuthStateOverlay(field, {
+		iframeSrc: "autofill-iframe.html",
+		readyMessageType: "IFRAME_READY",
+		state: "NEEDS_REAUTH",
+	});
 }

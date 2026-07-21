@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bittery Extension — Popup Redesign · Round 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..700&display=swap" rel="stylesheet" />
+<style>
+  /* ============================================================
+     BITTERY EXTENSION POPUP — ROUND 1
+     Brand-Forward applied to the 620×520 popup.
+     Toggles: screen · theme (dark/light) · desktop-app mode.
+     Dark values mirror tokens.css .dark, light mirrors :root.
+     ============================================================ */
+  .popup {
+    /* dark (default) */
+    --bg:        oklch(0.126 0.008 282);
+    --sidebar:   oklch(0.148 0.011 283);
+    --card:      oklch(0.172 0.013 283);
+    --popover:   oklch(0.196 0.015 284);
+    --overlay:   oklch(0.225 0.017 284);
+
+    --border:        oklch(1 0 0 / 0.07);
+    --border-strong: oklch(1 0 0 / 0.11);
+
+    --text-1: oklch(0.935 0.005 288);
+    --text-2: oklch(0.715 0.010 288);
+    --text-3: oklch(0.535 0.013 288);
+
+    --hover:  oklch(1 0 0 / 0.04);
+    --active: oklch(1 0 0 / 0.07);
+
+    --primary:      oklch(0.70 0.165 288);
+    --primary-deep: oklch(0.58 0.185 292);
+    --primary-soft: oklch(0.70 0.165 288 / 0.11);
+    --primary-fg:   oklch(0.985 0.005 288);
+    --selected:     oklch(0.70 0.165 288 / 0.09);
+
+    --green: oklch(0.72 0.14 160);
+    --amber: oklch(0.78 0.13 75);
+    --red:   oklch(0.68 0.18 22);
+    --sky:   oklch(0.72 0.12 230);
+
+    --btn-hi:   oklch(0.72 0.165 286);
+    --btn-lo:   oklch(0.63 0.18 293);
+    --glow:     oklch(0.58 0.185 292 / 0.35);
+    --glow-big: oklch(0.58 0.185 292 / 0.5);
+    --aurora:   oklch(0.58 0.185 292 / 0.14);
+
+    --input-bg: oklch(1 0 0 / 0.02);
+    --tile-ring: oklch(1 0 0 / 0.09);
+
+    --radius:    10px;
+    --radius-sm: 6px;
+    --shadow-pop: 0 0 0 1px oklch(1 0 0 / 0.07), 0 10px 28px oklch(0 0 0 / 0.5), 0 2px 8px oklch(0 0 0 / 0.35);
+    color-scheme: dark;
+  }
+  .popup.light {
+    --bg:        oklch(0.985 0.003 286);
+    --sidebar:   oklch(0.965 0.005 286);
+    --card:      oklch(1 0 0);
+    --popover:   oklch(1 0 0);
+    --overlay:   oklch(0.945 0.006 286);
+
+    --border:        oklch(0 0 0 / 0.08);
+    --border-strong: oklch(0 0 0 / 0.14);
+
+    --text-1: oklch(0.185 0.012 285);
+    --text-2: oklch(0.40 0.013 286);
+    --text-3: oklch(0.55 0.013 286);
+
+    --hover:  oklch(0 0 0 / 0.035);
+    --active: oklch(0 0 0 / 0.06);
+
+    --primary:      oklch(0.585 0.19 289);
+    --primary-deep: oklch(0.5 0.2 292);
+    --primary-soft: oklch(0.585 0.19 289 / 0.10);
+    --selected:     oklch(0.585 0.19 289 / 0.09);
+
+    --green: oklch(0.55 0.14 160);
+    --amber: oklch(0.6 0.13 75);
+    --red:   oklch(0.577 0.245 27.3);
+    --sky:   oklch(0.55 0.12 230);
+
+    --btn-hi:   oklch(0.62 0.185 287);
+    --btn-lo:   oklch(0.53 0.195 292);
+    --glow:     oklch(0.5 0.2 292 / 0.22);
+    --glow-big: oklch(0.5 0.2 292 / 0.3);
+    --aurora:   oklch(0.5 0.2 292 / 0.08);
+
+    --input-bg: oklch(0 0 0 / 0.015);
+    --tile-ring: oklch(1 0 0 / 0.12);
+    --shadow-pop: 0 0 0 1px oklch(0 0 0 / 0.06), 0 10px 28px oklch(0 0 0 / 0.14), 0 2px 8px oklch(0 0 0 / 0.08);
+    color-scheme: light;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+    font-size: 13px; line-height: 1.45;
+    letter-spacing: -0.006em;
+    font-feature-settings: "cv05", "cv11";
+    background: oklch(0.09 0.006 282);
+    color: oklch(0.935 0.005 288);
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100vh; padding: 26px 16px 40px;
+  }
+  svg { display: block; flex: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; letter-spacing: inherit; text-align: left; }
+  input { font: inherit; letter-spacing: inherit; }
+
+  /* ============ viewer chrome (not part of the design) ============ */
+  .viewer-bar {
+    display: flex; align-items: center; gap: 20px; flex-wrap: wrap; justify-content: center;
+    margin-bottom: 22px;
+  }
+  .seg {
+    display: flex; gap: 2px; padding: 3px;
+    background: oklch(0.15 0.01 283); border: 1px solid oklch(1 0 0 / 0.07); border-radius: 8px;
+  }
+  .seg button {
+    padding: 4px 12px; border-radius: 5px;
+    font-size: 12px; font-weight: 500; color: oklch(0.6 0.01 288);
+    transition: background 0.12s, color 0.12s;
+  }
+  .seg button:hover { color: oklch(0.9 0.005 288); }
+  .seg button.on { background: oklch(0.24 0.017 284); color: oklch(0.94 0.005 288); box-shadow: 0 1px 3px oklch(0 0 0/0.3); }
+  .viewer-label { font-size: 10.5px; font-weight: 550; letter-spacing: 0.06em; text-transform: uppercase; color: oklch(0.5 0.01 288); margin-right: -12px; }
+
+  .stage { position: relative; }
+  /* fake browser toolbar context */
+  .toolbar-ctx {
+    display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+    width: 620px; margin: 0 auto 10px; padding: 0 4px;
+    opacity: 0.55;
+  }
+  .toolbar-ctx .puzzle { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; background: oklch(0.18 0.012 283); color: oklch(0.65 0.01 288); }
+  .toolbar-ctx .ext-pin { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305)); color: #fff; box-shadow: 0 0 12px oklch(0.58 0.185 292 / 0.5); }
+
+  /* ============ THE POPUP ============ */
+  .popup {
+    width: 620px; height: 520px;
+    margin: 0 auto;
+    background: var(--bg);
+    color: var(--text-1);
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 0 0 1px oklch(1 0 0 / 0.08), 0 24px 60px oklch(0 0 0 / 0.6), 0 6px 18px oklch(0 0 0 / 0.4);
+    display: flex; flex-direction: column;
+  }
+  .popup.light { box-shadow: 0 0 0 1px oklch(0 0 0 / 0.1), 0 24px 60px oklch(0 0 0 / 0.55), 0 6px 18px oklch(0 0 0 / 0.35); }
+  .screen { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  .screen.on { display: flex; }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-thumb { background: oklch(0.5 0.01 288 / 0.35); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
+
+  .kbd {
+    font-size: 10px; font-weight: 500; color: var(--text-3);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 1px 4px; line-height: 1.3;
+    background: var(--input-bg);
+  }
+  .icon-btn {
+    display: grid; place-items: center;
+    width: 26px; height: 26px; border-radius: var(--radius-sm);
+    color: var(--text-3);
+    transition: background 0.1s, color 0.1s;
+  }
+  .icon-btn:hover { background: var(--hover); color: var(--text-1); }
+  .btn-primary {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 28px; padding: 0 11px;
+    border-radius: var(--radius-sm);
+    background: linear-gradient(to bottom, var(--btn-hi), var(--btn-lo));
+    color: var(--primary-fg);
+    font-size: 12.5px; font-weight: 550;
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 14px var(--glow);
+    transition: filter 0.12s ease, box-shadow 0.12s ease;
+  }
+  .btn-primary:hover { filter: brightness(1.08); box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 1px 2px oklch(0 0 0 / 0.3), 0 0 20px var(--glow-big); }
+  .btn-primary.lg { height: 34px; width: 100%; font-size: 13px; border-radius: 8px; }
+  .btn-ghost {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 28px; padding: 0 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12.5px; font-weight: 500; color: var(--text-2);
+    transition: background 0.1s, color 0.1s;
+  }
+  .btn-ghost:hover { background: var(--hover); color: var(--text-1); }
+  .btn-outline {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    height: 34px; width: 100%;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    font-size: 12.5px; font-weight: 500; color: var(--text-2);
+    transition: background 0.1s, color 0.1s, border-color 0.1s;
+  }
+  .btn-outline:hover { background: var(--hover); color: var(--text-1); border-color: var(--border-strong); }
+
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 10.5px; font-weight: 550; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); margin-bottom: 5px; }
+  .input {
+    display: flex; align-items: center; gap: 8px;
+    height: 34px; padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--text-3);
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .input:hover { border-color: var(--border-strong); }
+  .input:focus-within {
+    border-color: color-mix(in oklab, var(--primary) 60%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 16%, transparent), 0 0 16px color-mix(in oklab, var(--primary-deep) 15%, transparent);
+  }
+  .input input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text-1); }
+  .input input::placeholder { color: var(--text-3); }
+  .input .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; letter-spacing: 0.05em; }
+
+  .group-label { font-size: 10.5px; font-weight: 550; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-3); }
+
+  /* ================= VAULT SCREEN ================= */
+  .v-header {
+    height: 48px; flex: none;
+    display: flex; align-items: center; gap: 4px;
+    padding: 0 10px;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+  }
+  .acct-trigger {
+    display: flex; align-items: center; gap: 8px;
+    height: 32px; padding: 0 8px;
+    border-radius: var(--radius-sm);
+    transition: background 0.12s ease;
+    color: var(--text-1);
+  }
+  .acct-trigger:hover, .acct-trigger[aria-expanded="true"] { background: var(--hover); }
+  .acct-avatar {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305));
+    color: #fff;
+    display: grid; place-items: center;
+    font-size: 9.5px; font-weight: 650; letter-spacing: 0.02em;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.18), 0 0 10px oklch(0.58 0.185 292 / 0.45);
+    flex: none;
+  }
+  .acct-name { font-weight: 550; font-size: 12.5px; max-width: 150px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .acct-trigger .chev { color: var(--text-3); transition: transform 0.15s; }
+  .acct-trigger[aria-expanded="true"] .chev { transform: rotate(180deg); }
+
+  .acct-popover {
+    position: absolute; z-index: 60; top: 44px; left: 10px; width: 268px;
+    background: var(--popover);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-pop);
+    padding: 4px; overflow: hidden;
+    opacity: 0; transform: translateY(-4px) scale(0.98); pointer-events: none;
+    transform-origin: top left;
+    transition: opacity 0.13s ease, transform 0.13s ease;
+  }
+  .acct-popover::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 60px;
+    background: linear-gradient(to bottom, color-mix(in oklab, var(--primary-deep) 20%, transparent), transparent);
+    pointer-events: none;
+  }
+  .acct-popover::after {
+    content: ""; position: absolute; top: 0; left: 8%; right: 8%; height: 1px;
+    background: linear-gradient(to right, transparent, color-mix(in oklab, var(--primary) 55%, transparent), transparent);
+  }
+  .acct-popover.open { opacity: 1; transform: none; pointer-events: auto; }
+  .pop-label { padding: 6px 8px 4px; position: relative; font-size: 10.5px; font-weight: 550; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); }
+  .pop-account {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    transition: background 0.1s ease;
+    position: relative;
+  }
+  .pop-account:hover { background: var(--hover); }
+  .pop-account .acct-avatar { width: 24px; height: 24px; font-size: 10.5px; }
+  .pop-account .meta { flex: 1; min-width: 0; }
+  .pop-account .meta .name { display: block; font-size: 12.5px; font-weight: 550; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pop-account .meta .email { display: block; font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .lock-dot { display: inline-flex; }
+  .lock-dot i { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+  .lock-dot.unlocked i { background: var(--green); box-shadow: 0 0 6px color-mix(in oklab, var(--green) 60%, transparent); }
+  .pop-account .check { color: var(--primary); filter: drop-shadow(0 0 4px color-mix(in oklab, var(--primary) 60%, transparent)); }
+  .pop-sep { height: 1px; background: var(--border); margin: 4px 6px; }
+  .pop-item {
+    display: flex; align-items: center; gap: 8px;
+    width: 100%; padding: 5.5px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 12.5px; color: var(--text-2);
+    transition: background 0.1s ease, color 0.1s ease;
+  }
+  .pop-item:hover { background: var(--hover); color: var(--text-1); }
+  .pop-item svg { color: var(--text-3); }
+
+  .v-panes { flex: 1; min-height: 0; display: flex; }
+  .v-list {
+    width: 244px; flex: none;
+    display: flex; flex-direction: column;
+    border-right: 1px solid var(--border);
+    background: var(--sidebar);
+    position: relative;
+  }
+  /* brand moment: aurora at top of the list pane */
+  .v-list::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 120px;
+    background: radial-gradient(130% 100% at 30% 0%, var(--aurora), transparent 65%);
+    pointer-events: none;
+  }
+  .v-search { padding: 8px 8px 6px; position: relative; flex: none; }
+  .searchbox {
+    display: flex; align-items: center; gap: 7px;
+    height: 28px; padding: 0 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--text-3); font-size: 12.5px;
+    transition: border-color 0.12s ease, box-shadow 0.12s ease;
+  }
+  .searchbox:hover { border-color: var(--border-strong); }
+  .searchbox:focus-within {
+    border-color: color-mix(in oklab, var(--primary) 60%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--primary) 16%, transparent), 0 0 16px color-mix(in oklab, var(--primary-deep) 15%, transparent);
+  }
+  .searchbox input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text-1); }
+  .searchbox input::placeholder { color: var(--text-3); }
+
+  .v-scroll { flex: 1; overflow-y: auto; padding: 0 6px 8px; position: relative; }
+  .v-scroll .group-label { padding: 8px 8px 4px; display: flex; align-items: center; gap: 5px; }
+  .v-scroll .group-label .site { color: var(--text-2); text-transform: none; letter-spacing: 0; font-size: 11px; font-weight: 500; }
+  .row {
+    display: flex; align-items: center; gap: 9px;
+    width: 100%; padding: 5px 8px; min-height: 40px;
+    border-radius: var(--radius-sm);
+    transition: background 0.1s ease;
+    position: relative;
+  }
+  .row:hover { background: var(--hover); }
+  .row.selected { background: var(--selected); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 14%, transparent); }
+  .row.selected::before {
+    content: ""; position: absolute; left: -6px; top: 7px; bottom: 7px; width: 2px;
+    border-radius: 2px; background: var(--primary);
+    box-shadow: 0 0 8px color-mix(in oklab, var(--primary) 80%, transparent);
+  }
+  .tile {
+    width: 26px; height: 26px; border-radius: 7px; flex: none;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 600; color: #fff;
+    box-shadow: inset 0 0 0 1px var(--tile-ring);
+  }
+  .row .body { flex: 1; min-width: 0; }
+  .row .title { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; color: var(--text-1); }
+  .row .title span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .title .ind { color: var(--text-3); flex: none; }
+  .row .sub { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  /* hover-revealed Fill chip on suggested rows */
+  .fill-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 22px; padding: 0 9px; flex: none;
+    border-radius: 999px;
+    background: linear-gradient(to bottom, var(--btn-hi), var(--btn-lo));
+    color: var(--primary-fg);
+    font-size: 11px; font-weight: 550;
+    box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.22), 0 0 10px var(--glow);
+    opacity: 0; transition: opacity 0.12s ease, filter 0.12s ease;
+  }
+  .row:hover .fill-chip, .row:focus-visible .fill-chip { opacity: 1; }
+  .fill-chip:hover { filter: brightness(1.08); }
+
+  .v-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg); }
+  .d-scroll { flex: 1; overflow-y: auto; }
+  .d-inner { padding: 18px 18px 24px; position: relative; }
+  .d-inner::before {
+    content: ""; position: absolute; top: -30px; left: -20px; width: 300px; height: 170px;
+    background: radial-gradient(60% 60% at 30% 40%, color-mix(in oklab, var(--primary-deep) 9%, transparent), transparent 70%);
+    pointer-events: none;
+  }
+  .d-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; position: relative; }
+  .tile-lg {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: grid; place-items: center;
+    font-size: 16px; font-weight: 600; color: #fff;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.1), 0 2px 8px oklch(0 0 0 / 0.3), 0 0 24px color-mix(in oklab, var(--primary-deep) 20%, transparent);
+    flex: none;
+  }
+  .d-head h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
+  .d-head .sub { font-size: 11.5px; color: var(--text-3); margin-top: 1px; }
+  .d-head .head-actions { margin-left: auto; display: flex; gap: 2px; }
+
+  .autofill-cta { margin-bottom: 14px; position: relative; }
+
+  .field-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .frow {
+    display: flex; align-items: center;
+    padding: 7px 12px; min-height: 44px;
+    transition: background 0.1s ease;
+  }
+  .frow + .frow { border-top: 1px solid var(--border); }
+  .frow:hover { background: var(--hover); }
+  .frow .fbody { flex: 1; min-width: 0; }
+  .flabel { font-size: 10.5px; font-weight: 550; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-3); margin-bottom: 1px; }
+  .fvalue { font-size: 13px; color: var(--text-1); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fvalue.link { color: color-mix(in oklab, var(--primary) 55%, var(--text-1)); }
+  .fvalue.mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; letter-spacing: 0.04em; }
+  .fvalue.dots { letter-spacing: 0.22em; color: var(--text-2); }
+  .factions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s ease; }
+  .frow:hover .factions, .frow:focus-within .factions { opacity: 1; }
+  .factions .icon-btn:hover { background: var(--active); }
+
+  .totp-code { display: flex; align-items: center; gap: 10px; }
+  .totp-code .code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 15px; font-weight: 500; letter-spacing: 0.12em; color: var(--text-1); }
+  .totp-ring { width: 15px; height: 15px; transform: rotate(-90deg); }
+  .totp-ring circle { fill: none; stroke-width: 2.5; }
+  .totp-ring .track { stroke: color-mix(in oklab, var(--text-3) 35%, transparent); }
+  .totp-ring .prog { stroke: var(--primary); stroke-linecap: round; stroke-dasharray: 37.7; animation: totp 30s linear infinite; filter: drop-shadow(0 0 3px color-mix(in oklab, var(--primary) 70%, transparent)); }
+  @keyframes totp { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 37.7; } }
+  .passkey-meta { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+
+  /* status footer */
+  .v-footer {
+    height: 30px; flex: none;
+    display: flex; align-items: center; gap: 7px;
+    padding: 0 10px;
+    border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--text-3);
+    background: var(--sidebar);
+  }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px color-mix(in oklab, var(--green) 60%, transparent); flex: none; }
+  .v-footer .lock-now { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 5px; font-size: 11px; color: var(--text-3); transition: background 0.1s, color 0.1s; }
+  .v-footer .lock-now:hover { background: var(--hover); color: var(--text-1); }
+
+  /* ================= UNLOCK / LOGIN SCREENS ================= */
+  .auth {
+    flex: 1; min-height: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    position: relative;
+    padding: 24px;
+    overflow-y: auto;
+  }
+  .auth::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 240px;
+    background: radial-gradient(70% 100% at 50% 0%, var(--aurora), transparent 70%);
+    pointer-events: none;
+  }
+  .auth-inner { width: 300px; position: relative; display: flex; flex-direction: column; align-items: center; }
+  .vault-emblem {
+    width: 64px; height: 64px;
+    display: grid; place-items: center;
+    filter: drop-shadow(0 4px 14px oklch(0 0 0 / 0.35)) drop-shadow(0 0 28px var(--glow-big));
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .vault-emblem img { width: 58px; height: 58px; object-fit: contain; }
+  .auth h1 { font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
+  .auth .who { display: flex; align-items: center; gap: 6px; margin: 5px 0 18px; font-size: 12px; color: var(--text-3); }
+  .auth .who .acct-avatar { width: 16px; height: 16px; border-radius: 4.5px; font-size: 7.5px; box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.18); }
+  .auth form { width: 100%; }
+  .auth .aux { margin-top: 14px; font-size: 12px; color: var(--text-3); text-align: center; }
+  .auth .aux button { color: var(--text-2); font-weight: 500; transition: color 0.1s; }
+  .auth .aux button:hover { color: var(--text-1); }
+  .or-sep { display: flex; align-items: center; gap: 10px; width: 100%; margin: 12px 0; color: var(--text-3); font-size: 10.5px; font-weight: 550; letter-spacing: 0.06em; text-transform: uppercase; }
+  .or-sep::before, .or-sep::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .banner {
+    display: flex; align-items: flex-start; gap: 9px;
+    width: 100%; padding: 9px 11px; margin-bottom: 14px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in oklab, var(--amber) 30%, transparent);
+    background: color-mix(in oklab, var(--amber) 9%, transparent);
+    font-size: 12px; color: var(--text-2);
+    position: relative;
+  }
+  .banner svg { color: var(--amber); margin-top: 1px; }
+  .banner b { color: var(--text-1); font-weight: 550; }
+  .banner .link-btn { color: var(--amber); font-weight: 550; padding: 0; }
+  .banner .link-btn:hover { text-decoration: underline; }
+
+  /* login split layout */
+  .login-split { flex: 1; min-height: 0; display: flex; }
+  .login-brand {
+    width: 230px; flex: none;
+    background: var(--sidebar);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 22px 20px;
+    position: relative; overflow: hidden;
+  }
+  .login-brand::before {
+    content: ""; position: absolute; inset: 0 0 auto 0; height: 220px;
+    background: radial-gradient(120% 100% at 30% 0%, var(--aurora), transparent 65%);
+    pointer-events: none;
+  }
+  .login-brand .mark {
+    width: 40px; height: 40px; border-radius: 11px;
+    background: linear-gradient(135deg, oklch(0.62 0.19 288), oklch(0.45 0.19 305));
+    display: grid; place-items: center; color: #fff;
+    box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.18), 0 0 24px var(--glow-big);
+    position: relative;
+  }
+  .login-brand h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; margin-top: 14px; position: relative; }
+  .login-brand p { font-size: 12px; color: var(--text-3); margin-top: 5px; line-height: 1.5; position: relative; }
+  .login-points { position: relative; display: flex; flex-direction: column; gap: 9px; }
+  .login-points .pt { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-2); }
+  .login-points .pt svg { color: var(--primary); filter: drop-shadow(0 0 4px color-mix(in oklab, var(--primary) 50%, transparent)); }
+  .login-form { flex: 1; min-width: 0; overflow-y: auto; padding: 24px 26px; }
+  .login-form h1 { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; margin-bottom: 2px; }
+  .login-form .lead { font-size: 12px; color: var(--text-3); margin-bottom: 16px; }
+  .adv-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; color: var(--text-3); margin-bottom: 12px; transition: color 0.1s; }
+  .adv-toggle:hover { color: var(--text-1); }
+  .adv-toggle .chev { transition: transform 0.15s; }
+  .adv-toggle.open .chev { transform: rotate(90deg); }
+  .adv-body { display: none; }
+  .adv-body.open { display: block; }
+
+  /* ================= SETTINGS SCREEN ================= */
+  .s-header {
+    height: 48px; flex: none;
+    display: flex; align-items: center; gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .s-header h1 { font-size: 13.5px; font-weight: 600; }
+  .s-scroll { flex: 1; overflow-y: auto; padding: 16px 18px 24px; }
+  .s-section { max-width: 460px; margin: 0 auto 16px; }
+  .s-section > .group-label { display: block; margin-bottom: 7px; padding: 0 2px; }
+  .srow { display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-height: 52px; }
+  .srow + .srow { border-top: 1px solid var(--border); }
+  .srow .sbody { flex: 1; min-width: 0; }
+  .srow .stitle { font-size: 12.5px; font-weight: 500; color: var(--text-1); display: flex; align-items: center; gap: 7px; }
+  .srow .sdesc { font-size: 11.5px; color: var(--text-3); margin-top: 1px; }
+  .managed-chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 18px; padding: 0 7px;
+    border-radius: 999px;
+    font-size: 10px; font-weight: 550;
+    color: var(--sky);
+    border: 1px solid color-mix(in oklab, var(--sky) 30%, transparent);
+    background: color-mix(in oklab, var(--sky) 9%, transparent);
+  }
+  .theme-seg {
+    display: flex; gap: 2px; padding: 2.5px;
+    background: var(--input-bg);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .theme-seg button {
+    display: inline-flex; align-items: center; gap: 5px;
+    height: 24px; padding: 0 10px;
+    border-radius: 5.5px;
+    font-size: 11.5px; font-weight: 500; color: var(--text-3);
+    transition: background 0.12s, color 0.12s, box-shadow 0.12s;
+  }
+  .theme-seg button:hover { color: var(--text-1); }
+  .theme-seg button.on {
+    background: var(--overlay); color: var(--text-1);
+    box-shadow: 0 1px 3px oklch(0 0 0 / 0.25), inset 0 0 0 1px var(--border);
+  }
+  .theme-seg.disabled { opacity: 0.55; pointer-events: none; }
+  .select {
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 28px; padding: 0 10px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    font-size: 12px; color: var(--text-1);
+    transition: border-color 0.1s;
+  }
+  .select:hover { border-color: var(--border-strong); }
+  .select svg { color: var(--text-3); }
+  .select.disabled { opacity: 0.55; pointer-events: none; }
+  .btn-destructive {
+    display: inline-flex; align-items: center; gap: 6px;
+    height: 28px; padding: 0 11px;
+    border-radius: var(--radius-sm);
+    font-size: 12.5px; font-weight: 500;
+    color: var(--red);
+    border: 1px solid color-mix(in oklab, var(--red) 30%, transparent);
+    background: color-mix(in oklab, var(--red) 7%, transparent);
+    transition: background 0.1s;
+  }
+  .btn-destructive:hover { background: color-mix(in oklab, var(--red) 13%, transparent); }
+  .btn-destructive.disabled { opacity: 0.5; pointer-events: none; }
+  .desktop-note { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-3); padding: 2px 2px 0; margin-top: 8px; }
+  .desktop-note svg { color: var(--sky); }
+
+  /* desktop-mode visibility helpers */
+  .only-desktop { display: none !important; }
+  .stage.desktop .only-desktop { display: flex !important; }
+  .stage.desktop .hide-desktop { display: none !important; }
+
+  .caption { margin-top: 18px; text-align: center; font-size: 11.5px; color: oklch(0.55 0.01 288); max-width: 620px; line-height: 1.6; }
+  .caption b { color: oklch(0.75 0.01 288); font-weight: 550; }
+</style>
+</head>
+<body>
+
+<!-- ICON SPRITE (lucide-style) -->
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="i-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9.5" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/></symbol>
+    <symbol id="i-lock-lg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="9.5" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/><circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-chev-d" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></symbol>
+    <symbol id="i-chev-l" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 6 9 12 15 18"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="11" cy="11" r="7.5"/><line x1="20.5" y1="20.5" x2="16.4" y2="16.4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><line x1="11" y1="18" x2="13" y2="18"/></symbol>
+    <symbol id="i-passkey" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><circle cx="12" cy="12" r="3.5"/><path d="M12 15.5V21"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="3.5"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 4V2"/><path d="M15 16v-2"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8L19 13"/><path d="M15 9h0"/><path d="M17.8 6.2L19 5"/><path d="M12.2 6.2L11 5"/><path d="M3 21l9-9"/></symbol>
+    <symbol id="i-touchid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 11v4"/><path d="M8 8.5a5 5 0 0 1 8 0"/><path d="M5.5 6.5A8.5 8.5 0 0 1 12 3.5a8.5 8.5 0 0 1 6.5 3"/><path d="M8.5 14.5V15a3.5 3.5 0 0 0 7 0v-3a3.5 3.5 0 0 0-1-2.45"/><path d="M5.5 11v3.5A6.5 6.5 0 0 0 12 21"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="3.5" width="19" height="13" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M4.93 19.07l1.41-1.41m11.32-11.32l1.41-1.41"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9.5"/><path d="M2.5 12h19"/><path d="M12 2.5c2.5 2.6 3.9 5.9 3.9 9.5s-1.4 6.9-3.9 9.5c-2.5-2.6-3.9-5.9-3.9-9.5S9.5 5.1 12 2.5z"/></symbol>
+    <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.6 7.6a5.5 5.5 0 1 1-7.8 7.8 5.5 5.5 0 0 1 7.8-7.8zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></symbol>
+    <symbol id="i-puzzle" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19.4 13.4c-.3 0-.6.1-.8.3l-1.1 1a.9.9 0 0 1-1.5-.7v-2a1 1 0 0 0-1-1h-2a.9.9 0 0 1-.7-1.5l1-1.1c.2-.2.3-.5.3-.8a1.9 1.9 0 0 0-3.7-.6c0 .5.2 1 .5 1.4l1 1.1a.9.9 0 0 1-.7 1.5H8.7a1 1 0 0 0-1 1v2a.9.9 0 0 1-1.5.7l-1.1-1a1.2 1.2 0 0 0-.8-.3 1.9 1.9 0 0 0 0 3.7c.3 0 .6-.1.8-.3l1.1-1a.9.9 0 0 1 1.5.7v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2a.9.9 0 0 1 1.5-.7l1.1 1c.2.2.5.3.8.3a1.9 1.9 0 0 0 0-3.7z"/></symbol>
+  </defs>
+</svg>
+
+<!-- ============ viewer controls ============ -->
+<div class="viewer-bar">
+  <span class="viewer-label">Screen</span>
+  <div class="seg" id="screenSeg">
+    <button data-screen="vault" class="on">Vault</button>
+    <button data-screen="unlock">Unlock</button>
+    <button data-screen="login">Login</button>
+    <button data-screen="settings">Settings</button>
+  </div>
+  <span class="viewer-label">Theme</span>
+  <div class="seg" id="themeSeg">
+    <button data-theme="dark" class="on">Dark</button>
+    <button data-theme="light">Light</button>
+  </div>
+  <span class="viewer-label">Desktop app</span>
+  <div class="seg" id="desktopSeg">
+    <button data-desktop="off" class="on">Standalone</button>
+    <button data-desktop="on">Connected</button>
+  </div>
+</div>
+
+<div class="stage" id="stage">
+  <div class="toolbar-ctx">
+    <span class="puzzle"><svg width="14" height="14"><use href="#i-puzzle"/></svg></span>
+    <span class="ext-pin"><svg width="13" height="13"><use href="#i-lock-lg"/></svg></span>
+  </div>
+
+  <div class="popup" id="popup">
+
+    <!-- ================= VAULT ================= -->
+    <div class="screen on" data-screen="vault">
+      <header class="v-header">
+        <button class="acct-trigger" id="acctTrigger" aria-expanded="false">
+          <span class="acct-avatar">QG</span>
+          <span class="acct-name">qrawall GmbH</span>
+          <svg class="chev" width="12" height="12"><use href="#i-chev-d"/></svg>
+        </button>
+        <span style="flex:1"></span>
+        <button class="icon-btn" title="Settings"><svg width="14" height="14"><use href="#i-settings"/></svg></button>
+        <button class="btn-primary" style="margin-left:4px"><svg width="12" height="12"><use href="#i-plus"/></svg>New item</button>
+
+        <div class="acct-popover" id="acctPopover">
+          <div class="pop-label">Accounts</div>
+          <button class="pop-account">
+            <span class="acct-avatar">QG</span>
+            <span class="meta"><span class="name">qrawall GmbH</span><span class="email">c.federico@qrawall.com</span></span>
+            <span class="lock-dot unlocked"><i></i></span>
+            <svg class="check" width="14" height="14"><use href="#i-check"/></svg>
+          </button>
+          <button class="pop-account">
+            <span class="acct-avatar" style="background: linear-gradient(135deg, oklch(0.55 0.1 220), oklch(0.45 0.1 250)); box-shadow: inset 0 0 0 1px oklch(1 0 0/0.12)">JS</span>
+            <span class="meta"><span class="name">Personal</span><span class="email">julian@sigmund.dev</span></span>
+            <span class="lock-dot"><i></i></span>
+          </button>
+          <div class="pop-sep"></div>
+          <button class="pop-item"><svg width="14" height="14"><use href="#i-plus"/></svg>Add account</button>
+          <button class="pop-item"><svg width="14" height="14"><use href="#i-settings"/></svg>Settings</button>
+          <div class="pop-sep"></div>
+          <button class="pop-item"><svg width="14" height="14"><use href="#i-lock"/></svg>Lock vault</button>
+        </div>
+      </header>
+
+      <div class="v-panes">
+        <aside class="v-list">
+          <div class="v-search">
+            <div class="searchbox">
+              <svg width="13" height="13"><use href="#i-search"/></svg>
+              <input placeholder="Search items…" />
+              <span class="kbd">⌘K</span>
+            </div>
+          </div>
+          <div class="v-scroll">
+            <div class="group-label"><svg width="11" height="11" style="color:var(--text-3)"><use href="#i-globe"/></svg><span>Suggested</span><span class="site">· github.com</span></div>
+            <button class="row selected">
+              <span class="tile" style="background:#1c2128">GH</span>
+              <span class="body">
+                <span class="title"><span>GitHub</span><svg class="ind" width="11" height="11"><use href="#i-passkey"/></svg></span>
+                <span class="sub">jsigmund</span>
+              </span>
+              <span class="fill-chip"><svg width="10" height="10"><use href="#i-wand"/></svg>Fill</span>
+            </button>
+            <button class="row">
+              <span class="tile" style="background:#24292f">GH</span>
+              <span class="body">
+                <span class="title"><span>GitHub — Work</span></span>
+                <span class="sub">c.federico@qrawall.com</span>
+              </span>
+              <span class="fill-chip"><svg width="10" height="10"><use href="#i-wand"/></svg>Fill</span>
+            </button>
+
+            <div class="group-label">Favorites</div>
+            <button class="row">
+              <span class="tile" style="background:#635bff">S</span>
+              <span class="body">
+                <span class="title"><span>Stripe</span></span>
+                <span class="sub">c.federico@qrawall.com</span>
+              </span>
+            </button>
+            <button class="row">
+              <span class="tile" style="background:#4285f4">G</span>
+              <span class="body">
+                <span class="title"><span>Google</span><svg class="ind" width="11" height="11"><use href="#i-passkey"/></svg></span>
+                <span class="sub">julian.sigmund@gmail.com</span>
+              </span>
+            </button>
+
+            <div class="group-label">All items</div>
+            <button class="row">
+              <span class="tile" style="background:#232f3e;color:#ff9900">A</span>
+              <span class="body">
+                <span class="title"><span>AWS Console</span><svg class="ind" width="11" height="11"><use href="#i-phone"/></svg></span>
+                <span class="sub">qrawall-prod</span>
+              </span>
+            </button>
+            <button class="row">
+              <span class="tile" style="background:#0acf83;color:#0d1117">F</span>
+              <span class="body">
+                <span class="title"><span>Figma</span></span>
+                <span class="sub">design@qrawall.com</span>
+              </span>
+            </button>
+            <button class="row">
+              <span class="tile" style="background:#5e6ad2">L</span>
+              <span class="body">
+                <span class="title"><span>Linear</span></span>
+                <span class="sub">c.federico@qrawall.com</span>
+              </span>
+            </button>
+            <button class="row">
+              <span class="tile" style="background:#e50914">N</span>
+              <span class="body">
+                <span class="title"><span>Netflix</span></span>
+                <span class="sub">family@sigmund.dev</span>
+              </span>
+            </button>
+            <button class="row">
+              <span class="tile" style="background:#000">▲</span>
+              <span class="body">
+                <span class="title"><span>Vercel</span></span>
+                <span class="sub">c.federico@qrawall.com</span>
+              </span>
+            </button>
+          </div>
+        </aside>
+
+        <main class="v-detail">
+          <div class="d-scroll">
+            <div class="d-inner">
+              <div class="d-head">
+                <span class="tile-lg" style="background:#1c2128">GH</span>
+                <div>
+                  <h1>GitHub</h1>
+                  <div class="sub">github.com</div>
+                </div>
+                <div class="head-actions">
+                  <button class="icon-btn" title="Edit in app"><svg width="13" height="13"><use href="#i-ext"/></svg></button>
+                  <button class="icon-btn" title="More"><svg width="14" height="14"><use href="#i-more"/></svg></button>
+                </div>
+              </div>
+
+              <div class="autofill-cta">
+                <button class="btn-primary lg"><svg width="13" height="13"><use href="#i-wand"/></svg>Autofill on this page</button>
+              </div>
+
+              <div class="field-card">
+                <div class="frow">
+                  <div class="fbody">
+                    <div class="flabel">Website</div>
+                    <div class="fvalue link">https://github.com</div>
+                  </div>
+                  <div class="factions">
+                    <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                    <button class="icon-btn" title="Open"><svg width="13" height="13"><use href="#i-ext"/></svg></button>
+                  </div>
+                </div>
+                <div class="frow">
+                  <div class="fbody">
+                    <div class="flabel">Username</div>
+                    <div class="fvalue">jsigmund</div>
+                  </div>
+                  <div class="factions">
+                    <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                  </div>
+                </div>
+                <div class="frow">
+                  <div class="fbody">
+                    <div class="flabel">Password</div>
+                    <div class="fvalue mono dots" id="pw" data-real="k9#mQv-2xTz!fRb7">••••••••••••••••</div>
+                  </div>
+                  <div class="factions">
+                    <button class="icon-btn" title="Reveal" id="pwToggle"><svg width="13" height="13"><use href="#i-eye"/></svg></button>
+                    <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                  </div>
+                </div>
+                <div class="frow">
+                  <div class="fbody">
+                    <div class="flabel">One-time password</div>
+                    <div class="totp-code">
+                      <span class="code">246 810</span>
+                      <svg class="totp-ring" viewBox="0 0 16 16"><circle class="track" cx="8" cy="8" r="6"/><circle class="prog" cx="8" cy="8" r="6"/></svg>
+                    </div>
+                  </div>
+                  <div class="factions">
+                    <button class="icon-btn" title="Copy"><svg width="13" height="13"><use href="#i-copy"/></svg></button>
+                  </div>
+                </div>
+                <div class="frow">
+                  <div class="fbody">
+                    <div class="flabel">Passkey</div>
+                    <div class="fvalue">MacBook Pro — Touch ID</div>
+                    <div class="passkey-meta">Last used Jul 2, 2026</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <footer class="v-footer">
+            <span class="only-desktop" style="display:none; align-items:center; gap:7px;">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span>Synced with desktop app</span>
+            </span>
+            <span class="hide-desktop" style="display:flex; align-items:center; gap:7px;">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span>Unlocked · locks in 14 min</span>
+            </span>
+            <button class="lock-now"><svg width="11" height="11"><use href="#i-lock"/></svg>Lock now</button>
+          </footer>
+        </main>
+      </div>
+    </div>
+
+    <!-- ================= UNLOCK ================= -->
+    <div class="screen" data-screen="unlock">
+      <div class="auth">
+        <div class="auth-inner">
+          <div class="vault-emblem"><img src="../../apps/extension/icons/icon-128.png" alt="Bittery" /></div>
+          <h1>Vault locked</h1>
+          <div class="who"><span class="acct-avatar">QG</span>c.federico@qrawall.com</div>
+
+          <div class="banner only-desktop" style="display:none">
+            <svg width="14" height="14"><use href="#i-warn"/></svg>
+            <div><b>Desktop app is locked.</b> Unlock it to continue, or enter your master password below. <button class="link-btn">Open desktop app</button></div>
+          </div>
+
+          <form onsubmit="return false" style="position:relative">
+            <div class="field" style="margin-bottom:10px">
+              <div class="input">
+                <svg width="13" height="13" style="color:var(--text-3)"><use href="#i-key"/></svg>
+                <input type="password" placeholder="Master password" autocomplete="current-password" />
+                <button class="icon-btn" style="width:22px;height:22px;margin-right:-4px" title="Show"><svg width="12" height="12"><use href="#i-eye"/></svg></button>
+              </div>
+            </div>
+            <button class="btn-primary lg" type="submit"><svg width="13" height="13"><use href="#i-lock"/></svg>Unlock vault</button>
+
+            <div class="or-sep only-desktop" style="display:none">or</div>
+            <button class="btn-outline only-desktop" style="display:none" type="button">
+              <svg width="15" height="15" style="color:var(--primary)"><use href="#i-touchid"/></svg>Unlock with Touch&nbsp;ID
+            </button>
+          </form>
+
+          <div class="aux">Not you? <button>Use a different account</button></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= LOGIN ================= -->
+    <div class="screen" data-screen="login">
+      <div class="login-split">
+        <aside class="login-brand">
+          <div>
+            <img src="../../apps/desktop/public/logo.png" alt="Bittery" style="height:30px; width:auto; position:relative; filter: drop-shadow(0 0 18px var(--glow))" />
+            <p style="margin-top:12px">Your passwords, everywhere you browse.</p>
+          </div>
+          <div class="login-points">
+            <span class="pt"><svg width="13" height="13"><use href="#i-zap"/></svg>One-click autofill</span>
+            <span class="pt"><svg width="13" height="13"><use href="#i-passkey"/></svg>Passkeys built in</span>
+            <span class="pt"><svg width="13" height="13"><use href="#i-shield"/></svg>End-to-end encrypted</span>
+          </div>
+        </aside>
+        <div class="login-form">
+          <h1>Sign in</h1>
+          <div class="lead">Use your Bittery account credentials.</div>
+          <form onsubmit="return false">
+            <div class="field">
+              <label>Email</label>
+              <div class="input"><input type="email" placeholder="you@example.com" value="c.federico@qrawall.com" /></div>
+            </div>
+            <div class="field">
+              <label>Master password</label>
+              <div class="input">
+                <input type="password" placeholder="••••••••••••" />
+                <button class="icon-btn" style="width:22px;height:22px;margin-right:-4px" title="Show"><svg width="12" height="12"><use href="#i-eye"/></svg></button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Secret key</label>
+              <div class="input">
+                <input class="mono" placeholder="A3-XXXXXX-XXXXXX-XXXXX-XXXXX" />
+                <button class="icon-btn" style="width:22px;height:22px;margin-right:-4px" title="Show"><svg width="12" height="12"><use href="#i-eye"/></svg></button>
+              </div>
+            </div>
+            <button class="adv-toggle" id="advToggle" type="button">
+              <svg class="chev" width="11" height="11"><use href="#i-chev-r"/></svg>Self-hosted server
+            </button>
+            <div class="adv-body" id="advBody">
+              <div class="field">
+                <label>Server URL</label>
+                <div class="input"><input placeholder="https://bittery.example.com" /></div>
+              </div>
+            </div>
+            <button class="btn-primary lg" type="submit">Sign in</button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= SETTINGS ================= -->
+    <div class="screen" data-screen="settings">
+      <header class="s-header">
+        <button class="icon-btn" title="Back"><svg width="14" height="14"><use href="#i-chev-l"/></svg></button>
+        <h1>Settings</h1>
+      </header>
+      <div class="s-scroll">
+        <div class="s-section">
+          <span class="group-label">Appearance</span>
+          <div class="field-card">
+            <div class="srow">
+              <div class="sbody">
+                <div class="stitle">Theme <span class="managed-chip only-desktop" style="display:none"><svg width="9" height="9"><use href="#i-monitor"/></svg>Desktop app</span></div>
+                <div class="sdesc hide-desktop">Choose how the extension looks.</div>
+                <div class="sdesc only-desktop" style="display:none">Follows your desktop app appearance setting.</div>
+              </div>
+              <div class="theme-seg" id="settingsThemeSeg">
+                <button data-theme="light"><svg width="12" height="12"><use href="#i-sun"/></svg>Light</button>
+                <button data-theme="dark" class="on"><svg width="12" height="12"><use href="#i-moon"/></svg>Dark</button>
+                <button data-theme="system"><svg width="12" height="12"><use href="#i-monitor"/></svg>System</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="s-section">
+          <span class="group-label">Security</span>
+          <div class="field-card">
+            <div class="srow">
+              <div class="sbody">
+                <div class="stitle">Auto-lock <span class="managed-chip only-desktop" style="display:none"><svg width="9" height="9"><use href="#i-monitor"/></svg>Desktop app</span></div>
+                <div class="sdesc">Lock the vault after a period of inactivity.</div>
+              </div>
+              <button class="select" id="autolockSelect">15 minutes<svg width="11" height="11"><use href="#i-chev-d"/></svg></button>
+            </div>
+            <div class="srow">
+              <div class="sbody">
+                <div class="stitle">Lock on browser close</div>
+                <div class="sdesc">Require unlock after the browser restarts.</div>
+              </div>
+              <button class="select">On<svg width="11" height="11"><use href="#i-chev-d"/></svg></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="s-section">
+          <span class="group-label">Account</span>
+          <div class="field-card">
+            <div class="srow">
+              <div class="sbody">
+                <div class="stitle">c.federico@qrawall.com</div>
+                <div class="sdesc">qrawall GmbH · signed in</div>
+              </div>
+              <button class="btn-destructive" id="signOutBtn"><svg width="12" height="12"><use href="#i-logout"/></svg>Sign out</button>
+            </div>
+          </div>
+          <div class="desktop-note only-desktop" style="display:none">
+            <svg width="12" height="12"><use href="#i-monitor"/></svg>
+            Accounts and security are managed by the Bittery desktop app.
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="caption">
+    <b>Round 1 · Extension popup, Brand-Forward.</b> 620×520 popup with dark/light from the shared tokens.
+    New: <b>Suggested</b> section for the active tab with hover <b>Fill</b>, an <b>Autofill on this page</b> action in the detail,
+    a status footer with lock control, an <b>Appearance</b> setting (managed by the desktop app when connected),
+    and a split-panel login. Toggle "Desktop app: Connected" to see managed states, Touch&nbsp;ID unlock and the desktop-locked banner.
+  </div>
+</div>
+
+<script>
+  const popup = document.getElementById('popup');
+  const stage = document.getElementById('stage');
+
+  // screen switching
+  document.getElementById('screenSeg').addEventListener('click', (e) => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    document.querySelectorAll('#screenSeg button').forEach(b => b.classList.toggle('on', b === btn));
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.dataset.screen === btn.dataset.screen));
+  });
+
+  // theme switching (viewer + settings segmented control stay in sync)
+  function setTheme(t) {
+    const dark = t !== 'light';
+    popup.classList.toggle('light', !dark);
+    document.querySelectorAll('#themeSeg button').forEach(b => b.classList.toggle('on', b.dataset.theme === (dark ? 'dark' : 'light')));
+    document.querySelectorAll('#settingsThemeSeg button').forEach(b => b.classList.toggle('on', b.dataset.theme === t));
+  }
+  document.getElementById('themeSeg').addEventListener('click', (e) => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    setTheme(btn.dataset.theme);
+  });
+  document.getElementById('settingsThemeSeg').addEventListener('click', (e) => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    setTheme(btn.dataset.theme === 'system' ? 'dark' : btn.dataset.theme);
+    document.querySelectorAll('#settingsThemeSeg button').forEach(b => b.classList.toggle('on', b === btn));
+  });
+
+  // desktop mode
+  document.getElementById('desktopSeg').addEventListener('click', (e) => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    document.querySelectorAll('#desktopSeg button').forEach(b => b.classList.toggle('on', b === btn));
+    const on = btn.dataset.desktop === 'on';
+    stage.classList.toggle('desktop', on);
+    // managed controls
+    document.getElementById('settingsThemeSeg').classList.toggle('disabled', on);
+    document.getElementById('autolockSelect').classList.toggle('disabled', on);
+    document.getElementById('signOutBtn').classList.toggle('disabled', on);
+  });
+
+  // account popover
+  const trigger = document.getElementById('acctTrigger');
+  const pop = document.getElementById('acctPopover');
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const open = pop.classList.toggle('open');
+    trigger.setAttribute('aria-expanded', open);
+  });
+  document.addEventListener('click', (e) => {
+    if (!pop.contains(e.target)) { pop.classList.remove('open'); trigger.setAttribute('aria-expanded', 'false'); }
+  });
+
+  // password reveal
+  const pw = document.getElementById('pw');
+  document.getElementById('pwToggle').addEventListener('click', () => {
+    const hidden = pw.textContent.startsWith('•');
+    pw.textContent = hidden ? pw.dataset.real : '••••••••••••••••';
+    pw.classList.toggle('dots', !hidden);
+  });
+
+  // deep-link state via query params, e.g. ?screen=unlock&theme=light&desktop=on
+  const params = new URLSearchParams(location.search);
+  if (params.get('screen')) document.querySelector(`#screenSeg button[data-screen="${params.get('screen')}"]`)?.click();
+  if (params.get('theme')) document.querySelector(`#themeSeg button[data-theme="${params.get('theme')}"]`)?.click();
+  if (params.get('desktop')) document.querySelector(`#desktopSeg button[data-desktop="${params.get('desktop')}"]`)?.click();
+
+  // login advanced toggle
+  const advToggle = document.getElementById('advToggle');
+  const advBody = document.getElementById('advBody');
+  advToggle.addEventListener('click', () => {
+    advToggle.classList.toggle('open');
+    advBody.classList.toggle('open');
+  });
+</script>
+</body>
+</html>

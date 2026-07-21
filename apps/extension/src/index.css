@@ -15,9 +15,52 @@ body {
 	}
 }
 
-/* Keep the autofill iframe document transparent so only the card is visible. */
-html.autofill-iframe-root,
-html.autofill-iframe-root body.autofill-iframe-body {
+/*
+ * In-page overlay documents (autofill dropdown, passkey prompts, save prompt).
+ *
+ * These are injected into arbitrary websites as transparent iframes: only the
+ * floating card inside should be visible, so the document itself must never
+ * paint a background — not even the themed one the popup gets above.
+ */
+html.bittery-overlay-root,
+html.bittery-overlay-root body.bittery-overlay-body {
 	/* biome-ignore lint/complexity/noImportantStyles: required to override host page styles in injected iframe */
 	background: transparent !important;
+	/*
+	 * Must stay `normal`. Under `color-scheme: dark` the browser paints an opaque
+	 * dark canvas for the document that takes precedence over a transparent
+	 * background, which shows up as a black box around the card on the host page.
+	 * The `.dark` class alone drives every token these surfaces use.
+	 */
+	color-scheme: normal;
+	margin: 0;
+	overflow: hidden;
+}
+
+/*
+ * Overlay scrollbars. The host page's scrollbar styling does not reach into the
+ * iframe, and the platform default is far too heavy for a 250px dropdown.
+ */
+.bittery-overlay-scroll {
+	scrollbar-width: thin;
+	scrollbar-color: var(--border-strong) transparent;
+}
+
+.bittery-overlay-scroll::-webkit-scrollbar {
+	width: 8px;
+}
+
+.bittery-overlay-scroll::-webkit-scrollbar-track {
+	background: transparent;
+}
+
+.bittery-overlay-scroll::-webkit-scrollbar-thumb {
+	background-color: var(--border-strong);
+	border: 2px solid transparent;
+	background-clip: padding-box;
+	border-radius: 999px;
+}
+
+.bittery-overlay-scroll::-webkit-scrollbar-thumb:hover {
+	background-color: var(--muted-foreground);
 }

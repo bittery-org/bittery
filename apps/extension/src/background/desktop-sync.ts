@@ -40,6 +40,11 @@ export interface ActiveAccountChangedEvent {
 	timestamp: number;
 }
 
+export interface ThemeChangedEvent {
+	theme: "light" | "dark" | "system";
+	timestamp: number;
+}
+
 class DesktopSyncService {
 	private lastDesktopStatus: DesktopStatus | null = null;
 	private desktopAvailable = false;
@@ -286,6 +291,35 @@ class DesktopSyncService {
 
 		if (event.event === "active_account_changed") {
 			await this.handleActiveAccountChanged(event.payload);
+			return;
+		}
+
+		if (event.event === "theme_changed") {
+			this.handleThemeChanged(event.payload);
+		}
+	}
+
+	/**
+	 * Handle theme changed event from desktop. The desktop app's appearance
+	 * setting overrides the extension's local preference while it is running, so
+	 * forward the new value to the popup for immediate application.
+	 */
+	handleThemeChanged(event: ThemeChangedEvent): void {
+		// Keep the cached status in sync so pollers/readers see the new theme.
+		if (this.lastDesktopStatus) {
+			this.lastDesktopStatus = {
+				...this.lastDesktopStatus,
+				theme: event.theme,
+			};
+		}
+
+		try {
+			chrome.runtime.sendMessage({
+				type: "THEME_CHANGED",
+				theme: event.theme,
+			});
+		} catch (_error) {
+			// Ignore if no listeners
 		}
 	}
 

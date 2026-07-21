@@ -1,5 +1,6 @@
 export { cleanupAutofillState, cleanupDetachedAutofillState } from "./cleanup";
 export {
+	fillCredentialItem,
 	handleFieldBlur,
 	handleFieldFocus,
 	hideAutofillOverlay,
@@ -16,3 +17,4 @@ export {
 	hideIdentityAutofillOverlay,
 } from "./identity";
 export { setupOutsideClickHandler } from "./outside-click";
+export { prewarmOverlay, resetOverlayPrewarm } from "./prewarm";
