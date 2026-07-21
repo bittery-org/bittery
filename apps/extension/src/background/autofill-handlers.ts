@@ -3,7 +3,10 @@
  * Handles autofill-specific messages.
  */
 
-import { hostnameMatches } from "../lib/hostname";
+import {
+	rankItemsByUsefulness,
+	rankItemsForHostname,
+} from "../lib/autofill-ranking";
 import { storage } from "../lib/storage";
 import { AUTOFILL_REAUTH_WINDOW_MS } from "./constants";
 import { isDesktopUnlockedNow } from "./desktop-status";
@@ -71,12 +74,15 @@ export async function handleGetAutofillItems(payload: {
 	const { hostname } = payload;
 	const items = await getDecryptedItemsForCurrentMode();
 
-	const filtered = items.filter(
-		(item) =>
-			item?.category === "login" && hostnameMatches(item?.url ?? "", hostname),
+	// Ranked, not just filtered: the exact host for the page the user is on comes
+	// first, then parent/child domains, then anything that merely shares a
+	// registrable domain. `rankItemsForHostname` also considers an item's
+	// secondary `urls`, which plain `hostnameMatches` on `url` ignored.
+	const logins = items.filter(
+		(item): item is NonNullable<typeof item> => item?.category === "login",
 	);
 
-	return { success: true, items: filtered };
+	return { success: true, items: rankItemsForHostname(logins, hostname) };
 }
 
 /**
@@ -87,10 +93,11 @@ export async function handleGetAutofillCreditCards(): Promise<MessageResponse> {
 
 	const items = await getDecryptedItemsForCurrentMode();
 	const creditCards = items.filter(
-		(item) => item?.category === "credit-card" && item?.cardNumber,
+		(item): item is NonNullable<typeof item> =>
+			item?.category === "credit-card" && Boolean(item?.cardNumber),
 	);
 
-	return { success: true, items: creditCards };
+	return { success: true, items: rankItemsByUsefulness(creditCards) };
 }
 
 /**
@@ -100,7 +107,9 @@ export async function handleGetAutofillIdentities(): Promise<MessageResponse> {
 	updateActivity();
 
 	const items = await getDecryptedItemsForCurrentMode();
-	const identities = items.filter((item) => item?.category === "identity");
+	const identities = items.filter(
+		(item): item is NonNullable<typeof item> => item?.category === "identity",
+	);
 
-	return { success: true, items: identities };
+	return { success: true, items: rankItemsByUsefulness(identities) };
 }

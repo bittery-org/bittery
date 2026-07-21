@@ -1,47 +1,27 @@
 import type { DecryptedItemWithContext } from "@bittery/shared";
+import { rankByQuery } from "./autofill-ranking";
 
 /**
- * Normalizes a string for case-insensitive searching
- */
-function normalizeString(str: string | null | undefined): string {
-	return (str || "").toLowerCase().trim();
-}
-
-/**
- * Checks if any of the provided values match the query
- */
-function matchesQuery(
-	query: string,
-	...values: (string | null | undefined)[]
-): boolean {
-	const normalizedQuery = normalizeString(query);
-	if (!normalizedQuery) return true; // Empty query matches everything
-
-	return values.some((value) =>
-		normalizeString(value).includes(normalizedQuery),
-	);
-}
-
-/**
- * Filters login/credential items by query
- * Searches across: title, username, email, URL, vault name, account email
+ * Filters and ranks login/credential items by query.
+ *
+ * Searches title, username, email and URL — deliberately *not* the password.
+ * Matching on the secret meant typing into a username field could surface an
+ * item purely because its password contained those characters, which is both
+ * confusing and a needless oracle.
+ *
+ * Results keep their incoming order for equally good matches, and callers feed
+ * this the hostname-ranked list, so the site you are actually on stays on top.
  */
 export function filterLoginItems(
 	items: DecryptedItemWithContext[],
 	query: string,
 ): DecryptedItemWithContext[] {
-	if (!query.trim()) return items;
-
-	return items.filter((item) => {
-		return matchesQuery(
-			query,
-			item.title,
-			item.username,
-			item.email,
-			item.url,
-			item.password,
-		);
-	});
+	return rankByQuery(items, query, (item) => [
+		{ value: item.username, weight: 60 },
+		{ value: item.email, weight: 55 },
+		{ value: item.title, weight: 50 },
+		{ value: item.url, weight: 30 },
+	]);
 }
 
 /**
@@ -52,16 +32,11 @@ export function filterCreditCardItems(
 	items: DecryptedItemWithContext[],
 	query: string,
 ): DecryptedItemWithContext[] {
-	if (!query.trim()) return items;
-
-	return items.filter((item) => {
-		return matchesQuery(
-			query,
-			item.title,
-			item.cardholderName,
-			item.cardNumber,
-		);
-	});
+	return rankByQuery(items, query, (item) => [
+		{ value: item.title, weight: 60 },
+		{ value: item.cardholderName, weight: 50 },
+		{ value: item.cardNumber, weight: 40 },
+	]);
 }
 
 /**
@@ -72,23 +47,15 @@ export function filterIdentityItems(
 	items: DecryptedItemWithContext[],
 	query: string,
 ): DecryptedItemWithContext[] {
-	if (!query.trim()) return items;
-
-	return items.filter((item) => {
-		return matchesQuery(
-			query,
-			item.title,
-			item.firstName,
-			item.middleName,
-			item.lastName,
-			item.firstName,
-			item.middleName,
-			item.lastName,
-			item.email,
-			...(item.addresses || []).map(
-				(addr) =>
-					`${addr.street} ${addr.city} ${addr.state} ${addr.zip} ${addr.country}`,
-			),
-		);
-	});
+	return rankByQuery(items, query, (item) => [
+		{ value: item.firstName, weight: 60 },
+		{ value: item.lastName, weight: 60 },
+		{ value: item.email, weight: 55 },
+		{ value: item.title, weight: 50 },
+		{ value: item.middleName, weight: 40 },
+		...(item.addresses || []).map((addr) => ({
+			value: `${addr.street} ${addr.city} ${addr.state} ${addr.zip} ${addr.country}`,
+			weight: 20,
+		})),
+	]);
 }
