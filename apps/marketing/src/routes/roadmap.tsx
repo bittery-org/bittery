@@ -1,15 +1,7 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import {
-	ArrowRight,
-	CheckCircle2,
-	Circle,
-	Clock,
-	MapIcon,
-	Rocket,
-	Sparkles,
-} from "lucide-react";
+import { createFileRoute } from "@tanstack/react-router";
+import { Check, Clock } from "lucide-react";
 import { motion } from "motion/react";
-import { Button } from "@/components/ui/button";
+import { ArrowLink, PrimaryCta } from "@/components/landing/cta-button";
 import { seo } from "@/lib/seo";
 import { billingMarketingEnabled } from "@/lib/urls";
 import { cn } from "@/lib/utils";
@@ -194,40 +186,57 @@ const roadmapCategories: RoadmapCategory[] = [
 	},
 ];
 
-// ─── Status config ───────────────────────────────────────────────────
+// ─── Timeline config ─────────────────────────────────────────────────
+// Keyed by ItemStatus so adding a status fails type-checking here
+// instead of rendering an unstyled group.
 
-const statusConfig: Record<
-	ItemStatus,
-	{
-		label: string;
-		icon: typeof CheckCircle2;
-		className: string;
-		dotClass: string;
-	}
-> = {
+interface StatusGroupConfig {
+	title: string;
+	tagline: string;
+	tagLabel: string;
+	spineClass: string;
+	cardClass: string;
+	entryDotClass: string;
+	tagClass: string;
+}
+
+const statusGroups: Record<ItemStatus, StatusGroupConfig> = {
 	done: {
-		label: "Done",
-		icon: CheckCircle2,
-		className:
-			"bg-emerald-500/10 text-emerald-700 border-emerald-500/20 dark:text-emerald-400",
-		dotClass: "bg-emerald-500",
+		title: "Shipped",
+		tagline: "Done, tested, and live in the product today.",
+		tagLabel: "Shipped",
+		spineClass:
+			"bg-linear-to-b from-success/50 via-success/40 to-success/30 shadow-[0_0_8px_color-mix(in_oklab,var(--color-success)_35%,transparent)]",
+		cardClass: "bg-card",
+		entryDotClass:
+			"bg-success shadow-[0_0_6px_color-mix(in_oklab,var(--color-success)_60%,transparent)]",
+		tagClass: "border-success/25 bg-success/10 text-success",
 	},
 	"in-progress": {
-		label: "In Progress",
-		icon: Clock,
-		className:
-			"bg-amber-500/10 text-amber-700 border-amber-500/20 dark:text-amber-400",
-		dotClass: "bg-amber-500",
+		title: "Building now",
+		tagline: "Actively in development, on the bench right now.",
+		tagLabel: "Building",
+		spineClass:
+			"bg-linear-to-b from-success/30 via-warning/45 to-warning/30 shadow-[0_0_8px_color-mix(in_oklab,var(--color-warning)_30%,transparent)]",
+		cardClass: "bg-card",
+		entryDotClass:
+			"animate-pulse bg-warning shadow-[0_0_6px_color-mix(in_oklab,var(--color-warning)_55%,transparent)]",
+		tagClass: "border-warning/25 bg-warning/10 text-warning",
 	},
 	planned: {
-		label: "Planned",
-		icon: Circle,
-		className: "bg-muted text-muted-foreground border-border",
-		dotClass: "bg-muted-foreground/40",
+		title: "Planned",
+		tagline: "Committed and queued — in rough priority order.",
+		tagLabel: "Planned",
+		spineClass: "bg-linear-to-b from-warning/25 via-border to-transparent",
+		cardClass: "bg-background",
+		entryDotClass: "border-[1.5px] border-muted-foreground/40 bg-background",
+		tagClass: "border-border bg-foreground/4 text-muted-foreground",
 	},
 };
 
-// ─── Stats ───────────────────────────────────────────────────────────
+const STATUS_ORDER: readonly ItemStatus[] = ["done", "in-progress", "planned"];
+
+// ─── Stats & grouping ────────────────────────────────────────────────
 
 function getVisibleRoadmapCategories() {
 	if (billingMarketingEnabled()) {
@@ -249,237 +258,335 @@ function getRoadmapStats(categories: RoadmapCategory[]) {
 	};
 }
 
-// ─── Component ───────────────────────────────────────────────────────
+interface TimelineEntry extends RoadmapItem {
+	category: string;
+}
 
-function StatusBadge({ status }: { status: ItemStatus }) {
-	const config = statusConfig[status];
-	const Icon = config.icon;
+function getTimelineGroups(categories: RoadmapCategory[]) {
+	const entries: TimelineEntry[] = categories.flatMap((category) =>
+		category.items.map((item) => ({ ...item, category: category.title })),
+	);
+	return STATUS_ORDER.map((status) => ({
+		status,
+		entries: entries.filter((entry) => entry.status === status),
+	})).filter((group) => group.entries.length > 0);
+}
+
+// ─── Motion helpers ──────────────────────────────────────────────────
+
+const reveal = (delay: number) => ({
+	initial: { opacity: 0, y: 14 },
+	animate: { opacity: 1, y: 0 },
+	transition: { duration: 0.7, delay, ease: [0.16, 1, 0.3, 1] as const },
+});
+
+const riseInView = (delay = 0) => ({
+	initial: { opacity: 0, y: 14 },
+	whileInView: { opacity: 1, y: 0 },
+	viewport: { once: true, margin: "-40px" } as const,
+	transition: { duration: 0.6, delay, ease: [0.16, 1, 0.3, 1] as const },
+});
+
+// ─── Pieces ──────────────────────────────────────────────────────────
+
+function MomentumStrip({ categories }: { categories: RoadmapCategory[] }) {
+	const stats = getRoadmapStats(categories);
+	const donePercent = stats.total ? (stats.done / stats.total) * 100 : 0;
+	const activePercent = stats.total
+		? ((stats.done + stats.inProgress) / stats.total) * 100
+		: 0;
+
+	return (
+		<section
+			aria-label="Roadmap progress"
+			className="rounded-2xl border bg-card p-5 text-left sm:px-6"
+		>
+			<div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+				<span className="font-semibold text-[26px] tabular-nums tracking-[-0.03em]">
+					{stats.done}{" "}
+					<span className="font-medium text-muted-foreground">
+						/ {stats.total}
+					</span>
+				</span>
+				<span className="text-[13px] text-muted-foreground">
+					features shipped
+				</span>
+				<span className="ml-auto font-semibold text-[12.5px] text-success tabular-nums">
+					{Math.round(donePercent)}% complete
+				</span>
+			</div>
+
+			<div className="relative mt-3.5 h-1.5 overflow-hidden rounded-full bg-foreground/6">
+				<motion.span
+					aria-hidden
+					className="absolute inset-y-0 left-0 rounded-full bg-warning/35"
+					initial={{ width: 0 }}
+					animate={{ width: `${activePercent}%` }}
+					transition={{ duration: 1, delay: 0.55, ease: [0.16, 1, 0.3, 1] }}
+				/>
+				<motion.span
+					aria-hidden
+					className="absolute inset-y-0 left-0 rounded-full bg-linear-to-r from-success/70 to-success shadow-[0_0_12px_color-mix(in_oklab,var(--color-success)_50%,transparent)]"
+					initial={{ width: 0 }}
+					animate={{ width: `${donePercent}%` }}
+					transition={{ duration: 1, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
+				/>
+			</div>
+
+			<div className="mt-3 flex flex-wrap gap-x-4.5 gap-y-1.5 text-[12px] text-muted-foreground">
+				<span className="inline-flex items-center gap-1.5">
+					<span
+						aria-hidden
+						className="size-[7px] rounded-full bg-success shadow-[0_0_6px_color-mix(in_oklab,var(--color-success)_60%,transparent)]"
+					/>
+					<span className="font-semibold tabular-nums">{stats.done}</span>{" "}
+					Shipped
+				</span>
+				<span className="inline-flex items-center gap-1.5">
+					<span
+						aria-hidden
+						className="size-[7px] rounded-full bg-warning shadow-[0_0_6px_color-mix(in_oklab,var(--color-warning)_50%,transparent)]"
+					/>
+					<span className="font-semibold tabular-nums">{stats.inProgress}</span>{" "}
+					Building now
+				</span>
+				<span className="inline-flex items-center gap-1.5">
+					<span
+						aria-hidden
+						className="size-[7px] rounded-full bg-muted-foreground/30"
+					/>
+					<span className="font-semibold tabular-nums">{stats.planned}</span>{" "}
+					Planned
+				</span>
+			</div>
+		</section>
+	);
+}
+
+function GroupNode({ status }: { status: ItemStatus }) {
+	if (status === "planned") {
+		return (
+			<span
+				aria-hidden
+				className="absolute top-0.5 -left-10 size-6 rounded-full border border-dashed border-muted-foreground/40 bg-background"
+			/>
+		);
+	}
+	const isBuilding = status === "in-progress";
+	const Icon = isBuilding ? Clock : Check;
 	return (
 		<span
+			aria-hidden
 			className={cn(
-				"inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-medium text-xs",
-				config.className,
+				"absolute top-0.5 -left-10 grid size-6 place-items-center rounded-full bg-background",
+				isBuilding
+					? "text-warning shadow-[0_0_0_1.5px_color-mix(in_oklab,var(--color-warning)_60%,transparent),0_0_16px_color-mix(in_oklab,var(--color-warning)_40%,transparent)]"
+					: "text-success shadow-[0_0_0_1.5px_color-mix(in_oklab,var(--color-success)_60%,transparent),0_0_16px_color-mix(in_oklab,var(--color-success)_45%,transparent)]",
 			)}
 		>
+			{isBuilding && (
+				<span
+					aria-hidden
+					className="absolute inset-0 animate-pulse rounded-full shadow-[0_0_14px_color-mix(in_oklab,var(--color-warning)_55%,transparent)]"
+				/>
+			)}
 			<Icon className="size-3" />
-			{config.label}
 		</span>
 	);
 }
 
-function ProgressBar({ categories }: { categories: RoadmapCategory[] }) {
-	const stats = getRoadmapStats(categories);
-	const donePercent = (stats.done / stats.total) * 100;
-	const progressPercent = ((stats.done + stats.inProgress) / stats.total) * 100;
-
+function CategoryChip({ category }: { category: string }) {
 	return (
-		<div className="space-y-3">
-			<div className="flex items-center justify-between text-sm">
-				<span className="text-muted-foreground">Overall progress</span>
-				<span className="font-medium tabular-nums">
-					{stats.done} of {stats.total} complete
-				</span>
-			</div>
-			<div className="h-2 overflow-hidden rounded-full bg-muted">
-				<div className="relative h-full">
-					<motion.div
-						className="absolute inset-y-0 left-0 rounded-full bg-amber-400/50 dark:bg-amber-500/30"
-						initial={{ width: 0 }}
-						animate={{ width: `${progressPercent}%` }}
-						transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
-					/>
-					<motion.div
-						className="absolute inset-y-0 left-0 rounded-full bg-emerald-500"
-						initial={{ width: 0 }}
-						animate={{ width: `${donePercent}%` }}
-						transition={{ duration: 0.8, ease: "easeOut" }}
-					/>
-				</div>
-			</div>
-			<div className="flex gap-4 text-xs">
-				<span className="flex items-center gap-1.5">
-					<span className="size-2 rounded-full bg-emerald-500" />
-					<span className="text-muted-foreground">{stats.done} Done</span>
-				</span>
-				<span className="flex items-center gap-1.5">
-					<span className="size-2 rounded-full bg-amber-400 dark:bg-amber-500/60" />
-					<span className="text-muted-foreground">
-						{stats.inProgress} In Progress
-					</span>
-				</span>
-				<span className="flex items-center gap-1.5">
-					<span className="size-2 rounded-full bg-muted-foreground/30" />
-					<span className="text-muted-foreground">{stats.planned} Planned</span>
-				</span>
-			</div>
-		</div>
+		<span
+			className={cn(
+				"whitespace-nowrap rounded-[5px] border bg-foreground/3 px-1.5 py-px font-medium text-[10.5px] text-muted-foreground",
+				category === "Critical for Launch" &&
+					"border-primary/25 bg-primary/8 text-primary",
+			)}
+		>
+			{category}
+		</span>
 	);
 }
 
+function StatusTag({ status }: { status: ItemStatus }) {
+	const config = statusGroups[status];
+	return (
+		<span
+			className={cn(
+				"inline-flex flex-none items-center gap-1.5 rounded-full border px-2 py-0.5 font-semibold text-[10.5px] uppercase tracking-[0.04em]",
+				config.tagClass,
+			)}
+		>
+			<span
+				aria-hidden
+				className={cn(
+					"size-[5px] rounded-full bg-current",
+					status === "in-progress" && "animate-pulse",
+				)}
+			/>
+			{config.tagLabel}
+		</span>
+	);
+}
+
+// ─── Page ────────────────────────────────────────────────────────────
+
 function RoadmapPage() {
 	const visibleRoadmapCategories = getVisibleRoadmapCategories();
+	const timelineGroups = getTimelineGroups(visibleRoadmapCategories);
 
 	return (
 		<>
-			{/* ─── Hero ──────────────────────────────────────────── */}
-			<section className="relative overflow-hidden pt-28 pb-16 sm:pt-36 sm:pb-20">
-				<div className="pointer-events-none absolute inset-0 overflow-hidden">
-					<div className="absolute top-0 right-0 h-150 w-150 translate-x-1/3 -translate-y-1/3 rounded-full bg-primary/4 blur-3xl" />
-					<div className="absolute bottom-0 left-0 h-100 w-100 -translate-x-1/3 translate-y-1/3 rounded-full bg-primary/3 blur-3xl" />
-				</div>
-
-				<div className="relative mx-auto max-w-5xl px-4">
+			{/* ─── Hero — public build log ───────────────────────── */}
+			<section className="relative overflow-hidden pt-32 pb-14 text-center sm:pt-40 sm:pb-16">
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-[-20%] top-[-40%] h-[640px] bg-[radial-gradient(46%_58%_at_50%_42%,color-mix(in_oklab,var(--color-primary-deep)_9%,transparent),transparent_70%)] dark:bg-[radial-gradient(46%_58%_at_50%_42%,color-mix(in_oklab,var(--color-primary-deep)_15%,transparent),transparent_70%)]"
+				/>
+				<div className="relative mx-auto max-w-3xl px-4">
 					<motion.div
-						className="mx-auto max-w-2xl text-center"
-						initial={{ opacity: 0, y: 20 }}
-						animate={{ opacity: 1, y: 0 }}
-						transition={{ duration: 0.6, ease: "easeOut" }}
+						{...reveal(0.05)}
+						className="inline-flex items-center gap-2 rounded-full border border-border-strong bg-foreground/3 px-3 py-1.5 font-medium text-[12.5px] text-muted-foreground"
 					>
-						<div className="mb-4 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/8 px-3 py-1 font-medium text-primary text-xs">
-							<MapIcon className="size-3.5" />
-							Product Roadmap
-						</div>
-						<h1 className="font-bold font-display text-3xl tracking-tight sm:text-4xl lg:text-5xl">
-							See what we're <span className="text-primary">building next</span>
-						</h1>
-						<p className="mt-4 text-base text-muted-foreground leading-relaxed sm:text-lg">
-							Transparency is one of our core values. Here's exactly what we're
-							working on, what's done, and what's coming next.
-						</p>
+						<span
+							aria-hidden
+							className="size-1.5 animate-pulse rounded-full bg-success shadow-[0_0_8px_color-mix(in_oklab,var(--color-success)_80%,transparent)]"
+						/>
+						Public build log — updated as we ship
 					</motion.div>
 
-					{/* Progress bar */}
-					<motion.div
-						className="mx-auto mt-10 max-w-lg"
-						initial={{ opacity: 0, y: 12 }}
-						animate={{ opacity: 1, y: 0 }}
-						transition={{ duration: 0.5, delay: 0.2, ease: "easeOut" }}
+					<motion.h1
+						{...reveal(0.13)}
+						className="mx-auto mt-5 max-w-[16ch] font-semibold text-[40px] leading-[1.04] tracking-[-0.045em] sm:text-[56px]"
 					>
-						<div className="rounded-2xl border border-border/60 bg-card p-5 sm:p-6">
-							<ProgressBar categories={visibleRoadmapCategories} />
-						</div>
+						Watch Bittery{" "}
+						<em className="bg-linear-to-r from-primary to-primary-deep bg-clip-text text-transparent not-italic">
+							get built
+						</em>
+						.
+					</motion.h1>
+
+					<motion.p
+						{...reveal(0.21)}
+						className="mx-auto mt-5 max-w-[52ch] text-[16.5px] text-muted-foreground leading-relaxed"
+					>
+						Transparency is one of our core values, so the roadmap is public.
+						This is exactly what has shipped, what we're building right now, and
+						what's next — no vaporware, no "coming soon" forever.
+					</motion.p>
+
+					<motion.div {...reveal(0.29)} className="mx-auto mt-10 max-w-xl">
+						<MomentumStrip categories={visibleRoadmapCategories} />
 					</motion.div>
 				</div>
 			</section>
 
-			{/* ─── Roadmap categories ────────────────────────────── */}
-			<section className="px-4 pt-16 pb-16 sm:pb-20">
-				<div className="mx-auto max-w-5xl space-y-12 sm:space-y-16">
-					{visibleRoadmapCategories.map((category, categoryIndex) => (
-						<motion.div
-							key={category.title}
-							initial={{ opacity: 0, y: 16 }}
-							whileInView={{ opacity: 1, y: 0 }}
-							viewport={{ once: true, margin: "-60px" }}
-							transition={{
-								duration: 0.45,
-								delay: categoryIndex * 0.06,
-							}}
-						>
-							<div className="mb-6">
-								<h2 className="font-display text-xl tracking-tight sm:text-2xl">
-									{category.title}
-								</h2>
-								<p className="mt-1.5 text-muted-foreground text-sm sm:text-base">
-									{category.description}
-								</p>
-							</div>
+			{/* ─── Shipping timeline ─────────────────────────────── */}
+			<section className="px-4 pt-8 pb-10 sm:pt-10">
+				<div className="mx-auto max-w-[820px]">
+					{timelineGroups.map((group) => {
+						const config = statusGroups[group.status];
+						return (
+							<section key={group.status} className="relative pt-7 pb-2 pl-10">
+								<span
+									aria-hidden
+									className={cn(
+										"absolute top-0 bottom-0 left-[11px] w-0.5 rounded-full",
+										config.spineClass,
+									)}
+								/>
 
-							<div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-								{category.items.map((item, i) => {
-									const config = statusConfig[item.status];
-									return (
-										<motion.div
-											key={item.title}
+								<motion.div
+									{...riseInView()}
+									className="relative mb-4.5 flex flex-wrap items-baseline gap-x-3 gap-y-1"
+								>
+									<GroupNode status={group.status} />
+									<h2 className="font-semibold text-[21px] tracking-[-0.03em]">
+										{config.title}
+									</h2>
+									<span className="text-[12.5px] text-muted-foreground tabular-nums">
+										{group.entries.length}{" "}
+										{group.entries.length === 1 ? "feature" : "features"}
+									</span>
+									<p className="ml-auto hidden max-w-[30ch] text-right text-[13px] text-muted-foreground sm:block">
+										{config.tagline}
+									</p>
+								</motion.div>
+
+								<div className="space-y-2.5">
+									{group.entries.map((entry, i) => (
+										<motion.article
+											key={entry.title}
+											{...riseInView(Math.min(i * 0.045, 0.27))}
 											className={cn(
-												"group relative rounded-xl border bg-card p-4 transition-all duration-300 hover:shadow-black/3 hover:shadow-lg sm:p-5",
-												item.status === "done"
-													? "border-emerald-500/15 hover:border-emerald-500/30"
-													: item.status === "in-progress"
-														? "border-amber-500/15 hover:border-amber-500/30"
-														: "border-border/60 hover:border-border",
+												"relative rounded-xl border px-4 py-3.5 transition-colors duration-150 hover:border-border-strong sm:px-5",
+												config.cardClass,
 											)}
-											initial={{ opacity: 0, y: 10 }}
-											whileInView={{ opacity: 1, y: 0 }}
-											viewport={{ once: true, margin: "-40px" }}
-											transition={{
-												duration: 0.35,
-												delay: i * 0.04,
-											}}
 										>
-											<div className="mb-3 flex items-start justify-between gap-2">
-												<h3 className="font-semibold text-sm sm:text-base">
-													{item.title}
-												</h3>
-												<StatusBadge status={item.status} />
-											</div>
-											<p className="text-muted-foreground text-xs leading-relaxed sm:text-sm">
-												{item.description}
-											</p>
-
-											{/* Subtle status indicator line at bottom */}
-											<div
+											<span
+												aria-hidden
+												className="absolute top-6 -left-[29px] h-px w-5 bg-border"
+											/>
+											<span
+												aria-hidden
 												className={cn(
-													"absolute inset-x-4 bottom-0 h-0.5 rounded-full opacity-0 transition-opacity duration-300 group-hover:opacity-100",
-													config.dotClass,
+													"absolute top-[21px] -left-8 size-[7px] rounded-full",
+													config.entryDotClass,
 												)}
 											/>
-										</motion.div>
-									);
-								})}
-							</div>
-						</motion.div>
-					))}
+
+											<div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+												<h3 className="font-semibold text-[14.5px] tracking-[-0.015em]">
+													{entry.title}
+												</h3>
+												<CategoryChip category={entry.category} />
+												<span className="ml-auto">
+													<StatusTag status={entry.status} />
+												</span>
+											</div>
+											<p className="mt-1 max-w-[62ch] text-[13px] text-muted-foreground leading-relaxed">
+												{entry.description}
+											</p>
+										</motion.article>
+									))}
+								</div>
+							</section>
+						);
+					})}
 				</div>
 			</section>
 
 			{/* ─── CTA ───────────────────────────────────────────── */}
-			<section className="px-4 py-16 sm:py-24">
+			<section className="relative overflow-hidden px-4 py-24 text-center sm:py-28">
+				<div
+					aria-hidden
+					className="pointer-events-none absolute inset-x-[-20%] bottom-[-60%] h-[560px] bg-[radial-gradient(46%_58%_at_50%_50%,color-mix(in_oklab,var(--color-primary-deep)_10%,transparent),transparent_70%)] dark:bg-[radial-gradient(46%_58%_at_50%_50%,color-mix(in_oklab,var(--color-primary-deep)_16%,transparent),transparent_70%)]"
+				/>
 				<motion.div
-					className="mx-auto max-w-5xl"
 					initial={{ opacity: 0, y: 16 }}
 					whileInView={{ opacity: 1, y: 0 }}
 					viewport={{ once: true, margin: "-80px" }}
-					transition={{ duration: 0.5 }}
+					transition={{ duration: 0.6 }}
+					className="relative mx-auto max-w-2xl"
 				>
-					<div className="relative overflow-hidden rounded-2xl border border-border/60 bg-linear-to-br from-card via-card to-primary/3 p-8 text-center sm:rounded-3xl sm:p-14">
-						<div className="absolute top-0 left-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/5 blur-3xl" />
-
-						<div className="relative">
-							<div className="mx-auto mb-4 flex size-12 items-center justify-center rounded-2xl bg-primary/10">
-								<Sparkles className="size-6 text-primary" />
-							</div>
-							<h2 className="font-display text-2xl tracking-tight sm:text-3xl">
-								Want to shape what's next?
-							</h2>
-							<p className="mx-auto mt-4 max-w-md text-base text-muted-foreground sm:text-lg">
-								Bittery is open source under the AGPLv3 and GPLv3. Join the
-								community, share your ideas, or contribute directly on GitHub.
-							</p>
-							<div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-								<Button size="lg" className="gap-2 rounded-full px-7" asChild>
-									<a
-										href="https://github.com/bittery-org/bittery"
-										target="_blank"
-										rel="noopener noreferrer"
-									>
-										<Rocket className="size-4" />
-										Contribute on GitHub
-									</a>
-								</Button>
-								<Button
-									size="lg"
-									variant="outline"
-									className="gap-2 rounded-full px-7"
-									asChild
-								>
-									<Link to="/contact">
-										Share feedback
-										<ArrowRight className="size-4" />
-									</Link>
-								</Button>
-							</div>
-						</div>
+					<h2 className="font-semibold text-[32px] tracking-[-0.04em] sm:text-[44px]">
+						Want to shape what's next?
+					</h2>
+					<p className="mx-auto mt-4 max-w-[46ch] text-[16px] text-muted-foreground">
+						Bittery is open source under the AGPLv3 and GPLv3. Join the
+						community, share your ideas, or contribute directly on GitHub.
+					</p>
+					<div className="mt-8 flex flex-wrap items-center justify-center gap-5">
+						<PrimaryCta
+							href="https://github.com/bittery-org/bittery"
+							size="lg"
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							Contribute on GitHub
+						</PrimaryCta>
+						<ArrowLink href="/contact">Share feedback</ArrowLink>
 					</div>
 				</motion.div>
 			</section>

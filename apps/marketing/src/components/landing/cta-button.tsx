@@ -7,15 +7,21 @@ export function PrimaryCta({
 	children,
 	size = "md",
 	className,
+	target,
+	rel,
 }: {
 	href: string;
 	children: React.ReactNode;
 	size?: "md" | "lg";
 	className?: string;
+	target?: string;
+	rel?: string;
 }) {
 	return (
 		<a
 			href={href}
+			target={target}
+			rel={rel}
 			className={cn(
 				"inline-flex items-center justify-center gap-2 rounded-md bg-linear-to-b from-primary to-primary-deep font-medium text-primary-foreground shadow-[inset_0_1px_0_oklch(1_0_0/0.22),0_1px_2px_oklch(0_0_0/0.3)] transition-[filter,box-shadow] duration-150 hover:brightness-108 dark:shadow-[inset_0_1px_0_oklch(1_0_0/0.22),0_1px_2px_oklch(0_0_0/0.3),0_0_16px_color-mix(in_oklab,var(--color-primary-deep)_35%,transparent)] dark:hover:shadow-[inset_0_1px_0_oklch(1_0_0/0.22),0_1px_2px_oklch(0_0_0/0.3),0_0_24px_color-mix(in_oklab,var(--color-primary-deep)_50%,transparent)]",
 				size === "lg" ? "h-10 px-5 text-[14.5px]" : "h-8 px-3.5 text-[13.5px]",
