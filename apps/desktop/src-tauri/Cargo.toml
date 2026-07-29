@@ -1,6 +1,6 @@
 [package]
 name = "Bittery"
-version = "0.1.2"
+version = "0.4.1"
 description = "Bittery Zero-Knowledge Password Manager"
 authors = ["you"]
 edition = "2021"
