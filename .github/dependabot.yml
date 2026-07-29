@@ -46,53 +46,122 @@ updates:
       - dependency-name: react-dom
         update-types: ["version-update:semver-major"]
 
+  # One block for every Rust root in the repo — deliberately not one block per
+  # root.
+  #
+  # There are four independent cargo resolution roots, each with its own
+  # Cargo.lock: /apps/server, /apps/desktop/src-tauri, /packages/crypto/napi and
+  # the workspace at /packages/crypto/core. The first three are *not* members of
+  # that workspace; they reach bittery-crypto-core through a path dependency,
+  # and bittery-crypto-core takes every crypto version from
+  # `[workspace.dependencies]` in packages/crypto/core/Cargo.toml.
+  #
+  # So a block per root had all of them proposing the same edit to that one
+  # shared manifest. hmac 0.12 -> 0.13 was raised three times (#96, #95, #89)
+  # and aes-gcm 0.10 -> 0.11 twice (#98, #87), each PR differing only in which
+  # lockfile it also touched. And because ci.yml builds every root on every PR,
+  # a bump labelled "desktop" that quietly rewrote the crypto manifest failed
+  # the `crypto` and `server` jobs too, so failures never pointed at the PR that
+  # caused them.
+  #
+  # `directories` puts all four roots behind one block: the shared manifest is
+  # edited once and every affected lockfile moves with it, in one PR.
   - package-ecosystem: cargo
-    directory: "/apps/server"
+    directories:
+      - "/apps/server"
+      - "/apps/desktop/src-tauri"
+      - "/packages/crypto/core"
+      # Previously uncovered. It is a fourth cargo root with its own lockfile
+      # and the same path dependency on bittery-crypto-core, so leaving it out
+      # let it drift behind the other three.
+      - "/packages/crypto/napi"
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    # Dependabot has no per-group labels, so the crypto review signal has to be
+    # carried by the whole block rather than by the crypto group alone. That is
+    # the safe direction here: all four roots link bittery-crypto-core, so any
+    # cargo PR can move crypto code. Over-labelling a tauri bump costs a glance;
+    # letting an aes-gcm bump through unflagged does not.
+    # The old per-root `server` / `desktop` labels are gone because a PR now
+    # spans directories and can no longer belong to a single app.
     labels:
       - dependencies
-      - server
-    commit-message:
-      prefix: "chore(deps)"
-    groups:
-      server-minor-patch:
-        update-types:
-          - minor
-          - patch
-
-  # Crypto crates are reviewed individually — no grouping, no silent batching.
-  - package-ecosystem: cargo
-    directory: "/packages/crypto/core"
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
+      - rust
       - crypto
       - needs-security-review
+    # Was `chore(deps)` per app and `chore(crypto-deps)` for the crypto root;
+    # a single block can only carry one prefix, so it names the ecosystem the
+    # way `chore(actions)` and `chore(docker)` do.
     commit-message:
-      prefix: "chore(crypto-deps)"
-
-  - package-ecosystem: cargo
-    directory: "/apps/desktop/src-tauri"
-    schedule:
-      interval: weekly
-      day: monday
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-      - desktop
-    commit-message:
-      prefix: "chore(deps)"
+      prefix: "chore(cargo)"
+    # Group order is significant: a dependency lands in the first group it
+    # matches, so the crypto family is claimed before the catch-alls.
     groups:
-      desktop-minor-patch:
+      # The RustCrypto crates are interlocked through the shared `digest`,
+      # `crypto-common`, `aead` and `elliptic-curve` traits: hmac 0.13 wants
+      # digest 0.11 while sha2 0.10 still wants digest 0.10, and the two cannot
+      # coexist behind one `impl Digest`. Bumped one crate at a time they arrive
+      # as a wave of individually unbuildable PRs — the open 0.13/0.11 wave is
+      # nine of them (#83, #86, #87, #89, #92, #95, #96, #97, #98, #99).
+      # Majors are in the group on purpose: moving together is the entire point,
+      # and this is still a dedicated group, not a catch-all, so the security
+      # labels above still describe every PR it produces.
+      rustcrypto:
+        patterns:
+          - aead
+          - aes-gcm
+          - block-buffer
+          - cipher
+          - const-oid
+          - crypto-bigint
+          - crypto-common
+          - digest
+          - ecdsa
+          - elliptic-curve
+          - getrandom
+          - ghash
+          - hkdf
+          - hmac
+          - inout
+          - p256
+          - password-hash
+          - pbkdf2
+          - polyval
+          - rand
+          - rand_chacha
+          - rand_core
+          - rsa
+          - sha1
+          - sha2
+          - signature
+          - subtle
+          - universal-hash
+          - zeroize
+        update-types:
+          - major
+          - minor
+          - patch
+      # One PR for the noisy low-risk stuff instead of dozens. Replaces the old
+      # `server-minor-patch` / `desktop-minor-patch` groups, which raised one
+      # such PR per root (#90, #91) even for dependencies they share.
+      cargo-minor-patch:
+        patterns:
+          - "*"
         update-types:
           - minor
           - patch
+      # Non-crypto majors stay individually reviewable rather than batched, but
+      # `group-by: dependency-name` collapses the per-directory copies into one
+      # PR each. Without it a major on a shared workspace dependency such as
+      # num-bigint (#93) would still be raised once per root.
+      cargo-major:
+        patterns:
+          - "*"
+        update-types:
+          - major
+        group-by: dependency-name
 
   - package-ecosystem: docker
     directories:
