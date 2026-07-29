@@ -309,25 +309,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download extension artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: extension
           path: release-artifacts
 
       - name: Download macOS desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-aarch64-apple-darwin
           path: release-artifacts
 
       - name: Download Windows desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-x86_64-pc-windows-msvc
           path: release-artifacts
 
       - name: Download Linux desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-x86_64-unknown-linux-gnu
           path: release-artifacts
