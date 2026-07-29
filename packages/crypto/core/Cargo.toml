@@ -15,7 +15,7 @@ authors = ["Bittery <team@bittery.com>"]
 
 [workspace.dependencies]
 # Crypto (RustCrypto - audited)
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 hkdf = "0.12"
 hmac = "0.12"
