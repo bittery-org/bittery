@@ -55,7 +55,7 @@ RUN node apps/web/scripts/render-nginx-config.mjs
 # ============================================================
 # Stage 3: Runtime — nginx to serve static files
 # ============================================================
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:1.31-alpine
 
 # Remove default nginx config
 USER root
