@@ -14,6 +14,7 @@ export type ImportWarningCode =
 	| "item-parse-failed"
 	| "invalid-item"
 	| "archived-skipped"
+	| "deleted-skipped"
 	| "missing-title"
 	| "documents-skipped"
 	| "attachments-skipped"

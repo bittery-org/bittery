@@ -16,7 +16,17 @@ export interface ParseCsvOptions {
 	requiredHeaders: string[];
 }
 
-const BOM = "﻿";
+const BOM = "\uFEFF";
+
+/**
+ * A tokenized record plus the 1-based physical line it started on. The line is
+ * carried through parsing so a reported row number always matches what the user
+ * sees in a spreadsheet, even when blank lines sit between data rows.
+ */
+interface CsvRecord {
+	fields: string[];
+	lineNumber: number;
+}
 
 /**
  * Strict RFC 4180 CSV parser.
@@ -32,18 +42,20 @@ export function parseCsv(text: string, options: ParseCsvOptions): CsvTable {
 		throw new ImportProviderError("csv-empty-file");
 	}
 
-	const records = tokenizeCsv(source);
-
-	if (records.length === 0) {
-		throw new ImportProviderError("csv-empty-file");
-	}
+	// Blank lines carry no record. Exporters routinely emit them at the end of
+	// the file, and a blank line can never be a valid multi-column row. They are
+	// dropped only after tokenizing, so each surviving record keeps the line
+	// number it had in the file.
+	const records = tokenizeCsv(source).filter(
+		(record) => !isBlankRecord(record.fields),
+	);
 
 	const headerRecord = records[0];
 	if (!headerRecord) {
 		throw new ImportProviderError("csv-empty-file");
 	}
 
-	const headers = headerRecord.map((header) => header.trim());
+	const headers = headerRecord.fields.map((header) => header.trim());
 	assertNoDuplicateHeaders(headers);
 	assertRequiredHeaders(headers, options.requiredHeaders);
 
@@ -53,15 +65,16 @@ export function parseCsv(text: string, options: ParseCsvOptions): CsvTable {
 		if (!record) {
 			continue;
 		}
-		if (record.length !== headers.length) {
+		if (record.fields.length !== headers.length) {
 			throw new ImportProviderError("csv-row-column-mismatch", {
-				// Row number as the user sees it in a spreadsheet: header is row 1.
-				rowNumber: index + 1,
+				// Row number as the user sees it in a spreadsheet: the line the
+				// record starts on, so interior blank lines do not shift it.
+				rowNumber: record.lineNumber,
 				expectedColumns: headers.length,
-				actualColumns: record.length,
+				actualColumns: record.fields.length,
 			});
 		}
-		rows.push(record);
+		rows.push(record.fields);
 	}
 
 	return { headers, rows };
@@ -132,13 +145,15 @@ function assertRequiredHeaders(
  * RFC 4180 state machine. Accepts CRLF, LF and lone CR as record separators,
  * quoted fields containing separators or newlines, and `""` as an escaped quote.
  */
-function tokenizeCsv(text: string): string[][] {
-	const records: string[][] = [];
+function tokenizeCsv(text: string): CsvRecord[] {
+	const records: CsvRecord[] = [];
 	let record: string[] = [];
 	let field = "";
 	let inQuotes = false;
 	let fieldStarted = false;
 	let quotedFieldClosed = false;
+	let line = 1;
+	let recordLine = 1;
 
 	const endField = () => {
 		record.push(field);
@@ -149,7 +164,7 @@ function tokenizeCsv(text: string): string[][] {
 
 	const endRecord = () => {
 		endField();
-		records.push(record);
+		records.push({ fields: record, lineNumber: recordLine });
 		record = [];
 	};
 
@@ -166,6 +181,11 @@ function tokenizeCsv(text: string): string[][] {
 				inQuotes = false;
 				quotedFieldClosed = true;
 				continue;
+			}
+			// Newlines inside a quoted field are content, but they still advance
+			// the physical line the next record starts on.
+			if (char === "\n" || (char === "\r" && text[index + 1] !== "\n")) {
+				line += 1;
 			}
 			field += char;
 			continue;
@@ -197,11 +217,15 @@ function tokenizeCsv(text: string): string[][] {
 				index += 1;
 			}
 			endRecord();
+			line += 1;
+			recordLine = line;
 			continue;
 		}
 
 		if (char === "\n") {
 			endRecord();
+			line += 1;
+			recordLine = line;
 			continue;
 		}
 
@@ -219,9 +243,13 @@ function tokenizeCsv(text: string): string[][] {
 		endRecord();
 	}
 
-	// Blank lines carry no record. Exporters routinely emit them at the end of
-	// the file, and a blank line can never be a valid multi-column row.
-	return records.filter(
-		(candidate) => !(candidate.length === 1 && candidate[0] === ""),
-	);
+	return records;
+}
+
+/**
+ * A record is blank when it is a single field holding nothing but whitespace —
+ * the shape an empty or whitespace-only line tokenizes into.
+ */
+function isBlankRecord(fields: string[]): boolean {
+	return fields.length === 1 && (fields[0] ?? "").trim() === "";
 }

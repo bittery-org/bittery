@@ -671,6 +671,7 @@
 	"vaults_import_warning_item_parse_failed": "Skipped item {itemNumber} in \"{vaultName}\".",
 	"vaults_import_warning_invalid_item": "Skipped malformed item {itemNumber} in \"{vaultName}\".",
 	"vaults_import_warning_archived_skipped": "{title}: archived items are skipped during import.",
+	"vaults_import_warning_deleted_skipped": "{title}: items in the trash are skipped during import.",
 	"vaults_import_warning_missing_title": "Item {itemNumber} in \"{vaultName}\" is missing a title and was renamed to \"{title}\".",
 	"vaults_import_warning_documents_skipped": "{title}: document items are skipped in v1 (attachments skipped).",
 	"vaults_import_warning_attachments_skipped": "{title}: attachments skipped during import.",

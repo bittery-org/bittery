@@ -59,7 +59,7 @@ Most fixtures require no purchase: Bitwarden, Chrome, Firefox, Safari/Passwords,
 5. **KeePass 1.x and KeePassXC.** Prefer two provider IDs; do not guess based only on `.csv` extension.
 6. **Dashlane ZIP/multi-CSV.** Reuse JSZip, parse every recognized member atomically, map each file type, and warn for attachments/passkeys. This is the broadest and most version-sensitive slice, so land it last.
 
-For every slice, update the provider union/registry, translations in every locale followed by `pnpm i18n:generate`, provider UI descriptions, tests, and `import-passwords.mdx`. The current documentation already claims every source is supported; change the table incrementally so it reflects shipped code.
+For every slice, update the provider union/registry, translations in every locale followed by `pnpm i18n:generate`, provider UI descriptions, tests, and `import-passwords.mdx`. Import support ships incrementally: the public documentation currently lists 1Password and Bitwarden as supported and every other source as coming soon, so extend that table one slice at a time as code lands.
 
 ## Parser and test design for this repository
 

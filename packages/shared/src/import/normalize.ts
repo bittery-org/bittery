@@ -54,28 +54,22 @@ export function normalizeExpiryDate(
 ): string | undefined {
 	const monthRaw = `${month ?? ""}`.trim();
 	const yearRaw = `${year ?? ""}`.trim();
-	if (!monthRaw && !yearRaw) {
+
+	// `MM/YYYY` is only meaningful with both halves. A partial or out-of-range
+	// value is dropped rather than stored as an expiry Bittery cannot render.
+	if (!/^\d{1,2}$/.test(monthRaw) || !/^\d{2}(\d{2})?$/.test(yearRaw)) {
 		return undefined;
 	}
 
 	const monthNumber = Number.parseInt(monthRaw, 10);
-	const paddedMonth =
-		Number.isFinite(monthNumber) && monthNumber >= 1 && monthNumber <= 12
-			? String(monthNumber).padStart(2, "0")
-			: monthRaw;
-
-	if (!yearRaw) {
-		return paddedMonth || undefined;
+	if (monthNumber < 1 || monthNumber > 12) {
+		return undefined;
 	}
 
 	// Two-digit years are exported by some products; expand them into this century.
-	const fullYear = /^\d{2}$/.test(yearRaw) ? `20${yearRaw}` : yearRaw;
+	const fullYear = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
 
-	if (!paddedMonth) {
-		return fullYear;
-	}
-
-	return `${paddedMonth}/${fullYear}`;
+	return `${String(monthNumber).padStart(2, "0")}/${fullYear}`;
 }
 
 /**

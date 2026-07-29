@@ -52,8 +52,8 @@ const JSON_ITEM_TYPE_CARD = 3;
 const JSON_ITEM_TYPE_IDENTITY = 4;
 const JSON_ITEM_TYPE_SSH_KEY = 5;
 
-/** Bitwarden JSON custom-field type discriminator. */
-const JSON_FIELD_TYPE_TEXT = 0;
+/** Bitwarden JSON custom-field type discriminator. Type 0 is plain text, the
+ * default every non-boolean, non-linked field falls back to. */
 const JSON_FIELD_TYPE_HIDDEN = 1;
 const JSON_FIELD_TYPE_BOOLEAN = 2;
 const JSON_FIELD_TYPE_LINKED = 3;
@@ -67,6 +67,7 @@ interface VaultAccumulator {
  */
 class SourceVaultBuilder {
 	private readonly byKey = new Map<string, VaultAccumulator>();
+	private readonly byId = new Map<string, VaultAccumulator>();
 	private readonly ordered: VaultAccumulator[] = [];
 
 	ensure(
@@ -89,29 +90,32 @@ class SourceVaultBuilder {
 			},
 		};
 		this.byKey.set(key, accumulator);
+		this.byId.set(id, accumulator);
 		this.ordered.push(accumulator);
 		return id;
 	}
 
+	/** Id of an already-registered vault, or undefined when the key is unknown. */
+	idForKey(key: string): string | undefined {
+		return this.byKey.get(key)?.vault.id;
+	}
+
 	countItem(id: string): void {
-		const accumulator = this.ordered.find((entry) => entry.vault.id === id);
+		const accumulator = this.byId.get(id);
 		if (accumulator) {
 			accumulator.vault.itemCount += 1;
 		}
 	}
 
 	countSkipped(id: string): void {
-		const accumulator = this.ordered.find((entry) => entry.vault.id === id);
+		const accumulator = this.byId.get(id);
 		if (accumulator) {
 			accumulator.vault.skippedCount += 1;
 		}
 	}
 
 	nameOf(id: string): string {
-		return (
-			this.ordered.find((entry) => entry.vault.id === id)?.vault.name ??
-			NO_FOLDER_VAULT_NAME
-		);
+		return this.byId.get(id)?.vault.name ?? NO_FOLDER_VAULT_NAME;
 	}
 
 	toArray(): ImportSourceVault[] {
@@ -226,15 +230,9 @@ function parseCsvExport(text: string): ImportPreview {
 
 		const rawTitle = readCsvColumn(row, columns, "name").trim();
 		const title = rawTitle || `Imported item ${index + 1}`;
-		if (!rawTitle) {
-			warnings.push({
-				code: "missing-title",
-				params: { itemNumber: index + 1, vaultName, title },
-				sourceVaultId,
-				sourceItemId: itemId,
-			});
-		}
 
+		// Skipped rows are resolved before any per-item warning, so a row that
+		// never reaches the vault does not also report a renamed title.
 		// `archivedDate` is not in Bitwarden's published header but real exports
 		// carry it. Absent in older exports, hence read rather than required.
 		if (readCsvColumn(row, columns, "archivedDate").trim()) {
@@ -247,6 +245,15 @@ function parseCsvExport(text: string): ImportPreview {
 				sourceItemId: itemId,
 			});
 			return;
+		}
+
+		if (!rawTitle) {
+			warnings.push({
+				code: "missing-title",
+				params: { itemNumber: index + 1, vaultName, title },
+				sourceVaultId,
+				sourceItemId: itemId,
+			});
 		}
 
 		const sourceCategory = readCsvColumn(row, columns, "type").trim();
@@ -446,36 +453,44 @@ function parseJsonExport(text: string): ImportPreview {
 			return;
 		}
 
+		// Folders are registered up front, so an unknown `folderId` is a dangling
+		// reference. Falling back to the unfoldered bucket keeps the raw GUID from
+		// surfacing as a vault name the user is asked to map.
 		const folderId = readString(item.folderId);
-		const sourceVaultId = folderId
-			? vaults.ensure(
-					`folder:${folderId}`,
-					`bitwarden-folder-${folderId}`,
-					folderId,
-				)
-			: vaults.ensure(
-					"no-folder",
-					NO_FOLDER_VAULT_ID,
-					NO_FOLDER_VAULT_NAME,
-					"no-folder",
-				);
+		const folderVaultId = folderId
+			? vaults.idForKey(`folder:${folderId}`)
+			: undefined;
+		const sourceVaultId =
+			folderVaultId ??
+			vaults.ensure(
+				"no-folder",
+				NO_FOLDER_VAULT_ID,
+				NO_FOLDER_VAULT_NAME,
+				"no-folder",
+			);
 		const itemId = readString(item.id) ?? `bitwarden-item-${index + 1}`;
 		const vaultName = vaults.nameOf(sourceVaultId);
 
 		const rawTitle = readString(item.name)?.trim();
 		const title = rawTitle || `Imported item ${index + 1}`;
-		if (!rawTitle) {
+
+		// Skipped items are resolved before any per-item warning, so an item that
+		// never reaches the vault does not also report a renamed title.
+		// Trashed and archived are distinct states in Bitwarden and are reported
+		// separately, but neither should land in a fresh vault as if it were live.
+		if (readString(item.deletedDate)) {
+			skippedCount += 1;
+			vaults.countSkipped(sourceVaultId);
 			warnings.push({
-				code: "missing-title",
-				params: { itemNumber: index + 1, vaultName, title },
+				code: "deleted-skipped",
+				params: { title },
 				sourceVaultId,
 				sourceItemId: itemId,
 			});
+			return;
 		}
 
-		// Trashed or archived: Bitwarden exports both, and neither should land in
-		// a fresh vault as if it were live.
-		if (readString(item.deletedDate) || readString(item.archivedDate)) {
+		if (readString(item.archivedDate)) {
 			skippedCount += 1;
 			vaults.countSkipped(sourceVaultId);
 			warnings.push({
@@ -485,6 +500,15 @@ function parseJsonExport(text: string): ImportPreview {
 				sourceItemId: itemId,
 			});
 			return;
+		}
+
+		if (!rawTitle) {
+			warnings.push({
+				code: "missing-title",
+				params: { itemNumber: index + 1, vaultName, title },
+				sourceVaultId,
+				sourceItemId: itemId,
+			});
 		}
 
 		const itemType = readNumber(item.type);
@@ -824,12 +848,6 @@ function readCustomFieldValue(
 			return raw ? "true" : "false";
 		}
 		return readString(raw) === "true" ? "true" : "false";
-	}
-	if (
-		fieldType === JSON_FIELD_TYPE_TEXT ||
-		fieldType === JSON_FIELD_TYPE_HIDDEN
-	) {
-		return readString(raw) ?? "";
 	}
 	return readString(raw) ?? "";
 }

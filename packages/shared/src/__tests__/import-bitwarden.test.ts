@@ -544,7 +544,7 @@ describe("Bitwarden import provider", () => {
 			).toBe(false);
 			expect(preview.summary.skippedCount).toBe(2);
 			expect(warningCodes(preview)).toEqual(
-				expect.arrayContaining(["unsupported-item-type", "archived-skipped"]),
+				expect.arrayContaining(["unsupported-item-type", "deleted-skipped"]),
 			);
 		});
 

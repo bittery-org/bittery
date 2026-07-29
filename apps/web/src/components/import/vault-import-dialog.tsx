@@ -201,6 +201,10 @@ function getImportWarningMessage(
 			return m.vaults_import_warning_archived_skipped({
 				title: getStringParam(warning.params, "title"),
 			});
+		case "deleted-skipped":
+			return m.vaults_import_warning_deleted_skipped({
+				title: getStringParam(warning.params, "title"),
+			});
 		case "missing-title":
 			return m.vaults_import_warning_missing_title({
 				itemNumber: getNumberParam(warning.params, "itemNumber", 0),

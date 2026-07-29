@@ -671,6 +671,7 @@
 	"vaults_import_warning_item_parse_failed": "Eintrag {itemNumber} in \"{vaultName}\" wurde übersprungen.",
 	"vaults_import_warning_invalid_item": "Fehlerhafter Eintrag {itemNumber} in \"{vaultName}\" wurde übersprungen.",
 	"vaults_import_warning_archived_skipped": "{title}: Archivierte Einträge werden beim Import übersprungen.",
+	"vaults_import_warning_deleted_skipped": "{title}: Einträge im Papierkorb werden beim Import übersprungen.",
 	"vaults_import_warning_missing_title": "Eintrag {itemNumber} in \"{vaultName}\" hat keinen Titel und wurde in \"{title}\" umbenannt.",
 	"vaults_import_warning_documents_skipped": "{title}: Dokumenteinträge werden in v1 übersprungen (Anhänge übersprungen).",
 	"vaults_import_warning_attachments_skipped": "{title}: Anhänge wurden beim Import übersprungen.",

@@ -102,6 +102,25 @@ describe("parseCsv", () => {
 			expect(table.rows).toHaveLength(1);
 		});
 
+		test("ignores a whitespace-only trailing line", () => {
+			const table = parseCsv("a,b,c\n1,2,3\n   \n", {
+				requiredHeaders: REQUIRED,
+			});
+
+			expect(table.rows).toEqual([["1", "2", "3"]]);
+		});
+
+		test("ignores interior blank lines", () => {
+			const table = parseCsv("a,b,c\n1,2,3\n\n4,5,6", {
+				requiredHeaders: REQUIRED,
+			});
+
+			expect(table.rows).toEqual([
+				["1", "2", "3"],
+				["4", "5", "6"],
+			]);
+		});
+
 		test("matches required headers case-insensitively", () => {
 			const table = parseCsv("A,B,C\n1,2,3", { requiredHeaders: REQUIRED });
 
@@ -209,6 +228,27 @@ describe("parseCsv", () => {
 				expectedColumns: 3,
 				actualColumns: 2,
 			});
+		});
+
+		test("keeps spreadsheet row numbers across interior blank lines", () => {
+			const error = expectErrorCode(
+				() => parseCsv("a,b,c\n1,2,3\n\n\n4,5", { requiredHeaders: REQUIRED }),
+				"csv-row-column-mismatch",
+			);
+
+			expect(error.params?.rowNumber).toBe(5);
+		});
+
+		test("keeps row numbers across newlines inside quoted fields", () => {
+			const error = expectErrorCode(
+				() =>
+					parseCsv('a,b,c\n"line one\nline two",2,3\n4,5', {
+						requiredHeaders: REQUIRED,
+					}),
+				"csv-row-column-mismatch",
+			);
+
+			expect(error.params?.rowNumber).toBe(4);
 		});
 	});
 });
