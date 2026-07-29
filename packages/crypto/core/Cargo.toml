@@ -19,7 +19,7 @@ aes-gcm = "0.10"
 pbkdf2 = { version = "0.12", features = ["simple"] }
 hkdf = "0.12"
 hmac = "0.12"
-sha1 = "0.10"
+sha1 = "0.11"
 sha2 = "0.10"
 rsa = { version = "0.9", features = ["sha2"] }
 p256 = { version = "0.13", features = ["ecdsa"] }
