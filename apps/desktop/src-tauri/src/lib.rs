@@ -3,16 +3,16 @@ mod desktop_ipc;
 mod keychain;
 mod native_messaging_installer;
 
-use std::sync::Arc;
 use base64::Engine;
 use desktop_ipc::{
-    desktop_ipc_socket_path, write_frame, DesktopEnvelope, DesktopEventKind,
-    DesktopRequest, DesktopResponse, DESKTOP_PROTOCOL_VERSION,
+    desktop_ipc_socket_path, write_frame, DesktopEnvelope, DesktopEventKind, DesktopRequest,
+    DesktopResponse, DESKTOP_PROTOCOL_VERSION,
 };
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::broadcast;
+use std::sync::Arc;
 use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_store::Store;
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::broadcast;
 
 #[derive(Debug, Clone)]
 enum LockEvent {
@@ -88,14 +88,11 @@ fn biometric_enabled_flag(value: Option<serde_json::Value>) -> bool {
 /// This is a security-relevant check: when a user has disabled biometrics for
 /// an account we must refuse to hand its MUK to the extension.
 fn is_biometric_enabled_for_account<R: Runtime>(store: &Store<R>, account_id: &str) -> bool {
-    biometric_enabled_flag(store.get(&account_id_key(account_id, "biometric_enabled")))
+    biometric_enabled_flag(store.get(account_id_key(account_id, "biometric_enabled")))
 }
 
 /// Resolve the email for a given stable accountId.
-fn resolve_email_for_account_id<R: Runtime>(
-    store: &Store<R>,
-    account_id: &str,
-) -> Option<String> {
+fn resolve_email_for_account_id<R: Runtime>(store: &Store<R>, account_id: &str) -> Option<String> {
     let accounts_str = read_store_string(store, "bittery_accounts_list")?;
     let accounts_json: serde_json::Value = serde_json::from_str(&accounts_str).ok()?;
     let accounts = accounts_json.get("accounts").and_then(|v| v.as_array())?;
@@ -160,13 +157,7 @@ fn unwrap_plaintext_with_context(
         return Err("Invalid encryption context marker".to_string());
     }
 
-    let expected = serialize_encryption_context(
-        vault_id,
-        entity_id,
-        entity_type,
-        version,
-        user_id,
-    );
+    let expected = serialize_encryption_context(vault_id, entity_id, entity_type, version, user_id);
     if context != expected {
         return Err("Encryption context mismatch".to_string());
     }
@@ -231,10 +222,7 @@ fn default_cached_vault_type() -> String {
     "personal".to_string()
 }
 
-fn decrypt_item_payload(
-    item: &CachedItemRecord,
-    vault_key_base64: &str,
-) -> Result<String, String> {
+fn decrypt_item_payload(item: &CachedItemRecord, vault_key_base64: &str) -> Result<String, String> {
     let user_id = item
         .last_modified_by
         .as_deref()
@@ -276,9 +264,7 @@ fn decrypt_item_payload(
             item.encryption_algorithm.clone(),
             vault_key_base64.to_string(),
         )
-        .map_err(|e| {
-            last_error.unwrap_or_else(|| format!("Decryption failed: {}", e))
-        })?;
+        .map_err(|e| last_error.unwrap_or_else(|| format!("Decryption failed: {}", e)))?;
 
         let unwrapped = unwrap_plaintext_with_context(
             decrypted_data,
@@ -305,9 +291,9 @@ fn build_snapshot_item_payload(
     item: &CachedItemRecord,
     decrypted_data: &str,
     vault: Option<&CachedVaultRecord>,
-	include_account_context: bool,
-	account_id: &str,
-	email: &str,
+    include_account_context: bool,
+    account_id: &str,
+    email: &str,
     account: Option<&serde_json::Value>,
 ) -> Option<serde_json::Value> {
     let Ok(mut payload) =
@@ -321,9 +307,9 @@ fn build_snapshot_item_payload(
     payload.insert("category".to_string(), serde_json::json!(item.category));
     payload.insert("favorite".to_string(), serde_json::json!(item.favorite));
     payload.insert("createdAt".to_string(), serde_json::json!(item.created_at));
-	payload.insert("updatedAt".to_string(), serde_json::json!(item.updated_at));
-	payload.insert("accountId".to_string(), serde_json::json!(account_id));
-	payload.insert("accountEmail".to_string(), serde_json::json!(email));
+    payload.insert("updatedAt".to_string(), serde_json::json!(item.updated_at));
+    payload.insert("accountId".to_string(), serde_json::json!(account_id));
+    payload.insert("accountEmail".to_string(), serde_json::json!(email));
 
     payload.insert(
         "vault".to_string(),
@@ -353,6 +339,14 @@ fn build_snapshot_item_payload(
     Some(serde_json::Value::Object(payload))
 }
 
+/// Resolve the active account's email, tolerating every historical shape of the
+/// `ACTIVE_ACCOUNT_KEY` value.
+///
+/// NOTE: currently unused — every caller now goes through
+/// [`get_active_account_id`] and resolves the email per accountId. Kept because
+/// it is the only place that still understands the legacy plain-email and
+/// intermediate-JSON encodings, which older stores can still contain.
+#[allow(dead_code)]
 fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
     let raw = read_store_string(store, ACTIVE_ACCOUNT_KEY)?;
 
@@ -391,7 +385,10 @@ fn get_active_account_id<R: Runtime>(store: &Store<R>) -> Option<String> {
     }
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
         if parsed.get("type").and_then(|value| value.as_str()) == Some("single") {
-            return parsed.get("accountId").and_then(|value| value.as_str()).map(str::to_string);
+            return parsed
+                .get("accountId")
+                .and_then(|value| value.as_str())
+                .map(str::to_string);
         }
         return None;
     }
@@ -401,6 +398,12 @@ fn get_active_account_id<R: Runtime>(store: &Store<R>) -> Option<String> {
     Some(raw)
 }
 
+/// Prefer an account-scoped store key, falling back to a legacy unscoped key.
+///
+/// NOTE: no production call site remains — all reads are account-scoped only
+/// (see `read_account_id_scoped_string`). It is still exercised by the unit
+/// tests below, so it is dead only in the non-test `bittery_lib` target.
+#[allow(dead_code)]
 fn lookup_store_string_with_fallback<F>(
     mut lookup: F,
     primary_key: &str,
@@ -432,7 +435,10 @@ fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
                 "timestamp": timestamp,
             }),
         },
-        LockEvent::Unlock { accounts, timestamp } => DesktopResponse::DesktopEvent {
+        LockEvent::Unlock {
+            accounts,
+            timestamp,
+        } => DesktopResponse::DesktopEvent {
             event: DesktopEventKind::Unlock,
             payload: serde_json::json!({
                 "accounts": accounts,
@@ -443,7 +449,10 @@ fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
             event: DesktopEventKind::DesktopClose,
             payload: serde_json::json!({ "timestamp": timestamp }),
         },
-        LockEvent::ActiveAccountChanged { account_id, timestamp } => DesktopResponse::DesktopEvent {
+        LockEvent::ActiveAccountChanged {
+            account_id,
+            timestamp,
+        } => DesktopResponse::DesktopEvent {
             event: DesktopEventKind::ActiveAccountChanged,
             payload: serde_json::json!({
                 "accountId": account_id,
@@ -465,13 +474,15 @@ fn get_unlocked_accounts<R: Runtime>(store: &Store<R>) -> Vec<String> {
         .get("bittery_unlocked_accounts")
         .and_then(|v| v.as_str().map(|s| s.to_string()))
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(Vec::new)
+        .unwrap_or_default()
 }
 
 fn get_account_directory<R: Runtime>(
     store: &Store<R>,
 ) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
-    let accounts_value = store.get("bittery_accounts_list").ok_or("No accounts found")?;
+    let accounts_value = store
+        .get("bittery_accounts_list")
+        .ok_or("No accounts found")?;
     let accounts_str = accounts_value
         .as_str()
         .ok_or("Invalid accounts list format")?;
@@ -493,7 +504,7 @@ fn get_account_directory<R: Runtime>(
 }
 
 fn load_muk_base64<R: Runtime>(store: &Store<R>, account_id: &str) -> Result<String, String> {
-	let session_data_str = read_account_id_scoped_string(store, account_id, "session_data")
+    let session_data_str = read_account_id_scoped_string(store, account_id, "session_data")
         .ok_or("No session data found")?;
     let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
         .map_err(|e| format!("Failed to parse session data: {}", e))?;
@@ -540,11 +551,11 @@ fn load_muk_base64<R: Runtime>(store: &Store<R>, account_id: &str) -> Result<Str
 }
 
 fn load_decrypted_vault_keys<R: Runtime>(
-	store: &Store<R>,
-	account_id: &str,
+    store: &Store<R>,
+    account_id: &str,
 ) -> Result<std::collections::HashMap<String, String>, String> {
-	let muk_base64 = load_muk_base64(store, account_id)?;
-	let vault_keys_str = read_account_id_scoped_string(store, account_id, "vault_keys")
+    let muk_base64 = load_muk_base64(store, account_id)?;
+    let vault_keys_str = read_account_id_scoped_string(store, account_id, "vault_keys")
         .ok_or("Vault keys not found")?;
     let vault_keys: Vec<serde_json::Value> = serde_json::from_str(&vault_keys_str)
         .map_err(|e| format!("Failed to parse vault keys: {}", e))?;
@@ -617,8 +628,8 @@ fn load_decrypted_vault_keys<R: Runtime>(
                 .map_err(|e| format!("Failed to decrypt vault key: {}", e))?
             }
         } else {
-			let encrypted_private_key_str =
-				read_account_id_scoped_string(store, account_id, "encrypted_private_key")
+            let encrypted_private_key_str =
+                read_account_id_scoped_string(store, account_id, "encrypted_private_key")
                     .ok_or("Encrypted private key not found for RSA decryption")?;
             let epk: serde_json::Value = serde_json::from_str(&encrypted_private_key_str)
                 .map_err(|e| format!("Failed to parse encrypted private key: {}", e))?;
@@ -642,11 +653,8 @@ fn load_decrypted_vault_keys<R: Runtime>(
             )
             .map_err(|e| format!("Failed to decrypt private key: {}", e))?;
 
-            crypto_commands::crypto_rsa_decrypt(
-                encrypted_vault_key.to_string(),
-                private_key_pem,
-            )
-            .map_err(|e| format!("Failed to RSA decrypt vault key: {}", e))?
+            crypto_commands::crypto_rsa_decrypt(encrypted_vault_key.to_string(), private_key_pem)
+                .map_err(|e| format!("Failed to RSA decrypt vault key: {}", e))?
         };
 
         decrypted_vault_keys.insert(vault_id.to_string(), vault_key_base64);
@@ -664,30 +672,34 @@ fn get_bearer_token_for_account_id<R: Runtime>(
         Ok(Some(token)) => Some(token),
         Ok(None) => read_store_string(store, &key),
         Err(error) => {
-            eprintln!("[desktop-ipc] Failed reading bearer token for account {}: {}", account_id, error);
+            eprintln!(
+                "[desktop-ipc] Failed reading bearer token for account {}: {}",
+                account_id, error
+            );
             None
         }
     }
 }
 
 async fn get_auth_token_internal(
-	app_handle: &tauri::AppHandle,
-	account_id: &str,
+    app_handle: &tauri::AppHandle,
+    account_id: &str,
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_store::StoreExt;
 
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
-	let token = get_bearer_token_for_account_id(&store, account_id).ok_or("Auth token not found")?;
-	let email = resolve_email_for_account_id(&store, account_id).ok_or("Account not found")?;
+    let token =
+        get_bearer_token_for_account_id(&store, account_id).ok_or("Auth token not found")?;
+    let email = resolve_email_for_account_id(&store, account_id).ok_or("Account not found")?;
 
-	let session_metadata = read_account_id_scoped_string(&store, account_id, "session_data")
+    let session_metadata = read_account_id_scoped_string(&store, account_id, "session_data")
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
 
-	Ok(serde_json::json!({
-		"accountId": account_id,
-		"email": email,
+    Ok(serde_json::json!({
+        "accountId": account_id,
+        "email": email,
         "authToken": token,
         "expiresAt": session_metadata.as_ref().and_then(|value| value.get("expiresAt")).cloned(),
         "userId": session_metadata.as_ref().and_then(|value| value.get("userId")).cloned(),
@@ -695,8 +707,8 @@ async fn get_auth_token_internal(
 }
 
 async fn get_items_snapshot_internal(
-	app_handle: &tauri::AppHandle,
-	account_ids: Option<Vec<String>>,
+    app_handle: &tauri::AppHandle,
+    account_ids: Option<Vec<String>>,
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_store::StoreExt;
 
@@ -705,34 +717,39 @@ async fn get_items_snapshot_internal(
         .map_err(|e| format!("Failed to access store: {}", e))?;
     // Lock-state marker holds accountIds (post-migration) or legacy emails.
     let unlocked_accounts = get_unlocked_accounts(&store);
-	let target_account_ids = match account_ids {
-		Some(values) if !values.is_empty() => values,
-		_ => unlocked_accounts.clone(),
-	};
+    let target_account_ids = match account_ids {
+        Some(values) if !values.is_empty() => values,
+        _ => unlocked_accounts.clone(),
+    };
 
-	let include_account_context = target_account_ids.len() > 1;
+    let include_account_context = target_account_ids.len() > 1;
     let account_directory = get_account_directory(&store).unwrap_or_default();
     let mut items = Vec::new();
     let mut skipped_items = 0usize;
 
-	for account_id in target_account_ids {
-		let is_unlocked = unlocked_accounts.iter().any(|value| value == &account_id);
-		if !is_unlocked {
-			continue;
-		}
-		let account = account_directory.get(&account_id).ok_or("Account not found")?;
-		let email = account.get("email").and_then(|value| value.as_str()).ok_or("Account email not found")?;
+    for account_id in target_account_ids {
+        let is_unlocked = unlocked_accounts.iter().any(|value| value == &account_id);
+        if !is_unlocked {
+            continue;
+        }
+        let account = account_directory
+            .get(&account_id)
+            .ok_or("Account not found")?;
+        let email = account
+            .get("email")
+            .and_then(|value| value.as_str())
+            .ok_or("Account email not found")?;
 
-		let decrypted_vault_keys = load_decrypted_vault_keys(&store, &account_id)?;
+        let decrypted_vault_keys = load_decrypted_vault_keys(&store, &account_id)?;
 
         let cached_items: Vec<CachedItemRecord> =
-			read_account_id_scoped_string(&store, &account_id, "cached_items")
+            read_account_id_scoped_string(&store, &account_id, "cached_items")
                 .map(|value| serde_json::from_str(&value))
                 .transpose()
                 .map_err(|e| format!("Failed to parse cached items: {}", e))?
                 .unwrap_or_default();
         let cached_vaults: Vec<CachedVaultRecord> =
-			read_account_id_scoped_string(&store, &account_id, "cached_vaults")
+            read_account_id_scoped_string(&store, &account_id, "cached_vaults")
                 .map(|value| serde_json::from_str(&value))
                 .transpose()
                 .map_err(|e| format!("Failed to parse cached vaults: {}", e))?
@@ -742,7 +759,10 @@ async fn get_items_snapshot_internal(
             .map(|vault| (vault.id.clone(), vault))
             .collect::<std::collections::HashMap<_, _>>();
 
-        for item in cached_items.into_iter().filter(|item| item.deleted_at.is_none()) {
+        for item in cached_items
+            .into_iter()
+            .filter(|item| item.deleted_at.is_none())
+        {
             let Some(vault_key) = decrypted_vault_keys.get(&item.vault_id) else {
                 continue;
             };
@@ -763,10 +783,10 @@ async fn get_items_snapshot_internal(
                 &item,
                 &decrypted_data,
                 vault_map.get(&item.vault_id),
-				include_account_context,
-				&account_id,
-				&email,
-				Some(account),
+                include_account_context,
+                &account_id,
+                email,
+                Some(account),
             ) else {
                 continue;
             };
@@ -851,11 +871,15 @@ async fn handle_desktop_ipc_message(
             },
             Err(error) => DesktopResponse::Error { message: error },
         },
-		DesktopRequest::GetDesktopAuthToken { account_id } => {
-			match get_auth_token_internal(app_handle, &account_id).await {
-				Ok(data) => DesktopResponse::DesktopAuthToken {
-					account_id,
-					email: data.get("email").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        DesktopRequest::GetDesktopAuthToken { account_id } => {
+            match get_auth_token_internal(app_handle, &account_id).await {
+                Ok(data) => DesktopResponse::DesktopAuthToken {
+                    account_id,
+                    email: data
+                        .get("email")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     auth_token: data
                         .get("authToken")
                         .and_then(|v| v.as_str())
@@ -870,11 +894,15 @@ async fn handle_desktop_ipc_message(
                 Err(error) => DesktopResponse::Error { message: error },
             }
         }
-		DesktopRequest::GetDesktopVaultKeys { account_id } => {
-			match get_vault_keys_internal(app_handle, Some(account_id.clone())).await {
-				Ok(data) => DesktopResponse::DesktopVaultKeys {
-					account_id,
-					email: data.get("email").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+        DesktopRequest::GetDesktopVaultKeys { account_id } => {
+            match get_vault_keys_internal(app_handle, Some(account_id.clone())).await {
+                Ok(data) => DesktopResponse::DesktopVaultKeys {
+                    account_id,
+                    email: data
+                        .get("email")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     vault_keys: data
                         .get("vault_keys")
                         .and_then(|v| v.as_str())
@@ -884,8 +912,8 @@ async fn handle_desktop_ipc_message(
                 Err(error) => DesktopResponse::Error { message: error },
             }
         }
-		DesktopRequest::GetDesktopItemsSnapshot { account_ids } => {
-			match get_items_snapshot_internal(app_handle, account_ids).await {
+        DesktopRequest::GetDesktopItemsSnapshot { account_ids } => {
+            match get_items_snapshot_internal(app_handle, account_ids).await {
                 Ok(data) => DesktopResponse::DesktopItemsSnapshot {
                     items: data
                         .get("items")
@@ -916,21 +944,29 @@ async fn handle_desktop_ipc_message(
                 Err(error) => DesktopResponse::Error { message: error },
             }
         }
-		DesktopRequest::BiometricUnlockRequest {
-			challenge,
-			extension_id,
-			account_id,
-		} => match biometric_unlock_internal(
+        DesktopRequest::BiometricUnlockRequest {
+            challenge,
+            extension_id,
+            account_id,
+        } => match biometric_unlock_internal(
             app_handle,
             &challenge,
             &extension_id,
-			account_id.as_deref(),
+            account_id.as_deref(),
         )
         .await
         {
-			Ok(response) => DesktopResponse::BiometricUnlockSuccess {
-				account_id: response.get("accountId").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
-				email: response.get("email").and_then(|v| v.as_str()).unwrap_or_default().to_string(),
+            Ok(response) => DesktopResponse::BiometricUnlockSuccess {
+                account_id: response
+                    .get("accountId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                email: response
+                    .get("email")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
                 encrypted_session: response
                     .get("encrypted_session")
                     .and_then(|v| v.as_str())
@@ -973,7 +1009,10 @@ async fn handle_desktop_ipc_message(
                     .unwrap_or_default()
                     .to_string(),
                 accounts: serde_json::from_value(
-                    response.get("accounts").cloned().unwrap_or_else(|| serde_json::json!([])),
+                    response
+                        .get("accounts")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!([])),
                 )
                 .unwrap_or_default(),
                 unlocked: response
@@ -1000,7 +1039,7 @@ async fn handle_desktop_ipc_message(
             Err(error) => DesktopResponse::BiometricUnlockAllFailed { error },
         },
         DesktopRequest::TriggerDesktopUnlock => {
-            let response = if let Err(error) = open_app_internal(app_handle) {
+            if let Err(error) = open_app_internal(app_handle) {
                 DesktopResponse::TriggerDesktopUnlockResult {
                     success: false,
                     error: Some(error),
@@ -1015,8 +1054,7 @@ async fn handle_desktop_ipc_message(
                     success: true,
                     error: None,
                 }
-            };
-            response
+            }
         }
         DesktopRequest::OpenDesktopApp {
             intent,
@@ -1027,10 +1065,8 @@ async fn handle_desktop_ipc_message(
             Ok(()) => {
                 match intent.as_deref() {
                     Some("create_item") => {
-                        let _ = app_handle.emit(
-                            "open-create-item",
-                            serde_json::json!({ "url": url }),
-                        );
+                        let _ =
+                            app_handle.emit("open-create-item", serde_json::json!({ "url": url }));
                     }
                     Some("view_item") => {
                         let _ = app_handle.emit(
@@ -1072,45 +1108,45 @@ where
             tokio::select! {
                 message = desktop_ipc::read_frame::<_, DesktopEnvelope<DesktopRequest>>(&mut reader) => {
                     let message = message.map_err(|error| error.to_string())?;
-					if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
-						eprintln!(
-							"[desktop-ipc] Protocol mismatch expected={} received={}",
-							DESKTOP_PROTOCOL_VERSION,
-							message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "legacy".to_string()),
-						);
-						let response = DesktopEnvelope::current(
-							message.request_id,
-							DesktopResponse::ProtocolMismatch {
-								expected_version: DESKTOP_PROTOCOL_VERSION,
-								received_version: message.protocol_version,
-							},
-						);
-						write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
-					} else {
-						match message.payload {
+                    if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
+                        eprintln!(
+                            "[desktop-ipc] Protocol mismatch expected={} received={}",
+                            DESKTOP_PROTOCOL_VERSION,
+                            message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "legacy".to_string()),
+                        );
+                        let response = DesktopEnvelope::current(
+                            message.request_id,
+                            DesktopResponse::ProtocolMismatch {
+                                expected_version: DESKTOP_PROTOCOL_VERSION,
+                                received_version: message.protocol_version,
+                            },
+                        );
+                        write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+                    } else {
+                        match message.payload {
                         DesktopRequest::UnsubscribeDesktopEvents => {
                             event_rx = None;
-							let response = DesktopEnvelope::current(
-								message.request_id,
-								DesktopResponse::DesktopEventSubscription { subscribed: false },
-							);
+                            let response = DesktopEnvelope::current(
+                                message.request_id,
+                                DesktopResponse::DesktopEventSubscription { subscribed: false },
+                            );
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
                         request => {
                             let payload = handle_desktop_ipc_message(&app_handle, request).await;
-							let response = DesktopEnvelope::current(message.request_id, payload);
+                            let response = DesktopEnvelope::current(message.request_id, payload);
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
-						}
-					}
+                        }
+                    }
                 }
                 event = rx.recv() => {
                     match event {
                         Ok(event) => {
-							let response = DesktopEnvelope::current(
-								None,
-								lock_event_to_response(event),
-							);
+                            let response = DesktopEnvelope::current(
+                                None,
+                                lock_event_to_response(event),
+                            );
                             write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {}
@@ -1119,39 +1155,49 @@ where
                 }
             }
         } else {
-            let message: DesktopEnvelope<DesktopRequest> =
-                desktop_ipc::read_frame(&mut reader).await.map_err(|error| error.to_string())?;
-			if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
-				eprintln!(
-					"[desktop-ipc] Protocol mismatch expected={} received={}",
-					DESKTOP_PROTOCOL_VERSION,
-					message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "legacy".to_string()),
-				);
-				let response = DesktopEnvelope::current(
-					message.request_id,
-					DesktopResponse::ProtocolMismatch {
-						expected_version: DESKTOP_PROTOCOL_VERSION,
-						received_version: message.protocol_version,
-					},
-				);
-				write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
-			} else {
-				match message.payload {
-                DesktopRequest::SubscribeDesktopEvents => {
-                    event_rx = Some(state.lock_events.subscribe());
-					let response = DesktopEnvelope::current(
-						message.request_id,
-						DesktopResponse::DesktopEventSubscription { subscribed: true },
-					);
-                    write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
+            let message: DesktopEnvelope<DesktopRequest> = desktop_ipc::read_frame(&mut reader)
+                .await
+                .map_err(|error| error.to_string())?;
+            if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
+                eprintln!(
+                    "[desktop-ipc] Protocol mismatch expected={} received={}",
+                    DESKTOP_PROTOCOL_VERSION,
+                    message
+                        .protocol_version
+                        .map(|version| version.to_string())
+                        .unwrap_or_else(|| "legacy".to_string()),
+                );
+                let response = DesktopEnvelope::current(
+                    message.request_id,
+                    DesktopResponse::ProtocolMismatch {
+                        expected_version: DESKTOP_PROTOCOL_VERSION,
+                        received_version: message.protocol_version,
+                    },
+                );
+                write_frame(&mut writer, &response)
+                    .await
+                    .map_err(|error| error.to_string())?;
+            } else {
+                match message.payload {
+                    DesktopRequest::SubscribeDesktopEvents => {
+                        event_rx = Some(state.lock_events.subscribe());
+                        let response = DesktopEnvelope::current(
+                            message.request_id,
+                            DesktopResponse::DesktopEventSubscription { subscribed: true },
+                        );
+                        write_frame(&mut writer, &response)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                    }
+                    request => {
+                        let payload = handle_desktop_ipc_message(&app_handle, request).await;
+                        let response = DesktopEnvelope::current(message.request_id, payload);
+                        write_frame(&mut writer, &response)
+                            .await
+                            .map_err(|error| error.to_string())?;
+                    }
                 }
-                request => {
-                    let payload = handle_desktop_ipc_message(&app_handle, request).await;
-					let response = DesktopEnvelope::current(message.request_id, payload);
-                    write_frame(&mut writer, &response).await.map_err(|error| error.to_string())?;
-                }
-				}
-			}
+            }
         }
     }
 
@@ -1166,7 +1212,11 @@ async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<Deskt
     let listener = match tokio::net::UnixListener::bind(&socket_path) {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("[desktop-ipc] Failed to bind {}: {}", socket_path.display(), error);
+            eprintln!(
+                "[desktop-ipc] Failed to bind {}: {}",
+                socket_path.display(),
+                error
+            );
             return;
         }
     };
@@ -1208,7 +1258,10 @@ async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<Deskt
         let server = match ServerOptions::new().create(&pipe_name) {
             Ok(server) => server,
             Err(error) => {
-                eprintln!("[desktop-ipc] Failed to create named pipe {}: {}", pipe_name, error);
+                eprintln!(
+                    "[desktop-ipc] Failed to create named pipe {}: {}",
+                    pipe_name, error
+                );
                 break;
             }
         };
@@ -1221,9 +1274,7 @@ async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<Deskt
         let app_handle = app_handle.clone();
         let state = state.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(error) =
-                handle_desktop_ipc_connection(app_handle, state, server).await
-            {
+            if let Err(error) = handle_desktop_ipc_connection(app_handle, state, server).await {
                 if !is_clean_disconnect(&error.to_lowercase()) {
                     eprintln!("[desktop-ipc] Connection ended: {}", error);
                 }
@@ -1239,29 +1290,35 @@ async fn check_extension_biometric_status(
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
-    
+
     // Check if biometry is available
     let biometry = app_handle.biometry();
-    let status = biometry.status()
+    let status = biometry
+        .status()
         .map_err(|e| format!("Failed to check biometry status: {}", e))?;
-    
+
     // Check if session data exists in store
-    let store = app_handle.store("store.json")
+    let store = app_handle
+        .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
-    
-	let active_account_id = get_active_account_id(&store);
+
+    let active_account_id = get_active_account_id(&store);
 
     // If active account is "all", check if ANY account has a valid session
-	let has_session = if active_account_id.as_deref() == Some("all") {
+    let has_session = if active_account_id.as_deref() == Some("all") {
         // Get accounts list and check if any has a session
         if let Some(accounts_value) = store.get("bittery_accounts_list") {
             if let Some(accounts_str) = accounts_value.as_str() {
                 if let Ok(accounts_json) = serde_json::from_str::<serde_json::Value>(accounts_str) {
-                    if let Some(accounts_array) = accounts_json.get("accounts").and_then(|a| a.as_array()) {
+                    if let Some(accounts_array) =
+                        accounts_json.get("accounts").and_then(|a| a.as_array())
+                    {
                         // Check if any account has session data
                         accounts_array.iter().any(|account| {
-							if let Some(account_id) = account.get("accountId").and_then(|value| value.as_str()) {
-								read_account_id_scoped_string(&store, account_id, "session_data")
+                            if let Some(account_id) =
+                                account.get("accountId").and_then(|value| value.as_str())
+                            {
+                                read_account_id_scoped_string(&store, account_id, "session_data")
                                     .is_some()
                             } else {
                                 false
@@ -1281,14 +1338,15 @@ async fn check_extension_biometric_status(
         }
     } else {
         // Single account mode - check specific account or legacy
-		let session_data = active_account_id.as_deref()
-			.and_then(|account_id| read_account_id_scoped_string(&store, account_id, "session_data"));
+        let session_data = active_account_id.as_deref().and_then(|account_id| {
+            read_account_id_scoped_string(&store, account_id, "session_data")
+        });
 
         // biometric_enabled is persisted as a JSON boolean; default to true.
-		let is_enabled = if let Some(account_id) = &active_account_id {
-			is_biometric_enabled_for_account(&store, account_id)
-		} else {
-			false
+        let is_enabled = if let Some(account_id) = &active_account_id {
+            is_biometric_enabled_for_account(&store, account_id)
+        } else {
+            false
         };
 
         session_data.is_some() && is_enabled
@@ -1306,27 +1364,35 @@ async fn extension_biometric_unlock(
     app_handle: tauri::AppHandle,
     challenge: String,
     extension_id: String,
-	account_id: Option<String>,
+    account_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
 
-    eprintln!("[Biometric Unlock] Request from extension: {}", extension_id);
+    eprintln!(
+        "[Biometric Unlock] Request from extension: {}",
+        extension_id
+    );
     eprintln!("[Biometric Unlock] Challenge: {}", challenge);
-	if let Some(ref id) = account_id {
-		eprintln!("[Biometric Unlock] Requested account: {}", id);
+    if let Some(ref id) = account_id {
+        eprintln!("[Biometric Unlock] Requested account: {}", id);
     }
 
     // 1. Authenticate with biometric (Touch ID / Windows Hello)
     let biometry = app_handle.biometry();
     let auth_options = tauri_plugin_biometry::AuthOptions::default();
-    biometry.authenticate("Unlock Bittery for browser extension".to_string(), auth_options)
+    biometry
+        .authenticate(
+            "Unlock Bittery for browser extension".to_string(),
+            auth_options,
+        )
         .map_err(|e| format!("Biometric authentication failed: {}", e))?;
 
     eprintln!("[Biometric Unlock] ✓ Authentication successful");
 
     // 2. Get session data from store
-    let store = app_handle.store("store.json")
+    let store = app_handle
+        .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
     // Debug: List all stored accounts
@@ -1338,39 +1404,49 @@ async fn extension_biometric_unlock(
         eprintln!("[Biometric Unlock] No accounts list found in store");
     }
 
-	let target_account_id = account_id.or_else(|| get_active_account_id(&store)).ok_or("No account specified")?;
-	let target_email = resolve_email_for_account_id(&store, &target_account_id).ok_or("Account not found")?;
+    let target_account_id = account_id
+        .or_else(|| get_active_account_id(&store))
+        .ok_or("No account specified")?;
+    let target_email =
+        resolve_email_for_account_id(&store, &target_account_id).ok_or("Account not found")?;
 
-	// Enforce the per-account biometric preference before releasing any secrets.
-	// If the user disabled biometrics for this account, refuse the unlock.
-	if !is_biometric_enabled_for_account(&store, &target_account_id) {
-		eprintln!("[Biometric Unlock] Biometrics disabled for account: {}", target_account_id);
-		return Err("Biometric unlock is disabled for this account".to_string());
-	}
+    // Enforce the per-account biometric preference before releasing any secrets.
+    // If the user disabled biometrics for this account, refuse the unlock.
+    if !is_biometric_enabled_for_account(&store, &target_account_id) {
+        eprintln!(
+            "[Biometric Unlock] Biometrics disabled for account: {}",
+            target_account_id
+        );
+        return Err("Biometric unlock is disabled for this account".to_string());
+    }
 
-	eprintln!("[Biometric Unlock] Target account: {}", target_account_id);
-	let session_data_str = read_account_id_scoped_string(&store, &target_account_id, "session_data")
-		.ok_or("No session data found")?;
+    eprintln!("[Biometric Unlock] Target account: {}", target_account_id);
+    let session_data_str =
+        read_account_id_scoped_string(&store, &target_account_id, "session_data")
+            .ok_or("No session data found")?;
     eprintln!("[Biometric Unlock] Session data found");
 
     let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
         .map_err(|e| format!("Failed to parse session data: {}", e))?;
-    
+
     eprintln!("[Biometric Unlock] Session data retrieved");
-    
+
     // 3. Get device key to decrypt the MUK
-    let device_key_value = store.get("bittery_device_key")
+    let device_key_value = store
+        .get("bittery_device_key")
         .ok_or("No device key found")?;
-    
-    let device_key_base64 = device_key_value.as_str()
+
+    let device_key_base64 = device_key_value
+        .as_str()
         .ok_or("Invalid device key format")?;
-    
+
     // 4. Get encrypted MUK from session data
-    let encrypted_muk = session_data.get("encryptedMasterUnlockKey")
+    let encrypted_muk = session_data
+        .get("encryptedMasterUnlockKey")
         .ok_or("No encrypted master unlock key in session")?;
-    
+
     eprintln!("[Biometric Unlock] Encrypted MUK retrieved");
-    
+
     // 5. Send the encrypted MUK and device key to extension
     // The extension will decrypt it using the device key
     // This is secure because:
@@ -1378,30 +1454,31 @@ async fn extension_biometric_unlock(
     // - Biometric authentication was required
     // - Communication is over localhost only
     // - Extension has same security boundary as desktop app
-    
+
     let encrypted_muk_json = serde_json::to_string(encrypted_muk)
         .map_err(|e| format!("Failed to serialize encrypted MUK: {}", e))?;
-    
-    let encrypted_session_b64 = base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
-    
+
+    let encrypted_session_b64 =
+        base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
+
     // Get auth token and vault keys from secure storage / store
-	let auth_token = get_bearer_token_for_account_id(&store, &target_account_id);
-	let vault_keys = read_account_id_scoped_string(&store, &target_account_id, "vault_keys");
-    
+    let auth_token = get_bearer_token_for_account_id(&store, &target_account_id);
+    let vault_keys = read_account_id_scoped_string(&store, &target_account_id, "vault_keys");
+
     // Sign the response with challenge to prevent replay attacks
     let signature_data = format!("{}:{}", challenge, encrypted_session_b64);
     let signature = base64::engine::general_purpose::STANDARD.encode(signature_data.as_bytes());
-    
+
     eprintln!("[Biometric Unlock] ✓ Response prepared and signed");
-    
-	let mut response = serde_json::json!({
-		"accountId": target_account_id,
-		"email": target_email,
+
+    let mut response = serde_json::json!({
+        "accountId": target_account_id,
+        "email": target_email,
         "encrypted_session": encrypted_session_b64,
         "device_key": device_key_base64,
         "signature": signature,
     });
-    
+
     // Include auth token and vault keys if available
     if let Some(token) = auth_token {
         response["auth_token"] = serde_json::Value::String(token);
@@ -1409,7 +1486,7 @@ async fn extension_biometric_unlock(
     if let Some(keys) = vault_keys {
         response["vault_keys"] = serde_json::Value::String(keys);
     }
-    
+
     Ok(response)
 }
 
@@ -1426,15 +1503,16 @@ async fn biometric_unlock_internal(
     app_handle: &tauri::AppHandle,
     challenge: &str,
     extension_id: &str,
-	account_id: Option<&str>,
+    account_id: Option<&str>,
 ) -> Result<serde_json::Value, String> {
     // Call the Tauri command
     extension_biometric_unlock(
         app_handle.clone(),
         challenge.to_string(),
         extension_id.to_string(),
-		account_id.map(|id| id.to_string()),
-    ).await
+        account_id.map(|id| id.to_string()),
+    )
+    .await
 }
 
 /// Perform biometric unlock for all accounts with single prompt
@@ -1446,53 +1524,69 @@ async fn biometric_unlock_all_internal(
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
 
-    eprintln!("[Biometric Unlock All] Request from extension: {}", extension_id);
+    eprintln!(
+        "[Biometric Unlock All] Request from extension: {}",
+        extension_id
+    );
     eprintln!("[Biometric Unlock All] Challenge: {}", challenge);
 
     // 1. Authenticate with biometric ONCE (Touch ID / Windows Hello)
     let biometry = app_handle.biometry();
     let auth_options = tauri_plugin_biometry::AuthOptions::default();
-    biometry.authenticate("Unlock all Bittery accounts for browser extension".to_string(), auth_options)
+    biometry
+        .authenticate(
+            "Unlock all Bittery accounts for browser extension".to_string(),
+            auth_options,
+        )
         .map_err(|e| format!("Biometric authentication failed: {}", e))?;
 
     eprintln!("[Biometric Unlock All] ✓ Authentication successful");
 
     // 2. Get accounts list from store
-    let store = app_handle.store("store.json")
+    let store = app_handle
+        .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
-    let accounts_value = store.get("bittery_accounts_list")
+    let accounts_value = store
+        .get("bittery_accounts_list")
         .ok_or("No accounts list found")?;
 
-    let accounts_str = accounts_value.as_str()
+    let accounts_str = accounts_value
+        .as_str()
         .ok_or("Invalid accounts list format")?;
 
     let accounts_json: serde_json::Value = serde_json::from_str(accounts_str)
         .map_err(|e| format!("Failed to parse accounts list: {}", e))?;
 
-    let accounts_array = accounts_json.get("accounts")
+    let accounts_array = accounts_json
+        .get("accounts")
         .and_then(|a| a.as_array())
         .ok_or("No accounts array found")?;
 
-    eprintln!("[Biometric Unlock All] Found {} accounts", accounts_array.len());
+    eprintln!(
+        "[Biometric Unlock All] Found {} accounts",
+        accounts_array.len()
+    );
 
     // 3. Get device key (shared across all accounts)
-    let device_key_value = store.get("bittery_device_key")
+    let device_key_value = store
+        .get("bittery_device_key")
         .ok_or("No device key found")?;
 
-    let device_key_base64 = device_key_value.as_str()
+    let device_key_base64 = device_key_value
+        .as_str()
         .ok_or("Invalid device key format")?;
 
     // 4. Unlock all accounts (no additional biometric prompts)
     let mut accounts_data = Vec::new();
-	let mut unlocked_account_ids = Vec::new();
-	let mut failed_account_ids = Vec::new();
+    let mut unlocked_account_ids = Vec::new();
+    let mut failed_account_ids = Vec::new();
 
-	for account in accounts_array {
-		let account_id = match account.get("accountId").and_then(|value| value.as_str()) {
-			Some(value) => value.to_string(),
-			None => continue,
-		};
+    for account in accounts_array {
+        let account_id = match account.get("accountId").and_then(|value| value.as_str()) {
+            Some(value) => value.to_string(),
+            None => continue,
+        };
         let email = match account.get("email").and_then(|e| e.as_str()) {
             Some(e) => e.to_lowercase(),
             None => {
@@ -1506,25 +1600,32 @@ async fn biometric_unlock_all_internal(
         // Respect the per-account biometric preference: skip (do not expose the
         // MUK for) any account whose owner has disabled biometric unlock.
         if !is_biometric_enabled_for_account(&store, &account_id) {
-            eprintln!("[Biometric Unlock All] Skipping account with biometrics disabled: {}", email);
+            eprintln!(
+                "[Biometric Unlock All] Skipping account with biometrics disabled: {}",
+                email
+            );
             continue;
         }
 
         // Get session data for this account (accountId key with legacy fallback)
-		let session_data_str = match read_account_id_scoped_string(&store, &account_id, "session_data") {
-            Some(s) => s,
-            None => {
-                eprintln!("[Biometric Unlock All] No session data for {}", email);
-				failed_account_ids.push(account_id);
-                continue;
-            }
-        };
+        let session_data_str =
+            match read_account_id_scoped_string(&store, &account_id, "session_data") {
+                Some(s) => s,
+                None => {
+                    eprintln!("[Biometric Unlock All] No session data for {}", email);
+                    failed_account_ids.push(account_id);
+                    continue;
+                }
+            };
 
         let session_data: serde_json::Value = match serde_json::from_str(&session_data_str) {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("[Biometric Unlock All] Failed to parse session data for {}: {}", email, e);
-				failed_account_ids.push(account_id);
+                eprintln!(
+                    "[Biometric Unlock All] Failed to parse session data for {}: {}",
+                    email, e
+                );
+                failed_account_ids.push(account_id);
                 continue;
             }
         };
@@ -1534,7 +1635,7 @@ async fn biometric_unlock_all_internal(
             Some(muk) => muk,
             None => {
                 eprintln!("[Biometric Unlock All] No encrypted MUK for {}", email);
-				failed_account_ids.push(account_id);
+                failed_account_ids.push(account_id);
                 continue;
             }
         };
@@ -1542,16 +1643,17 @@ async fn biometric_unlock_all_internal(
         let encrypted_muk_json = serde_json::to_string(encrypted_muk)
             .map_err(|e| format!("Failed to serialize encrypted MUK for {}: {}", email, e))?;
 
-        let encrypted_session_b64 = base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
+        let encrypted_session_b64 =
+            base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
 
         // Get auth token and vault keys for this account
-		let auth_token = get_bearer_token_for_account_id(&store, &account_id);
-		let vault_keys = read_account_id_scoped_string(&store, &account_id, "vault_keys");
+        let auth_token = get_bearer_token_for_account_id(&store, &account_id);
+        let vault_keys = read_account_id_scoped_string(&store, &account_id, "vault_keys");
 
         // Build account data
-		let mut account_data = serde_json::json!({
-			"accountId": account_id,
-			"email": email,
+        let mut account_data = serde_json::json!({
+            "accountId": account_id,
+            "email": email,
             "encrypted_session": encrypted_session_b64,
         });
 
@@ -1563,7 +1665,7 @@ async fn biometric_unlock_all_internal(
         }
 
         accounts_data.push(account_data);
-		unlocked_account_ids.push(account_id.clone());
+        unlocked_account_ids.push(account_id.clone());
         eprintln!("[Biometric Unlock All] ✓ Unlocked {}", email);
     }
 
@@ -1575,15 +1677,18 @@ async fn biometric_unlock_all_internal(
     let signature_data = format!("{}:{}", challenge, accounts_data.len());
     let signature = base64::engine::general_purpose::STANDARD.encode(signature_data.as_bytes());
 
-    eprintln!("[Biometric Unlock All] ✓ Unlocked {} accounts, {} failed",
-		unlocked_account_ids.len(), failed_account_ids.len());
+    eprintln!(
+        "[Biometric Unlock All] ✓ Unlocked {} accounts, {} failed",
+        unlocked_account_ids.len(),
+        failed_account_ids.len()
+    );
 
     let response = serde_json::json!({
         "device_key": device_key_base64,
         "signature": signature,
         "accounts": accounts_data,
-		"unlocked": unlocked_account_ids,
-		"failed": failed_account_ids,
+        "unlocked": unlocked_account_ids,
+        "failed": failed_account_ids,
     });
 
     Ok(response)
@@ -1601,8 +1706,8 @@ async fn get_lock_status_internal(
 
     // Read lock state marker (maintained by storage adapter based on MUKs in memory)
     // This is the source of truth for which accounts are unlocked. It holds
-	// stable account IDs, which are also used by the extension protocol.
-	let unlocked_accounts = get_unlocked_accounts(&store);
+    // stable account IDs, which are also used by the extension protocol.
+    let unlocked_accounts = get_unlocked_accounts(&store);
 
     // Auto-lock timeout is an app-wide preference (not account-scoped).
     let autolock_timeout_ms = store
@@ -1622,7 +1727,7 @@ async fn get_lock_status_internal(
 
     Ok(serde_json::json!({
         "locked": locked,
-		"unlocked_accounts": unlocked_accounts,
+        "unlocked_accounts": unlocked_accounts,
         "timestamp": timestamp,
         "autolock_timeout_ms": autolock_timeout_ms,
         "theme": theme,
@@ -1640,15 +1745,18 @@ fn open_app_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
         .ok_or("No window found")?;
 
     // Show the window if hidden
-    window.show()
+    window
+        .show()
         .map_err(|e| format!("Failed to show window: {}", e))?;
 
     // Unminimize if minimized
-    window.unminimize()
+    window
+        .unminimize()
         .map_err(|e| format!("Failed to unminimize window: {}", e))?;
 
     // Bring to front
-    window.set_focus()
+    window
+        .set_focus()
         .map_err(|e| format!("Failed to focus window: {}", e))?;
 
     Ok(())
@@ -1665,33 +1773,36 @@ async fn get_accounts_list_internal(
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
     // Get accounts list from store
-    let accounts_value = store.get("bittery_accounts_list")
+    let accounts_value = store
+        .get("bittery_accounts_list")
         .ok_or("No accounts found")?;
 
-    let accounts_str = accounts_value.as_str()
+    let accounts_str = accounts_value
+        .as_str()
         .ok_or("Invalid accounts list format")?;
 
     let accounts_json: serde_json::Value = serde_json::from_str(accounts_str)
         .map_err(|e| format!("Failed to parse accounts list: {}", e))?;
 
-    let accounts_array = accounts_json.get("accounts")
+    let accounts_array = accounts_json
+        .get("accounts")
         .and_then(|a| a.as_array())
         .ok_or("No accounts array found")?;
 
-	let active_account = get_active_account_id(&store);
-	let unlocked_accounts = get_unlocked_accounts(&store);
+    let active_account = get_active_account_id(&store);
+    let unlocked_accounts = get_unlocked_accounts(&store);
 
     Ok(serde_json::json!({
         "accounts": accounts_array,
-		"active_account": active_account,
-		"unlocked_accounts": unlocked_accounts,
+        "active_account": active_account,
+        "unlocked_accounts": unlocked_accounts,
     }))
 }
 
 /// Get vault keys for a specific stable account ID.
 async fn get_vault_keys_internal(
-	app_handle: &tauri::AppHandle,
-	account_id: Option<String>,
+    app_handle: &tauri::AppHandle,
+    account_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
     use tauri_plugin_store::StoreExt;
 
@@ -1699,14 +1810,16 @@ async fn get_vault_keys_internal(
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
-	let account_id = account_id.or_else(|| get_active_account_id(&store)).ok_or("No account specified")?;
-	let email = resolve_email_for_account_id(&store, &account_id).ok_or("Account not found")?;
-	let vault_keys = read_account_id_scoped_string(&store, &account_id, "vault_keys")
+    let account_id = account_id
+        .or_else(|| get_active_account_id(&store))
+        .ok_or("No account specified")?;
+    let email = resolve_email_for_account_id(&store, &account_id).ok_or("Account not found")?;
+    let vault_keys = read_account_id_scoped_string(&store, &account_id, "vault_keys")
         .ok_or("Vault keys not found")?;
 
-	Ok(serde_json::json!({
-		"accountId": account_id,
-		"email": email,
+    Ok(serde_json::json!({
+        "accountId": account_id,
+        "email": email,
         "vault_keys": vault_keys,
     }))
 }
@@ -1719,7 +1832,10 @@ fn broadcast_lock_event(
 ) -> Result<(), String> {
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::Lock { reason: reason.clone(), timestamp };
+    let event = LockEvent::Lock {
+        reason: reason.clone(),
+        timestamp,
+    };
 
     let _ = state.lock_events.send(event);
 
@@ -1735,11 +1851,17 @@ fn broadcast_unlock_event(
 ) -> Result<(), String> {
     let timestamp = now_timestamp_ms();
 
-    let event = LockEvent::Unlock { accounts: accounts.clone(), timestamp };
+    let event = LockEvent::Unlock {
+        accounts: accounts.clone(),
+        timestamp,
+    };
 
     let _ = state.lock_events.send(event);
 
-    eprintln!("[Unlock Event] Broadcast unlock event (accounts: {:?})", accounts);
+    eprintln!(
+        "[Unlock Event] Broadcast unlock event (accounts: {:?})",
+        accounts
+    );
     Ok(())
 }
 
@@ -1807,14 +1929,14 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-		.invoke_handler(tauri::generate_handler![
-			// Crypto commands
-			crypto_commands::crypto_derive_keys,
-			crypto_commands::crypto_encrypt,
-			crypto_commands::crypto_encrypt_with_context,
-			crypto_commands::crypto_decrypt,
-			crypto_commands::crypto_decrypt_with_context,
-			crypto_commands::crypto_validate_kdf_profile,
+        .invoke_handler(tauri::generate_handler![
+            // Crypto commands
+            crypto_commands::crypto_derive_keys,
+            crypto_commands::crypto_encrypt,
+            crypto_commands::crypto_encrypt_with_context,
+            crypto_commands::crypto_decrypt,
+            crypto_commands::crypto_decrypt_with_context,
+            crypto_commands::crypto_validate_kdf_profile,
             crypto_commands::crypto_generate_encryption_key,
             crypto_commands::crypto_generate_uuid,
             crypto_commands::crypto_generate_rsa_key_pair,
@@ -1861,7 +1983,7 @@ pub fn run() {
                 #[cfg(not(debug_assertions))]
                 eprintln!("🔧 First run detected - installing native messaging host...");
 
-                match native_messaging_installer::install_native_messaging_host(&app.handle()) {
+                match native_messaging_installer::install_native_messaging_host(app.handle()) {
                     Ok(_) => {
                         eprintln!("✅ Native messaging host installed successfully!");
                         eprintln!("   Browser extension can now use biometric unlock!");
@@ -1869,7 +1991,9 @@ pub fn run() {
                     Err(e) => {
                         eprintln!("⚠️  Failed to install native messaging host: {}", e);
                         eprintln!("   To enable biometric unlock, build the native host:");
-                        eprintln!("   cd src-tauri && cargo build --release --bin bittery-native-host");
+                        eprintln!(
+                            "   cd src-tauri && cargo build --release --bin bittery-native-host"
+                        );
                         eprintln!("   Then restart the app.");
                     }
                 }
@@ -1887,21 +2011,19 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|window, event| {
-            match event {
-                tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
-                    eprintln!("[Window Event] Window closing, broadcasting desktop_close event");
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::CloseRequested { .. } | tauri::WindowEvent::Destroyed => {
+                eprintln!("[Window Event] Window closing, broadcasting desktop_close event");
 
-                    if let Some(state) = window.app_handle().try_state::<Arc<DesktopIpcState>>() {
-                        let timestamp = now_timestamp_ms();
-                        let event = LockEvent::DesktopClose { timestamp };
-                        let _ = state.lock_events.send(event);
-                    } else {
-                        eprintln!("[Window Event] Failed to get DesktopIpcState");
-                    }
+                if let Some(state) = window.app_handle().try_state::<Arc<DesktopIpcState>>() {
+                    let timestamp = now_timestamp_ms();
+                    let event = LockEvent::DesktopClose { timestamp };
+                    let _ = state.lock_events.send(event);
+                } else {
+                    eprintln!("[Window Event] Failed to get DesktopIpcState");
                 }
-                _ => {}
             }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -1910,10 +2032,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        biometric_enabled_flag, build_snapshot_item_payload,
-        lookup_store_string_with_fallback, serialize_encryption_context,
-        unwrap_plaintext_with_context, CachedItemRecord, CachedVaultRecord,
-        CONTEXT_ENVELOPE_MARKER,
+        biometric_enabled_flag, build_snapshot_item_payload, lookup_store_string_with_fallback,
+        serialize_encryption_context, unwrap_plaintext_with_context, CachedItemRecord,
+        CachedVaultRecord, CONTEXT_ENVELOPE_MARKER,
     };
     use std::collections::HashMap;
 
@@ -1926,15 +2047,9 @@ mod tests {
         })
         .to_string();
 
-        let unwrapped = unwrap_plaintext_with_context(
-            decrypted,
-            "vault-1",
-            "item-1",
-            "item",
-            2,
-            "user-1",
-        )
-        .expect("expected envelope to unwrap");
+        let unwrapped =
+            unwrap_plaintext_with_context(decrypted, "vault-1", "item-1", "item", 2, "user-1")
+                .expect("expected envelope to unwrap");
 
         assert_eq!(unwrapped, "{\"title\":\"Example\"}");
     }
@@ -1948,15 +2063,9 @@ mod tests {
         })
         .to_string();
 
-        let error = unwrap_plaintext_with_context(
-            decrypted,
-            "vault-1",
-            "item-1",
-            "item",
-            3,
-            "user-1",
-        )
-        .expect_err("expected context mismatch");
+        let error =
+            unwrap_plaintext_with_context(decrypted, "vault-1", "item-1", "item", 3, "user-1")
+                .expect_err("expected context mismatch");
 
         assert_eq!(error, "Encryption context mismatch");
     }
@@ -2107,10 +2216,9 @@ mod tests {
 
     #[test]
     fn cached_vault_record_defaults_legacy_entries_to_personal_type() {
-        let vault: CachedVaultRecord = serde_json::from_str(
-            r#"{"id":"vault-1","name":"Main","icon":null,"imageUrl":null}"#,
-        )
-        .expect("legacy cached vault should deserialize");
+        let vault: CachedVaultRecord =
+            serde_json::from_str(r#"{"id":"vault-1","name":"Main","icon":null,"imageUrl":null}"#)
+                .expect("legacy cached vault should deserialize");
 
         assert_eq!(vault.vault_type, "personal");
     }

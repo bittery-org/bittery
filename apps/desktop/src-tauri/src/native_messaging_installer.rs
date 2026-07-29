@@ -1,13 +1,11 @@
-/**
- * Automatic Native Messaging Host Installer
- * 
- * This module handles automatic installation of the native messaging host
- * manifest when the Tauri app is launched. No manual user setup required!
- */
+//! Automatic Native Messaging Host Installer
+//!
+//! This module handles automatic installation of the native messaging host
+//! manifest when the Tauri app is launched. No manual user setup required!
 
-use std::fs;
-use std::path::PathBuf;
 use serde_json::json;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 #[cfg(target_os = "macos")]
@@ -15,7 +13,8 @@ const CHROME_MANIFEST_DIR: &str = "Library/Application Support/Google/Chrome/Nat
 #[cfg(target_os = "macos")]
 const EDGE_MANIFEST_DIR: &str = "Library/Application Support/Microsoft/Edge/NativeMessagingHosts";
 #[cfg(target_os = "macos")]
-const BRAVE_MANIFEST_DIR: &str = "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts";
+const BRAVE_MANIFEST_DIR: &str =
+    "Library/Application Support/BraveSoftware/Brave-Browser/NativeMessagingHosts";
 
 #[cfg(target_os = "linux")]
 const CHROME_MANIFEST_DIR: &str = ".config/google-chrome/NativeMessagingHosts";
@@ -29,7 +28,8 @@ const CHROME_REG_KEY: &str = r"Software\Google\Chrome\NativeMessagingHosts\com.b
 #[cfg(target_os = "windows")]
 const EDGE_REG_KEY: &str = r"Software\Microsoft\Edge\NativeMessagingHosts\com.bittery.desktop";
 #[cfg(target_os = "windows")]
-const BRAVE_REG_KEY: &str = r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.bittery.desktop";
+const BRAVE_REG_KEY: &str =
+    r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.bittery.desktop";
 
 const MANIFEST_NAME: &str = "com.bittery.desktop.json";
 const NATIVE_HOST_NAME: &str = "bittery-native-host";
@@ -48,6 +48,18 @@ pub fn allowed_extension_ids() -> Vec<String> {
     ids
 }
 
+/// Browser-extension origins derived from [`allowed_extension_ids`].
+///
+/// NOTE: currently unused. The origin allowlist below was written for the
+/// native messaging host's `argv[1]` (Chrome launches the host with the calling
+/// extension's origin as the first argument), but `native_host.rs::main` never
+/// inspects `argv`. It also does not match Chrome's argument verbatim: Chrome
+/// passes `chrome-extension://<id>/` (trailing slash), matching the
+/// `allowed_origins` entries written by `create_manifest_json`, while these two
+/// helpers build the origin without the trailing slash. Wiring them up as-is
+/// would therefore reject every real browser invocation. Left in place rather
+/// than deleted so the intended check can be finished deliberately.
+#[allow(dead_code)]
 pub fn allowed_extension_origins() -> Vec<String> {
     allowed_extension_ids()
         .into_iter()
@@ -55,6 +67,11 @@ pub fn allowed_extension_origins() -> Vec<String> {
         .collect()
 }
 
+/// Used by the `bittery-native-host` binary target (see
+/// `native_host.rs::is_allowlisted_extension_id`), which pulls this module in
+/// via `mod native_messaging_installer;`. It is dead only in the `bittery_lib`
+/// target, hence the allow.
+#[allow(dead_code)]
 pub fn allowed_origin_for_extension_id(extension_id: &str) -> Option<String> {
     allowed_extension_ids()
         .into_iter()
@@ -62,6 +79,9 @@ pub fn allowed_origin_for_extension_id(extension_id: &str) -> Option<String> {
         .map(|id| format!("chrome-extension://{}", id))
 }
 
+/// See the note on [`allowed_extension_origins`] — the intended `argv[1]`
+/// origin check is not wired up yet.
+#[allow(dead_code)]
 pub fn is_allowed_extension_origin(origin: &str) -> bool {
     allowed_extension_origins()
         .into_iter()
@@ -69,39 +89,44 @@ pub fn is_allowed_extension_origin(origin: &str) -> bool {
 }
 
 /// Install native messaging host manifest for all detected browsers
-pub fn install_native_messaging_host(app_handle: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+pub fn install_native_messaging_host(
+    app_handle: &tauri::AppHandle,
+) -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("🔧 Installing native messaging host...");
-    
+
     // Get path to the native host binary
     let native_host_path = get_native_host_path(app_handle)?;
-    
+
     eprintln!("📍 Native host binary: {:?}", native_host_path);
-    
+
     // Verify binary exists
     if !native_host_path.exists() {
         return Err(format!("Native host binary not found: {:?}", native_host_path).into());
     }
-    
+
     // Install for each browser
     let mut installed_count = 0;
-    
-    if let Ok(_) = install_for_chrome(&native_host_path) {
+
+    if install_for_chrome(&native_host_path).is_ok() {
         eprintln!("✅ Installed for Chrome");
         installed_count += 1;
     }
-    
-    if let Ok(_) = install_for_edge(&native_host_path) {
+
+    if install_for_edge(&native_host_path).is_ok() {
         eprintln!("✅ Installed for Edge");
         installed_count += 1;
     }
-    
-    if let Ok(_) = install_for_brave(&native_host_path) {
+
+    if install_for_brave(&native_host_path).is_ok() {
         eprintln!("✅ Installed for Brave");
         installed_count += 1;
     }
-    
+
     if installed_count > 0 {
-        eprintln!("🎉 Native messaging host installed for {} browser(s)", installed_count);
+        eprintln!(
+            "🎉 Native messaging host installed for {} browser(s)",
+            installed_count
+        );
         Ok(())
     } else {
         Err("Failed to install native messaging host for any browser".into())
@@ -109,7 +134,9 @@ pub fn install_native_messaging_host(app_handle: &tauri::AppHandle) -> Result<()
 }
 
 /// Get the path to the native host binary bundled with the app
-fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn get_native_host_path(
+    app_handle: &tauri::AppHandle,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     let binary_name = format!("{}.exe", NATIVE_HOST_NAME);
     #[cfg(not(target_os = "windows"))]
@@ -138,7 +165,10 @@ fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dy
                 .join("src-tauri/target")
                 .join(preferred_profile)
                 .join(&binary_name),
-            current_dir.join("target").join(preferred_profile).join(&binary_name),
+            current_dir
+                .join("target")
+                .join(preferred_profile)
+                .join(&binary_name),
         ];
 
         for path in dev_paths {
@@ -147,11 +177,11 @@ fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dy
             }
         }
     }
-    
+
     // Try bundled resources (production)
     let resource_path = app_handle.path().resource_dir()?;
     let native_host_path = resource_path.join(&binary_name);
-    
+
     if native_host_path.exists() {
         return Ok(native_host_path);
     }
@@ -167,7 +197,7 @@ fn get_native_host_path(app_handle: &tauri::AppHandle) -> Result<PathBuf, Box<dy
 ///
 /// Note: Chrome doesn't support wildcards in allowed_origins, but DOES support multiple IDs.
 /// We include both dev (unpacked) and production (Chrome Web Store) extension IDs.
-fn create_manifest_json(native_host_path: &PathBuf) -> serde_json::Value {
+fn create_manifest_json(native_host_path: &Path) -> serde_json::Value {
     let allowed_origins = allowed_extension_ids()
         .into_iter()
         .map(|id| format!("chrome-extension://{}/", id))
@@ -183,126 +213,152 @@ fn create_manifest_json(native_host_path: &PathBuf) -> serde_json::Value {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_for_chrome(native_host_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn install_for_chrome(native_host_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let home = dirs::home_dir().ok_or("Could not get home directory")?;
     let manifest_dir = home.join(CHROME_MANIFEST_DIR);
-    
+
     // Check if Chrome is installed
     if !manifest_dir.parent().map(|p| p.exists()).unwrap_or(false) {
         return Err("Chrome not installed".into());
     }
-    
+
     fs::create_dir_all(&manifest_dir)?;
-    
+
     let manifest_path = manifest_dir.join(MANIFEST_NAME);
     let manifest_json = create_manifest_json(native_host_path);
-    
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest_json)?)?;
-    
+
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest_json)?,
+    )?;
+
     Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_for_edge(native_host_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn install_for_edge(native_host_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let home = dirs::home_dir().ok_or("Could not get home directory")?;
     let manifest_dir = home.join(EDGE_MANIFEST_DIR);
-    
+
     // Check if Edge is installed
     if !manifest_dir.parent().map(|p| p.exists()).unwrap_or(false) {
         return Err("Edge not installed".into());
     }
-    
+
     fs::create_dir_all(&manifest_dir)?;
-    
+
     let manifest_path = manifest_dir.join(MANIFEST_NAME);
     let manifest_json = create_manifest_json(native_host_path);
-    
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest_json)?)?;
-    
+
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest_json)?,
+    )?;
+
     Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]
-fn install_for_brave(native_host_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn install_for_brave(native_host_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let home = dirs::home_dir().ok_or("Could not get home directory")?;
     let manifest_dir = home.join(BRAVE_MANIFEST_DIR);
-    
+
     // Check if Brave is installed
     if !manifest_dir.parent().map(|p| p.exists()).unwrap_or(false) {
         return Err("Brave not installed".into());
     }
-    
+
     fs::create_dir_all(&manifest_dir)?;
-    
+
     let manifest_path = manifest_dir.join(MANIFEST_NAME);
     let manifest_json = create_manifest_json(native_host_path);
-    
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest_json)?)?;
-    
+
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest_json)?,
+    )?;
+
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn install_for_chrome(native_host_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn install_for_chrome(native_host_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use winreg::enums::*;
     use winreg::RegKey;
-    
+
     // Create a temporary manifest file
     let temp_dir = std::env::temp_dir();
     let manifest_path = temp_dir.join("bittery-chrome-manifest.json");
-    
+
     let manifest_json = create_manifest_json(native_host_path);
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest_json)?)?;
-    
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest_json)?,
+    )?;
+
     // Write to registry
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.create_subkey(CHROME_REG_KEY)?;
-    key.0.set_value("", &manifest_path.to_string_lossy().to_string())?;
-    
+    key.0
+        .set_value("", &manifest_path.to_string_lossy().to_string())?;
+
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn install_for_edge(native_host_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn install_for_edge(native_host_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use winreg::enums::*;
     use winreg::RegKey;
-    
+
     // Create a temporary manifest file
     let temp_dir = std::env::temp_dir();
     let manifest_path = temp_dir.join("bittery-edge-manifest.json");
-    
+
     let manifest_json = create_manifest_json(native_host_path);
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest_json)?)?;
-    
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest_json)?,
+    )?;
+
     // Write to registry
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.create_subkey(EDGE_REG_KEY)?;
-    key.0.set_value("", &manifest_path.to_string_lossy().to_string())?;
-    
+    key.0
+        .set_value("", &manifest_path.to_string_lossy().to_string())?;
+
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn install_for_brave(native_host_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn install_for_brave(native_host_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     use winreg::enums::*;
     use winreg::RegKey;
-    
+
     // Create a temporary manifest file
     let temp_dir = std::env::temp_dir();
     let manifest_path = temp_dir.join("bittery-brave-manifest.json");
-    
+
     let manifest_json = create_manifest_json(native_host_path);
-    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest_json)?)?;
-    
+    fs::write(
+        &manifest_path,
+        serde_json::to_string_pretty(&manifest_json)?,
+    )?;
+
     // Write to registry
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let key = hkcu.create_subkey(BRAVE_REG_KEY)?;
-    key.0.set_value("", &manifest_path.to_string_lossy().to_string())?;
-    
+    key.0
+        .set_value("", &manifest_path.to_string_lossy().to_string())?;
+
     Ok(())
 }
 
-/// Check if native messaging host is already installed
+/// Check if native messaging host is already installed.
+///
+/// Only called from the release-build branch of the Tauri `setup` hook in
+/// `lib.rs` (debug builds always reinstall), so it is dead code in debug
+/// builds and in the `bittery-native-host` binary target.
+#[allow(dead_code)]
 pub fn is_installed() -> bool {
     #[cfg(not(target_os = "windows"))]
     {
@@ -310,23 +366,23 @@ pub fn is_installed() -> bool {
             Some(h) => h,
             None => return false,
         };
-        
+
         let chrome_path = home.join(CHROME_MANIFEST_DIR).join(MANIFEST_NAME);
         let edge_path = home.join(EDGE_MANIFEST_DIR).join(MANIFEST_NAME);
         let brave_path = home.join(BRAVE_MANIFEST_DIR).join(MANIFEST_NAME);
-        
+
         chrome_path.exists() || edge_path.exists() || brave_path.exists()
     }
-    
+
     #[cfg(target_os = "windows")]
     {
         use winreg::enums::*;
         use winreg::RegKey;
-        
+
         let hkcu = RegKey::predef(HKEY_CURRENT_USER);
-        
-        hkcu.open_subkey(CHROME_REG_KEY).is_ok() ||
-        hkcu.open_subkey(EDGE_REG_KEY).is_ok() ||
-        hkcu.open_subkey(BRAVE_REG_KEY).is_ok()
+
+        hkcu.open_subkey(CHROME_REG_KEY).is_ok()
+            || hkcu.open_subkey(EDGE_REG_KEY).is_ok()
+            || hkcu.open_subkey(BRAVE_REG_KEY).is_ok()
     }
 }
