@@ -1,0 +1,5 @@
+name,url,username,password,note
+example.com,https://example.com/,a,b,
+example.com,https://example.com/,someone,secret,
+example.org,https://example.org/,a,b,
+other.org,https://other.org/,a,b,

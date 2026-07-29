@@ -257,6 +257,8 @@ export function useVaultImport() {
 			switch (nameCode) {
 				case "no-folder":
 					return m.vaults_import_source_vault_no_folder();
+				case "chrome-passwords":
+					return m.vaults_import_source_vault_chrome_passwords();
 				default:
 					return nameCode;
 			}

@@ -8,6 +8,7 @@ export type ImportProviderId =
 	| "1password-1pux"
 	| "bittery-bttrx"
 	| "bitwarden"
+	| "chrome"
 	| "firefox";
 
 export type ImportMessageValue = string | number;
@@ -51,6 +52,7 @@ export type ImportErrorCode =
 	| "csv-duplicate-header"
 	| "csv-missing-header"
 	| "csv-row-column-mismatch"
+	| "csv-unknown-header-variant"
 	| "bitwarden-encrypted-export-unsupported"
 	| "bitwarden-attachment-export-unsupported"
 	| "bitwarden-organization-export-unsupported";
@@ -79,7 +81,7 @@ export interface ImportError {
  * Providers live in `@bittery/shared` and have no i18n access, so they emit a
  * code and the app layer resolves it to a translated string.
  */
-export type ImportSourceVaultNameCode = "no-folder";
+export type ImportSourceVaultNameCode = "no-folder" | "chrome-passwords";
 
 export interface ImportSourceVault {
 	id: string;
