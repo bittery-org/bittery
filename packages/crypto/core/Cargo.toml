@@ -24,7 +24,7 @@ sha2 = "0.10"
 rsa = { version = "0.9", features = ["sha2"] }
 p256 = { version = "0.13", features = ["ecdsa"] }
 ecdsa = "0.16"
-rand = "0.8"
+rand = "0.10"
 
 # BigInteger for SRP
 num-bigint = "0.4"
