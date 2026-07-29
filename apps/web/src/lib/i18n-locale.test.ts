@@ -1,11 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { describe, expect, test } from "bun:test";
 import {
 	persistLocaleSelection,
 	resolveBrowserLocale,
 	resolveLocale,
 } from "./i18n-locale";
 
-test.describe("i18n locale helpers", () => {
+describe("i18n locale helpers", () => {
 	test("resolveBrowserLocale picks de for de-DE and en otherwise", () => {
 		expect(resolveBrowserLocale("de-DE")).toBe("de");
 		expect(resolveBrowserLocale("de-AT")).toBe("de");

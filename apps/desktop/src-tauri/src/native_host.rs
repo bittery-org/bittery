@@ -1,12 +1,13 @@
-/**
- * Native messaging host for browser extensions.
- *
- * The browser-facing transport stays Chrome native messaging over stdio.
- * The desktop-facing transport is a local IPC socket/pipe using the shared
- * length-prefixed JSON codec defined in `desktop_ipc.rs`.
- */
+//! Native messaging host for browser extensions.
+//!
+//! The browser-facing transport stays Chrome native messaging over stdio.
+//! The desktop-facing transport is a local IPC socket/pipe using the shared
+//! length-prefixed JSON codec defined in `desktop_ipc.rs`.
 
 mod desktop_ipc;
+// This binary only consumes the extension-ID allowlist from the installer
+// module; the manifest-installation half is used exclusively by the Tauri app.
+#[allow(dead_code)]
 mod native_messaging_installer;
 
 use desktop_ipc::{
@@ -38,34 +39,34 @@ fn summarize_message(message: &DesktopRequest) -> String {
         DesktopRequest::Ping => "PING".to_string(),
         DesktopRequest::GetDesktopStatus => "GET_DESKTOP_STATUS".to_string(),
         DesktopRequest::GetDesktopAccounts => "GET_DESKTOP_ACCOUNTS".to_string(),
-		DesktopRequest::GetDesktopAuthToken { account_id } => {
-			format!("GET_DESKTOP_AUTH_TOKEN account_id={}", account_id)
+        DesktopRequest::GetDesktopAuthToken { account_id } => {
+            format!("GET_DESKTOP_AUTH_TOKEN account_id={}", account_id)
         }
-		DesktopRequest::GetDesktopVaultKeys { account_id } => {
-			format!("GET_DESKTOP_VAULT_KEYS account_id={}", account_id)
+        DesktopRequest::GetDesktopVaultKeys { account_id } => {
+            format!("GET_DESKTOP_VAULT_KEYS account_id={}", account_id)
         }
-		DesktopRequest::GetDesktopItemsSnapshot { account_ids } => format!(
-			"GET_DESKTOP_ITEMS_SNAPSHOT account_ids={}",
-			account_ids.as_ref().map(|values| values.len()).unwrap_or_default()
+        DesktopRequest::GetDesktopItemsSnapshot { account_ids } => format!(
+            "GET_DESKTOP_ITEMS_SNAPSHOT account_ids={}",
+            account_ids
+                .as_ref()
+                .map(|values| values.len())
+                .unwrap_or_default()
         ),
         DesktopRequest::SubscribeDesktopEvents => "SUBSCRIBE_DESKTOP_EVENTS".to_string(),
         DesktopRequest::UnsubscribeDesktopEvents => "UNSUBSCRIBE_DESKTOP_EVENTS".to_string(),
-        DesktopRequest::CheckBiometricAvailable => {
-            "CHECK_BIOMETRIC_AVAILABLE".to_string()
-        }
+        DesktopRequest::CheckBiometricAvailable => "CHECK_BIOMETRIC_AVAILABLE".to_string(),
         DesktopRequest::BiometricUnlockRequest {
             extension_id,
-			account_id,
+            account_id,
             ..
         } => format!(
-			"BIOMETRIC_UNLOCK_REQUEST extension_id={} account_id_present={}",
+            "BIOMETRIC_UNLOCK_REQUEST extension_id={} account_id_present={}",
             extension_id,
-			account_id.is_some()
+            account_id.is_some()
         ),
-        DesktopRequest::BiometricUnlockAllRequest { extension_id, .. } => format!(
-            "BIOMETRIC_UNLOCK_ALL_REQUEST extension_id={}",
-            extension_id
-        ),
+        DesktopRequest::BiometricUnlockAllRequest { extension_id, .. } => {
+            format!("BIOMETRIC_UNLOCK_ALL_REQUEST extension_id={}", extension_id)
+        }
         DesktopRequest::TriggerDesktopUnlock => "TRIGGER_DESKTOP_UNLOCK".to_string(),
         DesktopRequest::OpenDesktopApp { .. } => "OPEN_DESKTOP_APP".to_string(),
     }
@@ -100,10 +101,10 @@ fn is_allowlisted_extension_id(extension_id: &str) -> bool {
 fn validate_extension_request(request: &DesktopRequest) -> Result<(), String> {
     match request {
         DesktopRequest::BiometricUnlockRequest { extension_id, .. }
-        | DesktopRequest::BiometricUnlockAllRequest { extension_id, .. } => {
-            if !is_allowlisted_extension_id(extension_id) {
-                return Err("Extension ID is not allowlisted".to_string());
-            }
+        | DesktopRequest::BiometricUnlockAllRequest { extension_id, .. }
+            if !is_allowlisted_extension_id(extension_id) =>
+        {
+            return Err("Extension ID is not allowlisted".to_string());
         }
         _ => {}
     }
@@ -116,7 +117,13 @@ async fn send_ipc_request(request: NativeRequest) -> Result<NativeResponse, Stri
     let socket_path = desktop_ipc_socket_path();
     let mut stream = tokio::net::UnixStream::connect(&socket_path)
         .await
-        .map_err(|error| format!("Desktop IPC unavailable at {}: {}", socket_path.display(), error))?;
+        .map_err(|error| {
+            format!(
+                "Desktop IPC unavailable at {}: {}",
+                socket_path.display(),
+                error
+            )
+        })?;
     write_frame(&mut stream, &request)
         .await
         .map_err(|error| format!("Failed writing IPC request: {}", error))?;
@@ -175,7 +182,7 @@ fn open_desktop_app_system() -> Result<(), String> {
             return Ok(());
         }
 
-        return Err("Unable to open Bittery via macOS open".to_string());
+        Err("Unable to open Bittery via macOS open".to_string())
     }
 
     #[cfg(target_os = "windows")]
@@ -188,7 +195,7 @@ fn open_desktop_app_system() -> Result<(), String> {
             return Ok(());
         }
 
-        return Err("Unable to open Bittery via Windows start".to_string());
+        Err("Unable to open Bittery via Windows start".to_string())
     }
 
     #[cfg(target_os = "linux")]
@@ -205,7 +212,7 @@ fn open_desktop_app_system() -> Result<(), String> {
             return Ok(());
         }
 
-        return Err("Unable to open Bittery. Ensure the app is installed.".to_string());
+        Err("Unable to open Bittery. Ensure the app is installed.".to_string())
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
@@ -216,7 +223,7 @@ fn open_desktop_app_system() -> Result<(), String> {
 
 async fn open_desktop_app(payload: DesktopRequest) -> DesktopResponse {
     let request = NativeRequest {
-		protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+        protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
         request_id: None,
         payload,
     };
@@ -239,7 +246,7 @@ async fn open_desktop_app(payload: DesktopRequest) -> DesktopResponse {
 async fn handle_request(request: NativeRequest) -> NativeResponse {
     if let Err(error) = validate_extension_request(&request.payload) {
         return NativeResponse {
-			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: request.request_id,
             payload: DesktopResponse::Error { message: error },
         };
@@ -253,7 +260,7 @@ async fn handle_request(request: NativeRequest) -> NativeResponse {
         },
         request @ DesktopRequest::OpenDesktopApp { .. } => open_desktop_app(request).await,
         DesktopRequest::GetDesktopStatus => match send_ipc_request(NativeRequest {
-			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: request_id.clone(),
             payload: DesktopRequest::GetDesktopStatus,
         })
@@ -270,7 +277,7 @@ async fn handle_request(request: NativeRequest) -> NativeResponse {
             },
         },
         DesktopRequest::CheckBiometricAvailable => match send_ipc_request(NativeRequest {
-			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: request_id.clone(),
             payload: DesktopRequest::CheckBiometricAvailable,
         })
@@ -285,7 +292,7 @@ async fn handle_request(request: NativeRequest) -> NativeResponse {
         },
         other_request => {
             let forward = NativeRequest {
-				protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                 request_id: request_id.clone(),
                 payload: other_request,
             };
@@ -299,8 +306,8 @@ async fn handle_request(request: NativeRequest) -> NativeResponse {
     };
 
     NativeResponse {
-		protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
-        request_id: request_id,
+        protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+        request_id,
         payload,
     }
 }
@@ -318,7 +325,7 @@ async fn start_event_subscription(
     let mut state = subscription_state.lock().await;
     if state.task.is_some() {
         let _ = out_tx.send(NativeResponse {
-			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: request.request_id,
             payload: DesktopResponse::DesktopEventSubscription { subscribed: true },
         });
@@ -332,7 +339,7 @@ async fn start_event_subscription(
             Ok(stream) => stream,
             Err(error) => {
                 let _ = out_tx.send(NativeResponse {
-					protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                    protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                     request_id: request.request_id,
                     payload: DesktopResponse::Error {
                         message: format!(
@@ -348,7 +355,7 @@ async fn start_event_subscription(
 
         if let Err(error) = write_frame(&mut stream, &request).await {
             let _ = out_tx.send(NativeResponse {
-				protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                 request_id: request.request_id,
                 payload: DesktopResponse::Error {
                     message: format!("Failed writing subscribe request: {}", error),
@@ -361,7 +368,7 @@ async fn start_event_subscription(
             Ok(message) => message,
             Err(error) => {
                 let _ = out_tx.send(NativeResponse {
-					protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                    protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                     request_id: request.request_id,
                     payload: DesktopResponse::Error {
                         message: format!("Failed reading subscribe ack: {}", error),
@@ -389,7 +396,6 @@ async fn start_event_subscription(
                 }
             }
         }));
-        return;
     }
 
     #[cfg(windows)]
@@ -402,7 +408,7 @@ async fn start_event_subscription(
             Ok(stream) => stream,
             Err(error) => {
                 let _ = out_tx.send(NativeResponse {
-					protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                    protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                     request_id: request.request_id,
                     payload: DesktopResponse::Error {
                         message: format!("Desktop IPC unavailable at {}: {}", pipe_name, error),
@@ -414,7 +420,7 @@ async fn start_event_subscription(
 
         if let Err(error) = write_frame(&mut stream, &request).await {
             let _ = out_tx.send(NativeResponse {
-				protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                 request_id: request.request_id,
                 payload: DesktopResponse::Error {
                     message: format!("Failed writing subscribe request: {}", error),
@@ -427,7 +433,7 @@ async fn start_event_subscription(
             Ok(message) => message,
             Err(error) => {
                 let _ = out_tx.send(NativeResponse {
-					protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                    protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                     request_id: request.request_id,
                     payload: DesktopResponse::Error {
                         message: format!("Failed reading subscribe ack: {}", error),
@@ -455,13 +461,12 @@ async fn start_event_subscription(
                 }
             }
         }));
-        return;
     }
 
     #[cfg(not(any(unix, windows)))]
     {
         let _ = out_tx.send(NativeResponse {
-			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: request.request_id,
             payload: DesktopResponse::Error {
                 message: "Desktop event subscription is unavailable on this platform build"
@@ -482,7 +487,7 @@ async fn stop_event_subscription(
     }
 
     let _ = out_tx.send(NativeResponse {
-		protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+        protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
         request_id,
         payload: DesktopResponse::DesktopEventSubscription { subscribed: false },
     });
@@ -513,24 +518,24 @@ async fn main() {
         match read_native_message() {
             Ok(message) => {
                 log_native(&format!("received {}", summarize_message(&message.payload)));
-				if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
-					log_native(&format!(
-						"protocol mismatch expected={} received={}",
-						DESKTOP_PROTOCOL_VERSION,
-						message
-							.protocol_version
-							.map(|version| version.to_string())
-							.unwrap_or_else(|| "legacy".to_string())
-					));
-					let _ = out_tx.send(NativeResponse::current(
-						message.request_id,
-						DesktopResponse::ProtocolMismatch {
-							expected_version: DESKTOP_PROTOCOL_VERSION,
-							received_version: message.protocol_version,
-						},
-					));
-					continue;
-				}
+                if message.protocol_version != Some(DESKTOP_PROTOCOL_VERSION) {
+                    log_native(&format!(
+                        "protocol mismatch expected={} received={}",
+                        DESKTOP_PROTOCOL_VERSION,
+                        message
+                            .protocol_version
+                            .map(|version| version.to_string())
+                            .unwrap_or_else(|| "legacy".to_string())
+                    ));
+                    let _ = out_tx.send(NativeResponse::current(
+                        message.request_id,
+                        DesktopResponse::ProtocolMismatch {
+                            expected_version: DESKTOP_PROTOCOL_VERSION,
+                            received_version: message.protocol_version,
+                        },
+                    ));
+                    continue;
+                }
                 match message.payload {
                     DesktopRequest::SubscribeDesktopEvents => {
                         start_event_subscription(
@@ -559,7 +564,7 @@ async fn main() {
             Err(error) => {
                 log_native(&format!("failed to read message: {}", error));
                 let _ = out_tx.send(NativeResponse {
-					protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+                    protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                     request_id: None,
                     payload: DesktopResponse::Error {
                         message: error.to_string(),

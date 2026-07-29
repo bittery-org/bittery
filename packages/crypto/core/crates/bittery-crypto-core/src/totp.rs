@@ -44,9 +44,7 @@ fn base32_decode(input: &str) -> Result<Vec<u8>, CryptoError> {
         let value = BASE32_ALPHABET
             .iter()
             .position(|&b| b == c as u8)
-            .ok_or_else(|| {
-                CryptoError::InvalidInput(format!("Invalid base32 character: {}", c))
-            })?;
+            .ok_or_else(|| CryptoError::InvalidInput(format!("Invalid base32 character: {}", c)))?;
 
         buffer = (buffer << 5) | (value as u32);
         bits_left += 5;

@@ -105,11 +105,7 @@ pub fn encrypt_with_aad(
     encrypt_internal(plaintext, key, &aad)
 }
 
-fn encrypt_internal(
-    plaintext: &str,
-    key: &[u8],
-    aad: &[u8],
-) -> Result<EncryptedData, CryptoError> {
+fn encrypt_internal(plaintext: &str, key: &[u8], aad: &[u8]) -> Result<EncryptedData, CryptoError> {
     if key.len() != KEY_LENGTH {
         return Err(CryptoError::InvalidKeyLength {
             expected: KEY_LENGTH,
@@ -370,10 +366,7 @@ mod tests {
         let serialized_1 = context.to_aad_bytes().unwrap();
         let serialized_2 = context.to_aad_bytes().unwrap();
         assert_eq!(serialized_1, serialized_2);
-        assert_eq!(
-            serialized_1,
-            b"vault-1\0item-1\0item\099\0user-1".to_vec()
-        );
+        assert_eq!(serialized_1, b"vault-1\0item-1\0item\099\0user-1".to_vec());
     }
 
     #[test]

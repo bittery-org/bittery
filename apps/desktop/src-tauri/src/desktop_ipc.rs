@@ -11,8 +11,12 @@ pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProtocolEnvelope<T> {
-	#[serde(rename = "protocolVersion", default, skip_serializing_if = "Option::is_none")]
-	pub protocol_version: Option<u32>,
+    #[serde(
+        rename = "protocolVersion",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub protocol_version: Option<u32>,
     #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
     #[serde(flatten)]
@@ -22,13 +26,13 @@ pub struct ProtocolEnvelope<T> {
 pub type DesktopEnvelope<T> = ProtocolEnvelope<T>;
 
 impl<T> ProtocolEnvelope<T> {
-	pub fn current(request_id: Option<String>, payload: T) -> Self {
-		Self {
-			protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
-			request_id,
-			payload,
-		}
-	}
+    pub fn current(request_id: Option<String>, payload: T) -> Self {
+        Self {
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
+            request_id,
+            payload,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -41,20 +45,20 @@ pub enum DesktopRequest {
     #[serde(rename = "GET_DESKTOP_ACCOUNTS")]
     GetDesktopAccounts,
     #[serde(rename = "GET_DESKTOP_AUTH_TOKEN")]
-	GetDesktopAuthToken {
-		#[serde(rename = "accountId")]
-		account_id: String,
-	},
+    GetDesktopAuthToken {
+        #[serde(rename = "accountId")]
+        account_id: String,
+    },
     #[serde(rename = "GET_DESKTOP_VAULT_KEYS")]
-	GetDesktopVaultKeys {
-		#[serde(rename = "accountId")]
-		account_id: String,
-	},
+    GetDesktopVaultKeys {
+        #[serde(rename = "accountId")]
+        account_id: String,
+    },
     #[serde(rename = "GET_DESKTOP_ITEMS_SNAPSHOT")]
     GetDesktopItemsSnapshot {
         #[serde(skip_serializing_if = "Option::is_none")]
-		#[serde(rename = "accountIds")]
-		account_ids: Option<Vec<String>>,
+        #[serde(rename = "accountIds")]
+        account_ids: Option<Vec<String>>,
     },
     #[serde(rename = "SUBSCRIBE_DESKTOP_EVENTS")]
     SubscribeDesktopEvents,
@@ -67,8 +71,8 @@ pub enum DesktopRequest {
         challenge: String,
         extension_id: String,
         #[serde(skip_serializing_if = "Option::is_none")]
-		#[serde(rename = "accountId")]
-		account_id: Option<String>,
+        #[serde(rename = "accountId")]
+        account_id: Option<String>,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_ALL_REQUEST")]
     BiometricUnlockAllRequest {
@@ -95,17 +99,15 @@ pub enum DesktopRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum DesktopResponse {
-	#[serde(rename = "PROTOCOL_MISMATCH")]
-	ProtocolMismatch {
-		#[serde(rename = "expectedVersion")]
-		expected_version: u32,
-		#[serde(rename = "receivedVersion", skip_serializing_if = "Option::is_none")]
-		received_version: Option<u32>,
-	},
-    #[serde(rename = "PONG")]
-    Pong {
-        version: String,
+    #[serde(rename = "PROTOCOL_MISMATCH")]
+    ProtocolMismatch {
+        #[serde(rename = "expectedVersion")]
+        expected_version: u32,
+        #[serde(rename = "receivedVersion", skip_serializing_if = "Option::is_none")]
+        received_version: Option<u32>,
     },
+    #[serde(rename = "PONG")]
+    Pong { version: String },
     #[serde(rename = "DESKTOP_STATUS")]
     DesktopStatus {
         available: bool,
@@ -127,10 +129,10 @@ pub enum DesktopResponse {
         unlocked_accounts: Vec<String>,
     },
     #[serde(rename = "DESKTOP_AUTH_TOKEN")]
-	DesktopAuthToken {
-		#[serde(rename = "accountId")]
-		account_id: String,
-		email: String,
+    DesktopAuthToken {
+        #[serde(rename = "accountId")]
+        account_id: String,
+        email: String,
         #[serde(rename = "authToken")]
         auth_token: String,
         #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
@@ -139,10 +141,10 @@ pub enum DesktopResponse {
         user_id: Option<String>,
     },
     #[serde(rename = "DESKTOP_VAULT_KEYS")]
-	DesktopVaultKeys {
-		#[serde(rename = "accountId")]
-		account_id: String,
-		email: String,
+    DesktopVaultKeys {
+        #[serde(rename = "accountId")]
+        account_id: String,
+        email: String,
         #[serde(rename = "vaultKeys")]
         vault_keys: String,
     },
@@ -158,9 +160,7 @@ pub enum DesktopResponse {
         payload: serde_json::Value,
     },
     #[serde(rename = "DESKTOP_EVENT_SUBSCRIPTION")]
-    DesktopEventSubscription {
-        subscribed: bool,
-    },
+    DesktopEventSubscription { subscribed: bool },
     #[serde(rename = "BIOMETRIC_STATUS")]
     BiometricStatus {
         available: bool,
@@ -169,10 +169,10 @@ pub enum DesktopResponse {
         app_running: bool,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_SUCCESS")]
-	BiometricUnlockSuccess {
-		#[serde(rename = "accountId")]
-		account_id: String,
-		email: String,
+    BiometricUnlockSuccess {
+        #[serde(rename = "accountId")]
+        account_id: String,
+        email: String,
         encrypted_session: String,
         device_key: String,
         signature: String,
@@ -182,9 +182,7 @@ pub enum DesktopResponse {
         vault_keys: Option<String>,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_FAILED")]
-    BiometricUnlockFailed {
-        error: String,
-    },
+    BiometricUnlockFailed { error: String },
     #[serde(rename = "BIOMETRIC_UNLOCK_ALL_SUCCESS")]
     BiometricUnlockAllSuccess {
         device_key: String,
@@ -194,9 +192,7 @@ pub enum DesktopResponse {
         failed: Vec<String>,
     },
     #[serde(rename = "BIOMETRIC_UNLOCK_ALL_FAILED")]
-    BiometricUnlockAllFailed {
-        error: String,
-    },
+    BiometricUnlockAllFailed { error: String },
     #[serde(rename = "OPEN_DESKTOP_APP_RESULT")]
     OpenDesktopAppResult {
         success: bool,
@@ -210,16 +206,14 @@ pub enum DesktopResponse {
         error: Option<String>,
     },
     #[serde(rename = "ERROR")]
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AccountUnlockData {
-	#[serde(rename = "accountId")]
-	pub account_id: String,
-	pub email: String,
+    #[serde(rename = "accountId")]
+    pub account_id: String,
+    pub email: String,
     pub encrypted_session: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
@@ -249,7 +243,8 @@ where
     let mut buffer = vec![0u8; length];
     reader.read_exact(&mut buffer).await?;
 
-    serde_json::from_slice(&buffer).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
+    serde_json::from_slice(&buffer)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
 }
 
 pub async fn write_frame<W, T>(writer: &mut W, value: &T) -> io::Result<()>
@@ -279,8 +274,7 @@ pub fn desktop_ipc_socket_path() -> std::path::PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        read_frame, write_frame, DesktopEnvelope, DesktopEventKind, DesktopRequest,
-        DesktopResponse,
+        read_frame, write_frame, DesktopEnvelope, DesktopEventKind, DesktopRequest, DesktopResponse,
     };
     use tokio::io::duplex;
 
@@ -288,10 +282,10 @@ mod tests {
     async fn frame_round_trip_preserves_payload() {
         let (mut writer, mut reader) = duplex(4096);
         let message = DesktopEnvelope {
-			protocol_version: Some(1),
+            protocol_version: Some(1),
             request_id: Some("req-1".to_string()),
             payload: DesktopRequest::GetDesktopItemsSnapshot {
-				account_ids: Some(vec!["account-1".to_string()]),
+                account_ids: Some(vec!["account-1".to_string()]),
             },
         };
 
@@ -306,86 +300,86 @@ mod tests {
         assert_eq!(decoded, message);
     }
 
-	#[test]
-	fn open_desktop_app_intent_survives_envelope_deserialization() {
-		// Exact wire shape the extension sends for the "new item" handoff.
-		let raw = r#"{"requestId":"desktop-1","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"create_item","url":"https://example.com/login"}"#;
-		let decoded: DesktopEnvelope<DesktopRequest> =
-			serde_json::from_str(raw).expect("envelope should deserialize");
+    #[test]
+    fn open_desktop_app_intent_survives_envelope_deserialization() {
+        // Exact wire shape the extension sends for the "new item" handoff.
+        let raw = r#"{"requestId":"desktop-1","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"create_item","url":"https://example.com/login"}"#;
+        let decoded: DesktopEnvelope<DesktopRequest> =
+            serde_json::from_str(raw).expect("envelope should deserialize");
 
-		assert_eq!(
-			decoded.payload,
-			DesktopRequest::OpenDesktopApp {
-				intent: Some("create_item".to_string()),
-				url: Some("https://example.com/login".to_string()),
-				item_id: None,
-				vault_id: None,
-			}
-		);
-	}
+        assert_eq!(
+            decoded.payload,
+            DesktopRequest::OpenDesktopApp {
+                intent: Some("create_item".to_string()),
+                url: Some("https://example.com/login".to_string()),
+                item_id: None,
+                vault_id: None,
+            }
+        );
+    }
 
-	#[test]
-	fn open_desktop_app_view_item_intent_survives_envelope_deserialization() {
-		// Exact wire shape the extension sends for the "open in app" handoff.
-		let raw = r#"{"requestId":"desktop-2","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"view_item","itemId":"item-1","vaultId":"vault-1"}"#;
-		let decoded: DesktopEnvelope<DesktopRequest> =
-			serde_json::from_str(raw).expect("envelope should deserialize");
+    #[test]
+    fn open_desktop_app_view_item_intent_survives_envelope_deserialization() {
+        // Exact wire shape the extension sends for the "open in app" handoff.
+        let raw = r#"{"requestId":"desktop-2","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"view_item","itemId":"item-1","vaultId":"vault-1"}"#;
+        let decoded: DesktopEnvelope<DesktopRequest> =
+            serde_json::from_str(raw).expect("envelope should deserialize");
 
-		assert_eq!(
-			decoded.payload,
-			DesktopRequest::OpenDesktopApp {
-				intent: Some("view_item".to_string()),
-				url: None,
-				item_id: Some("item-1".to_string()),
-				vault_id: Some("vault-1".to_string()),
-			}
-		);
-	}
+        assert_eq!(
+            decoded.payload,
+            DesktopRequest::OpenDesktopApp {
+                intent: Some("view_item".to_string()),
+                url: None,
+                item_id: Some("item-1".to_string()),
+                vault_id: Some("vault-1".to_string()),
+            }
+        );
+    }
 
-	#[test]
-	fn open_desktop_app_without_intent_still_deserializes() {
-		// Older extensions send the bare request; it must keep working.
-		let raw = r#"{"protocolVersion":1,"type":"OPEN_DESKTOP_APP"}"#;
-		let decoded: DesktopEnvelope<DesktopRequest> =
-			serde_json::from_str(raw).expect("envelope should deserialize");
+    #[test]
+    fn open_desktop_app_without_intent_still_deserializes() {
+        // Older extensions send the bare request; it must keep working.
+        let raw = r#"{"protocolVersion":1,"type":"OPEN_DESKTOP_APP"}"#;
+        let decoded: DesktopEnvelope<DesktopRequest> =
+            serde_json::from_str(raw).expect("envelope should deserialize");
 
-		assert_eq!(
-			decoded.payload,
-			DesktopRequest::OpenDesktopApp {
-				intent: None,
-				url: None,
-				item_id: None,
-				vault_id: None,
-			}
-		);
-	}
+        assert_eq!(
+            decoded.payload,
+            DesktopRequest::OpenDesktopApp {
+                intent: None,
+                url: None,
+                item_id: None,
+                vault_id: None,
+            }
+        );
+    }
 
-	#[tokio::test]
-	async fn auth_token_request_round_trip_preserves_account_id_and_protocol_version() {
-		let (mut writer, mut reader) = duplex(4096);
-		let message = DesktopEnvelope {
-			protocol_version: Some(1),
-			request_id: Some("req-auth".to_string()),
-			payload: DesktopRequest::GetDesktopAuthToken {
-				account_id: "account-1".to_string(),
-			},
-		};
+    #[tokio::test]
+    async fn auth_token_request_round_trip_preserves_account_id_and_protocol_version() {
+        let (mut writer, mut reader) = duplex(4096);
+        let message = DesktopEnvelope {
+            protocol_version: Some(1),
+            request_id: Some("req-auth".to_string()),
+            payload: DesktopRequest::GetDesktopAuthToken {
+                account_id: "account-1".to_string(),
+            },
+        };
 
-		write_frame(&mut writer, &message)
-			.await
-			.expect("frame write should succeed");
-		let decoded: DesktopEnvelope<DesktopRequest> = read_frame(&mut reader)
-			.await
-			.expect("frame read should succeed");
+        write_frame(&mut writer, &message)
+            .await
+            .expect("frame write should succeed");
+        let decoded: DesktopEnvelope<DesktopRequest> = read_frame(&mut reader)
+            .await
+            .expect("frame read should succeed");
 
-		assert_eq!(decoded, message);
-	}
+        assert_eq!(decoded, message);
+    }
 
     #[tokio::test]
     async fn response_event_frame_round_trip_preserves_payload() {
         let (mut writer, mut reader) = duplex(4096);
         let message = DesktopEnvelope {
-			protocol_version: Some(1),
+            protocol_version: Some(1),
             request_id: None,
             payload: DesktopResponse::DesktopEvent {
                 event: DesktopEventKind::Unlock,
@@ -405,7 +399,7 @@ mod tests {
             .expect("frame read should succeed");
 
         assert_eq!(decoded, message);
-		let serialized = serde_json::to_value(&decoded).expect("response should serialize");
-		assert_eq!(serialized["protocolVersion"], 1);
+        let serialized = serde_json::to_value(&decoded).expect("response should serialize");
+        assert_eq!(serialized["protocolVersion"], 1);
     }
 }

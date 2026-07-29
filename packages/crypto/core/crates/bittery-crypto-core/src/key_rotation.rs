@@ -173,7 +173,7 @@ pub fn encrypt_vault_key_with_muk(
         encrypted,
         context: wrap_context.clone(),
     })
-        .map_err(|e| CryptoError::Encryption(format!("JSON serialization failed: {}", e)))
+    .map_err(|e| CryptoError::Encryption(format!("JSON serialization failed: {}", e)))
 }
 
 /// Decrypt and validate a vault key wrapped with MUK + AAD context.
@@ -369,7 +369,7 @@ mod tests {
         let encrypted = encrypt_vault_key_for_member(&vault_key, &key_pair.public_key).unwrap();
         let decrypted = rsa_decrypt(&encrypted, &key_pair.private_key).unwrap();
 
-        assert_eq!(decrypted, BASE64.encode(&vault_key));
+        assert_eq!(decrypted, BASE64.encode(vault_key));
     }
 
     #[test]
@@ -463,9 +463,16 @@ mod tests {
             },
         ];
 
-        let result =
-            perform_key_rotation(&old_vault_key, &members, &items, "vault-1", 2, "owner-id", &muk)
-                .unwrap();
+        let result = perform_key_rotation(
+            &old_vault_key,
+            &members,
+            &items,
+            "vault-1",
+            2,
+            "owner-id",
+            &muk,
+        )
+        .unwrap();
 
         // Should have encrypted keys for all members
         assert_eq!(result.member_encrypted_keys.len(), 2);

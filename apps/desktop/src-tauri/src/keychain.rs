@@ -249,22 +249,13 @@ mod tests {
         keychain_set("key_a", "value_a").unwrap();
         keychain_set("key_b", "value_b").unwrap();
 
-        assert_eq!(
-            keychain_get("key_a").unwrap(),
-            Some("value_a".to_string())
-        );
-        assert_eq!(
-            keychain_get("key_b").unwrap(),
-            Some("value_b".to_string())
-        );
+        assert_eq!(keychain_get("key_a").unwrap(), Some("value_a".to_string()));
+        assert_eq!(keychain_get("key_b").unwrap(), Some("value_b".to_string()));
 
         // Deleting one key should not affect the other
         keychain_delete("key_a").unwrap();
         assert!(keychain_get("key_a").unwrap().is_none());
-        assert_eq!(
-            keychain_get("key_b").unwrap(),
-            Some("value_b".to_string())
-        );
+        assert_eq!(keychain_get("key_b").unwrap(), Some("value_b".to_string()));
 
         // Cleanup
         let _ = keychain_delete("key_b");

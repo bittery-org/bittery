@@ -1,7 +1,7 @@
-import { expect, test } from "@playwright/test";
+import { describe, expect, test } from "bun:test";
 import { evaluateRouteAccess } from "./route-guards";
 
-test.describe("Route guard access evaluation", () => {
+describe("Route guard access evaluation", () => {
 	test("redirects cloud users without entitlement to billing", () => {
 		const redirect = evaluateRouteAccess({
 			routePath: "/security",

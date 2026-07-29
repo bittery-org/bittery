@@ -26,6 +26,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -52,6 +54,7 @@ jobs:
             type=sha,enable=${{ github.ref_type != 'tag' }}
 
       - name: Build and push server image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -62,11 +65,24 @@ jobs:
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
 
+      # Lets self-hosters verify an image really came from this workflow:
+      #   gh attestation verify oci://ghcr.io/<owner>/bittery-server:<tag> \
+      #     --repo bittery-org/bittery
+      - name: Attest server image provenance
+        if: steps.build.outputs.digest != ''
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-server
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
   build-web:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -93,6 +109,7 @@ jobs:
             type=sha,enable=${{ github.ref_type != 'tag' }}
 
       - name: Build and push web image
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -104,6 +121,14 @@ jobs:
             VITE_SERVER_URL=${{ vars.VITE_SERVER_URL || '' }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
+
+      - name: Attest web image provenance
+        if: steps.build.outputs.digest != ''
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-web
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
 
   build-desktop:
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
@@ -278,6 +303,8 @@ jobs:
     permissions:
       contents: write
       packages: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
@@ -380,6 +407,24 @@ jobs:
 
           ls -la release-upload/
 
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Written outside the directory first so the file being created is not
+          # itself picked up by the glob.
+          (cd release-upload && find . -maxdepth 1 -type f -printf '%P\0' \
+            | sort -z | xargs -0 sha256sum) > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" release-upload/SHA256SUMS
+          cat release-upload/SHA256SUMS
+
+      # Binary provenance for the installers users actually download. Verify with:
+      #   gh attestation verify Bittery.dmg --repo bittery-org/bittery
+      - name: Attest release artifact provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release-upload/*
+
       - name: Prepare release notes
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
@@ -387,6 +432,18 @@ jobs:
             VERSION="$(node -p "require('./package.json').version")"
           fi
           cat > release-notes.md <<EOF
+          ## Verifying this release
+
+          Every asset below is checksummed in \`SHA256SUMS\` and carries a signed
+          GitHub build provenance attestation proving it was produced by this
+          repository's release workflow:
+
+          \`\`\`bash
+          sha256sum -c SHA256SUMS
+          gh attestation verify Bittery.dmg --repo ${GITHUB_REPOSITORY}
+          gh attestation verify oci://ghcr.io/${GITHUB_REPOSITORY_OWNER}/bittery-server:${VERSION} --repo ${GITHUB_REPOSITORY}
+          \`\`\`
+
           ## Docker images
 
           Self-hosted deployments can pull versioned images from GHCR:

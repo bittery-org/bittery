@@ -4,12 +4,12 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bittery_crypto_core::{
-    decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_encryption_key, generate_rsa_key_pair,
-    generate_secret_key, generate_uuid, get_secret_key_hint, rsa_decrypt, rsa_encrypt, validate_secret_key,
-    validate_kdf_profile, KdfProfile,
-    srp6a::{HashAlgorithm, PrimeGroup, SrpClient},
+    decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_encryption_key,
+    generate_rsa_key_pair, generate_secret_key, generate_uuid, get_secret_key_hint,
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
-    AadContext, EncryptedData,
+    rsa_decrypt, rsa_encrypt,
+    srp6a::{HashAlgorithm, PrimeGroup, SrpClient},
+    validate_kdf_profile, validate_secret_key, AadContext, EncryptedData, KdfProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -62,9 +62,12 @@ pub fn crypto_derive_keys(
     algorithm: String,
     iterations: u32,
 ) -> Result<DerivedKeysResponse, String> {
-    let profile = KdfProfile { schema_version, algorithm, iterations };
-    let keys = derive_keys(&password, &secret_key, &email, &profile)
-        .map_err(|e| e.to_string())?;
+    let profile = KdfProfile {
+        schema_version,
+        algorithm,
+        iterations,
+    };
+    let keys = derive_keys(&password, &secret_key, &email, &profile).map_err(|e| e.to_string())?;
 
     Ok(DerivedKeysResponse {
         auth_key: STANDARD.encode(&keys.auth_key),
@@ -78,15 +81,12 @@ pub fn crypto_derive_keys(
 
 /// Encrypt plaintext using AES-256-GCM
 #[tauri::command]
-pub fn crypto_encrypt(
-    plaintext: String,
-    key_base64: String,
-) -> Result<EncryptResponse, String> {
-    let key = STANDARD.decode(&key_base64)
+pub fn crypto_encrypt(plaintext: String, key_base64: String) -> Result<EncryptResponse, String> {
+    let key = STANDARD
+        .decode(&key_base64)
         .map_err(|e| format!("Invalid key base64: {}", e))?;
 
-    let encrypted = encrypt(&plaintext, &key)
-        .map_err(|e| e.to_string())?;
+    let encrypted = encrypt(&plaintext, &key).map_err(|e| e.to_string())?;
 
     Ok(EncryptResponse {
         ciphertext: encrypted.ciphertext,
@@ -135,7 +135,8 @@ pub fn crypto_decrypt(
     algorithm: String,
     key_base64: String,
 ) -> Result<String, String> {
-    let key = STANDARD.decode(&key_base64)
+    let key = STANDARD
+        .decode(&key_base64)
         .map_err(|e| format!("Invalid key base64: {}", e))?;
 
     let data = EncryptedData {
@@ -148,6 +149,11 @@ pub fn crypto_decrypt(
 }
 
 /// Decrypt ciphertext using AES-256-GCM with authenticated context
+///
+/// The argument list is the Tauri IPC contract with the frontend caller; the
+/// AAD context fields are passed individually and cannot be grouped without
+/// changing the invoke payload shape.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub fn crypto_decrypt_with_context(
     ciphertext: String,
@@ -186,8 +192,8 @@ pub fn crypto_validate_kdf_profile(
     profile_json: String,
     pinned_profile_json: Option<String>,
 ) -> Result<(), String> {
-    let profile: KdfProfile =
-        serde_json::from_str(&profile_json).map_err(|e| format!("Invalid KDF profile JSON: {}", e))?;
+    let profile: KdfProfile = serde_json::from_str(&profile_json)
+        .map_err(|e| format!("Invalid KDF profile JSON: {}", e))?;
 
     let pinned: Option<KdfProfile> = match pinned_profile_json {
         Some(value) => Some(
@@ -219,8 +225,7 @@ pub fn crypto_generate_uuid() -> String {
 /// Generate an RSA-4096 key pair
 #[tauri::command]
 pub fn crypto_generate_rsa_key_pair() -> Result<RsaKeyPairResponse, String> {
-    let key_pair = generate_rsa_key_pair()
-        .map_err(|e| e.to_string())?;
+    let key_pair = generate_rsa_key_pair().map_err(|e| e.to_string())?;
 
     Ok(RsaKeyPairResponse {
         public_key: key_pair.public_key.clone(),
@@ -230,22 +235,14 @@ pub fn crypto_generate_rsa_key_pair() -> Result<RsaKeyPairResponse, String> {
 
 /// Encrypt data with RSA-OAEP using a public key
 #[tauri::command]
-pub fn crypto_rsa_encrypt(
-    plaintext: String,
-    public_key_pem: String,
-) -> Result<String, String> {
-    rsa_encrypt(&plaintext, &public_key_pem)
-        .map_err(|e| e.to_string())
+pub fn crypto_rsa_encrypt(plaintext: String, public_key_pem: String) -> Result<String, String> {
+    rsa_encrypt(&plaintext, &public_key_pem).map_err(|e| e.to_string())
 }
 
 /// Decrypt data with RSA-OAEP using a private key
 #[tauri::command]
-pub fn crypto_rsa_decrypt(
-    ciphertext: String,
-    private_key_pem: String,
-) -> Result<String, String> {
-    rsa_decrypt(&ciphertext, &private_key_pem)
-        .map_err(|e| e.to_string())
+pub fn crypto_rsa_decrypt(ciphertext: String, private_key_pem: String) -> Result<String, String> {
+    rsa_decrypt(&ciphertext, &private_key_pem).map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -274,9 +271,9 @@ pub fn crypto_get_secret_key_hint(secret_key: String) -> String {
 // SRP-6a Client Commands
 // ============================================================================
 
-/// SRP client state stored between calls
-/// For thread-safety, we use a simple approach where each operation is stateless
-/// by creating fresh clients and relying on the deterministic nature of the operations.
+// SRP client state stored between calls.
+// For thread-safety, we use a simple approach where each operation is stateless
+// by creating fresh clients and relying on the deterministic nature of the operations.
 
 fn get_srp_client() -> SrpClient {
     // Use SHA-256 and 4096-bit prime group (standard for Bittery)
@@ -328,13 +325,15 @@ pub fn crypto_srp_derive_session(
     username: String,
     private_key: String,
 ) -> Result<SessionResponse, String> {
-    let session = get_srp_client().derive_session(
-        &client_secret_ephemeral,
-        &server_public_ephemeral,
-        &salt,
-        &username,
-        &private_key,
-    ).map_err(|e| e.to_string())?;
+    let session = get_srp_client()
+        .derive_session(
+            &client_secret_ephemeral,
+            &server_public_ephemeral,
+            &salt,
+            &username,
+            &private_key,
+        )
+        .map_err(|e| e.to_string())?;
 
     Ok(SessionResponse {
         key: session.key.clone(),
@@ -357,11 +356,9 @@ pub fn crypto_srp_verify_session(
         proof: session_proof,
     };
 
-    get_srp_client().verify_session(
-        &client_public_ephemeral,
-        &session,
-        &server_session_proof,
-    ).map_err(|e| e.to_string())
+    get_srp_client()
+        .verify_session(&client_public_ephemeral, &session, &server_session_proof)
+        .map_err(|e| e.to_string())
 }
 
 // ============================================================================
@@ -413,7 +410,8 @@ pub fn crypto_encrypt_vault_key_for_member(
     vault_key_base64: String,
     member_public_key: String,
 ) -> Result<String, String> {
-    let vault_key = STANDARD.decode(&vault_key_base64)
+    let vault_key = STANDARD
+        .decode(&vault_key_base64)
         .map_err(|e| format!("Invalid vault key base64: {}", e))?;
 
     key_rotation::encrypt_vault_key_for_member(&vault_key, &member_public_key)
@@ -429,14 +427,15 @@ pub fn crypto_encrypt_vault_key_with_muk(
     user_id: String,
     key_version: u64,
 ) -> Result<String, String> {
-    let vault_key = STANDARD.decode(&vault_key_base64)
+    let vault_key = STANDARD
+        .decode(&vault_key_base64)
         .map_err(|e| format!("Invalid vault key base64: {}", e))?;
-    let muk = STANDARD.decode(&master_unlock_key_base64)
+    let muk = STANDARD
+        .decode(&master_unlock_key_base64)
         .map_err(|e| format!("Invalid MUK base64: {}", e))?;
 
     let context = VaultKeyWrapContext::new(&vault_id, &user_id, key_version);
-    key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk, &context)
-        .map_err(|e| e.to_string())
+    key_rotation::encrypt_vault_key_with_muk(&vault_key, &muk, &context).map_err(|e| e.to_string())
 }
 
 /// Re-encrypt an item with a new vault key
@@ -446,9 +445,11 @@ pub fn crypto_re_encrypt_item(
     old_vault_key_base64: String,
     new_vault_key_base64: String,
 ) -> Result<ReEncryptedItemResponse, String> {
-    let old_key = STANDARD.decode(&old_vault_key_base64)
+    let old_key = STANDARD
+        .decode(&old_vault_key_base64)
         .map_err(|e| format!("Invalid old key base64: {}", e))?;
-    let new_key = STANDARD.decode(&new_vault_key_base64)
+    let new_key = STANDARD
+        .decode(&new_vault_key_base64)
         .map_err(|e| format!("Invalid new key base64: {}", e))?;
 
     let item_data = ItemData {
@@ -458,8 +459,8 @@ pub fn crypto_re_encrypt_item(
         encryption_algorithm: item.encryption_algorithm,
     };
 
-    let result = key_rotation::re_encrypt_item(&item_data, &old_key, &new_key)
-        .map_err(|e| e.to_string())?;
+    let result =
+        key_rotation::re_encrypt_item(&item_data, &old_key, &new_key).map_err(|e| e.to_string())?;
 
     Ok(ReEncryptedItemResponse {
         item_id: result.item_id,
@@ -479,22 +480,30 @@ pub fn crypto_perform_key_rotation(
     current_user_id: String,
     master_unlock_key_base64: String,
 ) -> Result<KeyRotationResponse, String> {
-    let old_key = STANDARD.decode(&old_vault_key_base64)
+    let old_key = STANDARD
+        .decode(&old_vault_key_base64)
         .map_err(|e| format!("Invalid old key base64: {}", e))?;
-    let muk = STANDARD.decode(&master_unlock_key_base64)
+    let muk = STANDARD
+        .decode(&master_unlock_key_base64)
         .map_err(|e| format!("Invalid MUK base64: {}", e))?;
 
-    let members_data: Vec<MemberKeyData> = members.into_iter().map(|m| MemberKeyData {
-        user_id: m.user_id,
-        public_key: m.public_key,
-    }).collect();
+    let members_data: Vec<MemberKeyData> = members
+        .into_iter()
+        .map(|m| MemberKeyData {
+            user_id: m.user_id,
+            public_key: m.public_key,
+        })
+        .collect();
 
-    let items_data: Vec<ItemData> = items.into_iter().map(|i| ItemData {
-        id: i.id,
-        encrypted_data: i.encrypted_data,
-        encryption_iv: i.encryption_iv,
-        encryption_algorithm: i.encryption_algorithm,
-    }).collect();
+    let items_data: Vec<ItemData> = items
+        .into_iter()
+        .map(|i| ItemData {
+            id: i.id,
+            encrypted_data: i.encrypted_data,
+            encryption_iv: i.encryption_iv,
+            encryption_algorithm: i.encryption_algorithm,
+        })
+        .collect();
 
     let result = key_rotation::perform_key_rotation(
         &old_key,
@@ -508,27 +517,36 @@ pub fn crypto_perform_key_rotation(
     .map_err(|e| e.to_string())?;
 
     Ok(KeyRotationResponse {
-        member_encrypted_keys: result.member_encrypted_keys.into_iter().map(|m| MemberEncryptedKeyResponse {
-            user_id: m.user_id,
-            encrypted_vault_key: m.encrypted_vault_key,
-        }).collect(),
-        re_encrypted_items: result.re_encrypted_items.into_iter().map(|i| ReEncryptedItemResponse {
-            item_id: i.item_id,
-            encrypted_data: i.encrypted_data,
-            encryption_iv: i.encryption_iv,
-        }).collect(),
+        member_encrypted_keys: result
+            .member_encrypted_keys
+            .into_iter()
+            .map(|m| MemberEncryptedKeyResponse {
+                user_id: m.user_id,
+                encrypted_vault_key: m.encrypted_vault_key,
+            })
+            .collect(),
+        re_encrypted_items: result
+            .re_encrypted_items
+            .into_iter()
+            .map(|i| ReEncryptedItemResponse {
+                item_id: i.item_id,
+                encrypted_data: i.encrypted_data,
+                encryption_iv: i.encryption_iv,
+            })
+            .collect(),
     })
 }
 
 /// Validate rotation data
 #[tauri::command]
-pub fn crypto_validate_rotation_data(
-    members: Vec<MemberKeyInput>,
-) -> ValidationResponse {
-    let members_data: Vec<MemberKeyData> = members.into_iter().map(|m| MemberKeyData {
-        user_id: m.user_id,
-        public_key: m.public_key,
-    }).collect();
+pub fn crypto_validate_rotation_data(members: Vec<MemberKeyInput>) -> ValidationResponse {
+    let members_data: Vec<MemberKeyData> = members
+        .into_iter()
+        .map(|m| MemberKeyData {
+            user_id: m.user_id,
+            public_key: m.public_key,
+        })
+        .collect();
 
     let result = key_rotation::validate_rotation_data(&members_data);
 
