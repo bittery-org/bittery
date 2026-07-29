@@ -759,6 +759,22 @@ impl PipeSecurity {
     }
 }
 
+// SAFETY: the two fields are a `LocalAlloc`ated security descriptor and a plain
+// `SECURITY_ATTRIBUTES` value pointing at it. Neither has thread affinity: the
+// local heap is process wide, `LocalFree` may be called from any thread, and
+// the descriptor is only ever read by the kernel during `CreateNamedPipe`.
+//
+// The IPC accept loop holds a `PipeSecurity` across `.await` so it can stamp the
+// same descriptor onto every pipe instance it creates, and `tauri::async_runtime
+// ::spawn` requires the resulting future to be `Send`. Rebuilding the descriptor
+// per connection instead would add a syscall and a new failure path to the
+// accept hot loop for no safety benefit.
+//
+// Deliberately not `Sync`: `as_ptr` hands out a `*mut` to `self.attributes`, so
+// shared access is not sound. `&mut self` keeps that exclusive.
+#[cfg(windows)]
+unsafe impl Send for PipeSecurity {}
+
 #[cfg(windows)]
 impl Drop for PipeSecurity {
     fn drop(&mut self) {
