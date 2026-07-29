@@ -43,7 +43,8 @@
 			"!**/.source",
 			"!**/playwright-report",
 			"!**/paraglide",
-			"!**/project.inlang"
+			"!**/project.inlang",
+			"!packages/shared/src/__tests__/fixtures"
 		]
 	},
 	"formatter": {

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Bootstraps a fresh git worktree so all checks can run:
-#   1. copies .env from the main checkout (if present there and missing here)
+#   1. copies the gitignored env files (root .env, apps/*/.env, ...) from the
+#      main checkout, for each one missing here
 #   2. builds the generated @bittery/crypto-wasm workspace package (required
 #      before pnpm install can resolve the workspace)
 #   3. installs JS dependencies
@@ -16,9 +17,18 @@ cd "$(dirname "$0")/.."
 # Locate the main checkout (the worktree that owns the shared .git dir).
 main_checkout="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
 
-if [[ ! -f .env && -f "$main_checkout/.env" && "$main_checkout" != "$PWD" ]]; then
-	cp "$main_checkout/.env" .env
-	echo "setup-worktree: copied .env from $main_checkout"
+# Copy every gitignored env file the main checkout has — the root .env plus the
+# per-app ones (apps/web/.env, apps/mobile/.env, ...). Restricting the list to
+# ignored-but-untracked files keeps committed templates like .env.example out of
+# it; those already came with the checkout.
+if [[ "$main_checkout" != "$PWD" ]]; then
+	while IFS= read -r env_file; do
+		[[ -n "$env_file" && ! -e "$env_file" ]] || continue
+		mkdir -p "$(dirname "$env_file")"
+		cp "$main_checkout/$env_file" "$env_file"
+		echo "setup-worktree: copied $env_file from $main_checkout"
+	done < <(git -C "$main_checkout" ls-files --others --ignored --exclude-standard \
+		-- ':(glob)**/.env' ':(glob)**/.env.*' ':(glob,exclude)**/node_modules/**')
 fi
 
 if [[ ! -f packages/crypto/wasm/package.json ]]; then

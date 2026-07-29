@@ -129,7 +129,9 @@ export const onePassword1puxImportProvider: ImportProvider = {
 
 async function parse1puxArchive(file: File): Promise<unknown> {
 	if (!onePassword1puxImportProvider.canParse(file)) {
-		throw new ImportProviderError("unsupported-file-type");
+		throw new ImportProviderError("unsupported-file-type", {
+			format: onePassword1puxImportProvider.fileTypeLabel,
+		});
 	}
 
 	let archiveEntries: JSZipObject[];
