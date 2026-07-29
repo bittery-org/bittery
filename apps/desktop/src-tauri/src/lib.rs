@@ -2350,4 +2350,314 @@ mod tests {
 
         assert_eq!(vault.vault_type, "personal");
     }
+
+    // ----------------------------------------------------------------------
+    // Dependency lock guard
+    //
+    // `tauri-runtime`, `tauri-runtime-wry` and `wry` are a matched triple: the
+    // runtime declares the traits, tauri-runtime-wry implements them on top of
+    // wry. Upstream has shipped source-breaking changes across them in a MINOR
+    // bump -- tauri-runtime 2.10 -> 2.11 added
+    // `WebviewDispatch::eval_script_with_callback` with no default body, and
+    // dropped `Sync` from `NewWindowHandler`, which only compiles against a
+    // wry whose `with_new_window_req_handler` no longer demands `Send + Sync`
+    // (0.55, not 0.54). Nothing in Cargo.toml, where the only requirement is
+    // `tauri = "2"`, stops cargo from resolving one of the three forward and
+    // leaving the others behind. All three are transitive, and `wry` does not
+    // even match a `tauri-*` Dependabot pattern, so no manifest pin or
+    // grouping rule reaches it.
+    //
+    // Dependabot produced exactly that skew (tauri-runtime 2.11.3 against
+    // tauri-runtime-wry 2.10.1 and wry 0.54.2), and it only surfaced as
+    // E0046/E0277 after a full tauri build in CI. These checks read the
+    // committed lock instead, so the next skew fails in milliseconds with an
+    // actionable message.
+    // ----------------------------------------------------------------------
+
+    /// Minimal `[[package]]` reader. The lock is TOML, but pulling in a TOML
+    /// parser as a dev-dependency just to read two version strings is not worth
+    /// the added supply-chain surface, so walk the blocks directly.
+    fn locked_versions(lock: &str, crate_name: &str) -> Vec<String> {
+        let mut versions = Vec::new();
+        let mut current: Option<String> = None;
+
+        for line in lock.lines() {
+            let line = line.trim();
+            if line == "[[package]]" {
+                current = None;
+            } else if let Some(value) = line.strip_prefix("name = ") {
+                current = unquoted(value).map(str::to_string);
+            } else if let Some(value) = line.strip_prefix("version = ") {
+                if current.as_deref() == Some(crate_name) {
+                    if let Some(version) = unquoted(value) {
+                        versions.push(version.to_string());
+                    }
+                }
+            }
+        }
+
+        versions
+    }
+
+    fn unquoted(value: &str) -> Option<&str> {
+        value.strip_prefix('"')?.strip_suffix('"')
+    }
+
+    /// `"2.11.3"` -> `"2.11"`. Cargo treats a 2.x minor bump as compatible, so
+    /// the minor is the granularity at which this pair actually has to agree.
+    fn major_minor(version: &str) -> &str {
+        match version.match_indices('.').nth(1) {
+            Some((index, _)) => &version[..index],
+            None => version,
+        }
+    }
+
+    /// Resolves a crate to its single locked version, treating "absent" and
+    /// "resolved more than once" as failures rather than passing quietly. A
+    /// guard that no-ops when it stops understanding the lock is worse than no
+    /// guard at all.
+    fn sole_locked_version(lock: &str, crate_name: &str) -> Result<String, String> {
+        let mut versions = locked_versions(lock, crate_name);
+
+        match versions.len() {
+            1 => Ok(versions.remove(0)),
+            0 => Err(format!(
+                "Cargo.lock contains no `{crate_name}` entry. Either the lock is missing or \
+                 unparseable, or the dependency graph changed shape -- this guard must be \
+                 updated deliberately rather than left silently passing."
+            )),
+            _ => Err(format!(
+                "Cargo.lock resolved `{crate_name}` to more than one version ({}). The tauri \
+                 family must appear exactly once each.",
+                versions.join(", ")
+            )),
+        }
+    }
+
+    /// The `wry` requirement each `tauri-runtime-wry` minor declares, keyed by
+    /// that minor and taken from the published manifests.
+    ///
+    /// Cargo.lock records *resolved* versions and bare dependency names, never
+    /// requirement ranges, so the declared `wry = "^0.55.0"` genuinely cannot
+    /// be read back out of the lock. It is mirrored here instead. Each entry
+    /// uses the lowest floor declared across that minor's patch releases, so
+    /// the check can only ever be too lenient, never falsely red.
+    ///
+    /// An unrecognised `tauri-runtime-wry` minor is a hard failure rather than
+    /// a silent pass: a minor bump is precisely the moment a human should
+    /// re-check this pairing and extend the table.
+    const TAURI_RUNTIME_WRY_TO_WRY: &[(&str, &str)] =
+        &[("2.9", "^0.53.4"), ("2.10", "^0.54.0"), ("2.11", "^0.55.0")];
+
+    fn parse_version(version: &str) -> Option<(u64, u64, u64)> {
+        // Ignore any pre-release/build suffix; the tauri family does not use
+        // one, and a numeric prefix is all this comparison needs.
+        let core = version
+            .split(['-', '+'])
+            .next()
+            .unwrap_or_default()
+            .trim_start_matches('^');
+        let mut parts = core.split('.');
+        let major = parts.next()?.parse().ok()?;
+        let minor = parts.next()?.parse().ok()?;
+        let patch = parts.next().unwrap_or("0").parse().ok()?;
+
+        Some((major, minor, patch))
+    }
+
+    /// Cargo caret semantics, including the 0.x rule that makes this guard
+    /// necessary: `^0.55.0` admits 0.55.x but *not* 0.56.0, because for a 0.x
+    /// crate the minor is the breaking-change axis.
+    fn caret_admits(requirement: &str, version: &str) -> Option<bool> {
+        let (req_major, req_minor, req_patch) = parse_version(requirement)?;
+        let (major, minor, patch) = parse_version(version)?;
+
+        if major != req_major {
+            return Some(false);
+        }
+
+        if req_major == 0 {
+            return Some(minor == req_minor && patch >= req_patch);
+        }
+
+        Some((minor, patch) >= (req_minor, req_patch))
+    }
+
+    fn tauri_family_is_coherent(lock: &str) -> Result<(), String> {
+        let runtime = sole_locked_version(lock, "tauri-runtime")?;
+        let runtime_wry = sole_locked_version(lock, "tauri-runtime-wry")?;
+        let wry = sole_locked_version(lock, "wry")?;
+
+        if major_minor(&runtime) != major_minor(&runtime_wry) {
+            return Err(format!(
+                "Cargo.lock resolved tauri-runtime {runtime} against tauri-runtime-wry \
+                 {runtime_wry}. Upstream only supports these two crates at the same minor \
+                 version; a split does not compile (E0046: `eval_script_with_callback` is \
+                 unimplemented, E0277: `NewWindowHandler` is no longer `Sync`). Do not pin \
+                 one crate back -- re-resolve the whole family together from \
+                 apps/desktop/src-tauri, e.g. `cargo update -p tauri --precise <latest 2.x>`, \
+                 then re-run `cargo check --all-targets`."
+            ));
+        }
+
+        let minor = major_minor(&runtime_wry);
+        let requirement = TAURI_RUNTIME_WRY_TO_WRY
+            .iter()
+            .find(|(known, _)| *known == minor)
+            .map(|(_, requirement)| *requirement)
+            .ok_or_else(|| {
+                format!(
+                    "This guard has no recorded `wry` requirement for tauri-runtime-wry \
+                     {runtime_wry}. Look up the `wry` requirement that tauri-runtime-wry \
+                     {minor}.x declares (`cargo tree -p tauri-runtime-wry`, or its manifest on \
+                     crates.io) and add it to TAURI_RUNTIME_WRY_TO_WRY. Do not delete this \
+                     check -- a tauri-runtime-wry minor bump is exactly when the wry pairing \
+                     needs verifying."
+                )
+            })?;
+
+        let admitted = caret_admits(requirement, &wry).ok_or_else(|| {
+            format!("could not compare wry {wry} against the requirement {requirement}")
+        })?;
+
+        if admitted {
+            return Ok(());
+        }
+
+        Err(format!(
+            "Cargo.lock resolved wry {wry}, but tauri-runtime-wry {runtime_wry} declares \
+             `wry = \"{requirement}\"`. wry is 0.x, so a minor bump is breaking: 0.54 requires \
+             `Send + Sync` on `with_new_window_req_handler` while tauri-runtime 2.11 dropped \
+             `Sync` from `NewWindowHandler` (E0277). wry is transitive and matches no \
+             `tauri-*` grouping pattern, so re-resolve the family together from \
+             apps/desktop/src-tauri, e.g. `cargo update -p tauri --precise <latest 2.x>`, then \
+             re-run `cargo check --all-targets`."
+        ))
+    }
+
+    /// Builds a lock fixture shaped like the real `[[package]]` blocks,
+    /// including a `dependencies` list so the parser is exercised against
+    /// entries that merely *mention* these crate names.
+    fn lock_fixture(runtime: &str, runtime_wry: &str, wry: &str) -> String {
+        format!(
+            r#"
+[[package]]
+name = "tauri-runtime"
+version = "{runtime}"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "tauri-runtime-wry"
+version = "{runtime_wry}"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "tauri-runtime",
+ "wry",
+]
+
+[[package]]
+name = "wry"
+version = "{wry}"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+"#
+        )
+    }
+
+    #[test]
+    fn committed_cargo_lock_resolves_the_tauri_family_coherently() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock");
+        let lock = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("could not read {}: {error}", path.display()));
+
+        if let Err(problem) = tauri_family_is_coherent(&lock) {
+            panic!("{problem}");
+        }
+    }
+
+    #[test]
+    fn tauri_family_guard_rejects_the_skew_from_pr_91() {
+        // The exact resolution Dependabot produced in PR #91.
+        let problem = tauri_family_is_coherent(&lock_fixture("2.11.3", "2.10.1", "0.54.2"))
+            .expect_err("the PR #91 resolution must be rejected");
+
+        // The message has to stand on its own for whoever trips it later.
+        assert!(problem.contains("tauri-runtime 2.11.3"), "{problem}");
+        assert!(problem.contains("tauri-runtime-wry 2.10.1"), "{problem}");
+        assert!(
+            problem.contains("cargo update -p tauri --precise"),
+            "{problem}"
+        );
+    }
+
+    #[test]
+    fn tauri_family_guard_rejects_a_wry_only_skew() {
+        // The runtime pair agrees, so a two-crate check would pass this --
+        // but wry 0.54 still demands `Send + Sync` and will not compile.
+        let problem = tauri_family_is_coherent(&lock_fixture("2.11.3", "2.11.4", "0.54.2"))
+            .expect_err("wry 0.54 against tauri-runtime-wry 2.11 must be rejected");
+
+        assert!(problem.contains("wry 0.54.2"), "{problem}");
+        assert!(problem.contains("^0.55.0"), "{problem}");
+    }
+
+    #[test]
+    fn tauri_family_guard_accepts_the_committed_combination() {
+        assert!(tauri_family_is_coherent(&lock_fixture("2.11.3", "2.11.4", "0.55.1")).is_ok());
+        // The pairing shipped on main before this bump.
+        assert!(tauri_family_is_coherent(&lock_fixture("2.9.2", "2.9.3", "0.53.5")).is_ok());
+    }
+
+    #[test]
+    fn tauri_family_guard_fails_loudly_on_an_unknown_tauri_runtime_wry_minor() {
+        // A future minor whose wry requirement nobody has verified yet must
+        // stop the build rather than wave the resolution through.
+        let problem = tauri_family_is_coherent(&lock_fixture("2.12.0", "2.12.0", "0.56.0"))
+            .expect_err("an unrecorded minor must not pass");
+
+        assert!(problem.contains("TAURI_RUNTIME_WRY_TO_WRY"), "{problem}");
+    }
+
+    #[test]
+    fn tauri_family_guard_fails_loudly_on_an_unparseable_lock() {
+        let problem =
+            tauri_family_is_coherent("").expect_err("an empty or unreadable lock must not pass");
+
+        assert!(problem.contains("no `tauri-runtime` entry"), "{problem}");
+    }
+
+    #[test]
+    fn tauri_family_guard_rejects_a_crate_resolved_twice() {
+        let fixture = lock_fixture("2.11.3", "2.11.4", "0.55.1");
+        let lock = format!("{fixture}\n{fixture}");
+
+        let problem = tauri_family_is_coherent(&lock)
+            .expect_err("two resolutions of one crate must not pass");
+
+        assert!(problem.contains("more than one version"), "{problem}");
+    }
+
+    #[test]
+    fn caret_admits_applies_the_zero_major_rule_that_wry_depends_on() {
+        // 0.x: the minor is the breaking axis, so ^0.55.0 must not admit 0.56.
+        assert_eq!(caret_admits("^0.55.0", "0.55.0"), Some(true));
+        assert_eq!(caret_admits("^0.55.0", "0.55.1"), Some(true));
+        assert_eq!(caret_admits("^0.55.0", "0.56.0"), Some(false));
+        assert_eq!(caret_admits("^0.55.0", "0.54.2"), Some(false));
+        assert_eq!(caret_admits("^0.53.4", "0.53.2"), Some(false));
+
+        // >=1.0: the major is the breaking axis.
+        assert_eq!(caret_admits("^2.11.3", "2.12.0"), Some(true));
+        assert_eq!(caret_admits("^2.11.3", "2.11.2"), Some(false));
+        assert_eq!(caret_admits("^2.11.3", "3.0.0"), Some(false));
+    }
+
+    #[test]
+    fn locked_versions_does_not_confuse_dependency_lists_with_packages() {
+        // `dependencies = [ "tauri-runtime", ... ]` entries must not be
+        // mistaken for package declarations.
+        let versions =
+            locked_versions(&lock_fixture("2.11.3", "2.11.4", "0.55.1"), "tauri-runtime");
+
+        assert_eq!(versions, vec!["2.11.3".to_string()]);
+    }
 }
