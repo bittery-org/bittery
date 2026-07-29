@@ -27,7 +27,7 @@ ecdsa = "0.16"
 rand = "0.8"
 
 # BigInteger for SRP
-num-bigint = "0.4"
+num-bigint = "0.5"
 num-traits = "0.2"
 num-integer = "0.1"
 
