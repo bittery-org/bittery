@@ -125,6 +125,8 @@ function getProviderDescription(
 	switch (provider.id) {
 		case "1password-1pux":
 			return m.vaults_import_provider_1password_1pux_description();
+		case "bitwarden":
+			return m.vaults_import_provider_bitwarden_description();
 		default:
 			return m.vaults_import_provider_generic_description();
 	}
@@ -137,6 +139,8 @@ function getProviderImageDescription(
 	switch (provider.id) {
 		case "1password-1pux":
 			return m.vaults_import_provider_1password_1pux_image_description();
+		case "bitwarden":
+			return m.vaults_import_provider_bitwarden_image_description();
 		default:
 			return m.vaults_import_provider_generic_image_description();
 	}
@@ -197,6 +201,10 @@ function getImportWarningMessage(
 			return m.vaults_import_warning_archived_skipped({
 				title: getStringParam(warning.params, "title"),
 			});
+		case "deleted-skipped":
+			return m.vaults_import_warning_deleted_skipped({
+				title: getStringParam(warning.params, "title"),
+			});
 		case "missing-title":
 			return m.vaults_import_warning_missing_title({
 				itemNumber: getNumberParam(warning.params, "itemNumber", 0),
@@ -223,6 +231,28 @@ function getImportWarningMessage(
 		case "totp-secret-missing":
 			return m.vaults_import_warning_totp_secret_missing({
 				title: getStringParam(warning.params, "title"),
+			});
+		case "reprompt-not-supported":
+			return m.vaults_import_warning_reprompt_not_supported({
+				title: getStringParam(warning.params, "title"),
+			});
+		case "unsupported-item-type": {
+			const sourceCategory = getStringParam(warning.params, "sourceCategory");
+			return m.vaults_import_warning_unsupported_item_type({
+				title: getStringParam(warning.params, "title"),
+				sourceCategory:
+					sourceCategory ||
+					m.vaults_import_warning_fallback_unknown_source_category(),
+			});
+		}
+		case "passkeys-skipped":
+			return m.vaults_import_warning_passkeys_skipped({
+				title: getStringParam(warning.params, "title"),
+			});
+		case "linked-field-skipped":
+			return m.vaults_import_warning_linked_field_skipped({
+				title: getStringParam(warning.params, "title"),
+				fieldName: getStringParam(warning.params, "fieldName"),
 			});
 		default:
 			return m.vaults_import_warning_unknown();
@@ -279,7 +309,9 @@ function getImportErrorMessage(
 		case "create-vault-account-required":
 			return m.vaults_import_error_create_vault_account_required();
 		case "unsupported-file-type":
-			return m.vaults_import_error_unsupported_file_type();
+			return m.vaults_import_error_unsupported_file_type({
+				format: getStringParam(error.params, "format"),
+			});
 		case "archive-read-failed":
 			return m.vaults_import_error_archive_read_failed();
 		case "missing-export-data":
@@ -290,6 +322,32 @@ function getImportErrorMessage(
 			return m.vaults_import_error_invalid_export_data_json();
 		case "no-vaults-found":
 			return m.vaults_import_error_no_vaults_found();
+		case "no-items-found":
+			return m.vaults_import_error_no_items_found();
+		case "csv-empty-file":
+			return m.vaults_import_error_csv_empty_file();
+		case "csv-malformed-quoting":
+			return m.vaults_import_error_csv_malformed_quoting();
+		case "csv-duplicate-header":
+			return m.vaults_import_error_csv_duplicate_header({
+				header: getStringParam(error.params, "header"),
+			});
+		case "csv-missing-header":
+			return m.vaults_import_error_csv_missing_header({
+				headers: getStringParam(error.params, "headers"),
+			});
+		case "csv-row-column-mismatch":
+			return m.vaults_import_error_csv_row_column_mismatch({
+				rowNumber: getNumberParam(error.params, "rowNumber", 0),
+				expectedColumns: getNumberParam(error.params, "expectedColumns", 0),
+				actualColumns: getNumberParam(error.params, "actualColumns", 0),
+			});
+		case "bitwarden-encrypted-export-unsupported":
+			return m.vaults_import_error_bitwarden_encrypted_export_unsupported();
+		case "bitwarden-attachment-export-unsupported":
+			return m.vaults_import_error_bitwarden_attachment_export_unsupported();
+		case "bitwarden-organization-export-unsupported":
+			return m.vaults_import_error_bitwarden_organization_export_unsupported();
 		case "unsupported-item-provider":
 			return m.vaults_import_error_unsupported_item_provider({
 				providerId: getStringParam(error.params, "providerId"),

@@ -4,7 +4,7 @@ import type { DecryptedItemData, ItemCategory } from "../types";
  * Import providers currently supported by the shared import domain.
  * Keep as a strict union so future providers are added intentionally.
  */
-export type ImportProviderId = "1password-1pux" | "bittery-bttrx";
+export type ImportProviderId = "1password-1pux" | "bittery-bttrx" | "bitwarden";
 
 export type ImportMessageValue = string | number;
 
@@ -14,11 +14,16 @@ export type ImportWarningCode =
 	| "item-parse-failed"
 	| "invalid-item"
 	| "archived-skipped"
+	| "deleted-skipped"
 	| "missing-title"
 	| "documents-skipped"
 	| "attachments-skipped"
 	| "category-fallback"
-	| "totp-secret-missing";
+	| "totp-secret-missing"
+	| "reprompt-not-supported"
+	| "unsupported-item-type"
+	| "passkeys-skipped"
+	| "linked-field-skipped";
 
 export interface ImportWarning {
 	code: ImportWarningCode;
@@ -34,7 +39,16 @@ export type ImportErrorCode =
 	| "read-export-data-failed"
 	| "invalid-export-data-json"
 	| "no-vaults-found"
-	| "unsupported-item-provider";
+	| "no-items-found"
+	| "unsupported-item-provider"
+	| "csv-empty-file"
+	| "csv-malformed-quoting"
+	| "csv-duplicate-header"
+	| "csv-missing-header"
+	| "csv-row-column-mismatch"
+	| "bitwarden-encrypted-export-unsupported"
+	| "bitwarden-attachment-export-unsupported"
+	| "bitwarden-organization-export-unsupported";
 
 export class ImportProviderError extends Error {
 	readonly code: ImportErrorCode;
@@ -55,9 +69,17 @@ export interface ImportError {
 	sourceItemId?: string;
 }
 
+/**
+ * Localizable names a provider can request for a synthetic source vault.
+ * Providers live in `@bittery/shared` and have no i18n access, so they emit a
+ * code and the app layer resolves it to a translated string.
+ */
+export type ImportSourceVaultNameCode = "no-folder";
+
 export interface ImportSourceVault {
 	id: string;
 	name: string;
+	nameCode?: ImportSourceVaultNameCode;
 	itemCount: number;
 	skippedCount: number;
 }

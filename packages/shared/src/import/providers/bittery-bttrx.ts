@@ -25,7 +25,9 @@ export const bitteryBttrxImportProvider: ImportProvider = {
 
 	async parse(file: File): Promise<ImportPreview> {
 		if (!bitteryBttrxImportProvider.canParse(file)) {
-			throw new ImportProviderError("unsupported-file-type");
+			throw new ImportProviderError("unsupported-file-type", {
+				format: bitteryBttrxImportProvider.fileTypeLabel,
+			});
 		}
 
 		let archiveBuffer: ArrayBuffer;

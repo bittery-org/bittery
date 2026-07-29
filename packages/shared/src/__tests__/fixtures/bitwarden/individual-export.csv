@@ -1,0 +1,7 @@
+folder,favorite,type,name,notes,fields,reprompt,archivedDate,login_uri,login_username,login_password,login_totp
+Test 2,1,login,Figma,Test,"Test: t123
+Bool: true
+link: undefined",0,,https://figma.com,ada.lovelace@example.com,Xk7pQ2mNvR4tLw2231,JBSWY3DPEHPK3PXP
+Test 2,,login,GitHub,,,0,,https://github.com,,,
+,,login,Google,Dies ist ein Test,Key: 123,0,,"https://google.com,https://google.de",ada.lovelace@example.com,Xk7pQ2mNvR4tLw,otpauth://totp/Example:alice@example.com?secret=JBSWY3DPEHPK3PXP&issuer=Example&algorithm=SHA256&digits=8&period=60
+,,note,Test Notiz,Hallo Test Notiz,,0,,,,,

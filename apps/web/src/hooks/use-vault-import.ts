@@ -10,6 +10,7 @@ import {
 	type ImportProviderId,
 	type ImportSourceItem,
 	type ImportSourceVault,
+	type ImportSourceVaultNameCode,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
@@ -17,6 +18,7 @@ import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
 import { storage } from "@/lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
 import { useClientId, useQueryInvalidator } from "@/providers/sync-provider";
 
 const IMPORT_BATCH_SIZE = 200;
@@ -142,6 +144,30 @@ function buildDefaultMappings(
 	);
 }
 
+/**
+ * Providers live in `@bittery/shared` and cannot translate. A source vault they
+ * synthesize (Bitwarden's unfoldered bucket) carries a `nameCode` instead, which
+ * is resolved here — before mappings are built, so the prefilled target vault
+ * name is localized too.
+ */
+function localizeSourceVaultNames(
+	preview: ImportPreview,
+	resolveName: (nameCode: ImportSourceVaultNameCode) => string,
+): ImportPreview {
+	if (!preview.sourceVaults.some((sourceVault) => sourceVault.nameCode)) {
+		return preview;
+	}
+
+	return {
+		...preview,
+		sourceVaults: preview.sourceVaults.map((sourceVault) =>
+			sourceVault.nameCode
+				? { ...sourceVault, name: resolveName(sourceVault.nameCode) }
+				: sourceVault,
+		),
+	};
+}
+
 function filterImportablePreview(preview: ImportPreview): ImportPreview {
 	const importableVaultIds = new Set(
 		preview.sourceVaults
@@ -206,6 +232,7 @@ function normalizeImportError(
 }
 
 export function useVaultImport() {
+	const { m } = useI18n();
 	const core = useCoreContext();
 	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
@@ -224,6 +251,18 @@ export function useVaultImport() {
 	const [error, setError] = useState<ImportMessageDescriptor | null>(null);
 	const [isBusy, setIsBusy] = useState(false);
 	const [skippedEmptyVaultCount, setSkippedEmptyVaultCount] = useState(0);
+
+	const resolveSourceVaultName = useCallback(
+		(nameCode: ImportSourceVaultNameCode) => {
+			switch (nameCode) {
+				case "no-folder":
+					return m.vaults_import_source_vault_no_folder();
+				default:
+					return nameCode;
+			}
+		},
+		[m],
+	);
 
 	const existingVaults = useMemo(
 		() =>
@@ -275,7 +314,10 @@ export function useVaultImport() {
 					});
 				}
 
-				const parsedPreview = await provider.parse(file);
+				const parsedPreview = localizeSourceVaultNames(
+					await provider.parse(file),
+					resolveSourceVaultName,
+				);
 				const emptyVaultCount = parsedPreview.sourceVaults.filter(
 					(sourceVault) => sourceVault.itemCount === 0,
 				).length;
@@ -317,7 +359,7 @@ export function useVaultImport() {
 				setIsBusy(false);
 			}
 		},
-		[],
+		[resolveSourceVaultName],
 	);
 
 	const updateVaultMapping = useCallback(
