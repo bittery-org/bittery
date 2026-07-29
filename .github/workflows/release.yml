@@ -70,7 +70,7 @@ jobs:
       #     --repo bittery-org/bittery
       - name: Attest server image provenance
         if: steps.build.outputs.digest != ''
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-server
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -124,7 +124,7 @@ jobs:
 
       - name: Attest web image provenance
         if: steps.build.outputs.digest != ''
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-web
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -421,7 +421,7 @@ jobs:
       # Binary provenance for the installers users actually download. Verify with:
       #   gh attestation verify Bittery.dmg --repo bittery-org/bittery
       - name: Attest release artifact provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: release-upload/*
 
