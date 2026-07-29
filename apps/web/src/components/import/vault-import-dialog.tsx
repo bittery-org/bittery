@@ -127,6 +127,8 @@ function getProviderDescription(
 			return m.vaults_import_provider_1password_1pux_description();
 		case "bitwarden":
 			return m.vaults_import_provider_bitwarden_description();
+		case "chrome":
+			return m.vaults_import_provider_chrome_description();
 		default:
 			return m.vaults_import_provider_generic_description();
 	}
@@ -141,6 +143,8 @@ function getProviderImageDescription(
 			return m.vaults_import_provider_1password_1pux_image_description();
 		case "bitwarden":
 			return m.vaults_import_provider_bitwarden_image_description();
+		case "chrome":
+			return m.vaults_import_provider_chrome_image_description();
 		default:
 			return m.vaults_import_provider_generic_image_description();
 	}
@@ -341,6 +345,11 @@ function getImportErrorMessage(
 				rowNumber: getNumberParam(error.params, "rowNumber", 0),
 				expectedColumns: getNumberParam(error.params, "expectedColumns", 0),
 				actualColumns: getNumberParam(error.params, "actualColumns", 0),
+			});
+		case "csv-unknown-header-variant":
+			return m.vaults_import_error_csv_unknown_header_variant({
+				headers: getStringParam(error.params, "headers"),
+				expected: getStringParam(error.params, "expected"),
 			});
 		case "bitwarden-encrypted-export-unsupported":
 			return m.vaults_import_error_bitwarden_encrypted_export_unsupported();
