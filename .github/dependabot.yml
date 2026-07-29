@@ -143,6 +143,39 @@ updates:
           - major
           - minor
           - patch
+      # The tauri crates are version-locked to each other the same way the
+      # RustCrypto ones are, and #91 is the proof: tauri-plugin-store and
+      # tauri-plugin-opener raised their floor to tauri ^2.10, which dragged
+      # tauri 2.9.5 -> 2.10.3, after which cargo resolved tauri-runtime to
+      # 2.11.3 but left tauri-runtime-wry at 2.10.1 — a pairing upstream never
+      # supports. That skew failed desktop-rust and desktop-rust-windows with
+      # E0046 (missing `eval_script_with_callback`) and E0277 (`Sync` dropped
+      # from `NewWindowHandler`), on every platform.
+      #
+      # So tauri-runtime shipped a source-breaking change in a MINOR release,
+      # which is exactly what a bare minor/patch catch-all assumes cannot
+      # happen. This group takes the family out of `cargo-minor-patch` (it is
+      # ordered first, so it wins) and moves it atomically across all semver
+      # levels.
+      #
+      # LIMITATION — this narrows the hazard, it does not close it. Dependabot
+      # patterns match DIRECT dependencies only, and the crates that actually
+      # skewed are transitive: tauri-runtime, tauri-runtime-wry and wry appear
+      # in Cargo.lock, never in apps/desktop/src-tauri/Cargo.toml (`wry` does
+      # not even match these patterns). The group constrains the manifest side —
+      # tauri, tauri-build, tauri-plugin-* — so those move as one unit and stop
+      # dragging the runtime forward piecemeal, but cargo remains free to split
+      # the runtime pair underneath a single manifest bump. The durable guard is
+      # a lockfile invariant test asserting tauri-runtime and tauri-runtime-wry
+      # stay in step; that is being added separately.
+      tauri:
+        patterns:
+          - tauri
+          - tauri-*
+        update-types:
+          - major
+          - minor
+          - patch
       # One PR for the noisy low-risk stuff instead of dozens. Replaces the old
       # `server-minor-patch` / `desktop-minor-patch` groups, which raised one
       # such PR per root (#90, #91) even for dependencies they share.
