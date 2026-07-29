@@ -4,7 +4,11 @@ import type { DecryptedItemData, ItemCategory } from "../types";
  * Import providers currently supported by the shared import domain.
  * Keep as a strict union so future providers are added intentionally.
  */
-export type ImportProviderId = "1password-1pux" | "bittery-bttrx" | "bitwarden";
+export type ImportProviderId =
+	| "1password-1pux"
+	| "bittery-bttrx"
+	| "bitwarden"
+	| "firefox";
 
 export type ImportMessageValue = string | number;
 
@@ -23,7 +27,8 @@ export type ImportWarningCode =
 	| "reprompt-not-supported"
 	| "unsupported-item-type"
 	| "passkeys-skipped"
-	| "linked-field-skipped";
+	| "linked-field-skipped"
+	| "sync-account-skipped";
 
 export interface ImportWarning {
 	code: ImportWarningCode;
