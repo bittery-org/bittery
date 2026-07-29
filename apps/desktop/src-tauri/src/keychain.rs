@@ -202,6 +202,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "hits the real OS keychain: prompts for authorization on macOS and needs a running secret-service on Linux. Run explicitly with: cargo test -- --ignored"]
     fn test_keychain_roundtrip() {
         reset_cache();
 
@@ -239,6 +240,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "hits the real OS keychain: prompts for authorization on macOS and needs a running secret-service on Linux. Run explicitly with: cargo test -- --ignored"]
     fn test_multiple_keys_single_vault() {
         reset_cache();
 
@@ -262,6 +264,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "hits the real OS keychain: prompts for authorization on macOS and needs a running secret-service on Linux. Run explicitly with: cargo test -- --ignored"]
     fn test_cache_survives_across_calls() {
         reset_cache();
 

@@ -1,13 +1,16 @@
 mod crypto_commands;
 mod desktop_ipc;
+mod ipc_security;
 mod keychain;
 mod native_messaging_installer;
 
 use base64::Engine;
 use desktop_ipc::{
-    desktop_ipc_socket_path, write_frame, DesktopEnvelope, DesktopEventKind, DesktopRequest,
-    DesktopResponse, DESKTOP_PROTOCOL_VERSION,
+    write_frame, DesktopEnvelope, DesktopEventKind, DesktopRequest, DesktopResponse,
+    DESKTOP_PROTOCOL_VERSION,
 };
+#[cfg(windows)]
+use ipc_security::desktop_ipc_socket_path;
 use std::sync::Arc;
 use tauri::{Emitter, Manager, Runtime};
 use tauri_plugin_store::Store;
@@ -1206,7 +1209,20 @@ where
 
 #[cfg(unix)]
 async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<DesktopIpcState>) {
-    let socket_path = desktop_ipc_socket_path();
+    use std::os::unix::io::AsRawFd;
+
+    // The socket goes in a directory we create at 0700 rather than one whose
+    // mode depends on the process umask.
+    let socket_path = match ipc_security::prepare_desktop_ipc_socket_path() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!(
+                "[desktop-ipc] Refusing to start: could not prepare a private socket directory: {}",
+                error
+            );
+            return;
+        }
+    };
     let _ = std::fs::remove_file(&socket_path);
 
     let listener = match tokio::net::UnixListener::bind(&socket_path) {
@@ -1221,11 +1237,37 @@ async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<Deskt
         }
     };
 
+    if let Err(error) = ipc_security::restrict_socket_file(&socket_path) {
+        eprintln!(
+            "[desktop-ipc] Refusing to start: could not restrict {}: {}",
+            socket_path.display(),
+            error
+        );
+        let _ = std::fs::remove_file(&socket_path);
+        return;
+    }
+
     eprintln!("[desktop-ipc] Listening on {}", socket_path.display());
 
     loop {
         match listener.accept().await {
             Ok((stream, _)) => {
+                // This endpoint hands out vault keys and session tokens, so the
+                // peer has to prove it is our own native messaging host running
+                // as this same user before it gets to send a single frame.
+                match ipc_security::authorize_unix_peer(
+                    stream.as_raw_fd(),
+                    ipc_security::PeerRole::NativeHost,
+                    ipc_security::PeerPolicy::Required,
+                ) {
+                    Ok(_) => {}
+                    Err(reason) => {
+                        eprintln!("[desktop-ipc] Rejected connection: {}", reason);
+                        drop(stream);
+                        continue;
+                    }
+                }
+
                 let app_handle = app_handle.clone();
                 let state = state.clone();
                 tauri::async_runtime::spawn(async move {
@@ -1246,35 +1288,121 @@ async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<Deskt
     }
 }
 
+/// Create one instance of the desktop IPC named pipe.
+///
+/// Every instance carries the explicit security descriptor from
+/// `ipc_security`; passing `NULL` here would fall back to the default NPFS
+/// DACL, which grants `Everyone` and `ANONYMOUS` read access.
+#[cfg(windows)]
+fn create_desktop_ipc_pipe_instance(
+    pipe_name: &str,
+    security: &mut ipc_security::PipeSecurity,
+    first: bool,
+) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeServer> {
+    use tokio::net::windows::named_pipe::ServerOptions;
+
+    let mut options = ServerOptions::new();
+    options.first_pipe_instance(first);
+    options.reject_remote_clients(true);
+
+    // SAFETY: `security.as_ptr()` points at a live `SECURITY_ATTRIBUTES` that
+    // outlives the call, since `security` is borrowed for it.
+    unsafe { options.create_with_security_attributes_raw(pipe_name, security.as_ptr()) }
+}
+
 #[cfg(windows)]
 async fn start_desktop_ipc_server(app_handle: tauri::AppHandle, state: Arc<DesktopIpcState>) {
-    use tokio::net::windows::named_pipe::ServerOptions;
+    use std::os::windows::io::AsRawHandle;
 
     let pipe_name = desktop_ipc_socket_path();
     let pipe_name = pipe_name.to_string_lossy().to_string();
+
+    let mut security = match ipc_security::PipeSecurity::for_current_user() {
+        Ok(security) => security,
+        Err(error) => {
+            eprintln!(
+                "[desktop-ipc] FATAL: could not build the pipe security descriptor: {}. \
+                 Browser extension integration is disabled for this session.",
+                error
+            );
+            return;
+        }
+    };
+
+    // The first instance claims the name exclusively. If something already owns
+    // it, `FILE_FLAG_FIRST_PIPE_INSTANCE` fails with ERROR_ACCESS_DENIED, which
+    // means another process is squatting a pipe our extension would otherwise
+    // trust. That has to be loud, not a silent fallback.
+    let mut server = match create_desktop_ipc_pipe_instance(&pipe_name, &mut security, true) {
+        Ok(server) => server,
+        Err(error) => {
+            eprintln!(
+                "[desktop-ipc] FATAL: {}",
+                ipc_security::describe_pipe_create_error(&pipe_name, error.raw_os_error(), true)
+            );
+            return;
+        }
+    };
+
     eprintln!("[desktop-ipc] Listening on {}", pipe_name);
 
     loop {
-        let server = match ServerOptions::new().create(&pipe_name) {
-            Ok(server) => server,
+        if let Err(error) = server.connect().await {
+            eprintln!("[desktop-ipc] Named pipe connect failed: {}", error);
+            server = match create_desktop_ipc_pipe_instance(&pipe_name, &mut security, false) {
+                Ok(next) => next,
+                Err(error) => {
+                    eprintln!(
+                        "[desktop-ipc] FATAL: {}. Browser extension integration is disabled \
+                         until Bittery is restarted.",
+                        ipc_security::describe_pipe_create_error(
+                            &pipe_name,
+                            error.raw_os_error(),
+                            false
+                        )
+                    );
+                    return;
+                }
+            };
+            continue;
+        }
+
+        let connected = server;
+        // Replace the instance before handling the connection so the next
+        // client never finds the name unserved.
+        server = match create_desktop_ipc_pipe_instance(&pipe_name, &mut security, false) {
+            Ok(next) => next,
             Err(error) => {
                 eprintln!(
-                    "[desktop-ipc] Failed to create named pipe {}: {}",
-                    pipe_name, error
+                    "[desktop-ipc] FATAL: {}. Browser extension integration is disabled \
+                     until Bittery is restarted.",
+                    ipc_security::describe_pipe_create_error(
+                        &pipe_name,
+                        error.raw_os_error(),
+                        false
+                    )
                 );
-                break;
+                return;
             }
         };
 
-        if let Err(error) = server.connect().await {
-            eprintln!("[desktop-ipc] Named pipe connect failed: {}", error);
+        // The descriptor keeps other users out; this keeps every *other program
+        // this user runs* out.
+        if let Err(reason) = ipc_security::authorize_pipe_peer(
+            connected.as_raw_handle(),
+            ipc_security::PipeSide::Client,
+            ipc_security::PeerRole::NativeHost,
+            ipc_security::PeerPolicy::Required,
+        ) {
+            eprintln!("[desktop-ipc] Rejected connection: {}", reason);
+            drop(connected);
             continue;
         }
 
         let app_handle = app_handle.clone();
         let state = state.clone();
         tauri::async_runtime::spawn(async move {
-            if let Err(error) = handle_desktop_ipc_connection(app_handle, state, server).await {
+            if let Err(error) = handle_desktop_ipc_connection(app_handle, state, connected).await {
                 if !is_clean_disconnect(&error.to_lowercase()) {
                     eprintln!("[desktop-ipc] Connection ended: {}", error);
                 }

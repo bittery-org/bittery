@@ -10,6 +10,7 @@ dependencies = [
  "bittery-crypto-core",
  "dirs 5.0.1",
  "keyring",
+ "libc",
  "serde",
  "serde_json",
  "tauri",
@@ -18,6 +19,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-store",
  "tokio",
+ "windows-sys 0.61.2",
  "winreg 0.52.0",
 ]
 

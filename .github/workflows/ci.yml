@@ -102,6 +102,26 @@ jobs:
       - name: Desktop tests
         run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 
+  # The IPC layer has a substantial #[cfg(windows)] surface (pipe security
+  # descriptor, peer process identity) that no other job compiles — the release
+  # workflow was previously the first thing to build it. A compile-only check is
+  # enough here: the Windows-specific logic that can be unit tested (SDDL
+  # construction, access masks, error mapping) is deliberately not cfg-gated, so
+  # desktop-rust already exercises it on Linux.
+  desktop-rust-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Desktop check (Windows)
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
+
   crypto-wasm:
     runs-on: ubuntu-latest
     steps:

@@ -1,9 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-#[cfg(windows)]
-pub const DESKTOP_IPC_PIPE_NAME: &str = r"\\.\pipe\bittery-desktop-ipc";
-pub const DESKTOP_IPC_SOCKET_NAME: &str = "bittery-desktop-ipc.sock";
 // Kept at 1: the `theme` field and `theme_changed` event are additive and
 // tolerated by older peers, so no version bump (a bump hard-breaks mixed
 // extension/desktop versions during staggered rollouts).
@@ -261,15 +258,10 @@ where
     Ok(())
 }
 
-#[cfg(unix)]
-pub fn desktop_ipc_socket_path() -> std::path::PathBuf {
-    std::env::temp_dir().join(DESKTOP_IPC_SOCKET_NAME)
-}
-
-#[cfg(windows)]
-pub fn desktop_ipc_socket_path() -> std::path::PathBuf {
-    std::path::PathBuf::from(DESKTOP_IPC_PIPE_NAME)
-}
+// The endpoint's location used to live here. It moved to `ipc_security`
+// because a socket path is only as private as the directory it sits in, so the
+// path and its access controls have to be decided together. This module stays
+// purely about the wire format.
 
 #[cfg(test)]
 mod tests {

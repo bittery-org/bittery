@@ -5,15 +5,20 @@
 //! length-prefixed JSON codec defined in `desktop_ipc.rs`.
 
 mod desktop_ipc;
+mod ipc_security;
 // This binary only consumes the extension-ID allowlist from the installer
 // module; the manifest-installation half is used exclusively by the Tauri app.
 #[allow(dead_code)]
 mod native_messaging_installer;
 
 use desktop_ipc::{
-    desktop_ipc_socket_path, read_frame, write_frame, DesktopEnvelope, DesktopRequest,
-    DesktopResponse, DESKTOP_PROTOCOL_VERSION,
+    read_frame, write_frame, DesktopEnvelope, DesktopRequest, DesktopResponse,
+    DESKTOP_PROTOCOL_VERSION,
 };
+#[cfg(unix)]
+use ipc_security::desktop_ipc_socket_candidates;
+#[cfg(windows)]
+use ipc_security::desktop_ipc_socket_path;
 use std::io::{self, Read, Write};
 use std::process::Command;
 use std::sync::Arc;
@@ -112,35 +117,81 @@ fn validate_extension_request(request: &DesktopRequest) -> Result<(), String> {
     Ok(())
 }
 
+/// Connect to the desktop app's IPC endpoint and check who answered.
+///
+/// The desktop app makes the real authorization decision — it is the side
+/// holding the vault keys. Checking from here as well means a squatted socket
+/// is caught from both ends, because the extension would otherwise trust
+/// whatever a squatter chose to answer with. The policy is deliberately
+/// [`PeerPolicy::BestEffort`]: a peer positively identified as something other
+/// than the desktop app is refused, but a peer we simply cannot identify is
+/// allowed through so a platform quirk cannot brick the integration.
+///
+/// [`PeerPolicy::BestEffort`]: ipc_security::PeerPolicy::BestEffort
 #[cfg(unix)]
-async fn send_ipc_request(request: NativeRequest) -> Result<NativeResponse, String> {
-    let socket_path = desktop_ipc_socket_path();
-    let mut stream = tokio::net::UnixStream::connect(&socket_path)
-        .await
-        .map_err(|error| {
-            format!(
-                "Desktop IPC unavailable at {}: {}",
-                socket_path.display(),
-                error
-            )
-        })?;
-    write_frame(&mut stream, &request)
-        .await
-        .map_err(|error| format!("Failed writing IPC request: {}", error))?;
-    read_frame(&mut stream)
-        .await
-        .map_err(|error| format!("Failed reading IPC response: {}", error))
+async fn connect_desktop_ipc() -> Result<tokio::net::UnixStream, String> {
+    use std::os::unix::io::AsRawFd;
+
+    let candidates = desktop_ipc_socket_candidates();
+    let mut last_error = "no socket path is configured".to_string();
+
+    for path in &candidates {
+        match tokio::net::UnixStream::connect(path).await {
+            Ok(stream) => {
+                if let Err(reason) = ipc_security::authorize_unix_peer(
+                    stream.as_raw_fd(),
+                    ipc_security::PeerRole::DesktopApp,
+                    ipc_security::PeerPolicy::BestEffort,
+                ) {
+                    // Do not fall through to the next candidate: something is
+                    // impersonating the desktop app and that is worth reporting.
+                    return Err(format!(
+                        "Refusing to talk to the process listening on {}: {}",
+                        path.display(),
+                        reason
+                    ));
+                }
+                return Ok(stream);
+            }
+            Err(error) => {
+                last_error = format!("{}: {}", path.display(), error);
+            }
+        }
+    }
+
+    Err(format!("Desktop IPC unavailable ({})", last_error))
 }
 
+/// See the Unix variant for the rationale behind the best-effort policy.
 #[cfg(windows)]
-async fn send_ipc_request(request: NativeRequest) -> Result<NativeResponse, String> {
+async fn connect_desktop_ipc() -> Result<tokio::net::windows::named_pipe::NamedPipeClient, String> {
+    use std::os::windows::io::AsRawHandle;
     use tokio::net::windows::named_pipe::ClientOptions;
 
     let pipe_name = desktop_ipc_socket_path();
     let pipe_name = pipe_name.to_string_lossy().to_string();
-    let mut stream = ClientOptions::new()
+    let stream = ClientOptions::new()
         .open(&pipe_name)
         .map_err(|error| format!("Desktop IPC unavailable at {}: {}", pipe_name, error))?;
+
+    if let Err(reason) = ipc_security::authorize_pipe_peer(
+        stream.as_raw_handle(),
+        ipc_security::PipeSide::Server,
+        ipc_security::PeerRole::DesktopApp,
+        ipc_security::PeerPolicy::BestEffort,
+    ) {
+        return Err(format!(
+            "Refusing to talk to the process serving {}: {}",
+            pipe_name, reason
+        ));
+    }
+
+    Ok(stream)
+}
+
+#[cfg(any(unix, windows))]
+async fn send_ipc_request(request: NativeRequest) -> Result<NativeResponse, String> {
+    let mut stream = connect_desktop_ipc().await?;
     write_frame(&mut stream, &request)
         .await
         .map_err(|error| format!("Failed writing IPC request: {}", error))?;
@@ -332,87 +383,18 @@ async fn start_event_subscription(
         return;
     }
 
-    #[cfg(unix)]
+    // Unix and Windows only differ in the transport type, which
+    // `connect_desktop_ipc` hides; keeping one body means the peer check cannot
+    // be present on one platform and forgotten on the other.
+    #[cfg(any(unix, windows))]
     {
-        let socket_path = desktop_ipc_socket_path();
-        let mut stream = match tokio::net::UnixStream::connect(&socket_path).await {
+        let mut stream = match connect_desktop_ipc().await {
             Ok(stream) => stream,
             Err(error) => {
                 let _ = out_tx.send(NativeResponse {
                     protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
                     request_id: request.request_id,
-                    payload: DesktopResponse::Error {
-                        message: format!(
-                            "Desktop IPC unavailable at {}: {}",
-                            socket_path.display(),
-                            error
-                        ),
-                    },
-                });
-                return;
-            }
-        };
-
-        if let Err(error) = write_frame(&mut stream, &request).await {
-            let _ = out_tx.send(NativeResponse {
-                protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
-                request_id: request.request_id,
-                payload: DesktopResponse::Error {
-                    message: format!("Failed writing subscribe request: {}", error),
-                },
-            });
-            return;
-        }
-
-        let ack: NativeResponse = match read_frame(&mut stream).await {
-            Ok(message) => message,
-            Err(error) => {
-                let _ = out_tx.send(NativeResponse {
-                    protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
-                    request_id: request.request_id,
-                    payload: DesktopResponse::Error {
-                        message: format!("Failed reading subscribe ack: {}", error),
-                    },
-                });
-                return;
-            }
-        };
-
-        let _ = out_tx.send(ack);
-        let forward_tx = out_tx.clone();
-        state.task = Some(tokio::spawn(async move {
-            let mut stream = stream;
-            loop {
-                match read_frame::<_, NativeResponse>(&mut stream).await {
-                    Ok(message) => {
-                        if forward_tx.send(message).is_err() {
-                            break;
-                        }
-                    }
-                    Err(error) => {
-                        log_native(&format!("desktop event subscription ended: {}", error));
-                        break;
-                    }
-                }
-            }
-        }));
-    }
-
-    #[cfg(windows)]
-    {
-        use tokio::net::windows::named_pipe::ClientOptions;
-
-        let pipe_name = desktop_ipc_socket_path();
-        let pipe_name = pipe_name.to_string_lossy().to_string();
-        let mut stream = match ClientOptions::new().open(&pipe_name) {
-            Ok(stream) => stream,
-            Err(error) => {
-                let _ = out_tx.send(NativeResponse {
-                    protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
-                    request_id: request.request_id,
-                    payload: DesktopResponse::Error {
-                        message: format!("Desktop IPC unavailable at {}: {}", pipe_name, error),
-                    },
+                    payload: DesktopResponse::Error { message: error },
                 });
                 return;
             }
