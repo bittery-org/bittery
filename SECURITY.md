@@ -221,6 +221,33 @@ Items can be shared via encrypted links:
 - **Audit logging**: Every access attempt is logged with email, IP, user agent, and success/failure
 - **Rate limiting**: Maximum 50 shares per user per day
 
+## Local IPC (Desktop App ↔ Browser Extension)
+
+The browser extension does not talk to the desktop app directly. Chrome launches a **native messaging host** (`bittery-native-host`), which connects to the running desktop app over a local IPC endpoint — a Unix domain socket on macOS and Linux, a named pipe on Windows.
+
+This channel carries decrypted vault keys, session auth tokens and item snapshots once the vault is unlocked, so it is treated as a trust boundary rather than as plumbing.
+
+### Access Controls
+
+| Layer | macOS / Linux | Windows |
+|-------|---------------|---------|
+| Endpoint location | Per-user directory created at mode `0700` (`$XDG_RUNTIME_DIR` on Linux where available, otherwise a uid-scoped directory under the temp dir). The directory is rejected if it is a symlink or owned by another user, and its mode is re-read to confirm after creation. | Named pipe with an explicit security descriptor granting only the current user's SID and `SYSTEM`. Rights are enumerated individually so that pipe-instance creation is never granted to clients. |
+| Endpoint permissions | Socket inode set to `0600` after bind, rather than relying on the process umask | Default permissive descriptor is never used |
+| Name squatting | Server refuses to start rather than falling back to a weaker location | First pipe instance created with `FILE_FLAG_FIRST_PIPE_INSTANCE`; if the name is already owned the app reports a fatal error instead of silently disabling integration |
+| Caller identity (kernel) | Peer uid via `SO_PEERCRED` (Linux) / `getpeereid` (macOS); connections from any other uid are rejected | Peer process id via `GetNamedPipeClientProcessId` |
+| Caller identity (binary) | Peer executable resolved via `/proc/<pid>/exe` or `proc_pidpath` and required to be the installed native messaging host | Peer executable resolved via `QueryFullProcessImageNameW`, same requirement |
+| Which extension | Chrome enforces the `allowed_origins` list written into the native messaging host manifest at install time | Same |
+
+The desktop app fails closed: a peer it cannot identify is refused. The native messaging host applies the same check in the other direction, so a squatted endpoint is detectable from both ends.
+
+### Known Limits
+
+Stated explicitly rather than implied:
+
+- **The peer check is path based.** It proves the process on the other end is the binary sitting in our install location. An attacker who can *write* to that location can replace that binary and satisfy the check. Verifying the peer's code signature (`SecStaticCodeCheckValidity` on macOS, `WinVerifyTrust` on Windows) is the stronger control and is the intended next step; the verification is funnelled through a single function so it can be added without changing call sites.
+- **Process ids can be recycled.** The window between the kernel recording the peer's identity and the executable being resolved is small, but an attacker who can exit a trusted process and win the race for its pid could pass the check. Signature verification bound to the connection rather than the pid closes this as well.
+- **No defence against root/SYSTEM**, or against an attacker who can attach a debugger to the desktop process. Those adversaries have already won.
+
 ## Data Storage
 
 ### Soft Deletes
