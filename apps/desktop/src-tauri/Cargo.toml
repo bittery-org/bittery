@@ -51,5 +51,20 @@ features = ["windows-native"]
 version = "3"
 features = ["linux-native"]
 
+# Peer credentials on the local IPC socket (SO_PEERCRED / getpeereid,
+# LOCAL_PEERPID, proc_pidpath). Already in the dependency graph transitively, so
+# this only promotes it to a direct dependency rather than adding a new crate.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
+# Named pipe security descriptor (SDDL), peer process id and peer executable
+# lookup. Also already in the graph via tauri/tokio.
+windows-sys = { version = "0.61", features = [
+	"Win32_Foundation",
+	"Win32_Security",
+	"Win32_Security_Authorization",
+	"Win32_System_Pipes",
+	"Win32_System_Threading",
+] }
