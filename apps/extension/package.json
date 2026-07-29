@@ -5,6 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"check-types": "tsc --noEmit",
+		"test": "bun test tests/background tests/content-script tests/lib",
 		"dev": "node ./scripts/generate-manifest-locales.mjs && vite dev",
 		"build:release": "node ./scripts/generate-manifest-locales.mjs && vite build",
 		"preview": "vite preview",

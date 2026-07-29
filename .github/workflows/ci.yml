@@ -19,69 +19,7 @@ env:
   WASM_PACK_SHA256: "c539d91ccab2591a7e975bcf82c82e1911b03335c80aa83d67ad25ed2ad06539"
 
 jobs:
-  changes:
-    runs-on: ubuntu-latest
-    outputs:
-      js: ${{ steps.filter.outputs.js }}
-      server: ${{ steps.filter.outputs.server }}
-      crypto_wasm: ${{ steps.filter.outputs.crypto_wasm }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 1
-
-      - id: filter
-        name: Detect changed areas
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            {
-              echo "js=true"
-              echo "server=true"
-              echo "crypto_wasm=true"
-            } >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
-          changed_files="$(git diff --name-only "origin/$GITHUB_BASE_REF" "$GITHUB_SHA")"
-
-          js=false
-          server=false
-          crypto_wasm=false
-
-          while IFS= read -r path; do
-            case "$path" in
-              .github/workflows/ci.yml|package.json|pnpm-lock.yaml|pnpm-workspace.yaml|turbo.json|biome.json|packages/i18n/messages/*|packages/i18n/scripts/*)
-                js=true
-                ;;
-              apps/web/*|apps/web/**|apps/extension/*|apps/extension/**|apps/marketing/*|apps/marketing/**|apps/mobile/*|apps/mobile/**|apps/desktop/*|apps/desktop/**|packages/config/*|packages/config/**|packages/core/*|packages/core/**|packages/db/*|packages/db/**|packages/device/*|packages/device/**|packages/i18n/*|packages/i18n/**|packages/rust-rpc/*|packages/rust-rpc/**|packages/shared/*|packages/shared/**|packages/storage/*|packages/storage/**|packages/sync/*|packages/sync/**|packages/types/*|packages/types/**|packages/ui/*|packages/ui/**)
-                js=true
-                ;;
-            esac
-
-            case "$path" in
-              .github/workflows/ci.yml|apps/server/*|apps/server/**|packages/crypto/core/*|packages/crypto/core/**)
-                server=true
-                ;;
-            esac
-
-            case "$path" in
-              .github/workflows/ci.yml|packages/crypto/core/*|packages/crypto/core/**|packages/crypto/wasm/*|packages/crypto/wasm/**|apps/web/src/lib/crypto.worker.ts|apps/web/src/lib/wasm-crypto.ts|apps/extension/src/lib/wasm-crypto.ts)
-                crypto_wasm=true
-                ;;
-            esac
-          done <<< "$changed_files"
-
-          {
-            echo "js=$js"
-            echo "server=$server"
-            echo "crypto_wasm=$crypto_wasm"
-          } >> "$GITHUB_OUTPUT"
-
   migrations:
-    needs: changes
-    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       # Needs the base branch to detect edits to already-merged migrations.
@@ -100,9 +38,71 @@ jobs:
             node scripts/check-migrations.mjs
           fi
 
+  # The crypto crate is the security core of the product and is only a path
+  # dependency of the server, so `cargo test -p bittery-server` never runs its
+  # tests. It needs its own job.
+  crypto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: mozilla-actions/sccache-action@v0.0.9
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/crypto/core
+
+      - name: Crypto fmt
+        run: cargo fmt --all --check --manifest-path packages/crypto/core/Cargo.toml
+
+      - name: Crypto lint
+        run: cargo clippy --manifest-path packages/crypto/core/Cargo.toml -p bittery-crypto-core --all-targets -- -D warnings
+
+      - name: Crypto tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo test --manifest-path packages/crypto/core/Cargo.toml -p bittery-crypto-core
+          elapsed="$(( $(date +%s) - start ))"
+          echo "crypto tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+  desktop-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Desktop fmt
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+
+      - name: Desktop lint
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: Desktop tests
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+
   crypto-wasm:
-    needs: changes
-    if: needs.changes.outputs.js == 'true' || needs.changes.outputs.crypto_wasm == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -147,10 +147,7 @@ jobs:
           if-no-files-found: error
 
   js-static:
-    needs:
-      - changes
-      - crypto-wasm
-    if: needs.changes.outputs.js == 'true'
+    needs: crypto-wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -203,10 +200,7 @@ jobs:
         run: pnpm run version:check
 
   js-types:
-    needs:
-      - changes
-      - crypto-wasm
-    if: needs.changes.outputs.js == 'true'
+    needs: crypto-wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -253,11 +247,15 @@ jobs:
           echo "typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
   js-tests:
-    needs: changes
-    if: needs.changes.outputs.js == 'true'
+    needs: crypto-wasm
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: crypto-wasm
+          path: packages/crypto/wasm
 
       - uses: pnpm/action-setup@v4
         with:
@@ -279,15 +277,22 @@ jobs:
           elapsed="$(( $(date +%s) - start ))"
           echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
+      # Driven by turbo rather than a hardcoded package list so a new package
+      # with tests cannot silently go unrun. The Rust packages are excluded
+      # because they have dedicated jobs (server, crypto).
       - name: Package tests
+        shell: bash
         run: |
-          pnpm --filter @bittery/shared test
-          pnpm --filter @bittery/i18n test
-          pnpm --filter @bittery/device test
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm exec turbo run test \
+            --filter='!server' \
+            --filter='!@bittery/crypto-core' \
+            --filter='!@bittery/crypto-napi'
+          elapsed="$(( $(date +%s) - start ))"
+          echo "package tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
   server:
-    needs: changes
-    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     services:
       postgres:

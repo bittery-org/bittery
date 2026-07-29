@@ -1,11 +1,11 @@
-import { expect, test } from "@playwright/test";
+import { describe, expect, test } from "bun:test";
 import { appNavItems, filterNavItems } from "./nav-config";
 
 function getPaths(paths: { path: string }[]) {
 	return paths.map((item) => item.path);
 }
 
-test.describe("Navigation visibility filter", () => {
+describe("Navigation visibility filter", () => {
 	test("shows cloud billing and sentinel when entitled", () => {
 		const result = filterNavItems(appNavItems, {
 			mode: "cloud",

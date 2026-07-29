@@ -1,0 +1,109 @@
+version: 2
+
+updates:
+  # Actions are the supply-chain path into a workflow that can publish releases
+  # and push images to GHCR, so they get their own weekly window.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "chore(actions)"
+
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    # One PR for the noisy low-risk stuff instead of dozens.
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+      production-minor-patch:
+        dependency-type: production
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Pinned via pnpm.overrides in the root package.json; a Dependabot bump
+      # here would not take effect and only creates noise.
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: cargo
+    directory: "/apps/server"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - server
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      server-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  # Crypto crates are reviewed individually — no grouping, no silent batching.
+  - package-ecosystem: cargo
+    directory: "/packages/crypto/core"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - crypto
+      - needs-security-review
+    commit-message:
+      prefix: "chore(crypto-deps)"
+
+  - package-ecosystem: cargo
+    directory: "/apps/desktop/src-tauri"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - desktop
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      desktop-minor-patch:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: docker
+    directories:
+      - "/apps/server"
+      - "/apps/web"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - docker
+    commit-message:
+      prefix: "chore(docker)"

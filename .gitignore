@@ -53,3 +53,5 @@ temp
 .automaker
 test-results
 .pnpm-store
+# Desktop production env is generated at build time (see release.yml)
+apps/desktop/.env.production

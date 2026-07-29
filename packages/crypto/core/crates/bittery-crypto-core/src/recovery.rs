@@ -186,9 +186,15 @@ mod tests {
 
     #[test]
     fn test_validate_recovery_key_invalid() {
-        assert!(!validate_recovery_key("R2-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2-BCDEF-GHIJK"));
-        assert!(!validate_recovery_key("R1-ABCDE-GHIJKL-MNOPQ-RSTUV-WXYZ2-BCDEF-GHIJK"));
-        assert!(!validate_recovery_key("R1-ABC019-GHIJKL-MNOPQ-RSTUV-WXYZ2-BCDEF-GHIJK"));
+        assert!(!validate_recovery_key(
+            "R2-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2-BCDEF-GHIJK"
+        ));
+        assert!(!validate_recovery_key(
+            "R1-ABCDE-GHIJKL-MNOPQ-RSTUV-WXYZ2-BCDEF-GHIJK"
+        ));
+        assert!(!validate_recovery_key(
+            "R1-ABC019-GHIJKL-MNOPQ-RSTUV-WXYZ2-BCDEF-GHIJK"
+        ));
         assert!(!validate_recovery_key(""));
     }
 
@@ -202,8 +208,8 @@ mod tests {
     #[test]
     fn test_derive_recovery_encryption_key_nfkc_normalizes_email_salt() {
         let nfc = derive_recovery_encryption_key(TEST_RECOVERY_KEY, "müller@example.com").unwrap();
-        let nfd =
-            derive_recovery_encryption_key(TEST_RECOVERY_KEY, "mu\u{0308}ller@example.com").unwrap();
+        let nfd = derive_recovery_encryption_key(TEST_RECOVERY_KEY, "mu\u{0308}ller@example.com")
+            .unwrap();
 
         assert_eq!(nfc, nfd);
     }
@@ -211,8 +217,10 @@ mod tests {
     #[test]
     fn test_encrypt_decrypt_master_key_roundtrip() {
         let master_key = [42u8; MASTER_KEY_LENGTH];
-        let encrypted = encrypt_master_key(&master_key, TEST_RECOVERY_KEY, "test@example.com").unwrap();
-        let decrypted = decrypt_master_key(&encrypted, TEST_RECOVERY_KEY, "test@example.com").unwrap();
+        let encrypted =
+            encrypt_master_key(&master_key, TEST_RECOVERY_KEY, "test@example.com").unwrap();
+        let decrypted =
+            decrypt_master_key(&encrypted, TEST_RECOVERY_KEY, "test@example.com").unwrap();
 
         assert_eq!(master_key, decrypted);
     }
@@ -220,7 +228,8 @@ mod tests {
     #[test]
     fn test_decrypt_master_key_wrong_recovery_key_fails() {
         let master_key = [42u8; MASTER_KEY_LENGTH];
-        let encrypted = encrypt_master_key(&master_key, TEST_RECOVERY_KEY, "test@example.com").unwrap();
+        let encrypted =
+            encrypt_master_key(&master_key, TEST_RECOVERY_KEY, "test@example.com").unwrap();
         let wrong_key = "R1-ZYXWVU-TSRQPO-NMLKJ-HGFED-CBA23-UVWXY-ABCDE";
 
         let result = decrypt_master_key(&encrypted, wrong_key, "test@example.com");

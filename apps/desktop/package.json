@@ -10,7 +10,7 @@
 		"build:native-host:dev": "cd src-tauri && cargo build --bin bittery-native-host",
 		"build:app": "tsc && vite build && tauri build",
 		"build:pre": "cd src-tauri && cargo build --release --bin bittery-native-host",
-		"build:prod": "BITTERY_EXTENSION_ID=$(grep BITTERY_EXTENSION_ID .env.production | cut -d '=' -f2) pnpm build",
+		"build:prod": "BITTERY_EXTENSION_ID=$({ grep -h BITTERY_EXTENSION_ID .env.production 2>/dev/null || grep -h BITTERY_EXTENSION_ID .env.production.example; } | cut -d '=' -f2) pnpm build",
 		"build:release": "pnpm build:pre && pnpm build:app",
 		"preview": "vite preview",
 		"tauri": "tauri"
