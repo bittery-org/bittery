@@ -8,7 +8,8 @@ export type ImportProviderId =
 	| "1password-1pux"
 	| "bittery-bttrx"
 	| "bitwarden"
-	| "chrome";
+	| "chrome"
+	| "firefox";
 
 export type ImportMessageValue = string | number;
 
@@ -27,7 +28,8 @@ export type ImportWarningCode =
 	| "reprompt-not-supported"
 	| "unsupported-item-type"
 	| "passkeys-skipped"
-	| "linked-field-skipped";
+	| "linked-field-skipped"
+	| "sync-account-skipped";
 
 export interface ImportWarning {
 	code: ImportWarningCode;

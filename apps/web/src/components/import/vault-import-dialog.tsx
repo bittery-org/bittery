@@ -129,6 +129,8 @@ function getProviderDescription(
 			return m.vaults_import_provider_bitwarden_description();
 		case "chrome":
 			return m.vaults_import_provider_chrome_description();
+		case "firefox":
+			return m.vaults_import_provider_firefox_description();
 		default:
 			return m.vaults_import_provider_generic_description();
 	}
@@ -145,6 +147,8 @@ function getProviderImageDescription(
 			return m.vaults_import_provider_bitwarden_image_description();
 		case "chrome":
 			return m.vaults_import_provider_chrome_image_description();
+		case "firefox":
+			return m.vaults_import_provider_firefox_image_description();
 		default:
 			return m.vaults_import_provider_generic_image_description();
 	}
@@ -258,6 +262,8 @@ function getImportWarningMessage(
 				title: getStringParam(warning.params, "title"),
 				fieldName: getStringParam(warning.params, "fieldName"),
 			});
+		case "sync-account-skipped":
+			return m.vaults_import_warning_sync_account_skipped();
 		default:
 			return m.vaults_import_warning_unknown();
 	}

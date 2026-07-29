@@ -16,6 +16,7 @@ export { onePassword1puxImportProvider } from "./providers/1password-1pux";
 export { bitteryBttrxImportProvider } from "./providers/bittery-bttrx";
 export { bitwardenImportProvider } from "./providers/bitwarden";
 export { chromeImportProvider } from "./providers/chrome";
+export { firefoxImportProvider } from "./providers/firefox";
 export type {
 	ImportDecryptedItem,
 	ImportError,

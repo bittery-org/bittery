@@ -2,12 +2,14 @@ import { onePassword1puxImportProvider } from "./providers/1password-1pux";
 import { bitteryBttrxImportProvider } from "./providers/bittery-bttrx";
 import { bitwardenImportProvider } from "./providers/bitwarden";
 import { chromeImportProvider } from "./providers/chrome";
+import { firefoxImportProvider } from "./providers/firefox";
 import type { ImportProvider, ImportProviderId } from "./types";
 
 const providers: ImportProvider[] = [
 	onePassword1puxImportProvider,
 	bitwardenImportProvider,
 	chromeImportProvider,
+	firefoxImportProvider,
 	bitteryBttrxImportProvider,
 ];
 

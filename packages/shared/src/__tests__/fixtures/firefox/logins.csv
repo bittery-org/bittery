@@ -1,0 +1,11 @@
+"url","username","password","httpRealm","formActionOrigin","guid","timeCreated","timeLastUsed","timePasswordChanged"
+"https://github.com","octocat","hunter2",,"https://github.com","{6f0d5a1c-3b8e-4a2f-9c17-5e4b8d2a7f31}","1784538843000","1785325338000","1784538843000"
+"https://konto.example.de","jörg.müller@example.de","paßwort-123",,"https://konto.example.de","{b2c4e8f0-7d13-4c95-8a26-1f9e3b5d0c74}","1784909141000","1785313800000","1784909141000"
+"https://www.example.org","","kein-benutzername",,"https://www.example.org","{3e7a9d15-0c62-4b48-9f83-6d2a1e5c8b09}","1780428127000","1780428127000","1780428127000"
+"https://quote.example.com","quoter","pa""ss,word",,"https://quote.example.com","{9c1f4b8a-5e30-42d7-b6c9-8a07f2d4e153}","1784538843000","1785325338000","1785313800000"
+"https://intranet.example.com","realm-user","realm-pass","Restricted Area",,"{47d2a6e9-8f15-4c03-a92b-3e6d0b7c1af8}","1784909141000","1784909141000","1784909141000"
+"chrome://FirefoxAccounts","a1b2c3d4e5f60718293a4b5c6d7e8f90","{""version"":1,""accountData"":{""kSync"":""0f1e2d3c4b5a69788796a5b4c3d2e1f0"",""kXCS"":""1a2b3c4d5e6f7081""}}","Firefox Accounts credentials",,"{c8e5f207-1a94-4d6b-83f0-2b7c9e1d4a65}","1780428127000","1785325338000","1780428127000"
+"https://www7.example.com:8080","port-user","port-pass",,"https://www7.example.com:8080","{5b93c0d7-6e28-41af-9d54-7c1a8f3e6b02}","1784538843000","1784538843000","1784538843000"
+"https://portal.example.com","sso-user","sso-pass",,"https://sso.example.net","{2f6d8a04-9c73-4b15-8e02-4a9d7f1c6b38}","1784909141000","1785325338000","1784909141000"
+"http://legacy.example.net","legacy-user","legacy-pass","",,"{80a4c1e6-3d59-4f27-9b6a-0c8e5d2f7139}","1780428127000","1780428127000","1780428127000"
+"file://","file: username","file: password",,"file://",,,,
