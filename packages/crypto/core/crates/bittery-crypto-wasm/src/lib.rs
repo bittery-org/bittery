@@ -1250,8 +1250,9 @@ mod tests {
             "password",
             "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2",
             "test@example.com",
-            None,
-            None,
+            1,
+            "pbkdf2-sha256".to_string(),
+            600_000,
         )
         .unwrap();
 

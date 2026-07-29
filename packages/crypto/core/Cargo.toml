@@ -15,16 +15,25 @@ authors = ["Bittery <team@bittery.com>"]
 
 [workspace.dependencies]
 # Crypto (RustCrypto - audited)
-aes-gcm = "0.10"
-pbkdf2 = { version = "0.12", features = ["simple"] }
-hkdf = "0.12"
-hmac = "0.12"
-sha1 = "0.10"
-sha2 = "0.10"
-rsa = { version = "0.9", features = ["sha2"] }
-p256 = { version = "0.13", features = ["ecdsa"] }
-ecdsa = "0.16"
-rand = "0.8"
+aes-gcm = "0.11"
+pbkdf2 = "0.13"
+hkdf = "0.13"
+hmac = "0.13"
+sha1 = "0.11"
+sha2 = "0.11"
+# `rsa` has no stable release on the `digest` 0.11 generation yet (only
+# 0.10.0-rc.*), and shipping a release candidate of the RSA implementation in a
+# password manager is not acceptable. It therefore stays on 0.9, which brings
+# its own `sha2` 0.10 / `rand_core` 0.6 stack. `rsa.rs` uses the re-exports
+# (`rsa::sha2`, `rsa::rand_core`) so the two generations never get mixed up.
+rsa = { version = "0.9", features = ["sha2", "getrandom"] }
+p256 = { version = "0.14", features = ["ecdsa"] }
+ecdsa = "0.17"
+# `unbiased` restores rand 0.8's rejection-sampling guarantee for ranged
+# sampling (rand 0.9 made the default single-value sampler Canon's method, which
+# is documented as biased). This crate only draws raw bytes today, but the flag
+# means a future ranged draw here cannot silently be non-uniform.
+rand = { version = "0.10", features = ["unbiased"] }
 
 # BigInteger for SRP
 num-bigint = "0.5"
@@ -40,7 +49,12 @@ ciborium = "0.2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-getrandom = { version = "0.2", features = ["js"] }
+# Two getrandom generations are in the graph on purpose: 0.4 backs `rand` 0.10
+# (and everything on the new RustCrypto stack), 0.2 backs `rand_core` 0.6 which
+# `rsa` 0.9 still requires. Both need their JS backend turned on explicitly for
+# wasm32-unknown-unknown; the feature was renamed `js` -> `wasm_js` in 0.3.
+getrandom = { version = "0.4", features = ["wasm_js"] }
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 
 # NAPI bindings (for Bun/Node server)
 napi = { version = "2", default-features = false, features = ["napi4"] }

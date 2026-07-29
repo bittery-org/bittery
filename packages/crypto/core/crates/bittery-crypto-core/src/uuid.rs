@@ -1,9 +1,11 @@
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
+
+use crate::system_rng;
 
 /// Generate a RFC 4122 version 4 UUID using cryptographically secure randomness.
 pub fn generate_uuid() -> String {
     let mut bytes = [0u8; 16];
-    OsRng.fill_bytes(&mut bytes);
+    system_rng().fill_bytes(&mut bytes);
 
     // Set version (0100 for v4) and variant (10xx for RFC 4122).
     bytes[6] = (bytes[6] & 0x0f) | 0x40;

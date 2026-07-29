@@ -3,12 +3,17 @@
 //! RSA-OAEP with SHA-256 for encrypting vault keys when sharing with team members.
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use rand::rngs::OsRng;
+// `rsa` 0.9 is still on the `digest` 0.10 / `rand_core` 0.6 generation (there is
+// no stable release on `digest` 0.11 yet). Both are therefore taken from `rsa`'s
+// own re-exports rather than from the workspace `sha2` 0.11 / `rand` 0.10, so
+// the two RustCrypto generations can coexist without ever being mixed up.
+// `rsa::rand_core::OsRng` is the OS entropy source, same as before.
+use rsa::rand_core::OsRng;
+use rsa::sha2::Sha256;
 use rsa::{
     pkcs8::{DecodePrivateKey, DecodePublicKey, EncodePrivateKey, EncodePublicKey, LineEnding},
     Oaep, RsaPrivateKey, RsaPublicKey,
 };
-use sha2::Sha256;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use crate::error::CryptoError;

@@ -1,7 +1,7 @@
 use std::{env, fmt};
 
 use chrono::Utc;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use rand::random;
 use serde::Deserialize;
 use serde_json::Value;
@@ -505,7 +505,7 @@ fn get_invoice_subscription_id(invoice: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{verify_signature, StripeWebhookError};
-    use hmac::{Hmac, Mac};
+    use hmac::{Hmac, KeyInit, Mac};
     use sha2::Sha256;
 
     type TestHmacSha256 = Hmac<Sha256>;

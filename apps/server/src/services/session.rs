@@ -8,7 +8,9 @@ use std::{
 
 use base64::Engine;
 use parking_lot::RwLock;
-use rand::{random, RngCore};
+use rand::rand_core::UnwrapErr;
+use rand::rngs::SysRng;
+use rand::{random, Rng};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1244,7 +1246,10 @@ fn normalized_session_client_id(
 
 pub(crate) fn generate_opaque_session_token() -> String {
     let mut bytes = [0_u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    // `rand` 0.10 renamed `OsRng` -> `SysRng` and made it fallible; `UnwrapErr`
+    // restores the previous panic-on-entropy-failure behaviour so a failing
+    // system RNG can never yield a predictable session token.
+    UnwrapErr(SysRng).fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
 }
 

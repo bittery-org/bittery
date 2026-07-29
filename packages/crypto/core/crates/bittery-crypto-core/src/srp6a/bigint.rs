@@ -5,11 +5,12 @@
 
 use num_bigint::BigUint;
 use num_traits::Zero;
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroize;
 
 use crate::error::CryptoError;
+use crate::system_rng;
 
 /// SRP integer with optional hex length for padding
 #[derive(Clone, Debug)]
@@ -63,7 +64,7 @@ impl SrpInt {
 
     /// Generate random value with specified byte length
     pub fn random(bytes: usize) -> Self {
-        let mut rng = OsRng;
+        let mut rng = system_rng();
         let mut buffer = vec![0u8; bytes];
         rng.fill_bytes(&mut buffer);
         let value = BigUint::from_bytes_be(&buffer);

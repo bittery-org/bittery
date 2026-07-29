@@ -6,11 +6,13 @@
 use ciborium::ser::into_writer;
 use ciborium::value::Value;
 use p256::ecdsa::{signature::Signer, Signature, SigningKey};
+use p256::elliptic_curve::Generate;
 use p256::SecretKey;
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
 use sha2::{Digest, Sha256};
 
 use crate::error::CryptoError;
+use crate::system_rng;
 
 /// Bittery fixed AAGUID for extension passkeys.
 pub const PASSKEY_AAGUID: [u8; 16] = [
@@ -63,11 +65,16 @@ pub struct PasskeyAssertion {
 
 /// Generate a P-256 keypair for WebAuthn and return private key + COSE public key.
 pub fn generate_passkey_keypair() -> Result<PasskeyKeypair, CryptoError> {
-    let mut rng = OsRng;
-    let signing_key = SigningKey::random(&mut rng);
+    // `SigningKey::random` was deprecated in ecdsa 0.17 in favour of the
+    // `Generate` trait; `generate_from_rng` is the same operation over the same
+    // OS entropy source.
+    let mut rng = system_rng();
+    let signing_key = SigningKey::generate_from_rng(&mut rng);
     let private_key: [u8; 32] = signing_key.to_bytes().into();
 
-    let encoded = signing_key.verifying_key().to_encoded_point(false);
+    // `to_encoded_point` was renamed `to_sec1_point` in ecdsa 0.17; the return
+    // type is still a SEC1 `EncodedPoint`, and `false` still means uncompressed.
+    let encoded = signing_key.verifying_key().to_sec1_point(false);
     let x = encoded
         .x()
         .ok_or_else(|| CryptoError::InvalidInput("Missing P-256 x coordinate".to_string()))?;
@@ -87,7 +94,7 @@ pub fn generate_passkey_keypair() -> Result<PasskeyKeypair, CryptoError> {
 /// Generate a random 32-byte credential ID.
 pub fn generate_credential_id() -> [u8; 32] {
     let mut credential_id = [0u8; 32];
-    OsRng.fill_bytes(&mut credential_id);
+    system_rng().fill_bytes(&mut credential_id);
     credential_id
 }
 

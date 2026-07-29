@@ -3,6 +3,9 @@
 //! Core cryptographic primitives for the Bittery password manager.
 //! Implements zero-knowledge authentication and end-to-end encryption.
 
+use rand::rand_core::UnwrapErr;
+use rand::rngs::SysRng;
+
 pub mod encryption;
 pub mod error;
 mod identity;
@@ -51,3 +54,18 @@ pub use secret_key::{generate_secret_key, get_secret_key_hint, validate_secret_k
 pub use srp6a::{SrpClient, SrpServer};
 pub use totp::{generate_totp, generate_totp_at, TotpResult};
 pub use uuid::generate_uuid;
+
+/// The system CSPRNG used by every randomised primitive in this crate.
+///
+/// `rand` 0.10 renamed `OsRng` to `SysRng` and moved it behind the fallible
+/// [`rand::rand_core::TryRng`] trait, whereas `rand` 0.8's `OsRng` implemented
+/// the infallible `RngCore` and panicked internally when the OS entropy source
+/// failed. Wrapping it in [`UnwrapErr`] preserves that behaviour exactly: a
+/// failure of the operating system RNG panics instead of silently yielding weak
+/// or empty key material.
+///
+/// This must always be the OS entropy source. Never substitute a seeded or
+/// userspace PRNG (`StdRng`, `SmallRng`, `rand::rng()`, ...) here.
+pub(crate) fn system_rng() -> UnwrapErr<SysRng> {
+    UnwrapErr(SysRng)
+}
