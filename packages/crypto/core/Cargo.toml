@@ -15,16 +15,16 @@ authors = ["Bittery <team@bittery.com>"]
 
 [workspace.dependencies]
 # Crypto (RustCrypto - audited)
-aes-gcm = "0.10"
+aes-gcm = "0.11"
 pbkdf2 = { version = "0.12", features = ["simple"] }
-hkdf = "0.12"
-hmac = "0.12"
-sha1 = "0.10"
-sha2 = "0.10"
+hkdf = "0.13"
+hmac = "0.13"
+sha1 = "0.11"
+sha2 = "0.11"
 rsa = { version = "0.9", features = ["sha2"] }
-p256 = { version = "0.13", features = ["ecdsa"] }
-ecdsa = "0.16"
-rand = "0.8"
+p256 = { version = "0.14", features = ["ecdsa"] }
+ecdsa = "0.17"
+rand = "0.10"
 
 # BigInteger for SRP
 num-bigint = "0.5"
@@ -40,7 +40,7 @@ ciborium = "0.2"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-getrandom = { version = "0.2", features = ["js"] }
+getrandom = { version = "0.4", features = ["js"] }
 
 # NAPI bindings (for Bun/Node server)
 napi = { version = "2", default-features = false, features = ["napi4"] }
