@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         if: github.event_name == 'push' || github.event.inputs.push_images == 'true'
@@ -70,7 +70,7 @@ jobs:
       #     --repo bittery-org/bittery
       - name: Attest server image provenance
         if: steps.build.outputs.digest != ''
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-server
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -87,7 +87,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GHCR
         if: github.event_name == 'push' || github.event.inputs.push_images == 'true'
@@ -124,7 +124,7 @@ jobs:
 
       - name: Attest web image provenance
         if: steps.build.outputs.digest != ''
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-web
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -157,7 +157,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install Linux dependencies
@@ -260,7 +260,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - name: Install dependencies
@@ -309,25 +309,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Download extension artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: extension
           path: release-artifacts
 
       - name: Download macOS desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-aarch64-apple-darwin
           path: release-artifacts
 
       - name: Download Windows desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-x86_64-pc-windows-msvc
           path: release-artifacts
 
       - name: Download Linux desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-x86_64-unknown-linux-gnu
           path: release-artifacts
@@ -421,7 +421,7 @@ jobs:
       # Binary provenance for the installers users actually download. Verify with:
       #   gh attestation verify Bittery.dmg --repo bittery-org/bittery
       - name: Attest release artifact provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: release-upload/*
 
@@ -457,7 +457,7 @@ jobs:
           EOF
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release-upload/**
           body_path: release-notes.md
