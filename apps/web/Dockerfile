@@ -19,7 +19,7 @@ RUN packages/crypto/core/build-wasm.sh
 # ============================================================
 # Stage 2: JS builder — install deps and build Vite SPA
 # ============================================================
-FROM node:22-bookworm-slim AS js-builder
+FROM node:24-bookworm-slim AS js-builder
 
 RUN corepack enable && corepack prepare pnpm@10.18.3 --activate
 
