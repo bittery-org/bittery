@@ -10,7 +10,7 @@ use bittery_crypto_core::{
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use qubit::server::{Extensions, FromRequestExtensions, RpcError};
-use rand::Rng;
+use rand::RngExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -2135,7 +2135,7 @@ fn deterministic_fake_hint(email: &str) -> String {
 }
 
 fn generate_signup_verification_code() -> String {
-    rand::thread_rng().gen_range(100000..=999999).to_string()
+    rand::rng().random_range(100000..=999999).to_string()
 }
 
 fn jwt_signing_secret() -> String {

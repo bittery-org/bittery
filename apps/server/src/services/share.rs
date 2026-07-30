@@ -1,4 +1,4 @@
-use rand::Rng;
+use rand::RngExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, PgPool};
@@ -1268,17 +1268,17 @@ fn effective_share_link_status(link: &DbShareLinkRow, now: time::OffsetDateTime)
 
 fn generate_secure_token() -> String {
     const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..32)
         .map(|_| {
-            let index = rng.gen_range(0..ALPHABET.len());
+            let index = rng.random_range(0..ALPHABET.len());
             ALPHABET[index] as char
         })
         .collect()
 }
 
 fn generate_verification_code() -> String {
-    rand::thread_rng().gen_range(100000..=999999).to_string()
+    rand::rng().random_range(100000..=999999).to_string()
 }
 
 fn share_link_daily_limit() -> i64 {

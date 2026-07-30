@@ -2,7 +2,9 @@
 //!
 //! Generates a 1Password-style Secret Key in format: A3-XXXXXX-XXXXXX-XXXXX-XXXXX-XXXXX
 
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
+
+use crate::system_rng;
 
 /// Base32 charset without confusing characters (0, 1, 8, 9, O, I, L)
 pub(crate) const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
@@ -30,7 +32,7 @@ pub fn generate_secret_key() -> String {
 
 /// Generate a random segment of specified length
 fn generate_segment(length: usize) -> String {
-    let mut rng = OsRng;
+    let mut rng = system_rng();
     let mut bytes = vec![0u8; length];
     rng.fill_bytes(&mut bytes);
 

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use rand::RngCore;
+use rand::Rng;
 use sqlx::{query, query_as, query_scalar, PgPool};
 use time::{Duration, OffsetDateTime};
 use tracing::{error, info};
@@ -272,6 +272,6 @@ pub async fn cleanup_tombstones(pool: &PgPool) -> Result<u64, sqlx::Error> {
 
 fn generate_sync_event_id() -> String {
     let mut bytes = [0_u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     format!("syncevt_{}", hex::encode(bytes))
 }

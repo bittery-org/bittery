@@ -7,11 +7,12 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroize;
 
 use crate::error::CryptoError;
+use crate::system_rng;
 
 /// AES-256 key length in bytes
 const KEY_LENGTH: usize = 32;
@@ -119,14 +120,14 @@ fn encrypt_internal(plaintext: &str, key: &[u8], aad: &[u8]) -> Result<Encrypted
 
     // Generate random IV
     let mut iv = [0u8; IV_LENGTH];
-    let mut rng = OsRng;
+    let mut rng = system_rng();
     rng.fill_bytes(&mut iv);
-    let nonce = Nonce::from_slice(&iv);
+    let nonce = Nonce::from(iv);
 
     // Encrypt
     let mut plaintext_bytes = plaintext.as_bytes().to_vec();
     let ciphertext = match cipher.encrypt(
-        nonce,
+        &nonce,
         Payload {
             msg: plaintext_bytes.as_slice(),
             aad,
@@ -206,11 +207,24 @@ fn decrypt_internal(
         });
     }
 
-    let nonce = Nonce::from_slice(&iv);
+    // Length is already validated above; `try_from` re-checks it rather than
+    // panicking, so a malformed IV can never reach the AEAD.
+    let nonce = match Nonce::try_from(&iv[..]) {
+        Ok(value) => value,
+        Err(_) => {
+            let actual = iv.len();
+            ciphertext.zeroize();
+            iv.zeroize();
+            return Err(CryptoError::InvalidIvLength {
+                expected: IV_LENGTH,
+                actual,
+            });
+        }
+    };
 
     // Decrypt
     let plaintext_bytes = match cipher.decrypt(
-        nonce,
+        &nonce,
         Payload {
             msg: ciphertext.as_slice(),
             aad,
@@ -244,7 +258,7 @@ fn decrypt_internal(
 /// Generate a random 32-byte encryption key
 pub fn generate_encryption_key() -> [u8; KEY_LENGTH] {
     let mut key = [0u8; KEY_LENGTH];
-    let mut rng = OsRng;
+    let mut rng = system_rng();
     rng.fill_bytes(&mut key);
     key
 }
@@ -252,6 +266,78 @@ pub fn generate_encryption_key() -> [u8; KEY_LENGTH] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ciphertexts produced by the WebCrypto `AES-GCM` implementation (Node
+    /// `crypto.webcrypto.subtle`) with a fixed key and IV.
+    ///
+    /// A roundtrip test cannot detect a wire-format change, because it would
+    /// change on both sides at once. These pin the on-disk format (raw
+    /// ciphertext followed by the 128-bit tag) against an independent
+    /// implementation, so an `aes-gcm` upgrade cannot silently make already
+    /// stored vault data undecryptable, or break browser interop.
+    const KAT_KEY: [u8; 32] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+    const KAT_IV_B64: &str = "EBESExQVFhcYGRob";
+    const KAT_PLAINTEXT: &str = "Hello 世界! 🔐";
+
+    fn kat_context() -> AadContext {
+        AadContext {
+            vault_id: "vault-1".to_string(),
+            entity_id: "item-1".to_string(),
+            entity_type: "item".to_string(),
+            version: 7,
+            user_id: "user-1".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_decrypts_webcrypto_ciphertext_without_aad() {
+        let encrypted = EncryptedData {
+            ciphertext: "NZv0eibp3gtckp2RLlmZzEPAz6UUcHrqsa1saUQzUK3Rcg==".to_string(),
+            iv: KAT_IV_B64.to_string(),
+            algorithm: ALGORITHM.to_string(),
+        };
+
+        assert_eq!(decrypt(&encrypted, &KAT_KEY).unwrap(), KAT_PLAINTEXT);
+    }
+
+    #[test]
+    fn test_decrypts_webcrypto_ciphertext_with_aad() {
+        let encrypted = EncryptedData {
+            ciphertext: "NZv0eibp3gtckp2RLlmZzEPArimh+VTfr9PS3PTfE3sGQw==".to_string(),
+            iv: KAT_IV_B64.to_string(),
+            algorithm: ALGORITHM.to_string(),
+        };
+
+        assert_eq!(
+            decrypt_with_aad(&encrypted, &KAT_KEY, &kat_context()).unwrap(),
+            KAT_PLAINTEXT
+        );
+    }
+
+    #[test]
+    fn test_tag_tampering_is_rejected() {
+        let mut raw = BASE64
+            .decode("NZv0eibp3gtckp2RLlmZzEPAz6UUcHrqsa1saUQzUK3Rcg==")
+            .unwrap();
+        // Flip a bit in the trailing 128-bit GCM authentication tag.
+        let last = raw.len() - 1;
+        raw[last] ^= 0x01;
+
+        let encrypted = EncryptedData {
+            ciphertext: BASE64.encode(&raw),
+            iv: KAT_IV_B64.to_string(),
+            algorithm: ALGORITHM.to_string(),
+        };
+
+        assert!(matches!(
+            decrypt(&encrypted, &KAT_KEY),
+            Err(CryptoError::Decryption(_))
+        ));
+    }
 
     #[test]
     fn test_encrypt_decrypt_roundtrip() {

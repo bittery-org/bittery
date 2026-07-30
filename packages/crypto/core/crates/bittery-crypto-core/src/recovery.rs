@@ -5,13 +5,13 @@
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use pbkdf2::pbkdf2_hmac;
-use rand::{rngs::OsRng, RngCore};
+use rand::Rng;
 use sha2::Sha256;
 use zeroize::Zeroize;
 
 use crate::identity::normalize_email;
 use crate::secret_key::CHARSET;
-use crate::{decrypt, encrypt, CryptoError, EncryptedData};
+use crate::{decrypt, encrypt, system_rng, CryptoError, EncryptedData};
 
 /// Version prefix for recovery keys
 const VERSION_PREFIX: &str = "R1";
@@ -144,7 +144,7 @@ pub fn decrypt_master_key(
 }
 
 fn generate_segment(length: usize) -> String {
-    let mut rng = OsRng;
+    let mut rng = system_rng();
     let mut bytes = vec![0u8; length];
     rng.fill_bytes(&mut bytes);
 

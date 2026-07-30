@@ -2279,10 +2279,10 @@ fn ensure_team_admin(role: &str) -> Result<(), AppError> {
 
 fn generate_secure_token() -> String {
     const ALPHABET: &[u8] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..32)
         .map(|_| {
-            let index = rand::Rng::gen_range(&mut rng, 0..ALPHABET.len());
+            let index = rand::RngExt::random_range(&mut rng, 0..ALPHABET.len());
             ALPHABET[index] as char
         })
         .collect()
