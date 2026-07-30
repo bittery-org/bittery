@@ -63,7 +63,10 @@ services:
     image: ghcr.io/bittery-org/bittery-web:latest
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/nginx-health"]
+      # 127.0.0.1, not `localhost`: the web image's busybox wget only tries the
+      # first address getaddrinfo returns ([::1]) and nginx listens on IPv4 only.
+      # See the HEALTHCHECK comment in apps/web/Dockerfile.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/nginx-health"]
       interval: 10s
       timeout: 5s
       start_period: 5s
