@@ -259,6 +259,8 @@ export function useVaultImport() {
 					return m.vaults_import_source_vault_no_folder();
 				case "chrome-passwords":
 					return m.vaults_import_source_vault_chrome_passwords();
+				case "no-group":
+					return m.vaults_import_source_vault_no_group();
 				default:
 					return nameCode;
 			}

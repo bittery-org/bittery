@@ -131,6 +131,8 @@ function getProviderDescription(
 			return m.vaults_import_provider_chrome_description();
 		case "firefox":
 			return m.vaults_import_provider_firefox_description();
+		case "keepassxc":
+			return m.vaults_import_provider_keepassxc_description();
 		default:
 			return m.vaults_import_provider_generic_description();
 	}
@@ -149,6 +151,8 @@ function getProviderImageDescription(
 			return m.vaults_import_provider_chrome_image_description();
 		case "firefox":
 			return m.vaults_import_provider_firefox_image_description();
+		case "keepassxc":
+			return m.vaults_import_provider_keepassxc_image_description();
 		default:
 			return m.vaults_import_provider_generic_image_description();
 	}
@@ -264,6 +268,10 @@ function getImportWarningMessage(
 			});
 		case "sync-account-skipped":
 			return m.vaults_import_warning_sync_account_skipped();
+		case "totp-settings-unsupported":
+			return m.vaults_import_warning_totp_settings_unsupported({
+				title: getStringParam(warning.params, "title"),
+			});
 		default:
 			return m.vaults_import_warning_unknown();
 	}
@@ -363,6 +371,8 @@ function getImportErrorMessage(
 			return m.vaults_import_error_bitwarden_attachment_export_unsupported();
 		case "bitwarden-organization-export-unsupported":
 			return m.vaults_import_error_bitwarden_organization_export_unsupported();
+		case "keepassxc-keepass1-export-unsupported":
+			return m.vaults_import_error_keepassxc_keepass1_export_unsupported();
 		case "unsupported-item-provider":
 			return m.vaults_import_error_unsupported_item_provider({
 				providerId: getStringParam(error.params, "providerId"),

@@ -1,0 +1,12 @@
+"Group","Title","Username","Password","URL","Notes","TOTP","Icon","Last Modified","Created"
+"Passwords","Router Admin","admin","adm1n!","192.168.1.1","","","0","2026-07-11T08:15:20Z","2026-07-02T10:04:11Z"
+"Passwords/Work","GitHub","octocat","hunter2","https://github.com","Work account. Recovery codes are in the safe.","otpauth://totp/GitHub:octocat?secret=JBSWY3DPEHPK3PXP&period=30&digits=6&issuer=GitHub","1","2026-07-21T14:32:09Z","2026-07-03T11:20:45Z"
+"Passwords/Work","Jenkins","ci-bot","pa""ss,word","https://ci.example.com","Rotate every quarter.
+Owner: platform team","","0","2026-07-19T07:02:58Z","2026-07-05T16:45:30Z"
+"Passwords/Work","","","","","","","0","2026-07-06T12:00:00Z","2026-07-06T12:00:00Z"
+"Passwords/Work/Servers","db-primary","root","s3cr3t-db","ssh://db.internal.example.com:22","","","0","2026-07-24T18:41:12Z","2026-07-07T09:33:02Z"
+"Passwords/Persönliche Konten","Kontoauszug","jörg.müller@example.de","paßwort-123","https://konto.example.de","Straße 5, „Sparbuch“","","0","2026-07-23T20:11:44Z","2026-07-08T13:52:19Z"
+"Passwords/Persönliche Konten","WLAN Codes","","","","Gast-WLAN: 4711-8150","","0","2026-07-09T06:30:00Z","2026-07-09T06:30:00Z"
+"Passwords/Finance","Broker","trader","broker-pass","https://broker.example.com","","otpauth://totp/Broker:trader?secret=KZXW6ZDPNZSA%3D%3D%3D%3D&period=30&digits=8&issuer=Broker","0","2026-07-25T09:14:07Z","2026-07-10T15:05:55Z"
+"Passwords/Finance","Steam","gamer","steam-pass","https://steamcommunity.com","","otpauth://totp/Steam:gamer?secret=63U2ZWJCP2SIQP4T&period=30&digits=6&issuer=Steam&encoder=steam","0","2026-07-26T11:22:33Z","2026-07-12T08:08:08Z"
+"Passwords/Recycle Bin","Old Forum","olduser","old-pass","https://forum.example.org","Account closed.","","0","2026-07-13T17:47:00Z","2026-07-04T10:10:10Z"
