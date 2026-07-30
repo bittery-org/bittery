@@ -3,6 +3,7 @@ import { bitteryBttrxImportProvider } from "./providers/bittery-bttrx";
 import { bitwardenImportProvider } from "./providers/bitwarden";
 import { chromeImportProvider } from "./providers/chrome";
 import { firefoxImportProvider } from "./providers/firefox";
+import { keepassxcImportProvider } from "./providers/keepassxc";
 import type { ImportProvider, ImportProviderId } from "./types";
 
 const providers: ImportProvider[] = [
@@ -10,6 +11,7 @@ const providers: ImportProvider[] = [
 	bitwardenImportProvider,
 	chromeImportProvider,
 	firefoxImportProvider,
+	keepassxcImportProvider,
 	bitteryBttrxImportProvider,
 ];
 

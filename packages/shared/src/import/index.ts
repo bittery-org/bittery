@@ -17,6 +17,7 @@ export { bitteryBttrxImportProvider } from "./providers/bittery-bttrx";
 export { bitwardenImportProvider } from "./providers/bitwarden";
 export { chromeImportProvider } from "./providers/chrome";
 export { firefoxImportProvider } from "./providers/firefox";
+export { keepassxcImportProvider } from "./providers/keepassxc";
 export type {
 	ImportDecryptedItem,
 	ImportError,

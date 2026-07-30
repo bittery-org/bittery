@@ -1,0 +1,12 @@
+"Group","Title","Username","Password","URL","Notes"
+"Passwords","Router Admin","admin","adm1n!","192.168.1.1",""
+"Passwords/Work","GitHub","octocat","hunter2","https://github.com","Work account. Recovery codes are in the safe."
+"Passwords/Work","Jenkins","ci-bot","pa""ss,word","https://ci.example.com","Rotate every quarter.
+Owner: platform team"
+"Passwords/Work","","","","",""
+"Passwords/Work/Servers","db-primary","root","s3cr3t-db","ssh://db.internal.example.com:22",""
+"Passwords/Persönliche Konten","Kontoauszug","jörg.müller@example.de","paßwort-123","https://konto.example.de","Straße 5, „Sparbuch“"
+"Passwords/Persönliche Konten","WLAN Codes","","","","Gast-WLAN: 4711-8150"
+"Passwords/Finance","Broker","trader","broker-pass","https://broker.example.com",""
+"Passwords/Finance","Steam","gamer","steam-pass","https://steamcommunity.com",""
+"Passwords/Recycle Bin","Old Forum","olduser","old-pass","https://forum.example.org","Account closed."

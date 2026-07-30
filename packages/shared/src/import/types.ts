@@ -9,7 +9,8 @@ export type ImportProviderId =
 	| "bittery-bttrx"
 	| "bitwarden"
 	| "chrome"
-	| "firefox";
+	| "firefox"
+	| "keepassxc";
 
 export type ImportMessageValue = string | number;
 
@@ -25,6 +26,7 @@ export type ImportWarningCode =
 	| "attachments-skipped"
 	| "category-fallback"
 	| "totp-secret-missing"
+	| "totp-settings-unsupported"
 	| "reprompt-not-supported"
 	| "unsupported-item-type"
 	| "passkeys-skipped"
@@ -55,7 +57,8 @@ export type ImportErrorCode =
 	| "csv-unknown-header-variant"
 	| "bitwarden-encrypted-export-unsupported"
 	| "bitwarden-attachment-export-unsupported"
-	| "bitwarden-organization-export-unsupported";
+	| "bitwarden-organization-export-unsupported"
+	| "keepassxc-keepass1-export-unsupported";
 
 export class ImportProviderError extends Error {
 	readonly code: ImportErrorCode;
@@ -81,7 +84,10 @@ export interface ImportError {
  * Providers live in `@bittery/shared` and have no i18n access, so they emit a
  * code and the app layer resolves it to a translated string.
  */
-export type ImportSourceVaultNameCode = "no-folder" | "chrome-passwords";
+export type ImportSourceVaultNameCode =
+	| "no-folder"
+	| "chrome-passwords"
+	| "no-group";
 
 export interface ImportSourceVault {
 	id: string;
