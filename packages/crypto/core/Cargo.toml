@@ -32,7 +32,7 @@ num-traits = "0.2"
 num-integer = "0.1"
 
 # Encoding
-base64 = "0.22"
+base64 = "0.23"
 hex = "0.4"
 ciborium = "0.2"
 

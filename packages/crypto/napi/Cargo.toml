@@ -12,7 +12,7 @@ crate-type = ["cdylib"]
 bittery-crypto-core = { path = "../core/crates/bittery-crypto-core" }
 napi = { version = "3", default-features = false, features = ["napi8"] }
 napi-derive = "3"
-base64 = "0.22"
+base64 = "0.23"
 
 [build-dependencies]
 napi-build = "2.3"
