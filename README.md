@@ -51,7 +51,7 @@ We welcome bug reports, feature ideas, and pull requests. See [CONTRIBUTING.md](
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 20+
+- [Node.js](https://nodejs.org/) 24+
 - [pnpm](https://pnpm.io/) 10+
 - [Rust](https://www.rust-lang.org/tools/install)
 - [Docker](https://www.docker.com/) (for PostgreSQL)

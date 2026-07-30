@@ -25,8 +25,9 @@ rustup target add wasm32-unknown-unknown
 
 ### Node.js/pnpm (for NAPI builds)
 ```bash
-# Ensure Node.js 18+ is installed
-node --version  # Should be >= 18
+# The repo's toolchain targets Node.js 24 (see the README prerequisites).
+# The published @bittery/crypto-napi addon itself still supports Node.js 18+.
+node --version  # Should be >= 24
 
 # Install pnpm globally
 npm install -g pnpm
@@ -163,7 +164,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v2

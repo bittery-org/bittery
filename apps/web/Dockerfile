@@ -65,7 +65,15 @@ COPY --from=js-builder --chown=101:101 /app/apps/web/.generated/nginx.conf /etc/
 COPY --from=js-builder --chown=101:101 /app/apps/web/dist/client /usr/share/nginx/html
 USER 101:101
 
+# Probe 127.0.0.1, never `localhost`. This image ships busybox wget, which only
+# tries the *first* address getaddrinfo returns — for `localhost` that is [::1].
+# nginx listens on IPv4 only here: replacing the packaged default.conf makes
+# /docker-entrypoint.d/10-listen-on-ipv6-by-default.sh skip its patch ("config
+# differs from the packaged version"), so no `listen [::]:8080` is ever added.
+# The result was a container stuck `unhealthy` forever. Adding an IPv6 listener
+# instead would turn a bad health flag into a failed startup wherever the
+# container has no IPv6 stack, so the probe is pinned to IPv4 instead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget -q --spider http://localhost:8080/nginx-health || exit 1
+  CMD wget -q --spider http://127.0.0.1:8080/nginx-health || exit 1
 
 EXPOSE 8080
