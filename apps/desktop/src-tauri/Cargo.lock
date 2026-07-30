@@ -331,7 +331,7 @@ dependencies = [
  "sha1",
  "sha2",
  "subtle",
- "thiserror 1.0.69",
+ "thiserror 2.0.17",
  "unicode-normalization",
  "zeroize",
 ]
