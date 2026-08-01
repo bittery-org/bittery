@@ -100,7 +100,7 @@ export function RpcProvider({ children }: RpcProviderProps) {
 						? activeAccount.accountId
 						: undefined;
 				if (activeAccountId) {
-					await storage.updateStoredSessionMetadata?.(activeAccountId, {
+					await storage.updateStoredSessionMetadata(activeAccountId, {
 						sessionId,
 						expiresAt,
 					});

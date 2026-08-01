@@ -3,7 +3,6 @@
  * Displayed when biometric re-authentication is required
  */
 
-import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
 	AlertCircle,
@@ -21,11 +20,15 @@ import {
 	TouchableOpacity,
 	View,
 } from "react-native";
+import { useBiometricType } from "@/lib/biometric-type";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 import { useBiometricAuth } from "../contexts/biometric-auth-context";
-import { resolveBiometricErrorMessage } from "../lib/biometric-error-message";
-import { type BiometricErrorType, storage } from "../services/storage";
+import {
+	resolveBiometricErrorMessage,
+	resolveMasterPasswordReentryMessage,
+} from "../lib/biometric-error-message";
+import type { BiometricErrorType } from "../services/storage";
 
 interface BiometricAuthModalProps {
 	visible: boolean;
@@ -49,12 +52,8 @@ export function BiometricAuthModal({
 
 	const [isAuthenticating, setIsAuthenticating] = useState(false);
 	const [retryCount, setRetryCount] = useState(0);
-	const biometricTypeQuery = useQuery({
-		queryKey: ["mobile", "biometric-type"],
-		queryFn: () => storage.getBiometricType(),
-		enabled: visible,
-	});
-	const biometricType = biometricTypeQuery.data ?? null;
+	const { label: biometricTypeLabel, token: biometricTypeToken } =
+		useBiometricType({ enabled: visible });
 
 	const handleAuthenticate = useCallback(async () => {
 		setIsAuthenticating(true);
@@ -83,7 +82,7 @@ export function BiometricAuthModal({
 	};
 
 	const getBiometricIcon = () => {
-		if (biometricType === "Face ID") {
+		if (biometricTypeToken === "face") {
 			return <ScanFace size={48} color="#3b82f6" />;
 		}
 		return <Fingerprint size={48} color="#3b82f6" />;
@@ -112,7 +111,11 @@ export function BiometricAuthModal({
 						{m.mob_biometric_modal_password_required_title()}
 					</Text>
 					<Text className="mb-6 text-center text-muted">
-						{m.mob_biometric_modal_password_required_description()}
+						{/* The period comes from storage as a number and is formatted here. */}
+						{resolveMasterPasswordReentryMessage(
+							lastAuthResult?.masterPasswordReentryPeriodMs,
+							m,
+						)}
 					</Text>
 					<TouchableOpacity
 						onPress={handleUsePassword}
@@ -135,7 +138,7 @@ export function BiometricAuthModal({
 					</View>
 					<Text className="mb-2 text-center font-bold text-foreground text-xl">
 						{m.mob_biometric_modal_biometric_required({
-							biometricType: biometricType || "Biometric",
+							biometricType: biometricTypeLabel,
 						})}
 					</Text>
 					<Text className="mb-6 text-center text-muted">
@@ -148,9 +151,10 @@ export function BiometricAuthModal({
 
 		// If there was an error
 		if (lastAuthResult && !lastAuthResult.success) {
-			const errorMessage =
-				lastAuthResult.message ||
-				resolveBiometricErrorMessage(lastAuthResult.error || "unknown", m);
+			// `lastAuthResult.message` is a diagnostic English string (or the raw native
+			// error code the react-native port passes through) and is never displayed; the
+			// copy is derived from `error`, plus the structured re-entry period.
+			const errorMessage = resolveBiometricErrorMessage(lastAuthResult, m);
 
 			return (
 				<>
@@ -204,12 +208,12 @@ export function BiometricAuthModal({
 				</View>
 				<Text className="mb-2 text-center font-bold text-foreground text-xl">
 					{m.mob_biometric_modal_biometric_required({
-						biometricType: biometricType || "Biometric",
+						biometricType: biometricTypeLabel,
 					})}
 				</Text>
 				<Text className="mb-6 text-center text-muted">
 					{m.mob_biometric_modal_use_biometric({
-						biometricType: biometricType || "biometric",
+						biometricType: biometricTypeLabel,
 					})}
 				</Text>
 				<View className="w-full space-y-3">

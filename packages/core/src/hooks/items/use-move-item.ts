@@ -90,6 +90,7 @@ export function useMoveItem() {
 				input.itemId,
 				input.targetVaultId,
 				encryptedData,
+				input.decryptedData,
 			);
 
 			enqueueItemMutation(queue, sourceContext, {

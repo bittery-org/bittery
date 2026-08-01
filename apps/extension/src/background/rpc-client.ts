@@ -64,7 +64,7 @@ export const rpcClient = createSessionRefreshingRpcClient({
 			activeAccount?.type === "single" ? activeAccount.accountId : undefined;
 		const [token, sessionData] = await Promise.all([
 			getAuthToken(),
-			storage.getStoredSessionData?.(accountId) ?? Promise.resolve(null),
+			storage.getStoredSessionData(accountId),
 		]);
 
 		return {
@@ -80,7 +80,7 @@ export const rpcClient = createSessionRefreshingRpcClient({
 			activeAccount?.type === "single" ? activeAccount.accountId : undefined;
 		await storage.storeAuthToken(token, accountId);
 		if (accountId) {
-			await storage.updateStoredSessionMetadata?.(accountId, {
+			await storage.updateStoredSessionMetadata(accountId, {
 				sessionId,
 				expiresAt,
 			});

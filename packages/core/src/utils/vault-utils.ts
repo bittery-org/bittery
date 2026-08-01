@@ -4,7 +4,7 @@
  * Compatibility wrappers around core vault services.
  */
 
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore } from "@bittery/storage";
 import {
 	type RpcVaultClient,
 	refreshVaultKeys as refreshVaultKeysCore,
@@ -15,7 +15,7 @@ import {
  */
 export async function refreshVaultKeys(
 	rpcClient: RpcVaultClient,
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	accountEmail?: string,
 ): Promise<void> {
 	await refreshVaultKeysCore(rpcClient, storage, accountEmail);

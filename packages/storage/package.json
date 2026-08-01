@@ -8,14 +8,17 @@
 		"./types": {
 			"default": "./src/types.ts"
 		},
-		"./adapter": {
-			"default": "./src/adapter.ts"
+		"./tiers": {
+			"default": "./src/tiers.ts"
 		},
 		"./account-id": {
 			"default": "./src/account-id.ts"
 		},
 		"./crypto-provider": {
 			"default": "./src/crypto-provider.ts"
+		},
+		"./testing": {
+			"default": "./src/testing/in-memory-port.ts"
 		},
 		"./adapters/web": {
 			"default": "./src/adapters/web.ts"
@@ -44,7 +47,6 @@
 		"@tauri-apps/api": "^2.0.0",
 		"@tauri-apps/plugin-store": "^2.0.0",
 		"@choochmeque/tauri-plugin-biometry-api": "^0.2.0",
-		"expo-crypto": "^15.0.0",
 		"expo-local-authentication": "^17.0.0",
 		"expo-secure-store": "^15.0.0",
 		"expo-sqlite": "^16.0.0"
@@ -66,9 +68,6 @@
 			"optional": true
 		},
 		"expo-sqlite": {
-			"optional": true
-		},
-		"expo-crypto": {
 			"optional": true
 		}
 	},

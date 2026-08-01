@@ -123,7 +123,7 @@ const rpcClient = createSessionRefreshingRpcClient({
 		const activeAccount = await storage.getActiveAccount();
 		if (activeAccount?.type === "single") {
 			await storage.storeAuthToken(token, activeAccount.accountId);
-			await storage.updateStoredSessionMetadata?.(activeAccount.accountId, {
+			await storage.updateStoredSessionMetadata(activeAccount.accountId, {
 				sessionId,
 				expiresAt,
 			});

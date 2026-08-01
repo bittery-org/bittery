@@ -1,4 +1,3 @@
-import { MASTER_PASSWORD_REENTRY_PERIOD_MS } from "@bittery/storage";
 import { useRouter } from "expo-router";
 import {
 	Button,
@@ -29,6 +28,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert, Platform, ScrollView, Text, View } from "react-native";
 import { Uniwind, useUniwind, withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { useBiometricType } from "@/lib/biometric-type";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 import CredentialProvider from "../../modules/credential-provider";
@@ -59,9 +59,10 @@ export default function SettingsScreen() {
 		useAccount();
 	const { theme } = useUniwind();
 
+	const { label: biometricTypeLabel, token: biometricTypeToken } =
+		useBiometricType();
 	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [biometricEnabled, setBiometricEnabled] = useState(false);
-	const [biometricType, setBiometricType] = useState<string | null>(null);
 	const [biometricDetails, setBiometricDetails] = useState<{
 		hasHardware: boolean;
 		isEnrolled: boolean;
@@ -100,11 +101,6 @@ export default function SettingsScreen() {
 		const available = details.hasHardware && details.isEnrolled;
 		setBiometricAvailable(available);
 
-		if (available) {
-			const type = await storage.getBiometricType();
-			setBiometricType(type);
-		}
-
 		const enabled = await storage.isBiometricEnabled(fallbackAccountId);
 		setBiometricEnabled(enabled);
 
@@ -125,9 +121,13 @@ export default function SettingsScreen() {
 				activeAccount.accountId,
 			);
 			if (sessionData) {
+				// The stored period, not the compiled-in constant: `AccountStore` persists it
+				// globally and applies that value, so reading it back is the only way this
+				// countdown cannot disagree with the policy that actually fires.
+				const periodMs = await storage.getMasterPasswordReentryPeriodMs();
 				const lastEntry =
 					sessionData.lastMasterPasswordEntry || sessionData.createdAt;
-				const nextRequired = lastEntry + MASTER_PASSWORD_REENTRY_PERIOD_MS;
+				const nextRequired = lastEntry + periodMs;
 				const daysRemaining = Math.ceil(
 					(nextRequired - Date.now()) / (24 * 60 * 60 * 1000),
 				);
@@ -140,6 +140,11 @@ export default function SettingsScreen() {
 		loadSettings();
 	}, [loadSettings]);
 
+	/**
+	 * Biometric unlock is presented here as a **device-wide** switch. `AccountStore.setBiometricEnabled`
+	 * is per-account, so the fan-out over every account happens here at the call site, where the
+	 * "this applies to every account on the device" intent is visible and reviewable.
+	 */
 	const handleBiometricToggle = async (value: boolean) => {
 		if (allAccounts.length === 0) return;
 		const fallbackAccountId =
@@ -147,7 +152,8 @@ export default function SettingsScreen() {
 
 		try {
 			if (value) {
-				// Verify biometric before enabling
+				// Verify biometric before enabling. The prompt reason reaches the OS dialog,
+				// so it has to be translated copy from up here.
 				const success = await storage.authenticateWithBiometric(
 					m.mob_settings_biometric_verify_prompt(),
 					fallbackAccountId,
@@ -159,9 +165,9 @@ export default function SettingsScreen() {
 					);
 					return;
 				}
-				await storage.enableBiometric(fallbackAccountId);
-			} else {
-				await storage.disableBiometric(fallbackAccountId);
+			}
+			for (const account of await storage.getAccountsList()) {
+				await storage.setBiometricEnabled(account.accountId, value);
 			}
 			setBiometricEnabled(value);
 		} catch (error) {
@@ -181,15 +187,17 @@ export default function SettingsScreen() {
 				text: option.label,
 				onPress: async () => {
 					if (allAccounts.length === 0) return;
-					await storage.storeAutoLockTimeout(option.value);
+					// Device-wide, for the same reason as the biometric switch above:
+					// `AccountStore` stores the timeout per account, so the fan-out is
+					// spelled out here instead of being hidden below the seam.
+					const accounts = await storage.getAccountsList();
+					for (const account of accounts) {
+						await storage.storeAutoLockTimeout(option.value, account.accountId);
+					}
 					setAutoLockTimeout(option.value);
 
 					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-						const accountsToUpdate = activeAccount
-							? [activeAccount]
-							: allAccounts;
-
-						for (const account of accountsToUpdate) {
+						for (const account of accounts) {
 							const sessionData = await storage.getStoredSessionData(
 								account.accountId,
 							);
@@ -225,12 +233,9 @@ export default function SettingsScreen() {
 	);
 
 	const handleLock = async () => {
-		// Clear React Native session (in-memory cache)
-		if (storage.lockAllAccounts) {
-			await storage.lockAllAccounts();
-		} else {
-			await storage.clearSession();
-		}
+		// Lock, don't sign out: `lockAllAccounts` drops every in-memory master unlock key and
+		// the session-bound secrets but keeps `session_data`, so quick-unlock still works.
+		await storage.lockAllAccounts();
 
 		// IMPORTANT: Clear MUK from native VaultStateManager for autofill security
 		// Without this, autofill will still work even when app is locked!
@@ -424,7 +429,7 @@ export default function SettingsScreen() {
 							className="px-4 py-4"
 						>
 							<View className="mr-4 h-10 w-10 items-center justify-center rounded-lg bg-secondary">
-								{biometricType === "Face ID" ? (
+								{biometricTypeToken === "face" ? (
 									<StyledScanFace
 										size={20}
 										className="text-surface-foreground"
@@ -439,7 +444,7 @@ export default function SettingsScreen() {
 							<View className="flex-1">
 								<Label>
 									{m.mob_settings_biometric_unlock({
-										biometricType: biometricType || "Biometric",
+										biometricType: biometricTypeLabel,
 									})}
 								</Label>
 								<Description>

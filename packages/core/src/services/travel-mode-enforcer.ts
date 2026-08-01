@@ -3,7 +3,7 @@
  * Owns config, purge, and read-filtering keyed by accountId.
  */
 
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { TravelModeConfig, VaultKeyData } from "@bittery/storage/types";
 import {
 	filterItemsByTravelMode,
@@ -17,7 +17,14 @@ import {
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 
 export interface TravelModeEnforcerOptions {
-	storage: IStorageAdapter;
+	/** Account-scoped settings and vault keys. */
+	storage: AccountStore;
+	/**
+	 * The encrypted item/vault cache. A sibling of `storage`, not something it wraps:
+	 * `AccountStore` holds only a `PlatformPort` and deliberately cannot reach records,
+	 * so a purge has to touch both explicitly.
+	 */
+	itemCache: ItemCache;
 	coordinator?: VaultRepositoryCoordinator;
 }
 
@@ -36,8 +43,12 @@ export class TravelModeEnforcer {
 		this.options = { ...this.options, coordinator };
 	}
 
-	get storage(): IStorageAdapter {
+	get storage(): AccountStore {
 		return this.options.storage;
+	}
+
+	get itemCache(): ItemCache {
+		return this.options.itemCache;
 	}
 
 	getConfig(accountId: string): TravelModeConfig {
@@ -79,7 +90,7 @@ export class TravelModeEnforcer {
 	}
 
 	async hydrateFromStorage(accountId: string): Promise<TravelModeConfig> {
-		const cached = (await this.storage.getTravelModeCache?.(accountId)) ?? null;
+		const cached = await this.storage.getTravelModeCache(accountId);
 		if (!cached) {
 			throw new Error(
 				`No verified travel mode policy for account ${accountId}`,
@@ -98,7 +109,7 @@ export class TravelModeEnforcer {
 		accountId: string,
 		config: TravelModeConfig,
 	): Promise<void> {
-		await this.storage.storeTravelModeCache?.(config, accountId);
+		await this.storage.storeTravelModeCache(config, accountId);
 		this.memoryCache.set(accountId, config);
 		this.verifiedAccounts.add(accountId);
 	}
@@ -133,16 +144,18 @@ export class TravelModeEnforcer {
 			await this.storage.storeVaultKeys(filtered, accountId);
 		}
 
-		const cachedItems = await this.storage.getCachedItems?.(accountId);
+		// Item-cache layer. `null` means the account has never synced, so there is
+		// nothing to purge — distinct from `[]`, which means "synced and empty".
+		const cachedItems = await this.itemCache.getCachedItems(accountId);
 		if (cachedItems) {
 			const filtered = cachedItems.filter((i) => !hidden.has(i.vaultId));
-			await this.storage.setCachedItems?.(filtered, accountId);
+			await this.itemCache.setCachedItems(filtered, accountId);
 		}
 
-		const cachedVaults = await this.storage.getCachedVaults?.(accountId);
+		const cachedVaults = await this.itemCache.getCachedVaults(accountId);
 		if (cachedVaults) {
 			const filtered = cachedVaults.filter((v) => !hidden.has(v.id));
-			await this.storage.setCachedVaults?.(filtered, accountId);
+			await this.itemCache.setCachedVaults(filtered, accountId);
 		}
 
 		// In-memory repo layer via coordinator
@@ -282,10 +295,16 @@ export class TravelModeEnforcer {
 	}
 }
 
-let enforcerByStorage = new WeakMap<IStorageAdapter, TravelModeEnforcer>();
+let enforcerByStorage = new WeakMap<AccountStore, TravelModeEnforcer>();
 
+/**
+ * One enforcer per `AccountStore`. `itemCache` is required rather than resolved
+ * lazily: an enforcer that cannot purge the record cache would fail open on the
+ * one layer that actually holds hidden-vault ciphertext.
+ */
 export function getTravelModeEnforcer(
-	storage: IStorageAdapter,
+	storage: AccountStore,
+	itemCache: ItemCache,
 	coordinator?: VaultRepositoryCoordinator,
 ): TravelModeEnforcer {
 	const existing = enforcerByStorage.get(storage);
@@ -295,7 +314,7 @@ export function getTravelModeEnforcer(
 		}
 		return existing;
 	}
-	const created = new TravelModeEnforcer({ storage, coordinator });
+	const created = new TravelModeEnforcer({ storage, itemCache, coordinator });
 	enforcerByStorage.set(storage, created);
 	return created;
 }

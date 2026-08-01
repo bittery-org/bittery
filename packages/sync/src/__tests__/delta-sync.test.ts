@@ -1,11 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { CachedVaultMetadata } from "@bittery/types";
 import { type DeltaSyncClient, performDeltaSync } from "../delta-sync";
-import type { ItemCacheAdapter, SyncEvent } from "../types";
-
-type SyncedVaultKey = NonNullable<
-	Parameters<NonNullable<ItemCacheAdapter["syncVaultKeys"]>>[0]
->[number];
+import type { SyncEvent, SyncItemCache, SyncVaultKeyEntry } from "../types";
 
 function serverVault() {
 	return {
@@ -60,20 +56,21 @@ function event(overrides: Partial<SyncEvent> = {}): SyncEvent {
 }
 
 function recordingCache() {
-	const vaultKeys: SyncedVaultKey[] = [];
+	const vaultKeys: SyncVaultKeyEntry[] = [];
 	const vaults: CachedVaultMetadata[] = [];
 
-	const cache: ItemCacheAdapter = {
-		supportsItemCache: true,
+	const cache: SyncItemCache = {
 		syncVaultKeys: async (keys) => {
 			vaultKeys.push(...keys);
 		},
-		upsertVault: async (vault) => {
+		upsertCachedVault: async (vault) => {
 			vaults.push(vault);
 		},
-		upsertEncrypted: async () => undefined,
-		removeItem: async () => undefined,
-		removeVault: async () => undefined,
+		upsertCachedItem: async () => undefined,
+		removeCachedItem: async () => undefined,
+		removeCachedVault: async () => undefined,
+		clearItemCache: async () => undefined,
+		replaceItemId: () => undefined,
 	};
 
 	return { cache, vaultKeys, vaults };

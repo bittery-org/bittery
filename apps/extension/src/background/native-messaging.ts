@@ -5,7 +5,7 @@
 
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
-import { storage } from "../lib/storage";
+import { itemCache, storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
 import { desktopSync } from "./desktop-sync";
 import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
@@ -125,19 +125,11 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 			// Sync biometric enabled status: if unlock succeeded, biometric must be
 			// enabled on desktop. Only after the binding check, so a stale or
 			// mismatched response never persists state.
-			if (
-				activeAccount.type === "single" &&
-				"updateBiometricEnabled" in storage
-			) {
-				await (
-					storage as {
-						updateBiometricEnabled: (
-							accountId: string,
-							enabled: boolean,
-						) => Promise<void>;
-					}
-				).updateBiometricEnabled(activeAccount.accountId, true);
-			}
+			//
+			// `setBiometricEnabled` is total on `AccountStore` and bypasses the
+			// hardware probe on purpose — this is the sync channel that mirrors the
+			// desktop app's setting onto a platform with no biometric hardware.
+			await storage.setBiometricEnabled(activeAccount.accountId, true);
 
 			// Decode the base64 encrypted session data (it's a JSON-encoded EncryptedData structure)
 			const encryptedSessionJson = atob(responseData.encrypted_session);
@@ -176,7 +168,7 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				token = storedToken;
 			}
 
-			const enforcer = getTravelModeEnforcer(storage);
+			const enforcer = getTravelModeEnforcer(storage, itemCache);
 			const client = await createStoredAccountRpcClient(
 				storage,
 				activeAccount.accountId,
@@ -453,7 +445,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 					await storage.storeAuthToken(accountData.auth_token, accountId);
 				}
 
-				const enforcer = getTravelModeEnforcer(storage);
+				const enforcer = getTravelModeEnforcer(storage, itemCache);
 				const client = await createStoredAccountRpcClient(
 					storage,
 					accountId,

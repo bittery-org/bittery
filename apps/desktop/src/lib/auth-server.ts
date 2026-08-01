@@ -156,13 +156,18 @@ export async function resolveActiveAuthServerUrl(): Promise<string> {
 		return activeServerUrl;
 	}
 
-	const legacyServerUrl = normalizeServerUrl(
-		(await storage.getLegacyServerUrl()) ?? "",
-	);
-	if (legacyServerUrl) {
-		storeActiveServerUrl(legacyServerUrl);
-		rememberServerUrl(legacyServerUrl);
-		return legacyServerUrl;
+	// When nothing is active yet (first paint after a restart, or straight after a
+	// sign-out), fall back to the first account that has a server URL rather than jumping
+	// to the build default.
+	for (const account of await storage.getAccountsList()) {
+		const accountServerUrl = normalizeServerUrl(
+			(await storage.getServerUrl(account.accountId)) ?? "",
+		);
+		if (accountServerUrl) {
+			storeActiveServerUrl(accountServerUrl);
+			rememberServerUrl(accountServerUrl);
+			return accountServerUrl;
+		}
 	}
 
 	const fallback = getFallbackServerUrl();

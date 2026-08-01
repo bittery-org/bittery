@@ -7,7 +7,7 @@ import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
-import { storage } from "./lib/storage";
+import { forgetActiveSession, initializeStorage, storage } from "./lib/storage";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
 
@@ -51,7 +51,10 @@ function handleUnauthorizedError() {
 
 	queryClient.clear();
 
-	storage.clearSession().then(() => {
+	// An expired session is a sign-out: `forgetSession` also drops `session_data`, avoiding
+	// a stale quick-unlock offer. The encrypted item cache goes with it — `AccountStore`
+	// cannot reach it (CONTRACT.md §12.3).
+	forgetActiveSession().then(() => {
 		toast.error(m.toast_auth_session_expired());
 		window.location.href = "/login";
 	});
@@ -101,9 +104,10 @@ const rpcClient = createSessionRefreshingRpcClient({
 	// Resolve at request time — prerender evaluates defaultServerUrl without `window`.
 	getServerUrl: async () => getServerUrl(),
 	getSessionSnapshot: async () => {
+		await initializeStorage();
 		const [token, sessionData] = await Promise.all([
 			storage.getAuthToken(),
-			storage.getStoredSessionData?.() ?? Promise.resolve(null),
+			storage.getStoredSessionData(),
 		]);
 		return {
 			token,
@@ -111,10 +115,18 @@ const rpcClient = createSessionRefreshingRpcClient({
 			expiresAt: sessionData?.serverExpiresAt ?? sessionData?.expiresAt ?? null,
 		};
 	},
-	getRefreshToken: () => storage.getAuthToken(),
+	getRefreshToken: async () => {
+		await initializeStorage();
+		return storage.getAuthToken();
+	},
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-		await storage.storeAuthToken(token);
-		await storage.updateStoredSessionMetadata?.("", {
+		await initializeStorage();
+		const accountId = (await storage.getActiveAccount())?.accountId;
+		if (!accountId) {
+			return;
+		}
+		await storage.storeAuthToken(token, accountId);
+		await storage.updateStoredSessionMetadata(accountId, {
 			sessionId,
 			expiresAt,
 		});

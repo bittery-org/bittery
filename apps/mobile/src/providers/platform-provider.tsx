@@ -2,7 +2,7 @@
  * Mobile Platform Provider
  *
  * Configures the PlatformProvider for the mobile app with:
- * - React Native storage adapter (injected with native crypto)
+ * - `AccountStore` + `ItemCache` over the two React Native ports
  * - Native FFI crypto module (decrypt, encrypt, generateEncryptionKey)
  * - Real-time sync using WebSocket connection to server
  */
@@ -27,7 +27,7 @@ import {
 	validateSecretKey,
 	verifyServerSession,
 } from "../lib/crypto/native-crypto";
-import { storage } from "../services/storage";
+import { itemCache, storage } from "../services/storage";
 
 /**
  * Crypto adapter that satisfies ICrypto interface
@@ -95,7 +95,12 @@ export function MobilePlatformProvider({
 	);
 
 	return (
-		<PlatformProvider storage={storage} crypto={crypto} sync={sync}>
+		<PlatformProvider
+			storage={storage}
+			itemCache={itemCache}
+			crypto={crypto}
+			sync={sync}
+		>
 			{children}
 		</PlatformProvider>
 	);

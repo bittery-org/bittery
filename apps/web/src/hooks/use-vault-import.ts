@@ -16,7 +16,7 @@ import {
 import { useRPCClient } from "@bittery/shared/rpc";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useClientId, useQueryInvalidator } from "@/providers/sync-provider";
@@ -442,7 +442,7 @@ export function useVaultImport() {
 					return cachedUserId;
 				}
 
-				const sessionData = await storage.getStoredSessionData?.(accountId);
+				const sessionData = await storage.getStoredSessionData(accountId);
 				const userId =
 					sessionData?.userId ?? (await storage.getActiveAccountUserId());
 				if (!userId) {
@@ -736,8 +736,11 @@ export function useVaultImport() {
 					currentVaultName: undefined,
 				}));
 
-				if (storage.clearItemCache) {
-					await storage.clearItemCache();
+				// An import can target several accounts, and `ItemCache` is namespaced
+				// per account — omitting the id would clear the literal `"default"`
+				// collection and leave every real account's stale ciphertext in place.
+				for (const account of await storage.getAccountsList()) {
+					await itemCache.clearItemCache(account.accountId);
 				}
 
 				const { accountsInfo } = await core.accounts.resolveAccounts();

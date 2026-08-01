@@ -23,7 +23,7 @@ import {
 	setActiveAuthServerUrl,
 	subscribeActiveAuthServerUrl,
 } from "@/lib/auth-server";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface LoginSearchParams {
@@ -63,6 +63,7 @@ export const Route = createFileRoute("/login")({
 		if (sessionValid) {
 			const restored = await getAccountSessionManager({
 				storage,
+				itemCache,
 			}).unlockAccount(activeAccount.accountId, true);
 			if (restored) {
 				throw redirect({ to: "/vault" });

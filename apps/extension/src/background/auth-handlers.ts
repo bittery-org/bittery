@@ -11,14 +11,14 @@ import {
 	storeLoginSession,
 	storeUnlockSession,
 } from "@bittery/core";
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import { cryptoAdapter } from "../lib/crypto-adapter";
-import { storage } from "../lib/storage";
+import { itemCache, storage } from "../lib/storage";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
+import { restoreUnlockedSessions } from "./services/session-restore";
 import {
 	getAutoLockTimeoutCached,
 	getLastActivityTimestamp,
@@ -62,7 +62,7 @@ export async function handleLogin(payload: {
 	);
 
 	// Store session data using shared utility
-	await storeLoginSession(result, secretKey, storage, email, {
+	await storeLoginSession(result, secretKey, storage, itemCache, email, {
 		serverUrl: DEFAULT_SERVER_URL,
 	});
 
@@ -110,9 +110,13 @@ export async function handleQuickUnlock(payload: {
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(result, storage, activeAccount.accountId, {
-		travelModeRpcClient: rpcClient,
-	});
+	await storeUnlockSession(
+		result,
+		storage,
+		itemCache,
+		activeAccount.accountId,
+		{ travelModeRpcClient: rpcClient },
+	);
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
 	if (result.masterUnlockKey) {
@@ -136,10 +140,13 @@ export async function handleCheckAuth(): Promise<MessageResponse> {
 	// This handles the case where the first account is added but not set as active
 	await ensureActiveAccountSet();
 
-	// Try to restore sessions from storage if not already unlocked
-	// This handles browser restart where in-memory MUKs are cleared
+	// Try to restore sessions from storage if not already unlocked.
+	//
+	// The service-worker startup routine already does this once per wake
+	// (`restoreUnlockedSessions`); this covers the case where the worker stayed alive
+	// through a lock and the popup is asking again.
 	if (localAuthenticated && !isUnlocked()) {
-		await tryRestoreAllSessions();
+		await restoreUnlockedSessions();
 	}
 
 	const desktopUnlocked = await isDesktopUnlockedNow();
@@ -185,7 +192,7 @@ async function ensureActiveAccountSet(): Promise<void> {
 			});
 		} else {
 			// Multiple accounts - check if any are unlocked
-			const unlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
+			const unlockedAccountIds = await storage.getUnlockedAccounts();
 
 			if (unlockedAccountIds.length >= 1) {
 				// One or more unlocked - use the first unlocked account as active
@@ -211,54 +218,26 @@ async function ensureActiveAccountSet(): Promise<void> {
 }
 
 /**
- * Try to restore all account sessions from encrypted storage
- * Called on startup/auth check to restore sessions after browser restart
- */
-async function tryRestoreAllSessions(): Promise<void> {
-	try {
-		const accounts = await storage.getAccountsList();
-		if (accounts.length === 0) return;
-
-		const restoredAccountIds: string[] = [];
-
-		// Try to restore each account's session
-		for (const account of accounts) {
-			try {
-				const restored = await getAccountSessionManager({
-					storage,
-				}).unlockAccount(account.accountId, false);
-				if (restored) {
-					restoredAccountIds.push(account.accountId);
-				}
-			} catch (error) {
-				console.error(
-					`[Auth] Failed to restore session for ${account.email}:`,
-					error,
-				);
-			}
-		}
-
-		// If we restored any sessions, set the session manager's global MUK
-		// (just a sentinel value indicating "at least one account is unlocked")
-		if (restoredAccountIds.length > 0) {
-			// Update activity timestamp FIRST to prevent immediate auto-lock
-			await updateActivity();
-
-			const muk = await storage.getMasterUnlockKey(restoredAccountIds[0]);
-			if (muk) {
-				setMasterUnlockKey(muk);
-			}
-		}
-	} catch (error) {
-		console.error("[Auth] Failed to restore sessions:", error);
-	}
-}
-
-/**
  * Handle CAN_QUICK_UNLOCK message - Check if quick unlock is available
+ *
+ * Deliberately NOT `storage.canQuickUnlock()`, which additionally requires unexpired
+ * `session_data`. Quick unlock does not need it: `performSRPUnlock` re-authenticates against
+ * the server and re-issues both the token and the vault keys, so everything it consumes —
+ * the accounts list, the stored `secret_key` and the pinned KDF profile — is device-bound
+ * and survives a browser restart. The honest question is "can we re-derive?", and that is
+ * what this asks.
  */
 export async function handleCanQuickUnlock(): Promise<MessageResponse> {
-	const canQuickUnlock = await storage.canQuickUnlock();
+	const activeAccount = await storage.getActiveAccount();
+	if (!activeAccount) {
+		return { success: true, canQuickUnlock: false };
+	}
+
+	const { accountId } = activeAccount;
+	const canQuickUnlock =
+		(await storage.hasStoredSecretKey(accountId)) &&
+		(await storage.getPinnedKdfProfile(accountId)) !== null;
+
 	return { success: true, canQuickUnlock };
 }
 
@@ -291,11 +270,26 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 }
 
 /**
- * Handle LOGOUT message - Clear session and lock
+ * Handle LOGOUT message - Sign out of the active account and lock
+ *
+ * `forgetSession`, not `clearSession`: the latter only locks and deliberately keeps
+ * `session_data` so quick-unlock still works. Signing out has to destroy that too.
+ *
+ * `AccountStore` sits on a `PlatformPort` and cannot reach the record-backed cache, so the
+ * encrypted item cache is dropped from here (CONTRACT.md §12.3). Leaving it behind after a
+ * sign-out is a real leak.
  */
 export async function handleLogout(): Promise<MessageResponse> {
-	await storage.clearSession();
-	lock();
+	const accountId = (await storage.getActiveAccount())?.accountId;
+	await storage.forgetSession(accountId);
+	if (accountId) {
+		await itemCache.clearItemCache(accountId);
+	}
+	// `lock()` refuses while the desktop app owns the lock state; that is not a reason to
+	// fail the sign-out.
+	await lock().catch((error) => {
+		console.warn("[Auth] Lock during logout deferred to desktop app:", error);
+	});
 	return { success: true };
 }
 
@@ -384,9 +378,7 @@ export async function handleQuickUnlockAll(payload: {
 	for (const account of accounts) {
 		try {
 			// Check if account has stored secret key
-			const hasSecretKey = await storage.hasStoredSecretKey?.(
-				account.accountId,
-			);
+			const hasSecretKey = await storage.hasStoredSecretKey(account.accountId);
 			if (!hasSecretKey) {
 				failed.push(account.accountId);
 				continue;
@@ -400,7 +392,7 @@ export async function handleQuickUnlockAll(payload: {
 
 			// Store unlock session data
 			const accountRpcClient = await getAccountRpcClient(account.accountId);
-			await storeUnlockSession(result, storage, account.accountId, {
+			await storeUnlockSession(result, storage, itemCache, account.accountId, {
 				travelModeRpcClient: accountRpcClient,
 			});
 

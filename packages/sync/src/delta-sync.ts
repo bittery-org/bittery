@@ -14,7 +14,7 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 } from "@bittery/types";
-import type { ItemCacheAdapter, SyncEvent } from "./types";
+import type { SyncEvent, SyncItemCache } from "./types";
 
 /**
  * Minimal tRPC client interface required for delta sync operations.
@@ -73,7 +73,7 @@ export interface DeltaSyncClient {
  */
 export async function performDeltaSync(
 	rpcClient: DeltaSyncClient,
-	cache: ItemCacheAdapter,
+	cache: SyncItemCache,
 	event: SyncEvent,
 	accountScope?: string,
 	serverUrl?: string,
@@ -85,43 +85,19 @@ export async function performDeltaSync(
 
 	const itemAccountEmail = accountEmail ?? accountScope;
 
-	const upsertItem = async (item: CachedEncryptedItem) => {
-		if (cache.upsertEncrypted) {
-			await cache.upsertEncrypted(item, accountScope);
-			return;
-		}
-		await cache.upsertCachedItem?.(item, accountScope);
-	};
+	const upsertItem = (item: CachedEncryptedItem) =>
+		cache.upsertCachedItem(item, accountScope);
 
-	const removeItem = async (itemId: string) => {
-		if (cache.removeItem) {
-			await cache.removeItem(itemId, accountScope);
-			return;
-		}
-		await cache.removeCachedItem?.(itemId, accountScope);
-	};
+	const removeItem = (itemId: string) =>
+		cache.removeCachedItem(itemId, accountScope);
 
-	const upsertVault = async (vault: CachedVaultMetadata) => {
-		if (cache.upsertVault) {
-			await cache.upsertVault(vault, accountScope);
-			return;
-		}
-		await cache.upsertCachedVault?.(vault, accountScope);
-	};
+	const upsertVault = (vault: CachedVaultMetadata) =>
+		cache.upsertCachedVault(vault, accountScope);
 
-	const removeVault = async (vaultId: string) => {
-		if (cache.removeVault) {
-			await cache.removeVault(vaultId, accountScope);
-			return;
-		}
-		await cache.removeCachedVault?.(vaultId, accountScope);
-	};
+	const removeVault = (vaultId: string) =>
+		cache.removeCachedVault(vaultId, accountScope);
 
 	const syncVaultKeysFromServer = async () => {
-		if (!cache.syncVaultKeys) {
-			return;
-		}
-
 		const vaults = await rpcClient.vault.list.query();
 		await cache.syncVaultKeys(vaults.map(toVaultKeyEntry), accountScope);
 	};

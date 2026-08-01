@@ -3,8 +3,8 @@ import {
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
 import type { DecryptedItem } from "@bittery/shared/types";
+import type { AccountStore } from "@bittery/storage";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
 
@@ -45,13 +45,13 @@ function arrayBufferToBase64(buffer: Uint8Array): string {
 }
 
 interface ShareServiceDeps {
-	storage: IStorageAdapter;
+	storage: AccountStore;
 	crypto: ICrypto;
 	accounts: AccountResolver;
 }
 
 export class ShareService {
-	private readonly storage: IStorageAdapter;
+	private readonly storage: AccountStore;
 	private readonly crypto: ICrypto;
 	private readonly accounts: AccountResolver;
 

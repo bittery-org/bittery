@@ -177,44 +177,57 @@ export interface SyncManagerOptions {
 }
 
 /**
- * Adapter interface for item cache operations (subset of IStorageAdapter)
- * Used by delta sync to update local cache on incoming events
+ * A vault key as delta sync hands it back after refreshing from the server.
+ * Structurally identical to `VaultKeyData` in `@bittery/storage/types`; restated
+ * here because `packages/sync` deliberately does not depend on storage.
+ */
+export interface SyncVaultKeyEntry {
+	vaultId: string;
+	vaultName: string;
+	vaultType: "personal" | "team";
+	vaultIcon?: string | null;
+	vaultImageUrl?: string | null;
+	encryptedVaultKey: string;
+	role: "owner" | "admin" | "member" | "read-only";
+}
+
+/**
+ * The encrypted-blob cache, as sync sees it. Names match `ItemCache`
+ * (`packages/storage/src/item-cache.ts`), which satisfies this interface structurally.
+ *
+ * `accountId` is optional in the *signature* only because `ItemCache` allows omitting it
+ * (falling back to the `"default"` account segment). Every caller in this repo passes an
+ * explicit id; omitting it silently reads and writes the wrong collection.
  */
 export interface ItemCacheAdapter {
-	supportsItemCache: boolean;
-	upsertEncrypted?(
+	upsertCachedItem(
 		item: import("@bittery/types").CachedEncryptedItem,
-		email?: string,
+		accountId?: string,
 	): Promise<void>;
-	removeItem?(itemId: string, email?: string): Promise<void>;
-	upsertVault?(
+	removeCachedItem(itemId: string, accountId?: string): Promise<void>;
+	upsertCachedVault(
 		vault: import("@bittery/types").CachedVaultMetadata,
-		email?: string,
+		accountId?: string,
 	): Promise<void>;
-	removeVault?(vaultId: string, email?: string): Promise<void>;
-	upsertCachedItem?(
-		item: import("@bittery/types").CachedEncryptedItem,
-		email?: string,
+	removeCachedVault(vaultId: string, accountId?: string): Promise<void>;
+	clearItemCache(accountId?: string): Promise<void>;
+}
+
+/**
+ * What delta sync and the orchestrator actually drive: an item cache that also owns
+ * vault keys and optimistic-id reconciliation.
+ *
+ * Those two are genuinely NOT `ItemCache` methods and never will be — `ItemCache` stores
+ * opaque encrypted blobs and knows nothing about key wrapping or temp ids. In this repo
+ * the implementer is `VaultRepositoryCoordinator` (and `VaultRepository`), which sits
+ * above both the cache and the crypto.
+ */
+export interface SyncItemCache extends ItemCacheAdapter {
+	syncVaultKeys(
+		vaultKeys: SyncVaultKeyEntry[],
+		accountId?: string,
 	): Promise<void>;
-	removeCachedItem?(itemId: string, email?: string): Promise<void>;
-	upsertCachedVault?(
-		vault: import("@bittery/types").CachedVaultMetadata,
-		email?: string,
-	): Promise<void>;
-	removeCachedVault?(vaultId: string, email?: string): Promise<void>;
-	syncVaultKeys?(
-		vaultKeys: Array<{
-			vaultId: string;
-			vaultName: string;
-			vaultType: "personal" | "team";
-			vaultIcon?: string | null;
-			vaultImageUrl?: string | null;
-			encryptedVaultKey: string;
-			role: "owner" | "admin" | "member" | "read-only";
-		}>,
-		email?: string,
-	): Promise<void>;
-	clearItemCache?(email?: string): Promise<void>;
+	replaceItemId(tempId: string, realId: string, accountId?: string): void;
 }
 
 /**

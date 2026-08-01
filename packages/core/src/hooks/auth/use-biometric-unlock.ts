@@ -7,7 +7,10 @@
 
 import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
-import { usePlatformStorage } from "../../context/platform-context";
+import {
+	usePlatformItemCache,
+	usePlatformStorage,
+} from "../../context/platform-context";
 import { createStoredAccountRpcClient } from "../../services/rpc-client";
 import { getTravelModeEnforcer } from "../../services/travel-mode-enforcer";
 
@@ -89,13 +92,17 @@ export function useBiometricUnlock(
 	BiometricUnlockInput
 > {
 	const storage = usePlatformStorage();
+	const itemCache = usePlatformItemCache();
 
 	const verifyTravelMode = async (accountId: string): Promise<void> => {
 		const client = await createStoredAccountRpcClient(storage, accountId).catch(
 			() => null,
 		);
 		try {
-			await getTravelModeEnforcer(storage).verifyForUnlock(accountId, client);
+			await getTravelModeEnforcer(storage, itemCache).verifyForUnlock(
+				accountId,
+				client,
+			);
 		} catch {
 			await storage.clearSession(accountId);
 			throw {
@@ -115,76 +122,55 @@ export function useBiometricUnlock(
 				} as BiometricUnlockError;
 			}
 
-			// Check if biometric is supported
-			if (!storage.supportsBiometric) {
+			if (!(await storage.isBiometricAvailable())) {
 				throw {
 					type: "not_available",
-					message: "Biometric authentication is not supported on this platform",
+					message: "Biometric authentication is not available on this device",
 				} as BiometricUnlockError;
 			}
 
 			// Check if master password re-entry is required by policy
 			// This check happens before biometric auth for better UX
-			if (storage.isMasterPasswordReentryRequired) {
-				const requiresReentry =
-					await storage.isMasterPasswordReentryRequired(accountId);
-				if (requiresReentry) {
-					throw {
-						type: "master_password_required",
-						message:
-							"For security, please enter your master password. This is required periodically based on your settings.",
-					} as BiometricUnlockError;
-				}
+			if (await storage.isMasterPasswordReentryRequired(accountId)) {
+				throw {
+					type: "master_password_required",
+					message:
+						"For security, please enter your master password. This is required periodically based on your settings.",
+				} as BiometricUnlockError;
 			}
 
-			// Use enhanced biometric auth if available for better error handling
-			if (storage.authenticateWithBiometricEnhanced) {
-				const result: BiometricAuthResult =
-					await storage.authenticateWithBiometricEnhanced(
-						options.promptMessage ?? "Unlock Bittery",
-						accountId,
-					);
+			const result: BiometricAuthResult =
+				await storage.authenticateWithBiometricEnhanced(
+					options.promptMessage ?? "Unlock Bittery",
+					accountId,
+				);
 
-				if (!result.success) {
-					throw {
-						type: result.error ?? "unknown",
-						message: result.message ?? "Biometric authentication failed",
-					} as BiometricUnlockError;
-				}
-
-				// Now try to restore the MUK using biometric unlock
-				if (storage.unlockWithBiometric) {
-					const unlocked = await storage.unlockWithBiometric(accountId);
-					if (!unlocked) {
-						throw {
-							type: "authentication_failed",
-							message: "Failed to unlock vault after biometric authentication",
-						} as BiometricUnlockError;
-					}
-				}
-				await verifyTravelMode(accountId);
-
-				return { success: true };
+			if (!result.success) {
+				throw {
+					type: result.error ?? "unknown",
+					message: result.message ?? "Biometric authentication failed",
+				} as BiometricUnlockError;
 			}
 
-			// Fallback to simple biometric unlock
-			if (storage.unlockWithBiometric) {
-				const success = await storage.unlockWithBiometric(accountId);
-				if (!success) {
-					throw {
-						type: "authentication_failed",
-						message: "Biometric unlock failed",
-					} as BiometricUnlockError;
-				}
-				await verifyTravelMode(accountId);
-				return { success: true };
+			// Now restore the MUK using biometric unlock. The prompt normally does not
+			// re-appear here (the call above just refreshed the biometric grace window), but
+			// the reason is threaded through anyway: if it ever does appear, the OS must not
+			// show `AccountStore`'s English fallback in place of the caller's translated
+			// prompt.
+			const unlocked = await storage.unlockWithBiometric(
+				accountId,
+				options.promptMessage,
+			);
+			if (!unlocked) {
+				throw {
+					type: "authentication_failed",
+					message: "Failed to unlock vault after biometric authentication",
+				} as BiometricUnlockError;
 			}
 
-			// No biometric unlock method available
-			throw {
-				type: "not_available",
-				message: "Biometric unlock is not available",
-			} as BiometricUnlockError;
+			await verifyTravelMode(accountId);
+
+			return { success: true };
 		},
 		onSuccess: () => {
 			options.onSuccess?.();

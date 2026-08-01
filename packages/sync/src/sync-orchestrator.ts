@@ -4,21 +4,17 @@ import type { OutboundQueue, OutboundQueueClient } from "./outbound-queue";
 import { createSyncManager, type SyncManager } from "./sync-manager";
 import type {
 	ConnectionStatus,
-	ItemCacheAdapter,
 	SessionRevokedControlPayload,
 	SyncEvent,
+	SyncItemCache,
 	SyncManagerOptions,
 	SyncStatus,
 } from "./types";
 
-interface MutableItemCacheAdapter extends ItemCacheAdapter {
-	replaceItemId?: (tempId: string, realId: string, accountId?: string) => void;
-}
-
 export interface SyncOrchestratorOptions {
 	syncManager: Omit<SyncManagerOptions, "onStatusChange">;
 	rpcClient: DeltaSyncClient & CatchUpClient;
-	itemCache: MutableItemCacheAdapter;
+	itemCache: SyncItemCache;
 	outboundQueue: OutboundQueue;
 	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
@@ -182,7 +178,6 @@ export class SyncOrchestrator {
 		try {
 			const cursor = await this.syncManager.getStoredLastSyncCursor();
 
-			let fullRefreshHandled = false;
 			const result = await runCatchUp({
 				client: this.options.rpcClient,
 				initialCursor: cursor ?? { id: "" },
@@ -193,21 +188,11 @@ export class SyncOrchestrator {
 					await this.applyEvent(event);
 				},
 				onRequiresFullRefresh: async () => {
-					if (!this.options.itemCache.clearItemCache) {
-						return;
-					}
 					await this.options.itemCache.clearItemCache(
 						this.getDeltaSyncAccountScope(),
 					);
-					fullRefreshHandled = true;
 				},
 			});
-
-			if (result.requiresFullRefresh && !fullRefreshHandled) {
-				throw new Error(
-					"Catch-up requested full refresh but cache adapter could not clear local state",
-				);
-			}
 
 			await this.syncManager.setStoredLastSyncCursor(result.cursor);
 		} finally {
@@ -231,7 +216,7 @@ export class SyncOrchestrator {
 			});
 
 			for (const mapping of this.options.outboundQueue.consumeTempIdMappings()) {
-				this.options.itemCache.replaceItemId?.(
+				this.options.itemCache.replaceItemId(
 					mapping.tempId,
 					mapping.realId,
 					mapping.accountId,

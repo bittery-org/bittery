@@ -34,7 +34,7 @@ import {
 	normalizeEntitlements,
 	normalizeTeamRole,
 } from "@/lib/rpc-normalizers";
-import { storage } from "@/lib/storage";
+import { clearActiveAccountData } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
@@ -76,7 +76,7 @@ function UserNav() {
 		: "??";
 
 	const handleLogout = async () => {
-		await storage.clearAllStoredData();
+		await clearActiveAccountData();
 		queryClient.clear();
 		navigate({ to: "/login" });
 	};

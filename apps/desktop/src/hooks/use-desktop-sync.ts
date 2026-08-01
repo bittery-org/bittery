@@ -20,15 +20,21 @@ import {
 	invalidateDesktopAccountSession,
 	isUnauthorizedRpcError,
 } from "@/lib/session-invalidation";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import {
 	getDesktopSyncStore,
 	getOrCreateDesktopSyncClientId,
 } from "@/lib/sync-client-id";
 import * as tauriCrypto from "@/lib/tauri-crypto";
 
+/**
+ * `accountId` is deliberately non-nullable: it becomes `SyncSource.itemCacheAccountId`, and
+ * a `null` there silently routes every cached item and vault into `ItemCache`'s literal
+ * `"default"` collection instead of the account's own (CONTRACT.md §12.2). Desktop always
+ * has a real accountId — every account-scoped value it reads is keyed by one.
+ */
 interface SyncConnectionContext {
-	accountId: string | null;
+	accountId: string;
 	email: string | null;
 	serverUrl: string;
 	rpcClient: SyncSource["rpcClient"];
@@ -94,30 +100,10 @@ async function resolveDesktopSyncContexts(
 		}
 	}
 
-	if (contexts.length > 0) {
-		return contexts;
-	}
-
-	const [fallbackToken, fallbackUrl] = await Promise.all([
-		storage.getAuthToken(),
-		storage.getServerUrl(),
-	]);
-	if (fallbackToken && fallbackUrl) {
-		return [
-			{
-				accountId: null,
-				email: null,
-				serverUrl: fallbackUrl,
-				rpcClient: createAccountRpcClient(
-					fallbackToken,
-					fallbackUrl,
-					clientId,
-				) as unknown as SyncSource["rpcClient"],
-			},
-		];
-	}
-
-	return [];
+	// No account-less fallback: `storage.getAuthToken()` / `getServerUrl()` without an
+	// accountId resolve the *active* account, which is exactly the account the loop above
+	// already tried — and would hand the sync orchestrator a `null` itemCacheAccountId.
+	return contexts;
 }
 
 /**
@@ -356,7 +342,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const vaultCoordinator = useMemo(
-		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
+		() => getOrCreateVaultRepositoryCoordinator(crypto, storage, itemCache),
 		[],
 	);
 
@@ -379,6 +365,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				event,
 				accountId,
 				storage,
+				itemCache,
 				vaultCoordinator,
 				{
 					rpcClient: rpcClient as unknown as RpcVaultClient,
@@ -392,10 +379,9 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	const syncSources = useMemo<SyncSource[]>(
 		() =>
 			syncContexts.map((context) => ({
-				id: context.accountId ?? "legacy",
+				id: context.accountId,
 				serverUrl: context.serverUrl,
-				getAuthToken: () =>
-					storage.getAuthToken(context.accountId ?? undefined),
+				getAuthToken: () => storage.getAuthToken(context.accountId),
 				rpcClient: context.rpcClient,
 				itemCacheAccountId: context.accountId,
 				itemCacheAccountEmail: context.email,

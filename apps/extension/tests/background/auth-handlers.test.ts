@@ -43,6 +43,10 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 			return new Uint8Array([9]);
 		},
 	},
+	// Sibling of `storage`; the handlers now sequence both (CONTRACT.md §12.3).
+	itemCache: {
+		clearItemCache: async () => {},
+	},
 }));
 
 mock.module(path.join(libDir, "crypto-adapter.ts"), () => ({

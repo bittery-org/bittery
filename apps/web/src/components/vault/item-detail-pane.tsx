@@ -18,6 +18,7 @@ import {
 } from "@bittery/ui";
 import {
 	IconArrowLeft as ArrowLeft,
+	IconArrowLeftRight as ArrowLeftRight,
 	IconEllipsis as Dots,
 	IconHistory as History,
 	IconKey as Key,
@@ -28,6 +29,7 @@ import {
 } from "@bittery/ui/icons";
 import { type ReactNode, useCallback, useState } from "react";
 import { Favicon } from "@/components/vault/favicon";
+import { MoveItemDialog } from "@/components/vault/move-item-dialog";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function handleDownloadedFile(bytes: Uint8Array, fileName: string) {
@@ -84,6 +86,7 @@ export function ItemDetailPane({
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);
 	const [isShareHistoryOpen, setIsShareHistoryOpen] = useState(false);
 	const [isPasswordHistoryOpen, setIsPasswordHistoryOpen] = useState(false);
+	const [isMoveDialogOpen, setIsMoveDialogOpen] = useState(false);
 	const [isUpdatingTags, setIsUpdatingTags] = useState(false);
 
 	const handleTagsChange = useCallback(
@@ -206,6 +209,12 @@ export function ItemDetailPane({
 										</DropdownMenuItem>
 									)}{" "}
 									{canWriteItems && (
+										<DropdownMenuItem onClick={() => setIsMoveDialogOpen(true)}>
+											<ArrowLeftRight className="h-4 w-4" />
+											{m.vaults_detail_items_move_dialog_action_open()}
+										</DropdownMenuItem>
+									)}
+									{canWriteItems && (
 										<>
 											<DropdownMenuSeparator />
 											<DropdownMenuItem
@@ -264,6 +273,12 @@ export function ItemDetailPane({
 						itemId={selectedItem.id}
 						open={isShareHistoryOpen}
 						onOpenChange={setIsShareHistoryOpen}
+					/>
+					<MoveItemDialog
+						open={isMoveDialogOpen}
+						onOpenChange={setIsMoveDialogOpen}
+						item={selectedItem}
+						currentVaultId={selectedItem.vaultId}
 					/>
 					{selectedItem.category === "login" && (
 						<PasswordHistoryDialog

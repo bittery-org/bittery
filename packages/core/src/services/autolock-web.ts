@@ -7,7 +7,7 @@
  * - Event listeners for user activity tracking
  */
 
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore } from "@bittery/storage";
 import type { IAutolockService } from "@bittery/types";
 
 /**
@@ -30,7 +30,7 @@ const ACTIVITY_EVENTS = [
  * @returns IAutolockService instance
  */
 export function createWebAutolockService(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 ): IAutolockService {
 	let timeoutId: ReturnType<typeof setTimeout> | null = null;
 	let lastActivityTime = Date.now();

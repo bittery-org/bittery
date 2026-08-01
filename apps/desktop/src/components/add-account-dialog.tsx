@@ -32,16 +32,18 @@ export function AddAccountDialog({
 	open,
 	onOpenChange,
 }: AddAccountDialogProps) {
-	const legacyServerUrlQuery = useQuery({
-		queryKey: ["desktop", "legacy-server-url"],
-		queryFn: () => storage.getLegacyServerUrl(),
+	// Prefill the new account's form with the active account's server, which is what a
+	// second account on the same server needs.
+	const activeServerUrlQuery = useQuery({
+		queryKey: ["desktop", "active-account-server-url"],
+		queryFn: () => storage.getServerUrl(),
 		enabled: open,
 	});
 	const fallbackServerUrl =
 		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
 		"http://localhost:3000";
 	const initialServerUrl =
-		normalizeServerUrl(legacyServerUrlQuery.data ?? "") ?? fallbackServerUrl;
+		normalizeServerUrl(activeServerUrlQuery.data ?? "") ?? fallbackServerUrl;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>

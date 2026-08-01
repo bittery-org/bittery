@@ -4,8 +4,8 @@ import {
 	type ServerVaultListEntry,
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
+import type { AccountStore } from "@bittery/storage";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
 
@@ -67,7 +67,7 @@ export type TRPCVaultClient = RpcVaultClient;
  */
 export async function refreshVaultKeys(
 	rpcClient: RpcVaultClient,
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	accountId?: string,
 ): Promise<void> {
 	const vaultList = await rpcClient.vault.list.query();
@@ -75,13 +75,13 @@ export async function refreshVaultKeys(
 }
 
 interface VaultServiceDeps {
-	storage: IStorageAdapter;
+	storage: AccountStore;
 	crypto: ICrypto;
 	accounts: AccountResolver;
 }
 
 export class VaultService {
-	private readonly storage: IStorageAdapter;
+	private readonly storage: AccountStore;
 	private readonly crypto: ICrypto;
 	private readonly accounts: AccountResolver;
 

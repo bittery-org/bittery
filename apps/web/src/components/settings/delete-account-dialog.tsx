@@ -17,7 +17,7 @@ import { IconTrash as Trash2 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { storage } from "@/lib/storage";
+import { clearActiveAccountData } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
@@ -33,7 +33,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		mutationFn: (input: { confirmEmail: string }) =>
 			rpcClient.auth.deleteAccount.mutate(input),
 		onSuccess: async () => {
-			await storage.clearAllStoredData();
+			await clearActiveAccountData();
 			toast.success(m.settings_delete_account_dialog_toast_deleted());
 			navigate({ to: "/" });
 		},

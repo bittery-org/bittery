@@ -1,1761 +1,636 @@
 /**
- * React Native Storage Adapter with Biometric Authentication
- * Uses expo-secure-store and expo-sqlite for storage, expo-local-authentication for biometrics
+ * React Native mobile adapter — a pure mapping of the two ports onto `expo-secure-store`,
+ * `expo-sqlite` and `expo-local-authentication`.
+ *
+ * There is no policy in this file. No JSON, no encryption, no accountId, no expiry, no
+ * knowledge of the tier table, and — deliberately — no in-memory cache. Every primitive
+ * takes a string and returns `string | null`. All of that policy lives in `AccountStore` /
+ * `ItemCache`.
+ *
+ * | primitive              | backing store                                          |
+ * |------------------------|--------------------------------------------------------|
+ * | `secret*`              | `expo-secure-store`, chunked (see below)               |
+ * | `kv*` scope `device`   | sqlite `kv_store`, key as given                        |
+ * | `kv*` scope `session`  | sqlite `kv_store`, key under the `session:` namespace  |
+ * | records                | sqlite `records(collection, id, value)` — real O(1)    |
+ * | biometric              | `expo-local-authentication`                            |
+ *
+ * `sessionSurvivesRestart` is `true`: killing and relaunching the app does not end the
+ * user's session, so `deriveScope` never asks this port for `"session"` in production and
+ * every session-bound secret (`jwt_token`, `vault_keys`, `encrypted_private_key`) derives
+ * scope `"device"` and lands in the real secure store. The `session:` namespace exists only
+ * so the port is **total** — `kvGet(key, "session")` must be answerable, and it must not
+ * alias the device scope, or the two scopes would silently share a value.
+ *
+ * ## Chunking, not demotion
+ *
+ * Tier decides placement; size never does. `expo-secure-store` genuinely fails above
+ * ~2048 bytes on Android, so an oversized secret is split into chunks and reassembled on
+ * read — see `secretSet` / `secretGet` / `secretDelete` below — rather than falling back to
+ * a weaker store. The chunking is not policy: it is this platform's storage mechanism, and
+ * it is completely invisible above the seam.
+ *
+ * All three Expo modules are optional peer dependencies, so they stay behind dynamic
+ * `import()` and their loaded handles are memoised in a closure. Metro resolves a dynamic
+ * `import()` at build time and hands back an already-resolved promise on native, so the
+ * production path is unchanged; a static top-level import would instead be evaluated by
+ * every consumer of this package, including `bun test`, where `expo-modules-core` cannot
+ * load. The imports are reachable through a `ReactNativeDeps` seam whose default is exactly
+ * those dynamic imports; `react-native.test.ts` passes doubles instead.
+ *
+ * The only runtime exports are `createReactNativePlatformPort` and
+ * `createReactNativeRecordPort`. The rest of this file's exports are types.
  */
-/** biome-ignore-all lint/style/noNonNullAssertion: Wee need that here */
 
 import {
 	arrayBufferToBase64,
 	base64ToArrayBuffer,
 } from "@bittery/shared/crypto";
 import type {
-	CachedEncryptedItem,
-	CachedVaultMetadata,
-	ItemCacheMetadata,
-	KdfProfile,
-} from "@bittery/types";
-import * as CryptoType from "expo-crypto";
-import * as LocalAuthenticationType from "expo-local-authentication";
-import * as SecureStoreType from "expo-secure-store";
-import * as SQLiteType from "expo-sqlite";
-import {
-	findAccountById,
-	findAccountByServerUser,
-	generateAccountId,
-} from "../account-id";
-import {
-	ACCOUNT_STORAGE_SUFFIXES,
-	getAccountKey,
-	getLegacyAccountKey,
-} from "../account-keys";
-import type { IStorageAdapter } from "../adapter";
-import type { CryptoProvider } from "../crypto-provider";
-import { parseStoredKdfProfile } from "../kdf-profile";
-import {
-	migrateEmailKeysToAccountIds,
-	parseStoredActiveAccount,
-	serializeActiveAccount,
-} from "../migrate-to-account-ids";
-import { resolveStoredSessionExpiryTimestamp } from "../session";
-import {
-	type AccountMetadata,
-	type ActiveAccount,
-	BIOMETRIC_GRACE_PERIOD_MS,
-	type BiometricAuthResult,
-	DEFAULT_AUTO_LOCK_TIMEOUT_MS,
-	MASTER_PASSWORD_REENTRY_PERIOD_MS,
-	type StoredSessionData,
-	type TravelModeConfig,
-	type VaultKeyData,
-} from "../types";
-
-// Global storage keys (shared across all accounts)
-const DEVICE_KEY_STORAGE = "bittery_device_key";
-const ACTIVE_ACCOUNT_KEY = "bittery_active_account";
-const ACCOUNTS_LIST_KEY = "bittery_accounts_list";
-const AUTO_LOCK_TIMEOUT_GLOBAL_KEY = "bittery_auto_lock_timeout_global";
-const BIOMETRIC_ENABLED_GLOBAL_KEY = "bittery_biometric_enabled_global";
-
-function isSecureStoreOnlyKey(key: string): boolean {
-	return (
-		key === DEVICE_KEY_STORAGE ||
-		key.endsWith("_session_data") ||
-		key.endsWith("_jwt_token")
-	);
-}
-
-interface AccountsList {
-	accounts: AccountMetadata[];
-}
-
-// Per-account cache structure
-interface AccountCache {
-	authToken: string | null;
-	vaultKeys: VaultKeyData[] | null;
-	masterUnlockKey: Uint8Array | null;
-	cachedItems: CachedEncryptedItem[] | null;
-	cachedVaults: CachedVaultMetadata[] | null;
-}
-
-// In-memory caches - keyed by accountId
-const accountCaches: Map<string, AccountCache> = new Map();
+	BiometricPort,
+	BiometricPortResult,
+	PlatformPort,
+} from "../platform-port";
+import type { RecordPort } from "../record-port";
+import type { StorageScope } from "../tiers";
 
 /**
- * React Native Storage Adapter Implementation
+ * The security-review answer to "is `vault_keys` hardware-backed on mobile?". Yes — for
+ * every value, at every size.
+ * Verbatim from the design contract; the four adapters' strings are compared side by side.
  */
-export class ReactNativeStorageAdapter implements IStorageAdapter {
-	readonly platform = "mobile" as const;
-	readonly supportsMultiAccount = true;
-	readonly supportsBiometric = true;
-	readonly supportsItemCache = true;
+const SECRET_BACKING =
+	"expo-secure-store (iOS Keychain / Android Keystore-backed EncryptedSharedPreferences), chunked for values over the platform size limit";
 
-	private SecureStore: typeof SecureStoreType = SecureStoreType;
-	private SQLite: typeof SQLiteType = SQLiteType;
-	private LocalAuthentication: typeof LocalAuthenticationType =
-		LocalAuthenticationType;
-	private ExpoCrypto: typeof CryptoType = CryptoType;
-	private db: Awaited<ReturnType<typeof SQLiteType.openDatabaseAsync>> | null =
-		null;
-	private initialized = false;
-	private initializePromise: Promise<void> | null = null;
+/** The one database the mobile app has ever used. */
+const DATABASE_NAME = "bittery.db";
 
-	constructor(private crypto: CryptoProvider) {}
+/**
+ * `kv_store` holds both scopes. Device-scope keys are stored bare; session-scope keys carry
+ * this prefix so the two scopes are separate keyspaces rather than one shared one.
+ *
+ * Every key `AccountStore` writes begins with `bittery_`, so the prefix cannot shadow a real
+ * key — but the port never verifies that, because a port must not know the key scheme.
+ */
+const SESSION_PREFIX = "session:";
 
-	async initialize(): Promise<void> {
-		if (this.initialized) return;
-		if (this.initializePromise) return this.initializePromise;
+// ============================================================================
+// The Expo modules, as this adapter uses them
+// ============================================================================
 
-		this.initializePromise = (async () => {
-			try {
-				await this.openAndInitDatabase();
+/**
+ * The slice of `expo-secure-store` this adapter uses.
+ *
+ * Declared structurally rather than imported so the test doubles have three functions to
+ * implement, and so `tsc` in this package does not depend on Expo's type surface. The real
+ * module satisfies it — its extra trailing `options` parameters are irrelevant here.
+ */
+export interface ExpoSecureStore {
+	setItemAsync(key: string, value: string): Promise<void>;
+	getItemAsync(key: string): Promise<string | null>;
+	deleteItemAsync(key: string): Promise<void>;
+}
 
-				// Migrate legacy email-keyed storage to accountId keys
-				await migrateEmailKeysToAccountIds({
-					store: {
-						get: async <T>(key: string) => {
-							const value = await this.getItem(key);
-							if (value === null) return undefined;
-							if (value === "true") return true as T;
-							if (value === "false") return false as T;
-							return value as T;
-						},
-						set: async (key, value) => {
-							if (typeof value === "boolean") {
-								await this.setItem(key, value ? "true" : "false");
-							} else if (typeof value === "number") {
-								await this.setItem(key, value.toString());
-							} else if (typeof value === "string") {
-								await this.setItem(key, value);
-							} else {
-								await this.setItem(key, JSON.stringify(value));
-							}
-						},
-						delete: async (key) => {
-							await this.deleteItem(key);
-						},
-					},
-					activeAccountKey: ACTIVE_ACCOUNT_KEY,
-					accountsListKey: ACCOUNTS_LIST_KEY,
-					getAccountsList: async () =>
-						(await this.getAccountsListInternal()).accounts,
-					saveAccountsList: async (accounts) => {
-						await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify({ accounts }));
-					},
-				});
+/** Bind parameters this adapter passes; every column it touches is `TEXT`. */
+export type SqlParams = readonly string[];
 
-				this.initialized = true;
-			} catch (error) {
-				this.initializePromise = null;
-				console.error("[storage-react-native] Failed to initialize:", error);
-				throw error;
-			}
-		})();
+/** The slice of `expo-sqlite`'s `SQLiteDatabase` this adapter uses. */
+export interface ExpoSQLiteDatabase {
+	execAsync(source: string): Promise<void>;
+	runAsync(source: string, params: SqlParams): Promise<unknown>;
+	getFirstAsync<TRow>(source: string, params: SqlParams): Promise<TRow | null>;
+	getAllAsync<TRow>(source: string, params: SqlParams): Promise<TRow[]>;
+}
 
-		return this.initializePromise;
+/**
+ * `LocalAuthenticationResult` from `expo-local-authentication`, widened to what we read.
+ * The real type is a discriminated union; `error` is present only on the failure arm.
+ */
+export interface ExpoAuthenticationResult {
+	success: boolean;
+	error?: string;
+	warning?: string;
+}
+
+/**
+ * Deliberately no `cancelLabel` / `fallbackLabel`.
+ *
+ * Hardcoding strings like `"Cancel"` or `"Use Password"` here would produce user-facing
+ * copy below the i18n seam, which `CLAUDE.md` forbids. Omitting them makes iOS and Android
+ * supply their own already-localised system labels. Plumbing caller-supplied copy down
+ * through the port would only move the same violation one layer deeper.
+ *
+ * `promptMessage` is the one exception, and it is not copy this package authors: it is the
+ * caller's already-translated reason string, passed straight through.
+ */
+export interface ExpoAuthenticateOptions {
+	promptMessage: string;
+	disableDeviceFallback: boolean;
+}
+
+/** The slice of `expo-local-authentication` this adapter uses. */
+export interface ExpoLocalAuthentication {
+	hasHardwareAsync(): Promise<boolean>;
+	isEnrolledAsync(): Promise<boolean>;
+	supportedAuthenticationTypesAsync(): Promise<number[]>;
+	authenticateAsync(
+		options: ExpoAuthenticateOptions,
+	): Promise<ExpoAuthenticationResult>;
+	/** `AuthenticationType`: FINGERPRINT 1, FACIAL_RECOGNITION 2, IRIS 3. */
+	readonly AuthenticationType: {
+		readonly FINGERPRINT: number;
+		readonly FACIAL_RECOGNITION: number;
+	};
+}
+
+/**
+ * How the three optional Expo modules are obtained.
+ *
+ * This is a seam, not a test hook: the modules are optional peer dependencies that must stay
+ * behind a dynamic `import()` so a web, extension or desktop bundle never pulls them in, and
+ * naming the loaders makes that requirement checkable instead of incidental. The default is
+ * exactly those dynamic imports, so the production path is unchanged.
+ */
+export interface ReactNativeDeps {
+	loadSecureStore(): Promise<ExpoSecureStore>;
+	loadDatabase(name: string): Promise<ExpoSQLiteDatabase>;
+	loadLocalAuthentication(): Promise<ExpoLocalAuthentication>;
+}
+
+const defaultDeps: ReactNativeDeps = {
+	loadSecureStore: async () => {
+		const module = await import("expo-secure-store");
+		return module as unknown as ExpoSecureStore;
+	},
+	loadDatabase: async (name) => {
+		const module = await import("expo-sqlite");
+		return (await module.openDatabaseAsync(
+			name,
+		)) as unknown as ExpoSQLiteDatabase;
+	},
+	loadLocalAuthentication: async () => {
+		const module = await import("expo-local-authentication");
+		return module as unknown as ExpoLocalAuthentication;
+	},
+};
+
+/** One load per port instance, shared by every call. A rejection is cached too. */
+function memoise<T>(load: () => Promise<T>): () => Promise<T> {
+	let pending: Promise<T> | null = null;
+	return () => {
+		pending ??= load();
+		return pending;
+	};
+}
+
+// ============================================================================
+// SecureStore chunking — the central fix
+// ============================================================================
+
+/**
+ * Largest value written to `expo-secure-store` in one piece, measured in **UTF-8 bytes**
+ * rather than JS string length, so a multi-byte value cannot overflow the native limit that
+ * a `.length` check would have cleared. Comfortably under the ~2048 bytes above which the
+ * Android implementation fails.
+ */
+const CHUNK_THRESHOLD_BYTES = 1800;
+
+/**
+ * Bytes of payload per chunk. Each chunk is base64-encoded before it is stored, which costs
+ * 4/3, so 1350 payload bytes produce exactly 1800 base64 characters: every single item this
+ * adapter ever hands to `expo-secure-store` is at or under the threshold above.
+ */
+const CHUNK_PAYLOAD_BYTES = 1350;
+
+/**
+ * Marker written in place of an oversized value, followed by the chunk count.
+ *
+ * Chosen to be implausible as a real value: every value this port stores is produced by
+ * `AccountStore` (base64 key material, JSON documents, decimal timestamps), none of which
+ * can begin with this string. A value that *did* collide would still be handled safely —
+ * `chunkCountOf` only accepts a positive integer suffix, and a mis-parsed manifest whose
+ * chunks are absent reads back as `null` rather than as corrupt data.
+ */
+const CHUNK_MANIFEST_PREFIX = "__bittery_chunked_secret_v1__:";
+
+/** `expo-secure-store` keys allow `.`, `-` and `_`, so this suffix is always valid. */
+function chunkKey(key: string, index: number): string {
+	return `${key}.c${index}`;
+}
+
+function manifestFor(count: number): string {
+	return `${CHUNK_MANIFEST_PREFIX}${count}`;
+}
+
+/** How many chunks `stored` points at; `0` means "this is an ordinary value". */
+function chunkCountOf(stored: string | null): number {
+	if (stored === null || !stored.startsWith(CHUNK_MANIFEST_PREFIX)) {
+		return 0;
 	}
+	const count = Number.parseInt(stored.slice(CHUNK_MANIFEST_PREFIX.length), 10);
+	return Number.isInteger(count) && count > 0 ? count : 0;
+}
 
-	private async openAndInitDatabase(): Promise<void> {
-		if (!this.SQLite) {
-			throw new Error("SQLite module not initialized");
-		}
-
-		const openAndInit = async () => {
-			this.db = await this.SQLite!.openDatabaseAsync("bittery.db");
-			await this.db.execAsync(`
-				CREATE TABLE IF NOT EXISTS kv_store (
-					key TEXT PRIMARY KEY,
-					value TEXT NOT NULL
-				);
-			`);
-		};
-
-		try {
-			await openAndInit();
-		} catch {
-			// Retry once to recover from transient native handle issues (e.g. Fast Refresh)
-			await openAndInit();
-		}
+/**
+ * Split UTF-8 bytes into base64 chunks.
+ *
+ * Byte safety is structural rather than careful: the split happens on the **encoded byte
+ * array**, each slice is base64-encoded (so a chunk is pure ASCII and can never itself be
+ * split further), and the pieces are only decoded back to text once the whole byte array has
+ * been reassembled. A multi-byte character split across two chunks is therefore impossible
+ * by construction, not by a boundary check that could be wrong.
+ */
+function splitIntoChunks(bytes: Uint8Array): string[] {
+	const chunks: string[] = [];
+	for (let offset = 0; offset < bytes.length; offset += CHUNK_PAYLOAD_BYTES) {
+		chunks.push(
+			arrayBufferToBase64(bytes.subarray(offset, offset + CHUNK_PAYLOAD_BYTES)),
+		);
 	}
+	return chunks;
+}
 
-	private async setItem(key: string, value: string): Promise<void> {
-		if (isSecureStoreOnlyKey(key)) {
-			if (!this.SecureStore) {
-				throw new Error(
-					`SecureStore not available for sensitive key write: ${key}`,
-				);
-			}
-
-			await this.SecureStore.setItemAsync(key, value);
-
-			// Ensure sensitive keys do not remain in SQLite fallback storage.
-			if (this.db) {
-				await this.db.runAsync("DELETE FROM kv_store WHERE key = ?", [key]);
-			}
-			return;
-		}
-
-		// For sensitive data under 2KB, use SecureStore
-		if (value.length < 2000 && this.SecureStore) {
-			try {
-				await this.SecureStore.setItemAsync(key, value);
-				return;
-			} catch {
-				// Fall back to SQLite
-			}
-		}
-
-		// Use SQLite for larger data or as fallback
-		if (this.db) {
-			await this.db.runAsync(
-				"INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
-				[key, value],
-			);
-		}
+function joinChunks(parts: readonly string[]): string {
+	const decoded = parts.map((part) => base64ToArrayBuffer(part));
+	const total = decoded.reduce((sum, part) => sum + part.length, 0);
+	const bytes = new Uint8Array(total);
+	let offset = 0;
+	for (const part of decoded) {
+		bytes.set(part, offset);
+		offset += part.length;
 	}
+	return new TextDecoder().decode(bytes);
+}
 
-	private async getItem(key: string): Promise<string | null> {
-		if (isSecureStoreOnlyKey(key)) {
-			if (!this.SecureStore) {
-				console.warn(
-					`[storage-react-native] SecureStore unavailable for sensitive key read: ${key}`,
-				);
-				return null;
-			}
-
-			try {
-				const secureValue = await this.SecureStore.getItemAsync(key);
-				if (secureValue !== null) return secureValue;
-			} catch {
-				// Continue to migration check from legacy SQLite fallback.
-			}
-
-			// Legacy migration: promote historical SQLite value to SecureStore.
-			if (this.db) {
-				const legacy = await this.db.getFirstAsync<{ value: string }>(
-					"SELECT value FROM kv_store WHERE key = ?",
-					[key],
-				);
-				if (legacy?.value != null) {
-					try {
-						await this.SecureStore.setItemAsync(key, legacy.value);
-						await this.db.runAsync("DELETE FROM kv_store WHERE key = ?", [key]);
-						return legacy.value;
-					} catch (error) {
-						console.error(
-							"[storage-react-native] Failed migrating sensitive key to SecureStore:",
-							error,
-						);
-						return null;
-					}
-				}
-			}
-
-			return null;
-		}
-
-		// Try SecureStore first
-		if (this.SecureStore) {
-			try {
-				const value = await this.SecureStore.getItemAsync(key);
-				if (value !== null) return value;
-			} catch {
-				// Fall back to SQLite
-			}
-		}
-
-		// Try SQLite
-		if (this.db) {
-			const result = await this.db.getFirstAsync<{ value: string }>(
-				"SELECT value FROM kv_store WHERE key = ?",
-				[key],
-			);
-			return result?.value ?? null;
-		}
-
+/** A read that answers `null` for anything the store cannot produce, including a throw. */
+async function readSecure(
+	store: ExpoSecureStore,
+	key: string,
+): Promise<string | null> {
+	try {
+		return await store.getItemAsync(key);
+	} catch {
 		return null;
 	}
-
-	private async deleteItem(key: string): Promise<void> {
-		if (this.SecureStore) {
-			try {
-				await this.SecureStore.deleteItemAsync(key);
-			} catch {
-				// Ignore
-			}
-		}
-
-		if (this.db) {
-			await this.db.runAsync("DELETE FROM kv_store WHERE key = ?", [key]);
-		}
-	}
-
-	private async resolveAccountId(accountId?: string): Promise<string | null> {
-		if (accountId) return accountId;
-
-		const account = await this.getActiveAccount();
-		if (!account) return null;
-		return account.accountId;
-	}
-
-	private getAccountCache(accountId: string): AccountCache {
-		let cache = accountCaches.get(accountId);
-		if (!cache) {
-			cache = {
-				authToken: null,
-				vaultKeys: null,
-				masterUnlockKey: null,
-				cachedItems: null,
-				cachedVaults: null,
-			};
-			accountCaches.set(accountId, cache);
-		}
-		return cache;
-	}
-
-	private clearAccountCache(accountId: string): void {
-		accountCaches.delete(accountId);
-	}
-
-	private async getDeviceKey(): Promise<Uint8Array> {
-		const stored = await this.getItem(DEVICE_KEY_STORAGE);
-
-		if (stored) {
-			return base64ToArrayBuffer(stored);
-		}
-
-		// Generate new device key using expo-crypto
-		if (!this.ExpoCrypto) {
-			throw new Error("Crypto module not initialized");
-		}
-		const deviceKey = this.ExpoCrypto.getRandomBytes(32);
-		await this.setItem(DEVICE_KEY_STORAGE, arrayBufferToBase64(deviceKey));
-		return deviceKey;
-	}
-
-	// ============================================================================
-	// Session Management
-	// ============================================================================
-
-	async getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		if (cache.masterUnlockKey) {
-			return cache.masterUnlockKey;
-		}
-
-		// Try to restore from persistent storage if session is still valid
-		if (await this.isSessionValid(resolvedAccountId)) {
-			const restored = await this.decryptStoredMasterUnlockKeyInternal(
-				resolvedAccountId,
-				false,
-			);
-			if (restored) {
-				cache.masterUnlockKey = restored;
-				return restored;
-			}
-		}
-
-		return null;
-	}
-
-	async setMasterUnlockKey(key: Uint8Array, accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		cache.masterUnlockKey = key;
-	}
-
-	async clearMasterUnlockKey(accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		cache.masterUnlockKey = null;
-	}
-
-	async storeSessionData(
-		masterUnlockKey: Uint8Array,
-		accountId: string,
-		email: string,
-		userId: string,
-		expiresAt?: string | Date | number,
-		sessionId?: string,
-	): Promise<void> {
-		const deviceKey = await this.getDeviceKey();
-		const now = Date.now();
-
-		// Encrypt Master Unlock Key with device key
-		const mukBase64 = arrayBufferToBase64(masterUnlockKey);
-		const encryptedMUK = await this.crypto.encrypt(mukBase64, deviceKey);
-
-		const biometricEnabled =
-			(await this.isBiometricEnabled?.(accountId)) ?? false;
-
-		const sessionData: StoredSessionData = {
-			encryptedMasterUnlockKey: encryptedMUK,
-			email: email.toLowerCase(),
-			userId,
-			sessionId,
-			expiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
-			createdAt: now,
-			biometricEnabled,
-			lastMasterPasswordEntry: now,
-		};
-
-		const key = getAccountKey(accountId, "session_data");
-		await this.setItem(key, JSON.stringify(sessionData));
-	}
-
-	async tryRestoreSession(
-		skipBiometric = false,
-		accountId?: string,
-	): Promise<boolean> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return false;
-
-		if (!(await this.isSessionValid(resolvedAccountId))) {
-			return false;
-		}
-
-		// First check if MUK is already in memory cache (e.g., after login)
-		const cache = this.getAccountCache(resolvedAccountId);
-		if (cache.masterUnlockKey) {
-			console.log("[storage-react-native] Session restored from memory cache");
-			return true;
-		}
-
-		// Otherwise, try to decrypt from persistent storage
-		const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
-			resolvedAccountId,
-			skipBiometric,
-		);
-		if (!masterUnlockKey) {
-			return false;
-		}
-
-		await this.setMasterUnlockKey(masterUnlockKey, resolvedAccountId);
-		return true;
-	}
-
-	async isSessionValid(accountId?: string): Promise<boolean> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return false;
-
-		const sessionData = await this.getStoredSessionData(resolvedAccountId);
-		const token = await this.getAuthToken(resolvedAccountId);
-		if (!sessionData || !token) return false;
-
-		const now = Date.now();
-		return now < sessionData.expiresAt;
-	}
-
-	// ============================================================================
-	// Credentials
-	// ============================================================================
-
-	async storeSecretKey(secretKey: string, accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		const key = getAccountKey(resolvedAccountId, "secret_key");
-		await this.setItem(key, secretKey);
-	}
-
-	async getStoredSecretKey(accountId?: string): Promise<string | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "secret_key");
-		return this.getItem(key);
-	}
-
-	async storeAuthToken(token: string, accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		cache.authToken = token;
-
-		const key = getAccountKey(resolvedAccountId, "jwt_token");
-		await this.setItem(key, token);
-	}
-
-	async getAuthToken(accountId?: string): Promise<string | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		if (cache.authToken) {
-			return cache.authToken;
-		}
-
-		const key = getAccountKey(resolvedAccountId, "jwt_token");
-		const token = await this.getItem(key);
-		if (token) {
-			cache.authToken = token;
-		}
-		return token;
-	}
-
-	async storeVaultKeys(
-		vaultKeys: VaultKeyData[],
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		console.log(
-			"[storage-react-native] Storing vault keys:",
-			vaultKeys.length,
-			"keys",
-		);
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		cache.vaultKeys = vaultKeys;
-
-		const key = getAccountKey(resolvedAccountId, "vault_keys");
-		await this.setItem(key, JSON.stringify(vaultKeys));
-	}
-
-	async getVaultKeys(accountId?: string): Promise<VaultKeyData[] | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		if (cache.vaultKeys) {
-			return cache.vaultKeys;
-		}
-
-		const key = getAccountKey(resolvedAccountId, "vault_keys");
-		const stored = await this.getItem(key);
-		if (stored) {
-			cache.vaultKeys = JSON.parse(stored);
-		}
-		return cache.vaultKeys;
-	}
-
-	async storeEncryptedPrivateKey(
-		encryptedPrivateKey: string,
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		const key = getAccountKey(resolvedAccountId, "encrypted_private_key");
-		await this.setItem(key, encryptedPrivateKey);
-	}
-
-	async getEncryptedPrivateKey(accountId?: string): Promise<string | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "encrypted_private_key");
-		return this.getItem(key);
-	}
-
-	async storePinnedKdfProfile(
-		profile: KdfProfile,
-		accountId: string,
-	): Promise<void> {
-		const key = getAccountKey(accountId, "pinned_kdf_params");
-		await this.setItem(key, JSON.stringify(profile));
-	}
-
-	async getPinnedKdfProfile(accountId: string): Promise<KdfProfile | null> {
-		const key = getAccountKey(accountId, "pinned_kdf_params");
-		const stored = await this.getItem(key);
-		if (!stored) return null;
-		return parseStoredKdfProfile(stored);
-	}
-
-	async updateStoredSessionMetadata(
-		accountId: string,
-		metadata: {
-			sessionId?: string;
-			expiresAt: string | Date | number;
-		},
-	): Promise<void> {
-		const existing = await this.getStoredSessionData(accountId);
-		if (!existing) {
-			return;
-		}
-
-		const key = getAccountKey(accountId, "session_data");
-		const next: StoredSessionData = {
-			...existing,
-			sessionId: metadata.sessionId ?? existing.sessionId,
-			expiresAt: resolveStoredSessionExpiryTimestamp(
-				metadata.expiresAt,
-				existing.createdAt,
-			),
-		};
-		await this.setItem(key, JSON.stringify(next));
-	}
-
-	// ============================================================================
-	// Multi-Account
-	// ============================================================================
-
-	async getActiveAccount(): Promise<ActiveAccount> {
-		const stored = await this.getItem(ACTIVE_ACCOUNT_KEY);
-		return parseStoredActiveAccount(stored);
-	}
-
-	async getActiveAccountUserId(): Promise<string | null> {
-		const account = await this.getActiveAccount();
-		if (!account) return null;
-
-		const sessionData = await this.getStoredSessionData(account.accountId);
-		return sessionData?.userId ?? null;
-	}
-
-	async setActiveAccount(account: ActiveAccount): Promise<void> {
-		const normalizedValue = serializeActiveAccount(account);
-
-		if (normalizedValue) {
-			await this.setItem(ACTIVE_ACCOUNT_KEY, normalizedValue);
-		} else {
-			await this.deleteItem(ACTIVE_ACCOUNT_KEY);
-		}
-
-		// Update lastActiveAt if single account
-		if (account?.type === "single") {
-			const accountsList = await this.getAccountsListInternal();
-			const accountMeta = findAccountById(
-				accountsList.accounts,
-				account.accountId,
-			);
-			if (accountMeta) {
-				accountMeta.lastActiveAt = Date.now();
-				await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
-			}
-		}
-	}
-
-	async getAccountsList(): Promise<AccountMetadata[]> {
-		const accountsList = await this.getAccountsListInternal();
-		return accountsList.accounts;
-	}
-
-	private async getAccountsListInternal(): Promise<AccountsList> {
-		const stored = await this.getItem(ACCOUNTS_LIST_KEY);
-		if (!stored) {
-			return { accounts: [] };
-		}
-		try {
-			return JSON.parse(stored) as AccountsList;
-		} catch {
-			return { accounts: [] };
-		}
-	}
-
-	async addAccount(metadata: AccountMetadata): Promise<void> {
-		const accountsList = await this.getAccountsListInternal();
-
-		const accountWithId: AccountMetadata = metadata.accountId
-			? metadata
-			: { ...metadata, accountId: generateAccountId() };
-
-		const existingByServerUser =
-			accountWithId.serverUrl && accountWithId.userId
-				? findAccountByServerUser(
-						accountsList.accounts,
-						accountWithId.serverUrl,
-						accountWithId.userId,
-					)
-				: undefined;
-
-		const existingById = findAccountById(
-			accountsList.accounts,
-			accountWithId.accountId,
-		);
-
-		const existing = existingById ?? existingByServerUser;
-
-		if (existing) {
-			const existingIndex = accountsList.accounts.findIndex(
-				(a) => a.accountId === existing.accountId,
-			);
-			accountsList.accounts[existingIndex] = {
-				...accountWithId,
-				accountId: existing.accountId,
-			};
-		} else {
-			accountsList.accounts.push(accountWithId);
-		}
-
-		await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
-	}
-
-	async removeAccount(accountId: string): Promise<void> {
-		// Delete all namespaced keys for this account. Iterating the shared
-		// ACCOUNT_STORAGE_SUFFIXES keeps removal complete as suffixes are added.
-		for (const suffix of ACCOUNT_STORAGE_SUFFIXES) {
-			await this.deleteItem(getAccountKey(accountId, suffix));
-		}
-
-		this.clearAccountCache(accountId);
-
-		// Remove from accounts list
-		const accountsList = await this.getAccountsListInternal();
-		accountsList.accounts = accountsList.accounts.filter(
-			(a) => a.accountId !== accountId,
-		);
-		await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
-	}
-
-	// ============================================================================
-	// Settings
-	// ============================================================================
-
-	async storeAutoLockTimeout(
-		timeoutMs: number,
-		_accountId?: string,
-	): Promise<void> {
-		await this.storeGlobalAutoLockTimeout(timeoutMs);
-
-		const accountsList = await this.getAccountsListInternal();
-		for (const account of accountsList.accounts) {
-			const key = getAccountKey(account.accountId, "auto_lock_timeout");
-			await this.setItem(key, timeoutMs.toString());
-		}
-	}
-
-	async getAutoLockTimeout(accountId?: string): Promise<number | null> {
-		const globalValue = await this.getGlobalAutoLockTimeout();
-		if (globalValue !== null) return globalValue;
-
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "auto_lock_timeout");
-		const stored = await this.getItem(key);
-		if (stored) {
-			return Number.parseInt(stored, 10);
-		}
-
-		// Legacy migration: account-scoped email-keyed timeout
-		const accountsList = await this.getAccountsListInternal();
-		const account = findAccountById(accountsList.accounts, resolvedAccountId);
-		if (account) {
-			const legacyKey = getLegacyAccountKey(
-				account.email.toLowerCase(),
-				"auto_lock_timeout",
-			);
-			const legacyStored = await this.getItem(legacyKey);
-			if (legacyStored) {
-				return Number.parseInt(legacyStored, 10);
-			}
-		}
-
-		return null;
-	}
-
-	async getAutoLockTimeoutOrDefault(accountId?: string): Promise<number> {
-		const timeout = await this.getAutoLockTimeout(accountId);
-		return timeout ?? DEFAULT_AUTO_LOCK_TIMEOUT_MS;
-	}
-
-	async storeServerUrl(serverUrl: string, accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		const key = getAccountKey(resolvedAccountId, "server_url");
-		await this.setItem(key, serverUrl);
-	}
-
-	async getServerUrl(accountId?: string): Promise<string | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "server_url");
-		return this.getItem(key);
-	}
-
-	// ============================================================================
-	// Auth State
-	// ============================================================================
-
-	async isAuthenticated(accountId?: string): Promise<boolean> {
-		const token = await this.getAuthToken(accountId);
-		return token != null;
-	}
-
-	async canQuickUnlock(accountId?: string): Promise<boolean> {
-		const hasSecretKey = (await this.getStoredSecretKey(accountId)) !== null;
-		const sessionValid = await this.isSessionValid(accountId);
-		return hasSecretKey && sessionValid;
-	}
-
-	// ============================================================================
-	// Clear
-	// ============================================================================
-
-	async clearSession(accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		this.clearAccountCache(resolvedAccountId);
-
-		// Clear last biometric auth timestamp so biometric is required on next unlock
-		const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
-		await this.deleteItem(key);
-	}
-
-	async clearAllStoredData(accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (resolvedAccountId) {
-			await this.removeAccount(resolvedAccountId);
-		}
-	}
-
-	// ============================================================================
-	// Biometric
-	// ============================================================================
-
-	async isBiometricAvailable(): Promise<boolean> {
-		if (!this.LocalAuthentication) return false;
-		try {
-			const hasHardware = await this.LocalAuthentication.hasHardwareAsync();
-			if (!hasHardware) return false;
-
-			const isEnrolled = await this.LocalAuthentication.isEnrolledAsync();
-			return isEnrolled;
-		} catch {
-			return false;
-		}
-	}
-
-	async isBiometricEnabled(accountId?: string): Promise<boolean> {
-		const globalEnabled = await this.getGlobalBiometricEnabled();
-		if (globalEnabled !== null) return globalEnabled;
-
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return false;
-
-		const key = getAccountKey(resolvedAccountId, "biometric_enabled");
-		const enabled = await this.getItem(key);
-		return enabled === "true";
-	}
-
-	async enableBiometric(accountId?: string): Promise<void> {
-		await this.setGlobalBiometricEnabled(true);
-		await this.updateBiometricEnabledForAllAccounts(true);
-		if (accountId) {
-			const key = getAccountKey(accountId, "biometric_enabled");
-			await this.setItem(key, "true");
-		}
-	}
-
-	async disableBiometric(accountId?: string): Promise<void> {
-		await this.setGlobalBiometricEnabled(false);
-		await this.updateBiometricEnabledForAllAccounts(false);
-		if (accountId) {
-			const key = getAccountKey(accountId, "biometric_enabled");
-			await this.setItem(key, "false");
-		}
-	}
-
-	async authenticateWithBiometric(
-		reason = "Unlock Bittery",
-		accountId?: string,
-	): Promise<boolean> {
-		if (!this.LocalAuthentication) return false;
-
-		try {
-			const resolvedAccountId = await this.resolveAccountId(accountId);
-			if (!resolvedAccountId) return false;
-
-			const result = await this.LocalAuthentication.authenticateAsync({
-				promptMessage: reason,
-				cancelLabel: "Cancel",
-				disableDeviceFallback: false,
-				fallbackLabel: "Use Password",
-			});
-
-			if (result.success) {
-				// Update last biometric auth timestamp
-				const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
-				await this.setItem(key, Date.now().toString());
-				return true;
-			}
-
-			return false;
-		} catch (error) {
-			console.error(
-				"[storage-react-native] Biometric authentication failed:",
-				error,
-			);
-			return false;
-		}
-	}
-
-	async canBiometricUnlock(accountId?: string): Promise<boolean> {
-		const available = await this.isBiometricAvailable();
-		const enabled = await this.isBiometricEnabled(accountId);
-		const sessionValid = await this.isSessionValid(accountId);
-		return available && enabled && sessionValid;
-	}
-
-	async getStoredSessionData(
-		accountId?: string,
-	): Promise<StoredSessionData | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		try {
-			const key = getAccountKey(resolvedAccountId, "session_data");
-			const stored = await this.getItem(key);
-
-			if (!stored) return null;
-			const parsed = JSON.parse(stored) as StoredSessionData;
-			return {
-				...parsed,
-				expiresAt: resolveStoredSessionExpiryTimestamp(
-					parsed.expiresAt,
-					parsed.createdAt,
-				),
-			};
-		} catch {
-			return null;
-		}
-	}
-
-	// ============================================================================
-	// Private Helpers
-	// ============================================================================
-
-	private async getGlobalAutoLockTimeout(): Promise<number | null> {
-		const stored = await this.getItem(AUTO_LOCK_TIMEOUT_GLOBAL_KEY);
-		return stored ? Number.parseInt(stored, 10) : null;
-	}
-
-	private async storeGlobalAutoLockTimeout(timeoutMs: number): Promise<void> {
-		await this.setItem(AUTO_LOCK_TIMEOUT_GLOBAL_KEY, timeoutMs.toString());
-	}
-
-	private async getGlobalBiometricEnabled(): Promise<boolean | null> {
-		const stored = await this.getItem(BIOMETRIC_ENABLED_GLOBAL_KEY);
-		if (stored === null) return null;
-		return stored === "true";
-	}
-
-	private async setGlobalBiometricEnabled(enabled: boolean): Promise<void> {
-		await this.setItem(
-			BIOMETRIC_ENABLED_GLOBAL_KEY,
-			enabled ? "true" : "false",
-		);
-	}
-
-	private async updateBiometricEnabledForAllAccounts(
-		enabled: boolean,
-	): Promise<void> {
-		const accountsList = await this.getAccountsListInternal();
-		let metadataChanged = false;
-
-		for (const account of accountsList.accounts) {
-			const key = getAccountKey(account.accountId, "biometric_enabled");
-			await this.setItem(key, enabled ? "true" : "false");
-
-			if (account.biometricEnabled !== enabled) {
-				account.biometricEnabled = enabled;
-				metadataChanged = true;
-			}
-
-			const sessionKey = getAccountKey(account.accountId, "session_data");
-			const storedSession = await this.getItem(sessionKey);
-			if (storedSession) {
-				try {
-					const sessionData = JSON.parse(storedSession) as StoredSessionData;
-					sessionData.biometricEnabled = enabled;
-					await this.setItem(sessionKey, JSON.stringify(sessionData));
-				} catch {
-					// Ignore malformed session data
-				}
-			}
-		}
-
-		if (metadataChanged) {
-			await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
-		}
-	}
-
-	private async isBiometricAuthRequiredInternal(
-		accountId: string,
-	): Promise<boolean> {
-		const sessionData = await this.getStoredSessionData(accountId);
-		if (!sessionData || !sessionData.biometricEnabled) {
-			return false;
-		}
-
-		const key = getAccountKey(accountId, "last_biometric_auth");
-		const lastAuthStr = await this.getItem(key);
-
-		if (!lastAuthStr) {
-			return true;
-		}
-
-		const lastAuth = Number.parseInt(lastAuthStr, 10);
-		const timeSinceLastAuth = Date.now() - lastAuth;
-		return timeSinceLastAuth > BIOMETRIC_GRACE_PERIOD_MS;
-	}
-
-	private async isMasterPasswordReentryRequiredInternal(
-		accountId: string,
-	): Promise<boolean> {
-		const sessionData = await this.getStoredSessionData(accountId);
-		if (!sessionData) return true;
-
-		const lastPasswordEntry =
-			sessionData.lastMasterPasswordEntry || sessionData.createdAt;
-		const timeSinceLastEntry = Date.now() - lastPasswordEntry;
-		return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
-	}
-
-	private async decryptStoredMasterUnlockKeyInternal(
-		accountId: string,
-		skipBiometric = false,
-	): Promise<Uint8Array | null> {
-		const sessionData = await this.getStoredSessionData(accountId);
-		if (!sessionData) return null;
-
-		// Check if master password re-entry is required (periodic security measure)
-		if (await this.isMasterPasswordReentryRequiredInternal(accountId)) {
-			return null;
-		}
-
-		// Check if biometric authentication is required
-		if (!skipBiometric && sessionData.biometricEnabled) {
-			const authRequired =
-				await this.isBiometricAuthRequiredInternal(accountId);
-			if (authRequired) {
-				const authenticated = await this.authenticateWithBiometric(
-					"Unlock your vault",
-					accountId,
-				);
-				if (!authenticated) {
-					return null;
-				}
-			}
-		}
-
-		try {
-			const deviceKey = await this.getDeviceKey();
-			const mukBase64 = await this.crypto.decrypt(
-				sessionData.encryptedMasterUnlockKey,
-				deviceKey,
-			);
-			return base64ToArrayBuffer(mukBase64);
-		} catch {
-			return null;
-		}
-	}
-
-	// ============================================================================
-	// Item Cache
-	// ============================================================================
-
-	async setCachedItems(
-		items: CachedEncryptedItem[],
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		cache.cachedItems = items;
-
-		const key = getAccountKey(resolvedAccountId, "cached_items");
-		await this.setItem(key, JSON.stringify(items));
-	}
-
-	async getCachedItems(
-		accountId?: string,
-	): Promise<CachedEncryptedItem[] | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		if (cache.cachedItems) {
-			return cache.cachedItems;
-		}
-
-		const key = getAccountKey(resolvedAccountId, "cached_items");
-		const stored = await this.getItem(key);
-		if (stored) {
-			try {
-				cache.cachedItems = JSON.parse(stored);
-			} catch {
-				return null;
-			}
-		}
-		return cache.cachedItems;
-	}
-
-	async upsertCachedItem(
-		item: CachedEncryptedItem,
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		let items = await this.getCachedItems(resolvedAccountId);
-		if (!items) {
-			items = [];
-		}
-
-		const index = items.findIndex((i) => i.id === item.id);
-		if (index >= 0) {
-			items[index] = item;
-		} else {
-			items.push(item);
-		}
-
-		await this.setCachedItems(items, resolvedAccountId);
-	}
-
-	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const items = await this.getCachedItems(resolvedAccountId);
-		if (!items) return;
-
-		const filtered = items.filter((i) => i.id !== itemId);
-		await this.setCachedItems(filtered, resolvedAccountId);
-	}
-
-	async setCachedVaults(
-		vaults: CachedVaultMetadata[],
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		cache.cachedVaults = vaults;
-
-		const key = getAccountKey(resolvedAccountId, "cached_vaults");
-		await this.setItem(key, JSON.stringify(vaults));
-	}
-
-	async getCachedVaults(
-		accountId?: string,
-	): Promise<CachedVaultMetadata[] | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		if (cache.cachedVaults) {
-			return cache.cachedVaults;
-		}
-
-		const key = getAccountKey(resolvedAccountId, "cached_vaults");
-		const stored = await this.getItem(key);
-		if (stored) {
-			try {
-				cache.cachedVaults = JSON.parse(stored);
-			} catch {
-				return null;
-			}
-		}
-		return cache.cachedVaults;
-	}
-
-	async upsertCachedVault(
-		vault: CachedVaultMetadata,
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		let vaults = await this.getCachedVaults(resolvedAccountId);
-		if (!vaults) {
-			vaults = [];
-		}
-
-		const index = vaults.findIndex((v) => v.id === vault.id);
-		if (index >= 0) {
-			vaults[index] = vault;
-		} else {
-			vaults.push(vault);
-		}
-
-		await this.setCachedVaults(vaults, resolvedAccountId);
-	}
-
-	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		// Remove the vault metadata
-		const vaults = await this.getCachedVaults(resolvedAccountId);
-		if (vaults) {
-			const filtered = vaults.filter((v) => v.id !== vaultId);
-			await this.setCachedVaults(filtered, resolvedAccountId);
-		}
-
-		// Also remove all items belonging to this vault
-		const items = await this.getCachedItems(resolvedAccountId);
-		if (items) {
-			const filtered = items.filter((i) => i.vaultId !== vaultId);
-			await this.setCachedItems(filtered, resolvedAccountId);
-		}
-	}
-
-	async getItemCacheMetadata(
-		accountId?: string,
-	): Promise<ItemCacheMetadata | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "item_cache_meta");
-		const stored = await this.getItem(key);
-		if (!stored) return null;
-
-		try {
-			return JSON.parse(stored) as ItemCacheMetadata;
-		} catch {
-			return null;
-		}
-	}
-
-	async setItemCacheMetadata(
-		metadata: ItemCacheMetadata,
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const key = getAccountKey(resolvedAccountId, "item_cache_meta");
-		await this.setItem(key, JSON.stringify(metadata));
-	}
-
-	async clearItemCache(accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const cache = this.getAccountCache(resolvedAccountId);
-		cache.cachedItems = null;
-		cache.cachedVaults = null;
-
-		await this.deleteItem(getAccountKey(resolvedAccountId, "cached_items"));
-		await this.deleteItem(getAccountKey(resolvedAccountId, "cached_vaults"));
-		await this.deleteItem(getAccountKey(resolvedAccountId, "item_cache_meta"));
-	}
-
-	async storeTravelModeCache(
-		config: TravelModeConfig,
-		accountId?: string,
-	): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const key = getAccountKey(resolvedAccountId, "travel_mode_cache");
-		await this.setItem(key, JSON.stringify(config));
-	}
-
-	async getTravelModeCache(
-		accountId?: string,
-	): Promise<TravelModeConfig | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "travel_mode_cache");
-		const stored = await this.getItem(key);
-		if (!stored) return null;
-		try {
-			return JSON.parse(stored) as TravelModeConfig;
-		} catch {
-			return null;
-		}
-	}
-
-	// ============================================================================
-	// Mobile-Specific Methods (not in IStorageAdapter interface)
-	// ============================================================================
-
-	/**
-	 * Get detailed biometric availability information
-	 */
-	async getBiometricAvailabilityDetails(): Promise<{
+}
+
+/** Deleting an absent key is a no-op, and so is deleting when the store objects. */
+async function deleteSecure(
+	store: ExpoSecureStore,
+	key: string,
+): Promise<void> {
+	try {
+		await store.deleteItemAsync(key);
+	} catch {
+		// no-op
+	}
+}
+
+// ============================================================================
+// Biometric
+// ============================================================================
+
+/** Native failures the port distinguishes; everything else collapses into `failed`. */
+const BIOMETRIC_ERRORS: Readonly<
+	Record<string, NonNullable<BiometricPortResult["error"]>>
+> = {
+	user_cancel: "user_cancelled",
+	lockout: "lockout",
+	lockout_permanent: "lockout",
+	not_enrolled: "not_enrolled",
+	not_available: "not_available",
+};
+
+function messageOf(cause: unknown): string {
+	if (cause instanceof Error) {
+		return cause.message;
+	}
+	return typeof cause === "string" ? cause : String(cause);
+}
+
+function createReactNativeBiometricPort(
+	loadLocalAuthentication: () => Promise<ExpoLocalAuthentication>,
+): BiometricPort {
+	/** `null` when the module is absent or the probe itself failed — both mean "no". */
+	const probe = async (): Promise<{
 		hasHardware: boolean;
 		isEnrolled: boolean;
-	}> {
-		if (!this.LocalAuthentication) {
-			return { hasHardware: false, isEnrolled: false };
-		}
+	} | null> => {
 		try {
-			const hasHardware = await this.LocalAuthentication.hasHardwareAsync();
-			const isEnrolled = await this.LocalAuthentication.isEnrolledAsync();
-			return { hasHardware, isEnrolled };
-		} catch {
-			return { hasHardware: false, isEnrolled: false };
-		}
-	}
-
-	/**
-	 * Get the type of biometric authentication available (Face ID, Touch ID, Fingerprint)
-	 */
-	async getBiometricType(): Promise<string | null> {
-		if (!this.LocalAuthentication) return null;
-		try {
-			const types =
-				await this.LocalAuthentication.supportedAuthenticationTypesAsync();
-			if (
-				types.includes(
-					this.LocalAuthentication.AuthenticationType.FACIAL_RECOGNITION,
-				)
-			) {
-				return "Face ID";
-			}
-			if (
-				types.includes(this.LocalAuthentication.AuthenticationType.FINGERPRINT)
-			) {
-				return "Touch ID";
-			}
-			return null;
+			const local = await loadLocalAuthentication();
+			return {
+				hasHardware: await local.hasHardwareAsync(),
+				isEnrolled: await local.isEnrolledAsync(),
+			};
 		} catch {
 			return null;
 		}
-	}
+	};
 
-	/**
-	 * Lock all accounts (clear all in-memory caches and biometric auth timestamps)
-	 */
-	async lockAllAccounts(): Promise<void> {
-		accountCaches.clear();
+	return {
+		isAvailable: async () => {
+			const details = await probe();
+			return details !== null && details.hasHardware && details.isEnrolled;
+		},
 
-		// Clear last biometric auth timestamp for all accounts so biometric is required on next unlock
-		const accountsList = await this.getAccountsList();
-		for (const account of accountsList) {
-			const key = getAccountKey(account.accountId, "last_biometric_auth");
-			await this.deleteItem(key);
-		}
-	}
+		getDetails: async () =>
+			(await probe()) ?? { hasHardware: false, isEnrolled: false },
 
-	/**
-	 * Unlock all accounts with biometric authentication
-	 * Shows ONE biometric prompt and unlocks all accounts that support biometric
-	 * Returns { unlocked: string[], failed: Array<{accountId: string, error: string}> }
-	 */
-	async unlockAllAccountsWithBiometric(): Promise<{
-		unlocked: string[];
-		failed: Array<{ accountId: string; error: string }>;
-	}> {
-		const accountsList = await this.getAccountsList();
-		const unlocked: string[] = [];
-		const failed: Array<{ accountId: string; error: string }> = [];
-
-		if (accountsList.length === 0) {
-			return { unlocked, failed };
-		}
-
-		// Find first account that supports biometric
-		let firstAccountId: string | null = null;
-		for (const account of accountsList) {
-			if (await this.canBiometricUnlock(account.accountId)) {
-				firstAccountId = account.accountId;
-				break;
-			}
-		}
-
-		if (!firstAccountId) {
-			for (const account of accountsList) {
-				failed.push({
-					accountId: account.accountId,
-					error: "Biometric authentication not available",
-				});
-			}
-			return { unlocked, failed };
-		}
-
-		const authenticated = await this.authenticateWithBiometric(
-			"Unlock all accounts",
-			firstAccountId,
-		);
-
-		if (!authenticated) {
-			for (const account of accountsList) {
-				failed.push({
-					accountId: account.accountId,
-					error: "Biometric authentication failed or cancelled",
-				});
-			}
-			return { unlocked, failed };
-		}
-
-		for (const account of accountsList) {
+		getType: async () => {
 			try {
-				const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
-					account.accountId,
-					true,
-				);
-				if (masterUnlockKey) {
-					await this.setMasterUnlockKey(masterUnlockKey, account.accountId);
-					unlocked.push(account.accountId);
-				} else {
-					failed.push({
-						accountId: account.accountId,
-						error: "Could not decrypt session data",
-					});
+				const local = await loadLocalAuthentication();
+				const types = await local.supportedAuthenticationTypesAsync();
+				if (types.includes(local.AuthenticationType.FACIAL_RECOGNITION)) {
+					return "face";
 				}
-			} catch (error) {
-				failed.push({
-					accountId: account.accountId,
-					error: error instanceof Error ? error.message : "Unknown error",
+				if (types.includes(local.AuthenticationType.FINGERPRINT)) {
+					return "fingerprint";
+				}
+				return null;
+			} catch {
+				return null;
+			}
+		},
+
+		authenticate: async (reason) => {
+			let local: ExpoLocalAuthentication;
+			try {
+				local = await loadLocalAuthentication();
+			} catch (cause) {
+				return {
+					success: false,
+					error: "not_available",
+					message: messageOf(cause),
+				};
+			}
+			try {
+				const result = await local.authenticateAsync({
+					promptMessage: reason,
+					disableDeviceFallback: false,
 				});
-			}
-		}
-
-		return { unlocked, failed };
-	}
-
-	/**
-	 * Check if Secret Key is stored
-	 */
-	async hasStoredSecretKey(accountId?: string): Promise<boolean> {
-		const secretKey = await this.getStoredSecretKey(accountId);
-		return secretKey != null;
-	}
-
-	/**
-	 * Get metadata for a specific account
-	 */
-	async getAccountMetadata(accountId: string): Promise<AccountMetadata | null> {
-		const accountsList = await this.getAccountsList();
-		return findAccountById(accountsList, accountId) ?? null;
-	}
-
-	/**
-	 * Get list of unlocked account IDs (accounts with MUK currently in memory)
-	 */
-	async getUnlockedAccounts(): Promise<string[]> {
-		const unlockedAccountIds: string[] = [];
-		for (const [accountId, cache] of accountCaches.entries()) {
-			if (cache.masterUnlockKey) {
-				unlockedAccountIds.push(accountId);
-			}
-		}
-		return unlockedAccountIds;
-	}
-
-	/**
-	 * Check if master password re-entry is required (periodic security measure)
-	 */
-	async isMasterPasswordReentryRequired(accountId?: string): Promise<boolean> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return true;
-
-		const sessionData = await this.getStoredSessionData(resolvedAccountId);
-		if (!sessionData) return true;
-
-		const lastPasswordEntry =
-			sessionData.lastMasterPasswordEntry || sessionData.createdAt;
-		const timeSinceLastEntry = Date.now() - lastPasswordEntry;
-		return timeSinceLastEntry > MASTER_PASSWORD_REENTRY_PERIOD_MS;
-	}
-
-	/**
-	 * Unlock with biometric authentication
-	 */
-	async unlockWithBiometric(accountId?: string): Promise<boolean> {
-		try {
-			const resolvedAccountId = await this.resolveAccountId(accountId);
-			if (!resolvedAccountId) return false;
-
-			if (!(await this.canBiometricUnlock(resolvedAccountId))) {
-				return false;
-			}
-
-			const masterUnlockKey = await this.decryptStoredMasterUnlockKeyInternal(
-				resolvedAccountId,
-				false,
-			);
-			if (!masterUnlockKey) {
-				return false;
-			}
-
-			await this.setMasterUnlockKey(masterUnlockKey, resolvedAccountId);
-			return true;
-		} catch (error) {
-			console.error("[storage-react-native] Biometric unlock failed:", error);
-			return false;
-		}
-	}
-
-	// Aliases for backward compatibility
-	async storeMasterUnlockKey(
-		key: Uint8Array,
-		accountId?: string,
-	): Promise<void> {
-		return this.setMasterUnlockKey(key, accountId);
-	}
-
-	async addAccountToList(metadata: AccountMetadata): Promise<void> {
-		return this.addAccount(metadata);
-	}
-
-	async removeAccountFromList(accountId: string): Promise<void> {
-		// Note: This only removes from list, not all account data
-		const accountsList = await this.getAccountsListInternal();
-		accountsList.accounts = accountsList.accounts.filter(
-			(a) => a.accountId !== accountId,
-		);
-		await this.setItem(ACCOUNTS_LIST_KEY, JSON.stringify(accountsList));
-	}
-
-	async clearAccountData(accountId: string): Promise<void> {
-		await this.removeAccount(accountId);
-	}
-
-	/**
-	 * Store the timestamp when app went to background
-	 */
-	async storeBackgroundTimestamp(accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const key = getAccountKey(resolvedAccountId, "background_timestamp");
-		await this.setItem(key, Date.now().toString());
-	}
-
-	/**
-	 * Get the timestamp when app went to background
-	 */
-	async getBackgroundTimestamp(accountId?: string): Promise<number | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-
-		const key = getAccountKey(resolvedAccountId, "background_timestamp");
-		const timestamp = await this.getItem(key);
-		return timestamp ? Number.parseInt(timestamp, 10) : null;
-	}
-
-	/**
-	 * Clear the background timestamp
-	 */
-	async clearBackgroundTimestamp(accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return;
-
-		const key = getAccountKey(resolvedAccountId, "background_timestamp");
-		await this.deleteItem(key);
-	}
-
-	/**
-	 * Check if app should require re-authentication after returning from background
-	 */
-	async shouldRequireAuthAfterBackground(accountId?: string): Promise<boolean> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return false;
-
-		const backgroundTimestamp =
-			await this.getBackgroundTimestamp(resolvedAccountId);
-		if (!backgroundTimestamp) return false;
-
-		const autoLockTimeout =
-			await this.getAutoLockTimeoutOrDefault(resolvedAccountId);
-
-		// If auto-lock is set to "Never" (-1), don't require re-auth
-		if (autoLockTimeout === -1) return false;
-
-		const timeSinceBackground = Date.now() - backgroundTimestamp;
-		return timeSinceBackground > autoLockTimeout;
-	}
-
-	/**
-	 * Check if biometric authentication is required (public wrapper)
-	 */
-	async isBiometricAuthRequiredPublic(accountId?: string): Promise<boolean> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return false;
-		return this.isBiometricAuthRequiredInternal(resolvedAccountId);
-	}
-
-	/**
-	 * Decrypt stored master unlock key (interface method)
-	 */
-	async decryptStoredMasterUnlockKey(
-		accountId?: string,
-		skipBiometric = false,
-	): Promise<Uint8Array | null> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) return null;
-		return this.decryptStoredMasterUnlockKeyInternal(
-			resolvedAccountId,
-			skipBiometric,
-		);
-	}
-
-	/**
-	 * @deprecated Use decryptStoredMasterUnlockKey instead
-	 */
-	async decryptStoredMasterUnlockKeyPublic(
-		accountId?: string,
-		skipBiometric = false,
-	): Promise<Uint8Array | null> {
-		return this.decryptStoredMasterUnlockKey(accountId, skipBiometric);
-	}
-
-	/**
-	 * Update the last master password entry timestamp (for 30-day re-entry requirement)
-	 */
-	async updateLastMasterPasswordEntry(accountId?: string): Promise<void> {
-		const resolvedAccountId = await this.resolveAccountId(accountId);
-		if (!resolvedAccountId) throw new Error("No account specified");
-
-		const sessionData = await this.getStoredSessionData(resolvedAccountId);
-		if (!sessionData) return;
-
-		sessionData.lastMasterPasswordEntry = Date.now();
-
-		const key = getAccountKey(resolvedAccountId, "session_data");
-		await this.setItem(key, JSON.stringify(sessionData));
-	}
-
-	/**
-	 * Enhanced biometric authentication with detailed error handling
-	 */
-	async authenticateWithBiometricEnhanced(
-		reason = "Unlock Bittery",
-		accountId?: string,
-	): Promise<BiometricAuthResult> {
-		try {
-			const resolvedAccountId = await this.resolveAccountId(accountId);
-			if (!resolvedAccountId) {
+				if (result.success) {
+					return { success: true };
+				}
+				// Translate the native code into the port's closed set and do nothing else
+				// with it. The original is carried through untouched so the UI and any bug
+				// report keep the fact the platform actually reported.
+				const native = result.error ?? "unknown";
 				return {
 					success: false,
-					error: "unknown",
-					message: "No account specified",
+					error: BIOMETRIC_ERRORS[native] ?? "failed",
+					message: native,
 				};
+			} catch (cause) {
+				return { success: false, error: "failed", message: messageOf(cause) };
 			}
-
-			// Check hardware availability
-			if (!this.LocalAuthentication) {
-				return {
-					success: false,
-					error: "not_available",
-					message: "Biometric authentication not available",
-				};
-			}
-
-			const hasHardware = await this.LocalAuthentication.hasHardwareAsync();
-			if (!hasHardware) {
-				return {
-					success: false,
-					error: "not_available",
-					message: "This device does not support biometric authentication",
-				};
-			}
-
-			// Check if biometrics are enrolled
-			const isEnrolled = await this.LocalAuthentication.isEnrolledAsync();
-			if (!isEnrolled) {
-				return {
-					success: false,
-					error: "not_enrolled",
-					message:
-						"No biometrics enrolled. Please set up Face ID or Touch ID in your device settings",
-				};
-			}
-
-			// Check if biometric is enabled for this account
-			const isEnabled = await this.isBiometricEnabled(resolvedAccountId);
-			if (!isEnabled) {
-				return {
-					success: false,
-					error: "not_enabled",
-					message: "Biometric authentication is not enabled for this account",
-				};
-			}
-
-			// Check if master password re-entry is required
-			if (
-				await this.isMasterPasswordReentryRequiredInternal(resolvedAccountId)
-			) {
-				return {
-					success: false,
-					error: "master_password_required",
-					message:
-						"For your security, please enter your master password. This is required periodically.",
-				};
-			}
-
-			// Check if session is valid
-			if (!(await this.isSessionValid(resolvedAccountId))) {
-				return {
-					success: false,
-					error: "session_expired",
-					message: "Your session has expired. Please log in again",
-				};
-			}
-
-			const result = await this.LocalAuthentication.authenticateAsync({
-				promptMessage: reason,
-				cancelLabel: "Cancel",
-				disableDeviceFallback: false,
-				fallbackLabel: "Use Password",
-			});
-
-			if (result.success) {
-				// Update last biometric auth timestamp
-				const key = getAccountKey(resolvedAccountId, "last_biometric_auth");
-				await this.setItem(key, Date.now().toString());
-
-				// Clear background timestamp on successful auth
-				await this.clearBackgroundTimestamp(resolvedAccountId);
-
-				return { success: true };
-			}
-
-			// Handle specific error cases
-			if (result.error === "user_cancel") {
-				return {
-					success: false,
-					error: "user_cancelled",
-					message: "Authentication was cancelled",
-				};
-			}
-
-			if (result.error === "lockout") {
-				return {
-					success: false,
-					error: "lockout",
-					message:
-						"Too many failed attempts. Please use your password to unlock",
-				};
-			}
-
-			return {
-				success: false,
-				error: "authentication_failed",
-				message: "Biometric authentication failed. Please try again",
-			};
-		} catch (error) {
-			console.error(
-				"[storage-react-native] Biometric authentication error:",
-				error,
-			);
-			return {
-				success: false,
-				error: "unknown",
-				message:
-					error instanceof Error ? error.message : "Unknown error occurred",
-			};
-		}
-	}
+		},
+	};
 }
 
+// ============================================================================
+// sqlite
+// ============================================================================
+
+const CREATE_KV_TABLE = `
+	CREATE TABLE IF NOT EXISTS kv_store (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL
+	);
+`;
+
 /**
- * Create a new React Native Storage Adapter instance
- * @param crypto - CryptoProvider implementation for encryption operations
+ * One row per record, keyed by `(collection, id)`.
+ *
+ * The composite primary key is what makes `recordPut` / `recordDelete` genuinely O(1) and
+ * `recordList` an indexed range scan on the key's leading column.
  */
-export function createReactNativeStorageAdapter(
-	crypto: CryptoProvider,
-): ReactNativeStorageAdapter {
-	return new ReactNativeStorageAdapter(crypto);
+const CREATE_RECORDS_TABLE = `
+	CREATE TABLE IF NOT EXISTS records (
+		collection TEXT NOT NULL,
+		id TEXT NOT NULL,
+		value TEXT NOT NULL,
+		PRIMARY KEY (collection, id)
+	);
+`;
+
+/**
+ * Open the database and apply one schema statement.
+ *
+ * Opening can fail transiently on a stale native handle after a Fast Refresh, and a second
+ * attempt succeeds. It is not error handling — a second failure propagates.
+ */
+function openDatabase(
+	deps: ReactNativeDeps,
+	schema: string,
+): () => Promise<ExpoSQLiteDatabase> {
+	return memoise(async () => {
+		const open = async (): Promise<ExpoSQLiteDatabase> => {
+			const database = await deps.loadDatabase(DATABASE_NAME);
+			await database.execAsync(schema);
+			return database;
+		};
+		try {
+			return await open();
+		} catch {
+			return await open();
+		}
+	});
+}
+
+/** `_` and `%` are LIKE wildcards, and every `bittery_` key is full of the first one. */
+function escapeLikePattern(value: string): string {
+	return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+// ============================================================================
+// PlatformPort
+// ============================================================================
+
+function scopedKey(key: string, scope: StorageScope): string {
+	return scope === "session" ? `${SESSION_PREFIX}${key}` : key;
+}
+
+export function createReactNativePlatformPort(
+	deps: ReactNativeDeps = defaultDeps,
+): PlatformPort {
+	const secureStore = memoise(() => deps.loadSecureStore());
+	const database = openDatabase(deps, CREATE_KV_TABLE);
+
+	/** Keys in `kv_store` that start with `pattern`, exactly and case-sensitively. */
+	const keysMatching = async (pattern: string): Promise<string[]> => {
+		const rows = await (await database()).getAllAsync<{ key: string }>(
+			"SELECT key FROM kv_store WHERE key LIKE ? ESCAPE '\\'",
+			[`${escapeLikePattern(pattern)}%`],
+		);
+		// SQLite's LIKE is case-insensitive for ASCII, so the narrowed set is re-filtered
+		// exactly here. The query still does the work an index can do.
+		return rows.map((row) => row.key).filter((key) => key.startsWith(pattern));
+	};
+
+	return {
+		platform: "mobile",
+		sessionSurvivesRestart: true,
+		tiers: ["secret", "plain"],
+		secretBacking: SECRET_BACKING,
+		// Records live in their own sqlite table, which no native host reads.
+		recordKeyPrefix: "",
+		biometric: createReactNativeBiometricPort(
+			memoise(() => deps.loadLocalAuthentication()),
+		),
+
+		initialize: async () => {
+			await database();
+			await secureStore();
+		},
+
+		secretGet: async (key) => {
+			try {
+				const store = await secureStore();
+				const stored = await readSecure(store, key);
+				const count = chunkCountOf(stored);
+				if (count === 0) {
+					return stored;
+				}
+				const parts: string[] = [];
+				for (let index = 0; index < count; index += 1) {
+					const part = await readSecure(store, chunkKey(key, index));
+					if (part === null) {
+						// A torn write. Reporting a truncated secret would be worse than
+						// reporting none, so absence is the answer.
+						return null;
+					}
+					parts.push(part);
+				}
+				return joinChunks(parts);
+			} catch {
+				return null;
+			}
+		},
+
+		secretSet: async (key, value) => {
+			const store = await secureStore();
+			// Read before writing so the chunks of a previous, larger value can be swept
+			// afterwards. Nothing else can tell us how many there were.
+			const previousCount = chunkCountOf(await readSecure(store, key));
+
+			const bytes = new TextEncoder().encode(value);
+			let nextCount = 0;
+			if (bytes.length <= CHUNK_THRESHOLD_BYTES) {
+				await store.setItemAsync(key, value);
+			} else {
+				const parts = splitIntoChunks(bytes);
+				nextCount = parts.length;
+				for (const [index, part] of parts.entries()) {
+					await store.setItemAsync(chunkKey(key, index), part);
+				}
+				// The manifest goes last: until it lands, `key` still holds whatever it held.
+				await store.setItemAsync(key, manifestFor(nextCount));
+			}
+
+			for (let index = nextCount; index < previousCount; index += 1) {
+				await deleteSecure(store, chunkKey(key, index));
+			}
+		},
+
+		secretDelete: async (key) => {
+			try {
+				const store = await secureStore();
+				const count = chunkCountOf(await readSecure(store, key));
+				for (let index = 0; index < count; index += 1) {
+					await deleteSecure(store, chunkKey(key, index));
+				}
+				await deleteSecure(store, key);
+			} catch {
+				// Deleting an absent key is a no-op, never a throw.
+			}
+		},
+
+		kvGet: async (key, scope) => {
+			const row = await (await database()).getFirstAsync<{ value: string }>(
+				"SELECT value FROM kv_store WHERE key = ?",
+				[scopedKey(key, scope)],
+			);
+			// `?? null` and not `|| null`: the empty string is a value, not an absence.
+			return row?.value ?? null;
+		},
+
+		kvSet: async (key, value, scope) => {
+			await (await database()).runAsync(
+				"INSERT OR REPLACE INTO kv_store (key, value) VALUES (?, ?)",
+				[scopedKey(key, scope), value],
+			);
+		},
+
+		kvDelete: async (key, scope) => {
+			await (await database()).runAsync("DELETE FROM kv_store WHERE key = ?", [
+				scopedKey(key, scope),
+			]);
+		},
+
+		kvListKeys: async (prefix) => {
+			const found = new Set<string>();
+			for (const key of await keysMatching(prefix)) {
+				// An empty prefix matches the session namespace too; those keys are reported
+				// by the pass below, under their logical name.
+				if (!key.startsWith(SESSION_PREFIX)) {
+					found.add(key);
+				}
+			}
+			for (const key of await keysMatching(`${SESSION_PREFIX}${prefix}`)) {
+				found.add(key.slice(SESSION_PREFIX.length));
+			}
+			return [...found].sort();
+		},
+	};
+}
+
+// ============================================================================
+// RecordPort — one sqlite row per record
+// ============================================================================
+
+export function createReactNativeRecordPort(
+	deps: ReactNativeDeps = defaultDeps,
+): RecordPort {
+	const database = openDatabase(deps, CREATE_RECORDS_TABLE);
+
+	return {
+		initialize: async () => {
+			await database();
+		},
+
+		recordPut: async (collection, id, value) => {
+			await (await database()).runAsync(
+				"INSERT OR REPLACE INTO records (collection, id, value) VALUES (?, ?, ?)",
+				[collection, id, value],
+			);
+		},
+
+		recordGet: async (collection, id) => {
+			const row = await (await database()).getFirstAsync<{ value: string }>(
+				"SELECT value FROM records WHERE collection = ? AND id = ?",
+				[collection, id],
+			);
+			return row?.value ?? null;
+		},
+
+		recordDelete: async (collection, id) => {
+			await (await database()).runAsync(
+				"DELETE FROM records WHERE collection = ? AND id = ?",
+				[collection, id],
+			);
+		},
+
+		recordList: async (collection) =>
+			await (await database()).getAllAsync<{ id: string; value: string }>(
+				"SELECT id, value FROM records WHERE collection = ?",
+				[collection],
+			),
+
+		recordClear: async (collection) => {
+			await (await database()).runAsync(
+				"DELETE FROM records WHERE collection = ?",
+				[collection],
+			);
+		},
+	};
 }

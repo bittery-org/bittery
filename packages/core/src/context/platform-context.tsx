@@ -5,7 +5,7 @@
  * Each app wraps its root with PlatformProvider, injecting platform-specific implementations.
  */
 
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import type {
 	IAutolockService,
 	ICrypto,
@@ -21,7 +21,19 @@ import { type CoreContext, createCoreContext } from "../core-context";
  */
 export interface PlatformContextValue {
 	/** Storage adapter instance (already has CryptoProvider injected) */
-	storage: IStorageAdapter;
+	storage: AccountStore;
+
+	/**
+	 * The encrypted item/vault cache.
+	 *
+	 * A **sibling** of `storage`, never reachable through it: `AccountStore` sits on a
+	 * `PlatformPort` and `ItemCache` on a `RecordPort`, and neither knows about the
+	 * other. That layering is deliberate, and it is why every flow that has to drop
+	 * both — sign-out, account removal, a fresh login onto a reused accountId — has to
+	 * sequence them from up here. Not optional: an app that forgot to supply one would
+	 * leave encrypted vault contents on disk after logout.
+	 */
+	itemCache: ItemCache;
 
 	/** Platform crypto module - all platforms have identical API */
 	crypto: ICrypto;
@@ -49,7 +61,10 @@ const PlatformContext = createContext<PlatformContextValue | null>(null);
  */
 export interface PlatformProviderProps {
 	/** Storage adapter instance */
-	storage: IStorageAdapter;
+	storage: AccountStore;
+
+	/** Encrypted item/vault cache — a sibling of `storage`, supplied alongside it. */
+	itemCache: ItemCache;
 
 	/**
 	 * Platform crypto module - pass your crypto module directly (e.g., import * as crypto from "@/lib/wasm-crypto")
@@ -107,6 +122,7 @@ export interface PlatformProviderProps {
  */
 export function PlatformProvider({
 	storage,
+	itemCache,
 	crypto,
 	itemDecrypt,
 	autolock,
@@ -127,21 +143,23 @@ export function PlatformProvider({
 		() =>
 			createCoreContext({
 				storage,
+				itemCache,
 				crypto,
 			}),
-		[storage, crypto],
+		[storage, itemCache, crypto],
 	);
 
 	const value = useMemo(
 		() => ({
 			storage,
+			itemCache,
 			crypto,
 			core,
 			itemDecrypt: effectiveItemDecrypt,
 			autolock,
 			sync,
 		}),
-		[storage, crypto, core, effectiveItemDecrypt, autolock, sync],
+		[storage, itemCache, crypto, core, effectiveItemDecrypt, autolock, sync],
 	);
 
 	return (
@@ -170,8 +188,18 @@ export function usePlatform(): PlatformContextValue {
  * Hook to access just the storage adapter from platform context.
  * Convenience wrapper around usePlatform().
  */
-export function usePlatformStorage(): IStorageAdapter {
+export function usePlatformStorage(): AccountStore {
 	return usePlatform().storage;
+}
+
+/**
+ * Hook to access just the item cache from platform context.
+ *
+ * Deliberately a separate hook from {@link usePlatformStorage}: a caller that needs
+ * both takes both, so the two seams stay visible at every call site.
+ */
+export function usePlatformItemCache(): ItemCache {
+	return usePlatform().itemCache;
 }
 
 /**

@@ -68,6 +68,7 @@ export {
 	usePlatform,
 	usePlatformAutolock,
 	usePlatformCrypto,
+	usePlatformItemCache,
 	usePlatformItemDecrypt,
 	usePlatformStorage,
 	usePlatformSync,

@@ -15,7 +15,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
-import { type AccountMetadata, storage } from "@/lib/storage";
+import { type AccountMetadata, itemCache, storage } from "@/lib/storage";
 import { createDesktopAutolockService } from "@/services/autolock-service";
 
 interface AccountContextValue {
@@ -37,6 +37,9 @@ function createDesktopAccountManager(
 ): AccountSessionManager {
 	return getAccountSessionManager({
 		storage,
+		// Sibling of `storage`: `removeAccount` has to wipe the account's cached ciphertext,
+		// and `AccountStore` cannot reach it (CONTRACT.md §12.3).
+		itemCache,
 		onActiveChanged: async (active) => {
 			if (active?.type !== "single") {
 				return;

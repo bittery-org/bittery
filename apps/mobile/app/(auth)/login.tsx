@@ -4,6 +4,7 @@ import {
 	parseDeviceSetupParams,
 } from "@bittery/shared";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
+import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
 	Button,
@@ -40,6 +41,7 @@ import { withUniwind } from "uniwind";
 import { DeviceSetupQrScanner } from "@/components/device-setup-qr-scanner";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { defaultServerUrl } from "@/constants/server-url";
+import { useBiometricType } from "@/lib/biometric-type";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
@@ -81,12 +83,19 @@ export default function LoginScreen() {
 	const [setupComplete, setSetupComplete] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
-	const [biometricAvailable, setBiometricAvailable] = useState(false);
-	const [biometricType, setBiometricType] = useState<string | null>(null);
-	const [biometricDetails, setBiometricDetails] = useState<{
-		hasHardware: boolean;
-		isEnrolled: boolean;
-	}>({ hasHardware: false, isEnrolled: false });
+	// Both of these are cached async reads of a device fact, which is what `useQuery` is for.
+	const { label: biometricTypeLabel } = useBiometricType();
+	const biometricDetailsQuery = useQuery({
+		queryKey: ["mobile", "biometric-availability"],
+		queryFn: () => storage.getBiometricAvailabilityDetails(),
+	});
+	const biometricDetails = biometricDetailsQuery.data ?? {
+		hasHardware: false,
+		isEnrolled: false,
+	};
+	// Biometric is only "available" if hardware exists AND biometrics are enrolled
+	const biometricAvailable =
+		biometricDetails.hasHardware && biometricDetails.isEnrolled;
 
 	const applySetupPayload = useCallback((payload: ParsedDeviceSetupPayload) => {
 		setEmail(payload.email);
@@ -163,26 +172,6 @@ export default function LoginScreen() {
 		m.login_alert_setup_loaded_message,
 		m.login_alert_setup_loaded_title,
 	]);
-
-	useEffect(() => {
-		async function checkBiometric() {
-			const details = await storage.getBiometricAvailabilityDetails();
-			setBiometricDetails({
-				hasHardware: details.hasHardware,
-				isEnrolled: details.isEnrolled,
-			});
-
-			// Biometric is only "available" if hardware exists AND biometrics are enrolled
-			const available = details.hasHardware && details.isEnrolled;
-			setBiometricAvailable(available);
-
-			if (available) {
-				const type = await storage.getBiometricType();
-				setBiometricType(type);
-			}
-		}
-		checkBiometric();
-	}, []);
 
 	// Use the shared login hook
 	const loginMutation = useLogin({
@@ -495,12 +484,12 @@ export default function LoginScreen() {
 											<View className="flex-1">
 												<Label>
 													{m.login_biometric_enable_label({
-														biometricType: biometricType ?? "biometric",
+														biometricType: biometricTypeLabel,
 													})}
 												</Label>
 												<Description>
 													{m.login_biometric_enable_description({
-														biometricType: biometricType ?? "biometrics",
+														biometricType: biometricTypeLabel,
 													})}
 												</Description>
 											</View>
@@ -521,8 +510,7 @@ export default function LoginScreen() {
 													</Text>
 													<Text className="text-amber-700 text-sm">
 														{m.login_biometric_not_enrolled_description({
-															biometricType:
-																biometricType ?? "Face ID/Touch ID",
+															biometricType: biometricTypeLabel,
 														})}
 													</Text>
 												</View>

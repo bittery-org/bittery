@@ -12,7 +12,7 @@ import type { ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { cryptoAdapter } from "@/lib/crypto-adapter";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import { useSyncContext } from "./sync-provider";
 
 /**
@@ -55,7 +55,12 @@ export function ExtensionPlatformProvider({
 	);
 
 	return (
-		<PlatformProvider storage={storage} crypto={cryptoAdapter} sync={sync}>
+		<PlatformProvider
+			storage={storage}
+			itemCache={itemCache}
+			crypto={cryptoAdapter}
+			sync={sync}
+		>
 			{children}
 		</PlatformProvider>
 	);

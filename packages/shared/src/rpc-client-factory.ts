@@ -3,8 +3,15 @@ import { createSessionRefreshingRpcClient } from "./rpc-session-refresh";
 import { buildRpcUrl, normalizeServerUrl } from "./server-url";
 import type { SessionSnapshot } from "./session-refresh";
 
-interface IStorageAdapter {
-	getUnlockedAccounts?: () => Promise<string[]>;
+/**
+ * The slice of `AccountStore` this module needs, declared structurally because
+ * `@bittery/storage` depends on `@bittery/shared` and not the other way round.
+ *
+ * Every member is required: `AccountStore` is a total interface, so an optional
+ * member here would only re-create feature detection.
+ */
+interface AccountStoreLike {
+	getUnlockedAccounts(): Promise<string[]>;
 	getAuthToken(email: string): Promise<string | null>;
 	getServerUrl(email: string): Promise<string | null>;
 }
@@ -180,12 +187,12 @@ export function createRpcClientForServer(serverUrl: string): AppRpcClient {
 }
 
 export async function createAllAccountRpcClients(
-	storage: IStorageAdapter,
+	storage: AccountStoreLike,
 	clientId?: string,
 ): Promise<Map<string, ReturnType<typeof createAccountRpcClient>>> {
-	const unlockedAccountIds = await storage.getUnlockedAccounts?.();
+	const unlockedAccountIds = await storage.getUnlockedAccounts();
 
-	if (!unlockedAccountIds || unlockedAccountIds.length === 0) {
+	if (unlockedAccountIds.length === 0) {
 		return new Map();
 	}
 

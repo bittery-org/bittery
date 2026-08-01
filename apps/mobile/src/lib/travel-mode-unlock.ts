@@ -1,7 +1,7 @@
 /**
  * Travel mode enforcement for "unlock all accounts" biometric flows.
  *
- * The storage adapter's `unlockAllAccountsWithBiometric()` decrypts stored
+ * `AccountStore.unlockAllAccountsWithBiometric()` decrypts stored
  * MUKs but does NOT re-verify travel mode against the server. Travel mode is a
  * security feature that MUST fail closed, so every account produced by an
  * all-accounts unlock has to be verified at the caller level before it is
@@ -16,12 +16,12 @@
  */
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
-import { storage } from "../services/storage";
+import { itemCache, storage } from "../services/storage";
 
 export async function enforceTravelModeForUnlockedAccounts(
 	accountIds: string[],
 ): Promise<string[]> {
-	const enforcer = getTravelModeEnforcer(storage);
+	const enforcer = getTravelModeEnforcer(storage, itemCache);
 	const verified: string[] = [];
 
 	for (const accountId of accountIds) {

@@ -68,6 +68,12 @@ export type DesktopResponse =
 	  }
 	| {
 			type: "DESKTOP_ACCOUNTS";
+			/**
+			 * Mirrors the desktop native view's published account entry, which is itself a
+			 * republication of `AccountMetadata`. Only the two fields that are optional in
+			 * `AccountMetadata` are optional here — the rest are always sent, so the
+			 * consumer never has to invent a timestamp or a default.
+			 */
 			accounts: Array<{
 				accountId: string;
 				email: string;
@@ -76,9 +82,9 @@ export type DesktopResponse =
 				secretKeyHint: string;
 				teamName?: string;
 				teamAvatarUrl?: string | null;
-				lastActiveAt?: number;
-				biometricEnabled?: boolean;
-				addedAt?: number;
+				addedAt: number;
+				lastActiveAt: number;
+				biometricEnabled: boolean;
 			}>;
 			activeAccount?: string | null;
 			unlockedAccounts: string[];

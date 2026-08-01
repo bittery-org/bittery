@@ -1,8 +1,14 @@
-import { describe, expect, it, mock } from "bun:test";
-import type { IStorageAdapter } from "@bittery/storage";
+import { describe, expect, it, mock, spyOn } from "bun:test";
+import type { AccountStore } from "@bittery/storage";
+import type { InMemoryPlatformPort } from "@bittery/storage/testing";
 import type { AccountMetadata } from "@bittery/storage/types";
 import type { ICrypto, KdfProfile } from "@bittery/types";
 import {
+	createTestAccountStore,
+	createTestItemCache,
+} from "../testing/account-store-harness";
+import {
+	clearSession,
 	deriveSrpLoginProof,
 	getBiometricUnlockAvailability,
 	type IAuthClient,
@@ -20,6 +26,8 @@ const kdfParams: KdfProfile = {
 	iterations: 600_000,
 };
 
+const MUK = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
+
 function account(
 	accountId: string,
 	userId: string,
@@ -36,6 +44,20 @@ function account(
 		lastActiveAt: 1,
 		biometricEnabled: false,
 	};
+}
+
+/**
+ * A real `AccountStore` over the in-memory platform port. The real store answers every
+ * one of these queries from what the test actually wrote.
+ */
+async function makeStore(
+	accounts: AccountMetadata[] = [],
+): Promise<{ storage: AccountStore; port: InMemoryPlatformPort }> {
+	const { store, port } = await createTestAccountStore();
+	for (const metadata of accounts) {
+		await store.addAccount(metadata);
+	}
+	return { storage: store, port };
 }
 
 function createCrypto(secretReads: string[]): ICrypto {
@@ -99,21 +121,30 @@ function createAuthClient(
 
 describe("account-routed authentication", () => {
 	it("reports biometric unlock when any account is eligible", async () => {
-		const checkedAccountIds: string[] = [];
-		const storage = {
-			supportsBiometric: true,
-			getAccountMetadata: mock(async (accountId: string) =>
-				account(accountId, `user-${accountId}`, `https://${accountId}.example`),
-			),
-			isSessionValid: mock(async () => true),
-			canQuickUnlock: mock(async () => true),
-			canBiometricUnlock: mock(async (accountId: string) => {
-				checkedAccountIds.push(accountId);
-				return accountId === "account-b";
-			}),
-			isMasterPasswordReentryRequired: mock(async () => false),
-			getStoredSessionData: mock(async () => null),
-		} as unknown as IStorageAdapter;
+		const accounts = [
+			account("account-a", "user-a", "https://a.example"),
+			account("account-b", "user-b", "https://b.example"),
+		];
+		const { storage, port } = await makeStore(accounts);
+		port.biometricState.hasHardware = true;
+		port.biometricState.isEnrolled = true;
+
+		// Both accounts have a live session; only account-b has biometric turned on.
+		for (const metadata of accounts) {
+			await storage.storeAuthToken(
+				`token-${metadata.accountId}`,
+				metadata.accountId,
+			);
+			await storage.storeSessionData(
+				MUK,
+				metadata.accountId,
+				metadata.email,
+				metadata.userId,
+			);
+		}
+		await storage.setBiometricEnabled("account-b", true);
+
+		const canBiometricUnlock = spyOn(storage, "canBiometricUnlock");
 
 		const availability = await getBiometricUnlockAvailability(storage, [
 			"account-a",
@@ -124,7 +155,10 @@ describe("account-routed authentication", () => {
 			canUnlock: true,
 			requiresPasswordReentry: false,
 		});
-		expect(checkedAccountIds).toEqual(["account-a", "account-b"]);
+		expect(canBiometricUnlock.mock.calls).toEqual([
+			["account-a"],
+			["account-b"],
+		]);
 	});
 
 	it("derives proofs for duplicate-email accounts from only the requested account", async () => {
@@ -132,20 +166,19 @@ describe("account-routed authentication", () => {
 			account("account-a", "user-a", "https://a.example"),
 			account("account-b", "user-b", "https://b.example"),
 		];
+		const { storage } = await makeStore(accounts);
+		for (const metadata of accounts) {
+			await storage.storeSecretKey(
+				`secret-${metadata.accountId}`,
+				metadata.accountId,
+			);
+			await storage.storePinnedKdfProfile(kdfParams, metadata.accountId);
+		}
+
 		const secretReads: string[] = [];
-		const pinnedReads: string[] = [];
 		const clientAccountIds: string[] = [];
 		const startedEmails: string[] = [];
-		const storage = {
-			getAccountsList: mock(async () => accounts),
-			getStoredSecretKey: mock(
-				async (accountId: string) => `secret-${accountId}`,
-			),
-			getPinnedKdfProfile: mock(async (accountId: string) => {
-				pinnedReads.push(accountId);
-				return { ...kdfParams, salt: `pin-${accountId}` };
-			}),
-		} as unknown as IStorageAdapter;
+		const getPinnedKdfProfile = spyOn(storage, "getPinnedKdfProfile");
 		const crypto = createCrypto(secretReads);
 
 		for (const accountId of ["account-a", "account-b"]) {
@@ -166,28 +199,26 @@ describe("account-routed authentication", () => {
 			"secret-account-a:same@example.com",
 			"secret-account-b:same@example.com",
 		]);
-		expect(pinnedReads).toEqual(["account-a", "account-b"]);
+		expect(getPinnedKdfProfile.mock.calls).toEqual([
+			["account-a"],
+			["account-b"],
+		]);
 		expect(clientAccountIds).toEqual(["account-a", "account-b"]);
 		expect(startedEmails).toEqual(["same@example.com", "same@example.com"]);
 	});
 
 	it("does not mutate storage or the active account before login commit", async () => {
+		const { storage } = await makeStore([
+			account("cloud", "cloud-user", "https://cloud.example"),
+		]);
+		await storage.setActiveAccount({ type: "single", accountId: "cloud" });
+
 		const writes = {
-			storeAuthToken: mock(async () => {}),
-			storeServerUrl: mock(async () => {}),
-			storePinnedKdfProfile: mock(async () => {}),
-			setActiveAccount: mock(async () => {}),
+			storeAuthToken: spyOn(storage, "storeAuthToken"),
+			storeServerUrl: spyOn(storage, "storeServerUrl"),
+			storePinnedKdfProfile: spyOn(storage, "storePinnedKdfProfile"),
+			setActiveAccount: spyOn(storage, "setActiveAccount"),
 		};
-		const storage = {
-			...writes,
-			getAccountsList: mock(async () => [
-				account("cloud", "cloud-user", "https://cloud.example"),
-			]),
-			getActiveAccount: mock(async () => ({
-				type: "single",
-				accountId: "cloud",
-			})),
-		} as unknown as IStorageAdapter;
 		const startedEmails: string[] = [];
 		const handshakeClient = createAuthClient(startedEmails, "self-token");
 		const authenticatedClient = createAuthClient([], "self-token");
@@ -222,19 +253,16 @@ describe("account-routed authentication", () => {
 	});
 
 	it("validates full login against the pin selected by normalized server and email", async () => {
-		const accounts = [
+		const { storage } = await makeStore([
 			account("account-a", "user-a", "https://a.example"),
 			account("account-b", "user-b", "https://b.example"),
-		];
+		]);
 		const profileA = { ...kdfParams, iterations: 700_000 };
 		const profileB = { ...kdfParams };
+		await storage.storePinnedKdfProfile(profileA, "account-a");
+		await storage.storePinnedKdfProfile(profileB, "account-b");
+		const getPinnedKdfProfile = spyOn(storage, "getPinnedKdfProfile");
 		const crypto = createCrypto([]);
-		const storage = {
-			getAccountsList: mock(async () => accounts),
-			getPinnedKdfProfile: mock(async (accountId: string) =>
-				accountId === "account-a" ? profileA : profileB,
-			),
-		} as unknown as IStorageAdapter;
 
 		await performSRPLogin(
 			{
@@ -251,7 +279,7 @@ describe("account-routed authentication", () => {
 			},
 		);
 
-		expect(storage.getPinnedKdfProfile).toHaveBeenCalledWith("account-b");
+		expect(getPinnedKdfProfile).toHaveBeenCalledWith("account-b");
 		expect(crypto.validateKdfProfile).toHaveBeenCalledWith(kdfParams, profileB);
 	});
 
@@ -259,15 +287,13 @@ describe("account-routed authentication", () => {
 		const crypto = createCrypto([]);
 		delete (crypto as Partial<ICrypto>).validateKdfProfile;
 		const deriveKeys = crypto.deriveKeys as ReturnType<typeof mock>;
-		const storage = {
-			getAccountsList: mock(async () => [
-				account("account-a", "user-a", "https://a.example"),
-			]),
-			getPinnedKdfProfile: mock(async () => ({
-				...kdfParams,
-				iterations: 1_200_000,
-			})),
-		} as unknown as IStorageAdapter;
+		const { storage } = await makeStore([
+			account("account-a", "user-a", "https://a.example"),
+		]);
+		await storage.storePinnedKdfProfile(
+			{ ...kdfParams, iterations: 1_200_000 },
+			"account-a",
+		);
 
 		expect(
 			performSRPLogin(
@@ -285,12 +311,10 @@ describe("account-routed authentication", () => {
 
 	it("rejects ambiguous full-login account matches before derivation", async () => {
 		const crypto = createCrypto([]);
-		const storage = {
-			getAccountsList: mock(async () => [
-				account("account-a", "user-a", "https://a.example"),
-				account("account-b", "user-b", "https://a.example/"),
-			]),
-		} as unknown as IStorageAdapter;
+		const { storage } = await makeStore([
+			account("account-a", "user-a", "https://a.example"),
+			account("account-b", "user-b", "https://a.example/"),
+		]);
 
 		expect(
 			performSRPLogin(
@@ -345,26 +369,14 @@ describe("KDF agility on unlock", () => {
 	it("derives unlock keys with the account's pinned KDF profile", async () => {
 		const derivedParams: KdfProfile[] = [];
 		const crypto = createCapturingCrypto(derivedParams);
-		const storage = {
-			getAccountsList: mock(async () => [
-				account("acct", "user", "https://acct.example"),
-			]),
-			getStoredSecretKey: mock(async () => "secret"),
-			getPinnedKdfProfile: mock(async () => pinnedProfile),
-			getEncryptedPrivateKey: mock(async () => null),
-			getStoredSessionData: mock(async () => ({
-				sessionId: "session",
-				expiresAt: Date.now() + 60_000,
-				userId: "user",
-				email: "same@example.com",
-			})),
-			getAuthToken: mock(async () => "token"),
-			getVaultKeys: mock(async () => []),
-			isSessionValid: mock(async () => true),
-			getAccountMetadata: mock(async () =>
-				account("acct", "user", "https://acct.example"),
-			),
-		} as unknown as IStorageAdapter;
+		const { storage } = await makeStore([
+			account("acct", "user", "https://acct.example"),
+		]);
+		await storage.storeSecretKey("secret", "acct");
+		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
+		await storage.storeAuthToken("token", "acct");
+		await storage.storeVaultKeys([], "acct");
+		await storage.storeSessionData(MUK, "acct", "same@example.com", "user");
 
 		const result = await performSRPUnlock(
 			{ accountId: "acct", password: "password" },
@@ -382,13 +394,10 @@ describe("KDF agility on unlock", () => {
 
 	it("requires full sign-in when the offline-unlock pin is missing", async () => {
 		const crypto = createCapturingCrypto([]);
-		const storage = {
-			getAccountsList: mock(async () => [
-				account("acct", "user", "https://acct.example"),
-			]),
-			getStoredSecretKey: mock(async () => "secret"),
-			getPinnedKdfProfile: mock(async () => null),
-		} as unknown as IStorageAdapter;
+		const { storage } = await makeStore([
+			account("acct", "user", "https://acct.example"),
+		]);
+		await storage.storeSecretKey("secret", "acct");
 
 		expect(
 			performSRPUnlock(
@@ -406,13 +415,11 @@ describe("KDF agility on unlock", () => {
 	it("derives SRP login proofs with the negotiated server KDF params, not the current default", async () => {
 		const derivedParams: KdfProfile[] = [];
 		const crypto = createCapturingCrypto(derivedParams);
-		const storage = {
-			getAccountsList: mock(async () => [
-				account("acct", "user", "https://acct.example"),
-			]),
-			getStoredSecretKey: mock(async () => "secret"),
-			getPinnedKdfProfile: mock(async () => pinnedProfile),
-		} as unknown as IStorageAdapter;
+		const { storage } = await makeStore([
+			account("acct", "user", "https://acct.example"),
+		]);
+		await storage.storeSecretKey("secret", "acct");
+		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 
 		const authClient = {
 			auth: {
@@ -450,32 +457,10 @@ describe("storeLoginSession travel mode verification", () => {
 			expiresAt: new Date(Date.now() + 60_000),
 			user: { id: "user-1", email: "user@example.com" },
 			vaultKeys: [],
-			masterUnlockKey: new Uint8Array([1, 2, 3]),
+			masterUnlockKey: MUK,
 			kdfParams,
 			serverUrl: "https://cloud.example",
 		};
-	}
-
-	function createStorage(): IStorageAdapter {
-		// No auth token is stored yet — this is a first login in a fresh browser,
-		// so any ambient RPC client reading storage is unauthenticated.
-		return {
-			getAccountsList: mock(async () => []),
-			getAuthToken: mock(async () => null),
-			getServerUrl: mock(async () => "https://cloud.example"),
-			getTravelModeCache: mock(async () => null),
-			storeTravelModeCache: mock(async () => {}),
-			getPinnedKdfProfile: mock(async () => null),
-			storePinnedKdfProfile: mock(async () => {}),
-			storeAuthToken: mock(async () => {}),
-			storeServerUrl: mock(async () => {}),
-			storeVaultKeys: mock(async () => {}),
-			getVaultKeys: mock(async () => []),
-			storeSecretKey: mock(async () => {}),
-			storeSessionData: mock(async () => {}),
-			setMasterUnlockKey: mock(async () => {}),
-			storeEncryptedPrivateKey: mock(async () => {}),
-		} as unknown as IStorageAdapter;
 	}
 
 	function travelModeClientForToken(
@@ -504,25 +489,130 @@ describe("storeLoginSession travel mode verification", () => {
 
 	it("verifies travel mode with the freshly issued login token", async () => {
 		resetTravelModeEnforcerForTests();
-		const storage = createStorage();
+		// A first login into an empty store: nothing is authenticated yet, so any
+		// ambient RPC client reading storage would be unauthenticated.
+		const { storage } = await makeStore();
+		const storePinnedKdfProfile = spyOn(storage, "storePinnedKdfProfile");
 		const seenTokens: (string | null)[] = [];
 
 		await storeLoginSession(
 			loginResult(),
 			"secret",
 			storage,
+			(await createTestItemCache()).cache,
 			"user@example.com",
 			{
 				serverUrl: "https://cloud.example",
-				createTravelModeRpcClient: (token) =>
+				createTravelModeRpcClient: (token: string | null) =>
 					travelModeClientForToken(token, seenTokens),
 			},
 		);
 
 		expect(seenTokens).toEqual(["fresh-login-token"]);
-		expect(storage.storePinnedKdfProfile).toHaveBeenCalledWith(
+		expect(storePinnedKdfProfile).toHaveBeenCalledWith(
 			kdfParams,
 			expect.any(String),
 		);
+	});
+
+	// A reused accountId is the normal case, not an edge case:
+	// `resolveOrCreateAccountId` keys on (serverUrl, userId), so signing back in
+	// after a sign-out lands on the same id — and therefore the same item-cache
+	// collections. Anything left there is the *previous* session's ciphertext.
+	it("clears the item cache before writing a session onto a reused accountId", async () => {
+		resetTravelModeEnforcerForTests();
+		const { storage } = await makeStore();
+		const { cache: itemCache } = await createTestItemCache();
+		const seenTokens: (string | null)[] = [];
+
+		const accountId = await storeLoginSession(
+			loginResult(),
+			"secret",
+			storage,
+			itemCache,
+			"user@example.com",
+			{
+				serverUrl: "https://cloud.example",
+				createTravelModeRpcClient: (token: string | null) =>
+					travelModeClientForToken(token, seenTokens),
+			},
+		);
+
+		await itemCache.setCachedItems(
+			[{ id: "stale-item", vaultId: "vault-1" } as never],
+			accountId,
+		);
+
+		resetTravelModeEnforcerForTests();
+		await storeLoginSession(
+			loginResult(),
+			"secret",
+			storage,
+			itemCache,
+			"user@example.com",
+			{
+				serverUrl: "https://cloud.example",
+				createTravelModeRpcClient: (token: string | null) =>
+					travelModeClientForToken(token, seenTokens),
+			},
+		);
+
+		expect(await itemCache.getCachedItems(accountId)).toBeNull();
+	});
+});
+
+/**
+ * `AccountStore` holds only a `PlatformPort` and cannot reach the record cache, so
+ * sign-out has to sequence the two clears here. Leaving the cache behind is the leak
+ * CONTRACT.md §12.3 names — and lock is deliberately not sign-out.
+ */
+describe("clearSession item-cache handling", () => {
+	async function seeded() {
+		const { storage } = await makeStore();
+		const { cache: itemCache } = await createTestItemCache();
+		await storage.addAccount({
+			accountId: "acc-1",
+			email: "user@example.com",
+			userId: "user-1",
+			name: "User",
+			serverUrl: "https://cloud.example",
+			secretKeyHint: "ABCD",
+			addedAt: 1,
+			lastActiveAt: 1,
+			biometricEnabled: false,
+		});
+		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
+		await itemCache.setCachedItems(
+			[{ id: "item-1", vaultId: "vault-1" } as never],
+			"acc-1",
+		);
+		return { storage, itemCache };
+	}
+
+	it("wipes the account's cached ciphertext on a full sign-out", async () => {
+		const { storage, itemCache } = await seeded();
+
+		await clearSession(storage, itemCache, "acc-1", true);
+
+		expect(await itemCache.getCachedItems("acc-1")).toBeNull();
+	});
+
+	it("resolves the active account when the caller has no id", async () => {
+		const { storage, itemCache } = await seeded();
+
+		await clearSession(storage, itemCache, undefined, true);
+
+		expect(await itemCache.getCachedItems("acc-1")).toBeNull();
+		// Never the `"default"` segment: that belongs to a different account
+		// everywhere except web.
+		expect(await itemCache.getCachedItems()).toBeNull();
+	});
+
+	it("keeps the cache on a lock, so quick-unlock stays cheap", async () => {
+		const { storage, itemCache } = await seeded();
+
+		await clearSession(storage, itemCache, "acc-1", false);
+
+		expect(await itemCache.getCachedItems("acc-1")).toHaveLength(1);
 	});
 });

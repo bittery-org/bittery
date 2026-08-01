@@ -1,4 +1,4 @@
-import { storage } from "./storage";
+import { itemCache, storage } from "./storage";
 
 export function isUnauthorizedRpcError(error: unknown): boolean {
 	if (
@@ -12,14 +12,21 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
 	return false;
 }
 
+/**
+ * The server rejected this account's credentials, so it is a sign-out, not a lock:
+ * `forgetSession` drops the session-bound secrets (`jwt_token`, `vault_keys`,
+ * `encrypted_private_key`) *and* `session_data`, so no quick-unlock offer survives and the
+ * master password is required.
+ *
+ * `AccountStore` sits on a `PlatformPort` and cannot reach the record-backed cache, so the
+ * encrypted item cache has to be dropped from here (CONTRACT.md §12.3) — leaving it behind
+ * after a forced sign-out is a real leak.
+ */
 export async function invalidateDesktopAccountSession(
 	accountId: string,
 ): Promise<void> {
-	await storage.clearSession(accountId);
-	await storage.clearStoredSession(accountId);
-	await storage.storeAuthToken("", accountId);
-	await storage.storeVaultKeys([], accountId);
-	await storage.storeEncryptedPrivateKey("", accountId);
+	await storage.forgetSession(accountId);
+	await itemCache.clearItemCache(accountId);
 }
 
 export async function findAccountIdBySessionId(

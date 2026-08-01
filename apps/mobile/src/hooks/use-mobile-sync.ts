@@ -31,10 +31,18 @@ import {
 	getMobileSyncDb,
 	getOrCreateMobileSyncClientId,
 } from "../lib/sync-client-id";
-import { storage } from "../services/storage";
+import { itemCache, storage } from "../services/storage";
 
+/**
+ * `accountId` is deliberately non-nullable.
+ *
+ * It becomes `SyncSource.itemCacheAccountId`, and `ItemCache` falls back to the literal
+ * collection segment `"default"` when it is not given one — so a `null` here would not fail,
+ * it would silently read and write a collection that belongs to no account. Sync is simply
+ * not enabled until a real account is resolved. See CONTRACT.md §12.2.
+ */
 interface SyncConnectionContext {
-	accountId: string | null;
+	accountId: string;
 	serverUrl: string;
 }
 
@@ -117,15 +125,8 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
 		}
 	}
 
-	// Backward-compatible fallback for legacy/global single-account data.
-	const [fallbackToken, fallbackUrl] = await Promise.all([
-		storage.getAuthToken(),
-		storage.getServerUrl(),
-	]);
-	if (fallbackToken && fallbackUrl) {
-		return { accountId: null, serverUrl: fallbackUrl };
-	}
-
+	// No account-less fallback: a context without an accountId could not name an
+	// item-cache collection anyway.
 	return null;
 }
 
@@ -215,7 +216,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const vaultCoordinator = useMemo(
-		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
+		() => getOrCreateVaultRepositoryCoordinator(crypto, storage, itemCache),
 		[],
 	);
 
@@ -240,6 +241,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				event,
 				syncAccountId,
 				storage,
+				itemCache,
 				vaultCoordinator,
 				{
 					rpcClient: rpcClient as unknown as RpcVaultClient,
@@ -256,7 +258,8 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		clientId,
 		queryClient,
 		storage: syncStorage,
-		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
+		enabled:
+			enabled && isInitialized && !!serverUrl && !!clientId && !!syncAccountId,
 		realtimeEnabled: true,
 		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountId: syncAccountId,

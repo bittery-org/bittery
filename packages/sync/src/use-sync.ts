@@ -12,9 +12,9 @@ import {
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";
 import type {
-	ItemCacheAdapter,
 	SessionRevokedControlPayload,
 	SyncEvent,
+	SyncItemCache,
 	SyncStatus,
 	SyncStorage,
 } from "./types";
@@ -129,7 +129,7 @@ export interface UseSyncOptions {
 	storage?: SyncStorage;
 	enabled?: boolean;
 	realtimeEnabled?: boolean;
-	itemCacheAdapter?: ItemCacheAdapter;
+	itemCacheAdapter?: SyncItemCache;
 	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;

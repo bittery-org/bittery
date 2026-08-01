@@ -17,6 +17,7 @@ import {
 import {
 	type AccountMetadata,
 	type ActiveAccount,
+	itemCache,
 	storage,
 } from "@/services/storage";
 
@@ -57,6 +58,10 @@ export function AccountProvider({ children }: AccountProviderProps) {
 	if (!managerRef.current) {
 		managerRef.current = getAccountSessionManager({
 			storage,
+			// Sibling of `storage`, not reachable through it: `removeAccount` has to wipe the
+			// account's cached ciphertext as well as its session, and `AccountStore` sits on a
+			// `PlatformPort` that cannot see the record store.
+			itemCache,
 			invalidateQueries: async (keys) => {
 				await Promise.all(
 					keys.map((key) =>

@@ -3,18 +3,23 @@
  * Framework-agnostic; platform specifics injected via callbacks.
  */
 
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import {
 	findAccountById,
 	resolveActiveAccountId,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
 import { createStoredAccountRpcClient } from "./rpc-client";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export interface AccountSessionManagerOptions {
-	storage: IStorageAdapter;
+	storage: AccountStore;
+	/**
+	 * Sibling of `storage`. Required because `removeAccount` has to wipe the account's
+	 * cached ciphertext, and `AccountStore` cannot reach it. See CONTRACT.md §12.3.
+	 */
+	itemCache: ItemCache;
 	onActiveChanged?: (active: ActiveAccount) => void | Promise<void>;
 	onLockBroadcast?: (reason: string) => void | Promise<void>;
 	invalidateQueries?: (keys: string[][]) => void | Promise<void>;
@@ -44,8 +49,12 @@ export class AccountSessionManager {
 
 	constructor(private readonly options: AccountSessionManagerOptions) {}
 
-	get storage(): IStorageAdapter {
+	get storage(): AccountStore {
 		return this.options.storage;
+	}
+
+	get itemCache(): ItemCache {
+		return this.options.itemCache;
 	}
 
 	subscribe = (listener: () => void): (() => void) => {
@@ -67,7 +76,7 @@ export class AccountSessionManager {
 			if (this.options.verifyUnlockPolicy) {
 				await this.options.verifyUnlockPolicy(accountId);
 			} else {
-				const enforcer = getTravelModeEnforcer(this.storage);
+				const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 				if (!enforcer.isVerified(accountId)) {
 					const client = await createStoredAccountRpcClient(
 						this.storage,
@@ -95,7 +104,7 @@ export class AccountSessionManager {
 		const [accounts, active, unlocked] = await Promise.all([
 			this.storage.getAccountsList(),
 			this.storage.getActiveAccount(),
-			this.storage.getUnlockedAccounts?.() ?? Promise.resolve([]),
+			this.storage.getUnlockedAccounts(),
 		]);
 
 		this.accounts = accounts;
@@ -215,9 +224,7 @@ export class AccountSessionManager {
 			secretKeyHint: input.secretKeyHint,
 			addedAt: Date.now(),
 			lastActiveAt: Date.now(),
-			biometricEnabled: this.storage.isBiometricEnabled
-				? await this.storage.isBiometricEnabled(accountId)
-				: false,
+			biometricEnabled: await this.storage.isBiometricEnabled(accountId),
 		};
 
 		await this.storage.addAccount(metadata);
@@ -238,9 +245,7 @@ export class AccountSessionManager {
 	}
 
 	async lockAll(reason = "manual"): Promise<void> {
-		if (this.storage.lockAllAccounts) {
-			await this.storage.lockAllAccounts();
-		}
+		await this.storage.lockAllAccounts();
 		for (const account of this.accounts) {
 			this.lockState.set(account.accountId, "locked");
 		}
@@ -266,6 +271,10 @@ export class AccountSessionManager {
 		}
 
 		await this.storage.removeAccount(accountId);
+		// Removing the account must not leave its encrypted items behind. `AccountStore`
+		// holds only a `PlatformPort`; the cache lives behind a `RecordPort`, so the
+		// caller sequences the two. See CONTRACT.md §12.3.
+		await this.itemCache.clearItemCache(accountId);
 
 		if (wasActive) {
 			if (nextAccount) {

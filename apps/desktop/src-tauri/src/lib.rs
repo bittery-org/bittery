@@ -51,20 +51,16 @@ impl Default for DesktopIpcState {
     }
 }
 
-const ACTIVE_ACCOUNT_KEY: &str = "bittery_active_account";
 const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
 /// Persisted UI appearance preference ("light" | "dark" | "system"). Kept in
 /// the Rust-side store so the native host can report it to the extension even
 /// before the desktop frontend window has loaded (next-themes only writes the
 /// value to the webview's localStorage, which Rust cannot read).
+///
+/// This key is Rust-owned: the TypeScript storage layer neither reads nor
+/// writes it, which is why it is spelled out here rather than published in the
+/// native-host view.
 const UI_THEME_KEY: &str = "bittery_ui_theme";
-
-/// Build a namespaced storage key using the stable accountId (a UUID).
-/// Mirrors `getAccountKey` in the TypeScript storage layer; the accountId is
-/// NOT sanitized so it matches the keys written by the adapter exactly.
-fn account_id_key(account_id: &str, suffix: &str) -> String {
-    format!("bittery_account_{}_{}", account_id, suffix)
-}
 
 fn read_store_string<R: Runtime>(store: &Store<R>, key: &str) -> Option<String> {
     store
@@ -72,44 +68,233 @@ fn read_store_string<R: Runtime>(store: &Store<R>, key: &str) -> Option<String> 
         .and_then(|value| value.as_str().map(|s| s.to_string()))
 }
 
-fn read_account_id_scoped_string<R: Runtime>(
-    store: &Store<R>,
-    account_id: &str,
-    suffix: &str,
-) -> Option<String> {
-    read_store_string(store, &account_id_key(account_id, suffix))
+// The published native-host view
+//
+// `packages/storage/src/account-store.ts` writes one versioned projection of
+// everything this process needs, as a JSON *string* under the plain store key
+// below. Rust is an adapter of that published format: it never rebuilds a
+// storage key, never decides which store a value lives in, and never defaults a
+// value the app already resolved.
+
+/// The plain `store.json` key holding the projection. It is `globalKey("native_view")`
+/// on the TypeScript side; it is the single key this file may name itself,
+/// because every other key it opens is read out of the document stored here.
+const NATIVE_VIEW_KEY: &str = "bittery_native_view";
+
+/// The only `NativeHostView.v` this build understands. A document carrying any
+/// other version is refused, never partially interpreted: the writer is free to
+/// change field meanings behind a bump, so guessing would be a correctness bug
+/// with security consequences (`biometricEnabled` is an authorisation input).
+const NATIVE_VIEW_VERSION: u64 = 2;
+
+/// Which store a published key lives in. This exists so Rust never re-derives
+/// the tier table: `Secret` is the OS keychain, `Plain` is `store.json`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum NativeKeyStore {
+    Secret,
+    Plain,
 }
 
-/// Resolves the per-account `biometric_enabled` preference from its raw stored
-/// value. The flag is persisted as a JSON boolean; when it has never been set
-/// we default to `true` (biometric opt-out must be explicit).
-fn biometric_enabled_flag(value: Option<serde_json::Value>) -> bool {
-    value.and_then(|v| v.as_bool()).unwrap_or(true)
+/// A key plus the store it lives in, exactly as published.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct NativeKeyRef {
+    key: String,
+    store: NativeKeyStore,
 }
 
-/// Reads the per-account `biometric_enabled` preference from the store.
-/// This is a security-relevant check: when a user has disabled biometrics for
-/// an account we must refuse to hand its MUK to the extension.
-fn is_biometric_enabled_for_account<R: Runtime>(store: &Store<R>, account_id: &str) -> bool {
-    biometric_enabled_flag(store.get(account_id_key(account_id, "biometric_enabled")))
+/// One account's published entry.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeAccountView {
+    account_id: String,
+    email: String,
+    /// The displayable half of the account's metadata, republished by
+    /// `AccountStore` so this process can hand it to the browser extension
+    /// without reading `bittery_accounts_list` -- which would put a second copy
+    /// of the key scheme back in this file.
+    user_id: String,
+    name: String,
+    secret_key_hint: String,
+    /// Optional upstream. Absent here means absent there; never substituted.
+    #[serde(default)]
+    team_name: Option<String>,
+    #[serde(default)]
+    team_avatar_url: Option<String>,
+    added_at: i64,
+    last_active_at: i64,
+    /// Resolved by `AccountStore`; never defaulted here.
+    biometric_enabled: bool,
+    token: NativeKeyRef,
+    session_data: NativeKeyRef,
+    vault_keys: NativeKeyRef,
+    encrypted_private_key: NativeKeyRef,
+    /// Fully-resolved `store.json` key prefixes for this account's cached
+    /// records -- one record per key. Prefix-scan them; never concatenate.
+    items_key_prefix: String,
+    vaults_key_prefix: String,
 }
 
-/// Resolve the email for a given stable accountId.
-fn resolve_email_for_account_id<R: Runtime>(store: &Store<R>, account_id: &str) -> Option<String> {
-    let accounts_str = read_store_string(store, "bittery_accounts_list")?;
-    let accounts_json: serde_json::Value = serde_json::from_str(&accounts_str).ok()?;
-    let accounts = accounts_json.get("accounts").and_then(|v| v.as_array())?;
-    accounts.iter().find_map(|account| {
-        let acc_id = account.get("accountId").and_then(|v| v.as_str())?;
-        if acc_id == account_id {
-            account
-                .get("email")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_lowercase())
-        } else {
-            None
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeHostView {
+    v: u64,
+    active_account_id: Option<String>,
+    unlocked_account_ids: Vec<String>,
+    auto_lock_timeout_ms: i64,
+    device_key: NativeKeyRef,
+    accounts: Vec<NativeAccountView>,
+}
+
+impl NativeHostView {
+    fn account(&self, account_id: &str) -> Option<&NativeAccountView> {
+        self.accounts
+            .iter()
+            .find(|account| account.account_id == account_id)
+    }
+
+    fn is_unlocked(&self, account_id: &str) -> bool {
+        self.unlocked_account_ids
+            .iter()
+            .any(|value| value == account_id)
+    }
+}
+
+/// Why the published view could not be used. Both variants mean the same thing
+/// operationally -- this process knows nothing about any account -- but they are
+/// distinguished so the log says which happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NativeViewProblem {
+    /// Never written: the app has not initialised yet, or the store was reset.
+    Absent,
+    /// Written, but not in a shape or version this build understands.
+    Unreadable(String),
+}
+
+impl NativeViewProblem {
+    fn message(&self) -> String {
+        match self {
+            Self::Absent => format!(
+                "No {} published yet -- the desktop app has not initialised its storage",
+                NATIVE_VIEW_KEY
+            ),
+            Self::Unreadable(detail) => {
+                format!("Could not read {}: {}", NATIVE_VIEW_KEY, detail)
+            }
         }
-    })
+    }
+}
+
+/// The version field, read on its own so an unknown version is refused before
+/// any other field is interpreted.
+#[derive(serde::Deserialize)]
+struct NativeViewVersionProbe {
+    v: u64,
+}
+
+/// Parse the published document. Pure, so it is unit-testable without a Store.
+///
+/// No `unwrap()` anywhere on this path: the document is external input.
+fn parse_native_view(raw: Option<String>) -> Result<NativeHostView, NativeViewProblem> {
+    let Some(raw) = raw else {
+        return Err(NativeViewProblem::Absent);
+    };
+
+    let probe: NativeViewVersionProbe = serde_json::from_str(&raw)
+        .map_err(|error| NativeViewProblem::Unreadable(format!("invalid JSON: {}", error)))?;
+
+    if probe.v != NATIVE_VIEW_VERSION {
+        return Err(NativeViewProblem::Unreadable(format!(
+            "unsupported schema version {} (this build understands {})",
+            probe.v, NATIVE_VIEW_VERSION
+        )));
+    }
+
+    let view: NativeHostView = serde_json::from_str(&raw)
+        .map_err(|error| NativeViewProblem::Unreadable(format!("unexpected shape: {}", error)))?;
+
+    // The probe and the document must agree; they are two reads of the same
+    // bytes, and a disagreement means something is very wrong with the writer.
+    if view.v != NATIVE_VIEW_VERSION {
+        return Err(NativeViewProblem::Unreadable(format!(
+            "unsupported schema version {} (this build understands {})",
+            view.v, NATIVE_VIEW_VERSION
+        )));
+    }
+
+    Ok(view)
+}
+
+fn load_native_view<R: Runtime>(store: &Store<R>) -> Result<NativeHostView, NativeViewProblem> {
+    parse_native_view(read_store_string(store, NATIVE_VIEW_KEY))
+}
+
+/// Route a published ref to the store it names. Split from [`read_key_ref`] so
+/// the routing itself can be tested without a keychain or a Tauri store.
+fn read_key_ref_with<S, P>(key_ref: &NativeKeyRef, read_secret: S, read_plain: P) -> Option<String>
+where
+    S: FnOnce(&str) -> Option<String>,
+    P: FnOnce(&str) -> Option<String>,
+{
+    match key_ref.store {
+        NativeKeyStore::Secret => read_secret(&key_ref.key),
+        NativeKeyStore::Plain => read_plain(&key_ref.key),
+    }
+}
+
+/// Read a published key. `"secret"` goes to the OS keychain, `"plain"` to
+/// `store.json` -- and this process never decides which.
+fn read_key_ref<R: Runtime>(store: &Store<R>, key_ref: &NativeKeyRef) -> Option<String> {
+    read_key_ref_with(
+        key_ref,
+        |key| match keychain::keychain_get(key) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("[desktop-ipc] Keychain read failed for {}: {}", key, error);
+                None
+            }
+        },
+        |key| read_store_string(store, key),
+    )
+}
+
+/// Values of every `store.json` entry whose key starts with `prefix`.
+///
+/// Cached items and vaults are one record per key under the prefixes the view
+/// publishes, so a scan is the whole read. Pure, for testability.
+fn records_under_prefix(entries: Vec<(String, serde_json::Value)>, prefix: &str) -> Vec<String> {
+    entries
+        .into_iter()
+        .filter(|(key, _)| key.starts_with(prefix))
+        .filter_map(|(_, value)| value.as_str().map(|value| value.to_string()))
+        .collect()
+}
+
+/// Deserialize scanned records, skipping any that are corrupt.
+///
+/// These are disposable encrypted blobs: a bad record costs a re-sync and must
+/// never fail the whole snapshot. `ItemCache` skips corrupt records on the
+/// TypeScript side for the same reason.
+fn decode_records<T: serde::de::DeserializeOwned>(raw: Vec<String>, kind: &str) -> Vec<T> {
+    let mut decoded = Vec::with_capacity(raw.len());
+    for value in raw {
+        match serde_json::from_str(&value) {
+            Ok(record) => decoded.push(record),
+            Err(error) => eprintln!(
+                "[desktop-ipc] Skipping corrupt cached {} record: {}",
+                kind, error
+            ),
+        }
+    }
+    decoded
+}
+
+fn read_records<R: Runtime, T: serde::de::DeserializeOwned>(
+    store: &Store<R>,
+    prefix: &str,
+    kind: &str,
+) -> Vec<T> {
+    decode_records(records_under_prefix(store.entries(), prefix), kind)
 }
 
 fn normalize_item_version(version: Option<u64>) -> u64 {
@@ -342,82 +527,6 @@ fn build_snapshot_item_payload(
     Some(serde_json::Value::Object(payload))
 }
 
-/// Resolve the active account's email, tolerating every historical shape of the
-/// `ACTIVE_ACCOUNT_KEY` value.
-///
-/// NOTE: currently unused — every caller now goes through
-/// [`get_active_account_id`] and resolves the email per accountId. Kept because
-/// it is the only place that still understands the legacy plain-email and
-/// intermediate-JSON encodings, which older stores can still contain.
-#[allow(dead_code)]
-fn get_active_account_email<R: Runtime>(store: &Store<R>) -> Option<String> {
-    let raw = read_store_string(store, ACTIVE_ACCOUNT_KEY)?;
-
-    // Current format: plain "all" or accountId (see serializeActiveAccount).
-    if raw == "all" {
-        return Some("all".to_string());
-    }
-
-    // Intermediate JSON format: { type: "single" | "all", accountId? }.
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
-        if let Some(obj) = parsed.as_object() {
-            match obj.get("type").and_then(|v| v.as_str()) {
-                Some("single") => {
-                    let account_id = obj.get("accountId").and_then(|v| v.as_str())?;
-                    return resolve_email_for_account_id(store, account_id);
-                }
-                Some("all") => return Some("all".to_string()),
-                _ => {}
-            }
-        }
-    }
-
-    // Legacy format: a plain email string.
-    if raw.contains('@') {
-        return Some(raw.to_lowercase());
-    }
-
-    // Plain accountId stored by serializeActiveAccount.
-    resolve_email_for_account_id(store, &raw).or_else(|| Some(raw.to_lowercase()))
-}
-
-fn get_active_account_id<R: Runtime>(store: &Store<R>) -> Option<String> {
-    let raw = read_store_string(store, ACTIVE_ACCOUNT_KEY)?;
-    if raw == "all" {
-        return Some(raw);
-    }
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&raw) {
-        if parsed.get("type").and_then(|value| value.as_str()) == Some("single") {
-            return parsed
-                .get("accountId")
-                .and_then(|value| value.as_str())
-                .map(str::to_string);
-        }
-        return None;
-    }
-    if raw.contains('@') {
-        return None;
-    }
-    Some(raw)
-}
-
-/// Prefer an account-scoped store key, falling back to a legacy unscoped key.
-///
-/// NOTE: no production call site remains — all reads are account-scoped only
-/// (see `read_account_id_scoped_string`). It is still exercised by the unit
-/// tests below, so it is dead only in the non-test `bittery_lib` target.
-#[allow(dead_code)]
-fn lookup_store_string_with_fallback<F>(
-    mut lookup: F,
-    primary_key: &str,
-    fallback_key: &str,
-) -> Option<String>
-where
-    F: FnMut(&str) -> Option<String>,
-{
-    lookup(primary_key).or_else(|| lookup(fallback_key))
-}
-
 fn now_timestamp_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -472,55 +581,40 @@ fn lock_event_to_response(event: LockEvent) -> DesktopResponse {
     }
 }
 
-fn get_unlocked_accounts<R: Runtime>(store: &Store<R>) -> Vec<String> {
-    store
-        .get("bittery_unlocked_accounts")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
-}
-
-fn get_account_directory<R: Runtime>(
+/// Read the device key through the published ref.
+///
+/// It is secret-tier, so the ref says `"secret"` and this lands in the OS
+/// keychain.
+fn load_device_key_base64<R: Runtime>(
     store: &Store<R>,
-) -> Result<std::collections::HashMap<String, serde_json::Value>, String> {
-    let accounts_value = store
-        .get("bittery_accounts_list")
-        .ok_or("No accounts found")?;
-    let accounts_str = accounts_value
-        .as_str()
-        .ok_or("Invalid accounts list format")?;
-    let accounts_json: serde_json::Value = serde_json::from_str(accounts_str)
-        .map_err(|e| format!("Failed to parse accounts list: {}", e))?;
-    let accounts = accounts_json
-        .get("accounts")
-        .and_then(|value| value.as_array())
-        .ok_or("No accounts array found")?;
-
-    let mut directory = std::collections::HashMap::new();
-    for account in accounts {
-        if let Some(account_id) = account.get("accountId").and_then(|value| value.as_str()) {
-            directory.insert(account_id.to_string(), account.clone());
-        }
-    }
-
-    Ok(directory)
+    view: &NativeHostView,
+) -> Result<String, String> {
+    let device_key_base64 = read_key_ref(store, &view.device_key).ok_or("No device key found")?;
+    // Decoded only to reject a malformed value early; the base64 form is what
+    // both the crypto commands and the extension response want.
+    base64::engine::general_purpose::STANDARD
+        .decode(&device_key_base64)
+        .map_err(|e| format!("Failed to decode device key: {}", e))?;
+    Ok(device_key_base64)
 }
 
-fn load_muk_base64<R: Runtime>(store: &Store<R>, account_id: &str) -> Result<String, String> {
-    let session_data_str = read_account_id_scoped_string(store, account_id, "session_data")
-        .ok_or("No session data found")?;
-    let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
-        .map_err(|e| format!("Failed to parse session data: {}", e))?;
+fn load_session_data<R: Runtime>(
+    store: &Store<R>,
+    account: &NativeAccountView,
+) -> Result<serde_json::Value, String> {
+    let session_data_str =
+        read_key_ref(store, &account.session_data).ok_or("No session data found")?;
+    serde_json::from_str(&session_data_str)
+        .map_err(|e| format!("Failed to parse session data: {}", e))
+}
 
-    let device_key_value = store
-        .get("bittery_device_key")
-        .ok_or("No device key found")?;
-    let device_key_base64 = device_key_value
-        .as_str()
-        .ok_or("Invalid device key format")?;
-    let device_key = base64::engine::general_purpose::STANDARD
-        .decode(device_key_base64)
-        .map_err(|e| format!("Failed to decode device key: {}", e))?;
+fn load_muk_base64<R: Runtime>(
+    store: &Store<R>,
+    view: &NativeHostView,
+    account: &NativeAccountView,
+) -> Result<String, String> {
+    let session_data = load_session_data(store, account)?;
+    let device_key_base64 = load_device_key_base64(store, view)?;
 
     let encrypted_muk = session_data
         .get("encryptedMasterUnlockKey")
@@ -548,18 +642,18 @@ fn load_muk_base64<R: Runtime>(store: &Store<R>, account_id: &str) -> Result<Str
         ciphertext.to_string(),
         iv.to_string(),
         algorithm.to_string(),
-        base64::engine::general_purpose::STANDARD.encode(&device_key),
+        device_key_base64,
     )
     .map_err(|e| format!("Failed to decrypt MUK: {}", e))
 }
 
 fn load_decrypted_vault_keys<R: Runtime>(
     store: &Store<R>,
-    account_id: &str,
+    view: &NativeHostView,
+    account: &NativeAccountView,
 ) -> Result<std::collections::HashMap<String, String>, String> {
-    let muk_base64 = load_muk_base64(store, account_id)?;
-    let vault_keys_str = read_account_id_scoped_string(store, account_id, "vault_keys")
-        .ok_or("Vault keys not found")?;
+    let muk_base64 = load_muk_base64(store, view, account)?;
+    let vault_keys_str = read_key_ref(store, &account.vault_keys).ok_or("Vault keys not found")?;
     let vault_keys: Vec<serde_json::Value> = serde_json::from_str(&vault_keys_str)
         .map_err(|e| format!("Failed to parse vault keys: {}", e))?;
 
@@ -631,9 +725,8 @@ fn load_decrypted_vault_keys<R: Runtime>(
                 .map_err(|e| format!("Failed to decrypt vault key: {}", e))?
             }
         } else {
-            let encrypted_private_key_str =
-                read_account_id_scoped_string(store, account_id, "encrypted_private_key")
-                    .ok_or("Encrypted private key not found for RSA decryption")?;
+            let encrypted_private_key_str = read_key_ref(store, &account.encrypted_private_key)
+                .ok_or("Encrypted private key not found for RSA decryption")?;
             let epk: serde_json::Value = serde_json::from_str(&encrypted_private_key_str)
                 .map_err(|e| format!("Failed to parse encrypted private key: {}", e))?;
             let epk_ciphertext = epk
@@ -666,22 +759,15 @@ fn load_decrypted_vault_keys<R: Runtime>(
     Ok(decrypted_vault_keys)
 }
 
+/// The bearer token, read through the account's published `token` ref.
+///
+/// The ref says which store holds it, and on desktop that is always the
+/// keychain.
 fn get_bearer_token_for_account_id<R: Runtime>(
     store: &Store<R>,
-    account_id: &str,
+    account: &NativeAccountView,
 ) -> Option<String> {
-    let key = account_id_key(account_id, "jwt_token");
-    match keychain::keychain_get(&key) {
-        Ok(Some(token)) => Some(token),
-        Ok(None) => read_store_string(store, &key),
-        Err(error) => {
-            eprintln!(
-                "[desktop-ipc] Failed reading bearer token for account {}: {}",
-                account_id, error
-            );
-            None
-        }
-    }
+    read_key_ref(store, &account.token)
 }
 
 async fn get_auth_token_internal(
@@ -693,16 +779,16 @@ async fn get_auth_token_internal(
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
-    let token =
-        get_bearer_token_for_account_id(&store, account_id).ok_or("Auth token not found")?;
-    let email = resolve_email_for_account_id(&store, account_id).ok_or("Account not found")?;
+    let view = load_native_view(&store).map_err(|problem| problem.message())?;
+    let account = view.account(account_id).ok_or("Account not found")?;
 
-    let session_metadata = read_account_id_scoped_string(&store, account_id, "session_data")
+    let token = get_bearer_token_for_account_id(&store, account).ok_or("Auth token not found")?;
+    let session_metadata = read_key_ref(&store, &account.session_data)
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok());
 
     Ok(serde_json::json!({
         "accountId": account_id,
-        "email": email,
+        "email": account.email,
         "authToken": token,
         "expiresAt": session_metadata.as_ref().and_then(|value| value.get("expiresAt")).cloned(),
         "userId": session_metadata.as_ref().and_then(|value| value.get("userId")).cloned(),
@@ -718,49 +804,64 @@ async fn get_items_snapshot_internal(
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
-    // Lock-state marker holds accountIds (post-migration) or legacy emails.
-    let unlocked_accounts = get_unlocked_accounts(&store);
+
+    // A missing or unreadable view means this process knows about no accounts,
+    // which is an empty snapshot -- not an error and not a guess.
+    let view = match load_native_view(&store) {
+        Ok(view) => view,
+        Err(problem) => {
+            eprintln!("[desktop-ipc] Empty items snapshot: {}", problem.message());
+            return Ok(serde_json::json!({
+                "items": Vec::<serde_json::Value>::new(),
+                "generatedAt": now_timestamp_ms(),
+            }));
+        }
+    };
+
     let target_account_ids = match account_ids {
         Some(values) if !values.is_empty() => values,
-        _ => unlocked_accounts.clone(),
+        _ => view.unlocked_account_ids.clone(),
     };
 
     let include_account_context = target_account_ids.len() > 1;
-    let account_directory = get_account_directory(&store).unwrap_or_default();
     let mut items = Vec::new();
     let mut skipped_items = 0usize;
 
     for account_id in target_account_ids {
-        let is_unlocked = unlocked_accounts.iter().any(|value| value == &account_id);
-        if !is_unlocked {
+        if !view.is_unlocked(&account_id) {
             continue;
         }
-        let account = account_directory
-            .get(&account_id)
-            .ok_or("Account not found")?;
-        let email = account
-            .get("email")
-            .and_then(|value| value.as_str())
-            .ok_or("Account email not found")?;
+        let account = view.account(&account_id).ok_or("Account not found")?;
+        let email = account.email.as_str();
 
-        let decrypted_vault_keys = load_decrypted_vault_keys(&store, &account_id)?;
+        let decrypted_vault_keys = load_decrypted_vault_keys(&store, &view, account)?;
 
+        // Cached items and vaults are one `store.json` record per key under the
+        // prefixes the view publishes. Scan them; concatenate nothing.
         let cached_items: Vec<CachedItemRecord> =
-            read_account_id_scoped_string(&store, &account_id, "cached_items")
-                .map(|value| serde_json::from_str(&value))
-                .transpose()
-                .map_err(|e| format!("Failed to parse cached items: {}", e))?
-                .unwrap_or_default();
+            read_records(&store, &account.items_key_prefix, "item");
         let cached_vaults: Vec<CachedVaultRecord> =
-            read_account_id_scoped_string(&store, &account_id, "cached_vaults")
-                .map(|value| serde_json::from_str(&value))
-                .transpose()
-                .map_err(|e| format!("Failed to parse cached vaults: {}", e))?
-                .unwrap_or_default();
+            read_records(&store, &account.vaults_key_prefix, "vault");
         let vault_map = cached_vaults
             .into_iter()
             .map(|vault| (vault.id.clone(), vault))
             .collect::<std::collections::HashMap<_, _>>();
+
+        // The multi-account payload carries the account's identity. `userId`
+        // comes from the published session document; the view itself publishes
+        // only accountId, email and biometricEnabled per account.
+        let account_context = include_account_context.then(|| {
+            let user_id = read_key_ref(&store, &account.session_data)
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|session| {
+                    session
+                        .get("userId")
+                        .and_then(|value| value.as_str())
+                        .map(|value| value.to_string())
+                })
+                .unwrap_or_default();
+            serde_json::json!({ "email": email, "userId": user_id })
+        });
 
         for item in cached_items
             .into_iter()
@@ -789,7 +890,7 @@ async fn get_items_snapshot_internal(
                 include_account_context,
                 &account_id,
                 email,
-                Some(account),
+                account_context.as_ref(),
             ) else {
                 continue;
             };
@@ -821,32 +922,11 @@ async fn handle_desktop_ipc_message(
         DesktopRequest::GetDesktopStatus => match get_lock_status_internal(app_handle).await {
             Ok(status) => DesktopResponse::DesktopStatus {
                 available: true,
-                locked: status
-                    .get("locked")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(true),
-                unlocked_accounts: status
-                    .get("unlocked_accounts")
-                    .and_then(|v| v.as_array())
-                    .map(|accounts| {
-                        accounts
-                            .iter()
-                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                timestamp: status
-                    .get("timestamp")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or_else(now_timestamp_ms),
-                autolock_timeout_ms: status
-                    .get("autolock_timeout_ms")
-                    .and_then(|v| v.as_i64())
-                    .unwrap_or(600000),
-                theme: status
-                    .get("theme")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                locked: status.locked,
+                unlocked_accounts: status.unlocked_accounts,
+                timestamp: status.timestamp,
+                autolock_timeout_ms: status.autolock_timeout_ms,
+                theme: status.theme,
             },
             Err(error) => DesktopResponse::Error { message: error },
         },
@@ -1430,54 +1510,29 @@ async fn check_extension_biometric_status(
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
-    let active_account_id = get_active_account_id(&store);
-
-    // If active account is "all", check if ANY account has a valid session
-    let has_session = if active_account_id.as_deref() == Some("all") {
-        // Get accounts list and check if any has a session
-        if let Some(accounts_value) = store.get("bittery_accounts_list") {
-            if let Some(accounts_str) = accounts_value.as_str() {
-                if let Ok(accounts_json) = serde_json::from_str::<serde_json::Value>(accounts_str) {
-                    if let Some(accounts_array) =
-                        accounts_json.get("accounts").and_then(|a| a.as_array())
-                    {
-                        // Check if any account has session data
-                        accounts_array.iter().any(|account| {
-                            if let Some(account_id) =
-                                account.get("accountId").and_then(|value| value.as_str())
-                            {
-                                read_account_id_scoped_string(&store, account_id, "session_data")
-                                    .is_some()
-                            } else {
-                                false
-                            }
-                        })
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        } else {
-            false
+    // No usable view means no active account, which is "not enabled" -- the
+    // honest answer while the app has not initialised.
+    let active_account = match load_native_view(&store) {
+        Ok(view) => view
+            .active_account_id
+            .as_deref()
+            .and_then(|account_id| view.account(account_id).cloned()),
+        Err(problem) => {
+            eprintln!(
+                "[Biometric Status] Reporting not-enabled: {}",
+                problem.message()
+            );
+            None
         }
-    } else {
-        // Single account mode - check specific account or legacy
-        let session_data = active_account_id.as_deref().and_then(|account_id| {
-            read_account_id_scoped_string(&store, account_id, "session_data")
-        });
+    };
 
-        // biometric_enabled is persisted as a JSON boolean; default to true.
-        let is_enabled = if let Some(account_id) = &active_account_id {
-            is_biometric_enabled_for_account(&store, account_id)
-        } else {
-            false
-        };
-
-        session_data.is_some() && is_enabled
+    // `biometricEnabled` is published already resolved, so there is nothing to
+    // default here. Quick-unlock also needs a stored session to unlock into.
+    let has_session = match active_account {
+        Some(account) => {
+            account.biometric_enabled && read_key_ref(&store, &account.session_data).is_some()
+        }
+        None => false,
     };
 
     Ok(serde_json::json!({
@@ -1523,24 +1578,23 @@ async fn extension_biometric_unlock(
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
-    // Debug: List all stored accounts
-    if let Some(accounts_value) = store.get("bittery_accounts_list") {
-        if let Some(accounts_str) = accounts_value.as_str() {
-            eprintln!("[Biometric Unlock] Stored accounts: {}", accounts_str);
-        }
-    } else {
-        eprintln!("[Biometric Unlock] No accounts list found in store");
-    }
+    let view = load_native_view(&store).map_err(|problem| problem.message())?;
+    eprintln!(
+        "[Biometric Unlock] Published accounts: {}",
+        view.accounts.len()
+    );
 
     let target_account_id = account_id
-        .or_else(|| get_active_account_id(&store))
+        .or_else(|| view.active_account_id.clone())
         .ok_or("No account specified")?;
-    let target_email =
-        resolve_email_for_account_id(&store, &target_account_id).ok_or("Account not found")?;
+    let account = view
+        .account(&target_account_id)
+        .ok_or("Account not found")?;
+    let target_email = account.email.clone();
 
-    // Enforce the per-account biometric preference before releasing any secrets.
-    // If the user disabled biometrics for this account, refuse the unlock.
-    if !is_biometric_enabled_for_account(&store, &target_account_id) {
+    // Enforce the per-account biometric preference before releasing any
+    // secrets. The value is published already resolved.
+    if !account.biometric_enabled {
         eprintln!(
             "[Biometric Unlock] Biometrics disabled for account: {}",
             target_account_id
@@ -1549,24 +1603,12 @@ async fn extension_biometric_unlock(
     }
 
     eprintln!("[Biometric Unlock] Target account: {}", target_account_id);
-    let session_data_str =
-        read_account_id_scoped_string(&store, &target_account_id, "session_data")
-            .ok_or("No session data found")?;
-    eprintln!("[Biometric Unlock] Session data found");
-
-    let session_data: serde_json::Value = serde_json::from_str(&session_data_str)
-        .map_err(|e| format!("Failed to parse session data: {}", e))?;
+    let session_data = load_session_data(&store, account)?;
 
     eprintln!("[Biometric Unlock] Session data retrieved");
 
-    // 3. Get device key to decrypt the MUK
-    let device_key_value = store
-        .get("bittery_device_key")
-        .ok_or("No device key found")?;
-
-    let device_key_base64 = device_key_value
-        .as_str()
-        .ok_or("Invalid device key format")?;
+    // 3. Get device key to decrypt the MUK (keychain-only).
+    let device_key_base64 = load_device_key_base64(&store, &view)?;
 
     // 4. Get encrypted MUK from session data
     let encrypted_muk = session_data
@@ -1589,9 +1631,9 @@ async fn extension_biometric_unlock(
     let encrypted_session_b64 =
         base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
 
-    // Get auth token and vault keys from secure storage / store
-    let auth_token = get_bearer_token_for_account_id(&store, &target_account_id);
-    let vault_keys = read_account_id_scoped_string(&store, &target_account_id, "vault_keys");
+    // Get auth token and vault keys through their published refs
+    let auth_token = get_bearer_token_for_account_id(&store, account);
+    let vault_keys = read_key_ref(&store, &account.vault_keys);
 
     // Sign the response with challenge to prevent replay attacks
     let signature_data = format!("{}:{}", challenge, encrypted_session_b64);
@@ -1675,59 +1717,30 @@ async fn biometric_unlock_all_internal(
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
-    let accounts_value = store
-        .get("bittery_accounts_list")
-        .ok_or("No accounts list found")?;
-
-    let accounts_str = accounts_value
-        .as_str()
-        .ok_or("Invalid accounts list format")?;
-
-    let accounts_json: serde_json::Value = serde_json::from_str(accounts_str)
-        .map_err(|e| format!("Failed to parse accounts list: {}", e))?;
-
-    let accounts_array = accounts_json
-        .get("accounts")
-        .and_then(|a| a.as_array())
-        .ok_or("No accounts array found")?;
+    let view = load_native_view(&store).map_err(|problem| problem.message())?;
 
     eprintln!(
         "[Biometric Unlock All] Found {} accounts",
-        accounts_array.len()
+        view.accounts.len()
     );
 
-    // 3. Get device key (shared across all accounts)
-    let device_key_value = store
-        .get("bittery_device_key")
-        .ok_or("No device key found")?;
-
-    let device_key_base64 = device_key_value
-        .as_str()
-        .ok_or("Invalid device key format")?;
+    // 3. Get device key (shared across all accounts) through its published ref
+    let device_key_base64 = load_device_key_base64(&store, &view)?;
 
     // 4. Unlock all accounts (no additional biometric prompts)
     let mut accounts_data = Vec::new();
     let mut unlocked_account_ids = Vec::new();
     let mut failed_account_ids = Vec::new();
 
-    for account in accounts_array {
-        let account_id = match account.get("accountId").and_then(|value| value.as_str()) {
-            Some(value) => value.to_string(),
-            None => continue,
-        };
-        let email = match account.get("email").and_then(|e| e.as_str()) {
-            Some(e) => e.to_lowercase(),
-            None => {
-                eprintln!("[Biometric Unlock All] Skipping account with no email");
-                continue;
-            }
-        };
+    for account in &view.accounts {
+        let account_id = account.account_id.clone();
+        let email = account.email.to_lowercase();
 
         eprintln!("[Biometric Unlock All] Processing account: {}", email);
 
         // Respect the per-account biometric preference: skip (do not expose the
         // MUK for) any account whose owner has disabled biometric unlock.
-        if !is_biometric_enabled_for_account(&store, &account_id) {
+        if !account.biometric_enabled {
             eprintln!(
                 "[Biometric Unlock All] Skipping account with biometrics disabled: {}",
                 email
@@ -1735,23 +1748,12 @@ async fn biometric_unlock_all_internal(
             continue;
         }
 
-        // Get session data for this account (accountId key with legacy fallback)
-        let session_data_str =
-            match read_account_id_scoped_string(&store, &account_id, "session_data") {
-                Some(s) => s,
-                None => {
-                    eprintln!("[Biometric Unlock All] No session data for {}", email);
-                    failed_account_ids.push(account_id);
-                    continue;
-                }
-            };
-
-        let session_data: serde_json::Value = match serde_json::from_str(&session_data_str) {
-            Ok(d) => d,
-            Err(e) => {
+        let session_data = match load_session_data(&store, account) {
+            Ok(data) => data,
+            Err(error) => {
                 eprintln!(
-                    "[Biometric Unlock All] Failed to parse session data for {}: {}",
-                    email, e
+                    "[Biometric Unlock All] No usable session data for {}: {}",
+                    email, error
                 );
                 failed_account_ids.push(account_id);
                 continue;
@@ -1775,8 +1777,8 @@ async fn biometric_unlock_all_internal(
             base64::engine::general_purpose::STANDARD.encode(encrypted_muk_json.as_bytes());
 
         // Get auth token and vault keys for this account
-        let auth_token = get_bearer_token_for_account_id(&store, &account_id);
-        let vault_keys = read_account_id_scoped_string(&store, &account_id, "vault_keys");
+        let auth_token = get_bearer_token_for_account_id(&store, account);
+        let vault_keys = read_key_ref(&store, &account.vault_keys);
 
         // Build account data
         let mut account_data = serde_json::json!({
@@ -1793,7 +1795,7 @@ async fn biometric_unlock_all_internal(
         }
 
         accounts_data.push(account_data);
-        unlocked_account_ids.push(account_id.clone());
+        unlocked_account_ids.push(account_id);
         eprintln!("[Biometric Unlock All] ✓ Unlocked {}", email);
     }
 
@@ -1822,44 +1824,53 @@ async fn biometric_unlock_all_internal(
     Ok(response)
 }
 
+/// The lock state this process reports to the extension.
+///
+/// A struct rather than a `serde_json::Value` so the one caller reads typed
+/// fields; the view publishes the resolved value, so there is nothing left to
+/// default.
+struct DesktopStatusView {
+    locked: bool,
+    unlocked_accounts: Vec<String>,
+    timestamp: i64,
+    autolock_timeout_ms: i64,
+    theme: Option<String>,
+}
+
 /// Get current lock status of all accounts
 async fn get_lock_status_internal(
     app_handle: &tauri::AppHandle,
-) -> Result<serde_json::Value, String> {
+) -> Result<DesktopStatusView, String> {
     use tauri_plugin_store::StoreExt;
 
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
-    // Read lock state marker (maintained by storage adapter based on MUKs in memory)
-    // This is the source of truth for which accounts are unlocked. It holds
-    // stable account IDs, which are also used by the extension protocol.
-    let unlocked_accounts = get_unlocked_accounts(&store);
-
-    // Auto-lock timeout is an app-wide preference (not account-scoped).
-    let autolock_timeout_ms = store
-        .get("bittery_auto_lock_timeout")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(600000); // Default 10 minutes
-
     // UI appearance preference (app-wide, mirrors the frontend's next-themes
-    // value). Absent until the frontend syncs it via `set_ui_theme`.
+    // value). Rust-owned, so it is not part of the published view. Absent until
+    // the frontend syncs it via `set_ui_theme`.
     let theme = read_store_string(&store, UI_THEME_KEY);
 
-    let locked = unlocked_accounts.is_empty();
-    let timestamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_millis() as i64;
+    // Without a usable view nothing is unlocked, which is the safe *and* honest
+    // answer: the app has not initialised, so no MUK is in memory either. The
+    // auto-lock timeout is reported as 0, meaning "unknown" rather than a made
+    // up interval the user never chose.
+    let (unlocked_accounts, autolock_timeout_ms) = match load_native_view(&store) {
+        Ok(view) => (view.unlocked_account_ids, view.auto_lock_timeout_ms),
+        Err(problem) => {
+            eprintln!("[desktop-ipc] Reporting locked: {}", problem.message());
+            (Vec::new(), 0)
+        }
+    };
 
-    Ok(serde_json::json!({
-        "locked": locked,
-        "unlocked_accounts": unlocked_accounts,
-        "timestamp": timestamp,
-        "autolock_timeout_ms": autolock_timeout_ms,
-        "theme": theme,
-    }))
+    Ok(DesktopStatusView {
+        locked: unlocked_accounts.is_empty(),
+        unlocked_accounts,
+        timestamp: now_timestamp_ms(),
+        autolock_timeout_ms,
+        theme,
+    })
 }
 
 /// Bring the app window to foreground
@@ -1891,6 +1902,33 @@ fn open_app_internal(app_handle: &tauri::AppHandle) -> Result<(), String> {
 }
 
 /// Get account list (works even when locked)
+///
+/// One entry of the accounts response the browser extension consumes. It is a
+/// pure republication of the view's account entry: the extension stores the
+/// result as its own `AccountMetadata`, so every field it needs is published
+/// rather than defaulted or re-derived here.
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountsListEntry<'a> {
+    account_id: &'a str,
+    email: &'a str,
+    user_id: &'a str,
+    name: &'a str,
+    secret_key_hint: &'a str,
+    /// Omitted entirely when the view omitted it, so "no team" never arrives at
+    /// the consumer as an empty string.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    team_name: Option<&'a str>,
+    /// Nullable rather than skipped: the consumer's field is `string | null`.
+    team_avatar_url: Option<&'a str>,
+    added_at: i64,
+    last_active_at: i64,
+    biometric_enabled: bool,
+}
+
+/// Every field here comes from the published view. Reaching into
+/// `bittery_accounts_list` directly would put a second copy of the key scheme
+/// back in this file.
 async fn get_accounts_list_internal(
     app_handle: &tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
@@ -1900,30 +1938,41 @@ async fn get_accounts_list_internal(
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
 
-    // Get accounts list from store
-    let accounts_value = store
-        .get("bittery_accounts_list")
-        .ok_or("No accounts found")?;
+    // No view means no accounts. That is a clean empty answer, not an error:
+    // the extension polls this endpoint before the desktop app has initialised.
+    let view = match load_native_view(&store) {
+        Ok(view) => view,
+        Err(problem) => {
+            eprintln!("[desktop-ipc] Reporting no accounts: {}", problem.message());
+            return Ok(serde_json::json!({
+                "accounts": Vec::<serde_json::Value>::new(),
+                "active_account": serde_json::Value::Null,
+                "unlocked_accounts": Vec::<String>::new(),
+            }));
+        }
+    };
 
-    let accounts_str = accounts_value
-        .as_str()
-        .ok_or("Invalid accounts list format")?;
-
-    let accounts_json: serde_json::Value = serde_json::from_str(accounts_str)
-        .map_err(|e| format!("Failed to parse accounts list: {}", e))?;
-
-    let accounts_array = accounts_json
-        .get("accounts")
-        .and_then(|a| a.as_array())
-        .ok_or("No accounts array found")?;
-
-    let active_account = get_active_account_id(&store);
-    let unlocked_accounts = get_unlocked_accounts(&store);
+    let accounts = view
+        .accounts
+        .iter()
+        .map(|account| AccountsListEntry {
+            account_id: &account.account_id,
+            email: &account.email,
+            user_id: &account.user_id,
+            name: &account.name,
+            secret_key_hint: &account.secret_key_hint,
+            team_name: account.team_name.as_deref(),
+            team_avatar_url: account.team_avatar_url.as_deref(),
+            added_at: account.added_at,
+            last_active_at: account.last_active_at,
+            biometric_enabled: account.biometric_enabled,
+        })
+        .collect::<Vec<_>>();
 
     Ok(serde_json::json!({
-        "accounts": accounts_array,
-        "active_account": active_account,
-        "unlocked_accounts": unlocked_accounts,
+        "accounts": accounts,
+        "active_account": view.active_account_id,
+        "unlocked_accounts": view.unlocked_account_ids,
     }))
 }
 
@@ -1937,17 +1986,17 @@ async fn get_vault_keys_internal(
     let store = app_handle
         .store("store.json")
         .map_err(|e| format!("Failed to access store: {}", e))?;
+    let view = load_native_view(&store).map_err(|problem| problem.message())?;
 
     let account_id = account_id
-        .or_else(|| get_active_account_id(&store))
+        .or_else(|| view.active_account_id.clone())
         .ok_or("No account specified")?;
-    let email = resolve_email_for_account_id(&store, &account_id).ok_or("Account not found")?;
-    let vault_keys = read_account_id_scoped_string(&store, &account_id, "vault_keys")
-        .ok_or("Vault keys not found")?;
+    let account = view.account(&account_id).ok_or("Account not found")?;
+    let vault_keys = read_key_ref(&store, &account.vault_keys).ok_or("Vault keys not found")?;
 
     Ok(serde_json::json!({
         "accountId": account_id,
-        "email": email,
+        "email": account.email,
         "vault_keys": vault_keys,
     }))
 }
@@ -2160,11 +2209,228 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        biometric_enabled_flag, build_snapshot_item_payload, lookup_store_string_with_fallback,
-        serialize_encryption_context, unwrap_plaintext_with_context, CachedItemRecord,
-        CachedVaultRecord, CONTEXT_ENVELOPE_MARKER,
+        build_snapshot_item_payload, decode_records, parse_native_view, read_key_ref_with,
+        records_under_prefix, serialize_encryption_context, unwrap_plaintext_with_context,
+        CachedItemRecord, CachedVaultRecord, NativeKeyStore, NativeViewProblem,
+        CONTEXT_ENVELOPE_MARKER, NATIVE_VIEW_VERSION,
     };
-    use std::collections::HashMap;
+
+    // ----------------------------------------------------------------------
+    // The published native-host view
+    // ----------------------------------------------------------------------
+
+    /// A document shaped exactly like the one `account-store.ts` writes: two
+    /// accounts, secret-tier refs for the four per-account secrets and for the
+    /// device key, and fully-resolved `record:` prefixes.
+    fn native_view_document(version: u64) -> String {
+        serde_json::json!({
+            "v": version,
+            "activeAccountId": "acct-a",
+            "unlockedAccountIds": ["acct-a"],
+            "autoLockTimeoutMs": 300000,
+            "deviceKey": { "key": "bittery_device_key", "store": "secret" },
+            "accounts": [
+                {
+                    "accountId": "acct-a",
+                    "email": "alice@example.com",
+                    "userId": "user-a",
+                    "name": "Alice Example",
+                    "secretKeyHint": "A3-XXXXXX",
+                    "teamName": "Acme",
+                    "teamAvatarUrl": "https://cdn.example.com/acme.png",
+                    "addedAt": 1700000000000i64,
+                    "lastActiveAt": 1700000009999i64,
+                    "biometricEnabled": true,
+                    "token": { "key": "bittery_account_acct-a_jwt_token", "store": "secret" },
+                    "sessionData": { "key": "bittery_account_acct-a_session_data", "store": "secret" },
+                    "vaultKeys": { "key": "bittery_account_acct-a_vault_keys", "store": "secret" },
+                    "encryptedPrivateKey": { "key": "bittery_account_acct-a_encrypted_private_key", "store": "secret" },
+                    "itemsKeyPrefix": "record:acct-a:items:",
+                    "vaultsKeyPrefix": "record:acct-a:vaults:"
+                },
+                // No team fields at all: the optional half must survive being absent.
+                {
+                    "accountId": "acct-b",
+                    "email": "bob@example.com",
+                    "userId": "user-b",
+                    "name": "Bob Example",
+                    "secretKeyHint": "A3-YYYYYY",
+                    "addedAt": 1700000000001i64,
+                    "lastActiveAt": 1700000009998i64,
+                    "biometricEnabled": false,
+                    "token": { "key": "bittery_account_acct-b_jwt_token", "store": "secret" },
+                    "sessionData": { "key": "bittery_account_acct-b_session_data", "store": "secret" },
+                    "vaultKeys": { "key": "bittery_account_acct-b_vault_keys", "store": "secret" },
+                    "encryptedPrivateKey": { "key": "bittery_account_acct-b_encrypted_private_key", "store": "secret" },
+                    "itemsKeyPrefix": "record:acct-b:items:",
+                    "vaultsKeyPrefix": "record:acct-b:vaults:"
+                }
+            ]
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn parse_native_view_reads_a_representative_document() {
+        let view = parse_native_view(Some(native_view_document(NATIVE_VIEW_VERSION)))
+            .expect("the published document must parse");
+
+        assert_eq!(view.v, NATIVE_VIEW_VERSION);
+        assert_eq!(view.active_account_id.as_deref(), Some("acct-a"));
+        assert_eq!(view.unlocked_account_ids, vec!["acct-a".to_string()]);
+        // The resolved timeout, not a Rust-side default.
+        assert_eq!(view.auto_lock_timeout_ms, 300000);
+        assert_eq!(view.device_key.key, "bittery_device_key");
+        assert_eq!(view.device_key.store, NativeKeyStore::Secret);
+
+        assert!(view.is_unlocked("acct-a"));
+        assert!(!view.is_unlocked("acct-b"));
+
+        let alice = view.account("acct-a").expect("acct-a must be published");
+        assert_eq!(alice.email, "alice@example.com");
+        // The displayable metadata the extension stores verbatim.
+        assert_eq!(alice.user_id, "user-a");
+        assert_eq!(alice.name, "Alice Example");
+        assert_eq!(alice.secret_key_hint, "A3-XXXXXX");
+        assert_eq!(alice.team_name.as_deref(), Some("Acme"));
+        assert_eq!(
+            alice.team_avatar_url.as_deref(),
+            Some("https://cdn.example.com/acme.png")
+        );
+        assert_eq!(alice.added_at, 1700000000000);
+        assert_eq!(alice.last_active_at, 1700000009999);
+        assert!(alice.biometric_enabled);
+        assert_eq!(alice.token.key, "bittery_account_acct-a_jwt_token");
+        assert_eq!(alice.session_data.store, NativeKeyStore::Secret);
+        assert_eq!(alice.items_key_prefix, "record:acct-a:items:");
+        assert_eq!(alice.vaults_key_prefix, "record:acct-a:vaults:");
+
+        // A published `false` is honoured; nothing here defaults it to `true`.
+        let bob = view.account("acct-b").expect("acct-b must be published");
+        assert!(!bob.biometric_enabled);
+        // An omitted optional stays omitted; nothing here invents a placeholder.
+        assert_eq!(bob.team_name, None);
+        assert_eq!(bob.team_avatar_url, None);
+
+        assert!(view.account("acct-missing").is_none());
+    }
+
+    #[test]
+    fn parse_native_view_reports_an_absent_document() {
+        let problem =
+            parse_native_view(None).expect_err("an absent document must not parse to a view");
+
+        assert_eq!(problem, NativeViewProblem::Absent);
+    }
+
+    #[test]
+    fn parse_native_view_refuses_an_unknown_version() {
+        // A future writer may change what the fields mean, so a version this
+        // build does not know must be refused rather than misread.
+        let problem = parse_native_view(Some(native_view_document(99)))
+            .expect_err("an unknown schema version must be refused");
+
+        match problem {
+            NativeViewProblem::Unreadable(detail) => {
+                assert!(detail.contains("unsupported schema version 99"), "{detail}");
+            }
+            other => panic!("expected Unreadable, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_native_view_refuses_malformed_json() {
+        let problem = parse_native_view(Some("not json".to_string()))
+            .expect_err("malformed JSON must be refused");
+
+        assert!(matches!(problem, NativeViewProblem::Unreadable(_)));
+    }
+
+    #[test]
+    fn key_refs_route_to_the_store_they_name() {
+        let view = parse_native_view(Some(native_view_document(NATIVE_VIEW_VERSION)))
+            .expect("the published document must parse");
+        let alice = view.account("acct-a").expect("acct-a must be published");
+
+        // A "secret" ref must reach the keychain and never the store.
+        let resolved = read_key_ref_with(
+            &alice.token,
+            |key| Some(format!("keychain:{key}")),
+            |_| panic!("a secret ref must not be read from store.json"),
+        );
+        assert_eq!(
+            resolved.as_deref(),
+            Some("keychain:bittery_account_acct-a_jwt_token")
+        );
+
+        // A "plain" ref must reach store.json and never the keychain.
+        let plain = super::NativeKeyRef {
+            key: "bittery_native_view".to_string(),
+            store: NativeKeyStore::Plain,
+        };
+        let resolved = read_key_ref_with(
+            &plain,
+            |_| panic!("a plain ref must not be read from the keychain"),
+            |key| Some(format!("store:{key}")),
+        );
+        assert_eq!(resolved.as_deref(), Some("store:bittery_native_view"));
+    }
+
+    // ----------------------------------------------------------------------
+    // Record prefix scan
+    // ----------------------------------------------------------------------
+
+    #[test]
+    fn records_under_prefix_selects_only_the_published_prefix() {
+        let entries = vec![
+            (
+                "record:acct-a:items:item-1".to_string(),
+                serde_json::json!("one"),
+            ),
+            (
+                "record:acct-a:items:item-2".to_string(),
+                serde_json::json!("two"),
+            ),
+            // Same account, different collection.
+            (
+                "record:acct-a:vaults:vault-1".to_string(),
+                serde_json::json!("vault"),
+            ),
+            // Same collection, different account.
+            (
+                "record:acct-b:items:item-3".to_string(),
+                serde_json::json!("other"),
+            ),
+            // Not a record at all.
+            ("bittery_native_view".to_string(), serde_json::json!("view")),
+            // A non-string value is not a record this port ever wrote.
+            (
+                "record:acct-a:items:item-4".to_string(),
+                serde_json::json!(42),
+            ),
+        ];
+
+        let found = records_under_prefix(entries, "record:acct-a:items:");
+
+        assert_eq!(found, vec!["one".to_string(), "two".to_string()]);
+    }
+
+    #[test]
+    fn decode_records_skips_corrupt_entries() {
+        let raw = vec![
+            r#"{"id":"vault-1","name":"Main","type":"personal","icon":null,"imageUrl":null}"#
+                .to_string(),
+            "{ not json".to_string(),
+            r#"{"id":"vault-2","name":"Shared","type":"team","icon":null,"imageUrl":null}"#
+                .to_string(),
+        ];
+
+        let vaults: Vec<CachedVaultRecord> = decode_records(raw, "vault");
+
+        assert_eq!(vaults.len(), 2);
+        assert_eq!(vaults[0].id, "vault-1");
+        assert_eq!(vaults[1].id, "vault-2");
+    }
 
     #[test]
     fn unwrap_plaintext_with_context_accepts_matching_envelope() {
@@ -2196,38 +2462,6 @@ mod tests {
                 .expect_err("expected context mismatch");
 
         assert_eq!(error, "Encryption context mismatch");
-    }
-
-    #[test]
-    fn lookup_store_string_with_fallback_prefers_account_scoped_value() {
-        let values = HashMap::from([
-            (
-                "bittery_account_alice_example_com_session_data",
-                "scoped-session".to_string(),
-            ),
-            ("bittery_session_data", "legacy-session".to_string()),
-        ]);
-
-        let resolved = lookup_store_string_with_fallback(
-            |key| values.get(key).cloned(),
-            "bittery_account_alice_example_com_session_data",
-            "bittery_session_data",
-        );
-
-        assert_eq!(resolved.as_deref(), Some("scoped-session"));
-    }
-
-    #[test]
-    fn lookup_store_string_with_fallback_uses_legacy_value_when_scoped_is_missing() {
-        let values = HashMap::from([("bittery_session_data", "legacy-session".to_string())]);
-
-        let resolved = lookup_store_string_with_fallback(
-            |key| values.get(key).cloned(),
-            "bittery_account_alice_example_com_session_data",
-            "bittery_session_data",
-        );
-
-        assert_eq!(resolved.as_deref(), Some("legacy-session"));
     }
 
     #[test]
@@ -2322,24 +2556,6 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("alice@example.com")
         );
-    }
-
-    #[test]
-    fn biometric_enabled_flag_defaults_to_true_when_unset() {
-        // Never-set preference must not disable biometrics implicitly.
-        assert!(biometric_enabled_flag(None));
-    }
-
-    #[test]
-    fn biometric_enabled_flag_respects_explicit_false() {
-        assert!(!biometric_enabled_flag(Some(serde_json::json!(false))));
-        assert!(biometric_enabled_flag(Some(serde_json::json!(true))));
-    }
-
-    #[test]
-    fn biometric_enabled_flag_defaults_to_true_for_non_boolean() {
-        // A malformed/non-boolean value should not silently disable biometrics.
-        assert!(biometric_enabled_flag(Some(serde_json::json!("false"))));
     }
 
     #[test]

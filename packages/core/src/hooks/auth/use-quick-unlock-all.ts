@@ -7,7 +7,7 @@
  */
 
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { ICrypto } from "@bittery/types";
 import {
 	type UseMutationResult,
@@ -17,6 +17,7 @@ import {
 import { performSRPUnlock, storeUnlockSession } from "../../auth";
 import {
 	usePlatformCrypto,
+	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
 import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
@@ -85,7 +86,8 @@ export interface UseQuickUnlockAllOptions {
 
 export interface QuickUnlockAllDeps {
 	crypto: ICrypto;
-	storage: IStorageAdapter;
+	storage: AccountStore;
+	itemCache: ItemCache;
 }
 
 /**
@@ -96,7 +98,7 @@ export interface QuickUnlockAllDeps {
  */
 export async function quickUnlockAllAccounts(
 	input: QuickUnlockAllInput,
-	{ crypto, storage }: QuickUnlockAllDeps,
+	{ crypto, storage, itemCache }: QuickUnlockAllDeps,
 ): Promise<QuickUnlockAllResult> {
 	const { password, emails } = input;
 
@@ -117,9 +119,7 @@ export async function quickUnlockAllAccounts(
 	for (const account of accountsToUnlock) {
 		try {
 			// Check if account has stored secret key
-			const hasSecretKey = await storage.hasStoredSecretKey?.(
-				account.accountId,
-			);
+			const hasSecretKey = await storage.hasStoredSecretKey(account.accountId);
 			if (!hasSecretKey) {
 				failed.push({
 					email: account.email,
@@ -129,7 +129,7 @@ export async function quickUnlockAllAccounts(
 			}
 
 			const serverUrl =
-				(await storage.getServerUrl?.(account.accountId)) ||
+				(await storage.getServerUrl(account.accountId)) ||
 				getDefaultServerUrl();
 			const accountRpcClient = await createStaticStoredAccountRpcClient(
 				storage,
@@ -153,7 +153,7 @@ export async function quickUnlockAllAccounts(
 			);
 
 			// Store unlock session data
-			await storeUnlockSession(result, storage, account.accountId, {
+			await storeUnlockSession(result, storage, itemCache, account.accountId, {
 				travelModeRpcClient: accountRpcClient,
 				serverUrl,
 			});
@@ -203,11 +203,12 @@ export function useQuickUnlockAll(
 ): UseMutationResult<QuickUnlockAllResult, Error, QuickUnlockAllInput> {
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
+	const itemCache = usePlatformItemCache();
 	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: (input: QuickUnlockAllInput) =>
-			quickUnlockAllAccounts(input, { crypto, storage }),
+			quickUnlockAllAccounts(input, { crypto, storage, itemCache }),
 		onSuccess: (result, input) => {
 			// Invalidate all account-related queries
 			queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] });

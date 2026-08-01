@@ -1,6 +1,6 @@
 import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/")({
 	beforeLoad: async () => {
@@ -37,6 +37,7 @@ export const Route = createFileRoute("/")({
 			// Try to restore session
 			const restored = await getAccountSessionManager({
 				storage,
+				itemCache,
 			}).unlockAccount(activeAccount.accountId, true);
 			if (restored) {
 				throw redirect({ to: "/vault" });

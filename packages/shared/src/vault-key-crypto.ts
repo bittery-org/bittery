@@ -112,7 +112,7 @@ export interface VaultKeyStorageLike {
 	): Promise<Array<{ vaultId: string; encryptedVaultKey: string }> | null>;
 	getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null>;
 	getEncryptedPrivateKey(accountId?: string): Promise<string | null>;
-	getStoredSessionData?(accountId?: string): Promise<{ userId: string } | null>;
+	getStoredSessionData(accountId?: string): Promise<{ userId: string } | null>;
 }
 
 /**
@@ -215,7 +215,7 @@ export async function decryptStoredVaultKey({
 	const encryptedPrivateKey = await storage.getEncryptedPrivateKey(accountId);
 	const resolvedUserId =
 		userId ??
-		(await storage.getStoredSessionData?.(accountId))?.userId ??
+		(await storage.getStoredSessionData(accountId))?.userId ??
 		undefined;
 	return decryptVaultKey({
 		encryptedVaultKey,

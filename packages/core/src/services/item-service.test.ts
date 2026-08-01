@@ -40,6 +40,7 @@ describe("ItemService", () => {
 					{ accountId: "acc_alice", email: "alice@example.com" },
 				],
 			} as never,
+			itemCache: {} as never,
 			crypto: {
 				generateUuid: async () => "item_123",
 				decrypt: async () => Buffer.from("vault-key").toString("base64"),
@@ -88,7 +89,7 @@ describe("ItemService", () => {
 	test("falls back to older encryption versions when cached item metadata drifted", async () => {
 		const attemptedVersions: number[] = [];
 		const service = new ItemService({
-			storage: {
+			itemCache: {
 				getCachedItems: async () => [
 					{
 						id: "item_1",
@@ -106,6 +107,8 @@ describe("ItemService", () => {
 						attachments: [],
 					},
 				],
+			} as never,
+			storage: {
 				getVaultKeys: async () => [
 					{
 						vaultId: "vault_1",
@@ -192,7 +195,6 @@ describe("ItemService", () => {
 					{ accountId: "acc_source", email: "alice@example.com" },
 					{ accountId: "acc_target", email: "bob@example.com" },
 				],
-				supportsMultiAccount: true,
 				getVaultKeys: async () => [
 					{ vaultId: "vault_target", encryptedVaultKey: targetVaultKey },
 				],
@@ -202,6 +204,7 @@ describe("ItemService", () => {
 				getAccountMetadata: async () => ({ userId: "user_target" }),
 				getActiveAccountUserId: async () => "user_target",
 			} as never,
+			itemCache: {} as never,
 			crypto: {
 				generateUuid: async () => "item_new",
 				decrypt: async () => Buffer.from("vault-key").toString("base64"),
@@ -348,6 +351,7 @@ describe("ItemService", () => {
 					}),
 					getActiveAccountUserId: async () => "user_target",
 				} as never,
+				itemCache: {} as never,
 				crypto: {
 					generateUuid: async () => "item_new",
 					decrypt: async (
@@ -549,6 +553,7 @@ describe("ItemService", () => {
 					}),
 					getActiveAccountUserId: async () => "user_target",
 				} as never,
+				itemCache: {} as never,
 				crypto: {
 					generateUuid: async () => "item_new",
 					decrypt: async () => Buffer.from("vault-key").toString("base64"),

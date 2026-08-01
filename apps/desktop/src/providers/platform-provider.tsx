@@ -11,7 +11,7 @@ import { PlatformProvider } from "@bittery/core/hooks";
 import type { ICrypto, ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import * as tauriCrypto from "@/lib/tauri-crypto";
 import { useSyncContext } from "./sync-provider";
 
@@ -75,7 +75,12 @@ export function DesktopPlatformProvider({
 	);
 
 	return (
-		<PlatformProvider storage={storage} crypto={crypto} sync={sync}>
+		<PlatformProvider
+			storage={storage}
+			itemCache={itemCache}
+			crypto={crypto}
+			sync={sync}
+		>
 			{children}
 		</PlatformProvider>
 	);

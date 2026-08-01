@@ -6,7 +6,7 @@
  */
 
 import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { storage } from "../lib/storage";
+import { itemCache, storage } from "../lib/storage";
 import { type DesktopStatus, desktopClient } from "./desktop-client";
 import type { DesktopEventPayload } from "./desktop-protocol";
 import {
@@ -98,8 +98,8 @@ class DesktopSyncService {
 						// All-accounts mode was removed; collapse a legacy "all" pointer
 						// to a single active account (first unlocked, else first known).
 						if (previousState.activeAccount === "all") {
-							const unlocked = await storage.getUnlockedAccounts?.();
-							const accountId = unlocked?.[0] ?? accounts[0]?.accountId;
+							const unlocked = await storage.getUnlockedAccounts();
+							const accountId = unlocked[0] ?? accounts[0]?.accountId;
 							if (accountId) {
 								await storage.setActiveAccount({
 									type: "single",
@@ -185,10 +185,10 @@ class DesktopSyncService {
 						secretKeyHint: desktopAccount.secretKeyHint,
 						teamName: desktopAccount.teamName,
 						teamAvatarUrl: desktopAccount.teamAvatarUrl,
-						addedAt: desktopAccount.addedAt ?? Date.now(),
-						lastActiveAt: desktopAccount.lastActiveAt ?? Date.now(),
-						biometricEnabled: desktopAccount.biometricEnabled ?? false,
-					} as import("../lib/storage").AccountMetadata);
+						addedAt: desktopAccount.addedAt,
+						lastActiveAt: desktopAccount.lastActiveAt,
+						biometricEnabled: desktopAccount.biometricEnabled,
+					});
 				} else {
 					// Update existing account with latest data from desktop
 					// This ensures teamAvatarUrl and other fields stay in sync
@@ -212,8 +212,8 @@ class DesktopSyncService {
 				// All-accounts mode was removed; collapse a legacy "all" pointer to a
 				// single active account (first unlocked, else first known).
 				if (accountsData.activeAccount === "all") {
-					const unlocked = await storage.getUnlockedAccounts?.();
-					const accountId = unlocked?.[0] ?? refreshedAccounts[0]?.accountId;
+					const unlocked = await storage.getUnlockedAccounts();
+					const accountId = unlocked[0] ?? refreshedAccounts[0]?.accountId;
 					if (accountId) {
 						await storage.setActiveAccount({
 							type: "single",
@@ -408,7 +408,7 @@ class DesktopSyncService {
 				type: "single",
 				accountId: event.accountId,
 			});
-			await getAccountSessionManager({ storage }).refresh();
+			await getAccountSessionManager({ storage, itemCache }).refresh();
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
 			return;

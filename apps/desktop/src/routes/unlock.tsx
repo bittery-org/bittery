@@ -25,7 +25,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
 import { triggerAuthRevealToVault } from "@/lib/auth-reveal-transition";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface UnlockSearchParams {
@@ -164,12 +164,15 @@ export function UnlockPage() {
 	// tear down the session for any account whose policy cannot be verified so
 	// its hidden vaults are never exposed.
 	const performBiometricUnlockAll = useCallback(async () => {
-		// Use the unified biometric unlock method that shows ONE prompt for all accounts
-		if (!storage.unlockAllAccountsWithBiometric) {
-			throw new Error(m.toast_auth_unlock_error_biometric_not_supported());
-		}
-
-		const { unlocked, failed } = await storage.unlockAllAccountsWithBiometric();
+		// One prompt for every account. `AccountStore` is total, so there is nothing to
+		// feature-detect: on a machine without biometrics this simply reports every account
+		// as failed.
+		//
+		// The reason is what the OS biometric dialog displays, so it is user-facing copy and
+		// has to be translated here — storage's own default is an English fallback.
+		const { unlocked, failed } = await storage.unlockAllAccountsWithBiometric(
+			m.biometric_prompt_unlock_all_accounts(),
+		);
 
 		// Enforce travel mode per unlocked accountId. verifyForUnlock fetches
 		// (or, offline, hydrates the verified) policy and purges hidden vaults.
@@ -181,7 +184,10 @@ export function UnlockPage() {
 				accountId,
 			).catch(() => null);
 			try {
-				await getTravelModeEnforcer(storage).verifyForUnlock(accountId, client);
+				await getTravelModeEnforcer(storage, itemCache).verifyForUnlock(
+					accountId,
+					client,
+				);
 				verified.push(accountId);
 			} catch {
 				// Fail closed: never leave this account's hidden vaults exposed.

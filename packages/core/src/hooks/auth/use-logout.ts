@@ -16,7 +16,10 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { clearSession } from "../../auth";
-import { usePlatformStorage } from "../../context/platform-context";
+import {
+	usePlatformItemCache,
+	usePlatformStorage,
+} from "../../context/platform-context";
 
 /**
  * Options for useLogout hook
@@ -81,6 +84,7 @@ export function useLogout(
 ): UseMutationResult<void, Error, LogoutInput> {
 	const rpcClient = useRPCClient();
 	const storage = usePlatformStorage();
+	const itemCache = usePlatformItemCache();
 	const queryClient = useQueryClient();
 
 	return useMutation({
@@ -99,8 +103,10 @@ export function useLogout(
 
 			const resolvedAccountId = await resolveAccountScopeId(storage, email);
 
-			// Clear local session data
-			await clearSession(storage, resolvedAccountId, clearSecretKey);
+			// Clear local session data. A full sign-out also drops the account's
+			// encrypted item cache — `clearSession` sequences both, because
+			// `AccountStore` cannot reach the cache.
+			await clearSession(storage, itemCache, resolvedAccountId, clearSecretKey);
 
 			if (resolvedAccountId) {
 				const authToken = await storage.getAuthToken(resolvedAccountId);

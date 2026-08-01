@@ -13,6 +13,6 @@ import {
 	registerLifecycleListeners,
 } from "./services/service-worker-lifecycle";
 
-initializeBackgroundServices();
+void initializeBackgroundServices();
 registerBackgroundMessageRouter();
 registerLifecycleListeners();

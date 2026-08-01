@@ -6,7 +6,24 @@ import {
 } from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
 import { SyncOrchestrator } from "../sync-orchestrator";
-import type { SyncEvent, SyncStorage } from "../types";
+import type { SyncEvent, SyncItemCache, SyncStorage } from "../types";
+
+/**
+ * Every `SyncItemCache` method is total, so a test double must implement all of
+ * them. Overriding one is how a test says which call it cares about.
+ */
+function stubItemCache(overrides: Partial<SyncItemCache> = {}): SyncItemCache {
+	return {
+		upsertCachedItem: async () => undefined,
+		removeCachedItem: async () => undefined,
+		upsertCachedVault: async () => undefined,
+		removeCachedVault: async () => undefined,
+		clearItemCache: async () => undefined,
+		syncVaultKeys: async () => undefined,
+		replaceItemId: () => undefined,
+		...overrides,
+	};
+}
 
 class MemoryStorage implements SyncStorage {
 	private readonly data = new Map<string, unknown>();
@@ -90,10 +107,7 @@ describe("sync engine regressions", () => {
 					},
 				},
 			},
-			itemCache: {
-				supportsItemCache: true,
-				clearItemCache: async () => undefined,
-			},
+			itemCache: stubItemCache(),
 			outboundQueue,
 		});
 
@@ -121,17 +135,12 @@ describe("sync engine regressions", () => {
 		const storage = new MemoryStorage();
 		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
-		const clearedEmails: Array<string | undefined> = [];
-		const itemCache = {
-			supportsItemCache: true as const,
-			clearedEmails,
-			async clearItemCache(
-				this: { clearedEmails: Array<string | undefined> },
-				email?: string,
-			) {
-				this.clearedEmails.push(email);
+		const clearedAccounts: Array<string | undefined> = [];
+		const itemCache = stubItemCache({
+			clearItemCache: async (accountId?: string) => {
+				clearedAccounts.push(accountId);
 			},
-		};
+		});
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
@@ -183,68 +192,7 @@ describe("sync engine regressions", () => {
 
 		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
 		expect(cursor?.id).toBe("evt_20");
-		expect(clearedEmails).toEqual(["alice@example.com"]);
-
-		orchestrator.dispose();
-	});
-
-	test("does not advance cursor when full refresh cannot be performed", async () => {
-		const storage = new MemoryStorage();
-		await storage.set("lastSyncCursor", { id: "evt_5" });
-		const outboundQueue = new OutboundQueue(storage, "self_client");
-
-		const orchestrator = new SyncOrchestrator({
-			syncManager: {
-				serverUrl: "http://localhost:3000",
-				getAuthToken: async () => "token",
-				clientId: "self_client",
-				storage,
-			},
-			rpcClient: {
-				sync: {
-					getEventsSince: {
-						query: async () => ({
-							events: [],
-							hasMore: false,
-							requiresFullRefresh: true,
-							cursor: { id: "evt_21" },
-						}),
-					},
-				},
-				vault: {
-					getItem: {
-						query: async () => {
-							throw new Error("unused");
-						},
-					},
-					get: {
-						query: async () => ({
-							id: "vault_1",
-							name: "Vault",
-							vaultType: "personal",
-							icon: null,
-							imageUrl: null,
-						}),
-					},
-					listItems: {
-						query: async () => [],
-					},
-					list: {
-						query: async () => [],
-					},
-				},
-			},
-			itemCache: {
-				supportsItemCache: true,
-			},
-			outboundQueue,
-		});
-
-		await expect((orchestrator as any).runCatchUp()).rejects.toThrow(
-			"full refresh",
-		);
-		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
-		expect(cursor?.id).toBe("evt_5");
+		expect(clearedAccounts).toEqual(["alice@example.com"]);
 
 		orchestrator.dispose();
 	});

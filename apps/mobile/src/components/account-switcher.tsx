@@ -97,11 +97,9 @@ export function AccountSwitcher() {
 					text: m.mob_account_switcher_lock_dialog_confirm(),
 					style: "destructive",
 					onPress: async () => {
-						if (storage.lockAllAccounts) {
-							await storage.lockAllAccounts();
-						} else {
-							await storage.clearSession();
-						}
+						// Lock, not sign out: every in-memory master unlock key is dropped
+						// but `session_data` stays, so quick-unlock still works.
+						await storage.lockAllAccounts();
 
 						if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
 							CredentialProvider.clearAllMasterUnlockKeys();

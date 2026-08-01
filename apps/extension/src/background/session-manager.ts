@@ -177,10 +177,8 @@ export async function _lockInternal(): Promise<void> {
 	chrome.alarms.clear(AUTO_LOCK_ALARM_NAME);
 	stopKeepalive();
 
-	// Clear all per-account MUKs from storage adapter's in-memory cache
-	if (storage.lockAllAccounts) {
-		await storage.lockAllAccounts();
-	}
+	// Clear all per-account MUKs from the AccountStore's in-memory cache
+	await storage.lockAllAccounts();
 }
 
 /**

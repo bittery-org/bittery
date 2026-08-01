@@ -1,6 +1,6 @@
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore } from "@bittery/storage";
 import type { ActiveAccount } from "@bittery/storage/types";
 import {
 	createStoredAccountRpcClient,
@@ -59,7 +59,7 @@ export function findAccountForItem(
  * Returns an account-specific RPC client when accountId is provided.
  */
 export async function getClientForAccount(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	_defaultClient: DefaultRpcClient,
 	accountId: string,
 ): Promise<DefaultRpcClient> {
@@ -75,7 +75,7 @@ export async function getClientForAccount(
  * Resolves active account configuration into per-account API clients.
  */
 export class AccountResolver {
-	constructor(private readonly storage: IStorageAdapter) {}
+	constructor(private readonly storage: AccountStore) {}
 
 	async resolveAccounts(
 		activeAccountOverride?: ActiveAccount,
@@ -110,7 +110,7 @@ export class AccountResolver {
 	 * change the active account or the coordinator's active-account set.
 	 */
 	async resolveUnlockedAccounts(): Promise<AccountInfo[]> {
-		const accountIds = (await this.storage.getUnlockedAccounts?.()) ?? [];
+		const accountIds = await this.storage.getUnlockedAccounts();
 		return this.buildAccountInfos(accountIds);
 	}
 
@@ -121,7 +121,7 @@ export class AccountResolver {
 			accountIds.map(async (accountId): Promise<AccountInfo | null> => {
 				try {
 					const [metadata, authToken, serverUrl] = await Promise.all([
-						this.storage.getAccountMetadata?.(accountId),
+						this.storage.getAccountMetadata(accountId),
 						this.storage.getAuthToken(accountId),
 						this.storage.getServerUrl(accountId),
 					]);

@@ -16,13 +16,9 @@ import {
 	type VaultRepositoryCoordinator,
 } from "@bittery/core";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
-import type {
-	DeltaSyncClient,
-	ItemCacheAdapter,
-	SyncEvent,
-} from "@bittery/sync";
+import type { DeltaSyncClient, SyncEvent, SyncItemCache } from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
-import { storage } from "../../lib/storage";
+import { itemCache, storage } from "../../lib/storage";
 import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
 import { rpcClient } from "../rpc-client";
@@ -41,8 +37,13 @@ type VaultKeyLike = {
 	vaultId: string;
 };
 
+/**
+ * The slice of `AccountStore` this service consumes.
+ *
+ * Every member is required; clearing the cache is not storage's job at all — that goes
+ * through `itemCache`.
+ */
 export interface SyncCacheStorage {
-	supportsItemCache: boolean;
 	getActiveAccount: () => Promise<ActiveAccount>;
 	getAccountsList: () => Promise<
 		Array<{ accountId: string; email: string; userId?: string }>
@@ -51,10 +52,9 @@ export interface SyncCacheStorage {
 	storeAuthToken: (token: string, accountId?: string) => Promise<void>;
 	getServerUrl: (accountId?: string) => Promise<string | null>;
 	getVaultKeys: (accountId?: string) => Promise<VaultKeyLike[] | null>;
-	clearItemCache?: (accountId?: string) => Promise<void>;
-	getAccountMetadata?: (
+	getAccountMetadata: (
 		accountId: string,
-	) => Promise<{ email?: string } | null | undefined>;
+	) => Promise<{ email?: string } | null>;
 }
 
 export interface SyncCacheDesktopClient {
@@ -77,18 +77,27 @@ export interface SyncEventQueryClient extends DeltaSyncClient {
 
 export interface SyncCacheServiceDeps {
 	storage: SyncCacheStorage;
-	itemCache: ItemCacheAdapter;
+	/**
+	 * `VaultRepositoryCoordinator` in production. Not the raw `ItemCache`: delta sync also
+	 * drives `syncVaultKeys` and `replaceItemId`, which sit above the cache and the crypto.
+	 */
+	itemCache: SyncItemCache;
 	desktopClient: SyncCacheDesktopClient;
 	defaultClient: SyncEventQueryClient;
 	createAccountClient: (
 		token: string,
 		serverUrl: string,
 	) => SyncEventQueryClient;
+	/**
+	 * Mirrors `performDeltaSync` exactly: `(accountScope, serverUrl, accountEmail)`.
+	 */
 	deltaSync: (
 		client: DeltaSyncClient,
-		cache: ItemCacheAdapter,
+		cache: SyncItemCache,
 		event: SyncEvent,
-		accountEmail?: string,
+		accountScope?: string,
+		serverUrl?: string,
+		accountEmail?: string | null,
 	) => Promise<void>;
 	handleTravelModeSync?: (
 		event: SyncEvent,
@@ -99,7 +108,7 @@ export interface SyncCacheServiceDeps {
 }
 
 const defaultDeps: SyncCacheServiceDeps = {
-	storage: storage as unknown as SyncCacheStorage,
+	storage,
 	itemCache: core.vaultCoordinator,
 	desktopClient,
 	defaultClient: rpcClient as unknown as SyncEventQueryClient,
@@ -112,6 +121,7 @@ const defaultDeps: SyncCacheServiceDeps = {
 			event,
 			accountId,
 			storage,
+			itemCache,
 			core.vaultCoordinator as VaultRepositoryCoordinator,
 			accountClient
 				? {
@@ -168,10 +178,6 @@ export function createSyncCacheService(
 	};
 
 	async function clearItemCacheForAccountId(accountId?: string): Promise<void> {
-		await deps.storage.clearItemCache?.(accountId);
-		if (!deps.itemCache.clearItemCache) {
-			return;
-		}
 		try {
 			await deps.itemCache.clearItemCache(accountId);
 		} catch (error) {
@@ -197,7 +203,7 @@ export function createSyncCacheService(
 	async function resolveEmailForAccountId(
 		accountId: string,
 	): Promise<string | undefined> {
-		const metadata = await deps.storage.getAccountMetadata?.(accountId);
+		const metadata = await deps.storage.getAccountMetadata(accountId);
 		if (metadata?.email) {
 			return metadata.email;
 		}
@@ -432,8 +438,14 @@ export function createSyncCacheService(
 			}`,
 		);
 
+		// `ItemCache` collections are per account, and omitting the accountId writes into a
+		// collection literally named `default` (CONTRACT.md §12.2). With no known account
+		// there is nothing to apply the delta to, so drop it rather than stash it somewhere
+		// nothing will ever read.
 		if (candidateAccountIds.length === 0) {
-			await deps.deltaSync(deps.defaultClient, deps.itemCache, event);
+			deps.logger.warn(
+				`[sync-cache-service] Dropping ${event.type}: no known account to scope the cache write to`,
+			);
 			if (shouldClearDesktopCacheForEvent(event)) {
 				deps.desktopClient.clearCache();
 			}
@@ -452,10 +464,13 @@ export function createSyncCacheService(
 				}
 
 				const email = await resolveEmailForAccountId(accountId);
+				// `accountId` is the cache scope; the email only decorates the cached item.
 				await deps.deltaSync(
 					accountClient,
 					deps.itemCache,
 					event,
+					accountId,
+					await getServerUrlForAccountId(accountId),
 					email ? normalizeEmail(email) : undefined,
 				);
 				applied++;
@@ -467,18 +482,17 @@ export function createSyncCacheService(
 			}
 		}
 
+		// Invalidating the candidates' caches is the correct fallback when no account-scoped
+		// delta applied — the next read re-bootstraps them from the server.
 		if (applied === 0) {
 			deps.logger.warn(
-				`[sync-cache-service] No account-scoped delta applied for ${event.type}; falling back to global cache update`,
+				`[sync-cache-service] No account-scoped delta applied for ${event.type}; clearing candidate caches so the next read re-bootstraps`,
 			);
-			if (deps.storage.clearItemCache || deps.itemCache.clearItemCache) {
-				await Promise.all(
-					candidateAccountIds.map((accountId) =>
-						clearItemCacheForAccountId(accountId),
-					),
-				);
-			}
-			await deps.deltaSync(deps.defaultClient, deps.itemCache, event);
+			await Promise.all(
+				candidateAccountIds.map((accountId) =>
+					clearItemCacheForAccountId(accountId),
+				),
+			);
 		}
 
 		if (shouldClearDesktopCacheForEvent(event)) {
@@ -487,10 +501,6 @@ export function createSyncCacheService(
 	}
 
 	async function clearItemCachesForKnownAccounts(): Promise<void> {
-		if (!deps.storage.clearItemCache && !deps.itemCache.clearItemCache) {
-			return;
-		}
-
 		const activeSingleAccountId = await resolveActiveSingleAccountId();
 		const allAccountIds = await getAllKnownAccountIds();
 		const candidates = buildOrderedCandidates(
@@ -498,8 +508,9 @@ export function createSyncCacheService(
 			allAccountIds,
 		);
 
+		// No known accounts means no collections to clear; `ItemCache`'s literal `"default"`
+		// account segment only ever exists on web.
 		if (candidates.length === 0) {
-			await clearItemCacheForAccountId();
 			return;
 		}
 

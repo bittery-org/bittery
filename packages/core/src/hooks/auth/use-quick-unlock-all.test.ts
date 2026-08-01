@@ -1,7 +1,11 @@
 import { describe, expect, it, mock } from "bun:test";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { AccountMetadata } from "@bittery/storage/types";
+import type { AccountStore } from "@bittery/storage";
 import type { ICrypto } from "@bittery/types";
+import {
+	accountMetadata,
+	createTestAccountStore,
+	createTestItemCache,
+} from "../../testing/account-store-harness";
 
 mock.module("../../auth", () => ({
 	performSRPUnlock: mock(async () => ({
@@ -16,43 +20,37 @@ mock.module("../../services/rpc-client", () => ({
 
 const { quickUnlockAllAccounts } = await import("./use-quick-unlock-all");
 
-function account(accountId: string, email: string): AccountMetadata {
-	return {
-		accountId,
-		email,
-		userId: `user-${accountId}`,
-		name: accountId,
-		serverUrl: "https://app.bittery.io",
-		secretKeyHint: "ABCD••••",
-		addedAt: 1,
-		lastActiveAt: 1,
-		biometricEnabled: false,
-	};
-}
-
-const accounts = [
-	account("acc-1", "a@test.com"),
-	account("acc-2", "b@test.com"),
-];
-
-function createStorage(
-	overrides: Partial<IStorageAdapter> = {},
-): IStorageAdapter {
-	return {
-		getAccountsList: mock(async () => accounts),
-		hasStoredSecretKey: mock(async () => true),
-		getServerUrl: mock(async () => "https://app.bittery.io"),
-		...overrides,
-	} as unknown as IStorageAdapter;
+/**
+ * A real `AccountStore`: two accounts, and a stored secret key for each id in
+ * `withSecretKey`. `hasStoredSecretKey` then answers from actual storage rather than
+ * from a stub, which is what the id/email contract under test depends on.
+ */
+async function createStorage(
+	withSecretKey: string[] = ["acc-1", "acc-2"],
+): Promise<AccountStore> {
+	const { store } = await createTestAccountStore();
+	for (const [accountId, email] of [
+		["acc-1", "a@test.com"],
+		["acc-2", "b@test.com"],
+	] as const) {
+		await store.addAccount(accountMetadata({ accountId, email }));
+		await store.storeAuthToken(`token-${accountId}`, accountId);
+		if (withSecretKey.includes(accountId)) {
+			await store.storeSecretKey(`secret-${accountId}`, accountId);
+		}
+	}
+	return store;
 }
 
 const crypto = {} as ICrypto;
+
+const itemCache = (await createTestItemCache()).cache;
 
 describe("quickUnlockAllAccounts", () => {
 	it("returns account ids for unlocked accounts, not emails", async () => {
 		const result = await quickUnlockAllAccounts(
 			{ password: "pw" },
-			{ crypto, storage: createStorage() },
+			{ crypto, storage: await createStorage(), itemCache },
 		);
 
 		expect(result.unlocked).toEqual(["acc-1", "acc-2"]);
@@ -60,15 +58,11 @@ describe("quickUnlockAllAccounts", () => {
 	});
 
 	it("reports failures by email while still returning ids for successes", async () => {
-		const storage = createStorage({
-			hasStoredSecretKey: mock(
-				async (accountId: string) => accountId === "acc-2",
-			),
-		});
+		const storage = await createStorage(["acc-2"]);
 
 		const result = await quickUnlockAllAccounts(
 			{ password: "pw" },
-			{ crypto, storage },
+			{ crypto, storage, itemCache },
 		);
 
 		expect(result.unlocked).toEqual(["acc-2"]);
@@ -78,7 +72,7 @@ describe("quickUnlockAllAccounts", () => {
 	it("filters to the requested emails but still returns their ids", async () => {
 		const result = await quickUnlockAllAccounts(
 			{ password: "pw", emails: ["b@test.com"] },
-			{ crypto, storage: createStorage() },
+			{ crypto, storage: await createStorage(), itemCache },
 		);
 
 		expect(result.unlocked).toEqual(["acc-2"]);

@@ -161,8 +161,10 @@ export async function handleUpdateItemTotp(payload: {
 			};
 		}
 
-		// Get vault key for the item's vault
-		const vaultKeys = await storage.getVaultKeys(accountEmail);
+		// Get vault key for the item's vault. `AccountStore` is keyed by accountId, so the
+		// email has to be resolved first.
+		const accountId = await resolveAccountScopeId(storage, accountEmail);
+		const vaultKeys = await storage.getVaultKeys(accountId);
 		if (!vaultKeys || vaultKeys.length === 0) {
 			return {
 				success: false,
@@ -181,7 +183,6 @@ export async function handleUpdateItemTotp(payload: {
 		}
 
 		// Decrypt vault key
-		const accountId = await resolveAccountScopeId(storage, accountEmail);
 		const vaultKey = await decryptStoredVaultKey({
 			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
 			accountId,

@@ -5,7 +5,7 @@
  */
 
 import type { useRPCClient } from "@bittery/shared";
-import type { IStorageAdapter } from "@bittery/storage";
+import type { AccountStore } from "@bittery/storage";
 import type { DeletedItem } from "../hooks/use-deleted-items";
 import type { UnifiedItem } from "../hooks/use-items";
 import {
@@ -45,7 +45,7 @@ export function findAccountEmailForItem(
 }
 
 export async function getTRPCClientForAccount(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	defaultClient: ReturnType<typeof useRPCClient>,
 	accountId: string,
 ) {

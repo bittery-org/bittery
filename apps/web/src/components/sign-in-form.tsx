@@ -14,7 +14,12 @@ import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { storage } from "@/lib/storage";
+import {
+	forgetActiveSession,
+	itemCache,
+	refreshActiveAccountId,
+	storage,
+} from "@/lib/storage";
 import * as wasmCrypto from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -151,9 +156,18 @@ function SignInFormContent({
 					storage,
 				},
 			);
-			await storeLoginSession(result, input.secretKey, storage, input.email, {
-				serverUrl,
-			});
+			await storeLoginSession(
+				result,
+				input.secretKey,
+				storage,
+				itemCache,
+				input.email,
+				{ serverUrl },
+			);
+			// `storeLoginSession` sets the master unlock key before it moves the
+			// active-account pointer, so the unlock notification alone would publish the
+			// pre-login id. Re-read it once the pointer is final.
+			await refreshActiveAccountId();
 			return result;
 		},
 		onSuccess: () => {
@@ -361,7 +375,10 @@ function SignInFormContent({
 						type="button"
 						variant="link"
 						onClick={async () => {
-							await storage.clearSession();
+							// "Use a different account" must remove the quick-unlock offer,
+							// which lives in `session_data` — that is `forgetSession`, not
+							// `clearSession` (which only locks and keeps it).
+							await forgetActiveSession();
 							window.location.reload();
 						}}
 						className="w-full text-muted-foreground"

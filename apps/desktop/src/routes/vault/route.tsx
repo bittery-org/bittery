@@ -28,7 +28,7 @@ import {
 	getCreateItemIntent,
 	subscribeCreateItemIntent,
 } from "@/lib/create-item-intent";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
@@ -64,10 +64,10 @@ export const Route = createFileRoute("/vault")({
 			});
 		}
 
-		const restored = await getAccountSessionManager({ storage }).unlockAccount(
-			activeAccount.accountId,
-			true,
-		);
+		const restored = await getAccountSessionManager({
+			storage,
+			itemCache,
+		}).unlockAccount(activeAccount.accountId, true);
 
 		if (!restored) {
 			throw redirect({

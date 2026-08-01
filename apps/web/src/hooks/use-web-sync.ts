@@ -2,9 +2,16 @@ import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
 import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { getServerUrl } from "@/lib/auth-server";
-import { storage } from "@/lib/storage";
+import {
+	forgetActiveSession,
+	getActiveAccountIdSnapshot,
+	initializeStorage,
+	itemCache,
+	storage,
+	subscribeActiveAccountId,
+} from "@/lib/storage";
 import * as wasmCrypto from "@/lib/wasm-crypto";
 
 /**
@@ -76,16 +83,32 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 	const clientId = useMemo(() => getClientId(), []);
 	const syncStorage = useMemo(() => new WebSyncStorage(), []);
 	const vaultCoordinator = useMemo(
-		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
+		() => getOrCreateVaultRepositoryCoordinator(crypto, storage, itemCache),
 		[],
 	);
 
+	/**
+	 * The accountId the item cache is namespaced under. Passing `null` here would make
+	 * every cached read and write land in the literal `"default"` collection, so it is
+	 * read from the live active-account snapshot instead. The snapshot is refreshed
+	 * whenever the unlocked set changes and explicitly after a login.
+	 */
+	const syncAccountId = useSyncExternalStore(
+		subscribeActiveAccountId,
+		getActiveAccountIdSnapshot,
+		getActiveAccountIdSnapshot,
+	);
+
 	const getAuthTokenAsync = useCallback(async () => {
+		await initializeStorage();
 		return (await storage.getAuthToken()) || null;
 	}, []);
 
 	const onSessionRevoked = useCallback(async () => {
-		await storage.clearSession();
+		// Server-side revocation is a sign-out, not a lock: `forgetSession` drops
+		// `session_data` too, so the quick-unlock prompt cannot reappear for a session
+		// the server has already killed.
+		await forgetActiveSession();
 		queryClient.clear();
 
 		if (
@@ -96,6 +119,7 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		}
 	}, [queryClient]);
 	const resolveLegacyAccountId = useCallback(async (email: string) => {
+		await initializeStorage();
 		const matches = (await storage.getAccountsList()).filter(
 			(account) => account.email.toLowerCase() === email.toLowerCase(),
 		);
@@ -112,6 +136,7 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		storage: syncStorage,
 		enabled,
 		itemCacheAdapter: vaultCoordinator,
+		itemCacheAccountId: syncAccountId,
 		resolveLegacyAccountId,
 		onSessionRevoked,
 	});

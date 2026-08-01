@@ -1,4 +1,4 @@
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type {
 	CachedEncryptedItem,
@@ -35,8 +35,6 @@ type RepoEntry = {
 };
 
 export class VaultRepositoryCoordinator {
-	readonly supportsItemCache = true;
-
 	private readonly repos = new Map<string, RepoEntry>();
 	private readonly listeners = new Set<() => void>();
 	private readonly accountInfoByAccountId = new Map<
@@ -50,7 +48,8 @@ export class VaultRepositoryCoordinator {
 
 	constructor(
 		private readonly crypto: ICrypto,
-		private readonly storage: IStorageAdapter,
+		private readonly storage: AccountStore,
+		private readonly itemCache: ItemCache,
 	) {}
 
 	private emit(): void {
@@ -83,6 +82,7 @@ export class VaultRepositoryCoordinator {
 		const repo = new VaultRepositoryImpl(
 			this.crypto,
 			this.storage,
+			this.itemCache,
 			accountId,
 			serverUrl,
 			accountEmail,
@@ -144,7 +144,7 @@ export class VaultRepositoryCoordinator {
 	 * a stale local cache can never fail open.
 	 */
 	private async ensureTravelModeVerified(account: AccountInfo): Promise<void> {
-		const enforcer = getTravelModeEnforcer(this.storage, this);
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache, this);
 		if (enforcer.isVerified(account.accountId)) {
 			return;
 		}
@@ -303,10 +303,11 @@ export class VaultRepositoryCoordinator {
 		accountId: string,
 		items: VaultRepositoryItem[],
 	): VaultRepositoryItem[] {
-		return getTravelModeEnforcer(this.storage, this).filterItems(
-			accountId,
-			items,
-		);
+		return getTravelModeEnforcer(
+			this.storage,
+			this.itemCache,
+			this,
+		).filterItems(accountId, items);
 	}
 
 	getAll(): CoordinatedItem[] {
@@ -477,7 +478,7 @@ export class VaultRepositoryCoordinator {
 		this.emit();
 	}
 
-	// ItemCacheAdapter compatibility for useSync delta updates.
+	// --- SyncItemCache surface (packages/sync/src/types.ts) ---
 	async upsertEncrypted(
 		item: CachedEncryptedItem,
 		accountId: string,
@@ -568,19 +569,20 @@ export class VaultRepositoryCoordinator {
 }
 
 const coordinatorRegistry = new WeakMap<
-	IStorageAdapter,
+	AccountStore,
 	VaultRepositoryCoordinator
 >();
 
 export function getOrCreateVaultRepositoryCoordinator(
 	crypto: ICrypto,
-	storage: IStorageAdapter,
+	storage: AccountStore,
+	itemCache: ItemCache,
 ): VaultRepositoryCoordinator {
 	const existing = coordinatorRegistry.get(storage);
 	if (existing) {
 		return existing;
 	}
-	const created = new VaultRepositoryCoordinator(crypto, storage);
+	const created = new VaultRepositoryCoordinator(crypto, storage, itemCache);
 	coordinatorRegistry.set(storage, created);
 	return created;
 }

@@ -11,7 +11,10 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { usePlatformStorage } from "../../context/platform-context";
+import {
+	usePlatformItemCache,
+	usePlatformStorage,
+} from "../../context/platform-context";
 import {
 	type AccountSessionManager,
 	getAccountSessionManager,
@@ -35,28 +38,29 @@ export interface UseAccountSwitcherResult {
 
 function useAccountSessionManager(): AccountSessionManager {
 	const storage = usePlatformStorage();
+	const itemCache = usePlatformItemCache();
 	const queryClient = useQueryClient();
 
 	return useMemo(
 		() =>
 			getAccountSessionManager({
 				storage,
+				itemCache,
 				invalidateQueries: async (keys) => {
 					await Promise.all(
 						keys.map((key) => queryClient.invalidateQueries({ queryKey: key })),
 					);
 				},
 			}),
-		[storage, queryClient],
+		[storage, itemCache, queryClient],
 	);
 }
 
 export function useAccountSwitcher(
 	options: UseAccountSwitcherOptions = {},
 ): UseAccountSwitcherResult {
-	const storage = usePlatformStorage();
 	const manager = useAccountSessionManager();
-	const enabled = options.enabled !== false && storage.supportsMultiAccount;
+	const enabled = options.enabled !== false;
 	const refresh = useCallback(() => manager.refresh(), [manager]);
 
 	useSyncExternalStore(manager.subscribe, manager.getSnapshot);
