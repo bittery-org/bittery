@@ -30,8 +30,8 @@ import * as tauriCrypto from "@/lib/tauri-crypto";
 /**
  * `accountId` is deliberately non-nullable: it becomes `SyncSource.itemCacheAccountId`, and
  * a `null` there silently routes every cached item and vault into `ItemCache`'s literal
- * `"default"` collection instead of the account's own (CONTRACT.md §12.2). Desktop always
- * has a real accountId — every account-scoped value it reads is keyed by one.
+ * `"default"` collection instead of the account's own (packages/storage/CONTEXT.md §4.1).
+ * Desktop always has a real accountId — every account-scoped value it reads is keyed by one.
  */
 interface SyncConnectionContext {
 	accountId: string;

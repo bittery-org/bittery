@@ -53,7 +53,7 @@ function handleUnauthorizedError() {
 
 	// An expired session is a sign-out: `forgetSession` also drops `session_data`, avoiding
 	// a stale quick-unlock offer. The encrypted item cache goes with it — `AccountStore`
-	// cannot reach it (CONTRACT.md §12.3).
+	// cannot reach it (packages/storage/CONTEXT.md §4.2).
 	forgetActiveSession().then(() => {
 		toast.error(m.toast_auth_session_expired());
 		window.location.href = "/login";

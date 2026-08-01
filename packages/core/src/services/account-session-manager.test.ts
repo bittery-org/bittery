@@ -62,7 +62,7 @@ describe("AccountSessionManager", () => {
 		await manager.removeAccount("acc-1");
 
 		// Cold again for the removed account, untouched for the other one: leaving
-		// encrypted items behind after removal is the leak CONTRACT.md §12.3 names.
+		// encrypted items behind after removal is the leak packages/storage/CONTEXT.md §4.2 names.
 		expect(await itemCache.getCachedItems("acc-1")).toBeNull();
 		expect(await itemCache.getCachedItems("acc-2")).toHaveLength(1);
 	});

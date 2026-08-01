@@ -173,7 +173,7 @@ function normalizeRawItemWithVault<
 
 interface ItemServiceDeps {
 	storage: AccountStore;
-	/** Sibling of `storage`, never reachable through it. See CONTRACT.md §6. */
+	/** Sibling of `storage`, never reachable through it. See packages/storage/CONTEXT.md §3. */
 	itemCache: ItemCache;
 	crypto: ICrypto;
 	accounts: AccountResolver;

@@ -551,7 +551,7 @@ export async function storeLoginSession(
 	// pair, so a fresh login can land on an accountId whose collections still hold the
 	// previous session's ciphertext. Drop it before anything writes the new session.
 	// `AccountStore` cannot do this itself — it holds only a `PlatformPort`, and the
-	// cache lives behind a `RecordPort`. See CONTRACT.md §12.3.
+	// cache lives behind a `RecordPort`. See packages/storage/CONTEXT.md §4.2.
 	await itemCache.clearItemCache(accountId);
 
 	await prepareTravelModeForSession(
@@ -1075,7 +1075,7 @@ export async function getBiometricUnlockAvailability(
  * - `true` (sign-out): wipe the account's stored data *and* its cached ciphertext.
  *   `AccountStore.clearAllStoredData` cannot reach the cache (it holds only a
  *   `PlatformPort`), so the caller has to sequence the second half. Skipping it is the
- *   leak described in CONTRACT.md §12.3.
+ *   leak described in packages/storage/CONTEXT.md §4.2.
  */
 export async function clearSession(
 	storage: AccountStore,

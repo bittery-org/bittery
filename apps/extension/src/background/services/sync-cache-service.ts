@@ -52,9 +52,7 @@ export interface SyncCacheStorage {
 	storeAuthToken: (token: string, accountId?: string) => Promise<void>;
 	getServerUrl: (accountId?: string) => Promise<string | null>;
 	getVaultKeys: (accountId?: string) => Promise<VaultKeyLike[] | null>;
-	getAccountMetadata: (
-		accountId: string,
-	) => Promise<{ email?: string } | null>;
+	getAccountMetadata: (accountId: string) => Promise<{ email?: string } | null>;
 }
 
 export interface SyncCacheDesktopClient {
@@ -439,7 +437,7 @@ export function createSyncCacheService(
 		);
 
 		// `ItemCache` collections are per account, and omitting the accountId writes into a
-		// collection literally named `default` (CONTRACT.md §12.2). With no known account
+		// collection literally named `default` (packages/storage/CONTEXT.md §4.1). With no known account
 		// there is nothing to apply the delta to, so drop it rather than stash it somewhere
 		// nothing will ever read.
 		if (candidateAccountIds.length === 0) {

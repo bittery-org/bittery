@@ -19,8 +19,8 @@ export function isUnauthorizedRpcError(error: unknown): boolean {
  * master password is required.
  *
  * `AccountStore` sits on a `PlatformPort` and cannot reach the record-backed cache, so the
- * encrypted item cache has to be dropped from here (CONTRACT.md §12.3) — leaving it behind
- * after a forced sign-out is a real leak.
+ * encrypted item cache has to be dropped from here (packages/storage/CONTEXT.md §4.2) —
+ * leaving it behind after a forced sign-out is a real leak.
  */
 export async function invalidateDesktopAccountSession(
 	accountId: string,

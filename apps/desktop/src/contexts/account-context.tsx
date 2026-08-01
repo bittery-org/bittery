@@ -38,7 +38,7 @@ function createDesktopAccountManager(
 	return getAccountSessionManager({
 		storage,
 		// Sibling of `storage`: `removeAccount` has to wipe the account's cached ciphertext,
-		// and `AccountStore` cannot reach it (CONTRACT.md §12.3).
+		// and `AccountStore` cannot reach it (packages/storage/CONTEXT.md §4.2).
 		itemCache,
 		onActiveChanged: async (active) => {
 			if (active?.type !== "single") {

@@ -17,7 +17,7 @@ export interface AccountSessionManagerOptions {
 	storage: AccountStore;
 	/**
 	 * Sibling of `storage`. Required because `removeAccount` has to wipe the account's
-	 * cached ciphertext, and `AccountStore` cannot reach it. See CONTRACT.md §12.3.
+	 * cached ciphertext, and `AccountStore` cannot reach it. See packages/storage/CONTEXT.md §4.2.
 	 */
 	itemCache: ItemCache;
 	onActiveChanged?: (active: ActiveAccount) => void | Promise<void>;
@@ -273,7 +273,7 @@ export class AccountSessionManager {
 		await this.storage.removeAccount(accountId);
 		// Removing the account must not leave its encrypted items behind. `AccountStore`
 		// holds only a `PlatformPort`; the cache lives behind a `RecordPort`, so the
-		// caller sequences the two. See CONTRACT.md §12.3.
+		// caller sequences the two. See packages/storage/CONTEXT.md §4.2.
 		await this.itemCache.clearItemCache(accountId);
 
 		if (wasActive) {

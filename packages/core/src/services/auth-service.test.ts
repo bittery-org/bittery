@@ -564,7 +564,7 @@ describe("storeLoginSession travel mode verification", () => {
 /**
  * `AccountStore` holds only a `PlatformPort` and cannot reach the record cache, so
  * sign-out has to sequence the two clears here. Leaving the cache behind is the leak
- * CONTRACT.md §12.3 names — and lock is deliberately not sign-out.
+ * packages/storage/CONTEXT.md §4.2 names — and lock is deliberately not sign-out.
  */
 describe("clearSession item-cache handling", () => {
 	async function seeded() {

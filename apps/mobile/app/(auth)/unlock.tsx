@@ -238,7 +238,7 @@ export default function UnlockScreen() {
 				// Sign-out-grade wipe, so the encrypted item cache has to go with it:
 				// `AccountStore` sits on a `PlatformPort` and cannot reach the record
 				// store, so leaving this out would strand this account's ciphertext on
-				// disk after its keys are gone. See CONTRACT.md §12.3.
+				// disk after its keys are gone. See packages/storage/CONTEXT.md §4.2.
 				await storage.clearAllStoredData(targetAccount.accountId);
 				await itemCache.clearItemCache(targetAccount.accountId);
 				router.replace("/(auth)/login");

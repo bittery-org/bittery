@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import path from "node:path";
 
-// Regression coverage for CONTRACT.md §12.4.
+// Regression coverage for packages/storage/CONTEXT.md §4.3.
 //
 // `AccountStore.getUnlockedAccounts()` reports which accounts hold a master unlock key in
 // memory. MV3 empties that in-memory cache on every service-worker recycle, so the restore

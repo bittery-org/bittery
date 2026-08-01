@@ -165,7 +165,7 @@ export async function initializeStorage(): Promise<void> {
 // Sign-out helpers
 //
 // `AccountStore` sits on a `PlatformPort` and cannot reach the record-backed cache, so
-// every flow that drops one has to drop the other from here (CONTRACT.md §12.3).
+// every flow that drops one has to drop the other from here (packages/storage/CONTEXT.md §4.2).
 // Leaving the encrypted cache behind after a sign-out is a real leak.
 // ---------------------------------------------------------------------------
 

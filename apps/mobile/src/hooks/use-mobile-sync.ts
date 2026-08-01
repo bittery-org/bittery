@@ -39,7 +39,7 @@ import { itemCache, storage } from "../services/storage";
  * It becomes `SyncSource.itemCacheAccountId`, and `ItemCache` falls back to the literal
  * collection segment `"default"` when it is not given one — so a `null` here would not fail,
  * it would silently read and write a collection that belongs to no account. Sync is simply
- * not enabled until a real account is resolved. See CONTRACT.md §12.2.
+ * not enabled until a real account is resolved. See packages/storage/CONTEXT.md §4.1.
  */
 interface SyncConnectionContext {
 	accountId: string;

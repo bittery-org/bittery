@@ -276,8 +276,8 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
  * `session_data` so quick-unlock still works. Signing out has to destroy that too.
  *
  * `AccountStore` sits on a `PlatformPort` and cannot reach the record-backed cache, so the
- * encrypted item cache is dropped from here (CONTRACT.md §12.3). Leaving it behind after a
- * sign-out is a real leak.
+ * encrypted item cache is dropped from here (packages/storage/CONTEXT.md §4.2). Leaving it
+ * behind after a sign-out is a real leak.
  */
 export async function handleLogout(): Promise<MessageResponse> {
 	const accountId = (await storage.getActiveAccount())?.accountId;

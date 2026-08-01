@@ -34,7 +34,7 @@ async function resetDesktopAppCompletely(): Promise<void> {
 		});
 		for (const account of accounts) {
 			// A sibling of `storage`, never reachable through it — the cached ciphertext has
-			// to be dropped explicitly (CONTRACT.md §12.3).
+			// to be dropped explicitly (packages/storage/CONTEXT.md §4.2).
 			await itemCache.clearItemCache(account.accountId);
 			await storage.clearAllStoredData(account.accountId);
 		}
