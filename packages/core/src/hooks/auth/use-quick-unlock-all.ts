@@ -17,7 +17,10 @@ import {
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
-import { type UnlockOutcome, unlockAll } from "../../services/unlock";
+import {
+	type UnlockOutcome,
+	unlockAllWithPassword,
+} from "../../services/unlock";
 
 /**
  * Input for quick unlock all operation
@@ -98,14 +101,11 @@ export function useQuickUnlockAll(
 
 	return useMutation({
 		mutationFn: async (input: QuickUnlockAllInput) => {
-			const outcome = await unlockAll(
-				{
-					credential: { kind: "password", password: input.password },
-					emails: input.emails,
-				},
+			const outcome = await unlockAllWithPassword(
+				{ password: input.password, emails: input.emails },
 				{ crypto, storage, itemCache },
 			);
-			// `unlockAll` reports rather than throws; React Query needs a rejection to
+			// The unlock reports rather than throws; React Query needs a rejection to
 			// route a total failure to `onError`.
 			if (outcome.unlocked.length === 0) {
 				throw new Error(m.toast_auth_unlock_error_failed());

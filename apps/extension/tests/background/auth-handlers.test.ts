@@ -56,11 +56,11 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 	},
 }));
 
-// Stands in for the SRP/network half of `unlockAll` only. The active-account
+// Stands in for the SRP/network half of `unlockAllWithPassword` only. The active-account
 // selection and the write it performs are the real ones, because that is the
 // part of the contract the handler leans on.
 mock.module("@bittery/core/services/unlock", () => ({
-	unlockAll: async () => {
+	unlockAllWithPassword: async () => {
 		const previousActive = activeAccount;
 		const unlocked = accounts
 			.map((account) => account.accountId)

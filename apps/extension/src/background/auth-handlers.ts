@@ -11,7 +11,7 @@ import {
 	storeLoginSession,
 	storeUnlockSession,
 } from "@bittery/core";
-import { unlockAll } from "@bittery/core/services/unlock";
+import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { itemCache, storage } from "../lib/storage";
 import { isDesktopUnlockedNow } from "./desktop-status";
@@ -358,8 +358,8 @@ export async function handleQuickUnlockAll(payload: {
 		throw new Error("No accounts found");
 	}
 
-	const { activeAccountId, unlocked, failed } = await unlockAll(
-		{ credential: { kind: "password", password } },
+	const { activeAccountId, unlocked, failed } = await unlockAllWithPassword(
+		{ password },
 		{ storage, itemCache, crypto: cryptoAdapter },
 	);
 

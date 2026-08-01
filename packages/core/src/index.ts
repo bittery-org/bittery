@@ -80,14 +80,16 @@ export {
 	type TravelModeSyncRestoreOptions,
 } from "./services/travel-mode-sync";
 export {
-	type UnlockCredential,
+	type PasswordUnlockDeps,
 	type UnlockDeps,
 	type UnlockFailure,
 	type UnlockFailureReason,
 	type UnlockOptions,
 	type UnlockOutcome,
-	unlockAccount,
-	unlockAll,
+	unlockAccountWithBiometric,
+	unlockAccountWithPassword,
+	unlockAllWithBiometric,
+	unlockAllWithPassword,
 } from "./services/unlock";
 export {
 	type BootstrapItemsClient,

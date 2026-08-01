@@ -9,7 +9,11 @@ import {
 	mukFor,
 } from "../testing/account-store-harness";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
-import { unlockAccount, unlockAll } from "./unlock";
+import {
+	unlockAccountWithPassword,
+	unlockAllWithBiometric,
+	unlockAllWithPassword,
+} from "./unlock";
 
 const ACCOUNTS = [
 	["acc-1", "a@test.com"],
@@ -110,13 +114,9 @@ async function createStorage(
 	return { storage: store, port };
 }
 
-const password = { kind: "password", password: "pw" } as const;
-const biometric = {
-	kind: "biometric",
-	promptMessage: "Unlock all accounts",
-} as const;
+const PROMPT = "Unlock all accounts";
 
-describe("unlockAll", () => {
+describe("unlock all accounts", () => {
 	beforeEach(async () => {
 		resetTravelModeEnforcerForTests();
 		crypto = createCrypto();
@@ -127,8 +127,8 @@ describe("unlockAll", () => {
 		const { storage } = await createStorage();
 		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
 
-		const outcome = await unlockAll(
-			{ credential: password },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 
@@ -151,8 +151,8 @@ describe("unlockAll", () => {
 			withAuthToken: ["acc-2"],
 		});
 
-		const outcome = await unlockAll(
-			{ credential: password },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 
@@ -174,8 +174,8 @@ describe("unlockAll", () => {
 	it("reports no_auth_token when the account has a secret key but no token", async () => {
 		const { storage } = await createStorage({ withAuthToken: ["acc-2"] });
 
-		const outcome = await unlockAll(
-			{ credential: password },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 
@@ -187,8 +187,8 @@ describe("unlockAll", () => {
 	it("reports credential_rejected when the unlock itself fails", async () => {
 		const { storage } = await createStorage({ withKdfProfile: ["acc-2"] });
 
-		const outcome = await unlockAll(
-			{ credential: password },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 
@@ -205,8 +205,8 @@ describe("unlockAll", () => {
 	it("leaves the active account untouched when setActive is false", async () => {
 		const { storage } = await createStorage();
 
-		const outcome = await unlockAll(
-			{ credential: password },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
 			{ storage, itemCache, crypto },
 			{ setActive: false },
 		);
@@ -220,8 +220,8 @@ describe("unlockAll", () => {
 	it("filters to the requested emails but still returns ids", async () => {
 		const { storage } = await createStorage();
 
-		const outcome = await unlockAll(
-			{ credential: password, emails: ["b@test.com"] },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw", emails: ["b@test.com"] },
 			{ storage, itemCache, crypto },
 		);
 
@@ -233,8 +233,8 @@ describe("unlockAll", () => {
 		const { storage } = await createStorage({ withSecretKey: [] });
 		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
 
-		const outcome = await unlockAll(
-			{ credential: password },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 
@@ -249,9 +249,9 @@ describe("unlockAll", () => {
 	it("unlocks every account restored by one biometric prompt", async () => {
 		const { storage, port } = await createStorage({ biometric: true });
 
-		const outcome = await unlockAll(
-			{ credential: biometric },
-			{ storage, itemCache, crypto },
+		const outcome = await unlockAllWithBiometric(
+			{ promptMessage: PROMPT },
+			{ storage, itemCache },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
@@ -270,9 +270,9 @@ describe("unlockAll", () => {
 		});
 		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
 
-		const outcome = await unlockAll(
-			{ credential: biometric },
-			{ storage, itemCache, crypto },
+		const outcome = await unlockAllWithBiometric(
+			{ promptMessage: PROMPT },
+			{ storage, itemCache },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -293,8 +293,8 @@ describe("unlockAll", () => {
 		const { storage } = await createStorage({ verifiable: ["acc-2"] });
 		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
 
-		const outcome = await unlockAll(
-			{ credential: password },
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 
@@ -320,7 +320,10 @@ describe("unlockAll", () => {
 			verifiable: ["acc-2"],
 		});
 
-		await unlockAll({ credential: biometric }, { storage, itemCache, crypto });
+		await unlockAllWithBiometric(
+			{ promptMessage: PROMPT },
+			{ storage, itemCache },
+		);
 
 		// Fail closed: the rejected account must not stay unlocked.
 		expect(await storage.getUnlockedAccounts()).toEqual(["acc-2"]);
@@ -328,7 +331,7 @@ describe("unlockAll", () => {
 	});
 });
 
-describe("unlockAccount", () => {
+describe("unlock one account", () => {
 	beforeEach(async () => {
 		resetTravelModeEnforcerForTests();
 		crypto = createCrypto();
@@ -338,8 +341,8 @@ describe("unlockAccount", () => {
 	it("unlocks only the requested account", async () => {
 		const { storage } = await createStorage();
 
-		const outcome = await unlockAccount(
-			{ accountId: "acc-2", credential: password },
+		const outcome = await unlockAccountWithPassword(
+			{ accountId: "acc-2", password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 
@@ -354,8 +357,8 @@ describe("unlockAccount", () => {
 	it("reports an unknown account instead of throwing", async () => {
 		const { storage } = await createStorage();
 
-		const outcome = await unlockAccount(
-			{ accountId: "acc-404", credential: password },
+		const outcome = await unlockAccountWithPassword(
+			{ accountId: "acc-404", password: "pw" },
 			{ storage, itemCache, crypto },
 		);
 

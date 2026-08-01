@@ -1,11 +1,13 @@
 import {
 	useBiometricUnlock,
-	usePlatformCrypto,
 	useQuickUnlock,
 	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
-import { type UnlockOutcome, unlockAll } from "@bittery/core/services/unlock";
+import {
+	type UnlockOutcome,
+	unlockAllWithBiometric,
+} from "@bittery/core/services/unlock";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
@@ -71,7 +73,6 @@ export default function UnlockScreen() {
 	const router = useRouter();
 	const { toast } = useToast();
 	const { m } = useI18n();
-	const crypto = usePlatformCrypto();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
 
@@ -381,16 +382,13 @@ export default function UnlockScreen() {
 			setBiometricError(null);
 
 			try {
-				const outcome = await unlockAll(
+				const outcome = await unlockAllWithBiometric(
 					{
 						// One OS prompt for every account; the reason it displays is translated
 						// here rather than defaulted to English inside `AccountStore`.
-						credential: {
-							kind: "biometric",
-							promptMessage: m.biometric_prompt_unlock_all_accounts(),
-						},
+						promptMessage: m.biometric_prompt_unlock_all_accounts(),
 					},
-					{ storage, itemCache, crypto },
+					{ storage, itemCache },
 				);
 				if (outcome.unlocked.length === 0) {
 					setBiometricError(m.mob_unlock_biometric_failed());

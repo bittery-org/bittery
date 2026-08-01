@@ -1,11 +1,7 @@
 import { getBiometricUnlockAvailability } from "@bittery/core";
-import {
-	useAccountSwitcher,
-	usePlatformCrypto,
-	useQuickUnlockAll,
-} from "@bittery/core/hooks";
+import { useAccountSwitcher, useQuickUnlockAll } from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { unlockAll } from "@bittery/core/services/unlock";
+import { unlockAllWithBiometric } from "@bittery/core/services/unlock";
 import {
 	AccountAvatarGroup as AvatarGroup,
 	Button,
@@ -54,7 +50,6 @@ export function UnlockPage() {
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const { accounts, isInitialized } = useAccountSwitcher();
-	const crypto = usePlatformCrypto();
 	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -137,16 +132,13 @@ export function UnlockPage() {
 	});
 
 	const performBiometricUnlockAll = useCallback(async () => {
-		const { unlocked, failed } = await unlockAll(
+		const { unlocked, failed } = await unlockAllWithBiometric(
 			{
 				// The reason is what the OS biometric dialog displays, so it is user-facing
 				// copy and has to be translated here — storage's default is an English fallback.
-				credential: {
-					kind: "biometric",
-					promptMessage: m.biometric_prompt_unlock_all_accounts(),
-				},
+				promptMessage: m.biometric_prompt_unlock_all_accounts(),
 			},
-			{ storage, itemCache, crypto },
+			{ storage, itemCache },
 		);
 
 		if (unlocked.length === 0) {
@@ -163,7 +155,7 @@ export function UnlockPage() {
 
 		await peekAccountSessionManager()?.refresh();
 		triggerAuthRevealToVault();
-	}, [crypto, m, queryClient, showUnlockToast]);
+	}, [m, queryClient, showUnlockToast]);
 
 	const handleBiometricUnlockAll = async () => {
 		try {

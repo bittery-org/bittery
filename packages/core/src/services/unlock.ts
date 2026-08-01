@@ -10,7 +10,7 @@
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { findAccountById } from "@bittery/storage/account-id";
-import type { AccountMetadata } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
 import type { ICrypto } from "@bittery/types";
 import { performSRPUnlock, storeUnlockSession } from "./auth-service";
 import {
@@ -23,10 +23,6 @@ import {
 	TravelModeVerificationError,
 } from "./travel-mode-enforcer";
 import type { TravelModeRpcClient } from "./travel-mode-service";
-
-export type UnlockCredential =
-	| { kind: "password"; password: string }
-	| { kind: "biometric"; promptMessage: string };
 
 /**
  * Machine-readable codes rather than messages: every consumer only counts
@@ -55,6 +51,10 @@ export interface UnlockOutcome {
 export interface UnlockDeps {
 	storage: AccountStore;
 	itemCache: ItemCache;
+}
+
+/** Only the SRP (password) path derives keys, so only it takes an `ICrypto`. */
+export interface PasswordUnlockDeps extends UnlockDeps {
 	crypto: ICrypto;
 }
 
@@ -77,10 +77,62 @@ interface AcquireResult {
 	failed: UnlockFailure[];
 }
 
+/** What the accounts to unlock are, and what the unlock has to restore afterwards. */
+interface UnlockPlan {
+	/** Every account, ranked by `selectActiveAccountAfterUnlock`. */
+	accounts: AccountMetadata[];
+	targets: AccountMetadata[];
+	/**
+	 * Read before the credential is spent: the account the user was last using is
+	 * the answer, and acquiring can move the stored pointer.
+	 */
+	previousActive: ActiveAccount;
+}
+
+async function planAll(
+	storage: AccountStore,
+	emails: string[] | undefined,
+): Promise<UnlockPlan> {
+	const accounts = await storage.getAccountsList();
+	const targets = emails
+		? accounts.filter((account) => emails.includes(account.email))
+		: accounts;
+	return {
+		accounts,
+		targets,
+		previousActive: await storage.getActiveAccount(),
+	};
+}
+
+/** `null` for an account this device does not know. */
+async function planOne(
+	storage: AccountStore,
+	accountId: string,
+): Promise<UnlockPlan | null> {
+	const accounts = await storage.getAccountsList();
+	const account = findAccountById(accounts, accountId);
+	if (!account) {
+		return null;
+	}
+	return {
+		accounts,
+		targets: [account],
+		previousActive: await storage.getActiveAccount(),
+	};
+}
+
+function unknownAccountOutcome(accountId: string): UnlockOutcome {
+	return {
+		activeAccountId: undefined,
+		unlocked: [],
+		failed: [{ accountId, email: "", reason: "no_stored_secret_key" }],
+	};
+}
+
 async function acquireWithPassword(
 	targets: AccountMetadata[],
 	password: string,
-	{ storage, itemCache, crypto }: UnlockDeps,
+	{ storage, itemCache, crypto }: PasswordUnlockDeps,
 ): Promise<AcquireResult> {
 	const candidates: UnlockCandidate[] = [];
 	const failed: UnlockFailure[] = [];
@@ -166,23 +218,16 @@ async function acquireWithBiometric(
 	return { candidates, failed };
 }
 
+/**
+ * Everything after the credential is spent — only the acquire step differs
+ * between the credential kinds, so both paths finish here.
+ */
 async function runUnlock(
-	targets: AccountMetadata[],
-	accounts: AccountMetadata[],
-	credential: UnlockCredential,
-	deps: UnlockDeps,
+	{ candidates, failed }: AcquireResult,
+	{ accounts, previousActive }: UnlockPlan,
+	{ storage, itemCache }: UnlockDeps,
 	opts?: UnlockOptions,
 ): Promise<UnlockOutcome> {
-	const { storage, itemCache } = deps;
-	// Read before anything unlocks: the account the user was last using is the
-	// answer, and the acquire step below can move the stored pointer.
-	const previousActive = await storage.getActiveAccount();
-
-	const { candidates, failed } =
-		credential.kind === "password"
-			? await acquireWithPassword(targets, credential.password, deps)
-			: await acquireWithBiometric(targets, credential.promptMessage, deps);
-
 	const enforcer = getTravelModeEnforcer(storage, itemCache);
 	const unlocked: string[] = [];
 	for (const { account, rpcClient } of candidates) {
@@ -218,35 +263,68 @@ async function runUnlock(
 	return { activeAccountId, unlocked, failed };
 }
 
-/** Unlock every account (optionally narrowed to `emails`) with one credential. */
-export async function unlockAll(
-	input: { credential: UnlockCredential; emails?: string[] },
+/** Unlock every account (optionally narrowed to `emails`) with one password. */
+export async function unlockAllWithPassword(
+	input: { password: string; emails?: string[] },
+	deps: PasswordUnlockDeps,
+	opts?: UnlockOptions,
+): Promise<UnlockOutcome> {
+	const plan = await planAll(deps.storage, input.emails);
+	const acquired = await acquireWithPassword(
+		plan.targets,
+		input.password,
+		deps,
+	);
+	return runUnlock(acquired, plan, deps, opts);
+}
+
+/** Unlock every account (optionally narrowed to `emails`) with one OS prompt. */
+export async function unlockAllWithBiometric(
+	input: { promptMessage: string; emails?: string[] },
 	deps: UnlockDeps,
 	opts?: UnlockOptions,
 ): Promise<UnlockOutcome> {
-	const { credential, emails } = input;
-	const accounts = await deps.storage.getAccountsList();
-	const targets = emails
-		? accounts.filter((account) => emails.includes(account.email))
-		: accounts;
-	return runUnlock(targets, accounts, credential, deps, opts);
+	const plan = await planAll(deps.storage, input.emails);
+	const acquired = await acquireWithBiometric(
+		plan.targets,
+		input.promptMessage,
+		deps,
+	);
+	return runUnlock(acquired, plan, deps, opts);
 }
 
 /** Unlock a single account through the same policy and selection path. */
-export async function unlockAccount(
-	input: { accountId: string; credential: UnlockCredential },
+export async function unlockAccountWithPassword(
+	input: { accountId: string; password: string },
+	deps: PasswordUnlockDeps,
+	opts?: UnlockOptions,
+): Promise<UnlockOutcome> {
+	const plan = await planOne(deps.storage, input.accountId);
+	if (!plan) {
+		return unknownAccountOutcome(input.accountId);
+	}
+	const acquired = await acquireWithPassword(
+		plan.targets,
+		input.password,
+		deps,
+	);
+	return runUnlock(acquired, plan, deps, opts);
+}
+
+/** Unlock a single account through the same policy and selection path. */
+export async function unlockAccountWithBiometric(
+	input: { accountId: string; promptMessage: string },
 	deps: UnlockDeps,
 	opts?: UnlockOptions,
 ): Promise<UnlockOutcome> {
-	const { accountId, credential } = input;
-	const accounts = await deps.storage.getAccountsList();
-	const account = findAccountById(accounts, accountId);
-	if (!account) {
-		return {
-			activeAccountId: undefined,
-			unlocked: [],
-			failed: [{ accountId, email: "", reason: "no_stored_secret_key" }],
-		};
+	const plan = await planOne(deps.storage, input.accountId);
+	if (!plan) {
+		return unknownAccountOutcome(input.accountId);
 	}
-	return runUnlock([account], accounts, credential, deps, opts);
+	const acquired = await acquireWithBiometric(
+		plan.targets,
+		input.promptMessage,
+		deps,
+	);
+	return runUnlock(acquired, plan, deps, opts);
 }
