@@ -30,7 +30,8 @@
 		"./services/share-service": "./src/services/share-service.ts",
 		"./services/account-session-manager": "./src/services/account-session-manager.ts",
 		"./services/select-active-account": "./src/services/select-active-account.ts",
-		"./services/travel-mode-enforcer": "./src/services/travel-mode-enforcer.ts"
+		"./services/travel-mode-enforcer": "./src/services/travel-mode-enforcer.ts",
+		"./services/unlock": "./src/services/unlock.ts"
 	},
 	"dependencies": {
 		"@bittery/i18n": "workspace:*",

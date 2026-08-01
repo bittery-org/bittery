@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import path from "node:path";
+import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 
 // Regression coverage for the "Unlock All" password flow in the single-account
 // case. The bug: the handler treated the entries of `unlocked` (which are
@@ -16,6 +17,9 @@ interface StoredAccount {
 }
 
 let accounts: StoredAccount[] = [];
+let activeAccount: { type: "single"; accountId: string } | null = null;
+/** `null` unlocks every account; otherwise only the listed accountIds unlock. */
+let unlockableAccountIds: string[] | null = null;
 const setActiveAccountCalls: unknown[] = [];
 const getMasterUnlockKeyCalls: (string | undefined)[] = [];
 const setMasterUnlockKeyCalls: unknown[] = [];
@@ -29,23 +33,62 @@ mock.module(path.join(bgDir, "services/account-resolution.ts"), () => ({
 		accounts.find((a) => a.email === email)?.accountId,
 }));
 
-mock.module(path.join(libDir, "storage.ts"), () => ({
-	storage: {
-		getAccountsList: async () => accounts,
-		hasStoredSecretKey: async () => true,
-		getAuthToken: async () => "token",
-		getServerUrl: async () => "http://localhost:3000",
-		setActiveAccount: async (value: unknown) => {
-			setActiveAccountCalls.push(value);
-		},
-		getMasterUnlockKey: async (accountId?: string) => {
-			getMasterUnlockKeyCalls.push(accountId);
-			return new Uint8Array([9]);
-		},
+const storageMock = {
+	getAccountsList: async () => accounts,
+	hasStoredSecretKey: async () => true,
+	getAuthToken: async () => "token",
+	getServerUrl: async () => "http://localhost:3000",
+	getActiveAccount: async () => activeAccount,
+	setActiveAccount: async (value: unknown) => {
+		setActiveAccountCalls.push(value);
 	},
+	getMasterUnlockKey: async (accountId?: string) => {
+		getMasterUnlockKeyCalls.push(accountId);
+		return new Uint8Array([9]);
+	},
+};
+
+mock.module(path.join(libDir, "storage.ts"), () => ({
+	storage: storageMock,
 	// Sibling of `storage`; the handlers now sequence both (packages/storage/CONTEXT.md §4.2).
 	itemCache: {
 		clearItemCache: async () => {},
+	},
+}));
+
+// Stands in for the SRP/network half of `unlockAll` only. The active-account
+// selection and the write it performs are the real ones, because that is the
+// part of the contract the handler leans on.
+mock.module("@bittery/core/services/unlock", () => ({
+	unlockAll: async () => {
+		const previousActive = activeAccount;
+		const unlocked = accounts
+			.map((account) => account.accountId)
+			.filter((accountId) => unlockableAccountIds?.includes(accountId) ?? true);
+		const failed = accounts
+			.filter((account) => !unlocked.includes(account.accountId))
+			.map((account) => ({
+				accountId: account.accountId,
+				email: account.email,
+				reason: "credential_rejected" as const,
+			}));
+
+		if (unlocked.length === 0) {
+			return { activeAccountId: undefined, unlocked, failed };
+		}
+
+		const activeAccountId = selectActiveAccountAfterUnlock({
+			previousActive,
+			unlockedAccountIds: unlocked,
+			accounts,
+		});
+		if (activeAccountId) {
+			await storageMock.setActiveAccount({
+				type: "single",
+				accountId: activeAccountId,
+			});
+		}
+		return { activeAccountId, unlocked, failed };
 	},
 }));
 
@@ -103,6 +146,7 @@ mock.module("@bittery/core", () => ({
 }));
 
 mock.module("@bittery/core/services/account-session-manager", () => ({
+	peekAccountSessionManager: () => null,
 	getAccountSessionManager: () => ({
 		unlockAccount: async () => true,
 	}),
@@ -118,6 +162,8 @@ const { handleQuickUnlockAll } = await import(
 
 beforeEach(() => {
 	accounts = [];
+	activeAccount = null;
+	unlockableAccountIds = null;
 	setActiveAccountCalls.length = 0;
 	getMasterUnlockKeyCalls.length = 0;
 	setMasterUnlockKeyCalls.length = 0;
@@ -146,7 +192,7 @@ describe("handleQuickUnlockAll", () => {
 		expect(setMasterUnlockKeyCalls.length).toBe(1);
 	});
 
-	test("multiple accounts: selects the first unlocked account as active", async () => {
+	test("multiple accounts: falls back to the first unlocked account as active", async () => {
 		accounts = [
 			{ accountId: "acc-uuid-1", email: "a@example.com" },
 			{ accountId: "acc-uuid-2", email: "b@example.com" },
@@ -161,6 +207,56 @@ describe("handleQuickUnlockAll", () => {
 		]);
 		// MUK is seeded from the first unlocked accountId.
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-1"]);
+	});
+
+	test("multiple accounts: returns the user to the account they were last using", async () => {
+		accounts = [
+			{ accountId: "acc-uuid-1", email: "a@example.com" },
+			{ accountId: "acc-uuid-2", email: "b@example.com" },
+		];
+		activeAccount = { type: "single", accountId: "acc-uuid-2" };
+
+		await handleQuickUnlockAll({ password: "pw" });
+
+		expect(setActiveAccountCalls).toEqual([
+			{ type: "single", accountId: "acc-uuid-2" },
+		]);
+		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-2"]);
+	});
+
+	test("skips a previously active account that did not unlock", async () => {
+		accounts = [
+			{ accountId: "acc-uuid-1", email: "a@example.com" },
+			{ accountId: "acc-uuid-2", email: "b@example.com" },
+		];
+		activeAccount = { type: "single", accountId: "acc-uuid-2" };
+		unlockableAccountIds = ["acc-uuid-1"];
+
+		const response = await handleQuickUnlockAll({ password: "pw" });
+
+		expect(response.result).toEqual({
+			unlocked: ["acc-uuid-1"],
+			failed: [
+				{
+					accountId: "acc-uuid-2",
+					email: "b@example.com",
+					reason: "credential_rejected",
+				},
+			],
+		});
+		expect(setActiveAccountCalls).toEqual([
+			{ type: "single", accountId: "acc-uuid-1" },
+		]);
+	});
+
+	test("fails when no account unlocks", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		unlockableAccountIds = [];
+
+		await expect(handleQuickUnlockAll({ password: "pw" })).rejects.toThrow(
+			"Failed to unlock any accounts",
+		);
+		expect(setActiveAccountCalls).toEqual([]);
 	});
 });
 

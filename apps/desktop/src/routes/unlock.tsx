@@ -1,9 +1,11 @@
 import { getBiometricUnlockAvailability } from "@bittery/core";
-import { useAccountSwitcher, useQuickUnlockAll } from "@bittery/core/hooks";
-import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import {
+	useAccountSwitcher,
+	usePlatformCrypto,
+	useQuickUnlockAll,
+} from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
-import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
+import { unlockAll } from "@bittery/core/services/unlock";
 import {
 	AccountAvatarGroup as AvatarGroup,
 	Button,
@@ -52,6 +54,7 @@ export function UnlockPage() {
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const { accounts, isInitialized } = useAccountSwitcher();
+	const crypto = usePlatformCrypto();
 	const queryClient = useQueryClient();
 	const [password, setPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
@@ -99,27 +102,6 @@ export function UnlockPage() {
 		[allAccounts.length, getPartialUnlockMessage, m],
 	);
 
-	// Unlocking may free several accounts, but the app operates on a single
-	// active one. Return the user to whichever account they were last using;
-	// callers pass only the accounts that are actually usable.
-	const applyActiveAccountAfterUnlock = useCallback(
-		async (unlockedAccountIds: string[]) => {
-			const previousActive = await storage.getActiveAccount();
-			const activeId = selectActiveAccountAfterUnlock({
-				previousActive,
-				unlockedAccountIds,
-				accounts: allAccounts,
-			});
-			const unchanged =
-				previousActive?.type === "single" &&
-				previousActive.accountId === activeId;
-			if (activeId && !unchanged) {
-				await storage.setActiveAccount({ type: "single", accountId: activeId });
-			}
-		},
-		[allAccounts],
-	);
-
 	const accountIds = allAccounts.map((account) => account.accountId);
 	const biometricAvailability = useQuery({
 		queryKey: ["auth", "biometricAvailability", ...accountIds],
@@ -133,8 +115,6 @@ export function UnlockPage() {
 		onSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
-			await applyActiveAccountAfterUnlock(result.unlocked);
-
 			showUnlockToast({
 				unlockedCount: result.unlocked.length,
 				failedCount: result.failed.length,
@@ -146,7 +126,6 @@ export function UnlockPage() {
 		onPartialSuccess: async (result) => {
 			await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
-			await applyActiveAccountAfterUnlock(result.unlocked);
 			toast.warning(getPartialUnlockMessage(result.unlocked.length));
 			await peekAccountSessionManager()?.refresh();
 			triggerAuthRevealToVault();
@@ -157,64 +136,34 @@ export function UnlockPage() {
 		},
 	});
 
-	// Biometric unlock all accounts with ONE prompt.
-	// Travel mode is a SECURITY feature and MUST fail closed: after the
-	// biometric MUK restore we verify the server-side travel mode policy for
-	// every unlocked account (mirroring the single-account biometric path) and
-	// tear down the session for any account whose policy cannot be verified so
-	// its hidden vaults are never exposed.
 	const performBiometricUnlockAll = useCallback(async () => {
-		// One prompt for every account. `AccountStore` is total, so there is nothing to
-		// feature-detect: on a machine without biometrics this simply reports every account
-		// as failed.
-		//
-		// The reason is what the OS biometric dialog displays, so it is user-facing copy and
-		// has to be translated here — storage's own default is an English fallback.
-		const { unlocked, failed } = await storage.unlockAllAccountsWithBiometric(
-			m.biometric_prompt_unlock_all_accounts(),
+		const { unlocked, failed } = await unlockAll(
+			{
+				// The reason is what the OS biometric dialog displays, so it is user-facing
+				// copy and has to be translated here — storage's default is an English fallback.
+				credential: {
+					kind: "biometric",
+					promptMessage: m.biometric_prompt_unlock_all_accounts(),
+				},
+			},
+			{ storage, itemCache, crypto },
 		);
 
-		// Enforce travel mode per unlocked accountId. verifyForUnlock fetches
-		// (or, offline, hydrates the verified) policy and purges hidden vaults.
-		const verified: string[] = [];
-		let travelModeFailures = 0;
-		for (const accountId of unlocked) {
-			const client = await createStoredAccountRpcClient(
-				storage,
-				accountId,
-			).catch(() => null);
-			try {
-				await getTravelModeEnforcer(storage, itemCache).verifyForUnlock(
-					accountId,
-					client,
-				);
-				verified.push(accountId);
-			} catch {
-				// Fail closed: never leave this account's hidden vaults exposed.
-				await storage.clearSession(accountId);
-				travelModeFailures += 1;
-			}
-		}
-
-		if (verified.length === 0) {
+		if (unlocked.length === 0) {
 			throw new Error(m.toast_auth_unlock_error_biometric_none_unlocked());
 		}
-
-		// Only `verified` may be selected from: an account that failed travel
-		// mode verification must never become active.
-		await applyActiveAccountAfterUnlock(verified);
 
 		await queryClient.invalidateQueries({ queryKey: ["accounts"] });
 
 		showUnlockToast({
-			unlockedCount: verified.length,
-			failedCount: failed.length + travelModeFailures,
+			unlockedCount: unlocked.length,
+			failedCount: failed.length,
 			biometric: true,
 		});
 
 		await peekAccountSessionManager()?.refresh();
 		triggerAuthRevealToVault();
-	}, [applyActiveAccountAfterUnlock, m, queryClient, showUnlockToast]);
+	}, [crypto, m, queryClient, showUnlockToast]);
 
 	const handleBiometricUnlockAll = async () => {
 		try {

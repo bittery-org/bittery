@@ -4,6 +4,7 @@
  */
 
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { itemCache, storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
@@ -53,6 +54,9 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
  * stable code to translate instead of a hardcoded sentence.
  */
 export const STALE_DESKTOP_UNLOCK_RESPONSE = "stale-desktop-unlock-response";
+
+/** Same contract as above: a code for the UI to translate, not a sentence. */
+export const TRAVEL_MODE_UNVERIFIED = "travel-mode-unverified";
 
 /**
  * Check that a biometric-unlock response belongs to the challenge just sent.
@@ -173,11 +177,8 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				storage,
 				activeAccount.accountId,
 			).catch(() => null);
-			try {
-				await enforcer.verifyForUnlock(activeAccount.accountId, client);
-			} catch (error) {
-				await storage.clearSession(activeAccount.accountId);
-				throw error;
+			if (!(await enforcer.verifyOrClear(activeAccount.accountId, client))) {
+				throw new Error(TRAVEL_MODE_UNVERIFIED);
 			}
 
 			if (responseData.vault_keys) {
@@ -418,6 +419,9 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		const failed: Array<{ accountId: string; email: string; error: string }> =
 			[];
 
+		// Read before the loop below can tear a session down.
+		const previousActive = await storage.getActiveAccount();
+
 		// Process each account from response
 		for (const accountData of responseData.accounts || []) {
 			const email = accountData.email;
@@ -450,7 +454,14 @@ export async function handleNativeBiometricUnlockAll(options?: {
 					storage,
 					accountId,
 				).catch(() => null);
-				await enforcer.verifyForUnlock(accountId, client);
+				if (!(await enforcer.verifyOrClear(accountId, client))) {
+					failed.push({
+						accountId,
+						email,
+						error: TRAVEL_MODE_UNVERIFIED,
+					});
+					continue;
+				}
 
 				// Store only policy-visible vault keys after verification.
 				if (accountData.vault_keys) {
@@ -482,18 +493,21 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			throw new Error("Failed to unlock any accounts");
 		}
 
-		// Get first unlocked email (guaranteed to exist because we checked length above)
-		const firstUnlockedAccountId = unlocked[0];
-		if (!firstUnlockedAccountId) {
+		// All-accounts mode was removed; even when several accounts unlock, the app
+		// operates on a single active account.
+		const activeAccountId = selectActiveAccountAfterUnlock({
+			previousActive,
+			unlockedAccountIds: unlocked,
+			accounts,
+		});
+		if (!activeAccountId) {
 			throw new Error("No unlocked account found");
 		}
 
 		if (!options?.preserveActiveAccount) {
-			// All-accounts mode was removed; even when multiple accounts unlock the
-			// app operates on a single active account (the first unlocked one).
 			await storage.setActiveAccount({
 				type: "single",
-				accountId: firstUnlockedAccountId,
+				accountId: activeAccountId,
 			});
 		}
 
@@ -501,8 +515,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		// will see lastActivityTimestamp=0 and immediately lock everything!
 		await updateActivity();
 
-		// Set MUK for first unlocked account in session manager
-		const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);
+		const activeMuk = await storage.getMasterUnlockKey(activeAccountId);
 		if (activeMuk) {
 			setMasterUnlockKey(activeMuk);
 		}

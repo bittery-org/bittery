@@ -72,24 +72,25 @@ export class AccountSessionManager {
 	}
 
 	private async verifyUnlockPolicy(accountId: string): Promise<boolean> {
-		try {
-			if (this.options.verifyUnlockPolicy) {
+		if (this.options.verifyUnlockPolicy) {
+			try {
 				await this.options.verifyUnlockPolicy(accountId);
-			} else {
-				const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
-				if (!enforcer.isVerified(accountId)) {
-					const client = await createStoredAccountRpcClient(
-						this.storage,
-						accountId,
-					).catch(() => null);
-					await enforcer.verifyForUnlock(accountId, client);
-				}
+				return true;
+			} catch {
+				await this.storage.clearSession(accountId);
+				return false;
 			}
-			return true;
-		} catch {
-			await this.storage.clearSession(accountId);
-			return false;
 		}
+
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
+		if (enforcer.isVerified(accountId)) {
+			return true;
+		}
+		const client = await createStoredAccountRpcClient(
+			this.storage,
+			accountId,
+		).catch(() => null);
+		return enforcer.verifyOrClear(accountId, client);
 	}
 
 	async initialize(): Promise<void> {
@@ -311,10 +312,23 @@ export class AccountSessionManager {
 
 let sharedManager: AccountSessionManager | null = null;
 
+/**
+ * Constructs the shared manager on the first call and returns it afterwards.
+ *
+ * Passing options to an already-constructed manager throws: the options carry the
+ * platform callbacks (onActiveChanged, onLockBroadcast, …) and accepting them
+ * silently would drop them, leaving account switches and lock broadcasts dead.
+ * Callers that only need the instance must use `peekAccountSessionManager()`.
+ */
 export function getAccountSessionManager(
 	options?: AccountSessionManagerOptions,
 ): AccountSessionManager {
-	if (!sharedManager && options) {
+	if (options) {
+		if (sharedManager) {
+			throw new Error(
+				"AccountSessionManager is already constructed; these options (and any onActiveChanged/onLockBroadcast callbacks in them) would be silently dropped. Construct it exactly once at app startup and use peekAccountSessionManager() everywhere else.",
+			);
+		}
 		sharedManager = new AccountSessionManager(options);
 	}
 	if (!sharedManager) {

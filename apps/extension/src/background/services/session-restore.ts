@@ -30,7 +30,10 @@
  *   re-issues both the token and the vault keys.
  */
 
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import {
+	getAccountSessionManager,
+	peekAccountSessionManager,
+} from "@bittery/core/services/account-session-manager";
 import { itemCache, storage } from "../../lib/storage";
 import { setMasterUnlockKey, updateActivity } from "../session-manager";
 
@@ -48,7 +51,11 @@ export async function restoreUnlockedSessions(): Promise<string[]> {
 			return restoredAccountIds;
 		}
 
-		const sessions = getAccountSessionManager({ storage, itemCache });
+		// The background wires no platform callbacks, so whichever background caller
+		// runs first after a service-worker wake may construct the shared manager.
+		const sessions =
+			peekAccountSessionManager() ??
+			getAccountSessionManager({ storage, itemCache });
 
 		for (const account of accounts) {
 			try {

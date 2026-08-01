@@ -95,6 +95,7 @@ export function useQuickUnlock(
 			await storeUnlockSession(result, storage, itemCache, input.accountId, {
 				travelModeRpcClient: accountRpcClient,
 				serverUrl,
+				setActive: true,
 			});
 
 			return result;

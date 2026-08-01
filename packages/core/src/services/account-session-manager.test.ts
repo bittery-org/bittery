@@ -8,6 +8,8 @@ import {
 } from "../testing/account-store-harness";
 import {
 	AccountSessionManager,
+	getAccountSessionManager,
+	peekAccountSessionManager,
 	resetAccountSessionManagerForTests,
 } from "./account-session-manager";
 
@@ -290,5 +292,38 @@ describe("AccountSessionManager", () => {
 		expect(restored).toBe(false);
 		expect(clearSession).toHaveBeenCalledWith("acc-2");
 		expect(manager.isUnlocked("acc-2")).toBe(false);
+	});
+});
+
+describe("getAccountSessionManager", () => {
+	beforeEach(async () => {
+		resetAccountSessionManagerForTests();
+		itemCache = (await createTestItemCache()).cache;
+	});
+
+	it("rejects options once the manager exists, instead of dropping them", async () => {
+		const storage = await createStore();
+		getAccountSessionManager({ storage, itemCache });
+
+		expect(() =>
+			getAccountSessionManager({
+				storage,
+				itemCache,
+				onActiveChanged: () => {},
+			}),
+		).toThrow(/already constructed/);
+	});
+
+	it("returns the same instance for option-less calls", async () => {
+		const storage = await createStore();
+		const manager = getAccountSessionManager({ storage, itemCache });
+
+		expect(getAccountSessionManager()).toBe(manager);
+		expect(peekAccountSessionManager()).toBe(manager);
+	});
+
+	it("peek returns null before construction, get throws", () => {
+		expect(peekAccountSessionManager()).toBeNull();
+		expect(() => getAccountSessionManager()).toThrow(/not initialized/);
 	});
 });

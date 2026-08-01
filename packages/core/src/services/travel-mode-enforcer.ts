@@ -33,6 +33,17 @@ const DEFAULT_CONFIG: TravelModeConfig = {
 	hiddenVaultIds: [],
 };
 
+/**
+ * Lets an unlock tell "the policy could not be verified" apart from "the
+ * credential was wrong" by type rather than by message text.
+ */
+export class TravelModeVerificationError extends Error {
+	constructor(message: string, options?: { cause?: unknown }) {
+		super(message, options);
+		this.name = "TravelModeVerificationError";
+	}
+}
+
 export class TravelModeEnforcer {
 	private readonly memoryCache = new Map<string, TravelModeConfig>();
 	private readonly verifiedAccounts = new Set<string>();
@@ -193,6 +204,28 @@ export class TravelModeEnforcer {
 			}
 		}
 		return this.hydrateFromStorage(accountId);
+	}
+
+	/**
+	 * Verify for unlock, failing closed: an account whose policy cannot be
+	 * verified has its session torn down so hidden vaults are never exposed.
+	 */
+	async verifyOrClear(
+		accountId: string,
+		rpcClient?: TravelModeRpcClient | null,
+	): Promise<boolean> {
+		try {
+			await this.verifyForUnlock(accountId, rpcClient);
+			return true;
+		} catch (error) {
+			await this.storage.clearSession(accountId);
+			console.error(
+				"[TravelMode] Verification failed during unlock:",
+				accountId,
+				error,
+			);
+			return false;
+		}
 	}
 
 	async setHiddenVaults(

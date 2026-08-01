@@ -1,6 +1,6 @@
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { itemCache, storage } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 
 export const Route = createFileRoute("/")({
 	beforeLoad: async () => {
@@ -34,11 +34,12 @@ export const Route = createFileRoute("/")({
 		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
 
 		if (sessionValid) {
-			// Try to restore session
-			const restored = await getAccountSessionManager({
-				storage,
-				itemCache,
-			}).unlockAccount(activeAccount.accountId, true);
+			// This guard can run before AccountProvider constructs the manager; with no
+			// manager there is no verified unlock, so fall through to /unlock.
+			const restored = await peekAccountSessionManager()?.unlockAccount(
+				activeAccount.accountId,
+				true,
+			);
 			if (restored) {
 				throw redirect({ to: "/vault" });
 			}

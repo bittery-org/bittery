@@ -5,6 +5,7 @@
  * Desktop and mobile only - web/extension don't support biometric.
  */
 
+import { m } from "@bittery/i18n/paraglide/messages";
 import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
@@ -98,16 +99,14 @@ export function useBiometricUnlock(
 		const client = await createStoredAccountRpcClient(storage, accountId).catch(
 			() => null,
 		);
-		try {
-			await getTravelModeEnforcer(storage, itemCache).verifyForUnlock(
-				accountId,
-				client,
-			);
-		} catch {
-			await storage.clearSession(accountId);
+		const verified = await getTravelModeEnforcer(
+			storage,
+			itemCache,
+		).verifyOrClear(accountId, client);
+		if (!verified) {
 			throw {
 				type: "authentication_failed",
-				message: "Travel mode policy could not be verified",
+				message: m.auth_error_travel_mode_verify_failed(),
 			} as BiometricUnlockError;
 		}
 	};

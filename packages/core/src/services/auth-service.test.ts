@@ -16,6 +16,8 @@ import {
 	performSRPLogin,
 	performSRPUnlock,
 	storeLoginSession,
+	storeUnlockSession,
+	type UnlockResult,
 } from "./auth-service";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
 import type { TravelModeRpcClient } from "./travel-mode-service";
@@ -558,6 +560,58 @@ describe("storeLoginSession travel mode verification", () => {
 		);
 
 		expect(await itemCache.getCachedItems(accountId)).toBeNull();
+	});
+});
+
+describe("storeUnlockSession active account", () => {
+	function unlockResult(): UnlockResult {
+		return {
+			mode: "local",
+			token: "unlock-token",
+			user: { id: "user-b", email: "same@example.com" },
+			vaultKeys: [],
+			masterUnlockKey: MUK,
+		};
+	}
+
+	async function seeded() {
+		resetTravelModeEnforcerForTests();
+		const { storage } = await makeStore([
+			account("account-a", "user-a", "https://a.example"),
+			account("account-b", "user-b", "https://b.example"),
+		]);
+		for (const accountId of ["account-a", "account-b"]) {
+			await storage.storeTravelModeCache(
+				{ enabled: false, hiddenVaultIds: [] },
+				accountId,
+			);
+		}
+		await storage.setActiveAccount({ type: "single", accountId: "account-a" });
+		return { storage, itemCache: (await createTestItemCache()).cache };
+	}
+
+	it("leaves the active account alone when the caller opts out", async () => {
+		const { storage, itemCache } = await seeded();
+
+		await storeUnlockSession(unlockResult(), storage, itemCache, "account-b", {
+			setActive: false,
+		});
+
+		expect(await storage.getActiveAccount()).toEqual({
+			type: "single",
+			accountId: "account-a",
+		});
+	});
+
+	it("claims the active account when the caller says nothing", async () => {
+		const { storage, itemCache } = await seeded();
+
+		await storeUnlockSession(unlockResult(), storage, itemCache, "account-b");
+
+		expect(await storage.getActiveAccount()).toEqual({
+			type: "single",
+			accountId: "account-b",
+		});
 	});
 });
 

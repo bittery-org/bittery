@@ -11,7 +11,7 @@ import {
 	storeLoginSession,
 	storeUnlockSession,
 } from "@bittery/core";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import { unlockAll } from "@bittery/core/services/unlock";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { itemCache, storage } from "../lib/storage";
 import { isDesktopUnlockedNow } from "./desktop-status";
@@ -32,18 +32,6 @@ import {
 import type { MessageResponse } from "./types";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
-
-async function getAccountRpcClient(accountId: string) {
-	const token = await storage.getAuthToken(accountId);
-	if (!token) {
-		return rpcClient;
-	}
-	const serverUrl =
-		(await storage.getServerUrl(accountId)) ??
-		(await storage.getServerUrl()) ??
-		DEFAULT_SERVER_URL;
-	return createAccountRpcClient(token, serverUrl);
-}
 
 /**
  * Handle LOGIN message - Full SRP authentication
@@ -115,7 +103,7 @@ export async function handleQuickUnlock(payload: {
 		storage,
 		itemCache,
 		activeAccount.accountId,
-		{ travelModeRpcClient: rpcClient },
+		{ travelModeRpcClient: rpcClient, setActive: true },
 	);
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
@@ -364,68 +352,24 @@ export async function handleQuickUnlockAll(payload: {
 		};
 	}
 
-	// Get list of all accounts
 	const accounts = await storage.getAccountsList();
 
 	if (accounts.length === 0) {
 		throw new Error("No accounts found");
 	}
 
-	const unlocked: string[] = [];
-	const failed: string[] = [];
+	const { activeAccountId, unlocked, failed } = await unlockAll(
+		{ credential: { kind: "password", password } },
+		{ storage, itemCache, crypto: cryptoAdapter },
+	);
 
-	// Attempt to unlock each account
-	for (const account of accounts) {
-		try {
-			// Check if account has stored secret key
-			const hasSecretKey = await storage.hasStoredSecretKey(account.accountId);
-			if (!hasSecretKey) {
-				failed.push(account.accountId);
-				continue;
-			}
-
-			// Perform SRP unlock for this account
-			const result = await performSRPUnlock(
-				{ accountId: account.accountId, password },
-				{ crypto: cryptoAdapter, rpcClient, storage },
-			);
-
-			// Store unlock session data
-			const accountRpcClient = await getAccountRpcClient(account.accountId);
-			await storeUnlockSession(result, storage, itemCache, account.accountId, {
-				travelModeRpcClient: accountRpcClient,
-			});
-
-			unlocked.push(account.accountId);
-		} catch (error) {
-			console.error(
-				`[QUICK_UNLOCK_ALL] Failed to unlock ${account.email}:`,
-				error,
-			);
-			failed.push(account.accountId);
-		}
-	}
-
-	// If no accounts unlocked, fail
-	if (unlocked.length === 0) {
+	if (!activeAccountId) {
 		throw new Error("Failed to unlock any accounts");
 	}
 
-	// `unlocked` holds accountIds (UUIDs), not emails.
-	const firstUnlockedAccountId = unlocked[0];
-	if (!firstUnlockedAccountId) {
-		throw new Error("No unlocked accounts found");
-	}
-
-	// Set the active account to the first unlocked account. Other accounts stay
-	// unlocked in the background but only the active one is surfaced.
-	await storage.setActiveAccount({
-		type: "single",
-		accountId: firstUnlockedAccountId,
-	});
-
-	// Set MUK for first unlocked account in session manager
-	const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);
+	// The other accounts stay unlocked in the background; only the active one
+	// gets its MUK seeded into the in-memory session manager for auto-lock.
+	const activeMuk = await storage.getMasterUnlockKey(activeAccountId);
 	if (activeMuk) {
 		setMasterUnlockKey(activeMuk);
 	}

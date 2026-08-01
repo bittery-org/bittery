@@ -1,10 +1,11 @@
 import {
 	useBiometricUnlock,
+	usePlatformCrypto,
 	useQuickUnlock,
 	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
-import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
+import { type UnlockOutcome, unlockAll } from "@bittery/core/services/unlock";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
@@ -59,7 +60,6 @@ import { useAccount } from "../../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../../src/lib/biometric-error-message";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/rpc";
-import { enforceTravelModeForUnlockedAccounts } from "../../src/lib/travel-mode-unlock";
 import { useI18n } from "../../src/providers/i18n-provider";
 import {
 	type AccountMetadata,
@@ -71,6 +71,7 @@ export default function UnlockScreen() {
 	const router = useRouter();
 	const { toast } = useToast();
 	const { m } = useI18n();
+	const crypto = usePlatformCrypto();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
 
@@ -327,56 +328,19 @@ export default function UnlockScreen() {
 		},
 	});
 
-	const resolveUnlockedAccountIds = useCallback(
-		(identifiers: string[]) =>
-			identifiers.map((identifier) => {
-				const byId = allAccounts.find(
-					(account) => account.accountId === identifier,
-				);
-				if (byId) {
-					return byId.accountId;
-				}
-				const byEmail = allAccounts.find(
-					(account) => account.email === identifier,
-				);
-				return byEmail?.accountId ?? identifier;
-			}),
-		[allAccounts],
-	);
-
 	const finalizeAllAccountsUnlock = useCallback(
-		async (unlockedIdentifiers: string[], showPartialToast: boolean) => {
-			const unlockedAccountIds = resolveUnlockedAccountIds(unlockedIdentifiers);
-
+		async ({ unlocked, failed }: UnlockOutcome) => {
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForAccountIds(unlockedAccountIds);
-			}
-
-			// Multiple accounts may be unlocked, but the app always operates on a
-			// single active account. Return to whichever one was last active.
-			const previousActive = await storage.getActiveAccount();
-			const activeId = selectActiveAccountAfterUnlock({
-				previousActive,
-				unlockedAccountIds,
-				accounts: allAccounts,
-			});
-			const unchanged =
-				previousActive?.type === "single" &&
-				previousActive.accountId === activeId;
-			if (activeId && !unchanged) {
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: activeId,
-				});
+				await setNativeMuksForAccountIds(unlocked);
 			}
 
 			await refreshAccounts();
 
-			if (showPartialToast) {
+			if (failed.length > 0) {
 				toast.show({
 					variant: "warning",
 					label: m.mob_unlock_partial_toast({
-						unlocked: String(unlockedIdentifiers.length),
+						unlocked: String(unlocked.length),
 						total: String(allAccounts.length),
 					}),
 					placement: "bottom",
@@ -386,9 +350,8 @@ export default function UnlockScreen() {
 			router.replace("/(vault)");
 		},
 		[
-			allAccounts,
+			allAccounts.length,
 			refreshAccounts,
-			resolveUnlockedAccountIds,
 			router,
 			setNativeMuksForAccountIds,
 			toast,
@@ -397,12 +360,8 @@ export default function UnlockScreen() {
 	);
 
 	const quickUnlockAll = useQuickUnlockAll({
-		onSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result.unlocked, false);
-		},
-		onPartialSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result.unlocked, true);
-		},
+		onSuccess: finalizeAllAccountsUnlock,
+		onPartialSuccess: finalizeAllAccountsUnlock,
 		onError: (error) => {
 			console.error("Unlock all error:", error);
 			Alert.alert(
@@ -422,29 +381,22 @@ export default function UnlockScreen() {
 			setBiometricError(null);
 
 			try {
-				// One OS prompt for every account; the reason it displays is translated here
-				// rather than defaulted to English inside `AccountStore`.
-				const result = await storage.unlockAllAccountsWithBiometric(
-					m.biometric_prompt_unlock_all_accounts(),
+				const outcome = await unlockAll(
+					{
+						// One OS prompt for every account; the reason it displays is translated
+						// here rather than defaulted to English inside `AccountStore`.
+						credential: {
+							kind: "biometric",
+							promptMessage: m.biometric_prompt_unlock_all_accounts(),
+						},
+					},
+					{ storage, itemCache, crypto },
 				);
-				if (result.unlocked.length === 0) {
+				if (outcome.unlocked.length === 0) {
 					setBiometricError(m.mob_unlock_biometric_failed());
 					return;
 				}
-				// Travel mode MUST fail closed: re-verify each unlocked account
-				// against the server before treating it as unlocked.
-				const verifiedAccountIds = await enforceTravelModeForUnlockedAccounts(
-					resolveUnlockedAccountIds(result.unlocked),
-				);
-				if (verifiedAccountIds.length === 0) {
-					setBiometricError(m.mob_unlock_biometric_failed());
-					return;
-				}
-				await finalizeAllAccountsUnlock(
-					verifiedAccountIds,
-					result.failed.length > 0 ||
-						verifiedAccountIds.length < result.unlocked.length,
-				);
+				await finalizeAllAccountsUnlock(outcome);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);
 				setBiometricError(m.mob_unlock_biometric_failed());

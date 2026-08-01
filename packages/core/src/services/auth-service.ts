@@ -25,7 +25,10 @@ import {
 import type { EncryptedData, ICrypto, KdfProfile } from "@bittery/types";
 import { peekAccountSessionManager } from "./account-session-manager";
 import { createStoredAccountRpcClient } from "./rpc-client";
-import { getTravelModeEnforcer } from "./travel-mode-enforcer";
+import {
+	getTravelModeEnforcer,
+	TravelModeVerificationError,
+} from "./travel-mode-enforcer";
 import type { TravelModeRpcClient } from "./travel-mode-service";
 
 export interface StoreAuthSessionOptions {
@@ -39,6 +42,12 @@ export interface StoreAuthSessionOptions {
 		serverUrl: string,
 	) => TravelModeRpcClient;
 	serverUrl?: string;
+	/**
+	 * Whether this session should claim the active account. Defaults to `true`;
+	 * multi-account loops pass `false` so the last account unlocked cannot
+	 * overwrite the account the user was last using.
+	 */
+	setActive?: boolean;
 }
 
 async function resolveAccountIdForLogin(
@@ -61,7 +70,10 @@ async function prepareTravelModeForSession(
 	try {
 		await travelMode.verifyForUnlock(accountId, travelModeRpcClient);
 	} catch (error) {
-		throw new Error(m.auth_error_travel_mode_verify_failed(), { cause: error });
+		throw new TravelModeVerificationError(
+			m.auth_error_travel_mode_verify_failed(),
+			{ cause: error },
+		);
 	}
 }
 
@@ -993,13 +1005,15 @@ export async function storeUnlockSession(
 		);
 	}
 
-	const currentActive = await storage.getActiveAccount();
-	if (
-		!currentActive ||
-		currentActive.type !== "single" ||
-		currentActive.accountId !== accountId
-	) {
-		await storage.setActiveAccount({ type: "single", accountId });
+	if (options?.setActive ?? true) {
+		const currentActive = await storage.getActiveAccount();
+		if (
+			!currentActive ||
+			currentActive.type !== "single" ||
+			currentActive.accountId !== accountId
+		) {
+			await storage.setActiveAccount({ type: "single", accountId });
+		}
 	}
 
 	await storage.updateLastMasterPasswordEntry(accountId);

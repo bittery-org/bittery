@@ -1,5 +1,5 @@
 import { useLogin } from "@bittery/core/hooks";
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
 	Button,
@@ -23,7 +23,7 @@ import {
 	setActiveAuthServerUrl,
 	subscribeActiveAuthServerUrl,
 } from "@/lib/auth-server";
-import { itemCache, storage } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface LoginSearchParams {
@@ -61,10 +61,12 @@ export const Route = createFileRoute("/login")({
 		);
 		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
 		if (sessionValid) {
-			const restored = await getAccountSessionManager({
-				storage,
-				itemCache,
-			}).unlockAccount(activeAccount.accountId, true);
+			// This guard can run before AccountProvider constructs the manager; with no
+			// manager there is no verified unlock, so fall through to /unlock.
+			const restored = await peekAccountSessionManager()?.unlockAccount(
+				activeAccount.accountId,
+				true,
+			);
 			if (restored) {
 				throw redirect({ to: "/vault" });
 			}

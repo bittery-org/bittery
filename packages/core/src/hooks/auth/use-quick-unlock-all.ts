@@ -6,21 +6,18 @@
  * Each account's Master Unlock Key is derived from the password + that account's secret key.
  */
 
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
-import type { AccountStore, ItemCache } from "@bittery/storage";
-import type { ICrypto } from "@bittery/types";
+import { m } from "@bittery/i18n/paraglide/messages";
 import {
 	type UseMutationResult,
 	useMutation,
 	useQueryClient,
 } from "@tanstack/react-query";
-import { performSRPUnlock, storeUnlockSession } from "../../auth";
 import {
 	usePlatformCrypto,
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
-import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
+import { type UnlockOutcome, unlockAll } from "../../services/unlock";
 
 /**
  * Input for quick unlock all operation
@@ -39,22 +36,8 @@ export interface QuickUnlockAllInput {
 	emails?: string[];
 }
 
-/**
- * Result of quick unlock all operation
- */
-export interface QuickUnlockAllResult {
-	/**
-	 * Account ids of accounts that were successfully unlocked.
-	 * These are ids rather than emails because callers feed them straight into
-	 * account-scoped storage APIs such as `setActiveAccount`.
-	 */
-	unlocked: string[];
-
-	/**
-	 * Accounts that failed to unlock, keyed by email for display.
-	 */
-	failed: Array<{ email: string; error: string }>;
-}
+/** Surfaced as-is: consumers read `unlocked` and `failed.length`. */
+export type QuickUnlockAllResult = UnlockOutcome;
 
 /**
  * Options for useQuickUnlockAll hook
@@ -82,99 +65,6 @@ export interface UseQuickUnlockAllOptions {
 		result: QuickUnlockAllResult,
 		input: QuickUnlockAllInput,
 	) => void;
-}
-
-export interface QuickUnlockAllDeps {
-	crypto: ICrypto;
-	storage: AccountStore;
-	itemCache: ItemCache;
-}
-
-/**
- * Unlock every account that shares the given password.
- *
- * Split out of the hook so the id/email contract of {@link QuickUnlockAllResult}
- * can be tested without a React renderer.
- */
-export async function quickUnlockAllAccounts(
-	input: QuickUnlockAllInput,
-	{ crypto, storage, itemCache }: QuickUnlockAllDeps,
-): Promise<QuickUnlockAllResult> {
-	const { password, emails } = input;
-
-	// Get list of accounts to unlock
-	const accounts = await storage.getAccountsList();
-	const accountsToUnlock = emails
-		? accounts.filter((a) => emails.includes(a.email))
-		: accounts;
-
-	if (accountsToUnlock.length === 0) {
-		throw new Error("No accounts found to unlock");
-	}
-
-	const unlocked: string[] = [];
-	const failed: Array<{ email: string; error: string }> = [];
-
-	// Attempt to unlock each account
-	for (const account of accountsToUnlock) {
-		try {
-			// Check if account has stored secret key
-			const hasSecretKey = await storage.hasStoredSecretKey(account.accountId);
-			if (!hasSecretKey) {
-				failed.push({
-					email: account.email,
-					error: "No stored Secret Key. Please sign in with full credentials.",
-				});
-				continue;
-			}
-
-			const serverUrl =
-				(await storage.getServerUrl(account.accountId)) ||
-				getDefaultServerUrl();
-			const accountRpcClient = await createStaticStoredAccountRpcClient(
-				storage,
-				account.accountId,
-			);
-			if (!accountRpcClient) {
-				failed.push({
-					email: account.email,
-					error: "No auth token found for account",
-				});
-				continue;
-			}
-
-			// Perform SRP unlock for this account
-			const result = await performSRPUnlock(
-				{
-					accountId: account.accountId,
-					password,
-				},
-				{ crypto, rpcClient: accountRpcClient, storage },
-			);
-
-			// Store unlock session data
-			await storeUnlockSession(result, storage, itemCache, account.accountId, {
-				travelModeRpcClient: accountRpcClient,
-				serverUrl,
-			});
-
-			unlocked.push(account.accountId);
-		} catch (error) {
-			failed.push({
-				email: account.email,
-				error: error instanceof Error ? error.message : "Unknown error",
-			});
-		}
-	}
-
-	// If no accounts were unlocked, throw error
-	if (unlocked.length === 0) {
-		throw new Error(
-			`Failed to unlock any accounts. ${failed.map((f) => `${f.email}: ${f.error}`).join("; ")}`,
-		);
-	}
-
-	return { unlocked, failed };
 }
 
 /**
@@ -207,8 +97,21 @@ export function useQuickUnlockAll(
 	const queryClient = useQueryClient();
 
 	return useMutation({
-		mutationFn: (input: QuickUnlockAllInput) =>
-			quickUnlockAllAccounts(input, { crypto, storage, itemCache }),
+		mutationFn: async (input: QuickUnlockAllInput) => {
+			const outcome = await unlockAll(
+				{
+					credential: { kind: "password", password: input.password },
+					emails: input.emails,
+				},
+				{ crypto, storage, itemCache },
+			);
+			// `unlockAll` reports rather than throws; React Query needs a rejection to
+			// route a total failure to `onError`.
+			if (outcome.unlocked.length === 0) {
+				throw new Error(m.toast_auth_unlock_error_failed());
+			}
+			return outcome;
+		},
 		onSuccess: (result, input) => {
 			// Invalidate all account-related queries
 			queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] });

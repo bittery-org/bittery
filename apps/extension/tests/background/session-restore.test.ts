@@ -66,6 +66,7 @@ mock.module(path.join(bgDir, "session-manager.ts"), () => ({
 }));
 
 mock.module("@bittery/core/services/account-session-manager", () => ({
+	peekAccountSessionManager: () => null,
 	getAccountSessionManager: ({
 		storage,
 	}: {

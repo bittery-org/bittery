@@ -18,6 +18,7 @@ import {
 import {
 	type AccountSessionManager,
 	getAccountSessionManager,
+	peekAccountSessionManager,
 } from "../../services/account-session-manager";
 
 export interface UseAccountSwitcherOptions {
@@ -43,6 +44,9 @@ function useAccountSessionManager(): AccountSessionManager {
 
 	return useMemo(
 		() =>
+			// Several components use this hook, and on desktop/mobile the account
+			// provider owns construction — so only construct when nobody else has.
+			peekAccountSessionManager() ??
 			getAccountSessionManager({
 				storage,
 				itemCache,

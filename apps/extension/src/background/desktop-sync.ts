@@ -5,7 +5,11 @@
  * for real-time lock/unlock synchronization.
  */
 
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import {
+	getAccountSessionManager,
+	peekAccountSessionManager,
+} from "@bittery/core/services/account-session-manager";
+import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { itemCache, storage } from "../lib/storage";
 import { type DesktopStatus, desktopClient } from "./desktop-client";
 import type { DesktopEventPayload } from "./desktop-protocol";
@@ -96,10 +100,15 @@ class DesktopSyncService {
 					try {
 						const accounts = await storage.getAccountsList();
 						// All-accounts mode was removed; collapse a legacy "all" pointer
-						// to a single active account (first unlocked, else first known).
+						// to the single account the user was last on.
 						if (previousState.activeAccount === "all") {
+							const previousActive = await storage.getActiveAccount();
 							const unlocked = await storage.getUnlockedAccounts();
-							const accountId = unlocked[0] ?? accounts[0]?.accountId;
+							const accountId = selectActiveAccountAfterUnlock({
+								previousActive,
+								unlockedAccountIds: unlocked,
+								accounts,
+							});
 							if (accountId) {
 								await storage.setActiveAccount({
 									type: "single",
@@ -209,11 +218,16 @@ class DesktopSyncService {
 			// Update active account if desktop has one set
 			if (accountsData.activeAccount) {
 				const refreshedAccounts = await storage.getAccountsList();
-				// All-accounts mode was removed; collapse a legacy "all" pointer to a
-				// single active account (first unlocked, else first known).
+				// All-accounts mode was removed; collapse a legacy "all" pointer to
+				// the single account the user was last on.
 				if (accountsData.activeAccount === "all") {
+					const previousActive = await storage.getActiveAccount();
 					const unlocked = await storage.getUnlockedAccounts();
-					const accountId = unlocked[0] ?? refreshedAccounts[0]?.accountId;
+					const accountId = selectActiveAccountAfterUnlock({
+						previousActive,
+						unlockedAccountIds: unlocked,
+						accounts: refreshedAccounts,
+					});
 					if (accountId) {
 						await storage.setActiveAccount({
 							type: "single",
@@ -408,7 +422,12 @@ class DesktopSyncService {
 				type: "single",
 				accountId: event.accountId,
 			});
-			await getAccountSessionManager({ storage, itemCache }).refresh();
+			// The background wires no platform callbacks, so whichever background caller
+			// runs first after a service-worker wake may construct the shared manager.
+			await (
+				peekAccountSessionManager() ??
+				getAccountSessionManager({ storage, itemCache })
+			).refresh();
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
 			return;

@@ -10,7 +10,7 @@ import {
 	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { CreateItemSheet, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -28,7 +28,7 @@ import {
 	getCreateItemIntent,
 	subscribeCreateItemIntent,
 } from "@/lib/create-item-intent";
-import { itemCache, storage } from "@/lib/storage";
+import { storage } from "@/lib/storage";
 import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
 import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
@@ -64,10 +64,12 @@ export const Route = createFileRoute("/vault")({
 			});
 		}
 
-		const restored = await getAccountSessionManager({
-			storage,
-			itemCache,
-		}).unlockAccount(activeAccount.accountId, true);
+		// This guard can run before AccountProvider constructs the manager; with no
+		// manager there is no verified unlock, so send the user to /unlock.
+		const restored = await peekAccountSessionManager()?.unlockAccount(
+			activeAccount.accountId,
+			true,
+		);
 
 		if (!restored) {
 			throw redirect({

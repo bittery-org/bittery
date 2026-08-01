@@ -233,23 +233,25 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						storage,
 						accountId,
 					).catch(() => null);
-					await getTravelModeEnforcer(storage, itemCache).verifyForUnlock(
-						accountId,
-						client,
-					);
-					const muk = await storage.decryptStoredMasterUnlockKey(
-						accountId,
-						true, // Skip biometric since we just authenticated
-					);
-					if (muk) {
-						// Store in React Native memory cache
-						await storage.setMasterUnlockKey(muk, accountId);
-						await setNativeMuksForAccounts([accountId]);
-					} else {
-						if (__DEV__) {
-							console.warn(
-								"[BiometricAuth] decryptStoredMasterUnlockKey returned null MUK",
-							);
+					const verified = await getTravelModeEnforcer(
+						storage,
+						itemCache,
+					).verifyOrClear(accountId, client);
+					if (verified) {
+						const muk = await storage.decryptStoredMasterUnlockKey(
+							accountId,
+							true, // Skip biometric since we just authenticated
+						);
+						if (muk) {
+							// Store in React Native memory cache
+							await storage.setMasterUnlockKey(muk, accountId);
+							await setNativeMuksForAccounts([accountId]);
+						} else {
+							if (__DEV__) {
+								console.warn(
+									"[BiometricAuth] decryptStoredMasterUnlockKey returned null MUK",
+								);
+							}
 						}
 					}
 				} catch (error) {

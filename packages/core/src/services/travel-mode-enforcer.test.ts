@@ -160,6 +160,28 @@ describe("TravelModeEnforcer", () => {
 		});
 	});
 
+	it("verifyOrClear reports success without touching the session", async () => {
+		const { storage, itemCache } = await createLayers({
+			travelModeCache: { enabled: false, hiddenVaultIds: [] },
+		});
+		const clearSession = spyOn(storage, "clearSession");
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
+
+		expect(await enforcer.verifyOrClear(ACCOUNT_ID)).toBe(true);
+		expect(clearSession).not.toHaveBeenCalled();
+		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(true);
+	});
+
+	it("verifyOrClear fails closed by clearing the session", async () => {
+		const { storage, itemCache } = await createLayers();
+		const clearSession = spyOn(storage, "clearSession");
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
+
+		expect(await enforcer.verifyOrClear(ACCOUNT_ID)).toBe(false);
+		expect(clearSession).toHaveBeenCalledWith(ACCOUNT_ID);
+		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(false);
+	});
+
 	it("purges hidden data before committing an enabled policy", async () => {
 		const { storage, itemCache } = await createLayers();
 		const events: string[] = [];
