@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::{any::Any, env, time::Duration};
 
 use axum::{
     body::{to_bytes, Body},
@@ -16,7 +16,7 @@ use axum::{
     Json,
 };
 use serde_json::json;
-use tower_http::trace::TraceLayer;
+use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use tracing::Span;
 use url::Url;
 
@@ -37,6 +37,41 @@ pub fn http_trace_layer() -> HttpTraceLayer {
         .make_span_with(make_http_trace_span as fn(&Request<Body>) -> Span)
         .on_request(on_http_trace_request as fn(&Request<Body>, &Span))
         .on_response(on_http_trace_response as fn(&Response<Body>, Duration, &Span))
+}
+
+type PanicHandler = fn(Box<dyn Any + Send + 'static>) -> Response;
+
+/// Turn a panic anywhere below this layer into a `500` for that one request.
+///
+/// Without it, a panic in a handler unwinds out of the axum service and kills
+/// the whole hyper connection task: the client gets a dropped connection with
+/// no response, and every other keep-alive request already in flight on that
+/// connection dies with it. Tokio keeps the process alive (the panic is
+/// contained to the connection task, and no `panic = "abort"` profile is set),
+/// so this is a per-connection liveness problem rather than a crash.
+///
+/// One panic source is not obvious from reading the handlers: `rand` 0.10 made
+/// `ThreadRng` reseed failure fatal (`panic!("could not reseed ThreadRng")`)
+/// where 0.8 logged a warning and carried on. `ThreadRng` reseeds from the OS
+/// every 64 kB of output, so any `rand::rng()` caller — share-link tokens,
+/// team invite codes, auth verification codes, sync event IDs — can panic if
+/// the OS entropy source becomes unavailable. Failing closed is correct; this
+/// layer is what keeps it from taking connections down with it.
+pub fn catch_panic_layer() -> CatchPanicLayer<PanicHandler> {
+    CatchPanicLayer::custom(response_for_panic as PanicHandler)
+}
+
+fn response_for_panic(panic: Box<dyn Any + Send + 'static>) -> Response {
+    let details = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or("<non-string panic payload>");
+    tracing::error!(panic = %details, "request handler panicked");
+
+    // The panic message stays server-side: it can carry internal state, and the
+    // client has no use for it.
+    json_error(StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error")
 }
 
 fn make_http_trace_span(request: &Request<Body>) -> Span {
@@ -347,12 +382,15 @@ fn assert_valid_origin(value: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use axum::{
-        body::Body,
-        http::{header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue},
+        body::{to_bytes, Body},
+        http::{header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue, Request, StatusCode},
         response::Response,
+        routing::get,
+        Router,
     };
+    use tower::util::ServiceExt;
 
-    use super::{apply_public_asset_cors, parse_cors_origins};
+    use super::{apply_public_asset_cors, catch_panic_layer, parse_cors_origins};
 
     #[test]
     fn adds_wildcard_cors_for_favicon_responses() {
@@ -415,5 +453,39 @@ mod tests {
     fn rejects_paths_and_wildcards() {
         assert!(parse_cors_origins(Some("*")).is_err());
         assert!(parse_cors_origins(Some("https://app.example.com/path")).is_err());
+    }
+
+    /// A panicking handler — e.g. `rand` 0.10's `ThreadRng` failing to reseed —
+    /// must answer the request with a `500` instead of unwinding out of the
+    /// service and taking the connection with it.
+    #[tokio::test]
+    async fn panicking_handler_becomes_internal_server_error() {
+        async fn panicking_handler() -> StatusCode {
+            panic!("could not reseed ThreadRng")
+        }
+
+        let router = Router::new()
+            .route("/boom", get(panicking_handler))
+            .layer(catch_panic_layer());
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/boom")
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("catch-panic layer should answer instead of unwinding");
+
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("error body should read");
+        let body = String::from_utf8(body.to_vec()).expect("error body should be utf-8");
+        assert!(body.contains("Internal Server Error"));
+        // The panic message stays in the logs, not in the response.
+        assert!(!body.contains("ThreadRng"));
     }
 }

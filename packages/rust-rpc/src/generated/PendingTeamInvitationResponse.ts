@@ -2,7 +2,6 @@
 
 export type PendingTeamInvitationResponse = {
 	id: string;
-	token: string;
 	teamId: string;
 	teamName: string;
 	role: string;

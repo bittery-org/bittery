@@ -10,6 +10,10 @@ import {
 	createAccountRpcClient,
 	getDefaultServerUrl,
 } from "@bittery/shared/rpc-client-factory";
+import {
+	type ServerVaultListEntry,
+	toVaultKeyEntry,
+} from "@bittery/shared/vault-mapping";
 import type { IStorageAdapter, VaultKeyData } from "@bittery/storage";
 import {
 	findAccountById,
@@ -201,15 +205,7 @@ export interface FinishLoginResponse {
 	expiresAt: string | Date;
 }
 
-interface VaultListEntry {
-	id: string;
-	name: string;
-	vaultType: string;
-	icon: string | null;
-	imageUrl: string | null;
-	encryptedVaultKey: string;
-	role: string;
-}
+type VaultListEntry = ServerVaultListEntry;
 
 /**
  * RPC client interface for auth operations.
@@ -332,35 +328,11 @@ function parseEncryptedData(serialized: string | null): EncryptedData | null {
 	}
 }
 
-function normalizeVaultType(vaultType: string): VaultKeyData["vaultType"] {
-	return vaultType === "team" ? "team" : "personal";
-}
-
-function normalizeVaultRole(role: string): VaultKeyData["role"] {
-	switch (role) {
-		case "owner":
-		case "admin":
-		case "member":
-		case "read-only":
-			return role;
-		default:
-			return "member";
-	}
-}
-
 async function fetchVaultKeys(
 	authClient: IAuthClient,
 ): Promise<VaultKeyData[]> {
 	const vaults = await authClient.vault.list.query();
-	return vaults.map((vault) => ({
-		vaultId: vault.id,
-		vaultName: vault.name,
-		vaultType: normalizeVaultType(vault.vaultType),
-		vaultIcon: vault.icon,
-		vaultImageUrl: vault.imageUrl,
-		encryptedVaultKey: vault.encryptedVaultKey,
-		role: normalizeVaultRole(vault.role),
-	}));
+	return vaults.map(toVaultKeyEntry);
 }
 
 async function validateDerivedUnlockKey(input: {

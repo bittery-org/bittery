@@ -119,6 +119,39 @@ describe("TOTP Module", () => {
 			expect(result.code).toMatch(/^\d{8}$/);
 		});
 
+		// `TotpDigits`/`period` are erased at runtime, so a corrupt or tampered
+		// payload can carry any number. These must be rejected, not silently
+		// turned into a 20-digit "code" or an Infinity counter.
+		test.each([
+			0,
+			1,
+			5,
+			9,
+			10,
+			20,
+			-1,
+			6.5,
+			Number.NaN,
+		])("should reject digits=%p", async (digits) => {
+			await expect(
+				generateTotp({
+					secret: testSecret,
+					digits: digits as unknown as 6,
+				}),
+			).rejects.toThrow(/Invalid TOTP digits/);
+		});
+
+		test.each([
+			0,
+			-1,
+			1.5,
+			Number.NaN,
+		])("should reject period=%p", async (period) => {
+			await expect(
+				generateTotp({ secret: testSecret, period }),
+			).rejects.toThrow(/Invalid TOTP period/);
+		});
+
 		test("should return remaining seconds and progress", async () => {
 			const result = await generateTotp({ secret: testSecret });
 

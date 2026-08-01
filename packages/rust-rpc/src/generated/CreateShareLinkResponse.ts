@@ -2,6 +2,10 @@
 
 export type CreateShareLinkResponse = {
 	id: string;
+	/**
+	 * The only time the raw token is ever disclosed. The database holds just its
+	 * digest, so a link that is not copied here cannot be reconstructed later.
+	 */
 	token: string;
 	expiresAt: string;
 	baseShareUrl: string;

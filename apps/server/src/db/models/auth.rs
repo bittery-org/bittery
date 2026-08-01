@@ -24,8 +24,8 @@ pub struct DbSessionRecord {
 pub struct DbSignupVerificationRow {
     pub id: String,
     pub email: String,
-    pub invitation_token: Option<String>,
-    pub code: String,
+    pub invitation_token_hash: Option<String>,
+    pub code_hash: String,
     pub attempts: i32,
     pub max_attempts: i32,
     pub expires_at: OffsetDateTime,
@@ -90,7 +90,7 @@ pub struct DbLoginUserRow {
 pub struct DbRecoveryVerificationRow {
     pub id: String,
     pub email: String,
-    pub code: String,
+    pub code_hash: String,
     pub attempts: i32,
     pub max_attempts: i32,
     pub expires_at: OffsetDateTime,

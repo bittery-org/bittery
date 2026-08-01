@@ -184,9 +184,14 @@ export function ShareItemSheet({
 					{/* Security notice */}
 					<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-3 dark:bg-amber-950/30">
 						<StyledLink size={16} className="mt-0.5 mr-2 text-amber-600" />
-						<Text className="flex-1 text-amber-800 text-xs dark:text-amber-200">
-							{m.mob_share_security_notice()}
-						</Text>
+						<View className="flex-1">
+							<Text className="text-amber-800 text-xs dark:text-amber-200">
+								{m.mob_share_security_notice()}
+							</Text>
+							<Text className="mt-1 text-amber-800 text-xs dark:text-amber-200">
+								{m.mob_share_copy_once_notice()}
+							</Text>
+						</View>
 					</View>
 
 					{/* Actions */}

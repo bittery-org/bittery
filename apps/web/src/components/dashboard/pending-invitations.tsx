@@ -28,9 +28,11 @@ export function PendingInvitations() {
 	const pendingQuery = useQuery(rpc.team.invitations.pending.queryOptions());
 	const { locale, m } = useI18n();
 
+	// Invitations are addressed by id here: only the SHA-256 digest of the token
+	// is stored server-side, so the pending list cannot hand back the raw token.
 	const acceptMutation = useMutation({
-		mutationFn: (input: { token: string }) =>
-			rpcClient.team.invitations.accept.mutate(input),
+		mutationFn: (input: { invitationId: string }) =>
+			rpcClient.team.invitations.acceptById.mutate(input),
 		onSuccess: async (data) => {
 			toast.success(
 				m.dashboard_pending_toast_joined({ teamName: data.teamName }),
@@ -43,8 +45,8 @@ export function PendingInvitations() {
 	});
 
 	const declineMutation = useMutation({
-		mutationFn: (input: { token: string }) =>
-			rpcClient.team.invitations.decline.mutate(input),
+		mutationFn: (input: { invitationId: string }) =>
+			rpcClient.team.invitations.declineById.mutate(input),
 		onSuccess: async () => {
 			toast.success(m.dashboard_pending_toast_declined());
 			await invalidator.invalidateTeamInvitations();
@@ -109,7 +111,7 @@ export function PendingInvitations() {
 									size="sm"
 									variant="outline"
 									onClick={() =>
-										declineMutation.mutate({ token: invitation.token })
+										declineMutation.mutate({ invitationId: invitation.id })
 									}
 									disabled={declineMutation.isPending}
 								>
@@ -118,7 +120,7 @@ export function PendingInvitations() {
 								<Button
 									size="sm"
 									onClick={() =>
-										acceptMutation.mutate({ token: invitation.token })
+										acceptMutation.mutate({ invitationId: invitation.id })
 									}
 									disabled={acceptMutation.isPending}
 								>

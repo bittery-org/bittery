@@ -2,10 +2,10 @@ use std::{env, net::SocketAddr};
 
 use axum::{middleware, routing::get, Json, Router};
 use bittery_server::{
-    build_rate_limiter, create_public_http_router, create_rpc_router, create_sync_http_router, db,
-    edge_http_middleware, http_trace_layer, init_redis, load_edge_http_config,
-    rpc_request_context_middleware, rpc_request_guard_middleware, rpc_tracing_middleware, AppState,
-    JobRunner, SyncPubSub,
+    build_rate_limiter, catch_panic_layer, create_public_http_router, create_rpc_router,
+    create_sync_http_router, db, edge_http_middleware, http_trace_layer, init_redis,
+    load_edge_http_config, rpc_request_context_middleware, rpc_request_guard_middleware,
+    rpc_tracing_middleware, AppState, JobRunner, SyncPubSub,
 };
 use serde_json::json;
 use tokio::net::TcpListener;
@@ -86,6 +86,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .merge(public_http_routes)
         .nest("/sync", sync_routes)
         .merge(rpc_routes)
+        // Innermost of the three so that a panic becomes a normal `500` that
+        // still picks up the security and CORS headers on the way out, and so
+        // that the trace layer records it like any other response.
+        .layer(catch_panic_layer())
         .layer(middleware::from_fn_with_state(
             edge_http_config,
             edge_http_middleware,

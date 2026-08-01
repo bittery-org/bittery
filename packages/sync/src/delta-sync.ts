@@ -3,6 +3,12 @@
  * Extracted for reuse in both React hooks and non-React contexts (e.g., extension service worker)
  */
 
+import {
+	type ServerVaultListEntry,
+	type ServerVaultSummary,
+	toCachedVaultFields,
+	toVaultKeyEntry,
+} from "@bittery/shared/vault-mapping";
 import type {
 	CachedAttachment,
 	CachedEncryptedItem,
@@ -34,13 +40,7 @@ export interface DeltaSyncClient {
 			}>;
 		};
 		get: {
-			query: (input: { vaultId: string }) => Promise<{
-				id: string;
-				name: string;
-				type: string;
-				icon: string | null;
-				imageUrl: string | null;
-			}>;
+			query: (input: { vaultId: string }) => Promise<ServerVaultSummary>;
 		};
 		listItems: {
 			query: (input: { vaultId: string }) => Promise<
@@ -62,17 +62,7 @@ export interface DeltaSyncClient {
 			>;
 		};
 		list: {
-			query: () => Promise<
-				Array<{
-					id: string;
-					name: string;
-					type: "personal" | "team";
-					icon: string | null;
-					imageUrl: string | null;
-					encryptedVaultKey: string;
-					role: "owner" | "admin" | "member" | "read-only";
-				}>
-			>;
+			query: () => Promise<Array<ServerVaultListEntry>>;
 		};
 	};
 }
@@ -133,18 +123,7 @@ export async function performDeltaSync(
 		}
 
 		const vaults = await rpcClient.vault.list.query();
-		await cache.syncVaultKeys(
-			vaults.map((vault) => ({
-				vaultId: vault.id,
-				vaultName: vault.name,
-				vaultType: vault.type,
-				vaultIcon: vault.icon,
-				vaultImageUrl: vault.imageUrl,
-				encryptedVaultKey: vault.encryptedVaultKey,
-				role: vault.role,
-			})),
-			accountScope,
-		);
+		await cache.syncVaultKeys(vaults.map(toVaultKeyEntry), accountScope);
 	};
 
 	if (
@@ -256,13 +235,9 @@ export async function performDeltaSync(
 				vaultId: event.entityId,
 			});
 			await upsertVault({
-				id: vault.id,
+				...toCachedVaultFields(vault),
 				accountEmail: itemAccountEmail,
 				serverUrl,
-				name: vault.name,
-				type: vault.type,
-				icon: vault.icon,
-				imageUrl: vault.imageUrl,
 			} as CachedVaultMetadata);
 			break;
 		}

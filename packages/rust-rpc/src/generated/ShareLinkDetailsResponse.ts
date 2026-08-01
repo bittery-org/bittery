@@ -3,7 +3,6 @@ import type { ShareAllowedEmailDetails } from "./ShareAllowedEmailDetails";
 
 export type ShareLinkDetailsResponse = {
 	id: string;
-	token: string;
 	status: string;
 	accessMode: string;
 	isOneTimeUse: boolean;

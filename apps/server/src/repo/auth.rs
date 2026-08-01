@@ -9,6 +9,7 @@ use crate::{
     services::auth::{
         AuthVaultKeyResponse, EncryptedVaultKeyInput, RecoveryVaultKeyResponse, ValidatedKdfProfile,
     },
+    services::session::hash_token,
 };
 
 // ---------------------------------------------------------------------------
@@ -354,7 +355,7 @@ pub async fn reset_user_password_with_recovery(
     })?;
 
     let verification = query_as::<_, DbRecoveryVerificationRow>(
-        "SELECT id, email, code, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
     )
     .bind(email)
     .bind(now)
@@ -542,6 +543,9 @@ pub async fn load_auth_vault_keys(
 ///
 /// Invalidates any existing active verification for the same email/invitation_token combo,
 /// then inserts a new one with the given `id` and `code`.
+///
+/// Only SHA-256 digests of `code` and `invitation_token` are persisted; the raw
+/// values live solely in the outbound email and the caller's request.
 pub async fn create_signup_verification(
     pool: &PgPool,
     id: &str,
@@ -551,14 +555,15 @@ pub async fn create_signup_verification(
     expires_at: OffsetDateTime,
 ) -> Result<(), AppError> {
     let now = OffsetDateTime::now_utc();
-    match invitation_token {
-        Some(invitation_token) => {
+    let invitation_token_hash = invitation_token.map(hash_token);
+    match invitation_token_hash.as_deref() {
+        Some(invitation_token_hash) => {
             query(
-                "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND invitation_token = $3 AND used_at IS NULL",
+                "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND invitation_token_hash = $3 AND used_at IS NULL",
             )
             .bind(now)
             .bind(email)
-            .bind(invitation_token)
+            .bind(invitation_token_hash)
             .execute(pool)
             .await
             .map_err(|e| {
@@ -568,7 +573,7 @@ pub async fn create_signup_verification(
         }
         None => {
             query(
-                "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND invitation_token IS NULL AND used_at IS NULL",
+                "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND invitation_token_hash IS NULL AND used_at IS NULL",
             )
             .bind(now)
             .bind(email)
@@ -582,12 +587,12 @@ pub async fn create_signup_verification(
     }
 
     query(
-        "INSERT INTO signup_verification (id, email, invitation_token, code, expires_at) VALUES ($1, $2, $3, $4, $5)",
+        "INSERT INTO signup_verification (id, email, invitation_token_hash, code_hash, expires_at) VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(id)
     .bind(email)
-    .bind(invitation_token)
-    .bind(code)
+    .bind(invitation_token_hash)
+    .bind(hash_token(code))
     .bind(expires_at)
     .execute(pool)
     .await
@@ -617,11 +622,11 @@ pub async fn create_recovery_verification(
         })?;
 
     query(
-        "INSERT INTO recovery_verification (id, email, code, expires_at) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO recovery_verification (id, email, code_hash, expires_at) VALUES ($1, $2, $3, $4)",
     )
     .bind(generate_resource_id("recovery_verification"))
     .bind(email)
-    .bind(code)
+    .bind(hash_token(code))
     .bind(expires_at)
     .execute(pool)
     .await
@@ -640,21 +645,23 @@ pub async fn consume_signup_verification_code(
     invitation_token: Option<&str>,
 ) -> Result<bool, AppError> {
     let now = OffsetDateTime::now_utc();
-    let valid = match invitation_token {
-        Some(invitation_token) => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token, code, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token = $2 AND code = $3 AND expires_at > $4 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+    let invitation_token_hash = invitation_token.map(hash_token);
+    let code_hash = hash_token(code);
+    let valid = match invitation_token_hash.as_deref() {
+        Some(invitation_token_hash) => query_as::<_, DbSignupVerificationRow>(
+            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash = $2 AND code_hash = $3 AND expires_at > $4 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
         )
         .bind(email)
-        .bind(invitation_token)
-        .bind(code)
+        .bind(invitation_token_hash)
+        .bind(&code_hash)
         .bind(now)
         .fetch_optional(pool)
         .await,
         None => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token, code, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token IS NULL AND code = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash IS NULL AND code_hash = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
         )
         .bind(email)
-        .bind(code)
+        .bind(&code_hash)
         .bind(now)
         .fetch_optional(pool)
         .await,
@@ -681,17 +688,17 @@ pub async fn consume_signup_verification_code(
         return Ok(true);
     }
 
-    let active = match invitation_token {
-        Some(invitation_token) => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token, code, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+    let active = match invitation_token_hash.as_deref() {
+        Some(invitation_token_hash) => query_as::<_, DbSignupVerificationRow>(
+            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
         )
         .bind(email)
-        .bind(invitation_token)
+        .bind(invitation_token_hash)
         .bind(now)
         .fetch_optional(pool)
         .await,
         None => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token, code, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token IS NULL AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash IS NULL AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
         )
         .bind(email)
         .bind(now)
@@ -728,6 +735,49 @@ pub async fn consume_signup_verification_code(
     Ok(false)
 }
 
+/// Whether the email has a signup verification code that is still live.
+///
+/// Used to decide whether a failed attempt should count toward the per-email
+/// lockout: without this, anyone could lock an arbitrary address out of signup
+/// by guessing against an email that has no pending code.
+pub async fn has_active_signup_verification(pool: &PgPool, email: &str) -> Result<bool, AppError> {
+    let now = OffsetDateTime::now_utc();
+    let exists = query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM signup_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL)",
+    )
+    .bind(email)
+    .bind(now)
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to check active signup verification");
+        AppError::internal("Failed to check active signup verification")
+    })?;
+    Ok(exists)
+}
+
+/// Burns every live signup verification code for the email. Called when the
+/// per-email lockout trips so that a code an attacker may have narrowed down
+/// cannot be redeemed once the lock expires.
+pub async fn invalidate_pending_signup_verifications(
+    pool: &PgPool,
+    email: &str,
+) -> Result<(), AppError> {
+    let now = OffsetDateTime::now_utc();
+    query(
+        "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND used_at IS NULL",
+    )
+    .bind(now)
+    .bind(email)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to invalidate signup verifications");
+        AppError::internal("Failed to invalidate signup verifications")
+    })?;
+    Ok(())
+}
+
 pub async fn verify_recovery_code_attempt(
     pool: &PgPool,
     email: &str,
@@ -735,10 +785,10 @@ pub async fn verify_recovery_code_attempt(
 ) -> Result<bool, AppError> {
     let now = OffsetDateTime::now_utc();
     let valid = query_as::<_, DbRecoveryVerificationRow>(
-        "SELECT id, email, code, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND code = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND code_hash = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
     )
     .bind(email)
-    .bind(code)
+    .bind(hash_token(code))
     .bind(now)
     .fetch_optional(pool)
     .await
@@ -755,7 +805,7 @@ pub async fn verify_recovery_code_attempt(
     }
 
     let active = query_as::<_, DbRecoveryVerificationRow>(
-        "SELECT id, email, code, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
     )
     .bind(email)
     .bind(now)
@@ -821,9 +871,9 @@ pub async fn get_pending_invitation_for_signup(
     is_self_hosted: bool,
 ) -> Result<DbTeamInvitationAcceptRow, AppError> {
     let invitation = query_as::<_, DbTeamInvitationAcceptRow>(
-        "SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token = $1 AND ti.status = 'pending' LIMIT 1",
+        "SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token_hash = $1 AND ti.status = 'pending' LIMIT 1",
     )
-    .bind(invitation_token)
+    .bind(hash_token(invitation_token))
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -858,9 +908,9 @@ pub async fn get_pending_signup_invitation(
     is_self_hosted: bool,
 ) -> Result<DbSignupInvitationRow, AppError> {
     let invitation = query_as::<_, DbSignupInvitationRow>(
-        "SELECT ti.id, ti.team_id, t.name AS team_name, t.type::text AS team_type, t.image_key AS team_image_key, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.member_limit, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token = $1 AND ti.status = 'pending' LIMIT 1",
+        "SELECT ti.id, ti.team_id, t.name AS team_name, t.type::text AS team_type, t.image_key AS team_image_key, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.member_limit, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token_hash = $1 AND ti.status = 'pending' LIMIT 1",
     )
-    .bind(invitation_token)
+    .bind(hash_token(invitation_token))
     .fetch_optional(pool)
     .await
     .map_err(|e| {

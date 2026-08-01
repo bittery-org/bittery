@@ -4,6 +4,12 @@ import {
 } from "@bittery/shared";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
+import {
+	type ServerVaultListEntry,
+	type ServerVaultSummary,
+	toCachedVaultFields,
+	toVaultKeyEntry,
+} from "@bittery/shared/vault-mapping";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
 import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { VaultKeyData } from "@bittery/storage/types";
@@ -63,13 +69,7 @@ interface BootstrapItemPage {
 		updatedAt: string | Date;
 		deletedAt?: string | Date | null;
 		attachments?: CachedAttachment[];
-		vault: {
-			id: string;
-			name: string;
-			type: string;
-			icon: string | null;
-			imageUrl: string | null;
-		};
+		vault: ServerVaultSummary;
 	}>;
 	hasMore: boolean;
 	nextCursor?: string;
@@ -86,17 +86,7 @@ export interface BootstrapItemsClient {
 	};
 	vault?: {
 		list?: {
-			query: () => Promise<
-				Array<{
-					id: string;
-					name: string;
-					type: "personal" | "team";
-					icon: string | null;
-					imageUrl: string | null;
-					encryptedVaultKey: string;
-					role: "owner" | "admin" | "member" | "read-only";
-				}>
-			>;
+			query: () => Promise<Array<ServerVaultListEntry>>;
 		};
 	};
 }
@@ -416,15 +406,7 @@ export class VaultRepository {
 
 		try {
 			const vaults = await client.vault.list.query();
-			return vaults.map((vault) => ({
-				vaultId: vault.id,
-				vaultName: vault.name,
-				vaultType: vault.type,
-				vaultIcon: vault.icon,
-				vaultImageUrl: vault.imageUrl,
-				encryptedVaultKey: vault.encryptedVaultKey,
-				role: vault.role,
-			}));
+			return vaults.map(toVaultKeyEntry);
 		} catch (error) {
 			console.error("[VaultRepository] Failed to refresh vault keys:", error);
 			return null;
@@ -809,14 +791,10 @@ export class VaultRepository {
 				cachedItems.push(cachedItem);
 
 				vaults.set(rawItem.vault.id, {
-					id: rawItem.vault.id,
+					...toCachedVaultFields(rawItem.vault),
 					accountId: this.accountId,
 					accountEmail: this.accountEmail,
 					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-					name: rawItem.vault.name,
-					type: rawItem.vault.type,
-					icon: rawItem.vault.icon,
-					imageUrl: rawItem.vault.imageUrl,
 				});
 			}
 

@@ -110,6 +110,7 @@ import type { RequestEmailVerificationInput } from "./RequestEmailVerificationIn
 import type { RequestEmailVerificationResponse } from "./RequestEmailVerificationResponse.ts";
 import type { RequestRecoveryVerificationInput } from "./RequestRecoveryVerificationInput.ts";
 import type { RequestSignupVerificationInput } from "./RequestSignupVerificationInput.ts";
+import type { ResendInvitationResponse } from "./ResendInvitationResponse.ts";
 import type { ResetPasswordInput } from "./ResetPasswordInput.ts";
 import type { ResetPasswordResponse } from "./ResetPasswordResponse.ts";
 import type { RotationDataResponse } from "./RotationDataResponse.ts";
@@ -285,6 +286,7 @@ export type { RequestEmailVerificationInput } from "./RequestEmailVerificationIn
 export type { RequestEmailVerificationResponse } from "./RequestEmailVerificationResponse.ts";
 export type { RequestRecoveryVerificationInput } from "./RequestRecoveryVerificationInput.ts";
 export type { RequestSignupVerificationInput } from "./RequestSignupVerificationInput.ts";
+export type { ResendInvitationResponse } from "./ResendInvitationResponse.ts";
 export type { ResetPasswordInput } from "./ResetPasswordInput.ts";
 export type { ResetPasswordResponse } from "./ResetPasswordResponse.ts";
 export type { RotationDataResponse } from "./RotationDataResponse.ts";
@@ -631,16 +633,24 @@ export type QubitServer = {
 				[input: TokenInput],
 				{ Ok: AcceptInvitationResponse } | { Err: AppError }
 			>;
+			acceptById: Mutation<
+				[input: InvitationIdInput],
+				{ Ok: AcceptInvitationResponse } | { Err: AppError }
+			>;
 			cancel: Mutation<
 				[input: InvitationIdInput],
 				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 			resend: Mutation<
 				[input: InvitationIdInput],
-				{ Ok: SuccessResponse } | { Err: AppError }
+				{ Ok: ResendInvitationResponse } | { Err: AppError }
 			>;
 			decline: Mutation<
 				[input: TokenInput],
+				{ Ok: SuccessResponse } | { Err: AppError }
+			>;
+			declineById: Mutation<
+				[input: InvitationIdInput],
 				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 		};

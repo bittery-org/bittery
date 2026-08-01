@@ -1212,7 +1212,16 @@ pub fn js_validate_rotation_data(members_json: &str) -> Result<JsValidationResul
 mod tests {
     use super::*;
 
-    #[test]
+    // Every test below runs twice: natively under `cargo test`, and on
+    // wasm32-unknown-unknown under `wasm-pack test --node`. Only the wasm run
+    // exercises what this crate actually ships - the wasm-bindgen glue and the
+    // `wasm_js` getrandom backend. A host-target `cargo test` compiles neither,
+    // so it cannot tell you the WASM bundle works.
+    #[cfg(target_arch = "wasm32")]
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn test_derive_keys() {
         let result = js_derive_keys(
             "password",
@@ -1225,7 +1234,8 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn test_encrypt_decrypt() {
         let key = js_generate_encryption_key();
         let encrypted = js_encrypt("Hello, World!", &key).unwrap();
@@ -1233,7 +1243,8 @@ mod tests {
         assert_eq!(decrypted, "Hello, World!");
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn test_secret_key() {
         let key = js_generate_secret_key();
         assert!(js_validate_secret_key(&key));
@@ -1241,7 +1252,8 @@ mod tests {
         assert!(hint.starts_with("A3-"));
     }
 
-    #[test]
+    #[cfg_attr(not(target_arch = "wasm32"), test)]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test)]
     fn test_recovery_master_key_roundtrip() {
         let recovery_key = js_generate_recovery_key();
         assert!(js_validate_recovery_key(&recovery_key));

@@ -1,5 +1,9 @@
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig, devices } from "@playwright/test";
+// Shared with apps/web so both harnesses start the API server with the same
+// E2E-only rate-limit budgets. See that file for the rationale.
+import { E2E_SERVER_RATE_LIMITS } from "../web/tests/e2e-server-env";
 
 /**
  * Playwright E2E Test Configuration for Bittery Extension
@@ -17,6 +21,10 @@ import { defineConfig, devices } from "@playwright/test";
  * - Database must be running: pnpm run db:start (from root)
  * - Server must be running or will be started automatically
  */
+
+// This package is `"type": "module"`, so Playwright loads this config as ESM
+// where `__dirname` does not exist.
+const configDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
 	testDir: "./tests/e2e",
@@ -48,8 +56,8 @@ export default defineConfig({
 				// Chrome/Chromium args for extension testing
 				launchOptions: {
 					args: [
-						`--disable-extensions-except=${path.resolve(__dirname, "dist")}`,
-						`--load-extension=${path.resolve(__dirname, "dist")}`,
+						`--disable-extensions-except=${path.resolve(configDir, "dist")}`,
+						`--load-extension=${path.resolve(configDir, "dist")}`,
 						"--no-sandbox",
 					],
 				},
@@ -63,6 +71,9 @@ export default defineConfig({
 			url: "http://localhost:3000",
 			reuseExistingServer: !process.env.CI,
 			timeout: 120000,
+			// E2E-only auth rate-limit budgets; a whole run comes from one IP.
+			// See apps/web/tests/e2e-server-env.ts before changing/removing.
+			env: E2E_SERVER_RATE_LIMITS,
 		},
 		{
 			// Start the web app (for authentication/setup)

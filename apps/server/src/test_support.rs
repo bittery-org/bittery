@@ -27,8 +27,8 @@ use tower::util::ServiceExt;
 use url::Url;
 
 use crate::{
-    create_public_http_router, create_rpc_router, db, rpc_request_context_middleware,
-    rpc_request_guard_middleware, rpc_tracing_middleware, AppState,
+    catch_panic_layer, create_public_http_router, create_rpc_router, db,
+    rpc_request_context_middleware, rpc_request_guard_middleware, rpc_tracing_middleware, AppState,
 };
 
 const DATABASE_PREFIX: &str = "bittery_test_";
@@ -417,7 +417,12 @@ where
             rpc_request_context_middleware,
         ))
         .layer(middleware::from_fn(rpc_request_guard_middleware));
-    let router = Router::new().merge(public_routes).merge(rpc_routes);
+    // Mirrors `main.rs`: a panic below this layer is a `500`, not a dropped
+    // connection.
+    let router = Router::new()
+        .merge(public_routes)
+        .merge(rpc_routes)
+        .layer(catch_panic_layer());
 
     let result = std::panic::AssertUnwindSafe(test_fn(RpcTestApp {
         pool,

@@ -5,6 +5,7 @@ use time::{Duration, OffsetDateTime};
 
 use super::*;
 use crate::error::AppErrorCode;
+use crate::services::session::hash_token;
 use crate::test_support::{
     acquire_env_lock_async, assign_user_to_team, seed_item, seed_team, seed_user, seed_vault,
     seed_vault_key, with_rpc_test_app,
@@ -62,12 +63,12 @@ async fn seed_share_link(
     expires_at: OffsetDateTime,
 ) {
     query(
-		"INSERT INTO share_link (id, item_id, created_by_id, token, status, access_mode, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, expires_at) VALUES ($1, $2, $3, $4, $5::share_link_status, 'anyone'::share_link_access_mode, 'data', 'iv', 'key', 'key-iv', $6)",
+		"INSERT INTO share_link (id, item_id, created_by_id, token_hash, status, access_mode, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, expires_at) VALUES ($1, $2, $3, $4, $5::share_link_status, 'anyone'::share_link_access_mode, 'data', 'iv', 'key', 'key-iv', $6)",
 	)
 	.bind(link_id)
 	.bind(item_id)
 	.bind(created_by_id)
-	.bind(format!("token-{link_id}"))
+	.bind(hash_token(&format!("token-{link_id}")))
 	.bind(status)
 	.bind(expires_at)
 	.execute(pool)

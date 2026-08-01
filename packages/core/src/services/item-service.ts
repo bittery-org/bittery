@@ -9,6 +9,10 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import {
+	normalizeVaultType,
+	type ServerVaultSummary,
+} from "@bittery/shared/vault-mapping";
+import {
 	resolveAccountScopeId,
 	resolveUserIdForScope,
 } from "@bittery/storage/account-id";
@@ -141,13 +145,7 @@ type DecryptableItemRecord = {
 	lastModifiedBy?: string | null;
 };
 
-type RpcVaultSummary = {
-	id: string;
-	name: string;
-	vaultType: string;
-	icon: string | null;
-	imageUrl: string | null;
-} | null;
+type RpcVaultSummary = ServerVaultSummary | null;
 
 function normalizeVaultSummary(
 	vault: RpcVaultSummary,
@@ -156,7 +154,7 @@ function normalizeVaultSummary(
 	return {
 		id: vault?.id ?? vaultId,
 		name: vault?.name ?? "Unknown Vault",
-		type: vault?.vaultType ?? "personal",
+		type: normalizeVaultType(vault?.vaultType),
 		icon: vault?.icon ?? null,
 		imageUrl: vault?.imageUrl ?? null,
 	};

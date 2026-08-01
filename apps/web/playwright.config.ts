@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import { E2E_SERVER_RATE_LIMITS } from "./tests/e2e-server-env";
 
 /**
  * Playwright E2E Test Configuration for Bittery Web App
@@ -64,6 +65,11 @@ export default defineConfig({
 			url: "http://localhost:3000",
 			reuseExistingServer: !process.env.CI,
 			timeout: 120000, // 2 minutes to start server
+			// A whole E2E run comes from one IP, which blows through the auth
+			// rate limits meant for real users. See tests/e2e-server-env.ts for
+			// why each value is what it is - removing this reintroduces
+			// "Too many requests" failures partway through the suite.
+			env: E2E_SERVER_RATE_LIMITS,
 		},
 		{
 			// Start the web app

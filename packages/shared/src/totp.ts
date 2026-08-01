@@ -56,6 +56,38 @@ export interface ParsedOtpAuthUri {
 // Base32 alphabet (RFC 4648)
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
+/** Smallest accepted OTP length (matches `TotpDigits` and the Rust core). */
+const MIN_TOTP_DIGITS = 6;
+/** Largest accepted OTP length (matches `TotpDigits` and the Rust core). */
+const MAX_TOTP_DIGITS = 8;
+
+/**
+ * Reject out-of-range `digits`.
+ *
+ * `TotpDigits` is erased at runtime, so a corrupt or tampered payload can reach
+ * this code with any number. Mirrors the check in the Rust core.
+ */
+function assertValidDigits(digits: number): void {
+	if (
+		!Number.isInteger(digits) ||
+		digits < MIN_TOTP_DIGITS ||
+		digits > MAX_TOTP_DIGITS
+	) {
+		throw new Error(
+			`Invalid TOTP digits: expected ${MIN_TOTP_DIGITS}-${MAX_TOTP_DIGITS}, got ${digits}`,
+		);
+	}
+}
+
+/** Reject a non-positive `period`, which makes the counter Infinity/NaN. */
+function assertValidPeriod(period: number): void {
+	if (!Number.isInteger(period) || period < 1) {
+		throw new Error(
+			`Invalid TOTP period: expected at least 1 second, got ${period}`,
+		);
+	}
+}
+
 /**
  * Decode a base32-encoded string to Uint8Array
  */
@@ -206,6 +238,8 @@ async function generateHotp(
 	algorithm: TotpAlgorithm = "SHA1",
 	digits: TotpDigits = 6,
 ): Promise<string> {
+	assertValidDigits(digits);
+
 	// Step 1: Generate HMAC-SHA hash
 	const counterBytes = numberToBytes(counter);
 	const hash = await hmac(algorithm, secret, counterBytes);
@@ -230,6 +264,8 @@ async function generateHotp(
  */
 export async function generateTotp(options: TotpOptions): Promise<TotpResult> {
 	const { secret, algorithm = "SHA1", digits = 6, period = 30 } = options;
+	assertValidDigits(digits);
+	assertValidPeriod(period);
 
 	// Decode the base32 secret
 	const secretBytes = base32Decode(secret);
@@ -262,6 +298,8 @@ export async function generateTotpAt(
 	timestamp: number,
 ): Promise<string> {
 	const { secret, algorithm = "SHA1", digits = 6, period = 30 } = options;
+	assertValidDigits(digits);
+	assertValidPeriod(period);
 
 	const secretBytes = base32Decode(secret);
 	const counter = Math.floor(timestamp / period);
@@ -279,6 +317,8 @@ export async function verifyTotp(
 	tolerance = 1,
 ): Promise<boolean> {
 	const { secret, algorithm = "SHA1", digits = 6, period = 30 } = options;
+	assertValidDigits(digits);
+	assertValidPeriod(period);
 
 	const secretBytes = base32Decode(secret);
 	const now = Math.floor(Date.now() / 1000);

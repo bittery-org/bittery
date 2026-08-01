@@ -5,9 +5,18 @@ on:
   push:
     branches:
       - main
+  # A RustSec advisory can be published against a lockfile nobody has touched,
+  # so the `cargo-deny` job below must also run on unchanged code. Every other
+  # job is gated off `schedule` (see `if:` on each one) — the weekly run is a
+  # vulnerability-database sweep, not a full CI re-run. Monday, matching the
+  # weekly Dependabot cadence in .github/dependabot.yml.
+  schedule:
+    - cron: "17 6 * * 1"
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  # `github.event_name` is part of the group so the weekly sweep on main cannot
+  # cancel a real push build of the same ref.
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -17,9 +26,12 @@ env:
   PNPM_VERSION: "10.18.3"
   WASM_PACK_VERSION: "0.13.1"
   WASM_PACK_SHA256: "c539d91ccab2591a7e975bcf82c82e1911b03335c80aa83d67ad25ed2ad06539"
+  CARGO_DENY_VERSION: "0.20.2"
+  CARGO_DENY_SHA256: "9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f"
 
 jobs:
   migrations:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       # Needs the base branch to detect edits to already-merged migrations.
@@ -41,7 +53,16 @@ jobs:
   # The crypto crate is the security core of the product and is only a path
   # dependency of the server, so `cargo test -p bittery-server` never runs its
   # tests. It needs its own job.
+  #
+  # `--workspace` and not `-p bittery-crypto-core`: the workspace has three
+  # members, and narrowing to one of them is what let a stale test module sit in
+  # `bittery-crypto-wasm` uncompiled and left `bittery-crypto-ffi` - the C
+  # surface iOS ships and the crate `jni.rs` sits inside - with nothing but
+  # `cargo fmt` covering it. The Android half of the FFI crate is `#[cfg]`-gated
+  # off this target and gets its own job (crypto-ffi-android); the wasm crate is
+  # additionally built and tested for wasm32 in crypto-wasm / crypto-wasm-test.
   crypto:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -60,18 +81,91 @@ jobs:
         run: cargo fmt --all --check --manifest-path packages/crypto/core/Cargo.toml
 
       - name: Crypto lint
-        run: cargo clippy --manifest-path packages/crypto/core/Cargo.toml -p bittery-crypto-core --all-targets -- -D warnings
+        run: cargo clippy --manifest-path packages/crypto/core/Cargo.toml --workspace --all-targets -- -D warnings
 
       - name: Crypto tests
         shell: bash
         run: |
           set -euo pipefail
           start="$(date +%s)"
-          cargo test --manifest-path packages/crypto/core/Cargo.toml -p bittery-crypto-core
+          cargo test --manifest-path packages/crypto/core/Cargo.toml --workspace
           elapsed="$(( $(date +%s) - start ))"
           echo "crypto tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
+  # `bittery-crypto-ffi/src/jni.rs` is `#[cfg(target_os = "android")]`, so the
+  # ~1800 lines of JNI entry points the Android app calls compile on no other
+  # job - not even the `--workspace` lint above, which runs on Linux. Only a
+  # cross-target check reaches them. `cargo clippy` never links, so this needs
+  # the target's std but no Android NDK.
+  #
+  # iOS deliberately has no counterpart job: the iOS surface is plain
+  # `extern "C"` with no `#[cfg]` gating, so the Linux `crypto` job already
+  # compiles every line of it.
+  crypto-ffi-android:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/crypto/core
+          key: android
+
+      - name: Crypto FFI lint (Android)
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo clippy --manifest-path packages/crypto/core/Cargo.toml \
+            -p bittery-crypto-ffi --target aarch64-linux-android --all-targets -- -D warnings
+          elapsed="$(( $(date +%s) - start ))"
+          echo "crypto FFI Android lint: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+  # `packages/crypto/napi` is a fourth, standalone Cargo manifest with its own
+  # lockfile. It had no job at all: not fmt, not clippy, not `cargo check`, and
+  # its npm `test` script was an `echo`. `--locked` everywhere is the point of
+  # the job as much as the lints are - the lockfile went stale unnoticed once
+  # already.
+  crypto-napi:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/crypto/napi
+
+      - name: NAPI fmt
+        run: cargo fmt --all --check --manifest-path packages/crypto/napi/Cargo.toml
+
+      - name: NAPI lint
+        run: cargo clippy --manifest-path packages/crypto/napi/Cargo.toml --locked --all-targets -- -D warnings
+
+      - name: NAPI check
+        run: cargo check --manifest-path packages/crypto/napi/Cargo.toml --locked --all-targets
+
+      - name: NAPI tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo test --manifest-path packages/crypto/napi/Cargo.toml --locked
+          elapsed="$(( $(date +%s) - start ))"
+          echo "crypto NAPI tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
   desktop-rust:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +203,7 @@ jobs:
   # construction, access masks, error mapping) is deliberately not cfg-gated, so
   # desktop-rust already exercises it on Linux.
   desktop-rust-windows:
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,6 +218,7 @@ jobs:
         run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets
 
   crypto-wasm:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -166,7 +262,68 @@ jobs:
           path: packages/crypto/wasm
           if-no-files-found: error
 
+  # `wasm-pack build` type-checks the library but compiles neither the test
+  # module nor anything under `--all-targets`, and it runs no assertions. The
+  # `crypto` job does run the tests, but on the host target, where neither the
+  # wasm-bindgen glue nor the `wasm_js` getrandom backend exists - so a green
+  # `cargo test` says nothing about the bundle that actually ships to browsers.
+  # `wasm-pack test --node` runs the same assertions as real wasm32.
+  #
+  # Kept out of crypto-wasm on purpose: three jobs block on that one's artifact,
+  # so it stays a build-only job and the slower checks run beside it.
+  crypto-wasm-test:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: packages/crypto/core
+          key: wasm-test
+
+      - name: Install wasm-pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          archive="wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://github.com/wasm-bindgen/wasm-pack/releases/download/v${WASM_PACK_VERSION}/$archive"
+          echo "${WASM_PACK_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          mkdir -p "$HOME/.cargo/bin"
+          cp "$RUNNER_TEMP/wasm-pack-v${WASM_PACK_VERSION}-x86_64-unknown-linux-musl/wasm-pack" "$HOME/.cargo/bin/wasm-pack"
+          chmod +x "$HOME/.cargo/bin/wasm-pack"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          elapsed="$(( $(date +%s) - start ))"
+          echo "wasm-pack install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Crypto WASM lint (wasm32)
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo clippy --manifest-path packages/crypto/core/Cargo.toml \
+            -p bittery-crypto-wasm --target wasm32-unknown-unknown --all-targets -- -D warnings
+          elapsed="$(( $(date +%s) - start ))"
+          echo "crypto WASM lint: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Crypto WASM tests (wasm32, node)
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          wasm-pack test --node packages/crypto/core/crates/bittery-crypto-wasm
+          elapsed="$(( $(date +%s) - start ))"
+          echo "crypto WASM tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
   js-static:
+    if: github.event_name != 'schedule'
     needs: crypto-wasm
     runs-on: ubuntu-latest
     steps:
@@ -219,7 +376,14 @@ jobs:
       - name: Version sync
         run: pnpm run version:check
 
+      # Closed issue #31 asked for this and only the one-off grep was done, which
+      # is how three RATE_LIMIT_SIGNUP_VERIFY_* variables reached .env.example and
+      # docker-compose.yml without ever reaching the self-hosting docs.
+      - name: Env var docs
+        run: pnpm run env:check
+
   js-types:
+    if: github.event_name != 'schedule'
     needs: crypto-wasm
     runs-on: ubuntu-latest
     steps:
@@ -267,6 +431,7 @@ jobs:
           echo "typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
   js-tests:
+    if: github.event_name != 'schedule'
     needs: crypto-wasm
     runs-on: ubuntu-latest
     steps:
@@ -299,7 +464,10 @@ jobs:
 
       # Driven by turbo rather than a hardcoded package list so a new package
       # with tests cannot silently go unrun. The Rust packages are excluded
-      # because they have dedicated jobs (server, crypto).
+      # because they have dedicated jobs (server, crypto, crypto-napi) - this
+      # runner has no Rust toolchain, and their `test` scripts all shell out to
+      # `cargo test`. `@bittery/crypto-napi` stays filtered out for that reason
+      # and no longer because its `test` script was a no-op `echo`.
       - name: Package tests
         shell: bash
         run: |
@@ -313,6 +481,7 @@ jobs:
           echo "package tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
   server:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -387,3 +556,154 @@ jobs:
       - name: sccache stats
         if: always()
         run: sccache --show-stats
+
+  # Nothing in CI built a container image; the release workflow was the first
+  # thing to try, which is how an unreachable HEALTHCHECK probe and a corepack
+  # removal in a floating Node base tag both reached a tag before anyone noticed.
+  # Build only - the release workflow is the only place that pushes.
+  #
+  # Deliberately has no `if: github.event_name != 'schedule'` guard, for the same
+  # reason as cargo-deny: the inputs that can break these builds live outside the
+  # repo. `rust:1-bookworm`, `node:24-bookworm-slim`, `debian:bookworm-slim`,
+  # `nginxinc/nginx-unprivileged:1.31-alpine` and `caddy:alpine` are all floating
+  # tags, and a base image that changes under an untouched Dockerfile is exactly
+  # the failure the corepack break was. No commit triggers it, so only the cron
+  # catches it.
+  #
+  # Same GHA cache scopes as release.yml, so the two workflows warm each other's
+  # layers rather than each paying for a cold Rust build.
+  docker:
+    runs-on: ubuntu-latest
+    strategy:
+      # One broken image must not hide the state of the other two.
+      fail-fast: false
+      matrix:
+        include:
+          - name: server
+            context: .
+            file: apps/server/Dockerfile
+          - name: web
+            context: .
+            file: apps/web/Dockerfile
+          # The Railway edge proxy: a Caddy build with the Cloudflare DNS plugin.
+          # Its build context is its own directory, not the repo root.
+          - name: caddy
+            context: deploy/railway
+            file: deploy/railway/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Record start
+        run: echo "DOCKER_BUILD_START=$(date +%s)" >> "$GITHUB_ENV"
+
+      - name: Build ${{ matrix.name }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          push: false
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+      - name: Report timing
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          elapsed="$(( $(date +%s) - DOCKER_BUILD_START ))"
+          echo "docker ${{ matrix.name }} image: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+  # The self-hosting Compose stack ships no Dockerfile of its own - it pins
+  # published images - so there is nothing to build, but an interpolation typo or
+  # an unknown key in it breaks every self-hoster who copies the file. `config`
+  # parses and resolves it; the placeholder values satisfy the `${VAR:?}` guards
+  # so the parse is what fails, not a missing variable.
+  docker-compose-config:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate self-hosted Compose stack
+        shell: bash
+        env:
+          DOMAIN: example.com
+          JWT_SECRET: ci-validation-only
+          DB_PASSWORD: ci-validation-only
+          MINIO_ROOT_PASSWORD: ci-validation-only
+        run: docker compose -f deploy/docker/docker-compose.yml config --quiet
+
+  # Vulnerability-database gate. This repo has four independent Cargo lockfiles
+  # and takes weekly automated Cargo bumps from Dependabot; without this job a
+  # bump could land a crate carrying a published RustSec advisory and nothing
+  # would say so. All four lockfiles are checked against the single root
+  # deny.toml — a gate that only covered the server would be most of the problem
+  # left in place.
+  #
+  # Deliberately has no `if: github.event_name != 'schedule'` guard: it is the
+  # one job that must also run on the weekly cron, because a new advisory can be
+  # published against code that has not changed.
+  #
+  # Exceptions (currently the `rsa` Marvin advisory and the two `quick-xml`
+  # advisories pinned by Tauri) live in deny.toml with a dated, written reason.
+  # Never silence a finding here.
+  cargo-deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # cargo-deny shells out to `cargo metadata`, so a toolchain is still
+      # needed even though nothing is compiled.
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Same pinned-tarball-plus-checksum pattern as the wasm-pack install in
+      # crypto-wasm: a security gate must not itself be an unpinned download.
+      - name: Install cargo-deny
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/$archive"
+          echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/$archive" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP"
+          mkdir -p "$HOME/.cargo/bin"
+          cp "$RUNNER_TEMP/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl/cargo-deny" "$HOME/.cargo/bin/cargo-deny"
+          chmod +x "$HOME/.cargo/bin/cargo-deny"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          elapsed="$(( $(date +%s) - start ))"
+          echo "cargo-deny install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # Every lockfile is checked even if an earlier one fails, so one bad bump
+      # does not hide another.
+      - name: Advisories (all four lockfiles)
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          failed=0
+          for manifest in \
+            apps/server/Cargo.toml \
+            apps/desktop/src-tauri/Cargo.toml \
+            packages/crypto/core/Cargo.toml \
+            packages/crypto/napi/Cargo.toml
+          do
+            echo "::group::cargo deny check advisories -- $manifest"
+            # --allow advisory-not-detected: one shared deny.toml spans four
+            # disjoint dependency graphs, so every ignore entry belonging to a
+            # different lockfile would otherwise warn on each run.
+            if cargo deny --manifest-path "$manifest" --config deny.toml \
+              check --allow advisory-not-detected advisories; then
+              echo "- \`$manifest\`: advisories ok" >> "$GITHUB_STEP_SUMMARY"
+            else
+              failed=1
+              echo "- \`$manifest\`: **advisories FAILED**" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            echo "::endgroup::"
+          done
+          elapsed="$(( $(date +%s) - start ))"
+          echo "cargo-deny advisories: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+          exit "$failed"

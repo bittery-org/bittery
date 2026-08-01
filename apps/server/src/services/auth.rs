@@ -36,7 +36,8 @@ use crate::{
     services::rate_limit::{
         self, generic_ip_limit, login_email_limit, login_ip_limit, rate_limited_error,
         recovery_request_limit, recovery_verify_lock_duration, recovery_verify_max_attempts,
-        signup_email_limit, signup_ip_limit, RateLimiter, WindowLimit,
+        signup_email_limit, signup_ip_limit, signup_verification_request_limit,
+        signup_verify_lock_duration, signup_verify_max_attempts, RateLimiter, WindowLimit,
     },
     services::session::{
         format_rfc3339, generate_opaque_session_token, hash_token, is_grouped_client_session,
@@ -579,7 +580,7 @@ impl FromRequestExtensions<AppState> for PublicAuthContext {
 
 pub(crate) async fn request_signup_verification(
     app_state: &AppState,
-    _request: &RequestMetadata,
+    request: &RequestMetadata,
     input: RequestSignupVerificationInput,
 ) -> Result<LogoutResponse, AppError> {
     let pool = app_state
@@ -587,6 +588,28 @@ pub(crate) async fn request_signup_verification(
         .as_ref()
         .ok_or_else(|| internal_handler_error("Database is not configured"))?;
     let normalized_email = normalize_email(&input.email);
+
+    // Two independent counters, as in `request_recovery_verification`: a composite
+    // `email:ip` key would mint a fresh budget per pair, so rotating IPs for one
+    // email (or emails from one IP) would bypass it. Each request both sends an
+    // email and mints a new code, and minting a new code resets the per-code
+    // attempt counter — so this is the outer bound on the brute-force budget, not
+    // just an email-abuse limit.
+    let limiter = app_state.rate_limiter.as_ref();
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_SIGNUP_VERIFY_REQUEST_EMAIL,
+        &hash_normalized_email(&normalized_email),
+        signup_verification_request_limit(),
+    )
+    .await?;
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_SIGNUP_VERIFY_REQUEST_IP,
+        &request_ip_key(request),
+        signup_verification_request_limit(),
+    )
+    .await?;
 
     if let Some(invitation_token) = input.invitation_token.as_deref() {
         let _ =
@@ -611,7 +634,7 @@ pub(crate) async fn request_signup_verification(
 
 pub(crate) async fn verify_signup_verification(
     app_state: &AppState,
-    _request: &RequestMetadata,
+    request: &RequestMetadata,
     input: VerifySignupVerificationInput,
 ) -> Result<VerifySignupVerificationResponse, AppError> {
     let pool = app_state
@@ -619,11 +642,48 @@ pub(crate) async fn verify_signup_verification(
         .as_ref()
         .ok_or_else(|| internal_handler_error("Database is not configured"))?;
     let normalized_email = normalize_email(&input.email);
+    let email_hash = hash_normalized_email(&normalized_email);
+    let limiter = app_state.rate_limiter.as_ref();
+
+    // Generic per-IP throttle guards against high-volume guessing spread across
+    // many email addresses, which would otherwise dodge the per-email lock.
+    enforce_window_limit(
+        limiter,
+        rate_limit::SCOPE_GENERIC_IP,
+        &request_ip_key(request),
+        generic_ip_limit(),
+    )
+    .await?;
+
+    // A correct code while locked out must still fail. Enumeration-safe: the lock
+    // is keyed on the email hash whether or not a code exists for it.
+    if limiter
+        .is_locked(rate_limit::SCOPE_SIGNUP_VERIFY, &email_hash)
+        .await?
+        .is_limited()
+    {
+        return Err(rate_limited_error());
+    }
+
+    // Reject malformed codes before touching the database, as the share flow does.
+    if !is_valid_verification_code(&input.code) {
+        return Ok(VerifySignupVerificationResponse {
+            success: false,
+            signup_verification_token: None,
+        });
+    }
 
     if let Some(invitation_token) = input.invitation_token.as_deref() {
         let _ =
             get_pending_invitation_for_signup(pool, invitation_token, &normalized_email).await?;
     }
+
+    // Captured before the attempt, which may consume the row at the per-code cap.
+    // Only failures against a genuinely pending code count toward the lockout, so
+    // a caller cannot lock an arbitrary address out of signup. The response is the
+    // same either way, so this leaks nothing about whether a code exists.
+    let had_active_verification =
+        repo_auth::has_active_signup_verification(pool, &normalized_email).await?;
 
     let success = consume_signup_verification_code(
         pool,
@@ -632,20 +692,53 @@ pub(crate) async fn verify_signup_verification(
         input.invitation_token.as_deref(),
     )
     .await?;
-    if !success {
+    if success {
+        limiter
+            .clear(rate_limit::SCOPE_SIGNUP_VERIFY, &email_hash)
+            .await?;
+        return Ok(VerifySignupVerificationResponse {
+            success: true,
+            signup_verification_token: Some(create_signup_verification_token(
+                &normalized_email,
+                input.invitation_token.as_deref(),
+            )?),
+        });
+    }
+
+    if !had_active_verification {
         return Ok(VerifySignupVerificationResponse {
             success: false,
             signup_verification_token: None,
         });
     }
 
+    // The lifetime counter lives on the limiter, keyed on the identity, so
+    // requesting a fresh code cannot reset it the way `signup_verification.attempts`
+    // does.
+    let outcome = limiter
+        .record_failure(
+            rate_limit::SCOPE_SIGNUP_VERIFY,
+            &email_hash,
+            signup_verify_max_attempts(),
+            signup_verify_lock_duration(),
+        )
+        .await?;
+
+    if outcome.is_limited() {
+        repo_auth::invalidate_pending_signup_verifications(pool, &normalized_email).await?;
+        return Err(rate_limited_error());
+    }
+
     Ok(VerifySignupVerificationResponse {
-        success: true,
-        signup_verification_token: Some(create_signup_verification_token(
-            &normalized_email,
-            input.invitation_token.as_deref(),
-        )?),
+        success: false,
+        signup_verification_token: None,
     })
+}
+
+/// Signup and recovery codes are exactly six ASCII digits
+/// (see `generate_signup_verification_code`).
+fn is_valid_verification_code(code: &str) -> bool {
+    code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub(crate) async fn signup(
@@ -2455,6 +2548,51 @@ async fn delete_user_account_data(pool: &PgPool, user_id: &str) -> Result<(), Ap
     repo_auth::delete_user_account_data(pool, user_id).await
 }
 
+/// Captures the codes that would be emailed, so tests can act as the recipient.
+///
+/// Verification codes are stored as SHA-256 digests, so the plaintext exists only
+/// here and in the outbound mail — there is nothing left in the database for a
+/// test (or an attacker with a database read) to look up.
+#[cfg(test)]
+pub(crate) mod emailed_code_capture {
+    use std::{
+        collections::HashMap,
+        sync::{Mutex, OnceLock},
+    };
+
+    fn store() -> &'static Mutex<HashMap<String, String>> {
+        static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+        STORE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    pub(crate) fn signup_key(email: &str, invitation_token: Option<&str>) -> String {
+        format!(
+            "signup|{}|{}",
+            email.to_ascii_lowercase(),
+            invitation_token.unwrap_or("")
+        )
+    }
+
+    pub(crate) fn recovery_key(email: &str) -> String {
+        format!("recovery|{}", email.to_ascii_lowercase())
+    }
+
+    pub(crate) fn record(key: String, code: &str) {
+        store()
+            .lock()
+            .expect("emailed code capture should not be poisoned")
+            .insert(key, code.to_string());
+    }
+
+    pub(crate) fn latest(key: &str) -> Option<String> {
+        store()
+            .lock()
+            .expect("emailed code capture should not be poisoned")
+            .get(key)
+            .cloned()
+    }
+}
+
 fn send_signup_verification_code(
     email: &str,
     code: &str,
@@ -2465,6 +2603,11 @@ fn send_signup_verification_code(
 			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
 		));
     }
+    #[cfg(test)]
+    emailed_code_capture::record(
+        emailed_code_capture::signup_key(email, invitation_token),
+        code,
+    );
     info!(
         email = %email,
         code = %code,
@@ -2480,6 +2623,8 @@ fn send_recovery_code(email: &str, code: &str) -> Result<(), AppError> {
 			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
 		));
     }
+    #[cfg(test)]
+    emailed_code_capture::record(emailed_code_capture::recovery_key(email), code);
     info!(
         email = %email,
         code = %code,

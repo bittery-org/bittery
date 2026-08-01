@@ -26,12 +26,24 @@ import {
 	IconLock as Lock,
 	IconMail as Mail,
 	IconShieldCheck as ShieldCheck,
+	IconTriangleAlert as TriangleAlert,
 	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import {
+	isOneTimeShareLink,
+	resolveShareAccessStage,
+	type ShareLinkInfoStatus,
+} from "@/lib/share-access-gate";
 import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
+import { useI18n } from "@/providers/i18n-provider";
+
+const MISSING_SHARE_KEY_MESSAGE =
+	"Missing decryption key. Please use the complete share link.";
+const GENERIC_DECRYPTION_ERROR_MESSAGE =
+	"Failed to decrypt the shared item. The link may be invalid or corrupted.";
 
 export const Route = createFileRoute("/share/$token")({
 	component: ShareAccessPage,
@@ -74,6 +86,7 @@ function ShareAccessPage() {
 	const { token } = Route.useParams();
 	const rpc = useRPC();
 	const rpcClient = useRPCClient();
+	const { m } = useI18n();
 
 	const [email, setEmail] = useState("");
 	const [verificationCode, setVerificationCode] = useState("");
@@ -123,7 +136,7 @@ function ShareAccessPage() {
 				setDecryptionError(
 					error instanceof Error
 						? error.message
-						: "Failed to decrypt the shared item. The link may be invalid or corrupted.",
+						: GENERIC_DECRYPTION_ERROR_MESSAGE,
 				);
 			}
 		},
@@ -139,9 +152,7 @@ function ShareAccessPage() {
 		shareKeyIv: string;
 	}) {
 		if (!shareKey) {
-			throw new Error(
-				"Missing decryption key. Please use the complete share link.",
-			);
+			throw new Error(MISSING_SHARE_KEY_MESSAGE);
 		}
 
 		const shareKeyBytes = base64ToArrayBuffer(shareKey);
@@ -156,29 +167,44 @@ function ShareAccessPage() {
 
 		return JSON.parse(decrypted) as SharedItemData;
 	}
-	const publicAccessQuery = useQuery({
-		queryKey: ["share", "public-access", token, shareKey],
-		enabled:
-			linkInfoQuery.data?.valid === true &&
-			linkInfoQuery.data.accessMode === "anyone" &&
-			!!shareKey &&
-			!decryptedItem &&
-			!decryptionError,
-		queryFn: async () => {
+	// Consuming the link is a deliberate user action, never a side effect of
+	// navigation: `share.accessPublic` increments `access_count` server-side, so
+	// firing it on mount would let a plain refresh burn a one-time link.
+	const revealMutation = useMutation({
+		mutationFn: async () => {
 			const data = await rpcClient.share.accessPublic.mutate({ token });
 			return await decryptSharedItem(data);
 		},
-		retry: false,
+		onSuccess: (item) => {
+			setDecryptionError(null);
+			setDecryptedItem(item);
+		},
+		onError: (error: Error) => {
+			console.error("Share access error:", error);
+			setDecryptionError(GENERIC_DECRYPTION_ERROR_MESSAGE);
+		},
 	});
-	const resolvedDecryptedItem = decryptedItem ?? publicAccessQuery.data ?? null;
-	const resolvedDecryptionError =
-		decryptionError ??
-		(publicAccessQuery.error
-			? "Failed to decrypt the shared item. The link may be invalid or corrupted."
-			: null);
+
+	const linkInfo = linkInfoQuery.data;
+	const linkInfoStatus: ShareLinkInfoStatus = linkInfoQuery.isLoading
+		? "loading"
+		: linkInfoQuery.error
+			? "error"
+			: "ready";
+	const stage = resolveShareAccessStage({
+		linkInfoStatus,
+		linkInfo,
+		hasShareKey: !!shareKey,
+		revealPending: revealMutation.isPending,
+		hasDecryptedItem: !!decryptedItem,
+		hasFailure: !!decryptionError,
+	});
+	const isOneTimeUse = isOneTimeShareLink(linkInfo);
+	const expiresAt =
+		linkInfo && "expiresAt" in linkInfo ? linkInfo.expiresAt : null;
 
 	// Loading state
-	if (linkInfoQuery.isLoading) {
+	if (stage === "loading") {
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 				<Card className="w-full max-w-md">
@@ -192,7 +218,7 @@ function ShareAccessPage() {
 	}
 
 	// Error state
-	if (linkInfoQuery.error) {
+	if (stage === "link-not-found" || !linkInfo) {
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 				<Card className="w-full max-w-md">
@@ -215,12 +241,10 @@ function ShareAccessPage() {
 		);
 	}
 
-	const linkInfo = linkInfoQuery.data;
-
 	// Link not valid
-	if (!linkInfo?.valid) {
+	if (stage === "link-unavailable") {
 		const reason =
-			"reason" in (linkInfo || {})
+			"reason" in linkInfo
 				? (linkInfo as { reason?: string })?.reason
 				: undefined;
 
@@ -265,8 +289,10 @@ function ShareAccessPage() {
 		);
 	}
 
-	// Decryption error
-	if (resolvedDecryptionError) {
+	// Decryption error — including a link opened without its `#` fragment key,
+	// which is caught up-front so the recipient cannot burn the link on an
+	// access that could never have decrypted.
+	if (stage === "missing-key" || stage === "failed") {
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 				<Card className="w-full max-w-md">
@@ -275,7 +301,11 @@ function ShareAccessPage() {
 							<AlertCircle className="h-6 w-6 text-destructive" />
 						</div>
 						<CardTitle>Decryption Failed</CardTitle>
-						<CardDescription>{resolvedDecryptionError}</CardDescription>
+						<CardDescription>
+							{stage === "missing-key"
+								? MISSING_SHARE_KEY_MESSAGE
+								: decryptionError}
+						</CardDescription>
 					</CardHeader>
 					<CardFooter className="justify-center">
 						<Link to="/">
@@ -288,7 +318,7 @@ function ShareAccessPage() {
 	}
 
 	// Show decrypted item
-	if (resolvedDecryptedItem) {
+	if (stage === "revealed" && decryptedItem) {
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 				<Card className="w-full max-w-lg">
@@ -298,25 +328,25 @@ function ShareAccessPage() {
 								<ShieldCheck className="h-6 w-6" />
 							</div>
 							<div>
-								<CardTitle>{resolvedDecryptedItem.title}</CardTitle>
+								<CardTitle>{decryptedItem.title}</CardTitle>
 								<CardDescription className="capitalize">
-									{resolvedDecryptedItem.category.replace("-", " ")}
+									{decryptedItem.category.replace("-", " ")}
 								</CardDescription>
 							</div>
 						</div>
 					</CardHeader>
 					<CardContent>
-						<SharedItemDisplay item={resolvedDecryptedItem} />
+						<SharedItemDisplay item={decryptedItem} />
 					</CardContent>
 					<CardFooter className="justify-between text-muted-foreground text-xs">
 						<span className="flex items-center gap-1">
 							<Lock className="h-3 w-3" />
 							End-to-end encrypted
 						</span>
-						{"expiresAt" in linkInfo && linkInfo.expiresAt && (
+						{expiresAt && (
 							<span className="flex items-center gap-1">
 								<Calendar className="h-3 w-3" />
-								Expires: {new Date(linkInfo.expiresAt).toLocaleDateString()}
+								Expires: {new Date(expiresAt).toLocaleDateString()}
 							</span>
 						)}
 					</CardFooter>
@@ -325,8 +355,9 @@ function ShareAccessPage() {
 		);
 	}
 
-	// Email-restricted mode - show email verification form
-	if (linkInfo.accessMode === "email-restricted") {
+	// Email-restricted mode - the code-entry step is itself the explicit gate:
+	// nothing is consumed until a valid 6-digit code is submitted.
+	if (stage === "email-verification") {
 		return (
 			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 				<Card className="w-full max-w-md">
@@ -406,6 +437,11 @@ function ShareAccessPage() {
 										Code sent to {email}
 									</p>
 								</div>
+								{isOneTimeUse && (
+									<OneTimeUseWarning
+										message={m.share_access_gate_one_time_warning()}
+									/>
+								)}
 								<Button
 									type="submit"
 									className="w-full"
@@ -440,17 +476,114 @@ function ShareAccessPage() {
 		);
 	}
 
-	// Anyone mode - loading access
+	// Anyone mode - access in flight after the recipient confirmed
+	if (stage === "revealing") {
+		return (
+			<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
+				<Card className="w-full max-w-md">
+					<CardContent className="flex flex-col items-center justify-center py-12">
+						<Loader2 className="h-8 w-8 animate-spin text-primary" />
+						<p className="mt-4 text-muted-foreground">
+							Decrypting shared item...
+						</p>
+					</CardContent>
+				</Card>
+			</div>
+		);
+	}
+
+	// Anyone mode - the gate. Nothing has been consumed yet; only the button
+	// below calls `share.accessPublic`.
 	return (
 		<div className="flex min-h-screen w-full items-center justify-center bg-muted/30 p-4">
 			<Card className="w-full max-w-md">
-				<CardContent className="flex flex-col items-center justify-center py-12">
-					<Loader2 className="h-8 w-8 animate-spin text-primary" />
-					<p className="mt-4 text-muted-foreground">
-						Decrypting shared item...
-					</p>
+				<CardHeader className="text-center">
+					<div className="mx-auto mb-4 flex items-center gap-2">
+						<div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+							<ShieldCheck className="h-6 w-6" />
+						</div>
+						<span className="font-bold text-xl">Bittery</span>
+					</div>
+					<CardTitle>
+						{isOneTimeUse
+							? m.share_access_gate_title_one_time()
+							: m.share_access_gate_title()}
+					</CardTitle>
+					<CardDescription>
+						{isOneTimeUse
+							? m.share_access_gate_description_one_time()
+							: m.share_access_gate_description()}
+					</CardDescription>
+				</CardHeader>
+				<CardContent className="space-y-4">
+					<dl className="divide-y rounded-lg border bg-card text-sm">
+						<div className="flex items-center justify-between gap-4 px-3 py-2">
+							<dt className="text-muted-foreground">
+								{m.share_access_gate_label_access()}
+							</dt>
+							<dd className="text-right">
+								{linkInfo.accessMode === "email-restricted"
+									? m.share_access_gate_access_email_restricted()
+									: m.share_access_gate_access_anyone()}
+							</dd>
+						</div>
+						<div className="flex items-center justify-between gap-4 px-3 py-2">
+							<dt className="text-muted-foreground">
+								{m.share_access_gate_label_usage()}
+							</dt>
+							<dd className="text-right">
+								{isOneTimeUse
+									? m.share_access_gate_usage_one_time()
+									: m.share_access_gate_usage_multi()}
+							</dd>
+						</div>
+						{expiresAt && (
+							<div className="flex items-center justify-between gap-4 px-3 py-2">
+								<dt className="text-muted-foreground">
+									{m.share_access_gate_label_expires()}
+								</dt>
+								<dd className="flex items-center gap-1 text-right">
+									<Calendar className="size-3.5 text-muted-foreground" />
+									{new Date(expiresAt).toLocaleString()}
+								</dd>
+							</div>
+						)}
+					</dl>
+					{isOneTimeUse && (
+						<OneTimeUseWarning
+							message={m.share_access_gate_one_time_warning()}
+						/>
+					)}
 				</CardContent>
+				<CardFooter className="flex-col gap-3">
+					<Button
+						type="button"
+						className="w-full"
+						onClick={() => revealMutation.mutate()}
+					>
+						<Eye className="mr-2 h-4 w-4" />
+						{isOneTimeUse
+							? m.share_access_gate_action_reveal_one_time()
+							: m.share_access_gate_action_reveal()}
+					</Button>
+					<p className="flex items-start gap-1.5 text-muted-foreground text-xs">
+						<Lock aria-hidden className="mt-0.5 size-3 shrink-0" />
+						{m.share_access_gate_privacy_note()}
+					</p>
+				</CardFooter>
 			</Card>
+		</div>
+	);
+}
+
+function OneTimeUseWarning({ message }: { message: string }) {
+	return (
+		<div className="flex gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm">
+			<TriangleAlert
+				aria-hidden
+				className="mt-0.5 size-4 shrink-0 text-warning"
+			/>
+			<p>{message}</p>
 		</div>
 	);
 }

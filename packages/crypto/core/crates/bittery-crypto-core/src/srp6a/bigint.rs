@@ -170,6 +170,19 @@ impl SrpInt {
     }
 
     /// Modular exponentiation
+    ///
+    /// Not constant-time: `num_bigint::BigUint::modpow` uses a variable-window
+    /// sliding-window exponentiation whose memory access pattern and iteration
+    /// count depend on the exponent, and the intermediate multiplications are
+    /// not masked. Most call sites pass a secret exponent (the ephemerals `a`
+    /// and `b`, the password-derived `x`, and `a + u*x`).
+    ///
+    /// This is accepted for now because the alternative is replacing the bignum
+    /// backend with a constant-time one, which is a large change to the most
+    /// safety-critical arithmetic in the crate. The ephemeral exponents are
+    /// freshly drawn per session, and the SRP handshake runs across a network
+    /// boundary rather than co-resident with an attacker's measurement code.
+    /// Revisit if SRP ever runs somewhere an attacker can observe the process.
     pub fn mod_pow(&self, exponent: &SrpInt, modulus: &SrpInt) -> Self {
         Self {
             value: self.value.modpow(&exponent.value, &modulus.value),
@@ -280,6 +293,60 @@ mod tests {
         let modulus = SrpInt::with_length(BigUint::from(7u32), 2);
         let result = a.subtract_mod(&b, &modulus);
         assert_eq!(result.value(), &BigUint::from(5u32));
+    }
+
+    #[test]
+    fn test_to_hex_zero_pads_values_shorter_than_the_modulus() {
+        // g = 2 in the 1024-bit group: one significant byte, hashed as 128.
+        let g = SrpInt::with_length(BigUint::from(2u32), 256);
+        let hex = g.to_hex();
+
+        assert_eq!(hex.len(), 256);
+        assert!(hex.ends_with("02"));
+        assert!(hex[..254].chars().all(|c| c == '0'));
+        assert_eq!(hex::decode(&hex).unwrap().len(), 128);
+    }
+
+    #[test]
+    fn test_mod_pow_result_is_padded_to_the_modulus_width() {
+        // 2^3 mod 1000 = 8, whose natural big-endian encoding is one byte while
+        // the modulus is 32. A missing pad here would silently shorten every
+        // hash input derived from S, B or v.
+        let base = SrpInt::from(2u32);
+        let exp = SrpInt::from(3u32);
+        let modulus = SrpInt::with_length(BigUint::from(1000u32), 64);
+
+        let result = base.mod_pow(&exp, &modulus);
+
+        assert_eq!(result.value(), &BigUint::from(8u32));
+        assert_eq!(
+            result.to_hex(),
+            "0000000000000000000000000000000000000000000000000000000000000008"
+        );
+    }
+
+    #[test]
+    fn test_equals_pads_operands_of_different_byte_length() {
+        // Exercises the pad-then-ct_eq path: same numeric value, different
+        // natural byte lengths.
+        let short = SrpInt::from_hex("ff").unwrap();
+        let long = SrpInt::from_hex("00000000ff").unwrap();
+        let shifted = SrpInt::from_hex("ff00").unwrap();
+
+        assert!(short.equals(&long));
+        assert!(long.equals(&short));
+        assert!(!short.equals(&shifted));
+    }
+
+    #[test]
+    fn test_equals_treats_zero_and_empty_encoding_as_equal() {
+        // `BigUint::to_bytes_be` yields a single 0x00 byte for zero; make sure
+        // the max_len == 0 short-circuit and the padded compare agree.
+        let a = SrpInt::zero();
+        let b = SrpInt::from_hex("0000").unwrap();
+
+        assert!(a.equals(&b));
+        assert!(!a.equals(&SrpInt::from(1u32)));
     }
 
     #[test]

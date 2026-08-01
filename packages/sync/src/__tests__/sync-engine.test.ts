@@ -77,7 +77,7 @@ describe("sync engine regressions", () => {
 						query: async () => ({
 							id: "vault_1",
 							name: "Vault",
-							type: "personal",
+							vaultType: "personal",
 							icon: null,
 							imageUrl: null,
 						}),
@@ -161,7 +161,7 @@ describe("sync engine regressions", () => {
 						query: async () => ({
 							id: "vault_1",
 							name: "Vault",
-							type: "personal",
+							vaultType: "personal",
 							icon: null,
 							imageUrl: null,
 						}),
@@ -221,7 +221,7 @@ describe("sync engine regressions", () => {
 						query: async () => ({
 							id: "vault_1",
 							name: "Vault",
-							type: "personal",
+							vaultType: "personal",
 							icon: null,
 							imageUrl: null,
 						}),

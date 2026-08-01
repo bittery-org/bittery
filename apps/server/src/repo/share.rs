@@ -5,13 +5,14 @@ use crate::db::models::{
 };
 use crate::error::AppError;
 use crate::repo::common::generate_resource_id;
+use crate::services::session::hash_token;
 
 pub async fn load_share_links_for_item(
     pool: &PgPool,
     item_id: &str,
 ) -> Result<Vec<DbShareLinkRow>, AppError> {
     query_as::<_, DbShareLinkRow>(
-		"SELECT sl.id, sl.item_id, sl.created_by_id, sl.token, sl.status::text AS status, sl.access_mode::text AS access_mode, sl.is_one_time_use, sl.access_count, sl.max_access_count, sl.expires_at, sl.created_at, sl.last_accessed_at, i.vault_id FROM share_link sl INNER JOIN item i ON i.id = sl.item_id WHERE sl.item_id = $1 ORDER BY sl.created_at DESC",
+		"SELECT sl.id, sl.item_id, sl.created_by_id, sl.status::text AS status, sl.access_mode::text AS access_mode, sl.is_one_time_use, sl.access_count, sl.max_access_count, sl.expires_at, sl.created_at, sl.last_accessed_at, i.vault_id FROM share_link sl INNER JOIN item i ON i.id = sl.item_id WHERE sl.item_id = $1 ORDER BY sl.created_at DESC",
 	)
 	.bind(item_id)
 	.fetch_all(pool)
@@ -19,14 +20,16 @@ pub async fn load_share_links_for_item(
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load share links"); AppError::internal("Failed to load share links") })
 }
 
+/// `token` is the caller-supplied plaintext; only its digest is ever compared,
+/// because `share_link.token_hash` never holds the token itself.
 pub async fn load_public_share_link_by_token(
     pool: &PgPool,
     token: &str,
 ) -> Result<Option<DbPublicShareLinkRow>, AppError> {
     query_as::<_, DbPublicShareLinkRow>(
-		"SELECT id, created_by_id, token, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token = $1 LIMIT 1",
+		"SELECT id, created_by_id, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token_hash = $1 LIMIT 1",
 	)
-	.bind(token)
+	.bind(hash_token(token))
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link"); AppError::internal("Failed to load public share link") })

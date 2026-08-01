@@ -1,11 +1,13 @@
 import { useRPCClient } from "@bittery/shared/rpc";
-import { Badge, Button, cn, toast } from "@bittery/ui";
+import { Badge, Button, cn, copyWithToast, toast } from "@bittery/ui";
 import {
 	IconClock as Clock,
+	IconCopy as Copy,
 	IconArrowLeftRight as RefreshCw,
 	IconX as X,
 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
+import { useState } from "react";
 import { formatDate } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
@@ -32,6 +34,12 @@ export function PendingInvitationsList({
 	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
+	// Resending rotates the token, so the server hands back a brand new link that
+	// exists nowhere else. Keep it visible until the admin has copied it.
+	const [resentLink, setResentLink] = useState<{
+		invitationId: string;
+		url: string;
+	} | null>(null);
 
 	const getRoleLabel = (role: string) => {
 		switch (role) {
@@ -61,7 +69,11 @@ export function PendingInvitationsList({
 	const resendMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
 			rpcClient.team.invitations.resend.mutate(input),
-		onSuccess: async () => {
+		onSuccess: async (data) => {
+			setResentLink({
+				invitationId: data.invitationId,
+				url: `${window.location.origin}/invite/${data.token}`,
+			});
 			toast.success(m.team_invitations_toast_resent());
 			await invalidator.invalidateTeam();
 		},
@@ -190,6 +202,38 @@ export function PendingInvitationsList({
 								</div>
 							)}
 						</div>
+
+						{resentLink?.invitationId === invitation.id && (
+							<div className="mt-3 rounded-md border bg-muted/40 p-3">
+								<p className="font-medium text-sm">
+									{m.team_invitations_resend_link_title()}
+								</p>
+								<p className="mt-1 text-muted-foreground text-xs">
+									{m.team_invitations_resend_link_hint()}
+								</p>
+								<p className="mt-2 break-all text-muted-foreground text-xs">
+									{resentLink.url}
+								</p>
+								<Button
+									type="button"
+									variant="outline"
+									size="sm"
+									className="mt-3"
+									onClick={() =>
+										copyWithToast(
+											resentLink.url,
+											m.team_invitations_copy_label(),
+											{
+												showAutoClearMessage: false,
+											},
+										)
+									}
+								>
+									<Copy className="mr-2 h-4 w-4" />
+									{m.team_invitations_action_copy()}
+								</Button>
+							</div>
+						)}
 					</div>
 				);
 			})}

@@ -25,7 +25,13 @@ export interface TestUser {
 }
 
 /**
- * Generate a unique test user for isolation
+ * Generate a unique test user for isolation.
+ *
+ * The email must stay per-run unique - do not replace it with a fixed fixture
+ * address. Signup-code verification keeps a *lifetime* wrong-code counter keyed
+ * on the email hash which requesting a fresh code deliberately does not reset
+ * (`RATE_LIMIT_SIGNUP_VERIFY_MAX`, see apps/server/src/services/rate_limit.rs),
+ * so a reused address accumulates failures across runs until it is locked out.
  */
 export function generateTestUser(): TestUser {
 	const uniqueId = nanoid(8);
@@ -309,7 +315,13 @@ export const test = base.extend<{
 		const bitteryPage = new BitteryPage(page);
 		await use(bitteryPage);
 	},
-	testUser: async (_fixtures, use) => {
+	// Playwright reads the first parameter's destructuring pattern to work out a
+	// fixture's dependencies, so it must literally be a destructuring pattern.
+	// A named parameter (`_fixtures`) makes Playwright reject the whole file at
+	// load time ("First argument must use the object destructuring pattern"),
+	// which collects zero tests from every spec that imports this module.
+	// biome-ignore lint/correctness/noEmptyPattern: required by Playwright for a fixture with no dependencies
+	testUser: async ({}, use) => {
 		const user = generateTestUser();
 		await use(user);
 	},

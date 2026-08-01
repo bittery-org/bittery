@@ -3,8 +3,8 @@ import { useI18n } from "@bittery/i18n/react";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	IconCalendar,
+	IconCircleAlert,
 	IconClock,
-	IconCopy,
 	IconEarth,
 	IconMail,
 	IconEye,
@@ -30,7 +30,6 @@ import { Badge } from "../badge";
 import { Button } from "../button";
 import { Card, CardContent } from "../card";
 import { cn } from "../../lib/utils";
-import { copyWithToast } from "../clipboard";
 import {
 	Dialog,
 	DialogContent,
@@ -48,7 +47,6 @@ interface ShareLinksListProps {
 
 interface ShareLinkData {
 	id: string;
-	token: string;
 	status: "active" | "expired" | "exhausted" | "revoked";
 	accessMode: "anyone" | "email-restricted";
 	isOneTimeUse: boolean;
@@ -118,15 +116,6 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		}),
 		enabled: !!selectedLink && showAccessLogs,
 	});
-
-	const handleCopyLink = (token: string) => {
-		const baseShareUrl = linksQuery.data?.baseShareUrl || "";
-		const shareUrl = `${baseShareUrl}${token}`;
-		copyWithToast(shareUrl, m.sharing_common_link_label(), {
-			autoClearMs: 0,
-			successMessage: m.sharing_links_list_toast_copy_warning(),
-		});
-	};
 
 	const getStatusLabel = (status: ShareLinkStatus) => {
 		switch (status) {
@@ -204,10 +193,20 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		);
 	}
 
+	// Mapped field-by-field on purpose: the share token must never be threaded
+	// into the client model. A token without its fragment key is a dead link,
+	// so there is nothing this list could usefully do with it.
 	const links: ShareLinkData[] = (linksQuery.data?.links || []).map((link) => ({
-		...link,
+		id: link.id,
 		status: normalizeShareLinkStatus(link.status),
 		accessMode: normalizeShareLinkAccessMode(link.accessMode),
+		isOneTimeUse: link.isOneTimeUse,
+		accessCount: link.accessCount,
+		maxAccessCount: link.maxAccessCount,
+		allowedEmails: link.allowedEmails,
+		expiresAt: link.expiresAt,
+		createdAt: link.createdAt,
+		lastAccessedAt: link.lastAccessedAt,
 	}));
 
 	if (links.length === 0) {
@@ -226,6 +225,13 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	return (
 		<>
 			<div className="space-y-3">
+				<p className="flex items-start gap-2 text-muted-foreground text-xs">
+					<IconCircleAlert
+						aria-hidden
+						className="mt-px size-3.5 shrink-0"
+					/>
+					<span>{m.sharing_links_list_copy_once_explainer()}</span>
+				</p>
 				{links.map((link) => (
 					<Card
 						key={link.id}
@@ -316,16 +322,8 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 									<Button
 										size="sm"
 										variant="ghost"
-										onClick={() => handleCopyLink(link.token)}
-										title={m.sharing_links_list_action_copy_link()}
-									>
-										<IconCopy className="h-4 w-4" />
-									</Button>
-									<Button
-										size="sm"
-										variant="ghost"
 										onClick={() => {
-											setSelectedLink(link as ShareLinkData);
+											setSelectedLink(link);
 											setShowAccessLogs(true);
 										}}
 										title={m.sharing_links_list_action_view_access_logs()}

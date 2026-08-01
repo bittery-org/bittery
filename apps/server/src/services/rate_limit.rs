@@ -31,6 +31,9 @@ pub const SCOPE_LOGIN_IP: &str = "auth_login_ip";
 pub const SCOPE_LOGIN_EMAIL: &str = "auth_login_email";
 pub const SCOPE_SIGNUP_IP: &str = "auth_signup_ip";
 pub const SCOPE_SIGNUP_EMAIL: &str = "auth_signup_email";
+pub const SCOPE_SIGNUP_VERIFY_REQUEST_EMAIL: &str = "auth_signup_verify_request_email";
+pub const SCOPE_SIGNUP_VERIFY_REQUEST_IP: &str = "auth_signup_verify_request_ip";
+pub const SCOPE_SIGNUP_VERIFY: &str = "auth_signup_verify";
 pub const SCOPE_RECOVERY_REQUEST_EMAIL: &str = "auth_recovery_request_email";
 pub const SCOPE_RECOVERY_REQUEST_IP: &str = "auth_recovery_request_ip";
 pub const SCOPE_RECOVERY_VERIFY: &str = "auth_recovery_verify";
@@ -99,6 +102,17 @@ pub fn signup_email_limit() -> WindowLimit {
     }
 }
 
+/// Caps how often a signup verification code may be *requested*. Each request
+/// sends an email and mints a fresh code, so this is both an email-abuse limit
+/// and the outer bound on how many independent codes an attacker can guess
+/// against (the per-email lockout below caps guesses within that budget).
+pub fn signup_verification_request_limit() -> WindowLimit {
+    WindowLimit {
+        max: env_i64("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", 5),
+        window: ONE_HOUR,
+    }
+}
+
 pub fn recovery_request_limit() -> WindowLimit {
     WindowLimit {
         max: env_i64("RATE_LIMIT_RECOVERY_REQUEST", 5),
@@ -119,6 +133,20 @@ pub fn share_create_daily_limit() -> WindowLimit {
         max: env_i64("SHARE_LINK_DAILY_LIMIT", 50),
         window: ONE_DAY,
     }
+}
+
+pub fn signup_verify_max_attempts() -> i64 {
+    // Lifetime lockout threshold for signup-code guessing, keyed on the email
+    // hash rather than the code row. The per-code database cap
+    // (`signup_verification.max_attempts`, default 5) resets whenever a new code
+    // is requested, so on its own it bounds guesses per code, not per identity.
+    // This limiter is what makes the ~19.8-bit code space unguessable.
+    env_i64("RATE_LIMIT_SIGNUP_VERIFY_MAX", 10)
+}
+
+pub fn signup_verify_lock_duration() -> Duration {
+    let minutes = env_i64("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", 15);
+    Duration::from_secs((minutes as u64) * 60)
 }
 
 pub fn recovery_verify_max_attempts() -> i64 {

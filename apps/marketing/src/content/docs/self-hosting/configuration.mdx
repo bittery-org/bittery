@@ -53,7 +53,7 @@ to come from the proxy, collapsing all clients onto one shared budget.
 
 ### Tuning limits
 
-Override the maximum request counts below. The time windows are fixed in code; only the counts (and the recovery lockout duration) are configurable.
+Override the maximum request counts below. The time windows are fixed in code; only the counts (and the two lockout durations) are configurable.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -61,10 +61,17 @@ Override the maximum request counts below. The time windows are fixed in code; o
 | `RATE_LIMIT_LOGIN_EMAIL` | `10` | Login attempts per 15 minutes per email |
 | `RATE_LIMIT_SIGNUP_IP` | `10` | Signups per hour per IP |
 | `RATE_LIMIT_SIGNUP_EMAIL` | `5` | Signups per hour per email |
+| `RATE_LIMIT_SIGNUP_VERIFY_REQUEST` | `5` | Signup verification code requests per hour, counted independently per email and per IP |
+| `RATE_LIMIT_SIGNUP_VERIFY_MAX` | `10` | Failed signup verification code guesses per email before lockout |
+| `RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES` | `15` | Signup verification lockout duration in minutes |
 | `RATE_LIMIT_RECOVERY_REQUEST` | `5` | Recovery requests per hour |
 | `RATE_LIMIT_RECOVERY_VERIFY_MAX` | `5` | Recovery verification attempts before lockout |
 | `RATE_LIMIT_RECOVERY_LOCK_MINUTES` | `15` | Recovery lockout duration in minutes |
 | `RATE_LIMIT_AUTH_IP` | `30` | Requests per 15 minutes per IP for other auth endpoints |
+
+<Callout type="info">
+`RATE_LIMIT_SIGNUP_VERIFY_MAX` counts failed guesses against the email address, not against a single code, and **requesting a new verification code does not reset it**. That is deliberate: the per-code counter in the database does reset with every new code, so without this an attacker could buy a fresh set of guesses just by asking for another email. The count clears only on a successful verification or once the `RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES` lockout has elapsed — a locked-out user has to wait the window out, and sending themselves another code will not help.
+</Callout>
 
 ## Object storage (S3-compatible)
 

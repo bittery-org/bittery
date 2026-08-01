@@ -152,9 +152,19 @@ npx playwright test --headed --slow-mo=1000
 ## Test Data
 
 Tests use isolated test data:
-- **Test user:** `test-extension-save@bittery.test`
+- **Test user:** `e2e-extension-save-<random>@test.bittery.com`, generated per
+  run. Do not pin this to a fixed address: signup-code verification keeps a
+  lifetime wrong-code counter keyed on the email hash that requesting a new code
+  does not reset, so a reused address eventually locks itself out.
 - **Test vaults:** Auto-created during test setup
 - **Test credentials:** Unique per test to avoid conflicts
+
+## Rate limits
+
+The API server is started by `playwright.config.ts` with the E2E-only
+`RATE_LIMIT_*` budgets in `apps/web/tests/e2e-server-env.ts`. A whole run comes
+from one client IP, which would otherwise exhaust the per-IP auth limits partway
+through and surface as `Too many requests`.
 
 ## Known Issues
 

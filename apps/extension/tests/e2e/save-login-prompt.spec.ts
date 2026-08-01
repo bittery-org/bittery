@@ -12,11 +12,20 @@
  * - Database must be running
  */
 
+import { randomUUID } from "node:crypto";
 import { type BrowserContext, expect, type Page, test } from "@playwright/test";
 
-// Test user credentials
+// Test user credentials.
+//
+// The email MUST be generated per run, never a fixed literal. Signup-code
+// verification keeps a lifetime wrong-code counter keyed on the email hash that
+// requesting a fresh code deliberately does not reset
+// (RATE_LIMIT_SIGNUP_VERIFY_MAX in apps/server/src/services/rate_limit.rs), so a
+// reused address accumulates failures across runs and eventually locks itself
+// out semi-permanently. This matches `generateTestUser()` in
+// apps/web/tests/fixtures/test-fixtures.ts.
 const TEST_USER = {
-	email: "test-extension-save@bittery.test",
+	email: `e2e-extension-save-${randomUUID().slice(0, 8)}@test.bittery.com`,
 	password: "TestPassword123!@#",
 	masterPassword: "MasterPass123!@#",
 };

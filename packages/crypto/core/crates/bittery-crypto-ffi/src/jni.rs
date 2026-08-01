@@ -2,14 +2,30 @@
 //!
 //! This module provides JNI-compatible functions that wrap the FFI functions
 //! for use with React Native on Android.
+//!
+//! # Wiping key material
+//!
+//! Rust owns only the copies it makes on this side of the boundary, and those
+//! are wiped. Two things are outside its reach:
+//!
+//! * A `java.lang.String` argument lives on the JVM heap. `JNIEnv::get_string`
+//!   copies it into a Rust `String` (the copy is wiped here), but neither the
+//!   original nor the temporary buffer the JNI runtime hands out during the copy
+//!   can be cleared from Rust.
+//! * A `jstring` returned from these functions has been copied into the JVM heap
+//!   by `JNIEnv::new_string`. It is garbage-collected and cannot be wiped from
+//!   Rust; clearing it is the Kotlin/Java caller's problem.
 
 #![cfg(target_os = "android")]
 
 use ::jni::objects::{JClass, JObject, JString, JValue};
 use ::jni::sys::{jboolean, jint, jlong, JNI_FALSE, JNI_TRUE};
 use ::jni::JNIEnv;
+use zeroize::{Zeroize, Zeroizing};
 
-use crate::*;
+// This module reimplements the crypto calls against the JNI types rather than
+// wrapping the `extern "C"` surface in lib.rs, so there is nothing to import
+// from the crate root. A glob import here would only mask that.
 
 // ============================================================================
 // Helper Functions
@@ -19,6 +35,19 @@ fn get_string(env: &mut JNIEnv, s: JString) -> Option<String> {
     env.get_string(&s).ok().map(|s| s.into())
 }
 
+/// Copy a `java.lang.String` argument that carries secret material into a Rust
+/// `String` that is wiped when it goes out of scope.
+///
+/// Only the Rust-side copy is wiped; see the module docs for what stays on the
+/// JVM heap.
+fn get_secret_string(env: &mut JNIEnv, s: JString) -> Option<Zeroizing<String>> {
+    get_string(env, s).map(Zeroizing::new)
+}
+
+/// Build a `jstring`.
+///
+/// The bytes are copied into the JVM heap, so a secret passed here exists in two
+/// places from this point on and only the Rust-side copy can be wiped.
 fn new_string<'a>(env: &mut JNIEnv<'a>, s: &str) -> JString<'a> {
     env.new_string(s).unwrap_or_else(|_| JString::default())
 }
@@ -163,11 +192,11 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     algorithm: JString<'a>,
     iterations: jint,
 ) -> JObject<'a> {
-    let password_str = match get_string(&mut env, password) {
+    let password_str = match get_secret_string(&mut env, password) {
         Some(s) => s,
         None => return create_derived_keys_result(&mut env, None, None, Some("Invalid password")),
     };
-    let secret_str = match get_string(&mut env, secret_key) {
+    let secret_str = match get_secret_string(&mut env, secret_key) {
         Some(s) => s,
         None => {
             return create_derived_keys_result(&mut env, None, None, Some("Invalid secret key"))
@@ -199,9 +228,12 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
 
     match derive_keys(&password_str, &secret_str, &email_str, &profile) {
         Ok(keys) => {
-            let auth_key = STANDARD.encode(&keys.auth_key);
-            let muk = STANDARD.encode(&keys.master_unlock_key);
-            create_derived_keys_result(&mut env, Some(&auth_key), Some(&muk), None)
+            let mut auth_key = STANDARD.encode(&keys.auth_key);
+            let mut muk = STANDARD.encode(&keys.master_unlock_key);
+            let result = create_derived_keys_result(&mut env, Some(&auth_key), Some(&muk), None);
+            auth_key.zeroize();
+            muk.zeroize();
+            result
         }
         Err(e) => create_derived_keys_result(&mut env, None, None, Some(&e.to_string())),
     }
@@ -218,13 +250,13 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     plaintext: JString<'a>,
     key_base64: JString<'a>,
 ) -> JObject<'a> {
-    let plaintext_str = match get_string(&mut env, plaintext) {
+    let plaintext_str = match get_secret_string(&mut env, plaintext) {
         Some(s) => s,
         None => {
             return create_encrypt_result(&mut env, None, None, None, Some("Invalid plaintext"))
         }
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return create_encrypt_result(&mut env, None, None, None, Some("Invalid key")),
     };
@@ -233,7 +265,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::encrypt;
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return create_encrypt_result(
                 &mut env,
@@ -278,7 +310,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid algorithm"),
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid key"),
     };
@@ -287,7 +319,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::{decrypt, EncryptedData};
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => return new_string(&mut env, &format!("ERROR:Invalid key base64: {}", e)),
     };
 
@@ -298,7 +330,11 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     };
 
     match decrypt(&data, &key) {
-        Ok(plaintext) => new_string(&mut env, &plaintext),
+        Ok(mut plaintext) => {
+            let result = new_string(&mut env, &plaintext);
+            plaintext.zeroize();
+            result
+        }
         Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
     }
 }
@@ -317,13 +353,13 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     version: jlong,
     user_id: JString<'a>,
 ) -> JObject<'a> {
-    let plaintext_str = match get_string(&mut env, plaintext) {
+    let plaintext_str = match get_secret_string(&mut env, plaintext) {
         Some(s) => s,
         None => {
             return create_encrypt_result(&mut env, None, None, None, Some("Invalid plaintext"))
         }
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return create_encrypt_result(&mut env, None, None, None, Some("Invalid key")),
     };
@@ -352,7 +388,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::{encrypt_with_aad, AadContext};
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return create_encrypt_result(
                 &mut env,
@@ -412,7 +448,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid algorithm"),
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid key"),
     };
@@ -437,7 +473,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::{decrypt_with_aad, AadContext, EncryptedData};
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => return new_string(&mut env, &format!("ERROR:Invalid key base64: {}", e)),
     };
 
@@ -456,7 +492,11 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     };
 
     match decrypt_with_aad(&data, &key, &context) {
-        Ok(plaintext) => new_string(&mut env, &plaintext),
+        Ok(mut plaintext) => {
+            let result = new_string(&mut env, &plaintext);
+            plaintext.zeroize();
+            result
+        }
         Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
     }
 }
@@ -471,8 +511,17 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use base64::{engine::general_purpose::STANDARD, Engine};
     use bittery_crypto_core::generate_encryption_key;
 
-    let key = generate_encryption_key();
-    new_string(&mut env, &STANDARD.encode(&key))
+    let mut key = generate_encryption_key();
+    // `as_slice()` and not `key`: the key is a `[u8; 32]`, so passing it by
+    // value would copy the key material onto the stack for the duration of
+    // `encode` and leave that copy unwiped. Borrowing as a slice is what
+    // `clippy::needless_borrows_for_generic_args` wants and keeps the single
+    // wipeable copy.
+    let mut encoded = STANDARD.encode(key.as_slice());
+    key.zeroize();
+    let result = new_string(&mut env, &encoded);
+    encoded.zeroize();
+    result
 }
 
 // ============================================================================
@@ -488,6 +537,8 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
 ) -> JObject<'a> {
     use bittery_crypto_core::generate_rsa_key_pair;
 
+    // `RsaKeyPair` is `ZeroizeOnDrop` in the core, so the PKCS#8 private key is
+    // wiped when `key_pair` drops at the end of this match.
     match generate_rsa_key_pair() {
         Ok(key_pair) => create_rsa_keypair_result(
             &mut env,
@@ -506,7 +557,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     plaintext: JString<'a>,
     public_key_pem: JString<'a>,
 ) -> JString<'a> {
-    let plaintext_str = match get_string(&mut env, plaintext) {
+    let plaintext_str = match get_secret_string(&mut env, plaintext) {
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid plaintext"),
     };
@@ -534,7 +585,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid ciphertext"),
     };
-    let pem = match get_string(&mut env, private_key_pem) {
+    let pem = match get_secret_string(&mut env, private_key_pem) {
         Some(s) => s,
         None => return new_string(&mut env, "ERROR:Invalid private key"),
     };
@@ -542,7 +593,11 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::rsa_decrypt;
 
     match rsa_decrypt(&ciphertext_str, &pem) {
-        Ok(plaintext) => new_string(&mut env, &plaintext),
+        Ok(mut plaintext) => {
+            let result = new_string(&mut env, &plaintext);
+            plaintext.zeroize();
+            result
+        }
         Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
     }
 }
@@ -559,7 +614,10 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     _class: JClass<'a>,
 ) -> JString<'a> {
     use bittery_crypto_core::generate_secret_key;
-    new_string(&mut env, &generate_secret_key())
+    let mut secret_key = generate_secret_key();
+    let result = new_string(&mut env, &secret_key);
+    secret_key.zeroize();
+    result
 }
 
 #[no_mangle]
@@ -570,7 +628,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     _class: JClass<'a>,
     secret_key: JString<'a>,
 ) -> jboolean {
-    let key = match get_string(&mut env, secret_key) {
+    let key = match get_secret_string(&mut env, secret_key) {
         Some(s) => s,
         None => return JNI_FALSE,
     };
@@ -592,11 +650,12 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     _class: JClass<'a>,
     secret_key: JString<'a>,
 ) -> JString<'a> {
-    let key = match get_string(&mut env, secret_key) {
+    let key = match get_secret_string(&mut env, secret_key) {
         Some(s) => s,
         None => return JString::default(),
     };
 
+    // The hint is the deliberately public prefix of the secret key.
     use bittery_crypto_core::get_secret_key_hint;
     new_string(&mut env, &get_secret_key_hint(&key))
 }
@@ -687,7 +746,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         Some(s) => s,
         None => return JString::default(),
     };
-    let password_str = match get_string(&mut env, password) {
+    let password_str = match get_secret_string(&mut env, password) {
         Some(s) => s,
         None => return JString::default(),
     };
@@ -701,7 +760,11 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         None
     };
     match client.derive_safe_private_key(&salt_str, &password_str, iterations_opt) {
-        Ok(private_key) => new_string(&mut env, &private_key),
+        Ok(mut private_key) => {
+            let result = new_string(&mut env, &private_key);
+            private_key.zeroize();
+            result
+        }
         Err(_) => JString::default(),
     }
 }
@@ -719,15 +782,20 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         return JString::default();
     }
 
-    let pk = match get_string(&mut env, private_key) {
+    let pk = match get_secret_string(&mut env, private_key) {
         Some(s) => s,
         None => return JString::default(),
     };
 
     use bittery_crypto_core::srp6a::SrpClient;
     let client = unsafe { &*(handle as *const SrpClient) };
+    // The verifier is password-equivalent, so it is treated as secret material.
     match client.derive_verifier(&pk) {
-        Ok(verifier) => new_string(&mut env, &verifier),
+        Ok(mut verifier) => {
+            let result = new_string(&mut env, &verifier);
+            verifier.zeroize();
+            result
+        }
         Err(_) => JString::default(),
     }
 }
@@ -746,6 +814,8 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
 
     use bittery_crypto_core::srp6a::SrpClient;
     let client = unsafe { &*(handle as *const SrpClient) };
+    // `Ephemeral` is `ZeroizeOnDrop` in the core, so the secret ephemeral is
+    // wiped when it drops at the end of this function.
     let ephemeral = client.generate_ephemeral();
     create_ephemeral_result(&mut env, &ephemeral.public, &ephemeral.secret)
 }
@@ -767,7 +837,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         return create_session_result(&mut env, None, None, Some("Null handle"));
     }
 
-    let cse = match get_string(&mut env, client_secret_ephemeral) {
+    let cse = match get_secret_string(&mut env, client_secret_ephemeral) {
         Some(s) => s,
         None => {
             return create_session_result(
@@ -797,7 +867,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         Some(s) => s,
         None => return create_session_result(&mut env, None, None, Some("Invalid username")),
     };
-    let pk = match get_string(&mut env, private_key) {
+    let pk = match get_secret_string(&mut env, private_key) {
         Some(s) => s,
         None => return create_session_result(&mut env, None, None, Some("Invalid private key")),
     };
@@ -805,6 +875,8 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::srp6a::SrpClient;
     let client = unsafe { &*(handle as *const SrpClient) };
 
+    // `Session` is `ZeroizeOnDrop` in the core, so the session key is wiped when
+    // it drops at the end of this match.
     match client.derive_session(&cse, &spe, &salt_str, &username_str, &pk) {
         Ok(session) => {
             create_session_result(&mut env, Some(&session.key), Some(&session.proof), None)
@@ -849,6 +921,8 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     };
 
     let client = unsafe { &*(handle as *const SrpClient) };
+    // `Session` is `ZeroizeOnDrop` in the core, so moving the session key into it
+    // is what wipes this crate's copy.
     let session = Session { key, proof };
 
     match client.verify_session(&cpe, &session, &server_proof) {
@@ -920,7 +994,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         return create_ephemeral_result(&mut env, "", "");
     }
 
-    let v = match get_string(&mut env, verifier) {
+    let v = match get_secret_string(&mut env, verifier) {
         Some(s) => s,
         None => return create_ephemeral_result(&mut env, "", ""),
     };
@@ -951,7 +1025,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         return create_session_result(&mut env, None, None, Some("Null handle"));
     }
 
-    let sse = match get_string(&mut env, server_secret_ephemeral) {
+    let sse = match get_secret_string(&mut env, server_secret_ephemeral) {
         Some(s) => s,
         None => {
             return create_session_result(
@@ -981,7 +1055,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         Some(s) => s,
         None => return create_session_result(&mut env, None, None, Some("Invalid username")),
     };
-    let v = match get_string(&mut env, verifier) {
+    let v = match get_secret_string(&mut env, verifier) {
         Some(s) => s,
         None => return create_session_result(&mut env, None, None, Some("Invalid verifier")),
     };
@@ -1000,6 +1074,8 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     use bittery_crypto_core::srp6a::SrpServer;
     let server = unsafe { &*(handle as *const SrpServer) };
 
+    // `Session` is `ZeroizeOnDrop` in the core, so the session key is wiped when
+    // it drops at the end of this match.
     match server.derive_session(&sse, &cpe, &salt_str, &username_str, &v, &csp) {
         Ok(session) => {
             create_session_result(&mut env, Some(&session.key), Some(&session.proof), None)
@@ -1111,13 +1187,13 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     algorithm: JString<'a>,
     iterations: jint,
 ) -> JObject<'a> {
-    let password_str = match get_string(&mut env, password) {
+    let password_str = match get_secret_string(&mut env, password) {
         Some(s) => s,
         None => {
             return create_cp_derived_keys_result(&mut env, None, None, Some("Invalid password"))
         }
     };
-    let secret_str = match get_string(&mut env, secret_key) {
+    let secret_str = match get_secret_string(&mut env, secret_key) {
         Some(s) => s,
         None => {
             return create_cp_derived_keys_result(&mut env, None, None, Some("Invalid secret key"))
@@ -1153,9 +1229,12 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     };
     match derive_keys(&password_str, &secret_str, &email_str, &profile) {
         Ok(keys) => {
-            let auth_key = STANDARD.encode(&keys.auth_key);
-            let muk = STANDARD.encode(&keys.master_unlock_key);
-            create_cp_derived_keys_result(&mut env, Some(&auth_key), Some(&muk), None)
+            let mut auth_key = STANDARD.encode(&keys.auth_key);
+            let mut muk = STANDARD.encode(&keys.master_unlock_key);
+            let result = create_cp_derived_keys_result(&mut env, Some(&auth_key), Some(&muk), None);
+            auth_key.zeroize();
+            muk.zeroize();
+            result
         }
         Err(e) => create_cp_derived_keys_result(&mut env, None, None, Some(&e.to_string())),
     }
@@ -1174,13 +1253,13 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     plaintext: JString<'a>,
     key_base64: JString<'a>,
 ) -> JObject<'a> {
-    let plaintext_str = match get_string(&mut env, plaintext) {
+    let plaintext_str = match get_secret_string(&mut env, plaintext) {
         Some(s) => s,
         None => {
             return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid plaintext"))
         }
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid key")),
     };
@@ -1189,7 +1268,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     use bittery_crypto_core::encrypt;
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return create_cp_encrypt_result(
                 &mut env,
@@ -1227,13 +1306,13 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     version: jlong,
     user_id: JString<'a>,
 ) -> JObject<'a> {
-    let plaintext_str = match get_string(&mut env, plaintext) {
+    let plaintext_str = match get_secret_string(&mut env, plaintext) {
         Some(s) => s,
         None => {
             return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid plaintext"))
         }
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return create_cp_encrypt_result(&mut env, None, None, None, Some("Invalid key")),
     };
@@ -1272,7 +1351,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     use bittery_crypto_core::{encrypt_with_aad, AadContext};
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return create_cp_encrypt_result(
                 &mut env,
@@ -1327,7 +1406,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid algorithm")),
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid key")),
     };
@@ -1336,7 +1415,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     use bittery_crypto_core::{decrypt, EncryptedData};
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return create_cp_result(&mut env, None, Some(&format!("Invalid key base64: {}", e)))
         }
@@ -1349,7 +1428,11 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     };
 
     match decrypt(&data, &key) {
-        Ok(plaintext) => create_cp_result(&mut env, Some(&plaintext), None),
+        Ok(mut plaintext) => {
+            let result = create_cp_result(&mut env, Some(&plaintext), None);
+            plaintext.zeroize();
+            result
+        }
         Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
     }
 }
@@ -1367,7 +1450,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     plaintext: JString<'a>,
     public_key_pem: JString<'a>,
 ) -> JObject<'a> {
-    let plaintext_str = match get_string(&mut env, plaintext) {
+    let plaintext_str = match get_secret_string(&mut env, plaintext) {
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid plaintext")),
     };
@@ -1397,7 +1480,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid ciphertext")),
     };
-    let pem = match get_string(&mut env, private_key_pem) {
+    let pem = match get_secret_string(&mut env, private_key_pem) {
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid private key")),
     };
@@ -1405,7 +1488,11 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     use bittery_crypto_core::rsa_decrypt;
 
     match rsa_decrypt(&ciphertext_str, &pem) {
-        Ok(plaintext) => create_cp_result(&mut env, Some(&plaintext), None),
+        Ok(mut plaintext) => {
+            let result = create_cp_result(&mut env, Some(&plaintext), None);
+            plaintext.zeroize();
+            result
+        }
         Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
     }
 }
@@ -1425,14 +1512,21 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     use bittery_crypto_core::generate_passkey_keypair;
 
     match generate_passkey_keypair() {
-        Ok(result) => {
-            let value = serde_json::json!({
+        // `PasskeyKeypair` is `ZeroizeOnDrop`, so the scalar is wiped when
+        // `result` goes out of scope; the JSON blob carrying it is not, so it
+        // is wiped explicitly below. The extra `private_key` wipe stays as
+        // defence in depth.
+        Ok(mut result) => {
+            let mut value = serde_json::json!({
                 "privateKey": STANDARD.encode(result.private_key),
-                "publicKeyCose": STANDARD.encode(result.public_key_cose),
-                "publicKeySpki": STANDARD.encode(result.public_key_spki),
+                "publicKeyCose": STANDARD.encode(&result.public_key_cose),
+                "publicKeySpki": STANDARD.encode(&result.public_key_spki),
             })
             .to_string();
-            create_cp_result(&mut env, Some(&value), None)
+            result.private_key.zeroize();
+            let cp_result = create_cp_result(&mut env, Some(&value), None);
+            value.zeroize();
+            cp_result
         }
         Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
     }
@@ -1532,7 +1626,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     use base64::{engine::general_purpose::STANDARD, Engine};
     use bittery_crypto_core::sign_passkey_assertion;
 
-    let private_key_str = match get_string(&mut env, private_key_base64) {
+    let private_key_str = match get_secret_string(&mut env, private_key_base64) {
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid private key")),
     };
@@ -1546,7 +1640,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     };
 
     let private_key = match STANDARD.decode(&private_key_str) {
-        Ok(value) => value,
+        Ok(value) => Zeroizing::new(value),
         Err(error) => {
             return create_cp_result(
                 &mut env,
@@ -1612,7 +1706,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid algorithm")),
     };
-    let key_str = match get_string(&mut env, key_base64) {
+    let key_str = match get_secret_string(&mut env, key_base64) {
         Some(s) => s,
         None => return create_cp_result(&mut env, None, Some("Invalid key")),
     };
@@ -1637,7 +1731,7 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     use bittery_crypto_core::{decrypt_with_aad, AadContext, EncryptedData};
 
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return create_cp_result(&mut env, None, Some(&format!("Invalid key base64: {}", e)))
         }
@@ -1658,7 +1752,11 @@ pub extern "system" fn Java_expo_modules_credentialprovider_crypto_NativeCrypto_
     };
 
     match decrypt_with_aad(&data, &key, &context) {
-        Ok(plaintext) => create_cp_result(&mut env, Some(&plaintext), None),
+        Ok(mut plaintext) => {
+            let result = create_cp_result(&mut env, Some(&plaintext), None);
+            plaintext.zeroize();
+            result
+        }
         Err(e) => create_cp_result(&mut env, None, Some(&e.to_string())),
     }
 }
@@ -1707,7 +1805,7 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     digits: jint,
     period: jlong,
 ) -> JObject<'a> {
-    let secret_str = match get_string(&mut env, secret) {
+    let secret_str = match get_secret_string(&mut env, secret) {
         Some(s) => s,
         None => return create_totp_result(&mut env, None, 0, 0, 0.0, Some("Invalid secret")),
     };
@@ -1716,17 +1814,36 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         None => return create_totp_result(&mut env, None, 0, 0, 0.0, Some("Invalid algorithm")),
     };
 
+    // `jint`/`jlong` are signed: casting a negative value straight to `u32`/`u64`
+    // would reinterpret it as a huge positive number, so reject it up front.
+    let digits = match u32::try_from(digits) {
+        Ok(d) => d,
+        Err(_) => {
+            return create_totp_result(&mut env, None, 0, 0, 0.0, Some("Invalid TOTP digits"))
+        }
+    };
+    let period = match u64::try_from(period) {
+        Ok(p) => p,
+        Err(_) => {
+            return create_totp_result(&mut env, None, 0, 0, 0.0, Some("Invalid TOTP period"))
+        }
+    };
+
     use bittery_crypto_core::generate_totp;
 
-    match generate_totp(&secret_str, &algorithm_str, digits as u32, period as u64) {
-        Ok(result) => create_totp_result(
-            &mut env,
-            Some(&result.code),
-            result.remaining_seconds,
-            result.period,
-            result.progress,
-            None,
-        ),
+    match generate_totp(&secret_str, &algorithm_str, digits, period) {
+        Ok(mut result) => {
+            let totp = create_totp_result(
+                &mut env,
+                Some(&result.code),
+                result.remaining_seconds,
+                result.period,
+                result.progress,
+                None,
+            );
+            result.code.zeroize();
+            totp
+        }
         Err(e) => create_totp_result(&mut env, None, 0, 0, 0.0, Some(&e.to_string())),
     }
 }

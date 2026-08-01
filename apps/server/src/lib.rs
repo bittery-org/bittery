@@ -23,7 +23,8 @@ use serde::Serialize;
 use services::rate_limit::{NoopRateLimiter, PostgresRateLimiter};
 
 pub use http::middleware::{
-    edge_http_middleware, http_trace_layer, load_edge_http_config, rpc_request_guard_middleware,
+    catch_panic_layer, edge_http_middleware, http_trace_layer, load_edge_http_config,
+    rpc_request_guard_middleware,
 };
 pub use http::public::create_public_http_router;
 pub use http::rpc_tracing::rpc_tracing_middleware;

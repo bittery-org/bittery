@@ -22,12 +22,23 @@ use crate::error::CryptoError;
 const RSA_KEY_SIZE: usize = 4096;
 
 /// RSA key pair in PEM format
-#[derive(Debug, Clone, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct RsaKeyPair {
     /// Public key in SPKI PEM format
     pub public_key: String,
     /// Private key in PKCS8 PEM format
     pub private_key: String,
+}
+
+// Hand-written so that `{:?}` (or a stray `dbg!`) can never print the PKCS#8
+// private-key PEM. A derived `Debug` would.
+impl std::fmt::Debug for RsaKeyPair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RsaKeyPair")
+            .field("public_key", &self.public_key)
+            .field("private_key", &"[redacted]")
+            .finish()
+    }
 }
 
 /// Generate an RSA-4096 key pair for vault sharing
@@ -93,8 +104,13 @@ pub fn rsa_decrypt(ciphertext: &str, private_key_pem: &str) -> Result<String, Cr
 
     let padding = Oaep::new::<Sha256>();
 
+    // `decrypt` (unblinded) is the failure mode behind RUSTSEC-2023-0071 (Marvin):
+    // the timing of the modular exponentiation leaks information about the private
+    // key. `rsa` 0.9.10 has no fixed release and 0.10.0-rc does not address it
+    // either, so RNG blinding is the available mitigation and must not be dropped.
+    let mut rng = OsRng;
     let plaintext_bytes = private_key
-        .decrypt(padding, &ciphertext_bytes)
+        .decrypt_blinded(&mut rng, padding, &ciphertext_bytes)
         .map_err(|e| CryptoError::Rsa(format!("Decryption failed: {}", e)))?;
 
     String::from_utf8(plaintext_bytes).map_err(|e| CryptoError::Utf8Error(e.to_string()))
@@ -170,6 +186,18 @@ mod tests {
         let decrypted = rsa_decrypt(&ciphertext, &key_pair.private_key).unwrap();
 
         assert_eq!(plaintext, decrypted);
+    }
+
+    #[test]
+    fn test_debug_does_not_leak_private_key() {
+        let key_pair = generate_rsa_key_pair().unwrap();
+        let rendered = format!("{key_pair:?}");
+
+        assert!(!rendered.contains("-----BEGIN PRIVATE KEY-----"));
+        assert!(!rendered.contains(key_pair.private_key.trim()));
+        assert!(rendered.contains("[redacted]"));
+        // The public half stays visible — it is not secret and is useful in logs.
+        assert!(rendered.contains("-----BEGIN PUBLIC KEY-----"));
     }
 
     #[test]
