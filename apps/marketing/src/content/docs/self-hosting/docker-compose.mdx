@@ -133,6 +133,8 @@ The per-endpoint limits can be tuned via optional environment variables (the tim
 | `RATE_LIMIT_RECOVERY_REQUEST` | `5` | Recovery requests per hour |
 | `RATE_LIMIT_RECOVERY_VERIFY_MAX` | `5` | Recovery verification attempts before lockout |
 | `RATE_LIMIT_RECOVERY_LOCK_MINUTES` | `15` | Recovery lockout duration in minutes |
+| `RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX` | `5` | Failed share-link email verification attempts before lockout |
+| `RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES` | `15` | Share-link email verification lockout duration in minutes |
 | `RATE_LIMIT_AUTH_IP` | `30` | Requests per 15 minutes per IP for other auth endpoints |
 
 `RATE_LIMIT_SIGNUP_VERIFY_MAX` is keyed on the email address and requesting a new verification code does not reset it, so a user who exhausts their guesses stays locked out for `RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES` regardless of how many fresh codes they send themselves. See [Configuration Reference](/docs/self-hosting/configuration#rate-limiting) for the full explanation.
