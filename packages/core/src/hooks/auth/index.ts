@@ -6,6 +6,12 @@
  * for state management and caching.
  */
 
+// Account metadata sync hooks
+export {
+	type UseAccountMetadataSyncOptions,
+	useAccountMetadataSync,
+	useAccountMetadataSyncAll,
+} from "./use-account-metadata-sync";
 // Account switcher hook (multi-account management)
 export {
 	type UseAccountSwitcherOptions,
@@ -31,13 +37,6 @@ export {
 	type UseLoginOptions,
 	useLogin,
 } from "./use-login";
-// Logout hook
-export {
-	type LogoutInput,
-	type UseLogoutOptions,
-	useLock,
-	useLogout,
-} from "./use-logout";
 // Quick unlock hook (password unlock with stored secret key)
 export {
 	type QuickUnlockInput,

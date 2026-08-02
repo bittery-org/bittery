@@ -19,7 +19,7 @@ import {
 	createRpcClientForServer,
 	getDefaultServerUrl,
 } from "@bittery/shared/rpc-client-factory";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore } from "@bittery/storage";
 
 export type DefaultRpcClient = ReturnType<typeof createAccountRpcClient>;
 
@@ -28,7 +28,7 @@ export type DefaultRpcClient = ReturnType<typeof createAccountRpcClient>;
  * credentials. Returns `null` when there is no stored auth token.
  */
 export async function createStoredAccountRpcClient(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	accountId: string,
 	clientId?: string,
 ): Promise<DefaultRpcClient | null> {
@@ -46,7 +46,7 @@ export async function createStoredAccountRpcClient(
 		getSessionSnapshot: async () => {
 			const [token, sessionData] = await Promise.all([
 				storage.getAuthToken(accountId),
-				storage.getStoredSessionData?.(accountId),
+				storage.getStoredSessionData(accountId),
 			]);
 			return {
 				token,
@@ -57,7 +57,7 @@ export async function createStoredAccountRpcClient(
 		getRefreshToken: () => storage.getAuthToken(accountId),
 		storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 			await storage.storeAuthToken(token, accountId);
-			await storage.updateStoredSessionMetadata?.(accountId, {
+			await storage.updateStoredSessionMetadata(accountId, {
 				sessionId,
 				expiresAt,
 			});
@@ -72,7 +72,7 @@ export async function createStoredAccountRpcClient(
  * exists. Returns `undefined` when there is no stored auth token.
  */
 export async function createStaticStoredAccountRpcClient(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	accountId: string,
 ): Promise<DefaultRpcClient | undefined> {
 	const authToken = await storage.getAuthToken(accountId);
@@ -80,7 +80,7 @@ export async function createStaticStoredAccountRpcClient(
 		return undefined;
 	}
 	const serverUrl =
-		(await storage.getServerUrl?.(accountId)) || getDefaultServerUrl();
+		(await storage.getServerUrl(accountId)) || getDefaultServerUrl();
 	return createAccountRpcClient(authToken, serverUrl);
 }
 

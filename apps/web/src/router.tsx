@@ -1,13 +1,16 @@
 import { m } from "@bittery/i18n/paraglide/messages";
 import { RpcProvider } from "@bittery/shared/rpc";
-import { createAppRpcOptionsProxy } from "@bittery/shared/rpc-client";
+import {
+	createAppRpcOptionsProxy,
+	isUnauthorizedRpcError,
+} from "@bittery/shared/rpc-client";
 import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
 import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
-import { storage } from "./lib/storage";
+import { forgetActiveSession, initializeStorage, storage } from "./lib/storage";
 import "./index.css";
 import { initWasmCrypto } from "./lib/wasm-crypto";
 
@@ -28,18 +31,6 @@ import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
 
-function isUnauthorizedError(error: unknown): boolean {
-	if (
-		error &&
-		typeof error === "object" &&
-		"data" in error &&
-		(error as any).data?.code === "UNAUTHORIZED"
-	) {
-		return true;
-	}
-	return false;
-}
-
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
 
@@ -51,16 +42,22 @@ function handleUnauthorizedError() {
 
 	queryClient.clear();
 
-	storage.clearSession().then(() => {
-		toast.error(m.toast_auth_session_expired());
-		window.location.href = "/login";
-	});
+	// An expired session is a sign-out, so the quick-unlock offer in `session_data` goes too.
+	forgetActiveSession()
+		.then(() => {
+			toast.error(m.toast_auth_session_expired());
+			window.location.href = "/login";
+		})
+		// Without this reset one rejection pins the latch and every later 401 is dropped.
+		.catch(() => {
+			isHandlingAuthError = false;
+		});
 }
 
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
-			if (isUnauthorizedError(error)) {
+			if (isUnauthorizedRpcError(error)) {
 				handleUnauthorizedError();
 				return;
 			}
@@ -76,7 +73,7 @@ export const queryClient = new QueryClient({
 	}),
 	mutationCache: new MutationCache({
 		onError: (error) => {
-			if (isUnauthorizedError(error)) {
+			if (isUnauthorizedRpcError(error)) {
 				handleUnauthorizedError();
 			}
 		},
@@ -101,9 +98,10 @@ const rpcClient = createSessionRefreshingRpcClient({
 	// Resolve at request time — prerender evaluates defaultServerUrl without `window`.
 	getServerUrl: async () => getServerUrl(),
 	getSessionSnapshot: async () => {
+		await initializeStorage();
 		const [token, sessionData] = await Promise.all([
 			storage.getAuthToken(),
-			storage.getStoredSessionData?.() ?? Promise.resolve(null),
+			storage.getStoredSessionData(),
 		]);
 		return {
 			token,
@@ -111,10 +109,18 @@ const rpcClient = createSessionRefreshingRpcClient({
 			expiresAt: sessionData?.serverExpiresAt ?? sessionData?.expiresAt ?? null,
 		};
 	},
-	getRefreshToken: () => storage.getAuthToken(),
+	getRefreshToken: async () => {
+		await initializeStorage();
+		return storage.getAuthToken();
+	},
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-		await storage.storeAuthToken(token);
-		await storage.updateStoredSessionMetadata?.("", {
+		await initializeStorage();
+		const accountId = await storage.getActiveAccount();
+		if (!accountId) {
+			return;
+		}
+		await storage.storeAuthToken(token, accountId);
+		await storage.updateStoredSessionMetadata(accountId, {
 			sessionId,
 			expiresAt,
 		});

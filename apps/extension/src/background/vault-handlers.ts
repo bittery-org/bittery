@@ -3,6 +3,7 @@
  * Handles vault and vault item operations.
  */
 
+import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { rpcClient } from "./rpc-client";
 import { updateActivity } from "./session-manager";
 import type { MessageResponse } from "./types";
@@ -42,14 +43,14 @@ export async function handleGetWritableVaults(): Promise<MessageResponse> {
 	updateActivity();
 
 	try {
-		const vaults = await rpcClient.vault.list.query();
+		const vaults = (await rpcClient.vault.list.query()).map(toVaultKeyEntry);
 		const writableVaults = vaults.filter((vault) => vault.role !== "read-only");
 
 		return {
 			success: true,
 			vaults: writableVaults.map((vault) => ({
-				id: vault.id,
-				name: vault.name,
+				id: vault.vaultId,
+				name: vault.vaultName,
 				type: vault.vaultType,
 				role: vault.role,
 			})),

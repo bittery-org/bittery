@@ -31,9 +31,13 @@ pub const SCOPE_LOGIN_IP: &str = "auth_login_ip";
 pub const SCOPE_LOGIN_EMAIL: &str = "auth_login_email";
 pub const SCOPE_SIGNUP_IP: &str = "auth_signup_ip";
 pub const SCOPE_SIGNUP_EMAIL: &str = "auth_signup_email";
+pub const SCOPE_SIGNUP_VERIFY_REQUEST_EMAIL: &str = "auth_signup_verify_request_email";
+pub const SCOPE_SIGNUP_VERIFY_REQUEST_IP: &str = "auth_signup_verify_request_ip";
+pub const SCOPE_SIGNUP_VERIFY: &str = "auth_signup_verify";
 pub const SCOPE_RECOVERY_REQUEST_EMAIL: &str = "auth_recovery_request_email";
 pub const SCOPE_RECOVERY_REQUEST_IP: &str = "auth_recovery_request_ip";
 pub const SCOPE_RECOVERY_VERIFY: &str = "auth_recovery_verify";
+pub const SCOPE_SHARE_EMAIL_VERIFY: &str = "share_email_verify";
 pub const SCOPE_GENERIC_IP: &str = "auth_generic_ip";
 pub const SCOPE_SHARE_CREATE_DAILY: &str = "share_create_daily";
 
@@ -99,6 +103,17 @@ pub fn signup_email_limit() -> WindowLimit {
     }
 }
 
+/// Caps how often a signup verification code may be *requested*. Each request
+/// sends an email and mints a fresh code, so this is both an email-abuse limit
+/// and the outer bound on how many independent codes an attacker can guess
+/// against (the per-email lockout below caps guesses within that budget).
+pub fn signup_verification_request_limit() -> WindowLimit {
+    WindowLimit {
+        max: env_i64("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", 5),
+        window: ONE_HOUR,
+    }
+}
+
 pub fn recovery_request_limit() -> WindowLimit {
     WindowLimit {
         max: env_i64("RATE_LIMIT_RECOVERY_REQUEST", 5),
@@ -121,6 +136,20 @@ pub fn share_create_daily_limit() -> WindowLimit {
     }
 }
 
+pub fn signup_verify_max_attempts() -> i64 {
+    // Lifetime lockout threshold for signup-code guessing, keyed on the email
+    // hash rather than the code row. The per-code database cap
+    // (`signup_verification.max_attempts`, default 5) resets whenever a new code
+    // is requested, so on its own it bounds guesses per code, not per identity.
+    // This limiter is what makes the ~19.8-bit code space unguessable.
+    env_i64("RATE_LIMIT_SIGNUP_VERIFY_MAX", 10)
+}
+
+pub fn signup_verify_lock_duration() -> Duration {
+    let minutes = env_i64("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", 15);
+    Duration::from_secs((minutes as u64) * 60)
+}
+
 pub fn recovery_verify_max_attempts() -> i64 {
     // This is the rate-limiter lockout threshold that also throttles/locks the
     // caller across recovery-code attempts. It is independent of the per-code
@@ -132,6 +161,15 @@ pub fn recovery_verify_max_attempts() -> i64 {
 
 pub fn recovery_verify_lock_duration() -> Duration {
     let minutes = env_i64("RATE_LIMIT_RECOVERY_LOCK_MINUTES", 15);
+    Duration::from_secs((minutes as u64) * 60)
+}
+
+pub fn share_email_verify_max_attempts() -> i64 {
+    env_i64("RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX", 5)
+}
+
+pub fn share_email_verify_lock_duration() -> Duration {
+    let minutes = env_i64("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", 15);
     Duration::from_secs((minutes as u64) * 60)
 }
 

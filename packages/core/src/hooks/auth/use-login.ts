@@ -12,15 +12,16 @@ import {
 } from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
+	usePlatformCrypto,
+	usePlatformItemCache,
+	usePlatformStorage,
+} from "../../context/platform-context";
+import {
 	type LoginResult,
 	performSRPLogin,
 	type SRPLoginInput,
 	storeLoginSession,
-} from "../../auth";
-import {
-	usePlatformCrypto,
-	usePlatformStorage,
-} from "../../context/platform-context";
+} from "../../services/auth-service";
 
 /**
  * Options for useLogin hook
@@ -87,6 +88,7 @@ export function useLogin(
 	const rpcClient = useRPCClient();
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
+	const itemCache = usePlatformItemCache();
 
 	return useMutation({
 		mutationFn: async (input: LoginInput) => {
@@ -117,17 +119,14 @@ export function useLogin(
 				result,
 				input.secretKey,
 				storage,
+				itemCache,
 				input.email,
 				{
 					serverUrl,
 				},
 			);
 
-			if (
-				shouldEnableBiometric &&
-				storage.supportsBiometric &&
-				storage.enableBiometric
-			) {
+			if (shouldEnableBiometric && (await storage.isBiometricAvailable())) {
 				await storage.enableBiometric(accountId);
 			}
 

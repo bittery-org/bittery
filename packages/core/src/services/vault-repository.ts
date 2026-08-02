@@ -4,8 +4,15 @@ import {
 } from "@bittery/shared";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
+import {
+	decodeVaultType,
+	type ServerVaultListEntry,
+	type ServerVaultSummary,
+	toCachedVaultFields,
+	toVaultKeyEntry,
+} from "@bittery/shared/vault-mapping";
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type {
 	CachedAttachment,
@@ -63,13 +70,7 @@ interface BootstrapItemPage {
 		updatedAt: string | Date;
 		deletedAt?: string | Date | null;
 		attachments?: CachedAttachment[];
-		vault: {
-			id: string;
-			name: string;
-			type: string;
-			icon: string | null;
-			imageUrl: string | null;
-		};
+		vault: ServerVaultSummary;
 	}>;
 	hasMore: boolean;
 	nextCursor?: string;
@@ -86,23 +87,12 @@ export interface BootstrapItemsClient {
 	};
 	vault?: {
 		list?: {
-			query: () => Promise<
-				Array<{
-					id: string;
-					name: string;
-					type: "personal" | "team";
-					icon: string | null;
-					imageUrl: string | null;
-					encryptedVaultKey: string;
-					role: "owner" | "admin" | "member" | "read-only";
-				}>
-			>;
+			query: () => Promise<Array<ServerVaultListEntry>>;
 		};
 	};
 }
 
 export class VaultRepository {
-	readonly supportsItemCache = true;
 	private readonly fallbackServerUrl = getDefaultServerUrl();
 
 	private readonly items = new Map<string, VaultRepositoryItem>();
@@ -116,17 +106,22 @@ export class VaultRepository {
 	private hasCacheSnapshotFlag = false;
 	private serverUrl?: string;
 
+	/**
+	 * One repo is bound to one account for its whole life: every cache read, write,
+	 * RPC and crypto call below keys off this `accountId` rather than re-resolving.
+	 */
 	constructor(
 		private readonly crypto: ICrypto,
-		private readonly storage: IStorageAdapter,
-		private readonly accountId?: string,
+		private readonly storage: AccountStore,
+		private readonly itemCache: ItemCache,
+		private readonly accountId: string,
 		serverUrl?: string,
 		private readonly accountEmail?: string,
 	) {
 		this.serverUrl = serverUrl;
 	}
 
-	getAccountId(): string | undefined {
+	getAccountId(): string {
 		return this.accountId;
 	}
 
@@ -190,10 +185,7 @@ export class VaultRepository {
 
 	getVaults(): CachedVaultMetadata[] {
 		const vaults = Array.from(this.vaults.values());
-		if (!this.accountId) {
-			return vaults;
-		}
-		const enforcer = getTravelModeEnforcer(this.storage);
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 		if (!enforcer.isVerified(this.accountId)) return [];
 		const config = enforcer.getConfig(this.accountId);
 		if (!config.enabled) {
@@ -211,10 +203,7 @@ export class VaultRepository {
 
 	getVaultKeys(): VaultKeyData[] {
 		const vaultKeys = Array.from(this.vaultKeyEntries.values());
-		if (!this.accountId) {
-			return vaultKeys;
-		}
-		const enforcer = getTravelModeEnforcer(this.storage);
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 		if (!enforcer.isVerified(this.accountId)) return [];
 		return enforcer.filterVaultKeys(this.accountId, vaultKeys);
 	}
@@ -239,18 +228,16 @@ export class VaultRepository {
 		}
 	}
 
-	private shouldHandleAccountId(accountId?: string): boolean {
-		if (!accountId || !this.accountId) {
-			return true;
-		}
+	/**
+	 * A repo only ever handles its own account. The former "no accountId means
+	 * everyone" branch applied scopeless sync events to every open repo.
+	 */
+	private isForThisAccount(accountId: string): boolean {
 		return this.accountId === accountId;
 	}
 
 	private isTravelModeVaultHidden(vaultId: string): boolean {
-		if (!this.accountId) {
-			return false;
-		}
-		const enforcer = getTravelModeEnforcer(this.storage);
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 		if (!enforcer.isVerified(this.accountId)) return true;
 		return isVaultHidden(enforcer.getConfig(this.accountId), vaultId);
 	}
@@ -258,10 +245,7 @@ export class VaultRepository {
 	private applyTravelModeItemFilter(
 		items: VaultRepositoryItem[],
 	): VaultRepositoryItem[] {
-		if (!this.accountId) {
-			return items;
-		}
-		const enforcer = getTravelModeEnforcer(this.storage);
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 		if (!enforcer.isVerified(this.accountId)) return [];
 		return enforcer.filterItems(this.accountId, items);
 	}
@@ -416,15 +400,7 @@ export class VaultRepository {
 
 		try {
 			const vaults = await client.vault.list.query();
-			return vaults.map((vault) => ({
-				vaultId: vault.id,
-				vaultName: vault.name,
-				vaultType: vault.type,
-				vaultIcon: vault.icon,
-				vaultImageUrl: vault.imageUrl,
-				encryptedVaultKey: vault.encryptedVaultKey,
-				role: vault.role,
-			}));
+			return vaults.map(toVaultKeyEntry);
 		} catch (error) {
 			console.error("[VaultRepository] Failed to refresh vault keys:", error);
 			return null;
@@ -435,19 +411,17 @@ export class VaultRepository {
 		if (this.serverUrl) {
 			return;
 		}
-		if (!this.accountId) {
-			return;
-		}
 		this.serverUrl =
 			(await this.storage.getServerUrl(this.accountId)) ??
 			this.fallbackServerUrl;
 	}
 
+	/**
+	 * One `recordPut`, no read-modify-write. Delta sync calls this once per changed
+	 * item, which is exactly why `RecordPort` has per-record primitives.
+	 */
 	private async persistItem(item: CachedEncryptedItem): Promise<void> {
-		if (!this.storage.upsertCachedItem) {
-			return;
-		}
-		await this.storage.upsertCachedItem(item, this.accountId);
+		await this.itemCache.upsertCachedItem(item, this.accountId);
 	}
 
 	private buildItem(
@@ -547,9 +521,9 @@ export class VaultRepository {
 
 	async upsertEncrypted(
 		item: CachedEncryptedItem,
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		const decrypted = await this.decryptItem(item);
@@ -630,7 +604,7 @@ export class VaultRepository {
 
 	async removeItem(itemId: string): Promise<void> {
 		this.items.delete(itemId);
-		await this.storage.removeCachedItem?.(itemId, this.accountId);
+		await this.itemCache.removeCachedItem(itemId, this.accountId);
 		this.emit();
 	}
 
@@ -645,7 +619,7 @@ export class VaultRepository {
 			id: realId,
 		};
 		this.items.set(realId, migrated);
-		void this.storage.removeCachedItem?.(tempId, this.accountId);
+		void this.itemCache.removeCachedItem(tempId, this.accountId);
 		void this.persistItem(this.toCachedItem(migrated));
 		this.emit();
 	}
@@ -665,37 +639,27 @@ export class VaultRepository {
 		this.emit();
 	}
 
+	/**
+	 * `decryptedData` is the plaintext the caller sealed into
+	 * `newEncryptedPayload`. Re-deriving the encryption context here to decrypt
+	 * it back would race the inbound sync stream: an item event landing between
+	 * sealing and this write bumps `existing.version`, and the re-derived AAD no
+	 * longer matches the sealed one.
+	 */
 	async moveItem(
 		itemId: string,
 		targetVaultId: string,
 		newEncryptedPayload: EncryptedPayload,
+		decryptedData: DecryptedItemData,
 	): Promise<void> {
 		const existing = this.items.get(itemId);
 		if (!existing) {
 			return;
 		}
 
-		const targetVaultKey = await this.decryptVaultKey(targetVaultId);
-		const context = buildItemEncryptionContext({
-			vaultId: targetVaultId,
-			itemId: itemId,
-			version: (existing.version ?? 1) + 1,
-			userId: await this.resolveUserId(),
-		});
-		const decrypted = await this.crypto.decrypt(
-			{
-				ciphertext: newEncryptedPayload.ciphertext,
-				iv: newEncryptedPayload.iv,
-				algorithm: newEncryptedPayload.algorithm,
-			},
-			targetVaultKey,
-			context,
-		);
-		const parsed = JSON.parse(decrypted) as DecryptedItemData;
-
 		const next: VaultRepositoryItem = {
 			...existing,
-			...parsed,
+			...decryptedData,
 			vaultId: targetVaultId,
 			updatedAt: new Date().toISOString(),
 			version: existing.version + 1,
@@ -721,15 +685,15 @@ export class VaultRepository {
 		this.emit();
 
 		try {
-			if (this.accountId) {
-				getTravelModeEnforcer(this.storage).assertVerified(this.accountId);
-			}
+			getTravelModeEnforcer(this.storage, this.itemCache).assertVerified(
+				this.accountId,
+			);
 			await this.ensureServerUrl();
 			const [cachedItems, cachedVaults, cacheMeta, storedVaultKeys] =
 				await Promise.all([
-					this.storage.getCachedItems?.(this.accountId),
-					this.storage.getCachedVaults?.(this.accountId),
-					this.storage.getItemCacheMetadata?.(this.accountId),
+					this.itemCache.getCachedItems(this.accountId),
+					this.itemCache.getCachedVaults(this.accountId),
+					this.itemCache.getItemCacheMetadata(this.accountId),
 					this.storage.getVaultKeys(this.accountId),
 				]);
 
@@ -772,9 +736,9 @@ export class VaultRepository {
 	}
 
 	async hydrateFromServer(client: BootstrapItemsClient): Promise<void> {
-		if (this.accountId) {
-			getTravelModeEnforcer(this.storage).assertVerified(this.accountId);
-		}
+		getTravelModeEnforcer(this.storage, this.itemCache).assertVerified(
+			this.accountId,
+		);
 		await this.ensureServerUrl();
 
 		let cursor: string | undefined;
@@ -809,14 +773,10 @@ export class VaultRepository {
 				cachedItems.push(cachedItem);
 
 				vaults.set(rawItem.vault.id, {
-					id: rawItem.vault.id,
+					...toCachedVaultFields(rawItem.vault),
 					accountId: this.accountId,
 					accountEmail: this.accountEmail,
 					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-					name: rawItem.vault.name,
-					type: rawItem.vault.type,
-					icon: rawItem.vault.icon,
-					imageUrl: rawItem.vault.imageUrl,
 				});
 			}
 
@@ -854,12 +814,12 @@ export class VaultRepository {
 		}
 
 		await Promise.all([
-			this.storage.setCachedItems?.(cachedItems, this.accountId),
-			this.storage.setCachedVaults?.(
+			this.itemCache.setCachedItems(cachedItems, this.accountId),
+			this.itemCache.setCachedVaults(
 				Array.from(this.vaults.values()),
 				this.accountId,
 			),
-			this.storage.setItemCacheMetadata?.(
+			this.itemCache.setItemCacheMetadata(
 				{
 					lastFullSyncAt: Date.now(),
 					itemCount: cachedItems.length,
@@ -885,16 +845,16 @@ export class VaultRepository {
 		this.emit();
 	}
 
-	// ItemCacheAdapter compatibility for incremental migration.
+	// --- SyncItemCache surface (packages/sync/src/types.ts) ---
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
 		await this.upsertEncrypted(item, accountId);
 	}
 
-	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+	async removeCachedItem(itemId: string, accountId: string): Promise<void> {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		await this.removeItem(itemId);
@@ -902,9 +862,9 @@ export class VaultRepository {
 
 	async upsertCachedVault(
 		vault: CachedVaultMetadata,
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		this.vaults.set(vault.id, {
@@ -918,37 +878,35 @@ export class VaultRepository {
 			this.vaultKeyEntries.set(vault.id, {
 				...existingVaultKey,
 				vaultName: vault.name,
-				vaultType: vault.type as VaultKeyData["vaultType"],
+				vaultType: decodeVaultType(vault.type),
 				vaultIcon: vault.icon,
 				vaultImageUrl: vault.imageUrl,
 			});
 		}
-		await this.storage.upsertCachedVault?.(vault, this.accountId);
+		await this.itemCache.upsertCachedVault(vault, this.accountId);
 		this.emit();
 	}
 
 	async syncVaultKeys(
 		vaultKeys: VaultKeyData[],
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 
-		const filteredVaultKeys = this.accountId
-			? getTravelModeEnforcer(this.storage).filterVaultKeys(
-					this.accountId,
-					vaultKeys,
-				)
-			: vaultKeys;
+		const filteredVaultKeys = getTravelModeEnforcer(
+			this.storage,
+			this.itemCache,
+		).filterVaultKeys(this.accountId, vaultKeys);
 
 		this.mergeVaultKeyEntries(filteredVaultKeys);
 		await this.storage.storeVaultKeys(filteredVaultKeys, this.accountId);
 		this.emit();
 	}
 
-	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+	async removeCachedVault(vaultId: string, accountId: string): Promise<void> {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		this.vaults.delete(vaultId);
@@ -958,15 +916,15 @@ export class VaultRepository {
 				this.items.delete(itemId);
 			}
 		}
-		await this.storage.removeCachedVault?.(vaultId, this.accountId);
+		await this.itemCache.removeCachedVault(vaultId, this.accountId);
 		this.emit();
 	}
 
-	async clearItemCache(accountId?: string): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+	async clearItemCache(accountId: string): Promise<void> {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
-		await this.storage.clearItemCache?.(this.accountId);
+		await this.itemCache.clearItemCache(this.accountId);
 		this.clear();
 	}
 

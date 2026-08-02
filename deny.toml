@@ -1,0 +1,97 @@
+# cargo-deny configuration — RustSec advisory gate.
+#
+# This repo has four independent Cargo lockfiles (apps/server,
+# apps/desktop/src-tauri, packages/crypto/core, packages/crypto/napi) and takes
+# weekly automated Cargo bumps from Dependabot. One shared config keeps the gate
+# identical for all four; CI passes it explicitly with `--config deny.toml` so
+# the per-workspace directories do not each need a copy.
+#
+# Run locally from the repo root:
+#   cargo deny --manifest-path apps/server/Cargo.toml --config deny.toml check advisories
+#
+# Anything listed under `[advisories].ignore` is a *conscious, dated exception*.
+# Never add a blanket ignore: every entry below states why it cannot be fixed by
+# a bump and what compensates for it. If a bump becomes available, remove the
+# entry instead of refreshing it.
+
+[graph]
+# Evaluate every target the four workspaces actually ship to. Leaving this
+# unset would prune target-specific crates and hide, for example, the macOS-only
+# and Linux-only halves of the Tauri dependency graph.
+all-features = true
+
+[advisories]
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# Vulnerabilities always fail — that is the point of the gate.
+#
+# `unmaintained` is limited to crates the workspaces depend on directly, because
+# the transitive graph is dominated by things we cannot act on: Tauri v2 still
+# pulls the archived gtk-rs GTK3 bindings (RUSTSEC-2024-0411..0420) plus
+# `fxhash`, `proc-macro-error` and the `unic-*` family, and none of those have a
+# fix we can apply from this repo. Failing on them would mean a permanently red
+# gate, which is how gates get switched off. A crate *we* choose to depend on
+# going unmaintained is actionable, so that still fails.
+unmaintained = "workspace"
+
+# Yanked crates warn rather than fail: the only current hit is `spin 0.9.8`,
+# reached through `lazy_static` <- `num-bigint-dig` <- `rsa`, i.e. not something
+# this repo can bump. Escalate to "deny" once the `rsa` chain moves off it.
+yanked = "warn"
+
+# Each entry below applies to the lockfile(s) named in its comment. Because one
+# config is shared by four disjoint dependency graphs, cargo-deny reports
+# `advisory-not-detected` for every entry that does not apply to the lockfile
+# currently being checked; CI silences that one diagnostic with
+# `check --allow advisory-not-detected`. It is not a safety signal — an ignore
+# that has genuinely gone stale is found by deleting it and re-running, which is
+# also how the gate is verified to still be able to fail.
+ignore = [
+  # ---------------------------------------------------------------------------
+  # RUSTSEC-2023-0071 — `rsa` 0.9.10 — Marvin Attack (CVSS 5.9)
+  # Reviewed 2026-07-30. Affects all four lockfiles.
+  #
+  # No fixed release exists: RustCrypto has not shipped a constant-time
+  # implementation, and 0.10.0-rc does NOT fix it either, so there is nothing to
+  # upgrade to. Dropping `rsa` would mean re-doing vault-share key wrapping.
+  #
+  # Compensating control: RSA-OAEP decryption is the only side of the operation
+  # that touches the private key, and
+  # `packages/crypto/core/crates/bittery-crypto-core/src/rsa.rs` performs it with
+  # `RsaPrivateKey::decrypt_blinded(&mut OsRng, ...)` rather than the unblinded
+  # `decrypt`. RNG blinding randomises the modular exponentiation and is the
+  # mitigation the advisory's own workaround section points at; it must not be
+  # reverted. See the comment above the `decrypt_blinded` call.
+  #
+  # Re-check when `rsa` publishes a release that lists this advisory as fixed.
+  { id = "RUSTSEC-2023-0071", reason = "rsa: no fixed release (0.10.0-rc does not fix it); mitigated by decrypt_blinded with OsRng in bittery-crypto-core/src/rsa.rs" },
+
+  # ---------------------------------------------------------------------------
+  # RUSTSEC-2026-0194 — `quick-xml` 0.38.4 — quadratic duplicate-attribute scan
+  # RUSTSEC-2026-0195 — `quick-xml` 0.38.4 — unbounded namespace allocation
+  # Both CVSS 7.5, both DoS-only. Reviewed 2026-07-30. Affects
+  # apps/desktop/src-tauri only.
+  #
+  # The fix is quick-xml >= 0.41.0, which we cannot reach: `plist 1.8.0` pins
+  # `quick-xml = "^0.38"`, and `plist` is pulled in by `tauri 2.11.5` /
+  # `tauri-utils` / `tauri-codegen`. `cargo update -p quick-xml --precise 0.41.0`
+  # fails with "candidate versions found which didn't match: 0.41.0". Unblocking
+  # it needs an upstream `plist` bump followed by a Tauri release, not a change
+  # here.
+  #
+  # Exposure: `plist` is used by Tauri to read Apple property lists — the app's
+  # own Info.plist at build/codegen time and at bundle load. The desktop app
+  # never feeds attacker-supplied XML to it, so reaching either bug requires an
+  # attacker who can already write inside the installed app bundle. Both
+  # advisories are denial-of-service, not memory unsafety or key disclosure.
+  #
+  # Re-check when Tauri ships a release whose `plist` accepts quick-xml >= 0.41.
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml <0.41 pinned by plist 1.8.0 via tauri 2.11.5; DoS-only, only parses the app's own Info.plist" },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml <0.41 pinned by plist 1.8.0 via tauri 2.11.5; DoS-only, only parses the app's own Info.plist" },
+]
+
+# Only `check advisories` is wired into CI today. `check licenses`, `check bans`
+# and `check sources` can be turned on later by adding their sections here — the
+# CI job already points every lockfile at this file, so no new plumbing is
+# needed. They are deliberately left out rather than stubbed, so that a stray
+# `cargo deny check` does not fail against an empty allow-list.

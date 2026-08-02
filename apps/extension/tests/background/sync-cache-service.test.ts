@@ -1,13 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import type { SyncEvent } from "@bittery/sync";
+import type { ActiveAccountId } from "@bittery/storage/types";
+import type { SyncEvent, SyncItemCache } from "@bittery/sync";
 import {
 	createSyncCacheService,
 	type SyncCacheDesktopClient,
 	type SyncCacheStorage,
 	type SyncEventQueryClient,
 } from "../../src/background/services/sync-cache-service";
-
-type ActiveAccount = { type: "single"; accountId: string } | null;
 
 type AccountInput =
 	| string
@@ -56,13 +55,13 @@ function createClientStub(): SyncEventQueryClient {
 }
 
 function createStorageStub(input: {
-	activeAccount: ActiveAccount;
+	activeAccount: ActiveAccountId;
 	accounts: AccountInput[];
 	tokensByAccountId: Record<string, string | undefined>;
 	serverUrlsByAccountId?: Record<string, string | undefined>;
 	vaultIdsByAccountId?: Record<string, string[] | undefined>;
 	fallbackToken?: string | null;
-}): SyncCacheStorage & { clearedAccountIds: string[] } {
+}): SyncCacheStorage {
 	const resolvedAccounts = input.accounts.map(resolveAccount);
 	const tokenMap = new Map<string, string>(
 		Object.entries(input.tokensByAccountId)
@@ -79,11 +78,7 @@ function createStorageStub(input: {
 			([accountId, vaultIds]) => [accountId, vaultIds ?? []],
 		),
 	);
-	const clearedAccountIds: string[] = [];
-
 	return {
-		supportsItemCache: true,
-		clearedAccountIds,
 		getActiveAccount: async () => input.activeAccount,
 		getAccountsList: async () => resolvedAccounts,
 		getAuthToken: async (accountId?: string) => {
@@ -92,8 +87,8 @@ function createStorageStub(input: {
 			}
 
 			const active = input.activeAccount;
-			if (active && active.type === "single") {
-				return tokenMap.get(active.accountId) ?? null;
+			if (active) {
+				return tokenMap.get(active) ?? null;
 			}
 			return input.fallbackToken ?? null;
 		},
@@ -117,16 +112,35 @@ function createStorageStub(input: {
 				vaultId,
 			}));
 		},
-		clearItemCache: async (accountId?: string) => {
-			if (accountId) {
-				clearedAccountIds.push(accountId);
-			}
-		},
 		getAccountMetadata: async (accountId: string) => {
 			const account = resolvedAccounts.find(
 				(candidate) => candidate.accountId === accountId,
 			);
-			return account ? { email: account.email } : undefined;
+			return account ? { email: account.email } : null;
+		},
+	};
+}
+
+/**
+ * Stands in for `VaultRepositoryCoordinator`. Clearing the cache is `ItemCache`'s job —
+ * `AccountStore` cannot reach the record port at all.
+ */
+function createItemCacheStub(): SyncItemCache & {
+	clearedAccountIds: string[];
+} {
+	const clearedAccountIds: string[] = [];
+	return {
+		clearedAccountIds,
+		upsertCachedItem: async () => {},
+		removeCachedItem: async () => {},
+		upsertCachedVault: async () => {},
+		removeCachedVault: async () => {},
+		syncVaultKeys: async () => {},
+		replaceItemId: () => {},
+		clearItemCache: async (accountId?: string) => {
+			if (accountId) {
+				clearedAccountIds.push(accountId);
+			}
 		},
 	};
 }
@@ -150,7 +164,8 @@ describe("sync-cache-service", () => {
 	test("desktop-origin item changes apply account-scoped delta and clear desktop decrypt cache", async () => {
 		const deltaCalls: Array<{
 			eventType: SyncEvent["type"];
-			accountEmail: string | undefined;
+			accountScope: string | undefined;
+			accountEmail: string | null | undefined;
 		}> = [];
 		let desktopCacheClearCount = 0;
 
@@ -182,12 +197,21 @@ describe("sync-cache-service", () => {
 
 		const service = createSyncCacheService({
 			storage,
+			itemCache: createItemCacheStub(),
 			desktopClient: desktop,
 			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
-			deltaSync: async (_client, _cache, event, accountEmail) => {
+			deltaSync: async (
+				_client,
+				_cache,
+				event,
+				accountScope,
+				_serverUrl,
+				accountEmail,
+			) => {
 				deltaCalls.push({
 					eventType: event.type,
+					accountScope,
 					accountEmail,
 				});
 			},
@@ -202,8 +226,10 @@ describe("sync-cache-service", () => {
 		);
 
 		expect(deltaCalls).toHaveLength(1);
+		// The cache scope must be the accountId, not the email.
 		expect(deltaCalls[0]).toEqual({
 			eventType: "item_updated",
+			accountScope: aliceAccountId,
 			accountEmail: "alice@example.com",
 		});
 		expect(desktopCacheClearCount).toBe(1);
@@ -213,7 +239,7 @@ describe("sync-cache-service", () => {
 		const bobAccountId = "acc_bob_example_com";
 
 		const storage = createStorageStub({
-			activeAccount: { type: "single", accountId: bobAccountId },
+			activeAccount: bobAccountId,
 			accounts: [
 				{ accountId: "acc_z_example_com", email: "z@example.com" },
 				{ accountId: bobAccountId, email: "bob@example.com" },
@@ -228,6 +254,7 @@ describe("sync-cache-service", () => {
 
 		const service = createSyncCacheService({
 			storage,
+			itemCache: createItemCacheStub(),
 			desktopClient: {
 				getAuthToken: async () => null,
 				clearCache: () => {},
@@ -246,7 +273,7 @@ describe("sync-cache-service", () => {
 		});
 	});
 
-	test("falls back to global cache update when account-scoped clients are unavailable", async () => {
+	test("clears candidate caches instead of writing un-scoped when account-scoped clients are unavailable", async () => {
 		const deltaCalls: Array<string | undefined> = [];
 		const accountAId = "acc_a_example_com";
 		const accountBId = "acc_b_example_com";
@@ -264,26 +291,30 @@ describe("sync-cache-service", () => {
 			},
 			fallbackToken: "fallback-token",
 		});
+		const itemCache = createItemCacheStub();
 
 		const service = createSyncCacheService({
 			storage,
+			itemCache,
 			desktopClient: {
 				getAuthToken: async () => null,
 				clearCache: () => {},
 			},
 			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
-			deltaSync: async (_client, _cache, _event, accountEmail) => {
-				deltaCalls.push(accountEmail);
+			deltaSync: async (_client, _cache, _event, accountScope) => {
+				deltaCalls.push(accountScope);
 			},
 			logger: console,
 		});
 
 		await service.applyDeltaSyncForEvent(createSyncEvent());
 
-		// Both account-scoped attempts fail token resolution, then one global fallback run.
-		expect(deltaCalls).toEqual([undefined]);
-		expect(storage.clearedAccountIds).toEqual([accountBId, accountAId]);
+		// Both account-scoped attempts fail token resolution. An un-scoped delta would write
+		// into the literal `default` collection, which no account reads back — clearing the
+		// candidates is what makes the next read correct.
+		expect(deltaCalls).toEqual([]);
+		expect(itemCache.clearedAccountIds).toEqual([accountBId, accountAId]);
 	});
 
 	test("travel_mode_updated invokes travel mode handler only for matching account", async () => {
@@ -315,14 +346,15 @@ describe("sync-cache-service", () => {
 
 		const service = createSyncCacheService({
 			storage,
+			itemCache: createItemCacheStub(),
 			desktopClient: {
 				getAuthToken: async () => null,
 				clearCache: () => {},
 			},
 			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
-			deltaSync: async (_client, _cache, event, accountEmail) => {
-				deltaCalls.push(`${event.type}:${accountEmail ?? "global"}`);
+			deltaSync: async (_client, _cache, event, accountScope) => {
+				deltaCalls.push(`${event.type}:${accountScope ?? "global"}`);
 			},
 			handleTravelModeSync: async (_event, accountId) => {
 				travelModeCalls.push(accountId);

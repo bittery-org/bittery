@@ -97,16 +97,14 @@ function DeviceSetupDialogContent({
 		queryKey: ["device-setup", selectedAccountId],
 		enabled: !!selectedAccountId,
 		queryFn: async () => {
-			const [storedServerUrl, legacyServerUrl, secretKey] = await Promise.all([
+			const [storedServerUrl, secretKey] = await Promise.all([
 				storage.getServerUrl(selectedAccountId),
-				storage.getLegacyServerUrl(),
 				storage.getStoredSecretKey(selectedAccountId),
 			]);
 
 			const serverUrl =
 				normalizeServerUrl(storedServerUrl) ??
 				normalizeServerUrl(selectedAccount?.serverUrl) ??
-				normalizeServerUrl(legacyServerUrl) ??
 				fallbackServerUrl;
 
 			return {

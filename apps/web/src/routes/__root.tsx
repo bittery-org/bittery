@@ -11,6 +11,7 @@ import {
 import { TanStackRouterDevtools } from "@tanstack/react-router-devtools";
 import { ThemeProvider } from "next-themes";
 import appCss from "../index.css?url";
+import { initializeStorage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
 export interface RouterAppContext {
@@ -19,6 +20,11 @@ export interface RouterAppContext {
 }
 
 export const Route = createRootRouteWithContext<RouterAppContext>()({
+	// The single choke point for storage readiness. `AccountStore` keys everything by
+	// accountId, so the web active account must be seeded before any route guard, loader
+	// or component makes an account-scoped call. Root `beforeLoad` runs ahead of all of
+	// them, and `initializeStorage` is memoised so repeated navigations are free.
+	beforeLoad: () => initializeStorage(),
 	head: () => ({
 		meta: [
 			{

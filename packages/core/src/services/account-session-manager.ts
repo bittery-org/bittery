@@ -1,21 +1,45 @@
 /**
  * AccountSessionManager — single source of truth for multi-account state.
  * Framework-agnostic; platform specifics injected via callbacks.
+ *
+ * The destructive sequences themselves live in `./account-lifecycle`, which owns
+ * durable state (account records, item cache segments, the stored active
+ * pointer). What stays here is the volatile half: lock state, the in-memory
+ * account list, and the notifications that tell the app both changed.
  */
 
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import {
 	findAccountById,
 	resolveActiveAccountId,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
+import {
+	type CredentialMirror,
+	type LifecycleDeps,
+	type LifecycleOutcome,
+	lockAccount as lifecycleLockAccount,
+	lockAllAccounts as lifecycleLockAllAccounts,
+	removeAccount as lifecycleRemoveAccount,
+	NO_CREDENTIAL_MIRROR,
+} from "./account-lifecycle";
 import { createStoredAccountRpcClient } from "./rpc-client";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export interface AccountSessionManagerOptions {
-	storage: IStorageAdapter;
-	onActiveChanged?: (active: ActiveAccount) => void | Promise<void>;
+	storage: AccountStore;
+	/**
+	 * Sibling of `storage`. Required because `removeAccount` has to wipe the account's
+	 * cached ciphertext, and `AccountStore` cannot reach it. See packages/storage/CONTEXT.md §4.2.
+	 */
+	itemCache: ItemCache;
+	/**
+	 * Optional here, unlike in `LifecycleDeps`: the manager is constructed once per
+	 * app, so a platform that mirrors nothing cannot silently forget to answer twice.
+	 */
+	credentialMirror?: CredentialMirror;
+	onActiveChanged?: (active: ActiveAccountId) => void | Promise<void>;
 	onLockBroadcast?: (reason: string) => void | Promise<void>;
 	invalidateQueries?: (keys: string[][]) => void | Promise<void>;
 	verifyUnlockPolicy?: (accountId: string) => void | Promise<void>;
@@ -36,16 +60,27 @@ type LockState = "locked" | "unlocked";
 export class AccountSessionManager {
 	private accounts: AccountMetadata[] = [];
 	private lockState = new Map<string, LockState>();
-	private active: ActiveAccount = null;
+	private active: ActiveAccountId = null;
 	private initialized = false;
 	private initialization: Promise<void> | null = null;
 	private snapshot = 0;
 	private readonly listeners = new Set<() => void>();
+	private readonly lifecycle: LifecycleDeps;
 
-	constructor(private readonly options: AccountSessionManagerOptions) {}
+	constructor(private readonly options: AccountSessionManagerOptions) {
+		this.lifecycle = {
+			storage: options.storage,
+			itemCache: options.itemCache,
+			credentialMirror: options.credentialMirror ?? NO_CREDENTIAL_MIRROR,
+		};
+	}
 
-	get storage(): IStorageAdapter {
+	get storage(): AccountStore {
 		return this.options.storage;
+	}
+
+	get itemCache(): ItemCache {
+		return this.options.itemCache;
 	}
 
 	subscribe = (listener: () => void): (() => void) => {
@@ -63,24 +98,25 @@ export class AccountSessionManager {
 	}
 
 	private async verifyUnlockPolicy(accountId: string): Promise<boolean> {
-		try {
-			if (this.options.verifyUnlockPolicy) {
+		if (this.options.verifyUnlockPolicy) {
+			try {
 				await this.options.verifyUnlockPolicy(accountId);
-			} else {
-				const enforcer = getTravelModeEnforcer(this.storage);
-				if (!enforcer.isVerified(accountId)) {
-					const client = await createStoredAccountRpcClient(
-						this.storage,
-						accountId,
-					).catch(() => null);
-					await enforcer.verifyForUnlock(accountId, client);
-				}
+				return true;
+			} catch {
+				await this.storage.clearSession(accountId);
+				return false;
 			}
-			return true;
-		} catch {
-			await this.storage.clearSession(accountId);
-			return false;
 		}
+
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
+		if (enforcer.isVerified(accountId)) {
+			return true;
+		}
+		const client = await createStoredAccountRpcClient(
+			this.storage,
+			accountId,
+		).catch(() => null);
+		return enforcer.verifyOrClear(accountId, client);
 	}
 
 	async initialize(): Promise<void> {
@@ -95,7 +131,7 @@ export class AccountSessionManager {
 		const [accounts, active, unlocked] = await Promise.all([
 			this.storage.getAccountsList(),
 			this.storage.getActiveAccount(),
-			this.storage.getUnlockedAccounts?.() ?? Promise.resolve([]),
+			this.storage.getUnlockedAccounts(),
 		]);
 
 		this.accounts = accounts;
@@ -104,10 +140,7 @@ export class AccountSessionManager {
 		// that does not resolve to a known account is treated as "no active
 		// account" so the normal selection path takes over.
 		this.active =
-			active?.type === "single" &&
-			!resolveActiveAccountId(active.accountId, accounts)
-				? null
-				: active;
+			active && !resolveActiveAccountId(active, accounts) ? null : active;
 		this.lockState.clear();
 		const verifiedUnlocked = new Set(
 			(
@@ -136,15 +169,15 @@ export class AccountSessionManager {
 		return this.accounts;
 	}
 
-	getActiveAccount(): ActiveAccount {
+	getActiveAccount(): ActiveAccountId {
 		return this.active;
 	}
 
 	getActiveAccountMetadata(): AccountMetadata | null {
-		if (this.active?.type !== "single") {
+		if (!this.active) {
 			return null;
 		}
-		return findAccountById(this.accounts, this.active.accountId) ?? null;
+		return findAccountById(this.accounts, this.active) ?? null;
 	}
 
 	getUnlockedAccountIds(): string[] {
@@ -157,30 +190,26 @@ export class AccountSessionManager {
 		return this.lockState.get(accountId) === "unlocked";
 	}
 
-	async switchAccount(account: ActiveAccount): Promise<void> {
-		await this.storage.setActiveAccount(account);
-		this.active = account;
+	async switchAccount(accountId: ActiveAccountId): Promise<void> {
+		await this.storage.setActiveAccount(accountId);
+		this.active = accountId;
 
-		if (account?.type === "single") {
-			const meta = findAccountById(this.accounts, account.accountId);
+		if (accountId) {
+			const meta = findAccountById(this.accounts, accountId);
 			if (meta) {
 				meta.lastActiveAt = Date.now();
 				// Persist so storage-backed sorting sees the real value after
 				// reload. addAccount upserts an existing account by accountId.
 				await this.storage.addAccount(meta);
 			}
-			if (!this.isUnlocked(account.accountId)) {
-				let restored = await this.storage.tryRestoreSession(
-					true,
-					account.accountId,
-				);
-				if (restored)
-					restored = await this.verifyUnlockPolicy(account.accountId);
-				this.lockState.set(account.accountId, restored ? "unlocked" : "locked");
+			if (!this.isUnlocked(accountId)) {
+				let restored = await this.storage.tryRestoreSession(true, accountId);
+				if (restored) restored = await this.verifyUnlockPolicy(accountId);
+				this.lockState.set(accountId, restored ? "unlocked" : "locked");
 			}
 		}
 
-		await this.options.onActiveChanged?.(account);
+		await this.options.onActiveChanged?.(accountId);
 		await this.options.invalidateQueries?.([
 			["accounts"],
 			["auth"],
@@ -215,19 +244,17 @@ export class AccountSessionManager {
 			secretKeyHint: input.secretKeyHint,
 			addedAt: Date.now(),
 			lastActiveAt: Date.now(),
-			biometricEnabled: this.storage.isBiometricEnabled
-				? await this.storage.isBiometricEnabled(accountId)
-				: false,
+			biometricEnabled: await this.storage.isBiometricEnabled(accountId),
 		};
 
 		await this.storage.addAccount(metadata);
-		await this.storage.setActiveAccount({ type: "single", accountId });
+		await this.storage.setActiveAccount(accountId);
 		await this.refresh();
 		return accountId;
 	}
 
 	async lockAccount(accountId: string): Promise<void> {
-		await this.storage.clearSession(accountId);
+		await lifecycleLockAccount(accountId, this.lifecycle);
 		this.lockState.set(accountId, "locked");
 		await this.options.invalidateQueries?.([
 			["accounts", "unlocked"],
@@ -238,9 +265,9 @@ export class AccountSessionManager {
 	}
 
 	async lockAll(reason = "manual"): Promise<void> {
-		if (this.storage.lockAllAccounts) {
-			await this.storage.lockAllAccounts();
-		}
+		// `reason` is broadcast metadata for the app, not part of the sequence, so it
+		// stops here rather than travelling into the lifecycle module.
+		await lifecycleLockAllAccounts(this.lifecycle);
 		for (const account of this.accounts) {
 			this.lockState.set(account.accountId, "locked");
 		}
@@ -253,36 +280,22 @@ export class AccountSessionManager {
 		this.emit();
 	}
 
-	async removeAccount(accountId: string): Promise<void> {
-		const wasActive =
-			this.active?.type === "single" && this.active.accountId === accountId;
-		const nextAccount = wasActive
-			? this.accounts.find((account) => account.accountId !== accountId)
-			: undefined;
+	async removeAccount(accountId: string): Promise<LifecycleOutcome> {
+		const outcome = await lifecycleRemoveAccount(accountId, this.lifecycle);
+		// Re-reads the list, the pointer the module may have moved, and the lock
+		// states, then emits — so nothing in-memory has to be patched by hand here.
+		await this.refresh();
 
-		if (wasActive) {
-			await this.storage.setActiveAccount(null);
-			this.active = null;
+		if (outcome.wasActive) {
+			await this.options.onActiveChanged?.(this.active);
+			await this.options.invalidateQueries?.([
+				["accounts"],
+				["auth"],
+				["vaults"],
+				["items"],
+			]);
 		}
-
-		await this.storage.removeAccount(accountId);
-
-		if (wasActive) {
-			if (nextAccount) {
-				this.accounts = this.accounts.filter(
-					(account) => account.accountId !== accountId,
-				);
-				this.lockState.delete(accountId);
-				await this.switchAccount({
-					type: "single",
-					accountId: nextAccount.accountId,
-				});
-			} else {
-				await this.refresh();
-			}
-		} else {
-			await this.refresh();
-		}
+		return outcome;
 	}
 
 	async unlockAccount(
@@ -302,10 +315,23 @@ export class AccountSessionManager {
 
 let sharedManager: AccountSessionManager | null = null;
 
+/**
+ * Constructs the shared manager on the first call and returns it afterwards.
+ *
+ * Passing options to an already-constructed manager throws: the options carry the
+ * platform callbacks (onActiveChanged, onLockBroadcast, …) and accepting them
+ * silently would drop them, leaving account switches and lock broadcasts dead.
+ * Callers that only need the instance must use `peekAccountSessionManager()`.
+ */
 export function getAccountSessionManager(
 	options?: AccountSessionManagerOptions,
 ): AccountSessionManager {
-	if (!sharedManager && options) {
+	if (options) {
+		if (sharedManager) {
+			throw new Error(
+				"AccountSessionManager is already constructed; these options (and any onActiveChanged/onLockBroadcast callbacks in them) would be silently dropped. Construct it exactly once at app startup and use peekAccountSessionManager() everywhere else.",
+			);
+		}
 		sharedManager = new AccountSessionManager(options);
 	}
 	if (!sharedManager) {

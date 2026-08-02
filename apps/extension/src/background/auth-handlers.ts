@@ -5,45 +5,33 @@
  * Uses shared auth utilities from @bittery/core for SRP login/unlock logic.
  */
 
+import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import {
 	performSRPLogin,
 	performSRPUnlock,
 	storeLoginSession,
 	storeUnlockSession,
-} from "@bittery/core";
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+} from "@bittery/core/services/auth-service";
+import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { cryptoAdapter } from "../lib/crypto-adapter";
-import { storage } from "../lib/storage";
+import { itemCache, storage } from "../lib/storage";
+import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { isDesktopUnlockedNow } from "./desktop-status";
-import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
+import { requireDesktopUnlock } from "./desktop-unlock";
+import { lifecycleDeps } from "./lifecycle";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
+import { restoreUnlockedSessions } from "./services/session-restore";
 import {
-	getAutoLockTimeoutCached,
-	getLastActivityTimestamp,
-	isDesktopMode,
 	isUnlocked,
-	lock,
 	setDesktopModeSentinel,
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
+import { vaultSession } from "./vault-session";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
-
-async function getAccountRpcClient(accountId: string) {
-	const token = await storage.getAuthToken(accountId);
-	if (!token) {
-		return rpcClient;
-	}
-	const serverUrl =
-		(await storage.getServerUrl(accountId)) ??
-		(await storage.getServerUrl()) ??
-		DEFAULT_SERVER_URL;
-	return createAccountRpcClient(token, serverUrl);
-}
 
 /**
  * Handle LOGIN message - Full SRP authentication
@@ -62,7 +50,7 @@ export async function handleLogin(payload: {
 	);
 
 	// Store session data using shared utility
-	await storeLoginSession(result, secretKey, storage, email, {
+	await storeLoginSession(result, secretKey, storage, itemCache, email, {
 		serverUrl: DEFAULT_SERVER_URL,
 	});
 
@@ -99,19 +87,20 @@ export async function handleQuickUnlock(payload: {
 	// Get stored email for multi-account support
 	const activeAccount = await storage.getActiveAccount();
 
-	if (!activeAccount || activeAccount.type !== "single") {
+	if (!activeAccount) {
 		throw new Error("Quick unlock not available - no active account");
 	}
 
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
-		{ accountId: activeAccount.accountId, password },
+		{ accountId: activeAccount, password },
 		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(result, storage, activeAccount.accountId, {
+	await storeUnlockSession(result, storage, itemCache, activeAccount, {
 		travelModeRpcClient: rpcClient,
+		setActive: true,
 	});
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
@@ -136,10 +125,16 @@ export async function handleCheckAuth(): Promise<MessageResponse> {
 	// This handles the case where the first account is added but not set as active
 	await ensureActiveAccountSet();
 
-	// Try to restore sessions from storage if not already unlocked
-	// This handles browser restart where in-memory MUKs are cleared
+	// Try to restore sessions from storage if not already unlocked.
+	//
+	// The service-worker startup routine already does this once per wake
+	// (`restoreUnlockedSessions`); this covers the case where the worker stayed alive
+	// through a lock and the popup is asking again.
 	if (localAuthenticated && !isUnlocked()) {
-		await tryRestoreAllSessions();
+		const restored = await restoreUnlockedSessions();
+		if (restored.muk) {
+			setMasterUnlockKey(restored.muk);
+		}
 	}
 
 	const desktopUnlocked = await isDesktopUnlockedNow();
@@ -179,30 +174,21 @@ async function ensureActiveAccountSet(): Promise<void> {
 			// Single account - set it as active
 			const firstAccount = accounts[0];
 			if (!firstAccount) return; // Should never happen but satisfies TS
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: firstAccount.accountId,
-			});
+			await storage.setActiveAccount(firstAccount.accountId);
 		} else {
 			// Multiple accounts - check if any are unlocked
-			const unlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
+			const unlockedAccountIds = await storage.getUnlockedAccounts();
 
 			if (unlockedAccountIds.length >= 1) {
 				// One or more unlocked - use the first unlocked account as active
 				const unlockedAccountId = unlockedAccountIds[0];
 				if (!unlockedAccountId) return; // Should never happen but satisfies TS
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: unlockedAccountId,
-				});
+				await storage.setActiveAccount(unlockedAccountId);
 			} else {
 				// None unlocked - default to first account
 				const firstAccount = accounts[0];
 				if (!firstAccount) return; // Should never happen but satisfies TS
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: firstAccount.accountId,
-				});
+				await storage.setActiveAccount(firstAccount.accountId);
 			}
 		}
 	} catch (error) {
@@ -211,54 +197,26 @@ async function ensureActiveAccountSet(): Promise<void> {
 }
 
 /**
- * Try to restore all account sessions from encrypted storage
- * Called on startup/auth check to restore sessions after browser restart
- */
-async function tryRestoreAllSessions(): Promise<void> {
-	try {
-		const accounts = await storage.getAccountsList();
-		if (accounts.length === 0) return;
-
-		const restoredAccountIds: string[] = [];
-
-		// Try to restore each account's session
-		for (const account of accounts) {
-			try {
-				const restored = await getAccountSessionManager({
-					storage,
-				}).unlockAccount(account.accountId, false);
-				if (restored) {
-					restoredAccountIds.push(account.accountId);
-				}
-			} catch (error) {
-				console.error(
-					`[Auth] Failed to restore session for ${account.email}:`,
-					error,
-				);
-			}
-		}
-
-		// If we restored any sessions, set the session manager's global MUK
-		// (just a sentinel value indicating "at least one account is unlocked")
-		if (restoredAccountIds.length > 0) {
-			// Update activity timestamp FIRST to prevent immediate auto-lock
-			await updateActivity();
-
-			const muk = await storage.getMasterUnlockKey(restoredAccountIds[0]);
-			if (muk) {
-				setMasterUnlockKey(muk);
-			}
-		}
-	} catch (error) {
-		console.error("[Auth] Failed to restore sessions:", error);
-	}
-}
-
-/**
  * Handle CAN_QUICK_UNLOCK message - Check if quick unlock is available
+ *
+ * Deliberately NOT `storage.canQuickUnlock()`, which additionally requires unexpired
+ * `session_data`. Quick unlock does not need it: `performSRPUnlock` re-authenticates against
+ * the server and re-issues both the token and the vault keys, so everything it consumes —
+ * the accounts list, the stored `secret_key` and the pinned KDF profile — is device-bound
+ * and survives a browser restart. The honest question is "can we re-derive?", and that is
+ * what this asks.
  */
 export async function handleCanQuickUnlock(): Promise<MessageResponse> {
-	const canQuickUnlock = await storage.canQuickUnlock();
+	const activeAccount = await storage.getActiveAccount();
+	if (!activeAccount) {
+		return { success: true, canQuickUnlock: false };
+	}
+
+	const accountId = activeAccount;
+	const canQuickUnlock =
+		(await storage.hasStoredSecretKey(accountId)) &&
+		(await storage.getPinnedKdfProfile(accountId)) !== null;
+
 	return { success: true, canQuickUnlock };
 }
 
@@ -278,10 +236,9 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 	const userId = await storage.getActiveAccountUserId();
 	const sessionValid = await storage.isSessionValid();
 
-	const email =
-		activeAccount?.type === "single"
-			? await resolveEmailFromAccountId(activeAccount.accountId)
-			: null;
+	const email = activeAccount
+		? await resolveEmailFromAccountId(activeAccount)
+		: null;
 
 	return {
 		success: true,
@@ -291,64 +248,57 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 }
 
 /**
- * Handle LOGOUT message - Clear session and lock
+ * Handle LOGOUT message - Sign out of the active account and lock
  */
 export async function handleLogout(): Promise<MessageResponse> {
-	await storage.clearSession();
-	lock();
+	const accountId = await storage.getActiveAccount();
+	const outcome = accountId
+		? await invalidateAccountSession({ accountId }, lifecycleDeps)
+		: null;
+	// `source: "logout"` never refuses: signing out must lock even next to a desktop app.
+	await vaultSession.dispatch({
+		type: "LOCK_REQUESTED",
+		source: "logout",
+		at: Date.now(),
+	});
+
+	// The module reports instead of throwing, so a genuinely failed storage step
+	// has to be surfaced here or the popup would call a partial wipe a success.
+	if (outcome && outcome.failures.length > 0) {
+		console.error("[Auth] Sign-out steps failed:", outcome.failures);
+		return { success: false };
+	}
 	return { success: true };
 }
 
 /**
- * Handle GET_SESSION_STATUS message - Report unlock/lock timing for the popup
- * footer. Returns the remaining time before auto-lock when it can be computed
- * cheaply from in-memory session state; otherwise `remainingMs` is null.
+ * Handle GET_SESSION_STATUS message - the whole vault-session snapshot, so lock
+ * state and ownership reach the popup as one consistent value. Reading it also
+ * re-evaluates the desktop and the auto-lock deadline (fail-closed by design).
  */
 export async function handleGetSessionStatus(): Promise<MessageResponse> {
-	const unlocked = isUnlocked();
-	const desktopMode = isDesktopMode();
-
-	// Desktop mode has no independent countdown (lock state follows the app),
-	// and a "never" timeout (-1) has no countdown either.
-	const timeoutMs = getAutoLockTimeoutCached();
-	let remainingMs: number | null = null;
-
-	if (unlocked && !desktopMode && timeoutMs !== -1) {
-		const lastActivity = getLastActivityTimestamp();
-		if (lastActivity > 0) {
-			remainingMs = Math.max(0, timeoutMs - (Date.now() - lastActivity));
-		}
-	}
-
-	return {
-		success: true,
-		unlocked,
-		desktopMode,
-		remainingMs,
-		timeoutMs,
-	};
+	return { success: true, ...vaultSession.getSnapshot() };
 }
 
 /**
  * Handle LOCK message - Manual lock (clears MUK but keeps vault keys)
+ *
+ * Refusals travel as a machine-readable `code`, never as prose: the popup owns
+ * the translated string (strict i18n).
  */
 export async function handleLock(): Promise<MessageResponse> {
-	try {
-		// Lock extension (clears session manager's global MUK and all per-account MUKs)
-		// This will throw an error if desktop is running
-		await lock();
+	await vaultSession.dispatch({
+		type: "LOCK_REQUESTED",
+		source: "popup",
+		at: Date.now(),
+	});
 
-		return { success: true };
-	} catch (error) {
-		// Return user-friendly error when desktop is managing lock state
-		return {
-			success: false,
-			error:
-				error instanceof Error
-					? error.message
-					: "Failed to lock - desktop app is managing vault state",
-		};
+	const refusal = vaultSession.consumeRefusal();
+	if (refusal) {
+		return { success: false, code: refusal };
 	}
+
+	return { success: true };
 }
 
 /**
@@ -370,70 +320,24 @@ export async function handleQuickUnlockAll(payload: {
 		};
 	}
 
-	// Get list of all accounts
 	const accounts = await storage.getAccountsList();
 
 	if (accounts.length === 0) {
 		throw new Error("No accounts found");
 	}
 
-	const unlocked: string[] = [];
-	const failed: string[] = [];
+	const { activeAccountId, unlocked, failed } = await unlockAllWithPassword(
+		{ password },
+		{ storage, itemCache, crypto: cryptoAdapter },
+	);
 
-	// Attempt to unlock each account
-	for (const account of accounts) {
-		try {
-			// Check if account has stored secret key
-			const hasSecretKey = await storage.hasStoredSecretKey?.(
-				account.accountId,
-			);
-			if (!hasSecretKey) {
-				failed.push(account.accountId);
-				continue;
-			}
-
-			// Perform SRP unlock for this account
-			const result = await performSRPUnlock(
-				{ accountId: account.accountId, password },
-				{ crypto: cryptoAdapter, rpcClient, storage },
-			);
-
-			// Store unlock session data
-			const accountRpcClient = await getAccountRpcClient(account.accountId);
-			await storeUnlockSession(result, storage, account.accountId, {
-				travelModeRpcClient: accountRpcClient,
-			});
-
-			unlocked.push(account.accountId);
-		} catch (error) {
-			console.error(
-				`[QUICK_UNLOCK_ALL] Failed to unlock ${account.email}:`,
-				error,
-			);
-			failed.push(account.accountId);
-		}
-	}
-
-	// If no accounts unlocked, fail
-	if (unlocked.length === 0) {
+	if (!activeAccountId) {
 		throw new Error("Failed to unlock any accounts");
 	}
 
-	// `unlocked` holds accountIds (UUIDs), not emails.
-	const firstUnlockedAccountId = unlocked[0];
-	if (!firstUnlockedAccountId) {
-		throw new Error("No unlocked accounts found");
-	}
-
-	// Set the active account to the first unlocked account. Other accounts stay
-	// unlocked in the background but only the active one is surfaced.
-	await storage.setActiveAccount({
-		type: "single",
-		accountId: firstUnlockedAccountId,
-	});
-
-	// Set MUK for first unlocked account in session manager
-	const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);
+	// The other accounts stay unlocked in the background; only the active one
+	// gets its MUK seeded into the in-memory session manager for auto-lock.
+	const activeMuk = await storage.getMasterUnlockKey(activeAccountId);
 	if (activeMuk) {
 		setMasterUnlockKey(activeMuk);
 	}

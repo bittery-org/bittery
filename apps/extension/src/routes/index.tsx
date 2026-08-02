@@ -1,4 +1,5 @@
 import { createRoute, redirect } from "@tanstack/react-router";
+import { isDesktopStatusUnlocked } from "../background/desktop-protocol";
 import { Route as RootRoute } from "./__root";
 
 export const Route = createRoute({
@@ -19,9 +20,7 @@ export const Route = createRoute({
 		});
 		const desktopUnlocked =
 			desktopStatusResponse.success &&
-			desktopStatusResponse.available &&
-			desktopStatusResponse.locked === false &&
-			(desktopStatusResponse.unlockedAccounts?.length ?? 0) > 0;
+			isDesktopStatusUnlocked(desktopStatusResponse);
 
 		if (desktopUnlocked) {
 			throw redirect({ to: "/vault" });

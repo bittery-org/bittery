@@ -2,6 +2,80 @@ import { describe, expect, test } from "bun:test";
 import type { EncryptedData, EncryptionContext } from "@bittery/types";
 import { ItemService } from "./item-service";
 
+describe("ItemService account identity", () => {
+	// An unresolvable scope must never reach `AccountStore`, whose omitted-accountId
+	// fallback resolves to the *active* account. Reaching it unwraps one account's
+	// vault key for another account's scope.
+	test("never reads vault keys when the account scope cannot be resolved", async () => {
+		const getVaultKeysScopes: Array<string | undefined> = [];
+		let decryptCalls = 0;
+
+		const service = new ItemService({
+			storage: {
+				getActiveAccount: async () => "acc_active",
+				getAccountsList: async () => [
+					{ accountId: "acc_active", email: "alice@example.com" },
+				],
+				getVaultKeys: async (accountId?: string) => {
+					getVaultKeysScopes.push(accountId);
+					return [
+						{
+							vaultId: "vault_1",
+							encryptedVaultKey: JSON.stringify({
+								ciphertext: "wrapped",
+								iv: "vault-iv",
+								algorithm: "aes-256-gcm",
+								context: {
+									vaultId: "vault_1",
+									userId: "user_active",
+									keyVersion: 1,
+									purpose: "vault-key-wrap",
+								},
+							}),
+						},
+					];
+				},
+				getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
+				getEncryptedPrivateKey: async () => null,
+				getStoredSessionData: async () => ({ userId: "user_active" }),
+				getAccountMetadata: async () => null,
+				getActiveAccountUserId: async () => "user_active",
+			} as never,
+			itemCache: {} as never,
+			crypto: {
+				generateUuid: async () => "item_123",
+				decrypt: async () => {
+					decryptCalls += 1;
+					return Buffer.from("vault-key").toString("base64");
+				},
+				encrypt: async () => ({
+					ciphertext: "ciphertext",
+					iv: "iv",
+					algorithm: "aes-256-gcm",
+				}),
+			} as never,
+			accounts: {} as never,
+		});
+
+		await expect(
+			service.createItem(
+				{
+					vaultId: "vault_1",
+					category: "login",
+					data: { title: "example.com" },
+					// Belongs to no known account, so it resolves to nothing.
+					accountEmail: "stranger@example.com",
+				},
+				{} as never,
+			),
+		).rejects.toThrow();
+
+		// `toEqual` treats `[undefined]` as `[]`, so assert the length directly.
+		expect(getVaultKeysScopes.length).toBe(0);
+		expect(decryptCalls).toBe(0);
+	});
+});
+
 describe("ItemService", () => {
 	test("uses account metadata userId when session metadata is missing", async () => {
 		const encryptCalls: Array<{ context?: { userId?: string } }> = [];
@@ -40,6 +114,7 @@ describe("ItemService", () => {
 					{ accountId: "acc_alice", email: "alice@example.com" },
 				],
 			} as never,
+			itemCache: {} as never,
 			crypto: {
 				generateUuid: async () => "item_123",
 				decrypt: async () => Buffer.from("vault-key").toString("base64"),
@@ -88,7 +163,7 @@ describe("ItemService", () => {
 	test("falls back to older encryption versions when cached item metadata drifted", async () => {
 		const attemptedVersions: number[] = [];
 		const service = new ItemService({
-			storage: {
+			itemCache: {
 				getCachedItems: async () => [
 					{
 						id: "item_1",
@@ -106,6 +181,8 @@ describe("ItemService", () => {
 						attachments: [],
 					},
 				],
+			} as never,
+			storage: {
 				getVaultKeys: async () => [
 					{
 						vaultId: "vault_1",
@@ -184,15 +261,11 @@ describe("ItemService", () => {
 		const service = new ItemService({
 			storage: {
 				// One account active, the other merely unlocked in the background.
-				getActiveAccount: async () => ({
-					type: "single",
-					accountId: "acc_source",
-				}),
+				getActiveAccount: async () => "acc_source",
 				getAccountsList: async () => [
 					{ accountId: "acc_source", email: "alice@example.com" },
 					{ accountId: "acc_target", email: "bob@example.com" },
 				],
-				supportsMultiAccount: true,
 				getVaultKeys: async () => [
 					{ vaultId: "vault_target", encryptedVaultKey: targetVaultKey },
 				],
@@ -202,6 +275,7 @@ describe("ItemService", () => {
 				getAccountMetadata: async () => ({ userId: "user_target" }),
 				getActiveAccountUserId: async () => "user_target",
 			} as never,
+			itemCache: {} as never,
 			crypto: {
 				generateUuid: async () => "item_new",
 				decrypt: async () => Buffer.from("vault-key").toString("base64"),
@@ -348,6 +422,7 @@ describe("ItemService", () => {
 					}),
 					getActiveAccountUserId: async () => "user_target",
 				} as never,
+				itemCache: {} as never,
 				crypto: {
 					generateUuid: async () => "item_new",
 					decrypt: async (
@@ -549,6 +624,7 @@ describe("ItemService", () => {
 					}),
 					getActiveAccountUserId: async () => "user_target",
 				} as never,
+				itemCache: {} as never,
 				crypto: {
 					generateUuid: async () => "item_new",
 					decrypt: async () => Buffer.from("vault-key").toString("base64"),

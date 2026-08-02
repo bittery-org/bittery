@@ -11,6 +11,37 @@ use crate::error::CryptoError;
 // Base32 alphabet (RFC 4648)
 const BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
+/// Smallest accepted OTP length. Matches the documented FFI contract and the
+/// `TotpDigits = 6 | 7 | 8` TypeScript union.
+pub const MIN_TOTP_DIGITS: u32 = 6;
+/// Largest accepted OTP length. `10u32.pow(digits)` overflows above 9, so this
+/// bound is also what keeps the truncation step from panicking/wrapping.
+pub const MAX_TOTP_DIGITS: u32 = 8;
+
+/// Reject out-of-range `digits`.
+///
+/// This is the trust boundary: every binding (C FFI, JNI, wasm, napi, TS) goes
+/// through `hotp`, so validating here means no caller can reach the modulus
+/// computation with a value that overflows `10u32.pow`.
+fn validate_digits(digits: u32) -> Result<(), CryptoError> {
+    if !(MIN_TOTP_DIGITS..=MAX_TOTP_DIGITS).contains(&digits) {
+        return Err(CryptoError::InvalidInput(format!(
+            "Invalid TOTP digits: expected {MIN_TOTP_DIGITS}-{MAX_TOTP_DIGITS}, got {digits}"
+        )));
+    }
+    Ok(())
+}
+
+/// Reject a zero `period`, which would divide by zero when deriving the counter.
+fn validate_period(period: u64) -> Result<(), CryptoError> {
+    if period == 0 {
+        return Err(CryptoError::InvalidInput(
+            "Invalid TOTP period: expected at least 1 second, got 0".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Result of generating a TOTP code
 pub struct TotpResult {
     /// The generated TOTP code (zero-padded)
@@ -60,6 +91,8 @@ fn base32_decode(input: &str) -> Result<Vec<u8>, CryptoError> {
 }
 
 fn hotp(secret: &[u8], counter: u64, algorithm: &str, digits: u32) -> Result<String, CryptoError> {
+    validate_digits(digits)?;
+
     let counter_bytes = counter.to_be_bytes();
 
     let hash: Vec<u8> = match algorithm.to_uppercase().as_str() {
@@ -101,12 +134,20 @@ fn hotp(secret: &[u8], counter: u64, algorithm: &str, digits: u32) -> Result<Str
 }
 
 /// Generate a TOTP code for the current time (RFC 6238)
+///
+/// # Errors
+///
+/// Returns [`CryptoError::InvalidInput`] if `digits` is outside 6..=8, if
+/// `period` is 0, or if `secret` is not valid base32.
 pub fn generate_totp(
     secret: &str,
     algorithm: &str,
     digits: u32,
     period: u64,
 ) -> Result<TotpResult, CryptoError> {
+    validate_digits(digits)?;
+    validate_period(period)?;
+
     let secret_bytes = base32_decode(secret)?;
 
     let now = SystemTime::now()
@@ -130,6 +171,11 @@ pub fn generate_totp(
 }
 
 /// Generate a TOTP code for a specific timestamp (useful for testing)
+///
+/// # Errors
+///
+/// Returns [`CryptoError::InvalidInput`] if `digits` is outside 6..=8, if
+/// `period` is 0, or if `secret` is not valid base32.
 pub fn generate_totp_at(
     secret: &str,
     algorithm: &str,
@@ -137,6 +183,9 @@ pub fn generate_totp_at(
     period: u64,
     timestamp: u64,
 ) -> Result<String, CryptoError> {
+    validate_digits(digits)?;
+    validate_period(period)?;
+
     let secret_bytes = base32_decode(secret)?;
     let counter = timestamp / period;
     hotp(&secret_bytes, counter, algorithm, digits)
@@ -223,5 +272,71 @@ mod tests {
         assert_eq!(result.code.len(), 6);
         assert!(result.remaining_seconds > 0 && result.remaining_seconds <= 30);
         assert!(result.progress >= 0.0 && result.progress < 100.0);
+    }
+
+    /// `10u32.pow(digits)` panics in debug and wraps in release for
+    /// `digits >= 10`, and any `digits` outside 6..=8 violates the documented
+    /// contract. All of them must surface as an error instead.
+    #[test]
+    fn totp_rejects_out_of_range_digits() {
+        for digits in [0u32, 1, 5, 9, 10, 11, 20, u32::MAX] {
+            let err = match generate_totp_at(SEED_SHA1, "SHA1", digits, 30, 59) {
+                Ok(code) => panic!("digits {digits} must be rejected, got {code}"),
+                Err(e) => e,
+            };
+            assert!(
+                matches!(err, CryptoError::InvalidInput(_)),
+                "digits {digits} produced unexpected error: {err}"
+            );
+            assert!(
+                err.to_string().contains("Invalid TOTP digits"),
+                "digits {digits} produced unexpected message: {err}"
+            );
+
+            assert!(
+                generate_totp(SEED_SHA1, "SHA1", digits, 30).is_err(),
+                "generate_totp accepted digits {digits}"
+            );
+        }
+    }
+
+    /// `now / period` divides by zero when `period == 0`.
+    #[test]
+    fn totp_rejects_zero_period() {
+        let err = match generate_totp_at(SEED_SHA1, "SHA1", 6, 0, 59) {
+            Ok(code) => panic!("period 0 must be rejected, got {code}"),
+            Err(e) => e,
+        };
+        assert!(matches!(err, CryptoError::InvalidInput(_)));
+        assert!(err.to_string().contains("Invalid TOTP period"));
+
+        assert!(generate_totp(SEED_SHA1, "SHA1", 6, 0).is_err());
+    }
+
+    #[test]
+    fn totp_accepts_the_documented_digit_range() {
+        for digits in MIN_TOTP_DIGITS..=MAX_TOTP_DIGITS {
+            let code = generate_totp_at(SEED_SHA1, "SHA1", digits, 30, 59)
+                .unwrap_or_else(|e| panic!("digits {digits} must be accepted: {e}"));
+            assert_eq!(code.len(), digits as usize);
+        }
+    }
+
+    /// Guards against a validation change silently altering output: these are
+    /// the RFC 6238 T=59 SHA1 vector truncated to 6, 7 and 8 digits.
+    #[test]
+    fn totp_output_is_unchanged_for_valid_digit_lengths() {
+        assert_eq!(
+            generate_totp_at(SEED_SHA1, "SHA1", 6, 30, 59).unwrap(),
+            "287082"
+        );
+        assert_eq!(
+            generate_totp_at(SEED_SHA1, "SHA1", 7, 30, 59).unwrap(),
+            "4287082"
+        );
+        assert_eq!(
+            generate_totp_at(SEED_SHA1, "SHA1", 8, 30, 59).unwrap(),
+            "94287082"
+        );
     }
 }

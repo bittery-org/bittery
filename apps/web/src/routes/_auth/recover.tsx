@@ -1,9 +1,10 @@
+import { storeLoginSession } from "@bittery/core/services/auth-service";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPCClient } from "@bittery/shared/rpc";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
-import { resolveOrCreateAccountId } from "@bittery/storage/account-id";
+import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconCheck as Check,
@@ -16,8 +17,8 @@ import {
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type FormEvent, Fragment, useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { normalizeVaultListEntry } from "@/lib/rpc-normalizers";
-import { storage } from "@/lib/storage";
+import { loadRecoveredAccountBootstrap } from "@/lib/recovery-session";
+import { itemCache, refreshActiveAccountId, storage } from "@/lib/storage";
 import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
 import { WorkerCrypto } from "@/lib/worker-crypto";
 import { useI18n } from "@/providers/i18n-provider";
@@ -370,39 +371,44 @@ function RecoverRouteComponent() {
 			});
 
 			const serverUrl = getDefaultServerUrl();
-			const accountId = resolveOrCreateAccountId(
-				await storage.getAccountsList(),
-				serverUrl,
-				resetResult.userId,
-			);
-			await storage.storeAuthToken(resetResult.token, accountId);
-			await storage.storeServerUrl(serverUrl, accountId);
-
-			const vaultList = await rpcClient.vault.list.query();
-			await storage.storeVaultKeys(
-				vaultList.map(normalizeVaultListEntry),
-				accountId,
-			);
-
-			await storage.storeEncryptedPrivateKey(
-				JSON.stringify(newEncryptedPrivateKey),
-				accountId,
-			);
-			await storage.storeSecretKey(newSecretKey, accountId);
-			await storage.storeSessionData(
-				newMasterUnlockKey,
-				accountId,
-				email,
-				resetResult.userId,
-				resetResult.expiresAt,
-				resetResult.sessionId,
-			);
-			await storage.setMasterUnlockKey(newMasterUnlockKey, accountId);
-			await storage.storePinnedKdfProfile(newProfile, accountId);
-
 			setGeneratedSecretKey(newSecretKey);
 			setStep("newSecretKey");
 			toast.success(m.auth_recover_toast_reset_success());
+
+			try {
+				const bootstrap = await loadRecoveredAccountBootstrap({
+					token: resetResult.token,
+					serverUrl,
+				});
+				await storeLoginSession(
+					{
+						token: resetResult.token,
+						sessionId: resetResult.sessionId,
+						expiresAt: resetResult.expiresAt,
+						user: {
+							id: bootstrap.user.id,
+							email: bootstrap.user.email,
+							name: bootstrap.user.name,
+							teamName: bootstrap.user.teamName ?? undefined,
+							teamAvatarUrl: bootstrap.user.teamAvatarUrl,
+							encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
+						},
+						vaultKeys: bootstrap.vaults.map(toVaultKeyEntry),
+						masterUnlockKey: newMasterUnlockKey,
+						kdfParams: newProfile,
+						serverUrl,
+					},
+					newSecretKey,
+					storage,
+					itemCache,
+					bootstrap.user.email,
+					{ serverUrl },
+				);
+				await refreshActiveAccountId();
+			} catch (bootstrapError) {
+				console.error("Recovery session bootstrap failed:", bootstrapError);
+				toast.warning(m.auth_recover_toast_session_setup_failed());
+			}
 		} catch (error: unknown) {
 			console.error("Recovery flow failed:", error);
 			toast.error(

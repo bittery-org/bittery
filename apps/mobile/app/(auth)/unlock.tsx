@@ -1,11 +1,14 @@
 import {
 	useBiometricUnlock,
-	usePlatformStorage,
 	useQuickUnlock,
 	useQuickUnlockAll,
 	useSessionState,
 } from "@bittery/core/hooks";
-import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
+import { removeAccount } from "@bittery/core/services/account-lifecycle";
+import {
+	type UnlockOutcome,
+	unlockAllWithBiometric,
+} from "@bittery/core/services/unlock";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
@@ -41,6 +44,7 @@ import {
 } from "react-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { useBiometricType } from "@/lib/biometric-type";
 
 // Create styled icon components
 const StyledLock = withUniwind(Lock);
@@ -59,15 +63,18 @@ import { useAccount } from "../../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../../src/lib/biometric-error-message";
 import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/rpc";
-import { enforceTravelModeForUnlockedAccounts } from "../../src/lib/travel-mode-unlock";
 import { useI18n } from "../../src/providers/i18n-provider";
-import { type AccountMetadata, storage } from "../../src/services/storage";
+import { lifecycleDeps } from "../../src/services/lifecycle";
+import {
+	type AccountMetadata,
+	itemCache,
+	storage,
+} from "../../src/services/storage";
 
 export default function UnlockScreen() {
 	const router = useRouter();
 	const { toast } = useToast();
 	const { m } = useI18n();
-	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { allAccounts, activeAccount, refreshAccounts } = useAccount();
 
@@ -118,14 +125,8 @@ export default function UnlockScreen() {
 		targetAccount?.accountId,
 		{ enabled: unlockMode === "single" && !!targetAccount },
 	);
-	const biometricTypeQuery = useQuery({
-		queryKey: ["unlock", "biometric-type"],
-		queryFn: async () => {
-			return (await platformStorage.getBiometricType?.()) ?? null;
-		},
-		enabled: unlockMode === "all" || !!targetAccount,
-	});
-	const biometricType = biometricTypeQuery.data ?? null;
+	const { label: biometricTypeLabel, token: biometricTypeToken } =
+		useBiometricType({ enabled: unlockMode === "all" || !!targetAccount });
 	const allAccountsStatusQuery = useQuery({
 		queryKey: [
 			"unlock",
@@ -193,6 +194,9 @@ export default function UnlockScreen() {
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
+		// The OS renders this string, so it is user-facing copy and has to be translated
+		// here; the hook's own default is a hardcoded English fallback.
+		promptMessage: m.biometric_prompt_unlock_bittery(),
 		onSuccess: async () => {
 			if (!targetAccount) return;
 
@@ -208,7 +212,7 @@ export default function UnlockScreen() {
 				);
 
 				if (masterUnlockKey) {
-					await storage.storeMasterUnlockKey(
+					await storage.setMasterUnlockKey(
 						masterUnlockKey,
 						targetAccount.accountId,
 					);
@@ -223,10 +227,7 @@ export default function UnlockScreen() {
 				}
 
 				// Set as active account
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: targetAccount.accountId,
-				});
+				await storage.setActiveAccount(targetAccount.accountId);
 				await refreshAccounts();
 
 				router.replace("/(vault)");
@@ -235,15 +236,21 @@ export default function UnlockScreen() {
 					m.mob_unlock_alert_session_expired_title(),
 					m.mob_unlock_alert_session_expired_message(),
 				);
-				await storage.clearAllStoredData(targetAccount.accountId);
+				// The stored session is unusable, so the account goes off the device
+				// entirely — removal sequences the store, the item cache and the native
+				// autofill mirror together.
+				await removeAccount(targetAccount.accountId, lifecycleDeps);
 				router.replace("/(auth)/login");
 			}
 		},
 		onError: (error) => {
-			// Show specific error message
-			const errorMessage =
-				error.message ||
-				resolveBiometricErrorMessage(error.type || "unknown", m);
+			// Render from `error.type`, never from `error.message`: that string is an
+			// English diagnostic (`AccountStore`'s fallbacks, or the raw native error code
+			// the react-native port carries through) and is for logs, not for a screen.
+			const errorMessage = resolveBiometricErrorMessage(
+				{ error: error.type },
+				m,
+			);
 
 			if (error.type === "master_password_required") {
 				setBiometricError(errorMessage);
@@ -278,9 +285,8 @@ export default function UnlockScreen() {
 				CredentialProvider.updateLastMasterPasswordEntry();
 
 				// Escrow MUK with biometric for future quick unlocks
-				const biometricAvailable =
-					await platformStorage.isBiometricAvailable?.();
-				const biometricEnabled = await platformStorage.isBiometricEnabled?.(
+				const biometricAvailable = await storage.isBiometricAvailable();
+				const biometricEnabled = await storage.isBiometricEnabled(
 					targetAccount.accountId,
 				);
 				if (biometricAvailable && biometricEnabled) {
@@ -302,7 +308,7 @@ export default function UnlockScreen() {
 				teamName: result.user.teamName,
 				lastActiveAt: Date.now(),
 			};
-			await storage.addAccountToList(updatedMetadata);
+			await storage.addAccount(updatedMetadata);
 
 			// Refresh account context
 			await refreshAccounts();
@@ -320,56 +326,19 @@ export default function UnlockScreen() {
 		},
 	});
 
-	const resolveUnlockedAccountIds = useCallback(
-		(identifiers: string[]) =>
-			identifiers.map((identifier) => {
-				const byId = allAccounts.find(
-					(account) => account.accountId === identifier,
-				);
-				if (byId) {
-					return byId.accountId;
-				}
-				const byEmail = allAccounts.find(
-					(account) => account.email === identifier,
-				);
-				return byEmail?.accountId ?? identifier;
-			}),
-		[allAccounts],
-	);
-
 	const finalizeAllAccountsUnlock = useCallback(
-		async (unlockedIdentifiers: string[], showPartialToast: boolean) => {
-			const unlockedAccountIds = resolveUnlockedAccountIds(unlockedIdentifiers);
-
+		async ({ unlocked, failed }: UnlockOutcome) => {
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForAccountIds(unlockedAccountIds);
-			}
-
-			// Multiple accounts may be unlocked, but the app always operates on a
-			// single active account. Return to whichever one was last active.
-			const previousActive = await storage.getActiveAccount();
-			const activeId = selectActiveAccountAfterUnlock({
-				previousActive,
-				unlockedAccountIds,
-				accounts: allAccounts,
-			});
-			const unchanged =
-				previousActive?.type === "single" &&
-				previousActive.accountId === activeId;
-			if (activeId && !unchanged) {
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: activeId,
-				});
+				await setNativeMuksForAccountIds(unlocked);
 			}
 
 			await refreshAccounts();
 
-			if (showPartialToast) {
+			if (failed.length > 0) {
 				toast.show({
 					variant: "warning",
 					label: m.mob_unlock_partial_toast({
-						unlocked: String(unlockedIdentifiers.length),
+						unlocked: String(unlocked.length),
 						total: String(allAccounts.length),
 					}),
 					placement: "bottom",
@@ -379,9 +348,8 @@ export default function UnlockScreen() {
 			router.replace("/(vault)");
 		},
 		[
-			allAccounts,
+			allAccounts.length,
 			refreshAccounts,
-			resolveUnlockedAccountIds,
 			router,
 			setNativeMuksForAccountIds,
 			toast,
@@ -390,12 +358,8 @@ export default function UnlockScreen() {
 	);
 
 	const quickUnlockAll = useQuickUnlockAll({
-		onSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result.unlocked, false);
-		},
-		onPartialSuccess: async (result) => {
-			await finalizeAllAccountsUnlock(result.unlocked, true);
-		},
+		onSuccess: finalizeAllAccountsUnlock,
+		onPartialSuccess: finalizeAllAccountsUnlock,
 		onError: (error) => {
 			console.error("Unlock all error:", error);
 			Alert.alert(
@@ -414,31 +378,20 @@ export default function UnlockScreen() {
 
 			setBiometricError(null);
 
-			if (!storage.unlockAllAccountsWithBiometric) {
-				setBiometricError(m.mob_unlock_biometric_not_available());
-				return;
-			}
-
 			try {
-				const result = await storage.unlockAllAccountsWithBiometric();
-				if (result.unlocked.length === 0) {
+				const outcome = await unlockAllWithBiometric(
+					{
+						// One OS prompt for every account; the reason it displays is translated
+						// here rather than defaulted to English inside `AccountStore`.
+						promptMessage: m.biometric_prompt_unlock_all_accounts(),
+					},
+					{ storage, itemCache },
+				);
+				if (outcome.unlocked.length === 0) {
 					setBiometricError(m.mob_unlock_biometric_failed());
 					return;
 				}
-				// Travel mode MUST fail closed: re-verify each unlocked account
-				// against the server before treating it as unlocked.
-				const verifiedAccountIds = await enforceTravelModeForUnlockedAccounts(
-					resolveUnlockedAccountIds(result.unlocked),
-				);
-				if (verifiedAccountIds.length === 0) {
-					setBiometricError(m.mob_unlock_biometric_failed());
-					return;
-				}
-				await finalizeAllAccountsUnlock(
-					verifiedAccountIds,
-					result.failed.length > 0 ||
-						verifiedAccountIds.length < result.unlocked.length,
-				);
+				await finalizeAllAccountsUnlock(outcome);
 			} catch (error) {
 				console.error("Biometric unlock all failed:", error);
 				setBiometricError(m.mob_unlock_biometric_failed());
@@ -754,7 +707,7 @@ export default function UnlockScreen() {
 									size="lg"
 								>
 									<View className="flex-row items-center">
-										{biometricType === "Face ID" ? (
+										{biometricTypeToken === "face" ? (
 											<StyledScanFace size={24} className="text-muted" />
 										) : (
 											<StyledFingerprint size={24} className="text-muted" />
@@ -763,9 +716,7 @@ export default function UnlockScreen() {
 											{loading
 												? m.mob_unlock_authenticating()
 												: m.mob_unlock_biometric_label({
-														biometricType:
-															biometricType ||
-															m.mob_unlock_biometric_fallback(),
+														biometricType: biometricTypeLabel,
 													})}
 										</Text>
 									</View>

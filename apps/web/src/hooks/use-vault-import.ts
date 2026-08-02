@@ -1,5 +1,5 @@
-import { getClientForAccount } from "@bittery/core";
 import { useAllVaultKeys, useCoreContext } from "@bittery/core/hooks";
+import { getClientForAccount } from "@bittery/core/services/account-resolver";
 import {
 	getDecryptedVaultKey,
 	getImportProvider,
@@ -16,7 +16,7 @@ import {
 import { useRPCClient } from "@bittery/shared/rpc";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import { decrypt, encrypt, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useClientId, useQueryInvalidator } from "@/providers/sync-provider";
@@ -444,7 +444,7 @@ export function useVaultImport() {
 					return cachedUserId;
 				}
 
-				const sessionData = await storage.getStoredSessionData?.(accountId);
+				const sessionData = await storage.getStoredSessionData(accountId);
 				const userId =
 					sessionData?.userId ?? (await storage.getActiveAccountUserId());
 				if (!userId) {
@@ -517,10 +517,7 @@ export function useVaultImport() {
 				}
 
 				const activeAccount = await storage.getActiveAccount();
-				const defaultAccountId =
-					activeAccount?.type === "single"
-						? activeAccount.accountId
-						: undefined;
+				const defaultAccountId = activeAccount ?? undefined;
 				const defaultAccountEmail = defaultAccountId
 					? (await storage.getAccountsList()).find(
 							(a) => a.accountId === defaultAccountId,
@@ -616,11 +613,6 @@ export function useVaultImport() {
 							storage,
 							resolvedTarget.accountEmail,
 						);
-						if (!accountId) {
-							throw new VaultImportError("vault-import-failed", {
-								targetVaultName: resolvedTarget.vaultName,
-							});
-						}
 						const vaultRpcClient = await getClientForAccount(
 							storage,
 							rpcClient,
@@ -738,8 +730,10 @@ export function useVaultImport() {
 					currentVaultName: undefined,
 				}));
 
-				if (storage.clearItemCache) {
-					await storage.clearItemCache();
+				// An import can target several accounts, and `ItemCache` is namespaced
+				// per account, so each one must be cleared explicitly.
+				for (const account of await storage.getAccountsList()) {
+					await itemCache.clearItemCache(account.accountId);
 				}
 
 				const { accountsInfo } = await core.accounts.resolveAccounts();

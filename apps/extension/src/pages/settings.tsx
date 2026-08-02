@@ -18,17 +18,10 @@ import {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo } from "react";
+import type { DesktopStatus } from "../background/desktop-protocol";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 import { useTheme } from "../providers/theme-provider";
-
-interface DesktopStatus {
-	available: boolean;
-	locked: boolean;
-	unlockedAccounts: string[];
-	timestamp: number;
-	autolockTimeoutMs: number;
-}
 
 const GROUP_LABEL_CLASS =
 	"mb-1.5 block px-0.5 font-semibold text-[10.5px] text-muted-foreground uppercase tracking-[0.06em]";
@@ -57,8 +50,7 @@ export function SettingsPage() {
 	const { theme, setTheme, isDesktopManaged } = useTheme();
 	const { accounts, activeAccount: activeSelection } = useAccountSwitcher();
 
-	const activeAccountId =
-		activeSelection?.type === "single" ? activeSelection.accountId : null;
+	const activeAccountId = activeSelection ?? null;
 	const activeAccount = accounts.find((a) => a.accountId === activeAccountId);
 
 	// Auto-lock timeout options (in milliseconds)

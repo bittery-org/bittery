@@ -243,7 +243,7 @@ export function useCredentialProviderSync(
 		if (!enabled || Platform.OS !== "android" || !isAvailable) return;
 
 		try {
-			const unlockedEmails = (await storage.getUnlockedAccounts?.()) ?? [];
+			const unlockedEmails = await storage.getUnlockedAccounts();
 			debugLog(
 				"[CredentialProviderSync] ensureNativeMukSet: unlockedEmails=",
 				unlockedEmails,

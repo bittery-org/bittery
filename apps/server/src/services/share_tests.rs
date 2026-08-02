@@ -5,8 +5,8 @@ use sqlx::{query, query_as, query_scalar, FromRow};
 use super::*;
 use crate::error::AppErrorCode;
 use crate::test_support::{
-    acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app, EnvVarGuard,
 };
 
 struct ShareActorFixture {
@@ -62,7 +62,6 @@ fn sample_share_link_row() -> DbShareLinkRow {
         id: "share_link_123".to_string(),
         item_id: "item_123".to_string(),
         created_by_id: "user_123".to_string(),
-        token: "sharetoken1234567890ABCDEFGH1234".to_string(),
         status: "active".to_string(),
         access_mode: "anyone".to_string(),
         is_one_time_use: false,
@@ -197,6 +196,30 @@ fn validate_public_token_requires_expected_length_and_charset() {
     assert_eq!(
         invalid_char_error.message,
         "Share link not found or invalid"
+    );
+}
+
+/// The share token is the entire secret half of a share URL, so its entropy is
+/// the only thing standing between a guesser and a link: 32 characters drawn from
+/// a 62-symbol alphabet is ~190 bits. Shrinking either the length or the alphabet
+/// silently weakens every link, so both are pinned here.
+#[test]
+fn generate_secure_token_yields_distinct_32_character_tokens() {
+    const ALPHABET: &str = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+    let token = generate_secure_token();
+    assert_eq!(token.len(), 32);
+    assert!(
+        token.chars().all(|ch| ALPHABET.contains(ch)),
+        "token {token} contains characters outside the expected alphabet",
+    );
+    // Whatever it generates must also survive the inbound validator.
+    assert!(validate_public_token(&token).is_ok());
+
+    assert_ne!(
+        token,
+        generate_secure_token(),
+        "two tokens should never collide",
     );
 }
 
@@ -558,9 +581,9 @@ async fn get_share_link_returns_details_for_visible_links_and_not_found_for_hidd
             owner_response.body["result"]["Ok"]["id"],
             json!(fixture.email_link_id)
         );
-        assert_eq!(
-            owner_response.body["result"]["Ok"]["token"],
-            json!(fixture.email_link_token)
+        assert!(
+            owner_response.body["result"]["Ok"]["token"].is_null(),
+            "share.get must not expose the token: the server only holds its digest",
         );
         assert_eq!(
             owner_response.body["result"]["Ok"]["accessMode"],
@@ -1009,6 +1032,355 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
     .await;
 }
 
+/// Finding 5c: `share_email_verification.code_hash` must never hold the 6-digit
+/// code. A freshly generated code is persisted as a digest, the seeded code still
+/// verifies end to end, and the stored digest cannot be replayed as a code.
+#[tokio::test]
+async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
+    with_rpc_test_app("share_verification_code_hashed", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+
+        // The seeded code: the column holds its digest, not the code.
+        let seeded = query_scalar::<_, String>(
+			"SELECT code_hash FROM share_email_verification WHERE share_link_id = $1 AND email = $2 LIMIT 1",
+		)
+		.bind(&fixture.email_link_id)
+		.bind(&fixture.allowed_email)
+		.fetch_one(&app.pool)
+		.await
+		.expect("seeded verification row should load");
+        assert_ne!(seeded, fixture.verification_code);
+        assert_eq!(seeded, hash_token(&fixture.verification_code));
+        assert_eq!(seeded.len(), 64);
+
+        // A server-generated code is persisted the same way.
+        let requested = app
+            .rpc_call(
+                "share.requestEmailVerification",
+                json!([{
+                    "token": fixture.email_link_token.clone(),
+                    "email": fixture.request_email.clone()
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(requested.body["result"]["Ok"]["success"], json!(true));
+        let generated = query_scalar::<_, String>(
+			"SELECT code_hash FROM share_email_verification WHERE share_link_id = $1 AND email = $2 ORDER BY created_at DESC LIMIT 1",
+		)
+		.bind(&fixture.email_link_id)
+		.bind(&fixture.request_email)
+		.fetch_one(&app.pool)
+		.await
+		.expect("generated verification row should load");
+        assert_eq!(generated.len(), 64);
+        assert!(generated.chars().all(|ch| ch.is_ascii_hexdigit()));
+
+        // Replaying the stored digest as the code is rejected.
+        let replayed = app
+            .rpc_call(
+                "share.verifyEmailAndAccess",
+                json!([{
+                    "token": fixture.email_link_token.clone(),
+                    "email": fixture.allowed_email.clone(),
+                    "code": seeded
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(
+            &replayed.body,
+            "BAD_REQUEST",
+            "Invalid or expired verification code",
+        );
+
+        // A wrong 6-digit code is still rejected.
+        let wrong = app
+            .rpc_call(
+                "share.verifyEmailAndAccess",
+                json!([{
+                    "token": fixture.email_link_token.clone(),
+                    "email": fixture.allowed_email.clone(),
+                    "code": "000000"
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(
+            &wrong.body,
+            "BAD_REQUEST",
+            "Invalid or expired verification code",
+        );
+
+        // The raw code still resolves the hashed row.
+        let verified = app
+            .rpc_call(
+                "share.verifyEmailAndAccess",
+                json!([{
+                    "token": fixture.email_link_token.clone(),
+                    "email": fixture.allowed_email.clone(),
+                    "code": fixture.verification_code.clone()
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(
+            verified.body["result"]["Ok"]["encryptedItemData"],
+            json!(FIXTURE_ENCRYPTED_ITEM_DATA),
+        );
+    })
+    .await;
+}
+
+fn sample_create_share_params(item_id: &str) -> Value {
+    json!([{
+        "itemId": item_id,
+        "accessMode": "anyone",
+        "isOneTimeUse": false,
+        "expiresIn": "1day",
+        "allowedEmails": null,
+        "encryptedItemData": FIXTURE_ENCRYPTED_ITEM_DATA,
+        "encryptionIv": FIXTURE_ENCRYPTION_IV,
+        "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
+        "shareKeyIv": FIXTURE_SHARE_KEY_IV
+    }])
+}
+
+/// Finding 5d: `share_link.token_hash` must never hold the share token. Both a
+/// seeded link and a freshly created one are persisted as a digest, and the raw
+/// token a caller holds still resolves end to end through the public RPCs.
+#[tokio::test]
+async fn share_link_token_is_stored_hashed_and_still_resolves() {
+    with_rpc_test_app("share_link_token_hashed", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+
+        // The seeded link: the column holds its digest, not the token.
+        let seeded =
+            query_scalar::<_, String>("SELECT token_hash FROM share_link WHERE id = $1 LIMIT 1")
+                .bind(&fixture.one_time_link_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("seeded share link should load");
+        assert_ne!(seeded, fixture.one_time_token);
+        assert_eq!(seeded, hash_token(&fixture.one_time_token));
+        assert_eq!(seeded.len(), 64);
+
+        // A server-generated token is persisted the same way.
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let created = app
+            .rpc_call(
+                "share.create",
+                sample_create_share_params(&fixture.item_id),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(created.status, StatusCode::OK);
+        let created_link_id = created.body["result"]["Ok"]["id"]
+            .as_str()
+            .expect("create should return a link id")
+            .to_string();
+        let created_token = created.body["result"]["Ok"]["token"]
+            .as_str()
+            .expect("create should return the raw token exactly once")
+            .to_string();
+        assert_eq!(created_token.len(), 32);
+
+        let stored =
+            query_scalar::<_, String>("SELECT token_hash FROM share_link WHERE id = $1 LIMIT 1")
+                .bind(&created_link_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("created share link should load");
+        assert_ne!(stored, created_token);
+        assert_eq!(stored, hash_token(&created_token));
+        assert_eq!(stored.len(), 64);
+        assert!(stored.chars().all(|ch| ch.is_ascii_hexdigit()));
+
+        // The raw token still resolves the hashed row, end to end.
+        let info = app
+            .rpc_call(
+                "share.getPublicInfo",
+                json!([{ "token": created_token.clone() }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(info.status, StatusCode::OK);
+        assert_eq!(info.body["result"]["Ok"]["valid"], json!(true));
+        assert_eq!(info.body["result"]["Ok"]["accessMode"], json!("anyone"));
+
+        let accessed = app
+            .rpc_call(
+                "share.accessPublic",
+                json!([{ "token": created_token.clone() }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(accessed.status, StatusCode::OK);
+        assert_eq!(
+            accessed.body["result"]["Ok"]["encryptedItemData"],
+            json!(FIXTURE_ENCRYPTED_ITEM_DATA),
+        );
+    })
+    .await;
+}
+
+/// A database reader who lifts `token_hash` must not be able to use it: the digest
+/// is not itself a valid token, on any public entry point.
+#[tokio::test]
+async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
+    with_rpc_test_app("share_link_token_hash_replay", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+
+        let stored =
+            query_scalar::<_, String>("SELECT token_hash FROM share_link WHERE id = $1 LIMIT 1")
+                .bind(&fixture.owner_link_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("seeded share link should load");
+        assert_eq!(stored.len(), 64);
+
+        for method in ["share.getPublicInfo", "share.accessPublic"] {
+            let response = app
+                .rpc_call(
+                    method,
+                    json!([{ "token": stored.clone() }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(
+                response.status,
+                StatusCode::OK,
+                "unexpected status for {method}"
+            );
+            assert_handler_error(
+                &response.body,
+                "NOT_FOUND",
+                "Share link not found or invalid",
+            );
+        }
+
+        let email_stored =
+            query_scalar::<_, String>("SELECT token_hash FROM share_link WHERE id = $1 LIMIT 1")
+                .bind(&fixture.email_link_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("seeded email-restricted share link should load");
+        let requested = app
+            .rpc_call(
+                "share.requestEmailVerification",
+                json!([{
+                    "token": email_stored,
+                    "email": fixture.allowed_email.clone()
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(
+            &requested.body,
+            "NOT_FOUND",
+            "Share link not found or invalid",
+        );
+    })
+    .await;
+}
+
+/// The owner-facing read paths must not hand the token back: the server only holds
+/// a digest, and a token without its URL fragment is a dead link anyway.
+#[tokio::test]
+async fn list_by_item_and_get_do_not_expose_share_tokens() {
+    with_rpc_test_app("share_list_and_get_hide_tokens", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        let listed = app
+            .rpc_call(
+                "share.listByItem",
+                json!([{ "itemId": fixture.item_id.clone() }]),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(listed.status, StatusCode::OK);
+        let links = listed.body["result"]["Ok"]["links"]
+            .as_array()
+            .expect("links should be an array");
+        assert!(!links.is_empty());
+        for link in links {
+            assert!(
+                link["token"].is_null(),
+                "share.listByItem must not expose a token: {link}",
+            );
+        }
+
+        let details = app
+            .rpc_call(
+                "share.get",
+                json!([{ "linkId": fixture.owner_link_id.clone() }]),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(details.status, StatusCode::OK);
+        assert_eq!(
+            details.body["result"]["Ok"]["id"],
+            json!(fixture.owner_link_id)
+        );
+        assert!(
+            details.body["result"]["Ok"]["token"].is_null(),
+            "share.get must not expose a token",
+        );
+    })
+    .await;
+}
+
+/// The create response is the single legitimate disclosure of the raw token. It is
+/// copy-once: nothing afterwards can return it.
+#[tokio::test]
+async fn create_share_returns_token_exactly_once() {
+    with_rpc_test_app("share_create_token_once", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        let created = app
+            .rpc_call(
+                "share.create",
+                sample_create_share_params(&fixture.item_id),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(created.status, StatusCode::OK);
+        let created_link_id = created.body["result"]["Ok"]["id"]
+            .as_str()
+            .expect("create should return a link id")
+            .to_string();
+        let created_token = created.body["result"]["Ok"]["token"]
+            .as_str()
+            .expect("create should return the raw token")
+            .to_string();
+        assert_eq!(created_token.len(), 32);
+
+        let details = app
+            .rpc_call(
+                "share.get",
+                json!([{ "linkId": created_link_id.clone() }]),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+        assert_eq!(details.status, StatusCode::OK);
+        assert_eq!(
+            details.body["result"]["Ok"]["id"],
+            json!(created_link_id.clone())
+        );
+        assert!(
+            details.body["result"]["Ok"]["token"].is_null(),
+            "the token must not be recoverable after creation",
+        );
+        assert!(
+            !details.body.to_string().contains(&created_token),
+            "no field of share.get may echo the raw token",
+        );
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn verify_email_and_access_returns_payload_and_marks_email_verified() {
     with_rpc_test_app("share_verify_email_success", |app| async move {
@@ -1107,6 +1479,75 @@ async fn verify_email_and_access_rejects_invalid_codes_and_increments_attempts()
 			assert!(verification_state.used_at.is_none());
 		})
 		.await;
+}
+
+#[tokio::test]
+async fn share_email_verification_lockout_burns_pending_code() {
+    let _env_lock = acquire_env_lock_async().await;
+    let _env = EnvVarGuard::set(&[
+        ("RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX", "2"),
+        ("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", "15"),
+    ]);
+
+    with_rpc_test_app("share_email_verification_lockout", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+
+        let wrong = || async {
+            app.rpc_call(
+                "share.verifyEmailAndAccess",
+                json!([{
+                    "token": fixture.email_link_token.clone(),
+                    "email": fixture.allowed_email.clone(),
+                    "code": "000000"
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await
+        };
+
+        let first = wrong().await;
+        assert_handler_error(
+            &first.body,
+            "BAD_REQUEST",
+            "Invalid or expired verification code",
+        );
+
+        let locked = wrong().await;
+        assert_handler_error(
+            &locked.body,
+            "TOO_MANY_REQUESTS",
+            crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+        );
+
+        let state = query_as::<_, ShareVerificationStateRow>(
+            "SELECT attempts, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 LIMIT 1",
+        )
+        .bind(&fixture.email_link_id)
+        .bind(&fixture.allowed_email)
+        .fetch_one(&app.pool)
+        .await
+        .expect("share verification state should load");
+        assert_eq!(state.attempts, 2);
+        assert!(state.used_at.is_some());
+
+        let correct = app
+            .rpc_call(
+                "share.verifyEmailAndAccess",
+                json!([{
+                    "token": fixture.email_link_token,
+                    "email": fixture.allowed_email,
+                    "code": fixture.verification_code
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(
+            &correct.body,
+            "TOO_MANY_REQUESTS",
+            crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+        );
+    })
+    .await;
 }
 
 #[tokio::test]
@@ -1606,6 +2047,8 @@ async fn build_share_router_fixture(pool: &PgPool) -> ShareRouterFixture {
     }
 }
 
+/// `token` is the plaintext the tests hand to the public RPCs; only its digest is
+/// stored, exactly as `share.create` writes it.
 #[allow(clippy::too_many_arguments)]
 async fn seed_share_link(
     pool: &PgPool,
@@ -1621,12 +2064,12 @@ async fn seed_share_link(
     expires_at: time::OffsetDateTime,
 ) {
     query(
-			"INSERT INTO share_link (id, item_id, created_by_id, token, status, access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at) VALUES ($1, $2, $3, $4, $5::share_link_status, $6::share_link_access_mode, $7, $8, $9, $10, $11, $12, $13, $14)",
+			"INSERT INTO share_link (id, item_id, created_by_id, token_hash, status, access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at) VALUES ($1, $2, $3, $4, $5::share_link_status, $6::share_link_access_mode, $7, $8, $9, $10, $11, $12, $13, $14)",
 		)
 		.bind(id)
 		.bind(item_id)
 		.bind(created_by_id)
-		.bind(token)
+		.bind(hash_token(token))
 		.bind(status)
 		.bind(access_mode)
 		.bind(is_one_time_use)
@@ -1700,12 +2143,12 @@ async fn seed_share_email_verification(
     used_at: Option<time::OffsetDateTime>,
 ) {
     query(
-			"INSERT INTO share_email_verification (id, share_link_id, email, code, attempts, max_attempts, expires_at, created_at, used_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+			"INSERT INTO share_email_verification (id, share_link_id, email, code_hash, attempts, max_attempts, expires_at, created_at, used_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
 		)
 		.bind(id)
 		.bind(share_link_id)
 		.bind(email)
-		.bind(code)
+		.bind(hash_token(code))
 		.bind(attempts)
 		.bind(max_attempts)
 		.bind(expires_at)

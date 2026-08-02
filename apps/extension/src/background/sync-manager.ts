@@ -13,7 +13,13 @@ import {
 	runCatchUp,
 	type SyncCursor,
 } from "@bittery/sync";
+import { parseSseFrame, type SseFrame } from "./services/sse-frame";
 import { syncCacheService } from "./services/sync-cache-service";
+import {
+	setSessionFallbackEmail,
+	setSyncPort,
+	vaultSession,
+} from "./vault-session";
 
 // Storage keys
 const CLIENT_ID_KEY = "bittery_sync_client_id";
@@ -26,6 +32,19 @@ let abortController: AbortController | null = null;
 let connectionStatus: ConnectionStatus = "disconnected";
 let reconnectAttempt = 0;
 let syncConnectionEmail: string | null = null;
+/** Set once the server revoked this session; the JWT is dead, so reconnecting only loops 401s. */
+let revoked = false;
+
+// Registered at module scope, not from `initializeSync`: a reconnect alarm can reach
+// `connect()` on a cold worker that never ran init, and a revocation arriving on that
+// stream must still be able to tear the connection down.
+setSyncPort({ disconnect });
+
+/** The revocation payload names a session, never an account, so the machine needs this identity. */
+function setSyncConnectionEmail(email: string | null): void {
+	syncConnectionEmail = email;
+	setSessionFallbackEmail(email);
+}
 
 /**
  * Generate a random ID (simpler than nanoid for extension context)
@@ -144,12 +163,12 @@ export async function connect(): Promise<void> {
 	try {
 		const context = await syncCacheService.resolveConnectionContext();
 		if (!context) {
-			syncConnectionEmail = null;
+			setSyncConnectionEmail(null);
 			setStatus("disconnected", "no auth context available");
 			return;
 		}
 
-		syncConnectionEmail = context.email;
+		setSyncConnectionEmail(context.email);
 		abortController = new AbortController();
 
 		const response = await fetch(`${context.serverUrl}/sync/events`, {
@@ -204,7 +223,11 @@ async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 			const { done, value } = await reader.read();
 
 			if (done) {
-				setStatus("reconnecting", "stream ended by server");
+				// The server terminates the stream right after revoking it, and that
+				// teardown already reported `disconnected` — there is nothing to rejoin.
+				if (!revoked) {
+					setStatus("reconnecting", "stream ended by server");
+				}
 				scheduleReconnect("stream_ended");
 				break;
 			}
@@ -230,72 +253,65 @@ async function readStream(body: ReadableStream<Uint8Array>): Promise<void> {
 	}
 }
 
+function readString(value: unknown): string | undefined {
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 /**
- * Process a single SSE event payload.
+ * Handle a single parsed SSE frame.
  *
  * The server sends lightweight pings:
  *   event: sync             → something changed, catch up via getEventsSince
- *   event: session_revoked  → a session was revoked
+ *   event: session_revoked  → this connection's own session was revoked
  *   event: connected        → connection established
  */
-async function processEvent(eventStr: string): Promise<void> {
-	const lines = eventStr.trim().split("\n");
-	let data = "";
-	let sseEventType = "";
+export async function handleSyncSseFrame(frame: SseFrame): Promise<void> {
+	const payload = frame.data as Record<string, unknown>;
+	const jsonType = payload.type;
 
-	for (const line of lines) {
-		if (line.startsWith(":")) {
-			continue; // Skip heartbeats/comments.
-		}
-		if (line.startsWith("event: ")) {
-			sseEventType = line.slice(7);
-		} else if (line.startsWith("data: ")) {
-			data = line.slice(6);
-		} else if (line.startsWith("data:")) {
-			data = line.slice(5).trimStart();
-		}
-	}
-
-	if (!data) {
+	if (frame.event === "connected" || jsonType === "connected") {
 		return;
 	}
 
-	try {
-		const parsed = JSON.parse(data) as unknown;
-		if (!parsed || typeof parsed !== "object") {
-			return;
-		}
-
-		const jsonType = (parsed as { type?: unknown }).type;
-
-		// Handle connection message
-		if (sseEventType === "connected" || jsonType === "connected") {
-			return;
-		}
-
-		// Handle sync ping — catch up on missed events
-		if (sseEventType === "sync") {
-			await catchUpMissedEvents();
-			sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
-			return;
-		}
-
-		// Handle session revocation
-		if (sseEventType === "session_revoked") {
-			// The extension doesn't handle session revocation via SSE currently,
-			// but notify the UI in case it wants to react.
-			sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
-			return;
-		}
-	} catch (error) {
-		console.error("[sync-manager] Failed to parse SSE event:", error, data);
+	if (frame.event === "sync") {
+		await catchUpMissedEvents();
+		sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
+		return;
 	}
+
+	if (frame.event === "session_revoked") {
+		// Server payload is snake_case; the shared sync client accepts both casings.
+		const sessionId =
+			readString(payload.session_id) ?? readString(payload.sessionId) ?? null;
+
+		// Locking is the reducer's first act and must not wait on resolving an
+		// account: the invalidation, the disconnect and the popup broadcast all
+		// follow from this one dispatch.
+		await vaultSession.dispatch({
+			type: "SESSION_REVOKED",
+			sessionId,
+			reason: readString(payload.reason),
+			at: Date.now(),
+		});
+	}
+}
+
+async function processEvent(eventStr: string): Promise<void> {
+	const frame = parseSseFrame(eventStr);
+	if (!frame) {
+		return;
+	}
+	await handleSyncSseFrame(frame);
 }
 
 /**
  * Schedule reconnection using Chrome Alarms (MV3-compatible).
  */
 function scheduleReconnect(reason: string): void {
+	if (revoked) {
+		return;
+	}
+
 	const delayMs = Math.min(1000 * 2 ** reconnectAttempt, 30000);
 	reconnectAttempt++;
 
@@ -314,20 +330,34 @@ function scheduleReconnect(reason: string): void {
 export async function handleSyncReconnectAlarm(
 	alarm: chrome.alarms.Alarm,
 ): Promise<void> {
-	if (alarm.name === SYNC_ALARM_NAME) {
+	if (alarm.name === SYNC_ALARM_NAME && !revoked) {
 		await connect();
 	}
 }
 
 /**
  * Disconnect from SSE.
+ *
+ * `suppressReconnect` marks the session dead, so nothing schedules or honours a
+ * reconnect until a fresh sign-in runs `initializeSync`.
  */
-export function disconnect(reason = "manual disconnect"): void {
+export function disconnect(
+	reason = "manual disconnect",
+	suppressReconnect = false,
+): void {
+	if (suppressReconnect) {
+		revoked = true;
+	}
 	if (abortController) {
 		abortController.abort();
 		abortController = null;
 	}
 	syncConnectionEmail = null;
+	// A revoked teardown keeps the fallback identity: the session invalidation it
+	// triggers runs after this disconnect and resolves by email.
+	if (!suppressReconnect) {
+		setSessionFallbackEmail(null);
+	}
 	void chrome.alarms.clear(SYNC_ALARM_NAME);
 	setStatus("disconnected", reason);
 }
@@ -336,6 +366,7 @@ export function disconnect(reason = "manual disconnect"): void {
  * Initialize sync on login.
  */
 export async function initializeSync(): Promise<void> {
+	revoked = false;
 	await connect();
 }
 
@@ -344,6 +375,7 @@ export async function initializeSync(): Promise<void> {
  */
 export async function cleanupSync(): Promise<void> {
 	disconnect("logout cleanup");
+	revoked = false;
 	await chrome.storage.local.remove([
 		LAST_SYNC_CURSOR_KEY,
 		LEGACY_LAST_SYNC_KEY,

@@ -12,6 +12,7 @@ import {
 	handlePasskeyCreate,
 	handlePasskeyGet,
 } from "../passkey-handlers";
+import { ensureBackgroundServicesReady } from "../services/service-worker-lifecycle";
 import type { MessageResponse } from "../types";
 import { routeRegistry } from "./registry";
 import { ensureSyncInitialized } from "./sync-effects";
@@ -72,6 +73,10 @@ export function registerBackgroundMessageRouter(): void {
 		const runtimeMessage = message as RuntimeMessage;
 		void (async () => {
 			try {
+				// A message can arrive on a freshly woken service worker whose in-memory
+				// master-unlock-key cache is still empty. Waiting for the startup routine
+				// means no handler ever reads a half-restored unlock state.
+				await ensureBackgroundServicesReady();
 				const response = await routeRuntimeMessage(runtimeMessage);
 				sendResponse(response);
 			} catch (error) {

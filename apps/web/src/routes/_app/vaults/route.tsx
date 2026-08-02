@@ -63,10 +63,10 @@ function VaultsLayout() {
 
 	const handleCreateVault = async (data: CreateVaultInput) => {
 		const active = await storage.getActiveAccount();
-		if (active?.type !== "single") throw new Error();
+		if (!active) throw new Error();
 		const result = await createVault.mutateAsync({
 			...data,
-			accountId: active.accountId,
+			accountId: active,
 		});
 		navigate({ to: "/vaults/$vaultId", params: { vaultId: result.vaultId } });
 	};

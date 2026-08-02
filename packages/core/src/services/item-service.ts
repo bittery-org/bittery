@@ -9,10 +9,14 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import {
+	type ServerVaultSummary,
+	toCachedVaultFields,
+} from "@bittery/shared/vault-mapping";
+import type { AccountStore, ItemCache } from "@bittery/storage";
+import {
 	resolveAccountScopeId,
 	resolveUserIdForScope,
 } from "@bittery/storage/account-id";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type {
 	CachedAttachment,
 	CachedEncryptedItem,
@@ -141,24 +145,19 @@ type DecryptableItemRecord = {
 	lastModifiedBy?: string | null;
 };
 
-type RpcVaultSummary = {
-	id: string;
-	name: string;
-	vaultType: string;
-	icon: string | null;
-	imageUrl: string | null;
-} | null;
+type RpcVaultSummary = ServerVaultSummary | null;
 
 function normalizeVaultSummary(
 	vault: RpcVaultSummary,
 	vaultId: string,
 ): RawEncryptedItemWithVault["vault"] {
+	const decodedVault = vault ? toCachedVaultFields(vault) : undefined;
 	return {
-		id: vault?.id ?? vaultId,
-		name: vault?.name ?? "Unknown Vault",
-		type: vault?.vaultType ?? "personal",
-		icon: vault?.icon ?? null,
-		imageUrl: vault?.imageUrl ?? null,
+		id: decodedVault?.id ?? vaultId,
+		name: decodedVault?.name ?? "Unknown Vault",
+		type: decodedVault?.type ?? "personal",
+		icon: decodedVault?.icon ?? null,
+		imageUrl: decodedVault?.imageUrl ?? null,
 	};
 }
 
@@ -174,18 +173,22 @@ function normalizeRawItemWithVault<
 }
 
 interface ItemServiceDeps {
-	storage: IStorageAdapter;
+	storage: AccountStore;
+	/** Sibling of `storage`, never reachable through it. See packages/storage/CONTEXT.md §3. */
+	itemCache: ItemCache;
 	crypto: ICrypto;
 	accounts: AccountResolver;
 }
 
 export class ItemService {
-	private readonly storage: IStorageAdapter;
+	private readonly storage: AccountStore;
+	private readonly itemCache: ItemCache;
 	private readonly crypto: ICrypto;
 	private readonly accounts: AccountResolver;
 
 	constructor(deps: ItemServiceDeps) {
 		this.storage = deps.storage;
+		this.itemCache = deps.itemCache;
 		this.crypto = deps.crypto;
 		this.accounts = deps.accounts;
 	}
@@ -447,8 +450,8 @@ export class ItemService {
 					let rawItems: RawEncryptedItemWithVault[];
 
 					const [cachedItems, cachedVaults] = await Promise.all([
-						this.storage.getCachedItems?.(account.accountId),
-						this.storage.getCachedVaults?.(account.accountId),
+						this.itemCache.getCachedItems(account.accountId),
+						this.itemCache.getCachedVaults(account.accountId),
 					]);
 
 					if (cachedItems && cachedVaults && cachedItems.length > 0) {
@@ -462,9 +465,9 @@ export class ItemService {
 						const cachedItems = this.toCachedItems(rawItems, account);
 						const cachedVaults = this.toCachedVaults(rawItems, account);
 						await Promise.all([
-							this.storage.setCachedItems?.(cachedItems, account.accountId),
-							this.storage.setCachedVaults?.(cachedVaults, account.accountId),
-							this.storage.setItemCacheMetadata?.(
+							this.itemCache.setCachedItems(cachedItems, account.accountId),
+							this.itemCache.setCachedVaults(cachedVaults, account.accountId),
+							this.itemCache.setItemCacheMetadata(
 								{
 									lastFullSyncAt: Date.now(),
 									itemCount: cachedItems.length,
@@ -479,7 +482,7 @@ export class ItemService {
 					// drop any items belonging to hidden vaults before decrypting,
 					// mirroring VaultRepository. Prevents hidden-vault leakage if
 					// this path is wired into a UI later.
-					const enforcer = getTravelModeEnforcer(this.storage);
+					const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 					enforcer.assertVerified(account.accountId);
 					rawItems = enforcer.filterItems(account.accountId, rawItems);
 
@@ -581,7 +584,7 @@ export class ItemService {
 		}
 
 		let rawItems: RawEncryptedItem[];
-		const cachedItems = await this.storage.getCachedItems?.(
+		const cachedItems = await this.itemCache.getCachedItems(
 			ownerAccount.accountId,
 		);
 		if (cachedItems && cachedItems.length > 0) {
@@ -616,7 +619,7 @@ export class ItemService {
 		// Fail-closed travel-mode guard: require a verified policy for the owning
 		// account and drop items in hidden vaults (a hidden target vault yields no
 		// items) before decrypting, mirroring VaultRepository.
-		const enforcer = getTravelModeEnforcer(this.storage);
+		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 		enforcer.assertVerified(ownerAccount.accountId);
 		rawItems = enforcer.filterItems(ownerAccount.accountId, rawItems);
 
@@ -681,7 +684,7 @@ export class ItemService {
 		let rawItem: RawEncryptedItemWithVersion | null = null;
 
 		const accountId = await resolveAccountScopeId(this.storage, accountEmail);
-		const cachedItems = await this.storage.getCachedItems?.(accountId);
+		const cachedItems = await this.itemCache.getCachedItems(accountId);
 		const cached = cachedItems?.find((item) => item.id === itemId);
 		if (cached) {
 			rawItem = {
@@ -702,7 +705,6 @@ export class ItemService {
 		}
 
 		if (!rawItem) {
-			if (!accountId) throw new Error("Account identity is required");
 			const client = await this.accounts.getClientForAccount(
 				defaultClient,
 				accountId,
@@ -759,8 +761,8 @@ export class ItemService {
 					let rawItems: RawEncryptedItemWithVault[];
 
 					const [cachedItems, cachedVaults] = await Promise.all([
-						this.storage.getCachedItems?.(account.accountId),
-						this.storage.getCachedVaults?.(account.accountId),
+						this.itemCache.getCachedItems(account.accountId),
+						this.itemCache.getCachedVaults(account.accountId),
 					]);
 
 					if (cachedItems && cachedVaults) {
@@ -786,7 +788,7 @@ export class ItemService {
 					// drop items in hidden vaults before decrypting, mirroring
 					// VaultRepository, so deleted-item listings can't leak
 					// hidden-vault data if wired into a UI later.
-					const enforcer = getTravelModeEnforcer(this.storage);
+					const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 					enforcer.assertVerified(account.accountId);
 					rawItems = enforcer.filterItems(account.accountId, rawItems);
 
@@ -899,7 +901,6 @@ export class ItemService {
 			this.storage,
 			input.accountEmail,
 		);
-		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
 			accountId,
@@ -982,7 +983,6 @@ export class ItemService {
 			this.storage,
 			input.accountEmail,
 		);
-		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
 			accountId,

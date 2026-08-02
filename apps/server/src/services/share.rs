@@ -8,6 +8,7 @@ use crate::{
     config::{bittery_mode, db_pool, format_timestamp},
     db::models::*,
     error::AppError,
+    repo::common::hash_token,
     repo::{
         common::{generate_resource_id, insert_audit_event, load_scoped_item_access},
         share::{
@@ -18,6 +19,9 @@ use crate::{
     },
     services::rate_limit,
     services::team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
+    services::verification_code::{
+        LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
+    },
     AppState,
 };
 
@@ -70,6 +74,8 @@ pub struct CreateShareLinkInput {
 #[serde(rename_all = "camelCase")]
 pub struct CreateShareLinkResponse {
     pub id: String,
+    /// The only time the raw token is ever disclosed. The database holds just its
+    /// digest, so a link that is not copied here cannot be reconstructed later.
     pub token: String,
     pub expires_at: String,
     pub base_share_url: String,
@@ -95,7 +101,6 @@ pub struct ShareAllowedEmailDetails {
 #[serde(rename_all = "camelCase")]
 pub struct ShareLinkListEntry {
     pub id: String,
-    pub token: String,
     pub status: String,
     pub access_mode: String,
     pub is_one_time_use: bool,
@@ -118,7 +123,6 @@ pub struct ShareLinkListResponse {
 #[serde(rename_all = "camelCase")]
 pub struct ShareLinkDetailsResponse {
     pub id: String,
-    pub token: String,
     pub status: String,
     pub access_mode: String,
     pub is_one_time_use: bool,
@@ -280,13 +284,15 @@ pub(crate) async fn create_share_link(
         }
     }
 
+    // Only the SHA-256 digest is persisted; the raw token leaves the process once,
+    // in this call's response, and is never recoverable from the database.
     query(
-		"INSERT INTO share_link (id, item_id, created_by_id, token, access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, max_access_count, expires_at) VALUES ($1, $2, $3, $4, $5::share_link_access_mode, $6, $7, $8, $9, $10, $11, $12)",
+		"INSERT INTO share_link (id, item_id, created_by_id, token_hash, access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, max_access_count, expires_at) VALUES ($1, $2, $3, $4, $5::share_link_access_mode, $6, $7, $8, $9, $10, $11, $12)",
 	)
 	.bind(&share_link_id)
 	.bind(&scoped_item.item_id)
 	.bind(user_id)
-	.bind(&token)
+	.bind(hash_token(&token))
 	.bind(&input.access_mode)
 	.bind(input.is_one_time_use)
 	.bind(&input.encrypted_item_data)
@@ -367,7 +373,6 @@ pub(crate) async fn list_share_links_by_item(
                     .unwrap_or_default();
                 ShareLinkListEntry {
                     id: link.id,
-                    token: link.token,
                     status,
                     access_mode: link.access_mode,
                     is_one_time_use: link.is_one_time_use,
@@ -404,7 +409,6 @@ pub(crate) async fn get_share_link(
 
     Ok(ShareLinkDetailsResponse {
         id: visible_link.link.id,
-        token: visible_link.link.token,
         status: visible_link.link.status,
         access_mode: visible_link.link.access_mode,
         is_one_time_use: visible_link.link.is_one_time_use,
@@ -631,9 +635,9 @@ pub(crate) async fn access_public(
 ) -> Result<PublicShareAccessResponse, AppError> {
     validate_public_token(&input.token)?;
     let link = query_as::<_, DbPublicShareLinkRow>(
-		"SELECT id, created_by_id, token, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token = $1 AND access_mode = 'anyone' LIMIT 1",
+		"SELECT id, created_by_id, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token_hash = $1 AND access_mode = 'anyone' LIMIT 1",
 	)
-	.bind(&input.token)
+	.bind(hash_token(&input.token))
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link"); internal_error("Failed to load public share link") })?;
@@ -694,9 +698,10 @@ pub(crate) async fn access_public(
 }
 
 pub(crate) async fn request_email_verification(
-    pool: &PgPool,
+    app_state: &AppState,
     input: RequestEmailVerificationInput,
 ) -> Result<RequestEmailVerificationResponse, AppError> {
+    let pool = db_pool(app_state)?;
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
     let details =
@@ -738,7 +743,7 @@ pub(crate) async fn request_email_verification(
     }
 
     let existing_verification = query_as::<_, DbShareEmailVerificationRow>(
-		"SELECT id, share_link_id, email, code, attempts, max_attempts, expires_at, created_at, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+		"SELECT id, share_link_id, email, code_hash, attempts, max_attempts, expires_at, created_at, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
 	)
 	.bind(&details.link.id)
 	.bind(&normalized_email)
@@ -755,19 +760,14 @@ pub(crate) async fn request_email_verification(
         }
     }
 
-    let code = generate_verification_code();
-    let expires_at = now + time::Duration::minutes(15);
-    query(
-		"INSERT INTO share_email_verification (id, share_link_id, email, code, expires_at) VALUES ($1, $2, $3, $4, $5)",
-	)
-	.bind(generate_resource_id("share_verification"))
-	.bind(&details.link.id)
-	.bind(&normalized_email)
-	.bind(&code)
-	.bind(expires_at)
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to insert share email verification"); internal_error("Failed to insert share email verification") })?;
+    let _code = VerificationCodeService::new(pool)
+        .issue(
+            VerificationPurpose::ShareEmail {
+                share_link_id: &details.link.id,
+            },
+            &normalized_email,
+        )
+        .await?;
 
     Ok(RequestEmailVerificationResponse {
         success: true,
@@ -776,12 +776,13 @@ pub(crate) async fn request_email_verification(
 }
 
 pub(crate) async fn verify_email_and_access(
-    pool: &PgPool,
+    app_state: &AppState,
     input: VerifyEmailAndAccessInput,
 ) -> Result<PublicShareAccessResponse, AppError> {
+    let pool = db_pool(app_state)?;
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
-    if input.code.len() != 6 {
+    if !VerificationCodeService::is_valid_code(&input.code) {
         return Err(bad_request_error("Invalid or expired verification code"));
     }
 
@@ -834,78 +835,56 @@ pub(crate) async fn verify_email_and_access(
         ));
     }
 
-    let verification = query_as::<_, DbShareEmailVerificationRow>(
-		"SELECT id, share_link_id, email, code, attempts, max_attempts, expires_at, created_at, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 AND code = $3 AND expires_at > $4 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-	)
-	.bind(&details.link.id)
-	.bind(&normalized_email)
-	.bind(&input.code)
-	.bind(now)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load verification code"); internal_error("Failed to load verification code") })?;
-
-    let verification = if let Some(verification) = verification {
-        verification
-    } else {
-        let any_verification = query_as::<_, DbShareEmailVerificationRow>(
-			"SELECT id, share_link_id, email, code, attempts, max_attempts, expires_at, created_at, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-		)
-		.bind(&details.link.id)
-		.bind(&normalized_email)
-		.bind(now)
-		.fetch_optional(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load fallback verification code"); internal_error("Failed to load fallback verification code") })?;
-
-        if let Some(any_verification) = any_verification {
-            query("UPDATE share_email_verification SET attempts = $1 WHERE id = $2")
-                .bind(any_verification.attempts + 1)
-                .bind(&any_verification.id)
-                .execute(pool)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to increment verification attempts");
-                    internal_error("Failed to increment verification attempts")
-                })?;
-
-            if any_verification.attempts + 1 >= any_verification.max_attempts {
-                query("UPDATE share_email_verification SET used_at = $1 WHERE id = $2")
-                    .bind(now)
-                    .bind(&any_verification.id)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!(error = %e, "Failed to exhaust verification code");
-                        internal_error("Failed to exhaust verification code")
-                    })?;
-            }
+    let verification_codes = VerificationCodeService::new(pool);
+    let verification_id = match verification_codes
+        .verify_with_lockout(
+            VerificationPurpose::ShareEmail {
+                share_link_id: &details.link.id,
+            },
+            &normalized_email,
+            &input.code,
+            app_state.rate_limiter.as_ref(),
+        )
+        .await?
+    {
+        LockoutVerificationCodeOutcome::Valid { verification_id } => verification_id,
+        LockoutVerificationCodeOutcome::Exhausted => {
+            log_share_access(
+                pool,
+                &details.link.id,
+                Some(&input.email),
+                false,
+                Some("Max verification attempts exceeded"),
+            )
+            .await?;
+            return Err(AppError::too_many_requests(
+                "Maximum verification attempts exceeded. Please request a new code.",
+            ));
         }
-
-        log_share_access(
-            pool,
-            &details.link.id,
-            Some(&input.email),
-            false,
-            Some("Invalid or expired verification code"),
-        )
-        .await?;
-        return Err(bad_request_error("Invalid or expired verification code"));
+        LockoutVerificationCodeOutcome::Locked
+        | LockoutVerificationCodeOutcome::LockoutTriggered => {
+            log_share_access(
+                pool,
+                &details.link.id,
+                Some(&input.email),
+                false,
+                Some("Verification lockout"),
+            )
+            .await?;
+            return Err(rate_limit::rate_limited_error());
+        }
+        LockoutVerificationCodeOutcome::Invalid => {
+            log_share_access(
+                pool,
+                &details.link.id,
+                Some(&input.email),
+                false,
+                Some("Invalid or expired verification code"),
+            )
+            .await?;
+            return Err(bad_request_error("Invalid or expired verification code"));
+        }
     };
-
-    if verification.attempts >= verification.max_attempts {
-        log_share_access(
-            pool,
-            &details.link.id,
-            Some(&input.email),
-            false,
-            Some("Max verification attempts exceeded"),
-        )
-        .await?;
-        return Err(AppError::too_many_requests(
-            "Maximum verification attempts exceeded. Please request a new code.",
-        ));
-    }
 
     if !consume_share_link_access(pool, &details.link.id, now).await? {
         log_share_access(
@@ -921,15 +900,25 @@ pub(crate) async fn verify_email_and_access(
         ));
     }
 
-    query("UPDATE share_email_verification SET used_at = $1 WHERE id = $2")
-        .bind(now)
-        .bind(&verification.id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to mark verification as used");
-            internal_error("Failed to mark verification as used")
-        })?;
+    if !verification_codes
+        .consume(
+            VerificationPurpose::ShareEmail {
+                share_link_id: &details.link.id,
+            },
+            &verification_id,
+        )
+        .await?
+    {
+        log_share_access(
+            pool,
+            &details.link.id,
+            Some(&input.email),
+            false,
+            Some("Invalid or expired verification code"),
+        )
+        .await?;
+        return Err(bad_request_error("Invalid or expired verification code"));
+    }
 
     query(
 		"UPDATE share_link_allowed_email SET verified = true, verified_at = $1 WHERE share_link_id = $2 AND lower(email) = lower($3)",
@@ -957,7 +946,7 @@ async fn load_visible_share_link(
     actor_user_id: &str,
 ) -> Result<Option<VisibleShareLink>, AppError> {
     let link = query_as::<_, DbShareLinkRow>(
-		"SELECT sl.id, sl.item_id, sl.created_by_id, sl.token, sl.status::text AS status, sl.access_mode::text AS access_mode, sl.is_one_time_use, sl.access_count, sl.max_access_count, sl.expires_at, sl.created_at, sl.last_accessed_at, i.vault_id FROM share_link sl INNER JOIN item i ON i.id = sl.item_id WHERE sl.id = $1 LIMIT 1",
+		"SELECT sl.id, sl.item_id, sl.created_by_id, sl.status::text AS status, sl.access_mode::text AS access_mode, sl.is_one_time_use, sl.access_count, sl.max_access_count, sl.expires_at, sl.created_at, sl.last_accessed_at, i.vault_id FROM share_link sl INNER JOIN item i ON i.id = sl.item_id WHERE sl.id = $1 LIMIT 1",
 	)
 	.bind(link_id)
 	.fetch_optional(pool)
@@ -1004,23 +993,26 @@ async fn load_visible_share_link(
     }))
 }
 
+/// `token` is the caller-supplied plaintext; both query variants below compare its
+/// digest, because `share_link.token_hash` never holds the token itself.
 async fn load_public_share_link_details_by_token(
     pool: &PgPool,
     token: &str,
     required_access_mode: Option<&str>,
 ) -> Result<Option<PublicShareLinkDetails>, AppError> {
+    let token_hash = hash_token(token);
     let link = match required_access_mode {
 		Some(access_mode) => query_as::<_, DbPublicShareLinkRow>(
-			"SELECT id, created_by_id, token, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token = $1 AND access_mode = $2::share_link_access_mode LIMIT 1",
+			"SELECT id, created_by_id, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token_hash = $1 AND access_mode = $2::share_link_access_mode LIMIT 1",
 		)
-		.bind(token)
+		.bind(&token_hash)
 		.bind(access_mode)
 		.fetch_optional(pool)
 		.await,
 		None => query_as::<_, DbPublicShareLinkRow>(
-			"SELECT id, created_by_id, token, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token = $1 LIMIT 1",
+			"SELECT id, created_by_id, status::text AS status, access_mode::text AS access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, access_count, max_access_count, expires_at FROM share_link WHERE token_hash = $1 LIMIT 1",
 		)
-		.bind(token)
+		.bind(&token_hash)
 		.fetch_optional(pool)
 		.await,
 	}
@@ -1275,10 +1267,6 @@ fn generate_secure_token() -> String {
             ALPHABET[index] as char
         })
         .collect()
-}
-
-fn generate_verification_code() -> String {
-    rand::rng().random_range(100000..=999999).to_string()
 }
 
 fn share_link_daily_limit() -> i64 {

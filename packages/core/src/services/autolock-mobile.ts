@@ -10,18 +10,31 @@
  * Types are defined inline to avoid requiring react-native as a dependency.
  */
 
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore } from "@bittery/storage";
 import type { IAutolockService } from "@bittery/types";
 
 /**
- * Extended storage adapter interface for mobile-specific methods
- * These methods are available on ReactNativeStorageAdapter
+ * Should the app re-authenticate after coming back from the background?
+ *
+ * This is autolock *policy*, so it lives here rather than in storage: `AccountStore`
+ * supplies the two facts (when we went to background, and the account's auto-lock
+ * timeout) and this function decides, including the two fail-open cases:
+ *
+ *  - no background timestamp recorded -> never require re-auth;
+ *  - a timeout of `-1` means "Never", so it never requires re-auth however long the app
+ *    was backgrounded.
  */
-interface MobileStorageAdapter extends IStorageAdapter {
-	storeBackgroundTimestamp(accountId?: string): Promise<void>;
-	getBackgroundTimestamp(accountId?: string): Promise<number | null>;
-	clearBackgroundTimestamp(accountId?: string): Promise<void>;
-	shouldRequireAuthAfterBackground(accountId?: string): Promise<boolean>;
+async function shouldRequireAuthAfterBackground(
+	storage: AccountStore,
+	accountId?: string,
+): Promise<boolean> {
+	const backgroundTimestamp = await storage.getBackgroundTimestamp(accountId);
+	if (!backgroundTimestamp) return false;
+
+	const autoLockTimeout = await storage.getAutoLockTimeoutOrDefault(accountId);
+	if (autoLockTimeout === -1) return false;
+
+	return Date.now() - backgroundTimestamp > autoLockTimeout;
 }
 
 /**
@@ -51,8 +64,8 @@ interface AppStateModule {
  * Options for creating the mobile autolock service
  */
 export interface MobileAutolockOptions {
-	/** Storage adapter with mobile-specific methods */
-	storage: MobileStorageAdapter;
+	/** Account store; the background-timestamp methods are total on every platform. */
+	storage: AccountStore;
 	/** Optional: Get the active account email for multi-account support */
 	getActiveAccountId?: () => Promise<string | undefined>;
 }
@@ -80,7 +93,7 @@ export function createMobileAutolockService(
 			return getActiveAccountId();
 		}
 		const active = await storage.getActiveAccount();
-		return active?.type === "single" ? active.accountId : undefined;
+		return active ?? undefined;
 	};
 
 	const clearBackgroundTimestamps = async (): Promise<void> => {
@@ -121,7 +134,7 @@ export function createMobileAutolockService(
 	const shouldLock = async (): Promise<boolean> => {
 		if (isDisposed) return false;
 		const accountId = await getAccountId();
-		return storage.shouldRequireAuthAfterBackground(accountId);
+		return shouldRequireAuthAfterBackground(storage, accountId);
 	};
 
 	// Execute lock

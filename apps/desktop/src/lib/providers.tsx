@@ -1,14 +1,15 @@
+import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
-import { createAppRpcOptionsProxy } from "@bittery/shared/rpc-client";
+import {
+	createAppRpcOptionsProxy,
+	isUnauthorizedRpcError,
+} from "@bittery/shared/rpc-client";
 import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
 import { resolveActiveAuthServerUrl } from "@/lib/auth-server";
-import {
-	handleDesktopUnauthorizedError,
-	isUnauthorizedRpcError,
-} from "@/lib/session-invalidation";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
 
@@ -18,10 +19,6 @@ const fallbackServerUrl =
 
 let isHandlingAuthError = false;
 
-function isUnauthorizedError(error: unknown): boolean {
-	return isUnauthorizedRpcError(error);
-}
-
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
 
@@ -30,15 +27,16 @@ function handleUnauthorizedError() {
 
 	isHandlingAuthError = true;
 
-	void handleDesktopUnauthorizedError()
-		.then(({ prefillEmail, shouldRedirect }) => {
-			if (!shouldRedirect) {
-				isHandlingAuthError = false;
-				return;
-			}
-
+	void invalidateAccountSession("active", lifecycleDeps)
+		.then((outcome) => {
 			queryClient.clear();
 			toast.error(m.toast_auth_session_expired());
+
+			// A 401 with no active account still has to leave the screen that produced
+			// it: staying put swallows the error and strands the user on a dead view.
+			const prefillEmail = outcome.wasActive
+				? outcome.affected[0]?.email
+				: undefined;
 			if (prefillEmail) {
 				window.location.href = `/login?prefillEmail=${encodeURIComponent(prefillEmail)}`;
 			} else {
@@ -53,7 +51,7 @@ function handleUnauthorizedError() {
 const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
-			if (isUnauthorizedError(error)) {
+			if (isUnauthorizedRpcError(error)) {
 				handleUnauthorizedError();
 				return;
 			}
@@ -69,7 +67,7 @@ const queryClient = new QueryClient({
 	}),
 	mutationCache: new MutationCache({
 		onError: (error) => {
-			if (isUnauthorizedError(error)) {
+			if (isUnauthorizedRpcError(error)) {
 				handleUnauthorizedError();
 			}
 		},
@@ -79,10 +77,9 @@ const queryClient = new QueryClient({
 
 async function resolveDesktopServerUrl(): Promise<string> {
 	const activeAccount = await storage.getActiveAccount();
-	const accountServerUrl =
-		activeAccount?.type === "single"
-			? await storage.getServerUrl(activeAccount.accountId)
-			: null;
+	const accountServerUrl = activeAccount
+		? await storage.getServerUrl(activeAccount)
+		: null;
 	const activeAuthServerUrl = await resolveActiveAuthServerUrl();
 	return (
 		normalizeServerUrl(accountServerUrl ?? "") ??
@@ -97,13 +94,13 @@ const rpcClient = createSessionRefreshingRpcClient({
 	appPlatform: "desktop",
 	getSessionSnapshot: async () => {
 		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount?.type !== "single") {
+		if (!activeAccount) {
 			return { token: null, issuedAt: null, expiresAt: null };
 		}
 
 		const [token, sessionData] = await Promise.all([
-			storage.getAuthToken(activeAccount.accountId),
-			storage.getStoredSessionData(activeAccount.accountId),
+			storage.getAuthToken(activeAccount),
+			storage.getStoredSessionData(activeAccount),
 		]);
 
 		return {
@@ -114,16 +111,16 @@ const rpcClient = createSessionRefreshingRpcClient({
 	},
 	getRefreshToken: async () => {
 		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount?.type !== "single") {
+		if (!activeAccount) {
 			return null;
 		}
-		return storage.getAuthToken(activeAccount.accountId);
+		return storage.getAuthToken(activeAccount);
 	},
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount?.type === "single") {
-			await storage.storeAuthToken(token, activeAccount.accountId);
-			await storage.updateStoredSessionMetadata?.(activeAccount.accountId, {
+		if (activeAccount) {
+			await storage.storeAuthToken(token, activeAccount);
+			await storage.updateStoredSessionMetadata(activeAccount, {
 				sessionId,
 				expiresAt,
 			});

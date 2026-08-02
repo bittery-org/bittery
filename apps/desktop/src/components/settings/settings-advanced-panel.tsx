@@ -15,7 +15,7 @@ import { IconLoaderCircle } from "@bittery/ui/icons";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { SettingsField } from "@/components/settings/settings-field";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import { clearDesktopSyncState } from "@/lib/sync-client-id";
 import { useI18n } from "@/providers/i18n-provider";
 import { useSyncContext } from "@/providers/sync-provider";
@@ -40,16 +40,14 @@ export function SettingsAdvancedPanel({
 			syncContext.outboundQueue.clear();
 
 			try {
+				// `clearItemCache` requires an accountId per account, so each is cleared
+				// individually; with no accounts there is nothing cached to clear.
 				const accounts = await storage.getAccountsList();
-				if (accounts.length === 0) {
-					await storage.clearItemCache();
-				} else {
-					await Promise.all(
-						accounts.map((account) =>
-							storage.clearItemCache(account.accountId),
-						),
-					);
-				}
+				await Promise.all(
+					accounts.map((account) =>
+						itemCache.clearItemCache(account.accountId),
+					),
+				);
 
 				await clearDesktopSyncState({ preserveClientId: true });
 

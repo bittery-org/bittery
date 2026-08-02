@@ -5,15 +5,19 @@
  * for real-time lock/unlock synchronization.
  */
 
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { storage } from "../lib/storage";
-import { type DesktopStatus, desktopClient } from "./desktop-client";
-import type { DesktopEventPayload } from "./desktop-protocol";
+import {
+	getAccountSessionManager,
+	peekAccountSessionManager,
+} from "@bittery/core/services/account-session-manager";
+import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
+import { itemCache, storage } from "../lib/storage";
+import { desktopClient } from "./desktop-client";
+import type { DesktopEventPayload, DesktopStatus } from "./desktop-protocol";
 import {
 	type DesktopModeStateSnapshot,
 	evaluateDesktopRecoveryDecision,
 } from "./services/desktop-recovery";
-import { _lockInternal, setDesktopModeSentinel } from "./session-manager";
+import { vaultSession, vaultSessionPorts } from "./vault-session";
 
 const POLL_INTERVAL_MS = 5000; // Poll every 5 seconds
 const DESKTOP_MODE_RECOVERY_WINDOW_MS = 60000; // 1 minute window to recover desktop mode after restart
@@ -68,9 +72,12 @@ class DesktopSyncService {
 		if (status?.available) {
 			await this.syncAccountsFromDesktop();
 
-			// If desktop is unlocked, set sentinel MUK to mark extension as unlocked
 			if (!status.locked && status.unlockedAccounts.length > 0) {
-				setDesktopModeSentinel();
+				await vaultSession.dispatch({
+					type: "DESKTOP_UNLOCK_PUSHED",
+					accountIds: status.unlockedAccounts,
+					at: Date.now(),
+				});
 				await this.saveDesktopModeState();
 			}
 		}
@@ -88,33 +95,35 @@ class DesktopSyncService {
 			const status = await this.checkDesktopStatus();
 
 			if (status?.available && !status.locked) {
-				// Set sentinel MUK to mark as "unlocked via desktop"
-				setDesktopModeSentinel();
+				await vaultSession.dispatch({
+					type: "DESKTOP_UNLOCK_PUSHED",
+					accountIds: status.unlockedAccounts,
+					at: Date.now(),
+				});
 
 				// Restore active account if available
 				if (previousState.activeAccount) {
 					try {
 						const accounts = await storage.getAccountsList();
 						// All-accounts mode was removed; collapse a legacy "all" pointer
-						// to a single active account (first unlocked, else first known).
+						// to the single account the user was last on.
 						if (previousState.activeAccount === "all") {
-							const unlocked = await storage.getUnlockedAccounts?.();
-							const accountId = unlocked?.[0] ?? accounts[0]?.accountId;
+							const previousActive = await storage.getActiveAccount();
+							const unlocked = await storage.getUnlockedAccounts();
+							const accountId = selectActiveAccountAfterUnlock({
+								previousActive,
+								unlockedAccountIds: unlocked,
+								accounts,
+							});
 							if (accountId) {
-								await storage.setActiveAccount({
-									type: "single",
-									accountId,
-								});
+								await storage.setActiveAccount(accountId);
 							}
 						} else {
 							const account = accounts.find(
 								(item) => item.accountId === previousState.activeAccount,
 							);
 							if (account) {
-								await storage.setActiveAccount({
-									type: "single",
-									accountId: account.accountId,
-								});
+								await storage.setActiveAccount(account.accountId);
 							}
 						}
 					} catch (error) {
@@ -136,11 +145,9 @@ class DesktopSyncService {
 			const status = await this.checkDesktopStatus();
 
 			if (status?.available) {
-				// If desktop is locked, ensure extension is locked
-				if (status.locked) {
-					await _lockInternal();
-				} else if (status.unlockedAccounts.length > 0) {
-					// If desktop is unlocked, try to auto-unlock extension
+				// A locked desktop already locked this side: `checkDesktopStatus`
+				// dispatched `DESKTOP_OBSERVED` and the reducer derives that edge.
+				if (!status.locked && status.unlockedAccounts.length > 0) {
 					await this.handleUnlockEvent({
 						accounts: status.unlockedAccounts,
 						timestamp: status.timestamp,
@@ -185,10 +192,10 @@ class DesktopSyncService {
 						secretKeyHint: desktopAccount.secretKeyHint,
 						teamName: desktopAccount.teamName,
 						teamAvatarUrl: desktopAccount.teamAvatarUrl,
-						addedAt: desktopAccount.addedAt ?? Date.now(),
-						lastActiveAt: desktopAccount.lastActiveAt ?? Date.now(),
-						biometricEnabled: desktopAccount.biometricEnabled ?? false,
-					} as import("../lib/storage").AccountMetadata);
+						addedAt: desktopAccount.addedAt,
+						lastActiveAt: desktopAccount.lastActiveAt,
+						biometricEnabled: desktopAccount.biometricEnabled,
+					});
 				} else {
 					// Update existing account with latest data from desktop
 					// This ensures teamAvatarUrl and other fields stay in sync
@@ -209,26 +216,25 @@ class DesktopSyncService {
 			// Update active account if desktop has one set
 			if (accountsData.activeAccount) {
 				const refreshedAccounts = await storage.getAccountsList();
-				// All-accounts mode was removed; collapse a legacy "all" pointer to a
-				// single active account (first unlocked, else first known).
+				// All-accounts mode was removed; collapse a legacy "all" pointer to
+				// the single account the user was last on.
 				if (accountsData.activeAccount === "all") {
-					const unlocked = await storage.getUnlockedAccounts?.();
-					const accountId = unlocked?.[0] ?? refreshedAccounts[0]?.accountId;
+					const previousActive = await storage.getActiveAccount();
+					const unlocked = await storage.getUnlockedAccounts();
+					const accountId = selectActiveAccountAfterUnlock({
+						previousActive,
+						unlockedAccountIds: unlocked,
+						accounts: refreshedAccounts,
+					});
 					if (accountId) {
-						await storage.setActiveAccount({
-							type: "single",
-							accountId,
-						});
+						await storage.setActiveAccount(accountId);
 					}
 				} else {
 					const active = refreshedAccounts.find(
 						(item) => item.accountId === accountsData.activeAccount,
 					);
 					if (active) {
-						await storage.setActiveAccount({
-							type: "single",
-							accountId: active.accountId,
-						});
+						await storage.setActiveAccount(active.accountId);
 					}
 				}
 			}
@@ -241,18 +247,30 @@ class DesktopSyncService {
 	}
 
 	/**
-	 * Check desktop status
+	 * Check desktop status.
+	 *
+	 * `desktopAvailable` is reachability — the native host answers
+	 * `{available:false, locked:true}` when it cannot reach the app — and every
+	 * read feeds the reducer, which derives the lock and disconnect edges itself.
 	 */
 	async checkDesktopStatus(): Promise<DesktopStatus | null> {
+		const previousLocked = this.lastDesktopStatus?.locked ?? null;
 		const data = await desktopClient.getLockStatus();
-		if (!data) {
-			this.desktopAvailable = false;
-			this.lastDesktopStatus = null;
-			return null;
-		}
 
 		this.lastDesktopStatus = data;
-		this.desktopAvailable = true;
+		this.desktopAvailable = data !== null;
+
+		// Cached desktop tokens and items belong to the previous lock state.
+		if ((data?.locked ?? null) !== previousLocked) {
+			desktopClient.clearCache();
+		}
+
+		await vaultSession.dispatch({
+			type: "DESKTOP_OBSERVED",
+			status: vaultSessionPorts.desktop.readCached(),
+			at: Date.now(),
+		});
+
 		return data;
 	}
 
@@ -324,31 +342,26 @@ class DesktopSyncService {
 	}
 
 	/**
-	 * Handle lock event from desktop
+	 * Handle lock event from desktop.
+	 *
+	 * The reducer owns both the lock and the `DESKTOP_LOCKED` push, so the two
+	 * can never disagree.
 	 */
 	async handleLockEvent(event: LockEvent): Promise<void> {
-		// Clear desktop client cache
 		desktopClient.clearCache();
 
-		// Immediately lock extension (bypass desktop check)
-		await _lockInternal();
-
-		// Notify UI to clear cache and refresh
-		try {
-			chrome.runtime.sendMessage({
-				type: "DESKTOP_LOCKED",
-				reason: event.reason,
-			});
-		} catch (_error) {
-			// Ignore if no listeners
-		}
+		await vaultSession.dispatch({
+			type: "DESKTOP_LOCK_PUSHED",
+			reason: event.reason,
+			at: Date.now(),
+		});
 	}
 
 	/**
-	 * Handle unlock event from desktop (set desktop mode and notify)
+	 * Handle unlock event from desktop (hand ownership to the desktop and notify)
 	 */
 	async handleUnlockEvent(event: UnlockEvent): Promise<void> {
-		// Clear desktop client cache (will fetch fresh session data on next request)
+		// Fresh session data is fetched on the next request.
 		desktopClient.clearCache();
 
 		if (event.accounts.length === 0) {
@@ -356,41 +369,35 @@ class DesktopSyncService {
 			return;
 		}
 
-		// In desktop mode, just set the sentinel MUK to mark extension as unlocked
-		setDesktopModeSentinel();
-
-		// Notify popup to navigate to vault immediately
-		try {
-			chrome.runtime.sendMessage({
-				type: "DESKTOP_UNLOCKED",
-				accounts: event.accounts,
-			});
-		} catch (_error) {
-			// Ignore if no listeners
-		}
+		await vaultSession.dispatch({
+			type: "DESKTOP_UNLOCK_PUSHED",
+			accountIds: event.accounts,
+			at: Date.now(),
+		});
 	}
 
 	/**
 	 * Handle desktop close event
 	 */
 	async handleDesktopCloseEvent(_event: DesktopCloseEvent): Promise<void> {
-		// Clear desktop client cache
 		desktopClient.clearCache();
 
-		// Lock extension immediately (bypass desktop check)
-		await _lockInternal();
-
-		// Mark desktop as unavailable
+		// Drop the cached status before dispatching so a concurrent snapshot read
+		// cannot re-observe the closed desktop as still connected.
 		this.desktopAvailable = false;
 		this.lastDesktopStatus = null;
 
-		// Clear desktop mode state
+		await vaultSession.dispatch({ type: "DESKTOP_CLOSED", at: Date.now() });
+
 		await this.clearDesktopModeState();
 
 		if (this.unsubscribeDesktopEvents) {
 			this.unsubscribeDesktopEvents();
 			this.unsubscribeDesktopEvents = null;
 		}
+
+		// Polling deliberately keeps running: it is the only path that re-detects a
+		// desktop that comes back after the event subscription is torn down.
 	}
 
 	/**
@@ -404,11 +411,13 @@ class DesktopSyncService {
 
 		// Update active account in extension storage to match desktop
 		try {
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: event.accountId,
-			});
-			await getAccountSessionManager({ storage }).refresh();
+			await storage.setActiveAccount(event.accountId);
+			// The background wires no platform callbacks, so whichever background caller
+			// runs first after a service-worker wake may construct the shared manager.
+			await (
+				peekAccountSessionManager() ??
+				getAccountSessionManager({ storage, itemCache })
+			).refresh();
 		} catch (error) {
 			console.error("[Desktop Sync] Failed to update active account:", error);
 			return;
@@ -431,37 +440,19 @@ class DesktopSyncService {
 		if (this.pollInterval) return;
 
 		this.pollInterval = setInterval(async () => {
-			const previousStatus = this.lastDesktopStatus;
-			const newStatus = await this.checkDesktopStatus();
+			// A missing previous status counts as locked, so a desktop that comes
+			// back after the event subscription was torn down is re-detected here.
+			const wasLocked = this.lastDesktopStatus?.locked ?? true;
+			const status = await this.checkDesktopStatus();
 
-			// Detect state changes and trigger event handlers
-			if (previousStatus && newStatus) {
-				// Check if lock state changed
-				const wasLocked = previousStatus.locked;
-				const isLocked = newStatus.locked;
-
-				if (!wasLocked && isLocked) {
-					// Desktop just locked
-					await this.handleLockEvent({
-						reason: "poll-detected",
-						timestamp: newStatus.timestamp,
-					});
-				} else if (wasLocked && !isLocked) {
-					// Desktop just unlocked
-					await this.handleUnlockEvent({
-						accounts: newStatus.unlockedAccounts,
-						timestamp: newStatus.timestamp,
-					});
-				}
-
-				// Check if unlocked accounts changed (account switch while unlocked)
-				if (
-					!isLocked &&
-					JSON.stringify(previousStatus.unlockedAccounts) !==
-						JSON.stringify(newStatus.unlockedAccounts)
-				) {
-					// Could trigger account sync here if needed
-				}
+			// `checkDesktopStatus` already reported the observation, and the reducer
+			// derives the lock and disconnect edges from it. Only the unlock edge
+			// needs an explicit hand-over of ownership to the desktop.
+			if (status && wasLocked && !status.locked) {
+				await this.handleUnlockEvent({
+					accounts: status.unlockedAccounts,
+					timestamp: status.timestamp,
+				});
 			}
 		}, POLL_INTERVAL_MS);
 	}
@@ -481,17 +472,6 @@ class DesktopSyncService {
 	 */
 	isDesktopAvailable(): boolean {
 		return this.desktopAvailable;
-	}
-
-	/**
-	 * Get desktop autolock timeout (to inherit in extension)
-	 */
-	getDesktopTimeout(): number | null {
-		if (!this.desktopAvailable || !this.lastDesktopStatus) {
-			return null;
-		}
-
-		return this.lastDesktopStatus.autolockTimeoutMs;
 	}
 
 	/**
@@ -524,8 +504,7 @@ class DesktopSyncService {
 			const activeAccount = await storage.getActiveAccount();
 			const state: DesktopModeStateSnapshot = {
 				lastConnectedAt: Date.now(),
-				activeAccount:
-					activeAccount?.type === "single" ? activeAccount.accountId : null,
+				activeAccount: activeAccount ?? null,
 			};
 			await chrome.storage.local.set({ [STORAGE_KEY_DESKTOP_MODE]: state });
 		} catch (error) {

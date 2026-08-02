@@ -11,10 +11,7 @@ use crate::{
     db::models::*,
     error::AppError,
     integrations::storage,
-    repo::{
-        common::{generate_resource_id, insert_audit_event, insert_sync_event},
-        team::load_team_membership_actor,
-    },
+    repo::common::{generate_resource_id, hash_token, insert_audit_event, insert_sync_event},
     services::billing::sync_team_seats_best_effort,
     services::session_control::{load_user_session_ids, record_session_revocations},
     services::team_billing::team_management_enabled as shared_team_management_enabled,
@@ -22,6 +19,16 @@ use crate::{
 
 const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
     "Team management is only available on Family or Team plans with active billing.";
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, sqlx::FromRow)]
+struct DbTeamMembershipActorRow {
+    id: String,
+    team_id: Option<String>,
+    role: String,
+    billing_plan: Option<String>,
+    billing_status: Option<String>,
+}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -181,7 +188,6 @@ pub struct TeamInvitationDetailsResponse {
 #[serde(rename_all = "camelCase")]
 pub struct PendingTeamInvitationResponse {
     pub id: String,
-    pub token: String,
     pub team_id: String,
     pub team_name: String,
     pub role: String,
@@ -195,6 +201,16 @@ pub struct SendInvitationResponse {
     pub invitation_id: String,
     pub token: String,
     pub existing_user_public_key: Option<String>,
+}
+
+/// Resending rotates the invite token, so the caller receives a brand new raw
+/// token exactly like `SendInvitationResponse` does. Only the digest is stored,
+/// which means the previous link stops working the moment this returns.
+#[derive(Debug, Clone, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ResendInvitationResponse {
+    pub invitation_id: String,
+    pub token: String,
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
@@ -314,9 +330,9 @@ pub(crate) async fn get_invitation_by_token(
     validate_token(&input.token)?;
 
     let invitation = query_as::<_, DbTeamInvitationDetailsRow>(
-		"SELECT ti.id, ti.email, ti.team_id, t.name AS team_name, ti.role::text AS role, ti.status::text AS status, invited_by.name AS invited_by_name, ti.expires_at, ti.created_at FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.token = $1 LIMIT 1",
+		"SELECT ti.id, ti.email, ti.team_id, t.name AS team_name, ti.role::text AS role, ti.status::text AS status, invited_by.name AS invited_by_name, ti.expires_at, ti.created_at FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.token_hash = $1 LIMIT 1",
 	)
-	.bind(&input.token)
+	.bind(hash_token(&input.token))
 	.fetch_optional(pool)
 	.await
 	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
@@ -359,7 +375,7 @@ pub(crate) async fn get_pending_invitations(
     .ok_or_else(|| not_found_error("User not found"))?;
 
     let invitations = query_as::<_, DbPendingTeamInvitationRow>(
-		"SELECT ti.id, ti.token, ti.team_id, t.name AS team_name, ti.role::text AS role, invited_by.name AS invited_by_name, ti.expires_at FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.email = $1 AND ti.status = 'pending' AND ti.expires_at > $2 ORDER BY ti.created_at DESC",
+		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.role::text AS role, invited_by.name AS invited_by_name, ti.expires_at FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.email = $1 AND ti.status = 'pending' AND ti.expires_at > $2 ORDER BY ti.created_at DESC",
 	)
 	.bind(&current_user.email)
 	.bind(OffsetDateTime::now_utc())
@@ -371,7 +387,6 @@ pub(crate) async fn get_pending_invitations(
         .into_iter()
         .map(|invitation| PendingTeamInvitationResponse {
             id: invitation.id,
-            token: invitation.token,
             team_id: invitation.team_id,
             team_name: invitation.team_name,
             role: invitation.role,
@@ -1022,14 +1037,14 @@ pub(crate) async fn send_invitation(
     };
 
     query(
-		"INSERT INTO team_invitation (id, team_id, email, role, invited_by_id, token, pending_vault_keys, expires_at) VALUES ($1, $2, $3, $4::team_role, $5, $6, $7, $8)",
+		"INSERT INTO team_invitation (id, team_id, email, role, invited_by_id, token_hash, pending_vault_keys, expires_at) VALUES ($1, $2, $3, $4::team_role, $5, $6, $7, $8)",
 	)
 	.bind(&invitation_id)
 	.bind(&input.team_id)
 	.bind(&input.email)
 	.bind(&input.role)
 	.bind(user_id)
-	.bind(&token)
+	.bind(hash_token(&token))
 	.bind(serialized_pending_vault_keys)
 	.bind(expires_at)
 	.execute(pool)
@@ -1043,22 +1058,67 @@ pub(crate) async fn send_invitation(
     })
 }
 
+/// Loads a still-pending invitation from the raw token handed out at creation
+/// time. Only the SHA-256 digest is stored, so the caller's token is hashed
+/// before comparison, exactly as session tokens are.
+async fn load_pending_invitation_by_token(
+    pool: &PgPool,
+    token: &str,
+) -> Result<DbTeamInvitationAcceptRow, AppError> {
+    query_as::<_, DbTeamInvitationAcceptRow>(
+		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token_hash = $1 AND ti.status = 'pending' LIMIT 1",
+	)
+	.bind(hash_token(token))
+	.fetch_optional(pool)
+	.await
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
+	.ok_or_else(|| not_found_error("Invitation not found or already used"))
+}
+
+/// Loads a still-pending invitation by its opaque id. Used by the in-app pending
+/// invitation list, which can no longer surface the raw token. The id is not a
+/// bearer credential: every caller re-checks that the invitation email matches
+/// the authenticated session user.
+async fn load_pending_invitation_by_id(
+    pool: &PgPool,
+    invitation_id: &str,
+) -> Result<DbTeamInvitationAcceptRow, AppError> {
+    query_as::<_, DbTeamInvitationAcceptRow>(
+		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.id = $1 AND ti.status = 'pending' LIMIT 1",
+	)
+	.bind(invitation_id)
+	.fetch_optional(pool)
+	.await
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
+	.ok_or_else(|| not_found_error("Invitation not found or already used"))
+}
+
 pub(crate) async fn accept_invitation(
     pool: &PgPool,
     user_id: &str,
     input: TokenInput,
 ) -> Result<AcceptInvitationResponse, AppError> {
     validate_token(&input.token)?;
+    let invitation = load_pending_invitation_by_token(pool, &input.token).await?;
+    accept_loaded_invitation(pool, user_id, invitation).await
+}
 
-    let invitation = query_as::<_, DbTeamInvitationAcceptRow>(
-		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token = $1 AND ti.status = 'pending' LIMIT 1",
-	)
-	.bind(&input.token)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
-	.ok_or_else(|| not_found_error("Invitation not found or already used"))?;
+/// Accepts an invitation the signed-in user already sees in their pending list.
+/// Exists because that list no longer exposes the raw token.
+pub(crate) async fn accept_invitation_by_id(
+    pool: &PgPool,
+    user_id: &str,
+    input: InvitationIdInput,
+) -> Result<AcceptInvitationResponse, AppError> {
+    let invitation = load_pending_invitation_by_id(pool, &input.invitation_id).await?;
+    accept_loaded_invitation(pool, user_id, invitation).await
+}
 
+async fn accept_loaded_invitation(
+    pool: &PgPool,
+    user_id: &str,
+    invitation: DbTeamInvitationAcceptRow,
+) -> Result<AcceptInvitationResponse, AppError> {
     if invitation.expires_at < OffsetDateTime::now_utc() {
         query("UPDATE team_invitation SET status = 'expired' WHERE id = $1")
             .bind(&invitation.id)
@@ -1182,16 +1242,26 @@ pub(crate) async fn decline_invitation(
     input: TokenInput,
 ) -> Result<SuccessResponse, AppError> {
     validate_token(&input.token)?;
+    let invitation = load_pending_invitation_by_token(pool, &input.token).await?;
+    decline_loaded_invitation(pool, user_id, invitation).await
+}
 
-    let invitation = query_as::<_, DbTeamInvitationAcceptRow>(
-		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.email, ti.role::text AS role, ti.invited_by_id, ti.expires_at, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status, ti.pending_vault_keys FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.token = $1 AND ti.status = 'pending' LIMIT 1",
-	)
-	.bind(&input.token)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
-	.ok_or_else(|| not_found_error("Invitation not found or already used"))?;
+/// Declines an invitation the signed-in user already sees in their pending list.
+/// Exists because that list no longer exposes the raw token.
+pub(crate) async fn decline_invitation_by_id(
+    pool: &PgPool,
+    user_id: &str,
+    input: InvitationIdInput,
+) -> Result<SuccessResponse, AppError> {
+    let invitation = load_pending_invitation_by_id(pool, &input.invitation_id).await?;
+    decline_loaded_invitation(pool, user_id, invitation).await
+}
 
+async fn decline_loaded_invitation(
+    pool: &PgPool,
+    user_id: &str,
+    invitation: DbTeamInvitationAcceptRow,
+) -> Result<SuccessResponse, AppError> {
     let current_user = query_as::<_, DbTeamUserRow>(
         "SELECT id, email, team_id, role::text AS role FROM \"user\" WHERE id = $1 LIMIT 1",
     )
@@ -1260,11 +1330,18 @@ pub(crate) async fn cancel_invitation(
     Ok(SuccessResponse { success: true })
 }
 
+/// Re-opens an invitation with a freshly minted token.
+///
+/// Only the SHA-256 digest of an invite token is stored, so the raw token that
+/// was handed out at creation time cannot be recovered here. Reviving the row
+/// without rotating would therefore produce a `pending` invitation that nobody
+/// can redeem. The token is regenerated, the digest replaced, and the new raw
+/// token returned once so the caller can hand out a working link.
 pub(crate) async fn resend_invitation(
     pool: &PgPool,
     user_id: &str,
     input: InvitationIdInput,
-) -> Result<SuccessResponse, AppError> {
+) -> Result<ResendInvitationResponse, AppError> {
     let invitation = query_as::<_, DbManageTeamInvitationRow>(
 		"SELECT ti.id, ti.team_id, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id WHERE ti.id = $1 LIMIT 1",
 	)
@@ -1288,17 +1365,24 @@ pub(crate) async fn resend_invitation(
 
     assert_team_management_entitlement(&invitation.billing_plan, &invitation.billing_status)?;
 
-    query("UPDATE team_invitation SET expires_at = $1, status = 'pending' WHERE id = $2")
-        .bind(OffsetDateTime::now_utc() + time::Duration::days(7))
-        .bind(&input.invitation_id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to resend invitation");
-            internal_error("Failed to resend invitation")
-        })?;
+    let token = generate_secure_token();
+    query(
+        "UPDATE team_invitation SET token_hash = $1, expires_at = $2, status = 'pending' WHERE id = $3",
+    )
+    .bind(hash_token(&token))
+    .bind(OffsetDateTime::now_utc() + time::Duration::days(7))
+    .bind(&input.invitation_id)
+    .execute(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to resend invitation");
+        internal_error("Failed to resend invitation")
+    })?;
 
-    Ok(SuccessResponse { success: true })
+    Ok(ResendInvitationResponse {
+        invitation_id: invitation.id,
+        token,
+    })
 }
 
 pub(crate) mod member_handlers {
@@ -2302,6 +2386,22 @@ fn not_found_error(message: &str) -> AppError {
 
 fn internal_error(message: &str) -> AppError {
     AppError::internal(message)
+}
+
+async fn load_team_membership_actor(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<Option<DbTeamMembershipActorRow>, AppError> {
+    query_as::<_, DbTeamMembershipActorRow>(
+        "SELECT u.id, u.team_id, u.role::text AS role, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load team membership");
+        AppError::internal("Failed to load team membership")
+    })
 }
 
 #[cfg(test)]

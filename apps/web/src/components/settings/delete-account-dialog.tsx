@@ -1,3 +1,7 @@
+import {
+	type AccountDeletionDeps,
+	deleteAccountEverywhere,
+} from "@bittery/core/services/account-lifecycle";
 import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
@@ -17,7 +21,12 @@ import { IconTrash as Trash2 } from "@bittery/ui/icons";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { storage } from "@/lib/storage";
+import { lifecycleDeps } from "@/lib/lifecycle";
+import {
+	initializeStorage,
+	refreshActiveAccountId,
+	storage,
+} from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
@@ -29,11 +38,39 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const navigate = useNavigate();
 	const confirmPhrase = m.settings_delete_account_dialog_confirm_phrase();
 
+	const deletionDeps: AccountDeletionDeps = {
+		...lifecycleDeps,
+		server: {
+			deleteAccount: async (input) => {
+				await rpcClient.auth.deleteAccount.mutate(input);
+			},
+		},
+	};
+
 	const deleteAccountMutation = useMutation({
-		mutationFn: (input: { confirmEmail: string }) =>
-			rpcClient.auth.deleteAccount.mutate(input),
-		onSuccess: async () => {
-			await storage.clearAllStoredData();
+		mutationFn: async (input: { confirmEmail: string }) => {
+			await initializeStorage();
+			const accountId = await storage.getActiveAccount();
+			if (!accountId) {
+				throw new Error("No active account to delete");
+			}
+
+			const outcome = await deleteAccountEverywhere(
+				{ accountId, confirmEmail: input.confirmEmail },
+				deletionDeps,
+			);
+			await refreshActiveAccountId();
+
+			// The module reports instead of throwing, and a failed server delete aborts the
+			// local wipe — the account still exists, so this has to reach the error toast.
+			const serverFailure = outcome.failures.find(
+				(failure) => failure.step === "delete_server_account",
+			);
+			if (serverFailure) {
+				throw serverFailure.cause;
+			}
+		},
+		onSuccess: () => {
 			toast.success(m.settings_delete_account_dialog_toast_deleted());
 			navigate({ to: "/" });
 		},

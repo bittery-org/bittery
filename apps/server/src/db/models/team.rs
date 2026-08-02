@@ -17,7 +17,6 @@ pub struct DbTeamInvitationDetailsRow {
 #[derive(Clone, Debug, FromRow)]
 pub struct DbPendingTeamInvitationRow {
     pub id: String,
-    pub token: String,
     pub team_id: String,
     pub team_name: String,
     pub role: String,
@@ -51,15 +50,6 @@ pub struct DbTeamUserRow {
 pub struct DbVaultRoleRow {
     pub vault_id: String,
     pub role: String,
-}
-
-#[derive(Clone, Debug, FromRow)]
-pub struct DbTeamMembershipActorRow {
-    pub id: String,
-    pub team_id: Option<String>,
-    pub role: String,
-    pub billing_plan: Option<String>,
-    pub billing_status: Option<String>,
 }
 
 #[derive(Clone, Debug, FromRow)]

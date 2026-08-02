@@ -10,7 +10,7 @@ import { desktopSync } from "../desktop-sync";
 export async function resolveEmailFromAccountId(
 	accountId: string,
 ): Promise<string | undefined> {
-	const metadata = await storage.getAccountMetadata?.(accountId);
+	const metadata = await storage.getAccountMetadata(accountId);
 	return metadata?.email;
 }
 
@@ -34,8 +34,8 @@ export async function resolveAccountEmailForVault(
 	vaultId: string,
 ): Promise<string | undefined> {
 	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return await resolveEmailFromAccountId(activeAccount.accountId);
+	if (activeAccount) {
+		return await resolveEmailFromAccountId(activeAccount);
 	}
 
 	const cached = core.vaultCoordinator.findAccountForVault(vaultId);
@@ -43,7 +43,10 @@ export async function resolveAccountEmailForVault(
 		return await resolveEmailFromAccountId(cached.accountId);
 	}
 
-	const localUnlockedAccountIds = (await storage.getUnlockedAccounts?.()) ?? [];
+	// `getUnlockedAccounts` reports which accounts hold a master unlock key in memory.
+	// The service-worker startup routine (`restoreUnlockedSessions`) repopulates that set
+	// before any message is routed, so this reader never has to restore anything itself.
+	const localUnlockedAccountIds = await storage.getUnlockedAccounts();
 	const desktopStatus = desktopSync.getLastStatus();
 	const desktopUnlockedEmails =
 		desktopStatus?.available && !desktopStatus.locked
@@ -92,8 +95,8 @@ export async function resolveAccountEmailForItemId(
 	}
 
 	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return await resolveEmailFromAccountId(activeAccount.accountId);
+	if (activeAccount) {
+		return await resolveEmailFromAccountId(activeAccount);
 	}
 
 	return undefined;

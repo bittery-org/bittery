@@ -142,6 +142,28 @@ pub async fn decline(
     team::decline_invitation(pool, &ctx.session.user_id, input).await
 }
 
+/// Accept/decline from the in-app pending list, which addresses the invitation by
+/// id because the raw token is no longer readable back out of the database.
+#[allow(non_snake_case)]
+#[handler(mutation)]
+pub async fn acceptById(
+    ctx: RefreshSessionContext,
+    input: InvitationIdInput,
+) -> Result<AcceptInvitationResponse, AppError> {
+    let pool = db_pool(&ctx.app_state)?;
+    team::accept_invitation_by_id(pool, &ctx.session.user_id, input).await
+}
+
+#[allow(non_snake_case)]
+#[handler(mutation)]
+pub async fn declineById(
+    ctx: RefreshSessionContext,
+    input: InvitationIdInput,
+) -> Result<SuccessResponse, AppError> {
+    let pool = db_pool(&ctx.app_state)?;
+    team::decline_invitation_by_id(pool, &ctx.session.user_id, input).await
+}
+
 #[handler(mutation)]
 pub async fn cancel(
     ctx: RefreshSessionContext,
@@ -155,7 +177,7 @@ pub async fn cancel(
 pub async fn resend(
     ctx: RefreshSessionContext,
     input: InvitationIdInput,
-) -> Result<SuccessResponse, AppError> {
+) -> Result<ResendInvitationResponse, AppError> {
     let pool = db_pool(&ctx.app_state)?;
     team::resend_invitation(pool, &ctx.session.user_id, input).await
 }
@@ -258,9 +280,11 @@ fn create_team_invitations_router() -> Router<AppState> {
         .handler(pending)
         .handler(send)
         .handler(accept)
+        .handler(acceptById)
         .handler(cancel)
         .handler(resend)
         .handler(decline)
+        .handler(declineById)
 }
 
 fn create_team_members_router() -> Router<AppState> {

@@ -18,7 +18,7 @@ use axum::{
         header::{AUTHORIZATION, CONTENT_TYPE},
         HeaderMap, HeaderValue, Request, StatusCode,
     },
-    middleware, Router,
+    Router,
 };
 use futures_util::FutureExt;
 use serde_json::{json, Value};
@@ -26,10 +26,7 @@ use sqlx::{query, PgPool};
 use tower::util::ServiceExt;
 use url::Url;
 
-use crate::{
-    create_public_http_router, create_rpc_router, db, rpc_request_context_middleware,
-    rpc_request_guard_middleware, rpc_tracing_middleware, AppState,
-};
+use crate::{create_app, db, AppState, EdgeHttpConfig};
 
 const DATABASE_PREFIX: &str = "bittery_test_";
 const MAX_POSTGRES_IDENTIFIER_LEN: usize = 63;
@@ -46,6 +43,10 @@ pub(crate) struct RpcTestApp {
     pub pool: PgPool,
     pub state: AppState,
     router: Router,
+}
+
+pub(crate) fn create_test_router(state: AppState) -> Router {
+    create_app(state, EdgeHttpConfig::default())
 }
 
 impl RpcTestApp {
@@ -407,17 +408,7 @@ where
         .expect("test database migrations should run");
 
     let state = AppState::from_pool(pool.clone());
-    let (qubit_service, _server_handle) = create_rpc_router().to_service(state.clone());
-    let public_routes = create_public_http_router().with_state(state.clone());
-    let rpc_routes = Router::new()
-        .nest_service("/rpc", qubit_service)
-        .route_layer(middleware::from_fn(rpc_tracing_middleware))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            rpc_request_context_middleware,
-        ))
-        .layer(middleware::from_fn(rpc_request_guard_middleware));
-    let router = Router::new().merge(public_routes).merge(rpc_routes);
+    let router = create_test_router(state.clone());
 
     let result = std::panic::AssertUnwindSafe(test_fn(RpcTestApp {
         pool,

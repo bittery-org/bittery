@@ -3,12 +3,21 @@
  * Handles communication with the desktop app for biometric unlock
  */
 
+import { lockAccount } from "@bittery/core/services/account-lifecycle";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
-import { storage } from "../lib/storage";
+import { itemCache, storage } from "../lib/storage";
 import { decrypt } from "../lib/wasm-crypto";
+import {
+	requestAllBiometricTransfer,
+	requestSingleBiometricTransfer,
+	STALE_DESKTOP_UNLOCK_RESPONSE,
+} from "./biometric-transfer";
+import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { desktopSync } from "./desktop-sync";
-import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
+import { requireDesktopUnlock } from "./desktop-unlock";
+import { lifecycleDeps } from "./lifecycle";
 import { sendNativeMessage } from "./native-messaging-client";
 import {
 	setDesktopModeSentinel,
@@ -26,16 +35,16 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 			type: "CHECK_BIOMETRIC_AVAILABLE",
 		});
 
-		const responseData = response as any;
-		const result = {
+		return {
 			success: true,
 			available:
-				responseData?.type === "BIOMETRIC_STATUS" && responseData.available,
-			enabled: responseData?.enabled || false,
+				response.type === "BIOMETRIC_STATUS" ? response.available : false,
+			enabled: response.type === "BIOMETRIC_STATUS" ? response.enabled : false,
 			appRunning:
-				responseData?.appRunning || responseData?.app_running || false,
+				response.type === "BIOMETRIC_STATUS"
+					? (response.appRunning ?? response.app_running ?? false)
+					: false,
 		};
-		return result;
 	} catch (error) {
 		console.error("[CHECK_NATIVE_BIOMETRIC] Error:", error);
 		return {
@@ -47,38 +56,18 @@ export async function handleCheckNativeBiometric(): Promise<MessageResponse> {
 	}
 }
 
-/**
- * Error code for a response that is not bound to the issued challenge. The
- * background worker has no access to the message bundles, so it hands the UI a
- * stable code to translate instead of a hardcoded sentence.
- */
-export const STALE_DESKTOP_UNLOCK_RESPONSE = "stale-desktop-unlock-response";
+export { STALE_DESKTOP_UNLOCK_RESPONSE };
 
-/**
- * Check that a biometric-unlock response belongs to the challenge just sent.
- *
- * This is not a MAC. The desktop derives the value from data the extension
- * already holds, so it authenticates nothing on its own — the transport is what
- * establishes trust (an allowlisted native-messaging host over stdio, reaching
- * the desktop through a user-owned local socket). What the binding does buy is
- * that a response captured earlier cannot be replayed against a later request,
- * which is the whole reason the challenge is generated per call.
- *
- * `challenge` is a UUID and `boundTo` is base64 or a count, so both are Latin-1
- * and safe for `btoa`.
- */
-function assertChallengeBinding(
-	label: string,
-	signature: unknown,
-	challenge: string,
-	boundTo: string | number,
-): void {
-	if (signature === btoa(`${challenge}:${boundTo}`)) {
-		return;
+/** Same contract as above: a code for the UI to translate, not a sentence. */
+export const TRAVEL_MODE_UNVERIFIED = "travel-mode-unverified";
+
+function decodeMasterUnlockKey(value: string): Uint8Array {
+	const binary = atob(value);
+	const key = new Uint8Array(binary.length);
+	for (let index = 0; index < binary.length; index += 1) {
+		key[index] = binary.charCodeAt(index);
 	}
-
-	console.error(`[${label}] Response is not bound to the issued challenge`);
-	throw new Error(STALE_DESKTOP_UNLOCK_RESPONSE);
+	return key;
 }
 
 /**
@@ -86,157 +75,60 @@ function assertChallengeBinding(
  */
 export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 	try {
-		// Verify we have an active account
 		const activeAccount = await storage.getActiveAccount();
-		if (!activeAccount || activeAccount.type !== "single") {
+		if (!activeAccount) {
 			throw new Error("No active account. Please log in again.");
 		}
 
-		const challenge = crypto.randomUUID();
-
-		const response = await sendNativeMessage({
-			type: "BIOMETRIC_UNLOCK_REQUEST",
-			challenge,
-			extension_id: chrome.runtime.id,
-			accountId: activeAccount.accountId,
+		const transfer = await requestSingleBiometricTransfer({
+			accountId: activeAccount,
+			extensionId: chrome.runtime.id,
 		});
-
-		const responseData = response as any;
-		if (responseData?.type === "BIOMETRIC_UNLOCK_SUCCESS") {
-			if (responseData.accountId !== activeAccount.accountId) {
-				throw new Error("Desktop returned biometric data for another account");
-			}
-			// Verify the response contains the expected data
-			if (
-				!responseData.encrypted_session ||
-				!responseData.device_key ||
-				!responseData.signature
-			) {
-				throw new Error("Invalid response from desktop app");
-			}
-
-			assertChallengeBinding(
-				"NATIVE_BIOMETRIC_UNLOCK",
-				responseData.signature,
-				challenge,
-				responseData.encrypted_session,
-			);
-
-			// Sync biometric enabled status: if unlock succeeded, biometric must be
-			// enabled on desktop. Only after the binding check, so a stale or
-			// mismatched response never persists state.
-			if (
-				activeAccount.type === "single" &&
-				"updateBiometricEnabled" in storage
-			) {
-				await (
-					storage as {
-						updateBiometricEnabled: (
-							accountId: string,
-							enabled: boolean,
-						) => Promise<void>;
-					}
-				).updateBiometricEnabled(activeAccount.accountId, true);
-			}
-
-			// Decode the base64 encrypted session data (it's a JSON-encoded EncryptedData structure)
-			const encryptedSessionJson = atob(responseData.encrypted_session);
-			const encryptedMuk = JSON.parse(encryptedSessionJson);
-
-			// Decode device key from base64
-			const deviceKeyBase64 = responseData.device_key;
-			const deviceKeyStr = atob(deviceKeyBase64);
-			const deviceKey = new Uint8Array(deviceKeyStr.length);
-			for (let i = 0; i < deviceKeyStr.length; i++) {
-				deviceKey[i] = deviceKeyStr.charCodeAt(i);
-			}
-
-			// Decrypt the MUK using the device key
-			const mukBase64 = await decrypt(encryptedMuk, deviceKey);
-
-			// Convert MUK from base64 to Uint8Array
-			const mukStr = atob(mukBase64);
-			const muk = new Uint8Array(mukStr.length);
-			for (let i = 0; i < mukStr.length; i++) {
-				muk[i] = mukStr.charCodeAt(i);
-			}
-
-			// Get auth token and vault keys from response (desktop app provides them) or storage
-			let token: string;
-			let vaultKeys: any[];
-
-			if (responseData.auth_token) {
-				token = responseData.auth_token;
-				await storage.storeAuthToken(token, activeAccount.accountId);
-			} else {
-				const storedToken = await storage.getAuthToken(activeAccount.accountId);
-				if (!storedToken) {
-					throw new Error("Missing auth token in response and storage");
-				}
-				token = storedToken;
-			}
-
-			const enforcer = getTravelModeEnforcer(storage);
-			const client = await createStoredAccountRpcClient(
-				storage,
-				activeAccount.accountId,
-			).catch(() => null);
-			try {
-				await enforcer.verifyForUnlock(activeAccount.accountId, client);
-			} catch (error) {
-				await storage.clearSession(activeAccount.accountId);
-				throw error;
-			}
-
-			if (responseData.vault_keys) {
-				vaultKeys = enforcer.filterVaultKeys(
-					activeAccount.accountId,
-					JSON.parse(responseData.vault_keys),
-				);
-				await storage.storeVaultKeys(vaultKeys, activeAccount.accountId);
-			} else {
-				const storedVaultKeys = await storage.getVaultKeys(
-					activeAccount.accountId,
-				);
-				if (!storedVaultKeys || storedVaultKeys.length === 0) {
-					throw new Error("Missing vault keys in response and storage");
-				}
-				vaultKeys = storedVaultKeys;
-			}
-
-			setMasterUnlockKey(muk);
-			await storage.setMasterUnlockKey(muk, activeAccount.accountId);
-
-			// Update activity tracking
-			await updateActivity();
-
-			return {
-				success: true,
-				message: "Biometric unlock successful",
-			};
+		if (!transfer.ok) {
+			throw new Error(transfer.code);
 		}
-		if (responseData?.type === "BIOMETRIC_UNLOCK_FAILED") {
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK] Failed response:",
-				responseData.error,
-			);
 
-			// Parse error and provide helpful message
-			const errorStr = responseData.error || "Biometric unlock failed";
-			let userMessage = errorStr;
+		const { material } = transfer;
+		await storage.setBiometricEnabled(activeAccount, true);
 
-			if (errorStr.includes("No session data found")) {
-				userMessage =
-					"Biometric unlock not set up for this account in the desktop app. Please open the Bittery desktop app, log in with this account, and enable biometric unlock in your account settings.";
-			}
+		const mukBase64 = await decrypt(material.encryptedMuk, material.deviceKey);
+		const muk = decodeMasterUnlockKey(mukBase64);
 
-			throw new Error(userMessage);
+		if (material.authToken) {
+			await storage.storeAuthToken(material.authToken, activeAccount);
+		} else if (!(await storage.getAuthToken(activeAccount))) {
+			throw new Error("Missing auth token in response and storage");
 		}
-		console.error(
-			"[NATIVE_BIOMETRIC_UNLOCK] Unexpected response type:",
-			responseData?.type,
-		);
-		throw new Error("Unexpected response from native host");
+
+		const enforcer = getTravelModeEnforcer(storage, itemCache);
+		const client = await createStoredAccountRpcClient(
+			storage,
+			activeAccount,
+		).catch(() => null);
+		if (!(await enforcer.verifyOrClear(activeAccount, client))) {
+			throw new Error(TRAVEL_MODE_UNVERIFIED);
+		}
+
+		if (material.vaultKeys) {
+			await storage.storeVaultKeys(
+				enforcer.filterVaultKeys(activeAccount, material.vaultKeys),
+				activeAccount,
+			);
+		} else {
+			const storedVaultKeys = await storage.getVaultKeys(activeAccount);
+			if (!storedVaultKeys || storedVaultKeys.length === 0) {
+				throw new Error("Missing vault keys in response and storage");
+			}
+		}
+
+		setMasterUnlockKey(muk);
+		await storage.setMasterUnlockKey(muk, activeAccount);
+		await updateActivity();
+
+		return {
+			success: true,
+			message: "Biometric unlock successful",
+		};
 	} catch (error) {
 		console.error("[NATIVE_BIOMETRIC_UNLOCK] Error:", error);
 		return {
@@ -264,17 +156,16 @@ export async function handleOpenDesktopApp(payload?: {
 			vaultId: payload?.vaultId,
 		});
 
-		const responseData = response as any;
-		if (responseData?.type === "OPEN_DESKTOP_APP_RESULT") {
+		if (response.type === "OPEN_DESKTOP_APP_RESULT") {
 			return {
-				success: Boolean(responseData.success),
-				error: responseData.error,
+				success: response.success,
+				error: response.error,
 			};
 		}
-		if (responseData?.type === "ERROR") {
+		if (response.type === "ERROR") {
 			return {
 				success: false,
-				error: responseData.message || "Failed to open desktop app",
+				error: response.message || "Failed to open desktop app",
 			};
 		}
 		return { success: true };
@@ -345,135 +236,61 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			}
 		}
 
-		// Standalone path: prompt for biometrics inside the desktop process and
-		// take the key material back. Only reached when no locked desktop is
-		// shadowing this side.
-		// Generate challenge for replay attack protection
-		const challenge = crypto.randomUUID();
-		const extensionId = chrome.runtime.id;
-
-		// Call the native messaging endpoint
-		// This will unlock the extension locally in standalone mode
-		const response = await sendNativeMessage({
-			type: "BIOMETRIC_UNLOCK_ALL_REQUEST",
-			challenge,
-			extension_id: extensionId,
+		const transfer = await requestAllBiometricTransfer({
+			expectedAccountIds: accounts.map((account) => account.accountId),
+			extensionId: chrome.runtime.id,
 		});
-
-		const responseData = response as any;
-		if (responseData?.type === "BIOMETRIC_UNLOCK_ALL_FAILED") {
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Unlock failed:",
-				responseData.error,
-			);
-			throw new Error(responseData.error || "Biometric unlock failed");
-		}
-
-		if (responseData?.type !== "BIOMETRIC_UNLOCK_ALL_SUCCESS") {
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Unexpected response type:",
-				responseData?.type,
-			);
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Full response:",
-				JSON.stringify(responseData, null, 2),
-			);
-			throw new Error(
-				`Invalid response type from desktop app: ${responseData?.type || "undefined"}`,
-			);
-		}
-
-		// Verify the response contains the expected data
-		if (
-			!responseData.device_key ||
-			!responseData.signature ||
-			!responseData.accounts
-		) {
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Missing required fields in response",
-			);
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Has device_key:",
-				!!responseData.device_key,
-			);
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Has signature:",
-				!!responseData.signature,
-			);
-			console.error(
-				"[NATIVE_BIOMETRIC_UNLOCK_ALL] Has accounts:",
-				!!responseData.accounts,
-			);
-			throw new Error("Invalid response structure from desktop app");
-		}
-
-		assertChallengeBinding(
-			"NATIVE_BIOMETRIC_UNLOCK_ALL",
-			responseData.signature,
-			challenge,
-			responseData.accounts?.length || 0,
-		);
-
-		// Decode device key from base64 (shared for all accounts)
-		const deviceKeyBase64 = responseData.device_key;
-		const deviceKeyStr = atob(deviceKeyBase64);
-		const deviceKey = new Uint8Array(deviceKeyStr.length);
-		for (let i = 0; i < deviceKeyStr.length; i++) {
-			deviceKey[i] = deviceKeyStr.charCodeAt(i);
+		if (!transfer.ok) {
+			throw new Error(transfer.code);
 		}
 
 		const unlocked: string[] = [];
 		const failed: Array<{ accountId: string; email: string; error: string }> =
 			[];
 
-		// Process each account from response
-		for (const accountData of responseData.accounts || []) {
-			const email = accountData.email;
-			const accountId = accountData.accountId;
+		// Read before the loop below can tear a session down.
+		const previousActive = await storage.getActiveAccount();
+
+		for (const material of transfer.materials) {
+			const { accountId, email } = material;
 
 			try {
-				// Decode the encrypted session data
-				const encryptedSessionJson = atob(accountData.encrypted_session);
-				const encryptedMuk = JSON.parse(encryptedSessionJson);
+				const mukBase64 = await decrypt(
+					material.encryptedMuk,
+					material.deviceKey,
+				);
+				const muk = decodeMasterUnlockKey(mukBase64);
 
-				// Decrypt the MUK using the device key
-				const mukBase64 = await decrypt(encryptedMuk, deviceKey);
-
-				// Convert MUK from base64 to Uint8Array
-				const mukStr = atob(mukBase64);
-				const muk = new Uint8Array(mukStr.length);
-				for (let i = 0; i < mukStr.length; i++) {
-					muk[i] = mukStr.charCodeAt(i);
+				if (material.authToken) {
+					await storage.storeAuthToken(material.authToken, accountId);
 				}
 
-				if (!accountId) throw new Error(`Missing account ID for ${email}`);
-
-				// Store auth token if provided
-				if (accountData.auth_token) {
-					await storage.storeAuthToken(accountData.auth_token, accountId);
-				}
-
-				const enforcer = getTravelModeEnforcer(storage);
+				const enforcer = getTravelModeEnforcer(storage, itemCache);
 				const client = await createStoredAccountRpcClient(
 					storage,
 					accountId,
 				).catch(() => null);
-				await enforcer.verifyForUnlock(accountId, client);
-
-				// Store only policy-visible vault keys after verification.
-				if (accountData.vault_keys) {
-					const vaultKeys = enforcer.filterVaultKeys(
+				if (!(await enforcer.verifyOrClear(accountId, client))) {
+					failed.push({
 						accountId,
-						JSON.parse(accountData.vault_keys),
+						email,
+						error: TRAVEL_MODE_UNVERIFIED,
+					});
+					continue;
+				}
+
+				if (material.vaultKeys) {
+					await storage.storeVaultKeys(
+						enforcer.filterVaultKeys(accountId, material.vaultKeys),
+						accountId,
 					);
-					await storage.storeVaultKeys(vaultKeys, accountId);
 				}
 
 				await storage.setMasterUnlockKey(muk, accountId);
 
 				unlocked.push(accountId);
 			} catch (error) {
-				if (accountId) await storage.clearSession(accountId);
+				if (accountId) await lockAccount(accountId, lifecycleDeps);
 				failed.push({
 					accountId,
 					email,
@@ -490,27 +307,22 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			throw new Error("Failed to unlock any accounts");
 		}
 
-		// Get first unlocked email (guaranteed to exist because we checked length above)
-		const firstUnlockedAccountId = unlocked[0];
-		if (!firstUnlockedAccountId) {
+		// All-accounts mode was removed; even when several accounts unlock, the app
+		// operates on a single active account.
+		const activeAccountId = selectActiveAccountAfterUnlock({
+			previousActive,
+			unlockedAccountIds: unlocked,
+			accounts,
+		});
+		if (!activeAccountId) {
 			throw new Error("No unlocked account found");
 		}
 
 		if (!options?.preserveActiveAccount) {
-			// All-accounts mode was removed; even when multiple accounts unlock the
-			// app operates on a single active account (the first unlocked one).
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: firstUnlockedAccountId,
-			});
+			await storage.setActiveAccount(activeAccountId);
 		}
 
-		// IMPORTANT: Update activity FIRST to set timestamp, otherwise isUnlocked()
-		// will see lastActivityTimestamp=0 and immediately lock everything!
-		await updateActivity();
-
-		// Set MUK for first unlocked account in session manager
-		const activeMuk = await storage.getMasterUnlockKey(firstUnlockedAccountId);
+		const activeMuk = await storage.getMasterUnlockKey(activeAccountId);
 		if (activeMuk) {
 			setMasterUnlockKey(activeMuk);
 		}

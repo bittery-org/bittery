@@ -11,15 +11,16 @@ use sqlx::{query, query_scalar, PgPool};
 use std::future::Future;
 
 use super::{
-    deterministic_fake_hint, header_value, normalize_email, normalize_signup_plan,
-    parse_bearer_token, parse_pending_vault_keys, plan_member_limit, signup_team_name,
-    validate_hex_string, validate_login_attempt_id, validate_resource_id, validate_token,
+    deterministic_fake_hint, emailed_code_capture, header_value, normalize_email,
+    normalize_signup_plan, parse_bearer_token, parse_pending_vault_keys, plan_member_limit,
+    signup_team_name, validate_hex_string, validate_login_attempt_id, validate_resource_id,
+    validate_token,
 };
-use crate::services::session::now_utc;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
     seed_vault_key, with_raw_test_db, with_rpc_test_app, RpcTestApp,
 };
+use crate::{repo::common::hash_token, services::session::now_utc};
 use time::{Duration, OffsetDateTime};
 
 const TEST_SRP_ITERATIONS: u32 = 1_000;
@@ -128,7 +129,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                     json!(true)
                 );
 
-                let code = latest_signup_verification_code(&app.pool, email, None).await;
+                let code = latest_signup_verification_code(email, None);
 
                 let wrong_code = app
                     .rpc_call(
@@ -725,7 +726,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     json!(true)
                 );
 
-                let code = latest_recovery_code(&app.pool, &fixture.email).await;
+                let code = latest_recovery_code(&fixture.email);
 
                 let wrong_code = app
                     .rpc_call(
@@ -751,6 +752,17 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .expect("recovery token should exist")
                     .to_string();
 
+                let replayed_code = app
+                    .rpc_call(
+                        "auth.verifyRecoveryCode",
+                        json!([{ "email": fixture.email, "code": code }]),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_eq!(replayed_code.status, StatusCode::OK);
+                assert_eq!(replayed_code.body["result"]["Ok"]["success"], json!(false));
+                assert!(replayed_code.body["result"]["Ok"]["recoveryToken"].is_null());
+
                 let invalid_recovery = app
                     .rpc_call(
                         "auth.getRecoveryData",
@@ -768,7 +780,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 let recovery_data = app
                     .rpc_call(
                         "auth.getRecoveryData",
-                        json!([{ "recoveryToken": recovery_token }]),
+                        json!([{ "recoveryToken": recovery_token.clone() }]),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -806,6 +818,19 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .await;
                 assert_eq!(reset.status, StatusCode::OK);
                 assert_eq!(reset.body["result"]["Ok"]["userId"], json!(fixture.user_id));
+
+                let reused_recovery = app
+                    .rpc_call(
+                        "auth.getRecoveryData",
+                        json!([{ "recoveryToken": recovery_token }]),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_handler_error(
+                    &reused_recovery.body,
+                    "UNAUTHORIZED",
+                    "Invalid recovery session",
+                );
 
                 let session_count = query_scalar::<_, i64>(
                     "SELECT COUNT(*)::bigint FROM session WHERE user_id = $1",
@@ -1457,38 +1482,19 @@ fn build_valid_token(label: &str) -> String {
     token
 }
 
-async fn latest_signup_verification_code(
-    pool: &PgPool,
-    email: &str,
-    invitation_token: Option<&str>,
-) -> String {
-    match invitation_token {
-			Some(invitation_token) => query_scalar::<_, String>(
-				"SELECT code FROM signup_verification WHERE email = $1 AND invitation_token = $2 ORDER BY created_at DESC LIMIT 1",
-			)
-			.bind(normalize_email(email))
-			.bind(invitation_token)
-			.fetch_one(pool)
-			.await
-			.expect("signup verification code should load"),
-			None => query_scalar::<_, String>(
-				"SELECT code FROM signup_verification WHERE email = $1 AND invitation_token IS NULL ORDER BY created_at DESC LIMIT 1",
-			)
-			.bind(normalize_email(email))
-			.fetch_one(pool)
-			.await
-			.expect("signup verification code should load"),
-		}
+/// Verification codes are stored as SHA-256 digests, so the plaintext can only be
+/// obtained where a real user would get it: the outbound email.
+fn latest_signup_verification_code(email: &str, invitation_token: Option<&str>) -> String {
+    emailed_code_capture::latest(&emailed_code_capture::signup_key(
+        &normalize_email(email),
+        invitation_token,
+    ))
+    .expect("signup verification code should have been emailed")
 }
 
-async fn latest_recovery_code(pool: &PgPool, email: &str) -> String {
-    query_scalar::<_, String>(
-        "SELECT code FROM recovery_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(normalize_email(email))
-    .fetch_one(pool)
-    .await
-    .expect("recovery code should load")
+fn latest_recovery_code(email: &str) -> String {
+    emailed_code_capture::latest(&emailed_code_capture::recovery_key(&normalize_email(email)))
+        .expect("recovery code should have been emailed")
 }
 
 async fn issue_signup_verification_token(
@@ -1506,7 +1512,7 @@ async fn issue_signup_verification_token(
     assert_eq!(request.status, StatusCode::OK);
     assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
 
-    let code = latest_signup_verification_code(&app.pool, email, invitation_token).await;
+    let code = latest_signup_verification_code(email, invitation_token);
     let verified = app
         .rpc_call(
             "auth.verifySignupVerification",
@@ -1534,14 +1540,14 @@ async fn seed_team_invitation(
     pending_vault_keys: Option<&str>,
 ) {
     query(
-			"INSERT INTO team_invitation (id, team_id, email, role, invited_by_id, token, pending_vault_keys, expires_at) VALUES ($1, $2, $3, $4::team_role, $5, $6, $7, $8)",
+			"INSERT INTO team_invitation (id, team_id, email, role, invited_by_id, token_hash, pending_vault_keys, expires_at) VALUES ($1, $2, $3, $4::team_role, $5, $6, $7, $8)",
 		)
 		.bind(invitation_id)
 		.bind(team_id)
 		.bind(normalize_email(email))
 		.bind(role)
 		.bind(invited_by_id)
-		.bind(token)
+		.bind(hash_token(token))
 		.bind(pending_vault_keys)
 		.bind(now_utc() + Duration::days(1))
 		.execute(pool)
@@ -1730,7 +1736,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                     )
                     .await;
                 assert_eq!(request.status, StatusCode::OK);
-                let code = latest_recovery_code(&app.pool, &fixture.email).await;
+                let code = latest_recovery_code(&fixture.email);
 
                 // Two wrong attempts stay below the threshold.
                 for _ in 0..2 {
@@ -1800,6 +1806,447 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                 .await
                 .expect("audit count should load");
                 assert_eq!(audit_count, 1);
+            },
+        )
+        .await;
+    })
+    .await;
+}
+
+/// Finding 5c: `signup_verification.code_hash` must never hold the code itself.
+/// A database read (backup, replica, compromised read-only credential) must not
+/// disclose a redeemable code, while the normal flow keeps working.
+#[tokio::test]
+async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("signup_verification_code_hashed", |app| async move {
+            let email = "signup-code-hashed@example.com";
+
+            let request = app
+                .rpc_call(
+                    "auth.requestSignupVerification",
+                    json!([{ "email": email, "invitationToken": null }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+
+            let code = latest_signup_verification_code(email, None);
+            let stored = query_scalar::<_, String>(
+                "SELECT code_hash FROM signup_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(normalize_email(email))
+            .fetch_one(&app.pool)
+            .await
+            .expect("signup verification row should load");
+
+            assert_ne!(stored, code, "the raw code must not be persisted");
+            assert_eq!(stored, hash_token(&code));
+            assert_eq!(stored.len(), 64);
+
+            // Replaying the stored column as if it were the code must fail.
+            let replayed = app
+                .rpc_call(
+                    "auth.verifySignupVerification",
+                    json!([{ "email": email, "code": stored, "invitationToken": null }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
+
+            let wrong = app
+                .rpc_call(
+                    "auth.verifySignupVerification",
+                    json!([{ "email": email, "code": "000000", "invitationToken": null }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+
+            let verified = app
+                .rpc_call(
+                    "auth.verifySignupVerification",
+                    json!([{ "email": email, "code": code, "invitationToken": null }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Finding 5c: same guarantee for `recovery_verification.code_hash`.
+#[tokio::test]
+async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("recovery_verification_code_hashed", |app| async move {
+            let fixture = build_seeded_auth_account_fixture(&app.pool, "codehash").await;
+
+            let request = app
+                .rpc_call(
+                    "auth.requestRecoveryVerification",
+                    json!([{ "email": fixture.email }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+
+            let code = latest_recovery_code(&fixture.email);
+            let stored = query_scalar::<_, String>(
+                "SELECT code_hash FROM recovery_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(normalize_email(&fixture.email))
+            .fetch_one(&app.pool)
+            .await
+            .expect("recovery verification row should load");
+
+            assert_ne!(stored, code, "the raw code must not be persisted");
+            assert_eq!(stored, hash_token(&code));
+
+            let replayed = app
+                .rpc_call(
+                    "auth.verifyRecoveryCode",
+                    json!([{ "email": fixture.email, "code": stored }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
+
+            let verified = app
+                .rpc_call(
+                    "auth.verifyRecoveryCode",
+                    json!([{ "email": fixture.email, "code": code }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Finding 5c: an invitation token carried through the signup flow is stored as a
+/// digest in `signup_verification.invitation_token_hash`, and signup still works.
+#[tokio::test]
+async fn signup_verification_invitation_token_is_stored_hashed() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("signup_verification_invite_hashed", |app| async move {
+            let fixture = build_auth_invitation_fixture(&app.pool, "invite_hashed").await;
+
+            let request = app
+                .rpc_call(
+                    "auth.requestSignupVerification",
+                    json!([{
+                        "email": fixture.invited_email,
+                        "invitationToken": fixture.invitation_token
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+
+            let stored = query_scalar::<_, Option<String>>(
+                "SELECT invitation_token_hash FROM signup_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(normalize_email(&fixture.invited_email))
+            .fetch_one(&app.pool)
+            .await
+            .expect("signup verification row should load")
+            .expect("invitation token hash should be present");
+
+            assert_ne!(stored, fixture.invitation_token);
+            assert_eq!(stored, hash_token(&fixture.invitation_token));
+
+            // Redeeming with the raw token still resolves the same row.
+            let code =
+                latest_signup_verification_code(&fixture.invited_email, Some(&fixture.invitation_token));
+            let verified = app
+                .rpc_call(
+                    "auth.verifySignupVerification",
+                    json!([{
+                        "email": fixture.invited_email,
+                        "code": code,
+                        "invitationToken": fixture.invitation_token
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+        })
+        .await;
+    })
+    .await;
+}
+
+/// The per-code cap in `signup_verification.max_attempts` is reset every time a
+/// new code is requested, so on its own it bounds guesses per code rather than
+/// per identity. This asserts the lifetime counter survives a code re-request:
+/// attempts made before and after the re-request add up to the same lockout.
+#[tokio::test]
+async fn verify_signup_verification_locks_out_across_code_re_request() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_signup_verify_lockout", |app| async move {
+            let _env = rate_limit_env(&[
+                ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "3"),
+                ("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", "15"),
+                ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
+                ("RATE_LIMIT_AUTH_IP", "50"),
+            ]);
+            let email = "signup-verify-lockout@example.com";
+            let ip = "198.51.100.20";
+
+            let request = app
+                .rpc_call(
+                    "auth.requestSignupVerification",
+                    json!([{ "email": email, "invitationToken": null }]),
+                    headers_with_ip(ip),
+                )
+                .await;
+            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+
+            // Two wrong guesses against the first code stay below the threshold.
+            for _ in 0..2 {
+                let wrong = app
+                    .rpc_call(
+                        "auth.verifySignupVerification",
+                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
+                        headers_with_ip(ip),
+                    )
+                    .await;
+                assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+            }
+
+            // Requesting a fresh code resets `signup_verification.attempts` to 0.
+            let re_request = app
+                .rpc_call(
+                    "auth.requestSignupVerification",
+                    json!([{ "email": email, "invitationToken": null }]),
+                    headers_with_ip(ip),
+                )
+                .await;
+            assert_eq!(re_request.body["result"]["Ok"]["success"], json!(true));
+            let code = latest_signup_verification_code(email, None);
+
+            // The lifetime counter is unaffected, so the very next wrong guess trips it.
+            let tripped = app
+                .rpc_call(
+                    "auth.verifySignupVerification",
+                    json!([{ "email": email, "code": "000000", "invitationToken": null }]),
+                    headers_with_ip(ip),
+                )
+                .await;
+            assert_handler_error(
+                &tripped.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+
+            // The correct code must still fail while locked.
+            let correct = app
+                .rpc_call(
+                    "auth.verifySignupVerification",
+                    json!([{ "email": email, "code": code, "invitationToken": null }]),
+                    headers_with_ip(ip),
+                )
+                .await;
+            assert_handler_error(
+                &correct.body,
+                RATE_LIMITED_CODE,
+                crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+            );
+
+            // Every pending code was burned, so none survives the lock expiring.
+            let pending = query_scalar::<_, i64>(
+                "SELECT COUNT(*)::bigint FROM signup_verification WHERE email = $1 AND used_at IS NULL",
+            )
+            .bind(normalize_email(email))
+            .fetch_one(&app.pool)
+            .await
+            .expect("signup verification count should load");
+            assert_eq!(pending, 0);
+
+            let locked_until = query_scalar::<_, Option<OffsetDateTime>>(
+                "SELECT locked_until FROM rate_limit_state WHERE scope = 'auth_signup_verify'",
+            )
+            .fetch_one(&app.pool)
+            .await
+            .expect("lock row should load");
+            assert!(locked_until.is_some_and(|until| until > now_utc()));
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Guessing against an email with no pending code must not count toward the
+/// lockout, otherwise anyone could lock an arbitrary address out of signup.
+#[tokio::test]
+async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_signup_verify_no_pending", |app| async move {
+            let _env = rate_limit_env(&[
+                ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "2"),
+                ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
+                ("RATE_LIMIT_AUTH_IP", "50"),
+            ]);
+            let email = "signup-verify-no-pending@example.com";
+            let ip = "198.51.100.21";
+
+            for _ in 0..4 {
+                let attempt = app
+                    .rpc_call(
+                        "auth.verifySignupVerification",
+                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
+                        headers_with_ip(ip),
+                    )
+                    .await;
+                assert_eq!(attempt.body["result"]["Ok"]["success"], json!(false));
+            }
+
+            // A genuine code issued afterwards still works.
+            let token = issue_signup_verification_token(&app, email, None).await;
+            assert!(!token.is_empty());
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Malformed codes are rejected before the database lookup and must not consume
+/// an attempt against the live code.
+#[tokio::test]
+async fn verify_signup_verification_rejects_malformed_codes_without_consuming_attempts() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app("rate_limit_signup_verify_malformed", |app| async move {
+            let _env = rate_limit_env(&[
+                ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "50"),
+                ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
+                ("RATE_LIMIT_AUTH_IP", "50"),
+            ]);
+            let email = "signup-verify-malformed@example.com";
+            let ip = "198.51.100.22";
+
+            let request = app
+                .rpc_call(
+                    "auth.requestSignupVerification",
+                    json!([{ "email": email, "invitationToken": null }]),
+                    headers_with_ip(ip),
+                )
+                .await;
+            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            let code = latest_signup_verification_code(email, None);
+
+            for malformed in ["", "12345", "1234567", "abcdef", "12 456"] {
+                let attempt = app
+                    .rpc_call(
+                        "auth.verifySignupVerification",
+                        json!([{ "email": email, "code": malformed, "invitationToken": null }]),
+                        headers_with_ip(ip),
+                    )
+                    .await;
+                assert_eq!(attempt.body["result"]["Ok"]["success"], json!(false));
+            }
+
+            let attempts = query_scalar::<_, i32>(
+                "SELECT attempts FROM signup_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
+            )
+            .bind(normalize_email(email))
+            .fetch_one(&app.pool)
+            .await
+            .expect("signup verification attempts should load");
+            assert_eq!(attempts, 0);
+
+            // The real code is still redeemable.
+            let verified = app
+                .rpc_call(
+                    "auth.verifySignupVerification",
+                    json!([{ "email": email, "code": code, "invitationToken": null }]),
+                    headers_with_ip(ip),
+                )
+                .await;
+            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+        })
+        .await;
+    })
+    .await;
+}
+
+/// Rotating the client IP must not mint a fresh code-request budget.
+#[tokio::test]
+async fn request_signup_verification_limits_one_email_across_rotating_ips() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app(
+            "rate_limit_signup_verify_req_ip_rotation",
+            |app| async move {
+                let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
+                let email = "signup-verify-req-rotate@example.com";
+
+                for ip in ["203.0.113.31", "203.0.113.32"] {
+                    let response = app
+                        .rpc_call(
+                            "auth.requestSignupVerification",
+                            json!([{ "email": email, "invitationToken": null }]),
+                            headers_with_ip(ip),
+                        )
+                        .await;
+                    assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                }
+
+                let blocked = app
+                    .rpc_call(
+                        "auth.requestSignupVerification",
+                        json!([{ "email": email, "invitationToken": null }]),
+                        headers_with_ip("203.0.113.33"),
+                    )
+                    .await;
+                assert_handler_error(
+                    &blocked.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
+            },
+        )
+        .await;
+    })
+    .await;
+}
+
+/// Rotating the email must not mint a fresh per-IP code-request budget either.
+#[tokio::test]
+async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
+    with_auth_test_env_async(Some("cloud"), async {
+        with_rpc_test_app(
+            "rate_limit_signup_verify_req_email_rotation",
+            |app| async move {
+                let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
+                let ip = "203.0.113.41";
+
+                for email in ["sv-rot-a@example.com", "sv-rot-b@example.com"] {
+                    let response = app
+                        .rpc_call(
+                            "auth.requestSignupVerification",
+                            json!([{ "email": email, "invitationToken": null }]),
+                            headers_with_ip(ip),
+                        )
+                        .await;
+                    assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                }
+
+                let blocked = app
+                    .rpc_call(
+                        "auth.requestSignupVerification",
+                        json!([{ "email": "sv-rot-c@example.com", "invitationToken": null }]),
+                        headers_with_ip(ip),
+                    )
+                    .await;
+                assert_handler_error(
+                    &blocked.body,
+                    RATE_LIMITED_CODE,
+                    crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+                );
             },
         )
         .await;

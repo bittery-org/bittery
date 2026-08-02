@@ -1,3 +1,4 @@
+import { wipeDevice } from "@bittery/core/services/account-lifecycle";
 import { invoke } from "@tauri-apps/api/core";
 import {
 	Menu,
@@ -6,6 +7,7 @@ import {
 	Submenu,
 } from "@tauri-apps/api/menu";
 import { Store } from "@tauri-apps/plugin-store";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { clearDesktopSyncState } from "@/lib/sync-client-id";
 
 const RESET_MENU_ITEM_ID = "bittery-reset-app-completely";
@@ -14,9 +16,44 @@ function isMacOS(): boolean {
 	return navigator.userAgent.toLowerCase().includes("mac");
 }
 
+/** One name, one place: `globalKey("device_key")`, in the OS keychain only. */
+const DEVICE_KEY_KEYCHAIN_KEY = "bittery_device_key";
+
 async function resetDesktopAppCompletely(): Promise<void> {
 	console.log("[macos-reset-menu] Reset action started");
 
+	// Wipe the accounts *before* `store.json` goes, because the accounts list is what names
+	// the per-account keys. Every per-account secret (`session_data`, `vault_keys`,
+	// `jwt_token`, `secret_key`, `encrypted_private_key`) is secret-tier now and lives in
+	// the OS keychain, so clearing `store.json` alone would leave all of it behind.
+	console.log("[macos-reset-menu] Clearing stored account data");
+	const outcome = await wipeDevice(lifecycleDeps);
+	if (outcome.failures.length > 0) {
+		console.error(
+			"[macos-reset-menu] Some account data survived the wipe",
+			outcome.failures,
+		);
+	}
+	console.log("[macos-reset-menu] Cleared stored account data", {
+		accountCount: outcome.affected.length,
+		failureCount: outcome.failures.length,
+	});
+
+	try {
+		console.log("[macos-reset-menu] Deleting keychain device key");
+		await invoke<boolean>("keychain_delete", {
+			key: DEVICE_KEY_KEYCHAIN_KEY,
+		});
+		console.log("[macos-reset-menu] Deleted keychain device key");
+	} catch (error) {
+		console.warn(
+			"[macos-reset-menu] Failed to clear device key from keychain",
+			error,
+		);
+	}
+
+	// This also removes the `bittery_native_view` projection and every `record:` key the
+	// item cache uses, so no separate step is needed for either.
 	console.log("[macos-reset-menu] Clearing store.json");
 	const appStore = await Store.load("store.json");
 	await appStore.clear();
@@ -26,17 +63,6 @@ async function resetDesktopAppCompletely(): Promise<void> {
 	console.log("[macos-reset-menu] Clearing sync store state");
 	await clearDesktopSyncState({ preserveClientId: false });
 	console.log("[macos-reset-menu] Cleared sync store state");
-
-	try {
-		console.log("[macos-reset-menu] Deleting keychain device_key");
-		await invoke<boolean>("keychain_delete", { key: "device_key" });
-		console.log("[macos-reset-menu] Deleted keychain device_key");
-	} catch (error) {
-		console.warn(
-			"[macos-reset-menu] Failed to clear device key from keychain",
-			error,
-		);
-	}
 
 	console.log("[macos-reset-menu] Clearing browser storage");
 	window.localStorage.clear();

@@ -21,3 +21,4 @@ export * from "./session-refresh";
 export * from "./session-refresh-fetch";
 export * from "./types";
 export * from "./vault-key-crypto";
+export * from "./vault-mapping";

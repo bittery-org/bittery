@@ -8,14 +8,12 @@
  * - Web autolock service
  */
 
-import {
-	createWebAutolockService,
-	PlatformProvider,
-} from "@bittery/core/hooks";
+import { PlatformProvider } from "@bittery/core/hooks";
+import { createWebAutolockService } from "@bittery/core/hooks/services/autolock-web";
 import type { IAutolockService, ICrypto, ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { storage } from "@/lib/storage";
+import { itemCache, storage } from "@/lib/storage";
 import * as wasmCrypto from "@/lib/wasm-crypto";
 import { useSyncContext } from "./sync-provider";
 
@@ -88,6 +86,7 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 	return (
 		<PlatformProvider
 			storage={storage}
+			itemCache={itemCache}
 			crypto={crypto}
 			sync={sync}
 			autolock={autolock}

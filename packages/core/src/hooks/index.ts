@@ -37,28 +37,6 @@
  * ```
  */
 
-export type { ActiveAccount } from "@bittery/storage/types";
-// Auth Utilities (for extension service worker - non-React usage)
-export {
-	type CheckEmailResult,
-	checkEmailExists,
-	clearSession,
-	getSessionState,
-	type IAuthClient,
-	type LoginResult,
-	type LoginUserData,
-	performSRPLogin,
-	performSRPUnlock,
-	type SessionState,
-	type SRPLoginDeps,
-	type SRPLoginInput,
-	type SRPUnlockDeps,
-	type SRPUnlockInput,
-	type StoreAuthSessionOptions,
-	storeLoginSession,
-	storeUnlockSession,
-	type UnlockResult,
-} from "../auth";
 // Context
 export {
 	type PlatformContextValue,
@@ -68,57 +46,40 @@ export {
 	usePlatform,
 	usePlatformAutolock,
 	usePlatformCrypto,
+	usePlatformItemCache,
 	usePlatformItemDecrypt,
 	usePlatformStorage,
 	usePlatformSync,
 	useQueryInvalidator,
 } from "../context/platform-context";
-// Services (platform-specific autolock implementations)
-export {
-	createMobileAutolockService,
-	createWebAutolockService,
-	type MobileAutolockOptions,
-} from "../services/autolock";
-export {
-	findAccountEmailForItem,
-	getItemAccountEmail,
-} from "../utils/account-helper";
-// Utilities
-export { refreshVaultKeys } from "../utils/vault-utils";
 // Auth Hooks (React Query wrappers for login/unlock)
 export {
 	type BiometricUnlockError,
 	type BiometricUnlockInput,
 	type BiometricUnlockResult,
 	type LoginInput,
-	type LogoutInput,
 	type QuickUnlockAllInput,
 	type QuickUnlockAllResult,
 	type QuickUnlockInput,
+	type UseAccountMetadataSyncOptions,
 	type UseAccountSwitcherOptions,
 	type UseAccountSwitcherResult,
 	type UseBiometricUnlockOptions,
 	type UseCheckEmailOptions,
 	type UseLoginOptions,
-	type UseLogoutOptions,
 	type UseQuickUnlockAllOptions,
 	type UseQuickUnlockOptions,
 	type UseSessionStateOptions,
+	useAccountMetadataSync,
+	useAccountMetadataSyncAll,
 	useAccountSwitcher,
 	useBiometricUnlock,
 	useCheckEmail,
-	useLock,
 	useLogin,
-	useLogout,
 	useQuickUnlock,
 	useQuickUnlockAll,
 	useSessionState,
 } from "./auth";
-export {
-	type UseAccountMetadataSyncOptions,
-	useAccountMetadataSync,
-	useAccountMetadataSyncAll,
-} from "./auth/use-account-metadata-sync";
 // Item Mutation Hooks (write operations)
 export {
 	type CreateItemInput,
@@ -139,11 +100,8 @@ export {
 } from "./items";
 // Share Mutation Hooks (write operations)
 export {
-	buildShareUrl,
 	type CreateShareInput,
 	type CreateShareResult,
-	type ShareAccessMode,
-	type ShareExpirationOption,
 	useCreateShare,
 } from "./share";
 // Team Mutation Hooks (write operations)

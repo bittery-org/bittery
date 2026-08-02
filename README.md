@@ -13,7 +13,7 @@
 ## Why Bittery?
 
 - **True zero-knowledge** — Your master password and Secret Key never leave your device. We only store encrypted data.
-- **Two-key protection** — Your account password plus a unique Secret Key. Guessing one isn't enough.
+- **Two-key protection** — Your master password plus a unique Secret Key. Guessing one isn't enough.
 - **Everywhere you are** — Web, desktop (macOS, Windows, Linux), mobile (iOS & Android), and a browser extension. Syncs across every device in seconds.
 - **Share safely** — Encrypted vault sharing for families and teams, plus expiring secure links.
 - **Your choice of hosting** — Use [Bittery Cloud](https://app.bittery.com) or [self-host](https://bittery.com/docs/self-hosting/overview) on your own infrastructure with Docker.

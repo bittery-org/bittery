@@ -11,6 +11,8 @@ use p256::SecretKey;
 use rand::Rng;
 use sha2::{Digest, Sha256};
 
+use zeroize::{Zeroize, ZeroizeOnDrop};
+
 use crate::error::CryptoError;
 use crate::system_rng;
 
@@ -31,7 +33,7 @@ pub const FLAG_BS: u8 = 0x10;
 pub const FLAG_AT: u8 = 0x40;
 
 /// Generated passkey key material.
-#[derive(Clone, Debug)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct PasskeyKeypair {
     /// 32-byte P-256 private scalar.
     pub private_key: [u8; 32],
@@ -39,6 +41,18 @@ pub struct PasskeyKeypair {
     pub public_key_cose: Vec<u8>,
     /// DER-encoded SubjectPublicKeyInfo public key for WebAuthn JSON (`response.publicKey`).
     pub public_key_spki: Vec<u8>,
+}
+
+// Hand-written so that `{:?}` (or a stray `dbg!`) can never print the P-256
+// private scalar. A derived `Debug` would.
+impl std::fmt::Debug for PasskeyKeypair {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PasskeyKeypair")
+            .field("private_key", &"[redacted]")
+            .field("public_key_cose", &self.public_key_cose)
+            .field("public_key_spki", &self.public_key_spki)
+            .finish()
+    }
 }
 
 /// Attested credential data block for registration.
@@ -322,6 +336,27 @@ mod tests {
         assert_eq!(crv, &Value::Integer(1_i64.into()));
         assert!(matches!(x, Value::Bytes(bytes) if bytes.len() == 32));
         assert!(matches!(y, Value::Bytes(bytes) if bytes.len() == 32));
+    }
+
+    #[test]
+    fn test_debug_does_not_leak_private_key() {
+        let keypair = generate_passkey_keypair().unwrap();
+        let rendered = format!("{keypair:?}");
+
+        // Both renderings a derived `Debug` could produce for a `[u8; 32]`.
+        let decimal_scalar = format!("{:?}", keypair.private_key);
+        let hex_scalar: String = keypair
+            .private_key
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert!(!rendered.contains(&decimal_scalar));
+        assert!(!rendered.contains(&hex_scalar));
+        assert!(rendered.contains("[redacted]"));
+        // The public halves stay visible — they are not secret and are useful
+        // in logs.
+        assert!(rendered.contains(&format!("{:?}", keypair.public_key_cose)));
+        assert!(rendered.contains(&format!("{:?}", keypair.public_key_spki)));
     }
 
     #[test]

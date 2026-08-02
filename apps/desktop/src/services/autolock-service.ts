@@ -6,7 +6,7 @@
  * lockAllAccounts when timeout is exceeded.
  */
 
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore } from "@bittery/storage";
 import type { IAutolockService } from "@bittery/types";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -25,12 +25,12 @@ const ACTIVITY_EVENTS = [
 /**
  * Create a desktop autolock service instance
  *
- * @param storage - Storage adapter for reading/writing timeout settings
+ * @param storage - Account store for reading/writing timeout settings
  * @param onLock - Callback to execute when lock should occur (lockAllAccounts)
  * @returns IAutolockService instance
  */
 export function createDesktopAutolockService(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	onLock: () => Promise<void>,
 ): IAutolockService {
 	let intervalId: ReturnType<typeof setInterval> | null = null;

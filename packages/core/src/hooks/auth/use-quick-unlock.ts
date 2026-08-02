@@ -8,15 +8,16 @@
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
+	usePlatformCrypto,
+	usePlatformItemCache,
+	usePlatformStorage,
+} from "../../context/platform-context";
+import {
 	performSRPUnlock,
 	type SRPUnlockInput,
 	storeUnlockSession,
 	type UnlockResult,
-} from "../../auth";
-import {
-	usePlatformCrypto,
-	usePlatformStorage,
-} from "../../context/platform-context";
+} from "../../services/auth-service";
 import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
 
 /**
@@ -66,6 +67,7 @@ export function useQuickUnlock(
 ): UseMutationResult<UnlockResult, Error, QuickUnlockInput> {
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
+	const itemCache = usePlatformItemCache();
 
 	return useMutation({
 		mutationFn: async (input: QuickUnlockInput) => {
@@ -73,8 +75,7 @@ export function useQuickUnlock(
 			// against the server during unlock. Without this, storeUnlockSession
 			// silently trusts stale local cache (travel mode fail-open).
 			const serverUrl =
-				(await storage.getServerUrl?.(input.accountId)) ||
-				getDefaultServerUrl();
+				(await storage.getServerUrl(input.accountId)) || getDefaultServerUrl();
 			const accountRpcClient = await createStaticStoredAccountRpcClient(
 				storage,
 				input.accountId,
@@ -91,9 +92,10 @@ export function useQuickUnlock(
 
 			// Store unlock session data, re-verifying travel mode against the
 			// server via the account RPC client.
-			await storeUnlockSession(result, storage, input.accountId, {
+			await storeUnlockSession(result, storage, itemCache, input.accountId, {
 				travelModeRpcClient: accountRpcClient,
 				serverUrl,
+				setActive: true,
 			});
 
 			return result;

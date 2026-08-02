@@ -1,9 +1,9 @@
+import { useCreateShare } from "@bittery/core/hooks";
 import {
-	buildShareUrl,
+	SHARE_EXPIRATION_OPTIONS,
 	type ShareAccessMode,
 	type ShareExpirationOption,
-	useCreateShare,
-} from "@bittery/core/hooks";
+} from "@bittery/core/services/share-service";
 import { useI18n } from "@bittery/i18n/react";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
@@ -55,14 +55,6 @@ interface ShareItemDialogProps {
 	onOpenChange?: (open: boolean) => void;
 }
 
-const EXPIRATION_OPTIONS: ShareExpirationOption[] = [
-	"1hour",
-	"1day",
-	"7days",
-	"14days",
-	"30days",
-];
-
 export function ShareItemDialog({
 	item,
 	open: controlledOpen,
@@ -78,6 +70,8 @@ export function ShareItemDialog({
 
 	const [showConfirmation, setShowConfirmation] = useState(false);
 	const [generatedLink, setGeneratedLink] = useState<string | null>(null);
+	const [hasCopiedLink, setHasCopiedLink] = useState(false);
+	const [showCloseWithoutCopy, setShowCloseWithoutCopy] = useState(false);
 
 	const [accessMode, setAccessMode] = useState<ShareAccessMode>("anyone");
 	const [expiresIn, setExpiresIn] = useState<ShareExpirationOption>("7days");
@@ -106,8 +100,7 @@ export function ShareItemDialog({
 					accessMode === "email-restricted" ? allowedEmails : undefined,
 			});
 
-			const shareUrl = buildShareUrl(result);
-			setGeneratedLink(shareUrl);
+			setGeneratedLink(result.shareUrl);
 			toast.success(m.sharing_item_dialog_toast_create_success());
 		} catch (error) {
 			const errorMessage =
@@ -141,11 +134,18 @@ export function ShareItemDialog({
 		setAllowedEmails(allowedEmails.filter((e) => e !== email));
 	};
 
-	const handleCopyLink = () => {
-		copyWithToast(generatedLink, m.sharing_common_link_label(), {
-			autoClearMs: 0,
-			showAutoClearMessage: false,
-		});
+	const handleCopyLink = async () => {
+		const copied = await copyWithToast(
+			generatedLink,
+			m.sharing_common_link_label(),
+			{
+				autoClearMs: 0,
+				showAutoClearMessage: false,
+			},
+		);
+		if (copied) {
+			setHasCopiedLink(true);
+		}
 	};
 
 	const handleCreateLink = () => {
@@ -159,8 +159,10 @@ export function ShareItemDialog({
 
 	const handleClose = () => {
 		setOpen(false);
+		setShowCloseWithoutCopy(false);
 		setTimeout(() => {
 			setGeneratedLink(null);
+			setHasCopiedLink(false);
 			setAccessMode("anyone");
 			setExpiresIn("7days");
 			setIsOneTimeUse(false);
@@ -169,11 +171,25 @@ export function ShareItemDialog({
 		}, 200);
 	};
 
+	// The share key only ever exists in this component's memory — once the
+	// dialog closes it is unrecoverable, so an uncopied link is a dead link.
+	const isLinkAtRisk = generatedLink !== null && !hasCopiedLink;
+
+	const handleRequestClose = () => {
+		if (isLinkAtRisk) {
+			setShowCloseWithoutCopy(true);
+			return;
+		}
+		handleClose();
+	};
+
 	return (
 		<>
 			<Dialog
 				open={open}
-				onOpenChange={(isOpen) => (isOpen ? setOpen(true) : handleClose())}
+				onOpenChange={(isOpen) =>
+						isOpen ? setOpen(true) : handleRequestClose()
+					}
 			>
 				{!isControlled && (
 					<DialogTrigger asChild>
@@ -207,19 +223,32 @@ export function ShareItemDialog({
 								</p>
 							</div>
 
+							<div className="flex items-start gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3">
+								<IconTriangleAlert
+									aria-hidden
+									className="mt-px size-4 shrink-0 text-warning"
+								/>
+								<p className="text-xs">
+									{m.sharing_item_dialog_generated_copy_once_warning()}
+								</p>
+							</div>
+
 							<div className="flex gap-2">
 								<Input
 									value={generatedLink}
 									readOnly
 									className="flex-1 font-mono text-xs"
 								/>
-								<Button onClick={handleCopyLink}>
+								<Button
+									onClick={handleCopyLink}
+									title={m.sharing_item_dialog_action_copy_link()}
+								>
 									<IconCopy className="h-4 w-4" />
 								</Button>
 							</div>
 
 							<DialogFooter>
-								<Button onClick={handleClose}>
+								<Button onClick={handleRequestClose}>
 									{m.sharing_item_dialog_action_done()}
 								</Button>
 							</DialogFooter>
@@ -310,7 +339,7 @@ export function ShareItemDialog({
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										{EXPIRATION_OPTIONS.map((value) => (
+										{SHARE_EXPIRATION_OPTIONS.map((value) => (
 											<SelectItem key={value} value={value}>
 												{expirationLabels[value]}
 											</SelectItem>
@@ -366,7 +395,10 @@ export function ShareItemDialog({
 				<AlertDialogContent>
 					<AlertDialogHeader>
 						<AlertDialogTitle className="flex items-center gap-2">
-							<IconTriangleAlert className="h-5 w-5 text-amber-500" />
+							<IconTriangleAlert
+								aria-hidden
+								className="size-5 text-warning"
+							/>
 							{m.sharing_item_dialog_confirm_title()}
 						</AlertDialogTitle>
 						<AlertDialogDescription>
@@ -395,6 +427,37 @@ export function ShareItemDialog({
 						</AlertDialogCancel>
 						<AlertDialogAction onClick={handleConfirmCreate}>
 							{m.sharing_item_dialog_confirm_action_confirm()}
+						</AlertDialogAction>
+					</AlertDialogFooter>
+				</AlertDialogContent>
+			</AlertDialog>
+
+			<AlertDialog
+				open={showCloseWithoutCopy}
+				onOpenChange={setShowCloseWithoutCopy}
+			>
+				<AlertDialogContent>
+					<AlertDialogHeader>
+						<AlertDialogTitle className="flex items-center gap-2">
+							<IconTriangleAlert
+								aria-hidden
+								className="size-5 text-warning"
+							/>
+							{m.sharing_item_dialog_close_without_copy_title()}
+						</AlertDialogTitle>
+						<AlertDialogDescription>
+							{m.sharing_item_dialog_close_without_copy_description()}
+						</AlertDialogDescription>
+					</AlertDialogHeader>
+					<AlertDialogFooter>
+						<AlertDialogCancel>
+							{m.sharing_item_dialog_action_cancel()}
+						</AlertDialogCancel>
+						<AlertDialogAction
+							onClick={handleClose}
+							className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+						>
+							{m.sharing_item_dialog_action_close_anyway()}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

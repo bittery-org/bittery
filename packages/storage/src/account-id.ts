@@ -1,4 +1,4 @@
-import type { IStorageAdapter } from "./adapter";
+import type { AccountStore } from "./account-store";
 import type { AccountMetadata } from "./types";
 
 /**
@@ -78,16 +78,32 @@ export function resolveAccountIdFromEmailInList(
 }
 
 /**
- * Resolve a storage scope identifier (accountId or legacy email) to accountId.
- * Falls back to the active single account when scope is omitted.
+ * Resolve a storage scope identifier (accountId or display email) to an accountId.
+ * Falls back to the active account when scope is omitted.
+ *
+ * Throws rather than returning `undefined`. An unresolved scope used to flow into
+ * `AccountStore`, whose omitted-accountId fallback resolves to the *active* account —
+ * so a scope naming one account silently read and wrote another's data.
  */
 export async function resolveAccountScopeId(
-	storage: IStorageAdapter,
+	storage: AccountStore,
+	scope?: string,
+	opts?: { errorMessage?: string },
+): Promise<string> {
+	const resolved = await tryResolveAccountScopeId(storage, scope);
+	if (!resolved) {
+		throw new Error(opts?.errorMessage ?? "Account identity is required");
+	}
+	return resolved;
+}
+
+/** Split out only so {@link resolveAccountScopeId} reads as resolve-or-throw. */
+async function tryResolveAccountScopeId(
+	storage: AccountStore,
 	scope?: string,
 ): Promise<string | undefined> {
 	if (!scope) {
-		const active = await storage.getActiveAccount();
-		return active?.type === "single" ? active.accountId : undefined;
+		return (await storage.getActiveAccount()) ?? undefined;
 	}
 
 	const accounts = await storage.getAccountsList();
@@ -95,19 +111,7 @@ export async function resolveAccountScopeId(
 		return scope;
 	}
 
-	const byEmail = resolveAccountIdFromEmailInList(accounts, scope);
-	if (byEmail) {
-		return byEmail;
-	}
-
-	if (!storage.supportsMultiAccount) {
-		const active = await storage.getActiveAccount();
-		if (active?.type === "single") {
-			return active.accountId;
-		}
-	}
-
-	return undefined;
+	return resolveAccountIdFromEmailInList(accounts, scope);
 }
 
 /** Find account by serverUrl + userId pair (canonical dedup key at login). */
@@ -181,17 +185,18 @@ export function resolveActiveAccountId(
  * those sources have a userId.
  */
 export async function resolveUserIdForAccount(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	accountId?: string,
 	opts?: { errorMessage?: string },
 ): Promise<string> {
-	const sessionData = await storage.getStoredSessionData?.(accountId);
+	// No `?.` guards: every `AccountStore` method is total on every platform.
+	const sessionData = await storage.getStoredSessionData(accountId);
 	if (sessionData?.userId) {
 		return sessionData.userId;
 	}
 
 	if (accountId) {
-		const accountMetadata = await storage.getAccountMetadata?.(accountId);
+		const accountMetadata = await storage.getAccountMetadata(accountId);
 		if (accountMetadata?.userId) {
 			return accountMetadata.userId;
 		}
@@ -212,7 +217,7 @@ export async function resolveUserIdForAccount(
  * (accountId or legacy email) to an accountId first via {@link resolveAccountScopeId}.
  */
 export async function resolveUserIdForScope(
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	scope?: string,
 	opts?: { errorMessage?: string },
 ): Promise<string> {

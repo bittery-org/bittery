@@ -6,10 +6,7 @@
  */
 
 export {
-	buildShareUrl,
 	type CreateShareInput,
 	type CreateShareResult,
-	type ShareAccessMode,
-	type ShareExpirationOption,
 	useCreateShare,
 } from "./use-create-share";

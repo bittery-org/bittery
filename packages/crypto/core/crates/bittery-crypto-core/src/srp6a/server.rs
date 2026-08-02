@@ -359,4 +359,82 @@ mod tests {
         let result = server.generate_ephemeral("ZZZZ");
         assert!(result.is_err());
     }
+
+    /// Server-side known-answer tests against RFC 5054 Appendix B (and RFC 2945
+    /// section 3 for K/M1/M2). See `srp6a::test_vectors` for provenance.
+    mod rfc_vectors {
+        use super::*;
+        use crate::srp6a::test_vectors as v;
+
+        fn server() -> SrpServer {
+            SrpServer::new(HashAlgorithm::Sha1, PrimeGroup::G1024)
+        }
+
+        #[test]
+        fn rfc5054_multiplier_k_matches_vector() {
+            let server = server();
+            // k = H(N, PAD(g))
+            let padded_g = server.g.pad(server.hex_length);
+            let k = server.hash_values(&[&server.n, &padded_g]);
+            assert_eq!(k.to_hex(), v::K_MULTIPLIER);
+        }
+
+        #[test]
+        fn rfc5054_server_public_ephemeral_matches_vector() {
+            let server = server();
+            let k = server.hash_values(&[&server.n, &server.g.pad(server.hex_length)]);
+            let verifier = SrpInt::from_hex(v::VERIFIER).unwrap();
+            let b = SrpInt::from_hex(v::SERVER_SECRET).unwrap();
+
+            // B = (k*v + g^b) mod N
+            let kv = k.multiply(&verifier).modulo(&server.n);
+            let g_b = server.g.mod_pow(&b, &server.n);
+            let big_b = kv.add(&g_b).modulo(&server.n);
+
+            assert_eq!(big_b.to_hex(), v::SERVER_PUBLIC);
+        }
+
+        #[test]
+        fn rfc5054_server_session_matches_vectors() {
+            // The server recomputes B internally from (b, v). The client proof
+            // fed in here was computed over the RFC's B, so acceptance also
+            // proves the recomputed B and the server-side
+            // S = (A * v^u)^b mod N match the RFC values.
+            let session = server()
+                .derive_session(
+                    v::SERVER_SECRET,
+                    v::CLIENT_PUBLIC,
+                    v::SALT,
+                    v::USERNAME,
+                    v::VERIFIER,
+                    v::CLIENT_PROOF,
+                )
+                .expect("RFC vector client proof must verify");
+
+            assert_eq!(session.key, v::SESSION_KEY);
+            assert_eq!(session.proof, v::SERVER_PROOF);
+        }
+
+        #[test]
+        fn rfc5054_server_session_key_is_hash_of_the_premaster_secret() {
+            let server = server();
+            let big_s = SrpInt::from_hex(v::PREMASTER_SECRET).unwrap();
+            assert_eq!(server.hash_values(&[&big_s]).to_hex(), v::SESSION_KEY);
+        }
+
+        #[test]
+        fn rfc5054_server_rejects_flipped_client_proof() {
+            let mut tampered = v::CLIENT_PROOF.to_string();
+            tampered.replace_range(0..1, "7"); // '6' -> '7'
+            let result = server().derive_session(
+                v::SERVER_SECRET,
+                v::CLIENT_PUBLIC,
+                v::SALT,
+                v::USERNAME,
+                v::VERIFIER,
+                &tampered,
+            );
+            assert!(matches!(result, Err(CryptoError::InvalidSessionProof)));
+        }
+    }
 }

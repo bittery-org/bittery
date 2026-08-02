@@ -8,6 +8,7 @@ use time::{macros::datetime, OffsetDateTime};
 use super::*;
 use crate::config::bittery_mode;
 use crate::error::AppErrorCode;
+use crate::repo::common::hash_token;
 use crate::services::team_billing::team_management_enabled;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
@@ -1007,12 +1008,12 @@ async fn build_audit_router_fixture(pool: &PgPool) -> AuditRouterFixture {
 
 async fn seed_share_link(pool: &PgPool, share_link_id: &str, item_id: &str, user_id: &str) {
     query(
-			"INSERT INTO share_link (id, item_id, created_by_id, token, access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, max_access_count, expires_at) VALUES ($1, $2, $3, $4, 'anyone', false, $5, $6, $7, $8, NULL, $9)",
+			"INSERT INTO share_link (id, item_id, created_by_id, token_hash, access_mode, is_one_time_use, encrypted_item_data, encryption_iv, encrypted_share_key, share_key_iv, max_access_count, expires_at) VALUES ($1, $2, $3, $4, 'anyone', false, $5, $6, $7, $8, NULL, $9)",
 		)
 		.bind(share_link_id)
 		.bind(item_id)
 		.bind(user_id)
-		.bind("audit-share-token")
+		.bind(hash_token("audit-share-token"))
 		.bind("encrypted-item-data")
 		.bind("item-iv")
 		.bind("encrypted-share-key")

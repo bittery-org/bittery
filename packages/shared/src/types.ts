@@ -128,6 +128,44 @@ export interface DecryptedItem extends DecryptedItemData {
 	updatedAt: string;
 }
 
+// Deliberately withheld from shares: id, vaultId, favorite, createdAt, updatedAt,
+// passwordHistory, passkeys, tags and linkedItemId are local-only or leak vault structure.
+export interface SharedItemPayload
+	extends Pick<
+		DecryptedItemData,
+		| "title"
+		| "url"
+		| "urls"
+		| "username"
+		| "password"
+		| "notes"
+		| "note"
+		| "customFields"
+		| "cardholderName"
+		| "cardNumber"
+		| "cvv"
+		| "expiryDate"
+		| "billingAddress"
+		| "firstName"
+		| "middleName"
+		| "lastName"
+		| "email"
+		| "addresses"
+		| "phoneNumbers"
+		| "ssn"
+		| "passportNumber"
+		| "driversLicense"
+		| "dateOfBirth"
+		| "totpSecret"
+		| "totpIssuer"
+		| "totpAccountName"
+		| "totpAlgorithm"
+		| "totpDigits"
+		| "totpPeriod"
+	> {
+	category: ItemCategory;
+}
+
 export interface ItemAccountContext {
 	accountId?: string;
 	email?: string;

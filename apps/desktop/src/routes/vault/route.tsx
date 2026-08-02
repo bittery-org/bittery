@@ -10,7 +10,7 @@ import {
 	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { CreateItemSheet, toast } from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
@@ -48,14 +48,12 @@ export const Route = createFileRoute("/vault")({
 		// Single account mode: validate session for specific account
 		const accountsList = await storage.getAccountsList();
 		const activeAccountEmail = accountsList.find(
-			(account) => account.accountId === activeAccount.accountId,
+			(account) => account.accountId === activeAccount,
 		)?.email;
 
 		// Check if user has stored credentials for active account
-		const hasSecretKey = await storage.getStoredSecretKey(
-			activeAccount.accountId,
-		);
-		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
+		const hasSecretKey = await storage.getStoredSecretKey(activeAccount);
+		const sessionValid = await storage.isSessionValid(activeAccount);
 
 		if (!hasSecretKey || !sessionValid) {
 			throw redirect({
@@ -64,8 +62,10 @@ export const Route = createFileRoute("/vault")({
 			});
 		}
 
-		const restored = await getAccountSessionManager({ storage }).unlockAccount(
-			activeAccount.accountId,
+		// This guard can run before AccountProvider constructs the manager; with no
+		// manager there is no verified unlock, so send the user to /unlock.
+		const restored = await peekAccountSessionManager()?.unlockAccount(
+			activeAccount,
 			true,
 		);
 
@@ -135,7 +135,7 @@ function RouteComponent() {
 				return [];
 			}
 
-			return [activeAccount.accountId];
+			return [activeAccount];
 		},
 	});
 	const accountIds = accountIdsQuery.data ?? [];
@@ -156,8 +156,8 @@ function RouteComponent() {
 			// If no account provided, use the active account.
 			if (!accountId) {
 				const activeAccount = await storage.getActiveAccount();
-				if (activeAccount?.type === "single") {
-					accountId = activeAccount.accountId;
+				if (activeAccount) {
+					accountId = activeAccount;
 				}
 			}
 
@@ -325,7 +325,7 @@ function RouteComponent() {
 						vaultKeys?.map((v) => ({
 							id: v.vaultId,
 							name: v.vaultName,
-							type: v.vaultType as "personal" | "team",
+							type: v.vaultType,
 							icon: v.vaultIcon,
 							imageUrl: v.vaultImageUrl,
 							accountId: v.accountId,

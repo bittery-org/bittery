@@ -12,12 +12,10 @@ import {
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
+import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
-import {
-	normalizeItemCategory,
-	normalizeVaultType,
-} from "@/lib/rpc-normalizers";
+import { normalizeItemCategory } from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
 import { decrypt, rsaDecrypt } from "@/lib/wasm-crypto";
 
@@ -106,11 +104,14 @@ export function useVaultExport() {
 			for (const item of allItems) {
 				if (!vaultMap.has(item.vaultId)) {
 					const vaultRecord = item.vault;
+					const vault = vaultRecord
+						? toCachedVaultFields(vaultRecord)
+						: undefined;
 					vaultMap.set(item.vaultId, {
-						id: vaultRecord?.id ?? item.vaultId,
-						name: vaultRecord?.name ?? item.vaultId,
-						type: normalizeVaultType(vaultRecord?.vaultType ?? "personal"),
-						icon: vaultRecord?.icon ?? null,
+						id: vault?.id ?? item.vaultId,
+						name: vault?.name ?? item.vaultId,
+						type: vault?.type ?? "personal",
+						icon: vault?.icon ?? null,
 					});
 				}
 			}

@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { VaultKeyData } from "@bittery/storage/types";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type { AccountStore, ItemCache } from "@bittery/storage";
+import type { TravelModeConfig, VaultKeyData } from "@bittery/storage/types";
+import {
+	accountMetadata,
+	createTestAccountStore,
+	createTestItemCache,
+} from "../testing/account-store-harness";
 import type { AccountResolver } from "./account-resolver";
 import {
 	getTravelModeEnforcer,
@@ -14,6 +19,21 @@ import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator"
 import type { RpcVaultClient } from "./vault-service";
 
 const ACCOUNT_ID = "account-1";
+
+/** Real `AccountStore` + real `ItemCache` over the in-memory ports, as the enforcer actually purges them. */
+async function createLayers(options: {
+	vaultKeys?: VaultKeyData[];
+	travelModeCache?: TravelModeConfig;
+}): Promise<{ storage: AccountStore; itemCache: ItemCache }> {
+	const { store } = await createTestAccountStore();
+	const { cache } = await createTestItemCache();
+	await store.addAccount(accountMetadata({ accountId: ACCOUNT_ID }));
+	await store.storeVaultKeys(options.vaultKeys ?? [], ACCOUNT_ID);
+	if (options.travelModeCache) {
+		await store.storeTravelModeCache(options.travelModeCache, ACCOUNT_ID);
+	}
+	return { storage: store, itemCache: cache };
+}
 
 describe("travel-mode-sync", () => {
 	beforeEach(() => {
@@ -33,15 +53,11 @@ describe("travel-mode-sync", () => {
 			},
 		];
 
-		const storage = {
-			storeVaultKeys: mock(async () => undefined),
-			getVaultKeys: mock(async () => vaultKeys),
-			storeTravelModeCache: mock(async () => undefined),
-			getTravelModeCache: mock(async () => ({
-				enabled: false,
-				hiddenVaultIds: ["vault-1"],
-			})),
-		} as unknown as IStorageAdapter;
+		const { storage } = await createLayers({
+			vaultKeys,
+			travelModeCache: { enabled: false, hiddenVaultIds: ["vault-1"] },
+		});
+		const storeVaultKeys = spyOn(storage, "storeVaultKeys");
 
 		const rpcClient = {
 			vault: {
@@ -84,7 +100,7 @@ describe("travel-mode-sync", () => {
 		});
 
 		expect(rpcClient.vault.list.query).toHaveBeenCalled();
-		expect(storage.storeVaultKeys).toHaveBeenCalledWith(vaultKeys, ACCOUNT_ID);
+		expect(storeVaultKeys).toHaveBeenCalledWith(vaultKeys, ACCOUNT_ID);
 		expect(coordinator.syncVaultKeys).toHaveBeenCalledWith(
 			vaultKeys,
 			ACCOUNT_ID,
@@ -105,15 +121,10 @@ describe("travel-mode-sync", () => {
 			},
 		];
 
-		const storage = {
-			storeVaultKeys: mock(async () => undefined),
-			getVaultKeys: mock(async () => vaultKeys),
-			storeTravelModeCache: mock(async () => undefined),
-			getTravelModeCache: mock(async () => ({
-				enabled: true,
-				hiddenVaultIds: ["vault-1"],
-			})),
-		} as unknown as IStorageAdapter;
+		const { storage, itemCache } = await createLayers({
+			vaultKeys,
+			travelModeCache: { enabled: true, hiddenVaultIds: ["vault-1"] },
+		});
 
 		const rpcClient = {
 			vault: {
@@ -151,7 +162,7 @@ describe("travel-mode-sync", () => {
 			})),
 		} as unknown as AccountResolver;
 
-		const enforcer = getTravelModeEnforcer(storage, coordinator);
+		const enforcer = getTravelModeEnforcer(storage, itemCache, coordinator);
 		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: true,
 			hiddenVaultIds: ["vault-1"],
@@ -172,6 +183,7 @@ describe("travel-mode-sync", () => {
 			},
 			ACCOUNT_ID,
 			storage,
+			itemCache,
 			coordinator,
 			{ rpcClient, accounts },
 		);
@@ -182,15 +194,9 @@ describe("travel-mode-sync", () => {
 	});
 
 	it("preserves enabled state when sync metadata omits enabled", async () => {
-		const storage = {
-			storeVaultKeys: mock(async () => undefined),
-			getVaultKeys: mock(async () => []),
-			storeTravelModeCache: mock(async () => undefined),
-			getTravelModeCache: mock(async () => ({
-				enabled: true,
-				hiddenVaultIds: ["vault-1"],
-			})),
-		} as unknown as IStorageAdapter;
+		const { storage, itemCache } = await createLayers({
+			travelModeCache: { enabled: true, hiddenVaultIds: ["vault-1"] },
+		});
 
 		const coordinator = {
 			purgeHiddenVaultsForAccount: mock(() => undefined),
@@ -198,7 +204,7 @@ describe("travel-mode-sync", () => {
 			refreshFromServer: mock(async () => undefined),
 		} as unknown as VaultRepositoryCoordinator;
 
-		const enforcer = getTravelModeEnforcer(storage, coordinator);
+		const enforcer = getTravelModeEnforcer(storage, itemCache, coordinator);
 		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: true,
 			hiddenVaultIds: ["vault-1"],
@@ -218,6 +224,7 @@ describe("travel-mode-sync", () => {
 			},
 			ACCOUNT_ID,
 			storage,
+			itemCache,
 			coordinator,
 		);
 

@@ -99,8 +99,20 @@ fn spawn_job(
                 }
             }
 
-            if let Err(error) = job(pool.clone()).await {
-                error!(job = job_name, error = %error, "scheduled job failed");
+            // Run each tick on its own task so a panic ends that tick instead
+            // of this loop. Nothing ever awaits the loop's `JoinHandle`, so a
+            // panic here would silently stop the job for the life of the
+            // process. `rand` 0.10 turned `ThreadRng` reseed failure into a
+            // panic (`could not reseed ThreadRng`) where 0.8 only warned, and
+            // tombstone cleanup mints sync event IDs from `rand::rng()`.
+            match tokio::spawn(job(pool.clone())).await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    error!(job = job_name, error = %error, "scheduled job failed");
+                }
+                Err(join_error) => {
+                    error!(job = job_name, error = %join_error, "scheduled job panicked");
+                }
             }
         }
     }))

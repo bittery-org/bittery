@@ -2,16 +2,15 @@ import { m } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import type { KdfProfile } from "@bittery/types";
 import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-
+import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { normalizeAuthVaultKey } from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
 import {
 	generateRecoveryKeyAsync,
@@ -67,8 +66,20 @@ export function useSignupForm({
 	const navigate = useNavigate();
 	const rpc = useRPC();
 	const rpcClient = useRPCClient();
-	const [secretKey, setSecretKey] = useState<string>("");
-	const [recoveryKey, setRecoveryKey] = useState<string>("");
+	const [keyMaterialQueryId] = useState(() => crypto.randomUUID());
+	const keyMaterialQuery = useQuery({
+		queryKey: ["signup-key-material", keyMaterialQueryId],
+		queryFn: async () => {
+			const [secretKey, recoveryKey] = await Promise.all([
+				generateSecretKeyAsync(),
+				generateRecoveryKeyAsync(),
+			]);
+			return { secretKey, recoveryKey };
+		},
+		staleTime: Number.POSITIVE_INFINITY,
+	});
+	const secretKey = keyMaterialQuery.data?.secretKey ?? "";
+	const recoveryKey = keyMaterialQuery.data?.recoveryKey ?? "";
 	const [hasDownloadedKit, setHasDownloadedKit] = useState(false);
 	const [showPassword, setShowPassword] = useState(false);
 	const [isEncrypting, setIsEncrypting] = useState(false);
@@ -123,16 +134,6 @@ export function useSignupForm({
 		setVerifiedEmail(null);
 		setVerifiedInvitationToken(null);
 	};
-
-	// Generate Secret Key + Recovery Key on mount (WASM auto-initializes)
-	useEffect(() => {
-		Promise.all([generateSecretKeyAsync(), generateRecoveryKeyAsync()]).then(
-			([generatedSecretKey, generatedRecoveryKey]) => {
-				setSecretKey(generatedSecretKey);
-				setRecoveryKey(generatedRecoveryKey);
-			},
-		);
-	}, []);
 
 	const requestSignupVerificationMutation = useMutation({
 		mutationFn: async (input: { email: string }) =>
@@ -201,7 +202,7 @@ export function useSignupForm({
 		onSuccess: async (data, variables) => {
 			// Store auth token and vault keys
 			await storage.storeAuthToken(data.token);
-			await storage.storeVaultKeys(data.vaultKeys.map(normalizeAuthVaultKey));
+			await storage.storeVaultKeys(data.vaultKeys.map(toAuthVaultKeyEntry));
 
 			toast.success(m.auth_signup_toast_account_created());
 

@@ -1,0 +1,14 @@
+# Architecture decision records
+
+Each file records one decision that has already been made, so nobody has to re-derive it
+from the code or re-propose the alternative that was rejected. Files are numbered
+sequentially (`0001-slug.md`); numbers are never reused and existing records are amended
+rather than deleted.
+
+Add one only when all three are true: the decision is **hard to reverse**, it is
+**surprising without context** (a reader would ask "why on earth is it like this?"), and a
+**real alternative** was weighed and rejected. Anything else belongs in a code comment.
+
+Deeper design context that is not decision-shaped lives next to the code —
+`packages/storage/CONTEXT.md`, `SECURITY.md`, `docs/kdf-policy.md`. ADRs cross-reference
+those rather than restating them.

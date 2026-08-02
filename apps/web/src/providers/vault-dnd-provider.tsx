@@ -146,8 +146,13 @@ export function VaultDndProvider({ children }: VaultDndProviderProps) {
 						params: { vaultId: targetVaultId },
 					});
 				},
-				onError: () => {
-					toast.error(m.vaults_dnd_move_error());
+				onError: (error) => {
+					console.error("[VaultDnd] move failed:", error);
+					toast.error(
+						error instanceof Error && error.message
+							? error.message
+							: m.vaults_dnd_move_error(),
+					);
 				},
 			},
 		);

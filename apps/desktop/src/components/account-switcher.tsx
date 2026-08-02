@@ -38,9 +38,9 @@ export function AccountSwitcher() {
 		activeAccount: activeSelection,
 		unlockedAccountIds,
 		switchAccount,
-		removeAccount,
 	} = useAccountSwitcher();
-	const { lockAllAccounts: lockAllAccountsWithBroadcast } = useAccount();
+	const { lockAllAccounts: lockAllAccountsWithBroadcast, removeAccount } =
+		useAccount();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const [accountToRemove, setAccountToRemove] = useState<string | null>(null);
@@ -51,8 +51,7 @@ export function AccountSwitcher() {
 
 	const accountsData = accounts;
 	const unlockedAccountIdsList = unlockedAccountIds;
-	const activeAccountId =
-		activeSelection?.type === "single" ? activeSelection.accountId : null;
+	const activeAccountId = activeSelection ?? null;
 	const activeAccount = accountsData.find(
 		(a) => a.accountId === activeAccountId,
 	);
@@ -87,7 +86,7 @@ export function AccountSwitcher() {
 		if (!account) return;
 
 		try {
-			await switchAccount.mutateAsync({ type: "single", accountId });
+			await switchAccount.mutateAsync(accountId);
 
 			const sessionValid = await storage.isSessionValid(accountId);
 			if (!sessionValid) {
@@ -139,36 +138,31 @@ export function AccountSwitcher() {
 
 	const handleRemoveAccount = async (accountId: string) => {
 		try {
-			const wasActive = activeAccountId === accountId;
+			const outcome = await removeAccount(accountId);
 
-			await removeAccount.mutateAsync(accountId);
-
-			const accountsList = await storage.getAccountsList();
-			if (accountsList.length === 0) {
-				await storage.setActiveAccount(null);
+			if (outcome.remaining.length === 0) {
 				navigate({ to: "/login" });
-			} else if (wasActive) {
-				const nextAccount = accountsList[0];
-				await switchAccount.mutateAsync({
-					type: "single",
-					accountId: nextAccount.accountId,
-				});
-
-				const sessionValid = await storage.isSessionValid(
-					nextAccount.accountId,
-				);
+			} else if (outcome.wasActive) {
+				const successor = outcome.activeAccount;
+				// The removal promotes the successor but no longer restores its session,
+				// so finding it locked is the normal case rather than the exception.
+				const sessionValid =
+					successor !== null &&
+					(await storage.isSessionValid(successor.accountId));
 				if (!sessionValid) {
-					navigate({
-						to: "/unlock",
-						search: { email: nextAccount.email },
-					});
+					navigate({ to: "/unlock", search: { email: successor?.email } });
 				} else {
 					await invalidator.invalidateAllAccountData();
 					navigate({ to: "/vault" });
 				}
 			}
 
-			toast.success(m.toast_account_switcher_remove_account_success());
+			if (outcome.failures.length > 0) {
+				console.error("Failed to remove account:", outcome.failures);
+				toast.error(m.toast_account_switcher_remove_account_failed());
+			} else {
+				toast.success(m.toast_account_switcher_remove_account_success());
+			}
 		} catch (error) {
 			console.error("Failed to remove account:", error);
 			toast.error(m.toast_account_switcher_remove_account_failed());

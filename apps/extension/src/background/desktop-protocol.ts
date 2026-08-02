@@ -1,9 +1,42 @@
-// Kept at 1: the `theme` field and `theme_changed` event are additive and
-// tolerated by older peers, so no version bump (a bump hard-breaks mixed
-// extension/desktop versions during staggered rollouts).
+// Kept at 1: additive fields remain compatible with older desktop peers.
 export const DESKTOP_PROTOCOL_VERSION = 1;
 
 export type DesktopTheme = "light" | "dark" | "system";
+
+export interface DesktopStatus {
+	available: boolean;
+	locked: boolean;
+	unlockedAccounts: string[];
+	timestamp: number;
+	autolockTimeoutMs: number;
+	/** The desktop app's appearance setting; null when unknown. */
+	theme: DesktopTheme | null;
+}
+
+/**
+ * True when the desktop app is available, unlocked, and has at least one
+ * unlocked account.
+ *
+ * Accepts a partial status because callers in the UI read it straight off a
+ * `chrome.runtime.sendMessage` response, where every field may be absent.
+ */
+export function isDesktopStatusUnlocked(
+	status: Partial<DesktopStatus> | null | undefined,
+): boolean {
+	return !!(
+		status?.available &&
+		!status.locked &&
+		(status.unlockedAccounts?.length ?? 0) > 0
+	);
+}
+
+/**
+ * Status the background returns instead of unlocking when a connected desktop
+ * app is locked — the desktop was asked to raise its own unlock screen (see
+ * `desktop-unlock.ts`), and the popup waits for the pushed `DESKTOP_UNLOCKED`
+ * event.
+ */
+export const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock" as const;
 
 export type DesktopRequest =
 	| { type: "PING" }
@@ -68,6 +101,12 @@ export type DesktopResponse =
 	  }
 	| {
 			type: "DESKTOP_ACCOUNTS";
+			/**
+			 * Mirrors the desktop native view's published account entry, which is itself a
+			 * republication of `AccountMetadata`. Only the two fields that are optional in
+			 * `AccountMetadata` are optional here — the rest are always sent, so the
+			 * consumer never has to invent a timestamp or a default.
+			 */
 			accounts: Array<{
 				accountId: string;
 				email: string;
@@ -76,9 +115,9 @@ export type DesktopResponse =
 				secretKeyHint: string;
 				teamName?: string;
 				teamAvatarUrl?: string | null;
-				lastActiveAt?: number;
-				biometricEnabled?: boolean;
-				addedAt?: number;
+				addedAt: number;
+				lastActiveAt: number;
+				biometricEnabled: boolean;
 			}>;
 			activeAccount?: string | null;
 			unlockedAccounts: string[];

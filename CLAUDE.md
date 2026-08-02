@@ -1,17 +1,12 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## Must Follow Guidelines
 
-- When working on any user-facing UI, follow the design system spec in `DESIGN.md` (tokens, elevation ladder, selection/hover/button recipes).
-- Ignore any class sorting issues, it will be auto formatted by Biome.
-- Ignore any weird formatting issues, it will be auto formatted by Biome.
-- Never run the dev server to test code changes, a dev server is always running when working with this repository.
-- Don't run any build command unless explicitly asked to do so.
-- Database migrations live in `apps/server/migrations`. Create new migrations with `pnpm run db:create -- <name>` and apply them with `pnpm run db:migrate`. Do not use Drizzle schema generation for migrations.
-- In React, try to not use useEffect unless you have to, we want to keep our components as simple as possible, if you find yourself needing to use useEffect, try to find a way to do it without it first.
-- If you notice a useEffect that can be refactored to not use useEffect, please do so!
-- We enforce strict i18n, never hardcode any user facing text, if you need to add a new text, add it to every language .json file inside `packages/i18n/messages/*.json`.
-- After making changes to the translation files make sure to run `pnpm i18n:generate` to regenerate the paraglide files.
-- If you need to fix a critical bug, always try to write an automated test for it if possible first & fix the bug after, this way we can ensure the bug is fixed and doesn't regress in the future.
+- For user-facing UI, follow the design system spec in `DESIGN.md` (tokens, elevation ladder, selection/hover/button recipes).
+- Name concepts with the vocabulary in `CONTEXT.md`, in code and in UI copy alike. Settled architectural decisions are recorded in `docs/adr/` — read the relevant one before proposing a change that contradicts it.
+- Verify changes with `pnpm check-types` and `pnpm test` (`pnpm test:server` for Rust).
+- Never hand-fix formatting or class sorting — run `pnpm biome check --write <changed files>` instead. Don't run `pnpm check:fix`; it applies `--unsafe` fixes repo-wide.
+- Never run the dev server (one is always running) and never run a build command unless explicitly asked.
+- Database migrations live in `apps/server/migrations`. Create with `pnpm run db:create -- <name>`, apply with `pnpm run db:migrate`. Never generate migrations from an ORM schema.
+- Avoid `useEffect` — find a way without it first, and refactor existing ones away when you touch them.
+- Strict i18n: never hardcode user-facing text. Add new keys to every `packages/i18n/messages/*.json`, then run `pnpm i18n:generate`.
+- For a critical bug, write a failing automated test first, then fix it.
+- Comments: explain **why**, never **what**. Max 1-2 lines, only for non-obvious constraints, workarounds, or security rules. If a comment restates the code, delete it and pick a better name. No comment blocks, no commented-out code, and no changelog ("was X, now Y") — describe the code as it stands. Constraints that still bind (back-compat shims, version pins, old data shapes) are a why, so keep those.

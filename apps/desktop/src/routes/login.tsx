@@ -1,5 +1,5 @@
 import { useLogin } from "@bittery/core/hooks";
-import { getAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import {
 	Button,
@@ -49,21 +49,21 @@ export const Route = createFileRoute("/login")({
 			if (!firstAccount) {
 				return;
 			}
-			activeAccount = {
-				type: "single",
-				accountId: firstAccount.accountId,
-			};
+			activeAccount = firstAccount.accountId;
 			await storage.setActiveAccount(activeAccount);
 		}
 
 		const activeAccountMetadata = accountsList.find(
-			(account) => account.accountId === activeAccount.accountId,
+			(account) => account.accountId === activeAccount,
 		);
-		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
+		const sessionValid = await storage.isSessionValid(activeAccount);
 		if (sessionValid) {
-			const restored = await getAccountSessionManager({
-				storage,
-			}).unlockAccount(activeAccount.accountId, true);
+			// This guard can run before AccountProvider constructs the manager; with no
+			// manager there is no verified unlock, so fall through to /unlock.
+			const restored = await peekAccountSessionManager()?.unlockAccount(
+				activeAccount,
+				true,
+			);
 			if (restored) {
 				throw redirect({ to: "/vault" });
 			}
@@ -178,11 +178,8 @@ export function LoginPage() {
 
 			if (normalizedServerUrl) {
 				const activeAccount = await storage.getActiveAccount();
-				if (activeAccount?.type === "single") {
-					await storage.storeServerUrl(
-						normalizedServerUrl,
-						activeAccount.accountId,
-					);
+				if (activeAccount) {
+					await storage.storeServerUrl(normalizedServerUrl, activeAccount);
 				}
 			}
 

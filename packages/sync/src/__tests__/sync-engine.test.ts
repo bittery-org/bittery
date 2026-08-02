@@ -6,7 +6,24 @@ import {
 } from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
 import { SyncOrchestrator } from "../sync-orchestrator";
-import type { SyncEvent, SyncStorage } from "../types";
+import type { SyncEvent, SyncItemCache, SyncStorage } from "../types";
+
+/**
+ * Every `SyncItemCache` method is total, so a test double must implement all of
+ * them. Overriding one is how a test says which call it cares about.
+ */
+function stubItemCache(overrides: Partial<SyncItemCache> = {}): SyncItemCache {
+	return {
+		upsertCachedItem: async () => undefined,
+		removeCachedItem: async () => undefined,
+		upsertCachedVault: async () => undefined,
+		removeCachedVault: async () => undefined,
+		clearItemCache: async () => undefined,
+		syncVaultKeys: async () => undefined,
+		replaceItemId: () => undefined,
+		...overrides,
+	};
+}
 
 class MemoryStorage implements SyncStorage {
 	private readonly data = new Map<string, unknown>();
@@ -77,7 +94,7 @@ describe("sync engine regressions", () => {
 						query: async () => ({
 							id: "vault_1",
 							name: "Vault",
-							type: "personal",
+							vaultType: "personal",
 							icon: null,
 							imageUrl: null,
 						}),
@@ -90,10 +107,7 @@ describe("sync engine regressions", () => {
 					},
 				},
 			},
-			itemCache: {
-				supportsItemCache: true,
-				clearItemCache: async () => undefined,
-			},
+			itemCache: stubItemCache(),
 			outboundQueue,
 		});
 
@@ -121,17 +135,12 @@ describe("sync engine regressions", () => {
 		const storage = new MemoryStorage();
 		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
-		const clearedEmails: Array<string | undefined> = [];
-		const itemCache = {
-			supportsItemCache: true as const,
-			clearedEmails,
-			async clearItemCache(
-				this: { clearedEmails: Array<string | undefined> },
-				email?: string,
-			) {
-				this.clearedEmails.push(email);
+		const clearedAccounts: string[] = [];
+		const itemCache = stubItemCache({
+			clearItemCache: async (accountId: string) => {
+				clearedAccounts.push(accountId);
 			},
-		};
+		});
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
@@ -161,7 +170,7 @@ describe("sync engine regressions", () => {
 						query: async () => ({
 							id: "vault_1",
 							name: "Vault",
-							type: "personal",
+							vaultType: "personal",
 							icon: null,
 							imageUrl: null,
 						}),
@@ -175,6 +184,8 @@ describe("sync engine regressions", () => {
 				},
 			},
 			itemCache,
+			// Scoped by accountId, never the email: an email is not an identity.
+			itemCacheAccountId: "acc_alice",
 			itemCacheAccountEmail: "alice@example.com",
 			outboundQueue,
 		});
@@ -183,15 +194,23 @@ describe("sync engine regressions", () => {
 
 		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
 		expect(cursor?.id).toBe("evt_20");
-		expect(clearedEmails).toEqual(["alice@example.com"]);
+		expect(clearedAccounts).toEqual(["acc_alice"]);
 
 		orchestrator.dispose();
 	});
 
-	test("does not advance cursor when full refresh cannot be performed", async () => {
+	// An email is not an account identity. Letting one name a cache scope makes
+	// `ItemCache` create a collection keyed by an email, and makes
+	// `VaultRepositoryCoordinator.getOrCreate` mint a repo under one.
+	test("never scopes a cache write by an email", async () => {
 		const storage = new MemoryStorage();
-		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
+		const upsertScopes: Array<string | undefined> = [];
+		const itemCache = stubItemCache({
+			upsertCachedItem: async (_item, accountId?: string) => {
+				upsertScopes.push(accountId);
+			},
+		});
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
@@ -206,45 +225,57 @@ describe("sync engine regressions", () => {
 						query: async () => ({
 							events: [],
 							hasMore: false,
-							requiresFullRefresh: true,
-							cursor: { id: "evt_21" },
+							requiresFullRefresh: false,
+							cursor: null,
 						}),
 					},
 				},
 				vault: {
 					getItem: {
-						query: async () => {
-							throw new Error("unused");
-						},
+						query: async () => ({
+							id: "item_1",
+							vaultId: "vault_1",
+							category: "login",
+							favorite: false,
+							encryptedData: "ciphertext",
+							encryptionIv: "iv",
+							encryptionAlgorithm: "aes-256-gcm",
+							version: 1,
+							lastModifiedBy: "user_1",
+							createdAt: "2026-03-13T00:00:00.000Z",
+							updatedAt: "2026-03-13T00:00:00.000Z",
+							deletedAt: null,
+							attachments: [],
+						}),
 					},
 					get: {
 						query: async () => ({
 							id: "vault_1",
 							name: "Vault",
-							type: "personal",
+							vaultType: "personal",
 							icon: null,
 							imageUrl: null,
 						}),
 					},
-					listItems: {
-						query: async () => [],
-					},
-					list: {
-						query: async () => [],
-					},
+					listItems: { query: async () => [] },
+					list: { query: async () => [] },
 				},
 			},
-			itemCache: {
-				supportsItemCache: true,
-			},
+			itemCache,
+			// Only an email is configured — no accountId to scope by.
+			itemCacheAccountEmail: "alice@example.com",
 			outboundQueue,
 		});
 
-		await expect((orchestrator as any).runCatchUp()).rejects.toThrow(
-			"full refresh",
-		);
-		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
-		expect(cursor?.id).toBe("evt_5");
+		try {
+			await (orchestrator as any).applyEvent(
+				buildEvent({ id: "evt_1", type: "item_updated", entityId: "item_1" }),
+			);
+		} catch {
+			// Refusing the write outright is the correct outcome.
+		}
+
+		expect(upsertScopes).not.toContain("alice@example.com");
 
 		orchestrator.dispose();
 	});

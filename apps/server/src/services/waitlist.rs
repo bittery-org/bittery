@@ -1,10 +1,11 @@
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
+use sqlx::{query_as, FromRow, PgPool};
 use std::sync::LazyLock;
+use time::OffsetDateTime;
 use ts_rs::TS;
 
-use crate::{error::AppError, repo::waitlist::upsert_beta_waitlist_entry};
+use crate::error::AppError;
 
 static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").expect("email regex should compile")
@@ -30,6 +31,18 @@ pub struct WaitlistSignupResponse {
     pub success: bool,
 }
 
+#[allow(dead_code)]
+#[derive(Debug, Clone, FromRow)]
+struct DbBetaWaitlistRow {
+    id: String,
+    email: String,
+    name: Option<String>,
+    use_case: Option<String>,
+    source: Option<String>,
+    created_at: OffsetDateTime,
+    updated_at: OffsetDateTime,
+}
+
 pub async fn join_beta_waitlist(
     pool: &PgPool,
     input: WaitlistSignupInput,
@@ -51,6 +64,41 @@ pub async fn join_beta_waitlist(
     .await?;
 
     Ok(WaitlistSignupResponse { success: true })
+}
+
+async fn upsert_beta_waitlist_entry(
+    pool: &PgPool,
+    id: &str,
+    email: &str,
+    name: Option<&str>,
+    use_case: Option<&str>,
+    source: Option<&str>,
+) -> Result<DbBetaWaitlistRow, AppError> {
+    query_as::<_, DbBetaWaitlistRow>(
+        r#"
+		INSERT INTO beta_waitlist (id, email, name, use_case, source)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (lower(email))
+		DO UPDATE SET
+			name = COALESCE(EXCLUDED.name, beta_waitlist.name),
+			use_case = COALESCE(EXCLUDED.use_case, beta_waitlist.use_case),
+			source = COALESCE(EXCLUDED.source, beta_waitlist.source),
+			updated_at = $6
+		RETURNING id, email, name, use_case, source, created_at, updated_at
+		"#,
+    )
+    .bind(id)
+    .bind(email)
+    .bind(name)
+    .bind(use_case)
+    .bind(source)
+    .bind(OffsetDateTime::now_utc())
+    .fetch_one(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to join waitlist");
+        AppError::internal("Failed to join waitlist")
+    })
 }
 
 fn normalize_email(email: &str) -> Result<String, AppError> {

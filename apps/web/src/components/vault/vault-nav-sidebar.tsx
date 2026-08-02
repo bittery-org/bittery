@@ -13,7 +13,6 @@ import {
 	VaultAvatar,
 } from "@bittery/ui";
 import {
-	IconArchive as Archive,
 	IconEllipsis as Dots,
 	IconLayoutGrid as Grid,
 	IconPencil as Pen,
@@ -384,13 +383,13 @@ export function VaultNavSidebar({
 							className="absolute top-[6px] bottom-[6px] -left-2 w-0.5 rounded-full bg-primary shadow-[0_0_8px_color-mix(in_oklab,var(--color-primary)_80%,transparent)]"
 						/>
 					)}
-					<Archive
+					<Trash
 						className={cn(
 							"size-3.5",
 							isTrashActive ? "text-primary" : "text-muted-foreground",
 						)}
 					/>
-					<span>{m.vaults_sidebar_link_archive()}</span>
+					<span>{m.vaults_sidebar_link_trash()}</span>
 				</Link>
 			</div>
 		</div>

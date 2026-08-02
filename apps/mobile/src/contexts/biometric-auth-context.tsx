@@ -3,6 +3,11 @@
  * Handles app state changes and biometric re-authentication when returning from background
  */
 
+import { createMobileAutolockService } from "@bittery/core/hooks/services/autolock-mobile";
+import {
+	lockAccount,
+	lockAllAccounts,
+} from "@bittery/core/services/account-lifecycle";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
@@ -13,12 +18,19 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useMemo,
 	useRef,
 	useState,
 } from "react";
 import { AppState, type AppStateStatus, Platform } from "react-native";
 import CredentialProvider from "../../modules/credential-provider";
-import { type BiometricAuthResult, storage } from "../services/storage";
+import { useI18n } from "../providers/i18n-provider";
+import { lifecycleDeps } from "../services/lifecycle";
+import {
+	type BiometricAuthResult,
+	itemCache,
+	storage,
+} from "../services/storage";
 import { useAccount } from "./account-context";
 
 interface BiometricAuthContextValue {
@@ -44,6 +56,7 @@ const BiometricAuthContext = createContext<BiometricAuthContextValue | null>(
 
 export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 	const router = useRouter();
+	const { m } = useI18n();
 	const { activeAccount, activeAccountConfig, allAccounts } = useAccount();
 	const appState = useRef<AppStateStatus>(AppState.currentState);
 
@@ -52,6 +65,26 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 	const [lastAuthResult, setLastAuthResult] =
 		useState<BiometricAuthResult | null>(null);
 	const [requiresMasterPassword, setRequiresMasterPassword] = useState(false);
+
+	// Deciding whether time spent in the background has exceeded the auto-lock timeout is
+	// autolock *policy*, and it lives in `@bittery/core`'s mobile autolock service.
+	// `AccountStore` only supplies the two facts it is built from
+	// (`getBackgroundTimestamp`, `getAutoLockTimeoutOrDefault`).
+	//
+	// The service is used purely as that policy oracle — `initialize()` is deliberately
+	// never called, because this context owns the `AppState` subscription and the
+	// lock/navigate/prompt sequence below. Initializing it would install a second listener
+	// that wrote its own background timestamps and locked behind this one's back.
+	const activeAccountIdRef = useRef<string | undefined>(undefined);
+	activeAccountIdRef.current = activeAccount?.accountId;
+	const autolockPolicy = useMemo(
+		() =>
+			createMobileAutolockService({
+				storage,
+				getActiveAccountId: async () => activeAccountIdRef.current,
+			}),
+		[],
+	);
 
 	const setNativeMuksForAccounts = useCallback(async (accountIds: string[]) => {
 		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) {
@@ -103,23 +136,13 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			) {
 				// Check if re-authentication is required
 				const shouldRequireAuth = activeAccount
-					? await storage.shouldRequireAuthAfterBackground(
-							activeAccount.accountId,
-						)
+					? await autolockPolicy.shouldLock()
 					: false;
 
 				if (shouldRequireAuth) {
-					// IMPORTANT: Clear MUK from native VaultStateManager when auto-lock triggers
-					// This prevents autofill from working while app is locked
-					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-						CredentialProvider.clearAllMasterUnlockKeys();
-					}
-
-					if (storage.lockAllAccounts) {
-						await storage.lockAllAccounts();
-					} else if (activeAccount) {
-						await storage.clearSession(activeAccount.accountId);
-					}
+					// The native autofill mirror is purged inside this call, before the store
+					// lock, so autofill cannot serve credentials while the app says locked.
+					await lockAllAccounts(lifecycleDeps);
 
 					const fallbackAccountId =
 						activeAccount?.accountId ?? allAccounts[0]?.accountId;
@@ -165,7 +188,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 			appState.current = nextAppState;
 		},
-		[activeAccount, activeAccountConfig, allAccounts, router],
+		[activeAccount, activeAccountConfig, allAccounts, autolockPolicy, router],
 	);
 
 	// Set up app state listener
@@ -193,8 +216,10 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				return result;
 			}
 
+			// The prompt reason is rendered by the OS dialog, so it is user-facing copy and
+			// has to arrive here already translated — storage will not author any.
 			const result = await storage.authenticateWithBiometricEnhanced(
-				"Unlock Bittery",
+				m.biometric_prompt_unlock_bittery(),
 				activeAccount.accountId,
 			);
 
@@ -209,27 +234,31 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						storage,
 						accountId,
 					).catch(() => null);
-					await getTravelModeEnforcer(storage).verifyForUnlock(
-						accountId,
-						client,
-					);
-					const muk = await storage.decryptStoredMasterUnlockKeyPublic(
-						accountId,
-						true, // Skip biometric since we just authenticated
-					);
-					if (muk) {
-						// Store in React Native memory cache
-						await storage.storeMasterUnlockKey(muk, accountId);
-						await setNativeMuksForAccounts([accountId]);
-					} else {
-						if (__DEV__) {
-							console.warn(
-								"[BiometricAuth] decryptStoredMasterUnlockKeyPublic returned null MUK",
-							);
+					const verified = await getTravelModeEnforcer(
+						storage,
+						itemCache,
+					).verifyOrClear(accountId, client);
+					if (verified) {
+						const muk = await storage.decryptStoredMasterUnlockKey(
+							accountId,
+							true, // Skip biometric since we just authenticated
+						);
+						if (muk) {
+							// Store in React Native memory cache
+							await storage.setMasterUnlockKey(muk, accountId);
+							await setNativeMuksForAccounts([accountId]);
+						} else {
+							if (__DEV__) {
+								console.warn(
+									"[BiometricAuth] decryptStoredMasterUnlockKey returned null MUK",
+								);
+							}
 						}
 					}
 				} catch (error) {
-					await storage.clearSession(accountId);
+					// The MUK restore failed halfway, so drop back to a clean locked account
+					// rather than leaving a half-unlocked one behind.
+					await lockAccount(accountId, lifecycleDeps);
 					console.error(
 						"[BiometricAuth] Failed to restore MUK after biometric auth:",
 						error,
@@ -244,7 +273,11 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			}
 
 			return result;
-		}, [activeAccount, setNativeMuksForAccounts]);
+		}, [
+			activeAccount,
+			m.biometric_prompt_unlock_bittery,
+			setNativeMuksForAccounts,
+		]);
 
 	// Check if re-auth is needed
 	const checkAndRequireAuth = useCallback(async (): Promise<boolean> => {
@@ -259,8 +292,12 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			return true;
 		}
 
-		// Check biometric auth requirement
-		const biometricRequired = await storage.isBiometricAuthRequiredPublic(
+		// The biometric grace period is `AccountStore`'s own business, applied inside
+		// `decryptStoredMasterUnlockKey`. What this screen needs is simpler: is the account
+		// currently unlocked? `getUnlockedAccounts()` means exactly "the master unlock key
+		// is in memory", so an account missing from it needs to be unlocked again.
+		const unlockedAccountIds = await storage.getUnlockedAccounts();
+		const biometricRequired = !unlockedAccountIds.includes(
 			activeAccount.accountId,
 		);
 

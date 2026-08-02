@@ -1,0 +1,56 @@
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { m } from "@bittery/i18n/paraglide/messages";
+import { toast } from "@bittery/ui";
+import type { QueryClient } from "@tanstack/react-query";
+import type { RegisteredRouter } from "@tanstack/react-router";
+
+type BackgroundPush = {
+	type: string;
+	reason?: string;
+	accounts?: string[];
+};
+
+/**
+ * Subscribed at module scope, not from an effect: pushes sent while the popup is
+ * still mounting would otherwise be dropped.
+ */
+export function subscribeBackgroundPushes(
+	queryClient: QueryClient,
+	router: RegisteredRouter,
+): void {
+	chrome.runtime.onMessage.addListener((message: BackgroundPush) => {
+		switch (message.type) {
+			case "DESKTOP_LOCKED":
+			case "VAULT_LOCKED": {
+				queryClient.clear();
+				router.navigate({ to: "/unlock" });
+				break;
+			}
+			case "SESSION_REVOKED": {
+				queryClient.clear();
+				router.navigate({ to: "/unlock" });
+				toast.error(m.ext_toast_session_revoked());
+				break;
+			}
+			case "DESKTOP_UNLOCKED": {
+				queryClient.clear();
+				router.navigate({ to: "/vault" });
+				break;
+			}
+			case "ACTIVE_ACCOUNT_CHANGED": {
+				void peekAccountSessionManager()
+					?.refresh()
+					.then(() =>
+						Promise.all([
+							queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
+							queryClient.invalidateQueries({ queryKey: ["items"] }),
+							queryClient.invalidateQueries({ queryKey: ["accounts"] }),
+							queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
+							queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
+						]),
+					);
+				break;
+			}
+		}
+	});
+}

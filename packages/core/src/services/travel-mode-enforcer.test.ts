@@ -1,75 +1,62 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
-import type { TravelModeConfig } from "@bittery/storage/types";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import type { AccountStore, ItemCache } from "@bittery/storage";
+import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
+import {
+	accountMetadata,
+	createTestAccountStore,
+	createTestItemCache,
+} from "../testing/account-store-harness";
 import {
 	resetTravelModeEnforcerForTests,
 	TravelModeEnforcer,
 } from "./travel-mode-enforcer";
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 
-function createMockStorage(
-	initialTravelConfig: TravelModeConfig | null = null,
-	events: string[] = [],
-): IStorageAdapter {
-	let travelConfig: TravelModeConfig | null = initialTravelConfig;
-	let vaultKeys = [{ vaultId: "v1", vaultName: "V1" }] as never[];
-	let items = [{ id: "i1", vaultId: "v1" }] as never[];
-	let vaults = [{ id: "v1", name: "V1" }] as never[];
+const ACCOUNT_ID = "acc-1";
 
-	return {
-		platform: "desktop",
-		supportsMultiAccount: true,
-		supportsBiometric: false,
-		supportsItemCache: true,
-		initialize: mock(async () => {}),
-		getMasterUnlockKey: mock(async () => null),
-		setMasterUnlockKey: mock(async () => {}),
-		clearMasterUnlockKey: mock(async () => {}),
-		storeSessionData: mock(async () => {}),
-		tryRestoreSession: mock(async () => false),
-		isSessionValid: mock(async () => false),
-		storeSecretKey: mock(async () => {}),
-		getStoredSecretKey: mock(async () => null),
-		storeAuthToken: mock(async () => {}),
-		getAuthToken: mock(async () => null),
-		storeVaultKeys: mock(async (keys: unknown) => {
-			events.push("purge:vault-keys");
-			vaultKeys = keys as never[];
-		}),
-		getVaultKeys: mock(async () => vaultKeys),
-		storeEncryptedPrivateKey: mock(async () => {}),
-		getEncryptedPrivateKey: mock(async () => null),
-		storePinnedKdfProfile: mock(async () => {}),
-		getPinnedKdfProfile: mock(async () => null),
-		getActiveAccount: mock(async () => null),
-		getActiveAccountUserId: mock(async () => null),
-		setActiveAccount: mock(async () => {}),
-		getAccountsList: mock(async () => []),
-		addAccount: mock(async () => {}),
-		removeAccount: mock(async () => {}),
-		storeAutoLockTimeout: mock(async () => {}),
-		getAutoLockTimeout: mock(async () => null),
-		getAutoLockTimeoutOrDefault: mock(async () => 600_000),
-		storeServerUrl: mock(async () => {}),
-		getServerUrl: mock(async () => null),
-		isAuthenticated: mock(async () => false),
-		canQuickUnlock: mock(async () => false),
-		clearSession: mock(async () => {}),
-		clearAllStoredData: mock(async () => {}),
-		setCachedItems: mock(async (nextItems: unknown) => {
-			items = nextItems as never[];
-		}),
-		getCachedItems: mock(async () => items),
-		setCachedVaults: mock(async (nextVaults: unknown) => {
-			vaults = nextVaults as never[];
-		}),
-		getCachedVaults: mock(async () => vaults),
-		storeTravelModeCache: mock(async (config: TravelModeConfig) => {
-			events.push("persist:config");
-			travelConfig = config;
-		}),
-		getTravelModeCache: mock(async () => travelConfig),
-	} as IStorageAdapter;
+/**
+ * A real `AccountStore` plus a real `ItemCache`, seeded with one vault key, one cached
+ * item and one cached vault — all belonging to vault `v1`, the vault every test below
+ * hides. The purge assertions below check what actually ended up in storage rather than
+ * which stub was called.
+ */
+async function createLayers(
+	options: {
+		travelModeCache?: { enabled: boolean; hiddenVaultIds: string[] } | null;
+	} = {},
+): Promise<{ storage: AccountStore; itemCache: ItemCache }> {
+	const { store } = await createTestAccountStore();
+	const { cache } = await createTestItemCache();
+
+	await store.addAccount(accountMetadata({ accountId: ACCOUNT_ID }));
+	await store.storeVaultKeys(
+		[
+			{
+				vaultId: "v1",
+				vaultName: "V1",
+				vaultType: "personal",
+				vaultIcon: null,
+				vaultImageUrl: null,
+				encryptedVaultKey: "encrypted",
+				role: "owner",
+			},
+		],
+		ACCOUNT_ID,
+	);
+	if (options.travelModeCache) {
+		await store.storeTravelModeCache(options.travelModeCache, ACCOUNT_ID);
+	}
+
+	await cache.setCachedItems(
+		[{ id: "i1", vaultId: "v1" } as CachedEncryptedItem],
+		ACCOUNT_ID,
+	);
+	await cache.setCachedVaults(
+		[{ id: "v1", name: "V1" } as CachedVaultMetadata],
+		ACCOUNT_ID,
+	);
+
+	return { storage: store, itemCache: cache };
 }
 
 describe("TravelModeEnforcer", () => {
@@ -77,68 +64,79 @@ describe("TravelModeEnforcer", () => {
 		resetTravelModeEnforcerForTests();
 	});
 
-	it("enable purges storage and coordinator layers", async () => {
-		const storage = createMockStorage();
+	it("enable purges every layer, including the record cache", async () => {
+		const { storage, itemCache } = await createLayers();
 		const coordinator = {
 			purgeHiddenVaultsForAccount: mock(() => {}),
 		} as unknown as VaultRepositoryCoordinator;
 
-		const enforcer = new TravelModeEnforcer({ storage, coordinator });
+		const enforcer = new TravelModeEnforcer({
+			storage,
+			itemCache,
+			coordinator,
+		});
 
-		await enforcer.applyConfig("acc-1", {
+		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: true,
 			hiddenVaultIds: ["v1"],
 		});
 
 		expect(coordinator.purgeHiddenVaultsForAccount).toHaveBeenCalledWith(
-			"acc-1",
+			ACCOUNT_ID,
 			["v1"],
 		);
-		expect(storage.storeVaultKeys).toHaveBeenCalled();
-		expect(enforcer.isEnabled("acc-1")).toBe(true);
+		expect(await storage.getVaultKeys(ACCOUNT_ID)).toEqual([]);
+		// The cache is the layer `AccountStore` cannot reach.
+		expect(await itemCache.getCachedItems(ACCOUNT_ID)).toEqual([]);
+		expect(await itemCache.getCachedVaults(ACCOUNT_ID)).toEqual([]);
+		expect(enforcer.isEnabled(ACCOUNT_ID)).toBe(true);
 	});
 
 	it("disable transitions from enabled to disabled", async () => {
-		const storage = createMockStorage();
-		const enforcer = new TravelModeEnforcer({ storage });
+		const { storage, itemCache } = await createLayers();
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 
-		await enforcer.applyConfig("acc-1", {
+		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: true,
 			hiddenVaultIds: ["v1"],
 		});
-		await enforcer.applyConfig("acc-1", {
+		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: false,
 			hiddenVaultIds: [],
 		});
 
-		expect(enforcer.isEnabled("acc-1")).toBe(false);
+		expect(enforcer.isEnabled(ACCOUNT_ID)).toBe(false);
 	});
 
 	it("restores a verified cached policy while offline", async () => {
 		const cached = { enabled: true, hiddenVaultIds: ["v1"] };
-		const storage = createMockStorage(cached);
-		const enforcer = new TravelModeEnforcer({ storage });
+		const { storage, itemCache } = await createLayers({
+			travelModeCache: cached,
+		});
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 
-		const config = await enforcer.verifyForUnlock("acc-1");
+		const config = await enforcer.verifyForUnlock(ACCOUNT_ID);
 
 		expect(config).toEqual(cached);
-		expect(enforcer.isVerified("acc-1")).toBe(true);
-		expect(storage.storeVaultKeys).toHaveBeenCalled();
+		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(true);
+		expect(await storage.getVaultKeys(ACCOUNT_ID)).toEqual([]);
 	});
 
 	it("fails closed while offline when no cached policy exists", async () => {
-		const storage = createMockStorage();
-		const enforcer = new TravelModeEnforcer({ storage });
+		const { storage, itemCache } = await createLayers();
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 
-		await expect(enforcer.verifyForUnlock("acc-1")).rejects.toThrow(
+		await expect(enforcer.verifyForUnlock(ACCOUNT_ID)).rejects.toThrow(
 			"No verified travel mode policy",
 		);
-		expect(enforcer.isVerified("acc-1")).toBe(false);
+		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(false);
 	});
 
 	it("replaces stale cached policy with verified server state", async () => {
-		const storage = createMockStorage({ enabled: false, hiddenVaultIds: [] });
-		const enforcer = new TravelModeEnforcer({ storage });
+		const { storage, itemCache } = await createLayers({
+			travelModeCache: { enabled: false, hiddenVaultIds: [] },
+		});
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 		const rpcClient = {
 			travelMode: {
 				getTravelMode: {
@@ -152,25 +150,54 @@ describe("TravelModeEnforcer", () => {
 			},
 		} as never;
 
-		const config = await enforcer.verifyForUnlock("acc-1", rpcClient);
+		const config = await enforcer.verifyForUnlock(ACCOUNT_ID, rpcClient);
 
 		expect(config.enabled).toBe(true);
 		expect(config.hiddenVaultIds).toEqual(["v1"]);
-		expect(storage.storeTravelModeCache).toHaveBeenCalled();
+		expect(await storage.getTravelModeCache(ACCOUNT_ID)).toMatchObject({
+			enabled: true,
+			hiddenVaultIds: ["v1"],
+		});
+	});
+
+	it("verifyOrClear reports success without touching the session", async () => {
+		const { storage, itemCache } = await createLayers({
+			travelModeCache: { enabled: false, hiddenVaultIds: [] },
+		});
+		const clearSession = spyOn(storage, "clearSession");
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
+
+		expect(await enforcer.verifyOrClear(ACCOUNT_ID)).toBe(true);
+		expect(clearSession).not.toHaveBeenCalled();
+		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(true);
+	});
+
+	it("verifyOrClear fails closed by clearing the session", async () => {
+		const { storage, itemCache } = await createLayers();
+		const clearSession = spyOn(storage, "clearSession");
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
+
+		expect(await enforcer.verifyOrClear(ACCOUNT_ID)).toBe(false);
+		expect(clearSession).toHaveBeenCalledWith(ACCOUNT_ID);
+		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(false);
 	});
 
 	it("purges hidden data before committing an enabled policy", async () => {
+		const { storage, itemCache } = await createLayers();
 		const events: string[] = [];
-		const storage = createMockStorage(null, events);
-		const enforcer = new TravelModeEnforcer({ storage });
+		spyOn(storage, "storeVaultKeys").mockImplementation(async () => {
+			events.push("purge:vault-keys");
+		});
+		spyOn(storage, "storeTravelModeCache").mockImplementation(async () => {
+			events.push("persist:config");
+		});
+		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 
-		await enforcer.applyConfig("acc-1", {
+		await enforcer.applyConfig(ACCOUNT_ID, {
 			enabled: true,
 			hiddenVaultIds: ["v1"],
 		});
 
-		expect(events.indexOf("purge:vault-keys")).toBeLessThan(
-			events.indexOf("persist:config"),
-		);
+		expect(events).toEqual(["purge:vault-keys", "persist:config"]);
 	});
 });

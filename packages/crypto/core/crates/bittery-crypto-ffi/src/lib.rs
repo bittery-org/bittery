@@ -19,18 +19,48 @@ use bittery_crypto_core::{
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
+use zeroize::{Zeroize, Zeroizing};
 
 // ============================================================================
 // Memory Management
 // ============================================================================
 
-/// Free a string allocated by Rust
+/// Reclaim a C string allocated by this library, wipe its bytes, and return the
+/// now-zeroed buffer so the allocation is released with the size it was created
+/// with.
+///
+/// The buffer has to be reclaimed before anything is overwritten: the nul
+/// terminator is what lets `CString::from_raw` recover the allocation length, so
+/// zeroing first would hand the allocator the wrong size.
+///
+/// # Safety
+/// `s` must be non-null, must have come from `CString::into_raw` in this
+/// library, and must not have been freed already.
+unsafe fn reclaim_and_wipe(s: *mut c_char) -> Vec<u8> {
+    let mut bytes = CString::from_raw(s).into_bytes();
+    bytes.zeroize();
+    bytes
+}
+
+/// Free a string allocated by Rust.
+///
+/// The buffer is zeroed before it is released, so strings that carry key
+/// material - derived keys, private keys, SRP session keys, decrypted plaintext,
+/// TOTP codes - do not survive in the freed allocation.
+///
+/// Every `char *` returned by this library must be released with this function.
+/// The allocation belongs to Rust, so releasing it with `free()` is undefined
+/// behaviour and also skips the wipe. Any copy the caller made of the string
+/// before freeing it is the caller's to clear; Rust cannot reach it.
+///
+/// # Safety
+/// `s` must either be null or a pointer returned by this library and not yet
+/// freed. Passing a pointer this library did not allocate, or freeing the same
+/// pointer twice, is undefined behaviour.
 #[no_mangle]
-pub extern "C" fn bittery_free_string(s: *mut c_char) {
+pub unsafe extern "C" fn bittery_free_string(s: *mut c_char) {
     if !s.is_null() {
-        unsafe {
-            drop(CString::from_raw(s));
-        }
+        drop(unsafe { reclaim_and_wipe(s) });
     }
 }
 
@@ -42,11 +72,51 @@ fn c_str_to_string(s: *const c_char) -> Option<String> {
     unsafe { CStr::from_ptr(s).to_str().ok().map(|s| s.to_owned()) }
 }
 
+/// Copy a C string carrying secret material into a Rust `String` that is wiped
+/// when it goes out of scope.
+///
+/// Only the Rust-side copy is wiped. The incoming `const char *` belongs to the
+/// caller and is never written to by this library, so clearing it is the
+/// caller's responsibility.
+fn c_str_to_secret_string(s: *const c_char) -> Option<Zeroizing<String>> {
+    c_str_to_string(s).map(Zeroizing::new)
+}
+
 /// Helper to convert Rust string to C string
 fn string_to_c_str(s: String) -> *mut c_char {
     CString::new(s)
         .map(|cs| cs.into_raw())
         .unwrap_or(ptr::null_mut())
+}
+
+/// Copy a secret `String` into a C string and wipe the Rust-side copy.
+///
+/// The returned buffer still holds the secret in plaintext; it is wiped when the
+/// caller hands it back to `bittery_free_string`.
+fn secret_string_to_c_str(mut s: String) -> *mut c_char {
+    copy_secret_into_c_str(&mut s)
+}
+
+/// Copy `s` into a freshly allocated C string, then wipe `s`.
+fn copy_secret_into_c_str(s: &mut String) -> *mut c_char {
+    // Size the buffer for the trailing nul up front. `CString::new` grows the
+    // vector by one byte and then shrinks it to fit; either step can reallocate,
+    // and a reallocation would copy the secret into a new block and release the
+    // old one unwiped.
+    let mut buffer = Vec::with_capacity(s.len() + 1);
+    buffer.extend_from_slice(s.as_bytes());
+    s.zeroize();
+
+    match CString::new(buffer) {
+        Ok(c_string) => c_string.into_raw(),
+        Err(error) => {
+            // Interior nul byte: `CString` hands the buffer back rather than
+            // taking ownership of it.
+            let mut rejected = error.into_vec();
+            rejected.zeroize();
+            ptr::null_mut()
+        }
+    }
 }
 
 // ============================================================================
@@ -74,7 +144,7 @@ pub extern "C" fn bittery_derive_keys(
     algorithm: *const c_char,
     iterations: u32,
 ) -> DerivedKeysResult {
-    let password = match c_str_to_string(account_password) {
+    let password = match c_str_to_secret_string(account_password) {
         Some(s) => s,
         None => {
             return DerivedKeysResult {
@@ -85,7 +155,7 @@ pub extern "C" fn bittery_derive_keys(
         }
     };
 
-    let secret = match c_str_to_string(secret_key) {
+    let secret = match c_str_to_secret_string(secret_key) {
         Some(s) => s,
         None => {
             return DerivedKeysResult {
@@ -127,8 +197,8 @@ pub extern "C" fn bittery_derive_keys(
         Ok(keys) => {
             use base64::{engine::general_purpose::STANDARD, Engine};
             DerivedKeysResult {
-                auth_key: string_to_c_str(STANDARD.encode(&keys.auth_key)),
-                master_unlock_key: string_to_c_str(STANDARD.encode(&keys.master_unlock_key)),
+                auth_key: secret_string_to_c_str(STANDARD.encode(&keys.auth_key)),
+                master_unlock_key: secret_string_to_c_str(STANDARD.encode(&keys.master_unlock_key)),
                 error: ptr::null_mut(),
             }
         }
@@ -159,7 +229,7 @@ pub extern "C" fn bittery_encrypt(
     plaintext: *const c_char,
     key_base64: *const c_char,
 ) -> EncryptResult {
-    let plaintext_str = match c_str_to_string(plaintext) {
+    let plaintext_str = match c_str_to_secret_string(plaintext) {
         Some(s) => s,
         None => {
             return EncryptResult {
@@ -171,7 +241,7 @@ pub extern "C" fn bittery_encrypt(
         }
     };
 
-    let key_str = match c_str_to_string(key_base64) {
+    let key_str = match c_str_to_secret_string(key_base64) {
         Some(s) => s,
         None => {
             return EncryptResult {
@@ -185,7 +255,7 @@ pub extern "C" fn bittery_encrypt(
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return EncryptResult {
                 ciphertext: ptr::null_mut(),
@@ -235,14 +305,14 @@ pub extern "C" fn bittery_decrypt(
         None => return string_to_c_str("ERROR:Invalid algorithm".to_string()),
     };
 
-    let key_str = match c_str_to_string(key_base64) {
+    let key_str = match c_str_to_secret_string(key_base64) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid key".to_string()),
     };
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => return string_to_c_str(format!("ERROR:Invalid key base64: {}", e)),
     };
 
@@ -253,7 +323,7 @@ pub extern "C" fn bittery_decrypt(
     };
 
     match decrypt(&data, &key) {
-        Ok(plaintext) => string_to_c_str(plaintext),
+        Ok(plaintext) => secret_string_to_c_str(plaintext),
         Err(e) => string_to_c_str(format!("ERROR:{}", e)),
     }
 }
@@ -269,7 +339,7 @@ pub extern "C" fn bittery_encrypt_with_context(
     version: u64,
     user_id: *const c_char,
 ) -> EncryptResult {
-    let plaintext_str = match c_str_to_string(plaintext) {
+    let plaintext_str = match c_str_to_secret_string(plaintext) {
         Some(s) => s,
         None => {
             return EncryptResult {
@@ -280,7 +350,7 @@ pub extern "C" fn bittery_encrypt_with_context(
             }
         }
     };
-    let key_str = match c_str_to_string(key_base64) {
+    let key_str = match c_str_to_secret_string(key_base64) {
         Some(s) => s,
         None => {
             return EncryptResult {
@@ -338,7 +408,7 @@ pub extern "C" fn bittery_encrypt_with_context(
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return EncryptResult {
                 ciphertext: ptr::null_mut(),
@@ -398,7 +468,7 @@ pub extern "C" fn bittery_decrypt_with_context(
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid algorithm".to_string()),
     };
-    let key_str = match c_str_to_string(key_base64) {
+    let key_str = match c_str_to_secret_string(key_base64) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid key".to_string()),
     };
@@ -421,7 +491,7 @@ pub extern "C" fn bittery_decrypt_with_context(
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let key = match STANDARD.decode(&key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => return string_to_c_str(format!("ERROR:Invalid key base64: {}", e)),
     };
 
@@ -440,7 +510,7 @@ pub extern "C" fn bittery_decrypt_with_context(
     };
 
     match decrypt_with_aad(&data, &key, &context) {
-        Ok(plaintext) => string_to_c_str(plaintext),
+        Ok(plaintext) => secret_string_to_c_str(plaintext),
         Err(e) => string_to_c_str(format!("ERROR:{}", e)),
     }
 }
@@ -449,8 +519,14 @@ pub extern "C" fn bittery_decrypt_with_context(
 #[no_mangle]
 pub extern "C" fn bittery_generate_encryption_key() -> *mut c_char {
     use base64::{engine::general_purpose::STANDARD, Engine};
-    let key = generate_encryption_key();
-    string_to_c_str(STANDARD.encode(&key))
+    let mut key = generate_encryption_key();
+    // `as_slice()` and not `key`: the key is a `[u8; 32]`, so passing it by
+    // value would copy the key material onto the stack for the duration of
+    // `encode` and leave that copy unwiped. Borrowing as a slice is what
+    // `clippy::needless_borrow` wants and keeps the single wipeable copy.
+    let encoded = secret_string_to_c_str(STANDARD.encode(key.as_slice()));
+    key.zeroize();
+    encoded
 }
 
 // ============================================================================
@@ -471,7 +547,7 @@ pub extern "C" fn bittery_generate_rsa_key_pair() -> RsaKeyPairResult {
     match generate_rsa_key_pair() {
         Ok(key_pair) => RsaKeyPairResult {
             public_key: string_to_c_str(key_pair.public_key.clone()),
-            private_key: string_to_c_str(key_pair.private_key.clone()),
+            private_key: secret_string_to_c_str(key_pair.private_key.clone()),
             error: ptr::null_mut(),
         },
         Err(e) => RsaKeyPairResult {
@@ -488,7 +564,7 @@ pub extern "C" fn bittery_rsa_encrypt(
     plaintext: *const c_char,
     public_key_pem: *const c_char,
 ) -> *mut c_char {
-    let plaintext_str = match c_str_to_string(plaintext) {
+    let plaintext_str = match c_str_to_secret_string(plaintext) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid plaintext".to_string()),
     };
@@ -515,13 +591,13 @@ pub extern "C" fn bittery_rsa_decrypt(
         None => return string_to_c_str("ERROR:Invalid ciphertext".to_string()),
     };
 
-    let pem = match c_str_to_string(private_key_pem) {
+    let pem = match c_str_to_secret_string(private_key_pem) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid private key".to_string()),
     };
 
     match rsa_decrypt(&ciphertext_str, &pem) {
-        Ok(plaintext) => string_to_c_str(plaintext),
+        Ok(plaintext) => secret_string_to_c_str(plaintext),
         Err(e) => string_to_c_str(format!("ERROR:{}", e)),
     }
 }
@@ -557,11 +633,18 @@ pub extern "C" fn bittery_passkey_generate_keypair() -> PasskeyKeypairResult {
     use base64::{engine::general_purpose::STANDARD, Engine};
 
     match generate_passkey_keypair() {
-        Ok(result) => PasskeyKeypairResult {
-            private_key: string_to_c_str(STANDARD.encode(result.private_key)),
-            public_key_cose: string_to_c_str(STANDARD.encode(result.public_key_cose)),
-            error: ptr::null_mut(),
-        },
+        // `PasskeyKeypair` is `ZeroizeOnDrop`, so the scalar is wiped when
+        // `result` goes out of scope. The explicit wipe stays as defence in
+        // depth: it shortens the window to the base64 encode above.
+        Ok(mut result) => {
+            let private_key = secret_string_to_c_str(STANDARD.encode(result.private_key));
+            result.private_key.zeroize();
+            PasskeyKeypairResult {
+                private_key,
+                public_key_cose: string_to_c_str(STANDARD.encode(&result.public_key_cose)),
+                error: ptr::null_mut(),
+            }
+        }
         Err(e) => PasskeyKeypairResult {
             private_key: ptr::null_mut(),
             public_key_cose: ptr::null_mut(),
@@ -664,7 +747,7 @@ pub extern "C" fn bittery_passkey_sign_assertion(
 ) -> PasskeyAssertionResult {
     use base64::{engine::general_purpose::STANDARD, Engine};
 
-    let private_key_str = match c_str_to_string(private_key_base64) {
+    let private_key_str = match c_str_to_secret_string(private_key_base64) {
         Some(s) => s,
         None => {
             return PasskeyAssertionResult {
@@ -696,7 +779,7 @@ pub extern "C" fn bittery_passkey_sign_assertion(
     };
 
     let private_key = match STANDARD.decode(&private_key_str) {
-        Ok(value) => value,
+        Ok(value) => Zeroizing::new(value),
         Err(error) => {
             return PasskeyAssertionResult {
                 authenticator_data: ptr::null_mut(),
@@ -737,13 +820,13 @@ pub extern "C" fn bittery_passkey_sign_assertion(
 /// Generate a new secret key
 #[no_mangle]
 pub extern "C" fn bittery_generate_secret_key() -> *mut c_char {
-    string_to_c_str(generate_secret_key())
+    secret_string_to_c_str(generate_secret_key())
 }
 
 /// Validate secret key format (returns 1 for valid, 0 for invalid)
 #[no_mangle]
 pub extern "C" fn bittery_validate_secret_key(secret_key: *const c_char) -> i32 {
-    let key = match c_str_to_string(secret_key) {
+    let key = match c_str_to_secret_string(secret_key) {
         Some(s) => s,
         None => return 0,
     };
@@ -757,10 +840,11 @@ pub extern "C" fn bittery_validate_secret_key(secret_key: *const c_char) -> i32 
 /// Get secret key hint
 #[no_mangle]
 pub extern "C" fn bittery_get_secret_key_hint(secret_key: *const c_char) -> *mut c_char {
-    let key = match c_str_to_string(secret_key) {
+    let key = match c_str_to_secret_string(secret_key) {
         Some(s) => s,
         None => return ptr::null_mut(),
     };
+    // The hint is the deliberately public prefix of the secret key.
     string_to_c_str(get_secret_key_hint(&key))
 }
 
@@ -806,8 +890,13 @@ pub extern "C" fn bittery_srp_client_new(
 }
 
 /// Free SRP client
+///
+/// # Safety
+/// `handle` must either be null or a pointer returned by
+/// `bittery_srp_client_new` that has not been freed yet. The handle must not be
+/// used afterwards.
 #[no_mangle]
-pub extern "C" fn bittery_srp_client_free(handle: *mut SrpClientHandle) {
+pub unsafe extern "C" fn bittery_srp_client_free(handle: *mut SrpClientHandle) {
     if !handle.is_null() {
         unsafe {
             drop(Box::from_raw(handle));
@@ -816,8 +905,14 @@ pub extern "C" fn bittery_srp_client_free(handle: *mut SrpClientHandle) {
 }
 
 /// Generate salt
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_client_new` that has not been freed.
 #[no_mangle]
-pub extern "C" fn bittery_srp_client_generate_salt(handle: *const SrpClientHandle) -> *mut c_char {
+pub unsafe extern "C" fn bittery_srp_client_generate_salt(
+    handle: *const SrpClientHandle,
+) -> *mut c_char {
     if handle.is_null() {
         return ptr::null_mut();
     }
@@ -826,8 +921,14 @@ pub extern "C" fn bittery_srp_client_generate_salt(handle: *const SrpClientHandl
 }
 
 /// Derive safe private key
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_client_new` that has not been freed. `salt` and `password` must
+/// either be null or point to nul-terminated C strings that stay valid for the
+/// duration of the call.
 #[no_mangle]
-pub extern "C" fn bittery_srp_client_derive_safe_private_key(
+pub unsafe extern "C" fn bittery_srp_client_derive_safe_private_key(
     handle: *const SrpClientHandle,
     salt: *const c_char,
     password: *const c_char,
@@ -842,7 +943,7 @@ pub extern "C" fn bittery_srp_client_derive_safe_private_key(
         Some(s) => s,
         None => return ptr::null_mut(),
     };
-    let password_str = match c_str_to_string(password) {
+    let password_str = match c_str_to_secret_string(password) {
         Some(s) => s,
         None => return ptr::null_mut(),
     };
@@ -853,14 +954,20 @@ pub extern "C" fn bittery_srp_client_derive_safe_private_key(
         None
     };
     match client.derive_safe_private_key(&salt_str, &password_str, iterations_opt) {
-        Ok(private_key) => string_to_c_str(private_key),
+        Ok(private_key) => secret_string_to_c_str(private_key),
         Err(_) => ptr::null_mut(),
     }
 }
 
 /// Derive verifier
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_client_new` that has not been freed. `private_key` must either
+/// be null or point to a nul-terminated C string that stays valid for the
+/// duration of the call.
 #[no_mangle]
-pub extern "C" fn bittery_srp_client_derive_verifier(
+pub unsafe extern "C" fn bittery_srp_client_derive_verifier(
     handle: *const SrpClientHandle,
     private_key: *const c_char,
 ) -> *mut c_char {
@@ -869,13 +976,14 @@ pub extern "C" fn bittery_srp_client_derive_verifier(
     }
     let client = unsafe { &(*handle).client };
 
-    let pk = match c_str_to_string(private_key) {
+    let pk = match c_str_to_secret_string(private_key) {
         Some(s) => s,
         None => return ptr::null_mut(),
     };
 
+    // The verifier is password-equivalent, so it is treated as secret material.
     match client.derive_verifier(&pk) {
-        Ok(verifier) => string_to_c_str(verifier),
+        Ok(verifier) => secret_string_to_c_str(verifier),
         Err(_) => ptr::null_mut(),
     }
 }
@@ -888,8 +996,12 @@ pub struct EphemeralResult {
 }
 
 /// Generate client ephemeral
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_client_new` that has not been freed.
 #[no_mangle]
-pub extern "C" fn bittery_srp_client_generate_ephemeral(
+pub unsafe extern "C" fn bittery_srp_client_generate_ephemeral(
     handle: *const SrpClientHandle,
 ) -> EphemeralResult {
     if handle.is_null() {
@@ -899,11 +1011,13 @@ pub extern "C" fn bittery_srp_client_generate_ephemeral(
         };
     }
     let client = unsafe { &(*handle).client };
+    // `Ephemeral` is `ZeroizeOnDrop` in the core; the clones below are the copies
+    // this crate owns.
     let ephemeral = client.generate_ephemeral();
 
     EphemeralResult {
         public: string_to_c_str(ephemeral.public.clone()),
-        secret: string_to_c_str(ephemeral.secret.clone()),
+        secret: secret_string_to_c_str(ephemeral.secret.clone()),
     }
 }
 
@@ -916,8 +1030,14 @@ pub struct SessionResult {
 }
 
 /// Derive client session
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_client_new` that has not been freed. Every `*const c_char`
+/// argument must either be null or point to a nul-terminated C string that
+/// stays valid for the duration of the call.
 #[no_mangle]
-pub extern "C" fn bittery_srp_client_derive_session(
+pub unsafe extern "C" fn bittery_srp_client_derive_session(
     handle: *const SrpClientHandle,
     client_secret_ephemeral: *const c_char,
     server_public_ephemeral: *const c_char,
@@ -934,7 +1054,7 @@ pub extern "C" fn bittery_srp_client_derive_session(
     }
     let client = unsafe { &(*handle).client };
 
-    let cse = match c_str_to_string(client_secret_ephemeral) {
+    let cse = match c_str_to_secret_string(client_secret_ephemeral) {
         Some(s) => s,
         None => {
             return SessionResult {
@@ -974,7 +1094,7 @@ pub extern "C" fn bittery_srp_client_derive_session(
             }
         }
     };
-    let pk = match c_str_to_string(private_key) {
+    let pk = match c_str_to_secret_string(private_key) {
         Some(s) => s,
         None => {
             return SessionResult {
@@ -987,7 +1107,7 @@ pub extern "C" fn bittery_srp_client_derive_session(
 
     match client.derive_session(&cse, &spe, &salt_str, &username_str, &pk) {
         Ok(session) => SessionResult {
-            key: string_to_c_str(session.key.clone()),
+            key: secret_string_to_c_str(session.key.clone()),
             proof: string_to_c_str(session.proof.clone()),
             error: ptr::null_mut(),
         },
@@ -1001,8 +1121,14 @@ pub extern "C" fn bittery_srp_client_derive_session(
 
 /// Verify server session proof (returns 1 for success, 0 for failure)
 /// Error message available via bittery_srp_client_verify_session_error
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_client_new` that has not been freed. Every `*const c_char`
+/// argument must either be null or point to a nul-terminated C string that
+/// stays valid for the duration of the call.
 #[no_mangle]
-pub extern "C" fn bittery_srp_client_verify_session(
+pub unsafe extern "C" fn bittery_srp_client_verify_session(
     handle: *const SrpClientHandle,
     client_public_ephemeral: *const c_char,
     session_key: *const c_char,
@@ -1033,6 +1159,8 @@ pub extern "C" fn bittery_srp_client_verify_session(
         None => return string_to_c_str("ERROR:Invalid server session proof".to_string()),
     };
 
+    // `Session` is `ZeroizeOnDrop` in the core, so moving the session key into
+    // it is what wipes this crate's copy.
     let session = Session { key, proof };
 
     match client.verify_session(&cpe, &session, &server_proof) {
@@ -1075,7 +1203,7 @@ pub extern "C" fn bittery_encrypt_vault_key_for_member(
     vault_key_base64: *const c_char,
     member_public_key: *const c_char,
 ) -> *mut c_char {
-    let vault_key_str = match c_str_to_string(vault_key_base64) {
+    let vault_key_str = match c_str_to_secret_string(vault_key_base64) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid vault key".to_string()),
     };
@@ -1086,7 +1214,7 @@ pub extern "C" fn bittery_encrypt_vault_key_for_member(
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let vault_key = match STANDARD.decode(&vault_key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => return string_to_c_str(format!("ERROR:Invalid vault key base64: {}", e)),
     };
 
@@ -1105,11 +1233,11 @@ pub extern "C" fn bittery_encrypt_vault_key_with_muk(
     user_id: *const c_char,
     key_version: u64,
 ) -> *mut c_char {
-    let vault_key_str = match c_str_to_string(vault_key_base64) {
+    let vault_key_str = match c_str_to_secret_string(vault_key_base64) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid vault key".to_string()),
     };
-    let muk_str = match c_str_to_string(master_unlock_key_base64) {
+    let muk_str = match c_str_to_secret_string(master_unlock_key_base64) {
         Some(s) => s,
         None => return string_to_c_str("ERROR:Invalid master unlock key".to_string()),
     };
@@ -1124,11 +1252,11 @@ pub extern "C" fn bittery_encrypt_vault_key_with_muk(
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let vault_key = match STANDARD.decode(&vault_key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => return string_to_c_str(format!("ERROR:Invalid vault key base64: {}", e)),
     };
     let muk = match STANDARD.decode(&muk_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => return string_to_c_str(format!("ERROR:Invalid MUK base64: {}", e)),
     };
 
@@ -1193,7 +1321,7 @@ pub extern "C" fn bittery_re_encrypt_item(
             }
         }
     };
-    let old_key_str = match c_str_to_string(old_vault_key_base64) {
+    let old_key_str = match c_str_to_secret_string(old_vault_key_base64) {
         Some(s) => s,
         None => {
             return ReEncryptedItemResult {
@@ -1204,7 +1332,7 @@ pub extern "C" fn bittery_re_encrypt_item(
             }
         }
     };
-    let new_key_str = match c_str_to_string(new_vault_key_base64) {
+    let new_key_str = match c_str_to_secret_string(new_vault_key_base64) {
         Some(s) => s,
         None => {
             return ReEncryptedItemResult {
@@ -1218,7 +1346,7 @@ pub extern "C" fn bittery_re_encrypt_item(
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let old_key = match STANDARD.decode(&old_key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return ReEncryptedItemResult {
                 item_id: ptr::null_mut(),
@@ -1229,7 +1357,7 @@ pub extern "C" fn bittery_re_encrypt_item(
         }
     };
     let new_key = match STANDARD.decode(&new_key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return ReEncryptedItemResult {
                 item_id: ptr::null_mut(),
@@ -1275,7 +1403,7 @@ pub extern "C" fn bittery_perform_key_rotation(
     current_user_id: *const c_char,
     master_unlock_key_base64: *const c_char,
 ) -> KeyRotationResultFFI {
-    let old_key_str = match c_str_to_string(old_vault_key_base64) {
+    let old_key_str = match c_str_to_secret_string(old_vault_key_base64) {
         Some(s) => s,
         None => {
             return KeyRotationResultFFI {
@@ -1325,7 +1453,7 @@ pub extern "C" fn bittery_perform_key_rotation(
             }
         }
     };
-    let muk_str = match c_str_to_string(master_unlock_key_base64) {
+    let muk_str = match c_str_to_secret_string(master_unlock_key_base64) {
         Some(s) => s,
         None => {
             return KeyRotationResultFFI {
@@ -1338,7 +1466,7 @@ pub extern "C" fn bittery_perform_key_rotation(
 
     use base64::{engine::general_purpose::STANDARD, Engine};
     let old_key = match STANDARD.decode(&old_key_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return KeyRotationResultFFI {
                 member_encrypted_keys_json: ptr::null_mut(),
@@ -1348,7 +1476,7 @@ pub extern "C" fn bittery_perform_key_rotation(
         }
     };
     let muk = match STANDARD.decode(&muk_str) {
-        Ok(k) => k,
+        Ok(k) => Zeroizing::new(k),
         Err(e) => {
             return KeyRotationResultFFI {
                 member_encrypted_keys_json: ptr::null_mut(),
@@ -1442,16 +1570,24 @@ pub extern "C" fn bittery_validate_rotation_data(
 }
 
 /// Free key rotation result
+///
+/// # Safety
+/// Every non-null string in `result` must be a pointer returned by this library
+/// and not yet freed. Freeing the same result twice is undefined behaviour.
 #[no_mangle]
-pub extern "C" fn bittery_free_key_rotation_result(result: KeyRotationResultFFI) {
+pub unsafe extern "C" fn bittery_free_key_rotation_result(result: KeyRotationResultFFI) {
     bittery_free_string(result.member_encrypted_keys_json);
     bittery_free_string(result.re_encrypted_items_json);
     bittery_free_string(result.error);
 }
 
 /// Free re-encrypted item result
+///
+/// # Safety
+/// Every non-null string in `result` must be a pointer returned by this library
+/// and not yet freed. Freeing the same result twice is undefined behaviour.
 #[no_mangle]
-pub extern "C" fn bittery_free_re_encrypted_item_result(result: ReEncryptedItemResult) {
+pub unsafe extern "C" fn bittery_free_re_encrypted_item_result(result: ReEncryptedItemResult) {
     bittery_free_string(result.item_id);
     bittery_free_string(result.encrypted_data);
     bittery_free_string(result.encryption_iv);
@@ -1459,8 +1595,12 @@ pub extern "C" fn bittery_free_re_encrypted_item_result(result: ReEncryptedItemR
 }
 
 /// Free validation result
+///
+/// # Safety
+/// `result.errors_json` must be null or a pointer returned by this library that
+/// has not been freed yet.
 #[no_mangle]
-pub extern "C" fn bittery_free_validation_result(result: ValidationResultFFI) {
+pub unsafe extern "C" fn bittery_free_validation_result(result: ValidationResultFFI) {
     bittery_free_string(result.errors_json);
 }
 
@@ -1496,8 +1636,13 @@ pub extern "C" fn bittery_srp_server_new(
 }
 
 /// Free SRP server
+///
+/// # Safety
+/// `handle` must either be null or a pointer returned by
+/// `bittery_srp_server_new` that has not been freed yet. The handle must not be
+/// used afterwards.
 #[no_mangle]
-pub extern "C" fn bittery_srp_server_free(handle: *mut SrpServerHandle) {
+pub unsafe extern "C" fn bittery_srp_server_free(handle: *mut SrpServerHandle) {
     if !handle.is_null() {
         unsafe {
             drop(Box::from_raw(handle));
@@ -1506,8 +1651,14 @@ pub extern "C" fn bittery_srp_server_free(handle: *mut SrpServerHandle) {
 }
 
 /// Generate server ephemeral
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_server_new` that has not been freed. `verifier` must either be
+/// null or point to a nul-terminated C string that stays valid for the duration
+/// of the call.
 #[no_mangle]
-pub extern "C" fn bittery_srp_server_generate_ephemeral(
+pub unsafe extern "C" fn bittery_srp_server_generate_ephemeral(
     handle: *const SrpServerHandle,
     verifier: *const c_char,
 ) -> EphemeralResult {
@@ -1519,7 +1670,7 @@ pub extern "C" fn bittery_srp_server_generate_ephemeral(
     }
     let server = unsafe { &(*handle).server };
 
-    let v = match c_str_to_string(verifier) {
+    let v = match c_str_to_secret_string(verifier) {
         Some(s) => s,
         None => {
             return EphemeralResult {
@@ -1532,7 +1683,7 @@ pub extern "C" fn bittery_srp_server_generate_ephemeral(
     match server.generate_ephemeral(&v) {
         Ok(ephemeral) => EphemeralResult {
             public: string_to_c_str(ephemeral.public.clone()),
-            secret: string_to_c_str(ephemeral.secret.clone()),
+            secret: secret_string_to_c_str(ephemeral.secret.clone()),
         },
         Err(_) => EphemeralResult {
             public: ptr::null_mut(),
@@ -1542,8 +1693,14 @@ pub extern "C" fn bittery_srp_server_generate_ephemeral(
 }
 
 /// Derive server session
+///
+/// # Safety
+/// `handle` must either be null or a live pointer returned by
+/// `bittery_srp_server_new` that has not been freed. Every `*const c_char`
+/// argument must either be null or point to a nul-terminated C string that
+/// stays valid for the duration of the call.
 #[no_mangle]
-pub extern "C" fn bittery_srp_server_derive_session(
+pub unsafe extern "C" fn bittery_srp_server_derive_session(
     handle: *const SrpServerHandle,
     server_secret_ephemeral: *const c_char,
     client_public_ephemeral: *const c_char,
@@ -1561,7 +1718,7 @@ pub extern "C" fn bittery_srp_server_derive_session(
     }
     let server = unsafe { &(*handle).server };
 
-    let sse = match c_str_to_string(server_secret_ephemeral) {
+    let sse = match c_str_to_secret_string(server_secret_ephemeral) {
         Some(s) => s,
         None => {
             return SessionResult {
@@ -1601,7 +1758,7 @@ pub extern "C" fn bittery_srp_server_derive_session(
             }
         }
     };
-    let v = match c_str_to_string(verifier) {
+    let v = match c_str_to_secret_string(verifier) {
         Some(s) => s,
         None => {
             return SessionResult {
@@ -1624,7 +1781,7 @@ pub extern "C" fn bittery_srp_server_derive_session(
 
     match server.derive_session(&sse, &cpe, &salt_str, &username_str, &v, &csp) {
         Ok(session) => SessionResult {
-            key: string_to_c_str(session.key.clone()),
+            key: secret_string_to_c_str(session.key.clone()),
             proof: string_to_c_str(session.proof.clone()),
             error: ptr::null_mut(),
         },
@@ -1651,22 +1808,28 @@ pub struct TotpFfiResult {
 }
 
 /// Free a TotpFfiResult
+///
+/// Both strings are zeroed before they are released.
+///
+/// # Safety
+/// `result.code` and `result.error` must each be null or a pointer returned by
+/// this library that has not been freed yet.
 #[no_mangle]
-pub extern "C" fn bittery_free_totp_result(result: TotpFfiResult) {
-    if !result.code.is_null() {
-        unsafe { drop(std::ffi::CString::from_raw(result.code)) };
-    }
-    if !result.error.is_null() {
-        unsafe { drop(std::ffi::CString::from_raw(result.error)) };
-    }
+pub unsafe extern "C" fn bittery_free_totp_result(result: TotpFfiResult) {
+    bittery_free_string(result.code);
+    bittery_free_string(result.error);
 }
 
 /// Generate a TOTP code for the current time
 ///
 /// - secret: base32-encoded shared secret
-/// - algorithm: "SHA1", "SHA256", or "SHA512"
-/// - digits: number of OTP digits (6, 7, or 8)
-/// - period: time step in seconds (typically 30)
+/// - algorithm: "SHA1", "SHA256", or "SHA512" (anything else falls back to SHA1)
+/// - digits: number of OTP digits; must be 6, 7 or 8
+/// - period: time step in seconds (typically 30); must be >= 1
+///
+/// `digits` and `period` are validated by the core: out-of-range values return a
+/// `TotpFfiResult` with a null `code` and a non-null `error` describing the
+/// problem. The caller must free the result with `bittery_free_totp_result`.
 #[no_mangle]
 pub extern "C" fn bittery_generate_totp(
     secret: *const c_char,
@@ -1674,7 +1837,7 @@ pub extern "C" fn bittery_generate_totp(
     digits: u32,
     period: u64,
 ) -> TotpFfiResult {
-    let secret_str = match c_str_to_string(secret) {
+    let secret_str = match c_str_to_secret_string(secret) {
         Some(s) => s,
         None => {
             return TotpFfiResult {
@@ -1703,7 +1866,7 @@ pub extern "C" fn bittery_generate_totp(
 
     match generate_totp(&secret_str, &algorithm_str, digits, period) {
         Ok(result) => TotpFfiResult {
-            code: string_to_c_str(result.code),
+            code: secret_string_to_c_str(result.code),
             remaining_seconds: result.remaining_seconds,
             period: result.period,
             progress: result.progress,
@@ -1716,5 +1879,90 @@ pub extern "C" fn bittery_generate_totp(
             progress: 0.0,
             error: string_to_c_str(e.to_string()),
         },
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SECRET: &str = "master-unlock-key-material";
+
+    #[test]
+    fn reclaim_and_wipe_zeroes_the_whole_allocation() {
+        let raw = CString::new(SECRET).unwrap().into_raw();
+
+        let mut wiped = unsafe { reclaim_and_wipe(raw) };
+
+        // `Vec::zeroize` clears the length and zeroes the full capacity, so none
+        // of the bytes the C caller could have read are left behind.
+        assert!(wiped.is_empty());
+        assert_eq!(wiped.capacity(), SECRET.len() + 1);
+        assert!(wiped
+            .spare_capacity_mut()
+            .iter()
+            .all(|byte| unsafe { byte.assume_init() } == 0));
+    }
+
+    #[test]
+    fn free_string_ignores_null() {
+        unsafe { bittery_free_string(ptr::null_mut()) };
+    }
+
+    #[test]
+    fn copy_secret_into_c_str_wipes_the_source_string() {
+        let mut secret = String::from("srp-session-key");
+        let capacity = secret.capacity();
+
+        let raw = copy_secret_into_c_str(&mut secret);
+
+        assert!(secret.is_empty());
+        assert_eq!(secret.capacity(), capacity);
+        assert!(unsafe { secret.as_mut_vec() }
+            .spare_capacity_mut()
+            .iter()
+            .all(|byte| unsafe { byte.assume_init() } == 0));
+
+        // The C string is an independent, intact copy.
+        assert_eq!(
+            unsafe { CStr::from_ptr(raw) }.to_str().unwrap(),
+            "srp-session-key"
+        );
+        unsafe { bittery_free_string(raw) };
+    }
+
+    #[test]
+    fn secret_string_to_c_str_preserves_the_value_for_the_caller() {
+        let raw = secret_string_to_c_str(String::from("A3-ABCDEF-GHIJKL"));
+
+        assert_eq!(
+            unsafe { CStr::from_ptr(raw) }.to_str().unwrap(),
+            "A3-ABCDEF-GHIJKL"
+        );
+        unsafe { bittery_free_string(raw) };
+    }
+
+    #[test]
+    fn secret_string_to_c_str_rejects_interior_nul() {
+        let raw = secret_string_to_c_str(String::from("aa\0bb"));
+
+        assert!(raw.is_null());
+    }
+
+    #[test]
+    fn free_totp_result_releases_code_and_error() {
+        let result = TotpFfiResult {
+            code: secret_string_to_c_str(String::from("123456")),
+            remaining_seconds: 12,
+            period: 30,
+            progress: 60.0,
+            error: ptr::null_mut(),
+        };
+
+        unsafe { bittery_free_totp_result(result) };
     }
 }

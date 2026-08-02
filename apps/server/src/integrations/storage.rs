@@ -141,10 +141,10 @@ pub fn is_valid_attachment_upload_key(
         .get(5)
         .map(|value| value.as_str())
         .unwrap_or_default();
-    let expected_signature = sign_attachment_upload_intent(&format!(
-        "{key_user_id}:{key_item_id}:{upload_id}:{expires_at_ms}"
-    ))?;
-    Ok(expected_signature == signature)
+    verify_attachment_upload_intent(
+        &format!("{key_user_id}:{key_item_id}:{upload_id}:{expires_at_ms}"),
+        signature,
+    )
 }
 
 pub async fn create_presigned_upload(
@@ -498,12 +498,28 @@ fn get_attachment_upload_signing_secret() -> Result<String, StorageError> {
     }
 }
 
-fn sign_attachment_upload_intent(payload: &str) -> Result<String, StorageError> {
+fn attachment_upload_mac(payload: &str) -> Result<HmacSha256, StorageError> {
     let secret = get_attachment_upload_signing_secret()?;
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
         .map_err(|error| StorageError::InvalidConfig(error.to_string()))?;
     mac.update(payload.as_bytes());
+    Ok(mac)
+}
+
+fn sign_attachment_upload_intent(payload: &str) -> Result<String, StorageError> {
+    let mac = attachment_upload_mac(payload)?;
     Ok(URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes()))
+}
+
+fn verify_attachment_upload_intent(payload: &str, signature: &str) -> Result<bool, StorageError> {
+    let mac = attachment_upload_mac(payload)?;
+    // An undecodable signature is treated exactly like a wrong one.
+    let Ok(tag) = URL_SAFE_NO_PAD.decode(signature) else {
+        return Ok(false);
+    };
+    // `verify_slice` compares the tag in constant time, so validation timing does not depend on how
+    // many leading bytes of a supplied signature happen to be correct.
+    Ok(mac.verify_slice(&tag).is_ok())
 }
 
 fn random_uuid_like() -> String {
@@ -559,7 +575,8 @@ mod tests {
     use super::{
         create_attachment_key, create_presigned_download, create_presigned_upload,
         create_team_image_key, create_vault_image_key, delete_object, head_object,
-        is_valid_attachment_upload_key, public_asset_url, StorageError,
+        is_valid_attachment_upload_key, public_asset_url, sign_attachment_upload_intent,
+        StorageError,
     };
     use crate::test_support::acquire_env_lock_async;
 
@@ -659,6 +676,66 @@ mod tests {
                 !is_valid_attachment_upload_key(&key, "user_123", "other_item", None)
                     .expect("validation should succeed")
             );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn attachment_upload_key_signature_checks_accept_only_the_expected_tag() {
+        const UPLOAD_ID: &str = "00000000-0000-0000-0000-000000000000";
+
+        with_storage_env_async("https://storage.example.invalid", async {
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let expires_at_ms = now_ms + 60_000;
+            let build_key = |signature: &str| {
+                format!("attachments/user_123/item_456/{expires_at_ms}-{UPLOAD_ID}-{signature}-file.enc")
+            };
+
+            let valid_signature = sign_attachment_upload_intent(&format!(
+                "user_123:item_456:{UPLOAD_ID}:{expires_at_ms}"
+            ))
+            .expect("signature should be created");
+            assert!(is_valid_attachment_upload_key(
+                &build_key(&valid_signature),
+                "user_123",
+                "item_456",
+                Some(now_ms),
+            )
+            .expect("validation should succeed"));
+
+            let foreign_signature = sign_attachment_upload_intent(&format!(
+                "user_123:other_item:{UPLOAD_ID}:{expires_at_ms}"
+            ))
+            .expect("signature should be created");
+            assert!(!is_valid_attachment_upload_key(
+                &build_key(&foreign_signature),
+                "user_123",
+                "item_456",
+                Some(now_ms),
+            )
+            .expect("validation should succeed"));
+
+            // Set the discarded trailing bits of the final base64url symbol: the tag bytes would be
+            // unchanged, so this only fails validation because decoding rejects it.
+            const URL_SAFE_ALPHABET: &[u8] =
+                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            let last_symbol = valid_signature.as_bytes()[valid_signature.len() - 1];
+            let last_index = URL_SAFE_ALPHABET
+                .iter()
+                .position(|symbol| *symbol == last_symbol)
+                .expect("signature should be base64url");
+            let malformed_signature = format!(
+                "{}{}",
+                &valid_signature[..valid_signature.len() - 1],
+                URL_SAFE_ALPHABET[last_index + 1] as char,
+            );
+            assert!(!is_valid_attachment_upload_key(
+                &build_key(&malformed_signature),
+                "user_123",
+                "item_456",
+                Some(now_ms),
+            )
+            .expect("malformed signatures should not error"));
         })
         .await;
     }

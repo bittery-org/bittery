@@ -1,10 +1,9 @@
 import {
 	useBiometricUnlock,
-	usePlatformStorage,
 	useQuickUnlock,
 	useSessionState,
 } from "@bittery/core/hooks";
-import { useQuery } from "@tanstack/react-query";
+import { removeAccount } from "@bittery/core/services/account-lifecycle";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Input, Label, TextField } from "heroui-native";
 import {
@@ -29,6 +28,7 @@ import {
 } from "react-native";
 import { withUniwind } from "uniwind";
 import { SafeAreaView } from "@/components/safe-area-view";
+import { useBiometricType } from "@/lib/biometric-type";
 
 // Create styled icon components
 const StyledLock = withUniwind(Lock);
@@ -46,6 +46,7 @@ import { resolveBiometricErrorMessage } from "../src/lib/biometric-error-message
 import { arrayBufferToBase64 } from "../src/lib/crypto";
 import { useServerUrl } from "../src/lib/rpc";
 import { useI18n } from "../src/providers/i18n-provider";
+import { lifecycleDeps } from "../src/services/lifecycle";
 import { storage } from "../src/services/storage";
 
 /**
@@ -64,7 +65,6 @@ export default function AutofillUnlockScreen() {
 	const params = useLocalSearchParams<{
 		passwordRequired?: string;
 	}>();
-	const platformStorage = usePlatformStorage();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { activeAccount, allAccounts, refreshAccounts } = useAccount();
 
@@ -80,14 +80,8 @@ export default function AutofillUnlockScreen() {
 		activeAccount?.accountId,
 		{ enabled: !!activeAccount },
 	);
-	const biometricTypeQuery = useQuery({
-		queryKey: ["autofill-unlock", "biometric-type"],
-		queryFn: async () => {
-			return (await platformStorage.getBiometricType?.()) ?? null;
-		},
-		enabled: !!activeAccount,
-	});
-	const biometricType = biometricTypeQuery.data ?? null;
+	const { label: biometricTypeLabel, token: biometricTypeToken } =
+		useBiometricType({ enabled: !!activeAccount });
 
 	const setNativeMuksForAccountIds = useCallback(
 		async (accountIds: string[]) => {
@@ -114,6 +108,9 @@ export default function AutofillUnlockScreen() {
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
+		// The OS renders this string, so it is user-facing copy and has to be translated
+		// here; the hook's own default is a hardcoded English fallback.
+		promptMessage: m.biometric_prompt_unlock_bittery(),
 		onSuccess: async () => {
 			if (!activeAccount) return;
 
@@ -129,7 +126,7 @@ export default function AutofillUnlockScreen() {
 				);
 
 				if (masterUnlockKey) {
-					await storage.storeMasterUnlockKey(
+					await storage.setMasterUnlockKey(
 						masterUnlockKey,
 						activeAccount.accountId,
 					);
@@ -144,10 +141,7 @@ export default function AutofillUnlockScreen() {
 				}
 
 				// Set as active account
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: activeAccount.accountId,
-				});
+				await storage.setActiveAccount(activeAccount.accountId);
 				await refreshAccounts();
 
 				// Show success message and close (user returns to autofill)
@@ -173,15 +167,21 @@ export default function AutofillUnlockScreen() {
 					m.mob_unlock_alert_session_expired_title(),
 					m.mob_unlock_alert_session_expired_message(),
 				);
-				await storage.clearAllStoredData(activeAccount.accountId);
+				// The stored session is unusable, so the account goes off the device
+				// entirely — removal sequences the store, the item cache and the native
+				// autofill mirror together.
+				await removeAccount(activeAccount.accountId, lifecycleDeps);
 				router.replace("/(auth)/login");
 			}
 		},
 		onError: (error) => {
-			// Show specific error message
-			const errorMessage =
-				error.message ||
-				resolveBiometricErrorMessage(error.type || "unknown", m);
+			// Render from `error.type`, never from `error.message`: that string is an
+			// English diagnostic (`AccountStore`'s fallbacks, or the raw native error code
+			// the react-native port carries through) and is for logs, not for a screen.
+			const errorMessage = resolveBiometricErrorMessage(
+				{ error: error.type },
+				m,
+			);
 
 			if (error.type === "master_password_required") {
 				setBiometricError(errorMessage);
@@ -216,9 +216,8 @@ export default function AutofillUnlockScreen() {
 				CredentialProvider.updateLastMasterPasswordEntry();
 
 				// Escrow MUK with biometric for future quick unlocks
-				const biometricAvailable =
-					await platformStorage.isBiometricAvailable?.();
-				const biometricEnabled = await platformStorage.isBiometricEnabled?.(
+				const biometricAvailable = await storage.isBiometricAvailable();
+				const biometricEnabled = await storage.isBiometricEnabled(
 					activeAccount.accountId,
 				);
 				if (biometricAvailable && biometricEnabled) {
@@ -382,7 +381,7 @@ export default function AutofillUnlockScreen() {
 									size="lg"
 								>
 									<View className="flex-row items-center">
-										{biometricType === "Face ID" ? (
+										{biometricTypeToken === "face" ? (
 											<StyledScanFace size={24} className="text-muted" />
 										) : (
 											<StyledFingerprint size={24} className="text-muted" />
@@ -391,9 +390,7 @@ export default function AutofillUnlockScreen() {
 											{loading
 												? m.mob_unlock_authenticating()
 												: m.mob_unlock_biometric_label({
-														biometricType:
-															biometricType ||
-															m.mob_unlock_biometric_fallback(),
+														biometricType: biometricTypeLabel,
 													})}
 										</Text>
 									</View>

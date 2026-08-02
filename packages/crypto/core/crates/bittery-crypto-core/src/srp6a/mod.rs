@@ -7,6 +7,8 @@ mod bigint;
 mod client;
 mod params;
 mod server;
+#[cfg(test)]
+mod test_vectors;
 
 pub use client::SrpClient;
 pub use params::{HashAlgorithm, PrimeGroup};

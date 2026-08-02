@@ -4,6 +4,7 @@ import type {
 	DecryptedItemWithContext,
 	Passkey,
 } from "@bittery/shared/types";
+import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { getBaseDomain, normalizeHost, parseHostname } from "../lib/hostname";
 import { storage } from "../lib/storage";
 import {
@@ -267,8 +268,8 @@ async function resolveAccountEmailForItem(
 	}
 
 	const activeAccount = await storage.getActiveAccount();
-	return activeAccount?.type === "single"
-		? await resolveEmailFromAccountId(activeAccount.accountId)
+	return activeAccount
+		? await resolveEmailFromAccountId(activeAccount)
 		: undefined;
 }
 
@@ -315,24 +316,6 @@ function pickCreateTarget(
 	return null;
 }
 
-function normalizeVaultRole(
-	role: string,
-): "owner" | "admin" | "member" | "read-only" {
-	switch (role) {
-		case "owner":
-		case "admin":
-		case "member":
-		case "read-only":
-			return role;
-		default:
-			return "member";
-	}
-}
-
-function normalizeVaultType(type: string): "personal" | "team" {
-	return type === "team" ? "team" : "personal";
-}
-
 function readVaultAccountEmail(vault: unknown): string | undefined {
 	if (!vault || typeof vault !== "object") {
 		return undefined;
@@ -346,13 +329,16 @@ async function getWritableVaultOptions(): Promise<
 > {
 	const vaults = await rpcClient.vault.list.query();
 	return vaults
-		.map((vault) => ({
-			id: vault.id,
-			name: vault.name,
-			accountEmail: readVaultAccountEmail(vault),
-			type: normalizeVaultType(vault.vaultType),
-			role: normalizeVaultRole(vault.role),
-		}))
+		.map((vault) => {
+			const decodedVault = toVaultKeyEntry(vault);
+			return {
+				id: decodedVault.vaultId,
+				name: decodedVault.vaultName,
+				accountEmail: readVaultAccountEmail(vault),
+				type: decodedVault.vaultType,
+				role: decodedVault.role,
+			};
+		})
 		.filter((vault) => vault.role !== "read-only");
 }
 

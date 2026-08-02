@@ -1,6 +1,11 @@
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import {
+	decodeVaultType,
+	type ServerVaultListEntry,
+	toVaultKeyEntry,
+} from "@bittery/shared/vault-mapping";
+import type { AccountStore } from "@bittery/storage";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
-import type { IStorageAdapter } from "@bittery/storage/adapter";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
 
@@ -45,15 +50,7 @@ export interface ConvertVaultTypeResult {
 	newType: "personal" | "team";
 }
 
-export interface VaultListItem {
-	id: string;
-	name: string;
-	vaultType: string;
-	icon: string | null;
-	imageUrl: string | null;
-	encryptedVaultKey: string;
-	role: string;
-}
+export type VaultListItem = ServerVaultListEntry;
 
 export interface RpcVaultClient {
 	vault: {
@@ -65,55 +62,26 @@ export interface RpcVaultClient {
 
 export type TRPCVaultClient = RpcVaultClient;
 
-function normalizeVaultType(vaultType: string): "personal" | "team" {
-	return vaultType === "team" ? "team" : "personal";
-}
-
-function normalizeVaultRole(
-	role: string,
-): "owner" | "admin" | "member" | "read-only" {
-	switch (role) {
-		case "owner":
-		case "admin":
-		case "member":
-		case "read-only":
-			return role;
-		default:
-			return "member";
-	}
-}
-
 /**
  * Refresh vault keys from server and store in local storage.
  */
 export async function refreshVaultKeys(
 	rpcClient: RpcVaultClient,
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	accountId?: string,
 ): Promise<void> {
 	const vaultList = await rpcClient.vault.list.query();
-	await storage.storeVaultKeys(
-		vaultList.map((vault) => ({
-			vaultId: vault.id,
-			vaultName: vault.name,
-			vaultType: normalizeVaultType(vault.vaultType),
-			vaultIcon: vault.icon,
-			vaultImageUrl: vault.imageUrl,
-			encryptedVaultKey: vault.encryptedVaultKey,
-			role: normalizeVaultRole(vault.role),
-		})),
-		accountId,
-	);
+	await storage.storeVaultKeys(vaultList.map(toVaultKeyEntry), accountId);
 }
 
 interface VaultServiceDeps {
-	storage: IStorageAdapter;
+	storage: AccountStore;
 	crypto: ICrypto;
 	accounts: AccountResolver;
 }
 
 export class VaultService {
-	private readonly storage: IStorageAdapter;
+	private readonly storage: AccountStore;
 	private readonly crypto: ICrypto;
 	private readonly accounts: AccountResolver;
 
@@ -293,8 +261,8 @@ export class VaultService {
 		return {
 			success: true,
 			vaultId: result.vaultId,
-			previousType: normalizeVaultType(result.previousType),
-			newType: normalizeVaultType(result.newType),
+			previousType: decodeVaultType(result.previousType),
+			newType: decodeVaultType(result.newType),
 		};
 	}
 

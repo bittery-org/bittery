@@ -1,7 +1,6 @@
-import { useRPC } from "@bittery/shared/rpc";
+import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
-import { normalizeVaultListEntry } from "@/lib/rpc-normalizers";
 import { storage, type VaultKeyData } from "@/lib/storage";
 
 /**
@@ -15,19 +14,18 @@ import { storage, type VaultKeyData } from "@/lib/storage";
  */
 export function useVaultKeysSync() {
 	const rpc = useRPC();
+	const rpcClient = useRPCClient();
 
-	const { data: vaults } = useQuery({
+	useQuery({
 		...rpc.vault.list.queryOptions(),
 		retry: false,
+		queryFn: async () => {
+			const vaults = await rpcClient.vault.list.query();
+			if (vaults.length > 0) {
+				const vaultKeys: VaultKeyData[] = vaults.map(toVaultKeyEntry);
+				await storage.storeVaultKeys(vaultKeys);
+			}
+			return vaults;
+		},
 	});
-
-	useEffect(() => {
-		if (!vaults || vaults.length === 0) return;
-
-		// Map vault.list response to VaultKeyData format
-		const vaultKeys: VaultKeyData[] = vaults.map(normalizeVaultListEntry);
-
-		// Update sessionStorage with the latest vault keys
-		storage.storeVaultKeys(vaultKeys);
-	}, [vaults]);
 }

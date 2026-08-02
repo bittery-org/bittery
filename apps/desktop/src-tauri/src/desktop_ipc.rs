@@ -1,9 +1,7 @@
 use serde::{Deserialize, Serialize};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-// Kept at 1: the `theme` field and `theme_changed` event are additive and
-// tolerated by older peers, so no version bump (a bump hard-breaks mixed
-// extension/desktop versions during staggered rollouts).
+// Kept at 1: additive fields remain compatible with older desktop peers.
 pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -218,6 +216,25 @@ pub struct AccountUnlockData {
     pub vault_keys: Option<String>,
 }
 
+// The native host compiles this shared schema but never constructs desktop-side material.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BiometricUnlockMaterial {
+    pub account: AccountUnlockData,
+    pub device_key: String,
+    pub signature: String,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BiometricUnlockAllMaterial {
+    pub device_key: String,
+    pub signature: String,
+    pub accounts: Vec<AccountUnlockData>,
+    pub unlocked: Vec<String>,
+    pub failed: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum DesktopEventKind {
@@ -266,7 +283,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        read_frame, write_frame, DesktopEnvelope, DesktopEventKind, DesktopRequest, DesktopResponse,
+        read_frame, write_frame, AccountUnlockData, DesktopEnvelope, DesktopEventKind,
+        DesktopRequest, DesktopResponse, DESKTOP_PROTOCOL_VERSION,
     };
     use tokio::io::duplex;
 
@@ -274,7 +292,7 @@ mod tests {
     async fn frame_round_trip_preserves_payload() {
         let (mut writer, mut reader) = duplex(4096);
         let message = DesktopEnvelope {
-            protocol_version: Some(1),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: Some("req-1".to_string()),
             payload: DesktopRequest::GetDesktopItemsSnapshot {
                 account_ids: Some(vec!["account-1".to_string()]),
@@ -295,7 +313,7 @@ mod tests {
     #[test]
     fn open_desktop_app_intent_survives_envelope_deserialization() {
         // Exact wire shape the extension sends for the "new item" handoff.
-        let raw = r#"{"requestId":"desktop-1","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"create_item","url":"https://example.com/login"}"#;
+        let raw = r#"{"requestId":"desktop-1","protocolVersion":2,"type":"OPEN_DESKTOP_APP","intent":"create_item","url":"https://example.com/login"}"#;
         let decoded: DesktopEnvelope<DesktopRequest> =
             serde_json::from_str(raw).expect("envelope should deserialize");
 
@@ -313,7 +331,7 @@ mod tests {
     #[test]
     fn open_desktop_app_view_item_intent_survives_envelope_deserialization() {
         // Exact wire shape the extension sends for the "open in app" handoff.
-        let raw = r#"{"requestId":"desktop-2","protocolVersion":1,"type":"OPEN_DESKTOP_APP","intent":"view_item","itemId":"item-1","vaultId":"vault-1"}"#;
+        let raw = r#"{"requestId":"desktop-2","protocolVersion":2,"type":"OPEN_DESKTOP_APP","intent":"view_item","itemId":"item-1","vaultId":"vault-1"}"#;
         let decoded: DesktopEnvelope<DesktopRequest> =
             serde_json::from_str(raw).expect("envelope should deserialize");
 
@@ -331,7 +349,7 @@ mod tests {
     #[test]
     fn open_desktop_app_without_intent_still_deserializes() {
         // Older extensions send the bare request; it must keep working.
-        let raw = r#"{"protocolVersion":1,"type":"OPEN_DESKTOP_APP"}"#;
+        let raw = r#"{"protocolVersion":2,"type":"OPEN_DESKTOP_APP"}"#;
         let decoded: DesktopEnvelope<DesktopRequest> =
             serde_json::from_str(raw).expect("envelope should deserialize");
 
@@ -350,7 +368,7 @@ mod tests {
     async fn auth_token_request_round_trip_preserves_account_id_and_protocol_version() {
         let (mut writer, mut reader) = duplex(4096);
         let message = DesktopEnvelope {
-            protocol_version: Some(1),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: Some("req-auth".to_string()),
             payload: DesktopRequest::GetDesktopAuthToken {
                 account_id: "account-1".to_string(),
@@ -371,7 +389,7 @@ mod tests {
     async fn response_event_frame_round_trip_preserves_payload() {
         let (mut writer, mut reader) = duplex(4096);
         let message = DesktopEnvelope {
-            protocol_version: Some(1),
+            protocol_version: Some(DESKTOP_PROTOCOL_VERSION),
             request_id: None,
             payload: DesktopResponse::DesktopEvent {
                 event: DesktopEventKind::Unlock,
@@ -392,6 +410,68 @@ mod tests {
 
         assert_eq!(decoded, message);
         let serialized = serde_json::to_value(&decoded).expect("response should serialize");
-        assert_eq!(serialized["protocolVersion"], 1);
+        assert_eq!(serialized["protocolVersion"], DESKTOP_PROTOCOL_VERSION);
+    }
+
+    #[test]
+    fn biometric_unlock_wire_fixture_uses_desktop_protocol_version_one() {
+        let raw = r#"{"protocolVersion":1,"requestId":"unlock-1","type":"BIOMETRIC_UNLOCK_SUCCESS","accountId":"account-1","email":"person@example.com","encrypted_session":"encrypted-session","device_key":"device-key","signature":"signature","auth_token":"token","vault_keys":"[]"}"#;
+        let decoded: DesktopEnvelope<DesktopResponse> =
+            serde_json::from_str(raw).expect("the v1 biometric fixture should deserialize");
+
+        assert_eq!(DESKTOP_PROTOCOL_VERSION, 1);
+        assert_eq!(decoded.protocol_version, Some(1));
+        assert_eq!(
+            decoded.payload,
+            DesktopResponse::BiometricUnlockSuccess {
+                account_id: "account-1".to_string(),
+                email: "person@example.com".to_string(),
+                encrypted_session: "encrypted-session".to_string(),
+                device_key: "device-key".to_string(),
+                signature: "signature".to_string(),
+                auth_token: Some("token".to_string()),
+                vault_keys: Some("[]".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn biometric_unlock_wire_fixture_rejects_missing_material() {
+        let raw = r#"{"protocolVersion":1,"type":"BIOMETRIC_UNLOCK_SUCCESS","accountId":"account-1","email":"person@example.com","device_key":"device-key","signature":"signature"}"#;
+
+        assert!(serde_json::from_str::<DesktopEnvelope<DesktopResponse>>(raw).is_err());
+    }
+
+    #[test]
+    fn all_account_biometric_unlock_wire_fixture_preserves_each_account() {
+        let raw = r#"{"protocolVersion":1,"requestId":"unlock-all-1","type":"BIOMETRIC_UNLOCK_ALL_SUCCESS","device_key":"device-key","signature":"signature","accounts":[{"accountId":"account-1","email":"first@example.com","encrypted_session":"session-1"},{"accountId":"account-2","email":"second@example.com","encrypted_session":"session-2","auth_token":"token-2","vault_keys":"[]"}],"unlocked":["account-1","account-2"],"failed":[]}"#;
+        let decoded: DesktopEnvelope<DesktopResponse> =
+            serde_json::from_str(raw).expect("the v1 all-account fixture should deserialize");
+
+        assert_eq!(
+            decoded.payload,
+            DesktopResponse::BiometricUnlockAllSuccess {
+                device_key: "device-key".to_string(),
+                signature: "signature".to_string(),
+                accounts: vec![
+                    AccountUnlockData {
+                        account_id: "account-1".to_string(),
+                        email: "first@example.com".to_string(),
+                        encrypted_session: "session-1".to_string(),
+                        auth_token: None,
+                        vault_keys: None,
+                    },
+                    AccountUnlockData {
+                        account_id: "account-2".to_string(),
+                        email: "second@example.com".to_string(),
+                        encrypted_session: "session-2".to_string(),
+                        auth_token: Some("token-2".to_string()),
+                        vault_keys: Some("[]".to_string()),
+                    },
+                ],
+                unlocked: vec!["account-1".to_string(), "account-2".to_string()],
+                failed: Vec::new(),
+            }
+        );
     }
 }

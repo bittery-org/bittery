@@ -28,6 +28,16 @@ export interface TravelModeConfig {
 }
 
 /**
+ * How a caller may express a session expiry.
+ *
+ * An ISO string or `Date` is an absolute instant; a number is absolute when it looks like
+ * a millisecond epoch and a relative duration otherwise. `AccountStore` owns the single
+ * rule that resolves this into a timestamp — see `resolveStoredSessionExpiryTimestamp`
+ * there. The type lives here because it is part of the vocabulary, not of the resolution.
+ */
+export type SessionExpiryInput = string | Date | number;
+
+/**
  * Encrypted session data persisted to storage
  */
 export interface StoredSessionData {
@@ -61,11 +71,13 @@ export interface AccountMetadata {
 }
 
 /**
- * Active account configuration
- * - { type: "single", accountId: string } - A specific account is active
- * - null - No account is active (logged out)
+ * The active account pointer: an accountId, or `null` when logged out.
+ *
+ * Named rather than a bare `string | null` because an accountId is one of several
+ * bare-string identities in flight (email, userId, serverUrl, vaultId) and confusing
+ * them silently crosses accounts.
  */
-export type ActiveAccount = { type: "single"; accountId: string } | null;
+export type ActiveAccountId = string | null;
 
 /**
  * Platform types
@@ -114,5 +126,17 @@ export type BiometricErrorType =
 export interface BiometricAuthResult {
 	success: boolean;
 	error?: BiometricErrorType;
+	/**
+	 * Diagnostic detail, in English, for logs and bug reports — **not** display copy.
+	 * The UI branches on `error` and renders its own translated message.
+	 */
 	message?: string;
+	/**
+	 * Structured detail for `master_password_required`: how often re-entry is required.
+	 *
+	 * Storage publishes the number and never the sentence. Formatting "every 30 days" is
+	 * user-facing copy, and `CLAUDE.md` forbids storage from producing any — the UI owns
+	 * the plural rules and the translation.
+	 */
+	masterPasswordReentryPeriodMs?: number;
 }

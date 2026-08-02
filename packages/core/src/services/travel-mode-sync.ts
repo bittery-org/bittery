@@ -1,4 +1,4 @@
-import type { IStorageAdapter } from "@bittery/storage/adapter";
+import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { AccountResolver } from "./account-resolver";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
@@ -16,7 +16,7 @@ export interface TravelModeSyncRestoreOptions {
 
 export async function restoreAfterTravelModeDisabled(
 	accountId: string,
-	storage: IStorageAdapter,
+	storage: AccountStore,
 	coordinator: VaultRepositoryCoordinator,
 	{ rpcClient, accounts }: TravelModeSyncRestoreOptions,
 ): Promise<void> {
@@ -39,7 +39,8 @@ export async function restoreAfterTravelModeDisabled(
 export async function handleTravelModeSyncEvent(
 	event: TravelModeSyncEvent,
 	accountId: string,
-	storage: IStorageAdapter,
+	storage: AccountStore,
+	itemCache: ItemCache,
 	coordinator?: VaultRepositoryCoordinator,
 	restoreOptions?: TravelModeSyncRestoreOptions,
 ): Promise<void> {
@@ -47,7 +48,7 @@ export async function handleTravelModeSyncEvent(
 		return;
 	}
 
-	const enforcer = getTravelModeEnforcer(storage, coordinator);
+	const enforcer = getTravelModeEnforcer(storage, itemCache, coordinator);
 	const previousConfig = enforcer.getConfig(accountId);
 	const config = await enforcer.applySyncEventMetadata(
 		accountId,

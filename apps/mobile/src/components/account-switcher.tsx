@@ -1,3 +1,4 @@
+import { lockAllAccounts } from "@bittery/core/services/account-lifecycle";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import {
@@ -8,12 +9,12 @@ import {
 } from "heroui-native";
 import { Check, Lock, Plus, Settings, Trash2 } from "lucide-react-native";
 import { useState } from "react";
-import { Alert, Platform, Text, View } from "react-native";
+import { Alert, Text, View } from "react-native";
 import { withUniwind } from "uniwind";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
-import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../contexts/account-context";
+import { lifecycleDeps } from "../services/lifecycle";
 import { type AccountMetadata, storage } from "../services/storage";
 
 const StyledCheck = withUniwind(Check);
@@ -32,10 +33,7 @@ export function AccountSwitcher() {
 	const [switching, setSwitching] = useState(false);
 	const [isOpen, setIsOpen] = useState(false);
 	const handleAccountSwitch = async (account: AccountMetadata) => {
-		if (
-			activeAccountConfig?.type === "single" &&
-			account.accountId === activeAccountConfig.accountId
-		) {
+		if (activeAccountConfig && account.accountId === activeAccountConfig) {
 			setIsOpen(false);
 			return;
 		}
@@ -97,15 +95,10 @@ export function AccountSwitcher() {
 					text: m.mob_account_switcher_lock_dialog_confirm(),
 					style: "destructive",
 					onPress: async () => {
-						if (storage.lockAllAccounts) {
-							await storage.lockAllAccounts();
-						} else {
-							await storage.clearSession();
-						}
-
-						if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-							CredentialProvider.clearAllMasterUnlockKeys();
-						}
+						// Lock, not sign out: every in-memory master unlock key is dropped —
+						// the native autofill mirror first — but `session_data` stays, so
+						// quick-unlock still works.
+						await lockAllAccounts(lifecycleDeps);
 
 						setIsOpen(false);
 						router.replace("/(auth)/unlock");
@@ -156,8 +149,8 @@ export function AccountSwitcher() {
 					<View className="pb-4">
 						{allAccounts.map((account) => {
 							const isActive =
-								activeAccountConfig?.type === "single" &&
-								account.accountId === activeAccountConfig.accountId;
+								activeAccountConfig &&
+								account.accountId === activeAccountConfig;
 							return (
 								<PressableFeedback
 									key={account.accountId}

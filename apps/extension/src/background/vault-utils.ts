@@ -6,7 +6,7 @@
 import type { MultiAccountItem } from "@bittery/core/services/item-service";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
-import { storage } from "../lib/storage";
+import { itemCache, storage } from "../lib/storage";
 import { core } from "./core-instance";
 import { desktopClient } from "./desktop-client";
 import { parseDesktopSnapshotItem } from "./desktop-snapshot";
@@ -67,8 +67,8 @@ export async function mergeDesktopAndLocalItemSources(
 
 async function getDesktopTargetAccountIds(): Promise<string[]> {
 	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return [activeAccount.accountId];
+	if (activeAccount) {
+		return [activeAccount];
 	}
 
 	return [];
@@ -77,12 +77,12 @@ async function getDesktopTargetAccountIds(): Promise<string[]> {
 async function filterItemsForTravelMode(
 	items: MultiAccountItem[],
 ): Promise<MultiAccountItem[]> {
-	const enforcer = getTravelModeEnforcer(storage);
+	const enforcer = getTravelModeEnforcer(storage, itemCache);
 	const activeAccount = await storage.getActiveAccount();
 
-	if (activeAccount?.type === "single") {
-		await enforcer.hydrateFromStorage(activeAccount.accountId);
-		return enforcer.filterItems(activeAccount.accountId, items);
+	if (activeAccount) {
+		await enforcer.hydrateFromStorage(activeAccount);
+		return enforcer.filterItems(activeAccount, items);
 	}
 
 	// No single active account means we cannot determine which account's travel

@@ -87,7 +87,7 @@ export async function hydrateDesktopAccountMaterial(
 	}
 
 	try {
-		await storage.tryRestoreSession?.(false, accountId);
+		await storage.tryRestoreSession(false, accountId);
 	} catch (error) {
 		console.warn(
 			`[desktop-key-material] Session restore failed for ${normalizedEmail}:`,

@@ -6,6 +6,7 @@ use super::{
     RotationVaultInput, VaultKeyRotationInput, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE,
 };
 use crate::error::AppErrorCode;
+use crate::repo::common::hash_token;
 use crate::services::session_control::load_session_revocation;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
@@ -404,14 +405,14 @@ async fn seed_team_invitation(
     expires_at: OffsetDateTime,
 ) {
     query(
-			"INSERT INTO team_invitation (id, team_id, email, role, invited_by_id, token, pending_vault_keys, expires_at) VALUES ($1, $2, $3, $4::team_role, $5, $6, $7, $8)",
+			"INSERT INTO team_invitation (id, team_id, email, role, invited_by_id, token_hash, pending_vault_keys, expires_at) VALUES ($1, $2, $3, $4::team_role, $5, $6, $7, $8)",
 		)
 		.bind(invitation_id)
 		.bind(team_id)
 		.bind(email)
 		.bind(role)
 		.bind(invited_by_id)
-		.bind(token)
+		.bind(hash_token(token))
 		.bind(pending_vault_keys)
 		.bind(expires_at)
 		.execute(pool)
@@ -873,10 +874,13 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             )
             .await;
         assert_eq!(pending_response.status, StatusCode::OK);
+        // The pending list addresses the invitation by id: the raw token is no
+        // longer readable back out of the database.
         assert_eq!(
-            pending_response.body["result"]["Ok"][0]["token"],
-            json!(invitation_token.clone())
+            pending_response.body["result"]["Ok"][0]["id"],
+            json!(invitation_id.clone())
         );
+        assert!(pending_response.body["result"]["Ok"][0]["token"].is_null());
 
         let public_lookup = app
             .rpc_call(
@@ -970,7 +974,14 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             )
             .await;
         assert_eq!(resend_response.status, StatusCode::OK);
-        assert_eq!(resend_response.body["result"]["Ok"]["success"], json!(true));
+        assert_eq!(
+            resend_response.body["result"]["Ok"]["invitationId"],
+            json!(invitation_id.clone())
+        );
+        assert!(
+            resend_response.body["result"]["Ok"]["token"].is_string(),
+            "resend must hand back the rotated invite token"
+        );
         let resent_expires_at = query_scalar::<_, OffsetDateTime>(
             "SELECT expires_at FROM team_invitation WHERE id = $1",
         )
@@ -1312,6 +1323,402 @@ async fn team_vaults_members_and_leave_rotation_queries() {
             .expect("members should be an array")
             .iter()
             .all(|member| member["userId"] != json!(fixture.member_user_id.clone())));
+    })
+    .await;
+}
+
+/// Finding 5c: `team_invitation.token_hash` must never hold the invite token
+/// itself. The raw token is returned once to the inviter (for the emailed link)
+/// and is still redeemable, but a database read discloses only a digest.
+#[tokio::test]
+async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
+    with_rpc_test_app("team_invitation_token_hashed", |app| async move {
+        let fixture = build_team_router_fixture(&app.pool).await;
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let owner_headers = authenticated_json_headers(&owner_session.token);
+
+        let send_response = app
+            .rpc_call(
+                "team.invitations.send",
+                json!([{
+                    "teamId": fixture.team_id,
+                    "email": "team-accept@example.com"
+                }]),
+                owner_headers,
+            )
+            .await;
+        assert_eq!(send_response.status, StatusCode::OK);
+        let invitation_id = send_response.body["result"]["Ok"]["invitationId"]
+            .as_str()
+            .expect("invitation id should exist")
+            .to_string();
+        let token = send_response.body["result"]["Ok"]["token"]
+            .as_str()
+            .expect("invitation token should exist")
+            .to_string();
+
+        let stored =
+            query_scalar::<_, String>("SELECT token_hash FROM team_invitation WHERE id = $1")
+                .bind(&invitation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("invitation should load");
+        assert_ne!(stored, token, "the raw invite token must not be persisted");
+        assert_eq!(stored, hash_token(&token));
+        assert_eq!(stored.len(), 64);
+
+        // The stored digest is not a bearer token: replaying it must not resolve.
+        let replayed = app
+            .rpc_call(
+                "team.invitations.getByToken",
+                json!([{ "token": stored }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(&replayed.body, "BAD_REQUEST", "Invalid token");
+
+        // A well-formed but wrong token still fails.
+        let wrong = app
+            .rpc_call(
+                "team.invitations.getByToken",
+                json!([{ "token": "0123456789abcdefghijklmnopqrstuv" }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(&wrong.body, "NOT_FOUND", "Invitation not found");
+
+        // The raw token from the emailed link still resolves and accepts.
+        let lookup = app
+            .rpc_call(
+                "team.invitations.getByToken",
+                json!([{ "token": token.clone() }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(lookup.body["result"]["Ok"]["status"], json!("pending"));
+
+        let accept_session = app.issue_session(&fixture.accept_user_id).await;
+        let accepted = app
+            .rpc_call(
+                "team.invitations.accept",
+                json!([{ "token": token }]),
+                authenticated_json_headers(&accept_session.token),
+            )
+            .await;
+        assert_eq!(
+            accepted.body["result"]["Ok"]["teamId"],
+            json!(fixture.team_id.clone())
+        );
+    })
+    .await;
+}
+
+/// Regression: resending must mint a brand new token. Only the digest of the
+/// original token is stored, so reviving the row without rotating leaves a
+/// `pending` invitation whose link nobody can produce. The caller therefore gets
+/// a fresh raw token back, and the previous one must stop working.
+#[tokio::test]
+async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
+    with_rpc_test_app("team_invitation_resend_rotates", |app| async move {
+        let fixture = build_team_router_fixture(&app.pool).await;
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let owner_headers = authenticated_json_headers(&owner_session.token);
+
+        let send_response = app
+            .rpc_call(
+                "team.invitations.send",
+                json!([{
+                    "teamId": fixture.team_id,
+                    "email": "team-accept@example.com"
+                }]),
+                owner_headers.clone(),
+            )
+            .await;
+        assert_eq!(send_response.status, StatusCode::OK);
+        let invitation_id = send_response.body["result"]["Ok"]["invitationId"]
+            .as_str()
+            .expect("invitation id should exist")
+            .to_string();
+        let original_token = send_response.body["result"]["Ok"]["token"]
+            .as_str()
+            .expect("invitation token should exist")
+            .to_string();
+
+        let hash_before =
+            query_scalar::<_, String>("SELECT token_hash FROM team_invitation WHERE id = $1")
+                .bind(&invitation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("invitation should load");
+
+        let resend_response = app
+            .rpc_call(
+                "team.invitations.resend",
+                json!([{ "invitationId": invitation_id.clone() }]),
+                owner_headers,
+            )
+            .await;
+        assert_eq!(resend_response.status, StatusCode::OK);
+        assert_eq!(
+            resend_response.body["result"]["Ok"]["invitationId"],
+            json!(invitation_id.clone())
+        );
+        let rotated_token = resend_response.body["result"]["Ok"]["token"]
+            .as_str()
+            .expect("resend should return a fresh invitation token")
+            .to_string();
+        assert_ne!(
+            rotated_token, original_token,
+            "resend must not hand back the token it was given at creation time"
+        );
+
+        let hash_after =
+            query_scalar::<_, String>("SELECT token_hash FROM team_invitation WHERE id = $1")
+                .bind(&invitation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("invitation should load");
+        assert_ne!(
+            hash_after, hash_before,
+            "resend must rotate the stored token digest"
+        );
+        assert_eq!(hash_after, hash_token(&rotated_token));
+        assert_ne!(
+            hash_after, rotated_token,
+            "the raw invite token must not be persisted"
+        );
+
+        // The link handed out before the resend is dead.
+        let stale_lookup = app
+            .rpc_call(
+                "team.invitations.getByToken",
+                json!([{ "token": original_token.clone() }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(&stale_lookup.body, "NOT_FOUND", "Invitation not found");
+
+        let accept_session = app.issue_session(&fixture.accept_user_id).await;
+        let stale_accept = app
+            .rpc_call(
+                "team.invitations.accept",
+                json!([{ "token": original_token }]),
+                authenticated_json_headers(&accept_session.token),
+            )
+            .await;
+        assert_handler_error(
+            &stale_accept.body,
+            "NOT_FOUND",
+            "Invitation not found or already used",
+        );
+
+        // The link built from the resend response works end to end.
+        let fresh_lookup = app
+            .rpc_call(
+                "team.invitations.getByToken",
+                json!([{ "token": rotated_token.clone() }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_eq!(
+            fresh_lookup.body["result"]["Ok"]["status"],
+            json!("pending")
+        );
+
+        let accepted = app
+            .rpc_call(
+                "team.invitations.accept",
+                json!([{ "token": rotated_token }]),
+                authenticated_json_headers(&accept_session.token),
+            )
+            .await;
+        assert_eq!(
+            accepted.body["result"]["Ok"]["teamId"],
+            json!(fixture.team_id.clone())
+        );
+    })
+    .await;
+}
+
+/// Regression: an invitation that already lapsed is the main reason an admin hits
+/// resend. It must come back as `pending` with a token the admin can actually
+/// hand out, not with the unreachable digest it was stored with.
+#[tokio::test]
+async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() {
+    with_rpc_test_app("team_invitation_resend_expired", |app| async move {
+        let fixture = build_team_router_fixture(&app.pool).await;
+        let invitation_id = "team_invitation_resend_expired";
+        let original_token = "ZXCVBNMASDFGHJKLQWERTYUIOP123456";
+        seed_team_invitation(
+            &app.pool,
+            invitation_id,
+            &fixture.team_id,
+            "team-accept@example.com",
+            "member",
+            &fixture.owner_user_id,
+            original_token,
+            None,
+            OffsetDateTime::now_utc() - Duration::days(1),
+        )
+        .await;
+        query("UPDATE team_invitation SET status = 'expired' WHERE id = $1")
+            .bind(invitation_id)
+            .execute(&app.pool)
+            .await
+            .expect("invitation should expire");
+
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let resend_response = app
+            .rpc_call(
+                "team.invitations.resend",
+                json!([{ "invitationId": invitation_id }]),
+                authenticated_json_headers(&owner_session.token),
+            )
+            .await;
+        assert_eq!(resend_response.status, StatusCode::OK);
+        let rotated_token = resend_response.body["result"]["Ok"]["token"]
+            .as_str()
+            .expect("resend should return a fresh invitation token")
+            .to_string();
+        assert_ne!(rotated_token, original_token);
+
+        let stored =
+            query_scalar::<_, String>("SELECT token_hash FROM team_invitation WHERE id = $1")
+                .bind(invitation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("invitation should load");
+        assert_eq!(stored, hash_token(&rotated_token));
+        assert_ne!(stored, hash_token(original_token));
+
+        let stale_lookup = app
+            .rpc_call(
+                "team.invitations.getByToken",
+                json!([{ "token": original_token }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(&stale_lookup.body, "NOT_FOUND", "Invitation not found");
+
+        let accept_session = app.issue_session(&fixture.accept_user_id).await;
+        let accepted = app
+            .rpc_call(
+                "team.invitations.accept",
+                json!([{ "token": rotated_token }]),
+                authenticated_json_headers(&accept_session.token),
+            )
+            .await;
+        assert_eq!(
+            accepted.body["result"]["Ok"]["teamId"],
+            json!(fixture.team_id.clone())
+        );
+    })
+    .await;
+}
+
+/// Finding 5c follow-on: the in-app pending list can no longer hand back the raw
+/// token, so accepting/declining from it addresses the invitation by id.
+#[tokio::test]
+async fn team_invitation_accept_and_decline_by_id_paths() {
+    with_rpc_test_app("team_accept_decline_by_id", |app| async move {
+        let fixture = build_team_router_fixture(&app.pool).await;
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let owner_headers = authenticated_json_headers(&owner_session.token);
+
+        let accept_invitation = app
+            .rpc_call(
+                "team.invitations.send",
+                json!([{
+                    "teamId": fixture.team_id,
+                    "email": "team-accept@example.com"
+                }]),
+                owner_headers.clone(),
+            )
+            .await;
+        let accept_invitation_id = accept_invitation.body["result"]["Ok"]["invitationId"]
+            .as_str()
+            .expect("accept invitation id should exist")
+            .to_string();
+
+        // Someone else's invitation id is not a credential.
+        let wrong_user_session = app.issue_session(&fixture.no_team_user_id).await;
+        let wrong_user_accept = app
+            .rpc_call(
+                "team.invitations.acceptById",
+                json!([{ "invitationId": accept_invitation_id.clone() }]),
+                authenticated_json_headers(&wrong_user_session.token),
+            )
+            .await;
+        assert_handler_error(
+            &wrong_user_accept.body,
+            "FORBIDDEN",
+            "This invitation is not for you",
+        );
+
+        let unknown_accept = app
+            .rpc_call(
+                "team.invitations.acceptById",
+                json!([{ "invitationId": "team_invitation_missing" }]),
+                authenticated_json_headers(&wrong_user_session.token),
+            )
+            .await;
+        assert_handler_error(
+            &unknown_accept.body,
+            "NOT_FOUND",
+            "Invitation not found or already used",
+        );
+
+        let accept_user_session = app.issue_session(&fixture.accept_user_id).await;
+        let accepted = app
+            .rpc_call(
+                "team.invitations.acceptById",
+                json!([{ "invitationId": accept_invitation_id.clone() }]),
+                authenticated_json_headers(&accept_user_session.token),
+            )
+            .await;
+        assert_eq!(
+            accepted.body["result"]["Ok"]["teamId"],
+            json!(fixture.team_id.clone())
+        );
+        let accepted_status =
+            query_scalar::<_, String>("SELECT status::text FROM team_invitation WHERE id = $1")
+                .bind(&accept_invitation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("accepted invitation status should load");
+        assert_eq!(accepted_status, "accepted");
+
+        let decline_invitation = app
+            .rpc_call(
+                "team.invitations.send",
+                json!([{
+                    "teamId": fixture.team_id,
+                    "email": "team-decline@example.com"
+                }]),
+                owner_headers,
+            )
+            .await;
+        let decline_invitation_id = decline_invitation.body["result"]["Ok"]["invitationId"]
+            .as_str()
+            .expect("decline invitation id should exist")
+            .to_string();
+
+        let decline_user_session = app.issue_session(&fixture.decline_user_id).await;
+        let declined = app
+            .rpc_call(
+                "team.invitations.declineById",
+                json!([{ "invitationId": decline_invitation_id.clone() }]),
+                authenticated_json_headers(&decline_user_session.token),
+            )
+            .await;
+        assert_eq!(declined.body["result"]["Ok"]["success"], json!(true));
+        let declined_status =
+            query_scalar::<_, String>("SELECT status::text FROM team_invitation WHERE id = $1")
+                .bind(&decline_invitation_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("declined invitation status should load");
+        assert_eq!(declined_status, "declined");
     })
     .await;
 }

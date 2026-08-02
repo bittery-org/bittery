@@ -1,4 +1,5 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import {
 	AccountSwitcher,
@@ -11,8 +12,10 @@ import {
 import { IconChevronDown } from "@bittery/ui/icons";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { lockVaultThroughWorker } from "@/lib/lock-vault";
 import { createExtensionInvalidator } from "@/lib/query-invalidation";
+import { useSessionStatus } from "@/lib/session-status";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -27,11 +30,11 @@ export function ExtensionAccountSwitcher() {
 		unlockedAccountIds,
 		refresh,
 		switchAccount,
-		lockAllAccounts,
 	} = useAccountSwitcher();
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { m } = useI18n();
+	const [isLockingAll, setIsLockingAll] = useState(false);
 	const invalidator = useMemo(
 		() => createExtensionInvalidator(queryClient),
 		[queryClient],
@@ -54,6 +57,11 @@ export function ExtensionAccountSwitcher() {
 		staleTime: 2000,
 	});
 
+	const sessionStatus = useSessionStatus();
+	// Shown until the worker says a desktop owns the lock, so the button does not
+	// flicker on first paint; the refusal toast covers the remaining race window.
+	const showLockAll = sessionStatus.data?.canLockLocally !== false;
+
 	const accountsData = accounts;
 	const localUnlockedAccountIds = unlockedAccountIds;
 
@@ -68,8 +76,7 @@ export function ExtensionAccountSwitcher() {
 		new Set([...localUnlockedAccountIds, ...desktopUnlockedAccountIds]),
 	);
 
-	const activeAccountId =
-		activeSelection?.type === "single" ? activeSelection.accountId : null;
+	const activeAccountId = activeSelection ?? null;
 	// Update team names for accounts that don't have them
 	useEffect(() => {
 		const updateMissingTeamNames = async () => {
@@ -119,10 +126,7 @@ export function ExtensionAccountSwitcher() {
 		if (!account) return;
 
 		try {
-			await switchAccount.mutateAsync({
-				type: "single",
-				accountId,
-			});
+			await switchAccount.mutateAsync(accountId);
 
 			// Check if desktop is available and has this account unlocked
 			const desktopStatus = await chrome.runtime.sendMessage({
@@ -162,14 +166,30 @@ export function ExtensionAccountSwitcher() {
 	};
 
 	const handleLockAll = async () => {
-		try {
-			await lockAllAccounts.mutateAsync();
-			navigate({ to: "/unlock" });
-			toast.success(m.ext_account_switcher_toast_all_locked());
-		} catch (error) {
-			console.error("Failed to lock all accounts:", error);
-			toast.error(m.ext_account_switcher_toast_lock_failed());
+		if (isLockingAll) return;
+		setIsLockingAll(true);
+		// A refused lock resolves, it does not reject — branch on the decision, never on catch.
+		const decision = await lockVaultThroughWorker();
+		setIsLockingAll(false);
+
+		if (!decision.ok) {
+			toast.error(
+				decision.code === "desktop_owns_lock"
+					? m.ext_lock_refused_desktop_owns()
+					: m.ext_account_switcher_toast_lock_failed(),
+			);
+			return;
 		}
+
+		queryClient.clear();
+		// The popup keeps its own per-context AccountStore view (storage CONTEXT.md §4.5).
+		await peekAccountSessionManager()
+			?.refresh()
+			.catch((error: unknown) => {
+				console.error("Failed to refresh account session after lock:", error);
+			});
+		navigate({ to: "/unlock" });
+		toast.success(m.ext_account_switcher_toast_all_locked());
 	};
 
 	// Get active account for trigger display
@@ -202,7 +222,7 @@ export function ExtensionAccountSwitcher() {
 			variant="ghost"
 			size="sm"
 			className="gap-2"
-			disabled={switchAccount.isPending}
+			disabled={switchAccount.isPending || isLockingAll}
 		>
 			{activeAccount ? (
 				<>
@@ -239,9 +259,9 @@ export function ExtensionAccountSwitcher() {
 			onAddAccount={handleAddAccount}
 			showAddAccount={!desktopStatus.data?.available}
 			onLockAll={handleLockAll}
-			showLockAll={!desktopStatus.data?.available}
+			showLockAll={showLockAll}
 			showSetupAnotherDevice={!desktopStatus.data?.available}
-			isLoading={switchAccount.isPending}
+			isLoading={switchAccount.isPending || isLockingAll}
 			trigger={trigger}
 		/>
 	);

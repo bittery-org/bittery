@@ -34,7 +34,8 @@
 		"./pricing": "./src/pricing.ts",
 		"./releases": "./src/releases.ts",
 		"./rust-rpc-client": "./src/rust-rpc-client.ts",
-		"./vault-key-crypto": "./src/vault-key-crypto.ts"
+		"./vault-key-crypto": "./src/vault-key-crypto.ts",
+		"./vault-mapping": "./src/vault-mapping.ts"
 	},
 	"dependencies": {
 		"@bittery/device": "workspace:*",

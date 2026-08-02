@@ -1,10 +1,10 @@
 import {
 	AccountResolver,
 	createStoredAccountRpcClient,
-	getOrCreateVaultRepositoryCoordinator,
-	handleTravelModeSyncEvent,
-	type RpcVaultClient,
-} from "@bittery/core";
+} from "@bittery/core/services/account-resolver";
+import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
+import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
+import type { RpcVaultClient } from "@bittery/core/services/vault-service";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
@@ -31,10 +31,17 @@ import {
 	getMobileSyncDb,
 	getOrCreateMobileSyncClientId,
 } from "../lib/sync-client-id";
-import { storage } from "../services/storage";
+import { itemCache, storage } from "../services/storage";
 
+/**
+ * `accountId` is deliberately non-nullable.
+ *
+ * It becomes `SyncSource.itemCacheAccountId`, and every `ItemCache` method now requires an
+ * `accountId` argument — there is no account-less collection to fall back to. Sync is simply
+ * not enabled until a real account is resolved.
+ */
 interface SyncConnectionContext {
-	accountId: string | null;
+	accountId: string;
 	serverUrl: string;
 }
 
@@ -98,8 +105,8 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
 	]);
 
 	const candidateIds: string[] = [];
-	if (activeAccount?.type === "single") {
-		candidateIds.push(activeAccount.accountId);
+	if (activeAccount) {
+		candidateIds.push(activeAccount);
 	}
 	for (const account of accounts) {
 		if (!candidateIds.includes(account.accountId)) {
@@ -117,15 +124,8 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
 		}
 	}
 
-	// Backward-compatible fallback for legacy/global single-account data.
-	const [fallbackToken, fallbackUrl] = await Promise.all([
-		storage.getAuthToken(),
-		storage.getServerUrl(),
-	]);
-	if (fallbackToken && fallbackUrl) {
-		return { accountId: null, serverUrl: fallbackUrl };
-	}
-
+	// No account-less fallback: a context without an accountId could not name an
+	// item-cache collection anyway.
 	return null;
 }
 
@@ -215,7 +215,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const vaultCoordinator = useMemo(
-		() => getOrCreateVaultRepositoryCoordinator(crypto, storage),
+		() => getOrCreateVaultRepositoryCoordinator(crypto, storage, itemCache),
 		[],
 	);
 
@@ -240,6 +240,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				event,
 				syncAccountId,
 				storage,
+				itemCache,
 				vaultCoordinator,
 				{
 					rpcClient: rpcClient as unknown as RpcVaultClient,
@@ -256,7 +257,8 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		clientId,
 		queryClient,
 		storage: syncStorage,
-		enabled: enabled && isInitialized && !!serverUrl && !!clientId,
+		enabled:
+			enabled && isInitialized && !!serverUrl && !!clientId && !!syncAccountId,
 		realtimeEnabled: true,
 		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountId: syncAccountId,

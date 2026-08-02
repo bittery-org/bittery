@@ -322,4 +322,146 @@ mod tests {
         let result = client.derive_safe_private_key("ZZZZ", "password123", None);
         assert!(result.is_err());
     }
+
+    /// Known-answer tests against RFC 5054 Appendix B (and, for the session key
+    /// and proofs, RFC 2945 section 3). See `srp6a::test_vectors` for the exact
+    /// provenance of every constant used here.
+    ///
+    /// These matter because the roundtrip tests above only prove that the
+    /// client and the server agree with each other; they would keep passing if
+    /// a bignum or padding regression moved both sides in the same direction.
+    mod rfc_vectors {
+        use super::*;
+        use crate::srp6a::test_vectors as v;
+
+        fn client() -> SrpClient {
+            SrpClient::new(HashAlgorithm::Sha1, PrimeGroup::G1024)
+        }
+
+        #[test]
+        fn rfc5054_private_key_x_matches_vector() {
+            let x = client()
+                .derive_private_key(v::SALT, v::USERNAME, v::PASSWORD)
+                .unwrap();
+            assert_eq!(x, v::X);
+        }
+
+        #[test]
+        fn rfc5054_verifier_matches_vector() {
+            let verifier = client().derive_verifier(v::X).unwrap();
+            assert_eq!(verifier, v::VERIFIER);
+        }
+
+        #[test]
+        fn rfc5054_multiplier_k_matches_vector() {
+            let client = client();
+            // k = H(N, PAD(g))
+            let padded_g = client.g.pad(client.hex_length);
+            let k = client.hash_values(&[&client.n, &padded_g]);
+            assert_eq!(k.to_hex(), v::K_MULTIPLIER);
+        }
+
+        #[test]
+        fn rfc5054_client_public_ephemeral_matches_vector() {
+            let client = client();
+            let a = SrpInt::from_hex(v::CLIENT_SECRET).unwrap();
+            // A = g^a mod N
+            let big_a = client.g.mod_pow(&a, &client.n);
+            assert_eq!(big_a.to_hex(), v::CLIENT_PUBLIC);
+        }
+
+        #[test]
+        fn rfc5054_scrambling_parameter_u_matches_vector() {
+            let client = client();
+            let big_a = SrpInt::from_hex(v::CLIENT_PUBLIC).unwrap();
+            let big_b = SrpInt::from_hex(v::SERVER_PUBLIC).unwrap();
+            // u = H(PAD(A), PAD(B))
+            let u =
+                client.hash_values(&[&big_a.pad(client.hex_length), &big_b.pad(client.hex_length)]);
+            assert_eq!(u.to_hex(), v::U);
+        }
+
+        #[test]
+        fn rfc5054_session_key_is_hash_of_the_premaster_secret() {
+            // Ties the session-key vector back to RFC 5054's published premaster
+            // secret, so `SESSION_KEY` is not an unanchored constant: it is
+            // exactly H(PAD(S)) for the RFC's S.
+            let client = client();
+            let big_s = SrpInt::from_hex(v::PREMASTER_SECRET).unwrap();
+            assert_eq!(client.hash_values(&[&big_s]).to_hex(), v::SESSION_KEY);
+        }
+
+        #[test]
+        fn rfc5054_client_session_matches_vectors() {
+            // Pins the client-side S = (B - k*g^x)^(a + u*x) mod N, because K is
+            // H(PAD(S)) and the previous test anchors K to the RFC's premaster
+            // secret.
+            let session = client()
+                .derive_session(
+                    v::CLIENT_SECRET,
+                    v::SERVER_PUBLIC,
+                    v::SALT,
+                    v::USERNAME,
+                    v::X,
+                )
+                .unwrap();
+
+            assert_eq!(session.key, v::SESSION_KEY);
+            assert_eq!(session.proof, v::CLIENT_PROOF);
+        }
+
+        #[test]
+        fn rfc5054_verify_session_accepts_vector_server_proof() {
+            let session = Session {
+                key: v::SESSION_KEY.to_string(),
+                proof: v::CLIENT_PROOF.to_string(),
+            };
+            client()
+                .verify_session(v::CLIENT_PUBLIC, &session, v::SERVER_PROOF)
+                .expect("RFC vector server proof must verify");
+        }
+
+        #[test]
+        fn rfc5054_verify_session_rejects_flipped_server_proof() {
+            let session = Session {
+                key: v::SESSION_KEY.to_string(),
+                proof: v::CLIENT_PROOF.to_string(),
+            };
+            let mut tampered = v::SERVER_PROOF.to_string();
+            tampered.replace_range(0..1, "c"); // 'b' -> 'c'
+            let result = client().verify_session(v::CLIENT_PUBLIC, &session, &tampered);
+            assert!(matches!(result, Err(CryptoError::InvalidSessionProof)));
+        }
+
+        #[test]
+        fn k_requires_zero_padded_g() {
+            // g = 2 encodes as a single byte, but k = H(N, PAD(g)) hashes it as
+            // a full modulus-width value. Dropping the pad silently changes k
+            // (and therefore B, S and every proof), so assert both directions.
+            let client = client();
+            let unpadded_g = SrpInt::from_hex("02").unwrap();
+            assert_eq!(unpadded_g.to_hex(), "02");
+
+            let with_pad = client.hash_values(&[&client.n, &client.g.pad(client.hex_length)]);
+            let without_pad = client.hash_values(&[&client.n, &unpadded_g]);
+
+            assert_eq!(with_pad.to_hex(), v::K_MULTIPLIER);
+            assert_ne!(without_pad.to_hex(), v::K_MULTIPLIER);
+        }
+
+        #[test]
+        fn hash_output_keeps_its_leading_zero_byte() {
+            // The RFC-anchored session key starts with a 0x00 byte. `to_hex`
+            // must keep it, otherwise the 20-byte K fed into M1/M2 would shrink
+            // to 19 bytes and both proofs would change.
+            let client = client();
+            let big_s = SrpInt::from_hex(v::PREMASTER_SECRET).unwrap();
+            let big_k = client.hash_values(&[&big_s]);
+
+            let hex = big_k.to_hex();
+            assert_eq!(hex.len(), 40);
+            assert!(hex.starts_with("01"));
+            assert_eq!(hex::decode(&hex).unwrap().len(), 20);
+        }
+    }
 }

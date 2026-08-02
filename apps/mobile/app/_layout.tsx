@@ -25,7 +25,7 @@ import { useCredentialProviderSync } from "../src/hooks/use-credential-provider-
 import { RpcProvider } from "../src/lib/rpc";
 import { I18nProvider } from "../src/providers/i18n-provider";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
-import { storage } from "../src/services/storage";
+import { initializeStorage } from "../src/services/storage";
 import { loadThemePreference } from "../src/services/theme-storage";
 
 // Initial theme will be loaded from storage during app initialization
@@ -90,8 +90,9 @@ export default function RootLayout() {
 	useEffect(() => {
 		async function prepare() {
 			try {
-				// Initialize storage adapter (loads Expo modules)
-				await storage.initialize();
+				// Both stores: opens the sqlite database and the secure store behind the
+				// two ports, and asserts the platform port honours the tier table.
+				await initializeStorage();
 
 				// Load and apply saved theme preference
 				const savedTheme = await loadThemePreference();
