@@ -6,13 +6,10 @@ use time::{Duration, OffsetDateTime};
 use crate::{
     db::models::{DbRecoveryVerificationRow, DbShareEmailVerificationRow, DbSignupVerificationRow},
     error::AppError,
-    repo::common::generate_resource_id,
-    services::{
-        rate_limit::{
-            self, recovery_verify_lock_duration, recovery_verify_max_attempts,
-            signup_verify_lock_duration, signup_verify_max_attempts, RateLimiter,
-        },
-        session::hash_token,
+    repo::common::{generate_resource_id, hash_token},
+    services::rate_limit::{
+        self, recovery_verify_lock_duration, recovery_verify_max_attempts,
+        signup_verify_lock_duration, signup_verify_max_attempts, RateLimiter,
     },
 };
 

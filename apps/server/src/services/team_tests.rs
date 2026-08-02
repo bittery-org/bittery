@@ -6,7 +6,7 @@ use super::{
     RotationVaultInput, VaultKeyRotationInput, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE,
 };
 use crate::error::AppErrorCode;
-use crate::services::session::hash_token;
+use crate::repo::common::hash_token;
 use crate::services::session_control::load_session_revocation;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,

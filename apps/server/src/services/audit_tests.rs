@@ -8,7 +8,7 @@ use time::{macros::datetime, OffsetDateTime};
 use super::*;
 use crate::config::bittery_mode;
 use crate::error::AppErrorCode;
-use crate::services::session::hash_token;
+use crate::repo::common::hash_token;
 use crate::services::team_billing::team_management_enabled;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,

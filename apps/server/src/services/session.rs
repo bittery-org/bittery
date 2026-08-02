@@ -13,16 +13,12 @@ use rand::rngs::SysRng;
 use rand::{random, Rng};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-use sqlx::{query, query_as, query_scalar, PgPool};
+use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
 use std::sync::LazyLock;
 use time::{format_description::well_known::Rfc3339, Duration, OffsetDateTime};
 use ts_rs::TS;
 
-use crate::{
-    db::{self, models::*},
-    error::AppError,
-};
+use crate::{db, error::AppError, repo::common::hash_token};
 
 #[derive(Clone, Debug, Default)]
 pub struct RequestMetadata {
@@ -41,6 +37,25 @@ pub struct VerifiedSession {
     pub expires_at: OffsetDateTime,
     pub platform: String,
     pub client_id: Option<String>,
+}
+
+#[derive(Clone, Debug, FromRow)]
+struct DbSessionRecord {
+    id: String,
+    expires_at: OffsetDateTime,
+    created_at: OffsetDateTime,
+    last_active_at: OffsetDateTime,
+    user_id: String,
+    ip_address: Option<String>,
+    user_agent: Option<String>,
+    device_name: Option<String>,
+    platform: Option<String>,
+    client_id: Option<String>,
+    device_info: Option<String>,
+    browser_name: Option<String>,
+    browser_version: Option<String>,
+    os_name: Option<String>,
+    os_version: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -1251,11 +1266,6 @@ pub(crate) fn generate_opaque_session_token() -> String {
     // system RNG can never yield a predictable session token.
     UnwrapErr(SysRng).fill_bytes(&mut bytes);
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
-}
-
-pub(crate) fn hash_token(token: &str) -> String {
-    let digest = Sha256::digest(token.as_bytes());
-    hex::encode(digest)
 }
 
 pub(crate) fn format_rfc3339(value: OffsetDateTime) -> String {

@@ -4,8 +4,7 @@ use crate::db::models::{
     DbPublicShareLinkRow, DbShareAccessLogRow, DbShareLinkAllowedEmailRow, DbShareLinkRow,
 };
 use crate::error::AppError;
-use crate::repo::common::generate_resource_id;
-use crate::services::session::hash_token;
+use crate::repo::common::{generate_resource_id, hash_token};
 
 pub async fn load_share_links_for_item(
     pool: &PgPool,

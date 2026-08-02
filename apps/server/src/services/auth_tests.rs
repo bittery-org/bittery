@@ -16,11 +16,11 @@ use super::{
     signup_team_name, validate_hex_string, validate_login_attempt_id, validate_resource_id,
     validate_token,
 };
-use crate::services::session::{hash_token, now_utc};
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
     seed_vault_key, with_raw_test_db, with_rpc_test_app, RpcTestApp,
 };
+use crate::{repo::common::hash_token, services::session::now_utc};
 use time::{Duration, OffsetDateTime};
 
 const TEST_SRP_ITERATIONS: u32 = 1_000;

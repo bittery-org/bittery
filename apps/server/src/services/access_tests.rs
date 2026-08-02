@@ -5,7 +5,7 @@ use time::{Duration, OffsetDateTime};
 
 use super::*;
 use crate::error::AppErrorCode;
-use crate::services::session::hash_token;
+use crate::repo::common::hash_token;
 use crate::test_support::{
     acquire_env_lock_async, assign_user_to_team, seed_item, seed_team, seed_user, seed_vault,
     seed_vault_key, with_rpc_test_app,

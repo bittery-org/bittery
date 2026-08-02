@@ -11,18 +11,24 @@ use crate::{
     db::models::*,
     error::AppError,
     integrations::storage,
-    repo::{
-        common::{generate_resource_id, insert_audit_event, insert_sync_event},
-        team::load_team_membership_actor,
-    },
+    repo::common::{generate_resource_id, hash_token, insert_audit_event, insert_sync_event},
     services::billing::sync_team_seats_best_effort,
-    services::session::hash_token,
     services::session_control::{load_user_session_ids, record_session_revocations},
     services::team_billing::team_management_enabled as shared_team_management_enabled,
 };
 
 const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
     "Team management is only available on Family or Team plans with active billing.";
+
+#[allow(dead_code)]
+#[derive(Clone, Debug, sqlx::FromRow)]
+struct DbTeamMembershipActorRow {
+    id: String,
+    team_id: Option<String>,
+    role: String,
+    billing_plan: Option<String>,
+    billing_status: Option<String>,
+}
 
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -2380,6 +2386,22 @@ fn not_found_error(message: &str) -> AppError {
 
 fn internal_error(message: &str) -> AppError {
     AppError::internal(message)
+}
+
+async fn load_team_membership_actor(
+    pool: &PgPool,
+    user_id: &str,
+) -> Result<Option<DbTeamMembershipActorRow>, AppError> {
+    query_as::<_, DbTeamMembershipActorRow>(
+        "SELECT u.id, u.team_id, u.role::text AS role, t.billing_plan::text AS billing_plan, t.billing_status::text AS billing_status FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load team membership");
+        AppError::internal("Failed to load team membership")
+    })
 }
 
 #[cfg(test)]

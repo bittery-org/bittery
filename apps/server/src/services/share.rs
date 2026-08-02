@@ -8,6 +8,7 @@ use crate::{
     config::{bittery_mode, db_pool, format_timestamp},
     db::models::*,
     error::AppError,
+    repo::common::hash_token,
     repo::{
         common::{generate_resource_id, insert_audit_event, load_scoped_item_access},
         share::{
@@ -17,7 +18,6 @@ use crate::{
         },
     },
     services::rate_limit,
-    services::session::hash_token,
     services::team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
     services::verification_code::{
         LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,

@@ -1,5 +1,6 @@
 use rand::random;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use sqlx::{query, query_as, PgPool, Postgres};
 use time::OffsetDateTime;
 
@@ -8,6 +9,10 @@ use crate::{db::models::DbScopedItemAccessRow, error::AppError};
 /// Generate a prefixed random ID (e.g. `audit_0a1b2c3d4e5f6789`).
 pub fn generate_resource_id(prefix: &str) -> String {
     format!("{prefix}_{:016x}", random::<u64>())
+}
+
+pub fn hash_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
 }
 
 /// Insert an audit log entry.
