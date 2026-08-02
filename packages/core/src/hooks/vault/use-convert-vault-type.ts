@@ -10,6 +10,7 @@ import {
 	useCoreContext,
 	useQueryInvalidator,
 } from "../../context/platform-context";
+import { useRefreshAfterVaultMutation } from "./mutation-utils";
 
 export interface ConvertVaultTypeInput {
 	vaultId: string;
@@ -29,6 +30,7 @@ export function useConvertVaultType() {
 	const defaultClient = useRPCClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
+	const refreshAfterMutation = useRefreshAfterVaultMutation();
 
 	return useMutation({
 		mutationFn: (
@@ -36,12 +38,7 @@ export function useConvertVaultType() {
 		): Promise<ConvertVaultTypeResult> =>
 			core.vaults.convertVaultType(input, defaultClient),
 		onSuccess: async (_data, variables) => {
-			await core.vaults.refreshVaultKeys(defaultClient, variables.accountId);
-			const { accountsInfo } = await core.accounts.resolveAccounts();
-			if (accountsInfo.length > 0) {
-				await core.vaultCoordinator.refreshFromServer(accountsInfo);
-			}
-			await invalidator.invalidateVaultKeys();
+			await refreshAfterMutation(variables.accountId);
 			await invalidator.invalidateVaultList(variables.vaultId);
 			await invalidator.invalidateVaultMembers(variables.vaultId);
 		},

@@ -1,10 +1,4 @@
-import {
-	cn,
-	SidebarInset,
-	SidebarProvider,
-	SidebarTrigger,
-	// SyncStatusIndicator,
-} from "@bittery/ui";
+import { cn, SidebarInset, SidebarProvider, SidebarTrigger } from "@bittery/ui";
 import {
 	createFileRoute,
 	Outlet,
@@ -16,7 +10,6 @@ import { AppSidebar } from "@/components/layout/sidebar";
 import { RevealLoader } from "@/components/loader";
 import { useVaultKeysSync } from "@/hooks/use-vault-keys-sync";
 import { storage } from "@/lib/storage";
-// import { useSyncContextOptional } from "@/providers/sync-provider";
 
 export const Route = createFileRoute("/_app")({
 	component: AppLayout,
@@ -34,7 +27,6 @@ function AppLayout() {
 		from: "/_app/vaults",
 		shouldThrow: false,
 	});
-	// const syncContext = useSyncContextOptional();
 
 	return (
 		<SidebarProvider className="h-svh overflow-hidden">

@@ -12,7 +12,12 @@ import {
 } from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
-import { CreateItemSheet, toast } from "@bittery/ui";
+import {
+	CreateItemSheet,
+	CreateVaultDialog,
+	EditVaultDialog,
+	toast,
+} from "@bittery/ui";
 import { useQuery } from "@tanstack/react-query";
 import {
 	createFileRoute,
@@ -29,9 +34,7 @@ import {
 	subscribeCreateItemIntent,
 } from "@/lib/create-item-intent";
 import { storage } from "@/lib/storage";
-import { CreateVaultDialog } from "../../components/vault/create-vault-dialog";
 import { DeleteVaultDialog } from "../../components/vault/delete-vault-dialog";
-import { EditVaultDialog } from "../../components/vault/edit-vault-dialog";
 import { VaultHeader } from "../../components/vault/vault-header";
 import { VaultSidebar } from "../../components/vault/vault-sidebar";
 import { VaultDndProvider } from "../../providers/dnd-provider";

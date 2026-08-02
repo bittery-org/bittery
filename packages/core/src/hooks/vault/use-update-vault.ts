@@ -6,10 +6,8 @@
 
 import { useRPCClient } from "@bittery/shared/rpc";
 import { useMutation } from "@tanstack/react-query";
-import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
+import { useCoreContext } from "../../context/platform-context";
+import { useRefreshAfterVaultMutation } from "./mutation-utils";
 
 /**
  * Input for updating a vault
@@ -29,18 +27,11 @@ export interface UpdateVaultInput {
 export function useUpdateVault() {
 	const defaultClient = useRPCClient();
 	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const refreshAfterMutation = useRefreshAfterVaultMutation();
 
 	return useMutation({
 		mutationFn: (input: UpdateVaultInput): Promise<void> =>
 			core.vaults.updateVault(input, defaultClient),
-		onSuccess: async (_data, variables) => {
-			await core.vaults.refreshVaultKeys(defaultClient, variables.accountId);
-			const { accountsInfo } = await core.accounts.resolveAccounts();
-			if (accountsInfo.length > 0) {
-				await core.vaultCoordinator.refreshFromServer(accountsInfo);
-			}
-			await invalidator.invalidateVaultKeys();
-		},
+		onSuccess: (_data, variables) => refreshAfterMutation(variables.accountId),
 	});
 }

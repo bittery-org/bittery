@@ -470,49 +470,26 @@ export class VaultRepositoryCoordinator {
 	}
 
 	// --- SyncItemCache surface (packages/sync/src/types.ts) ---
-	async upsertEncrypted(
-		item: CachedEncryptedItem,
-		accountId: string,
-	): Promise<void> {
-		const repo = this.getOrCreate(accountId);
-		await repo.upsertEncrypted(item, accountId);
-	}
-
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
 		accountId: string,
 	): Promise<void> {
-		await this.upsertEncrypted(item, accountId);
-	}
-
-	async removeItem(itemId: string, accountId: string): Promise<void> {
-		await this.getOrCreate(accountId).removeItem(itemId);
+		await this.getOrCreate(accountId).upsertEncrypted(item, accountId);
 	}
 
 	async removeCachedItem(itemId: string, accountId: string): Promise<void> {
-		await this.removeItem(itemId, accountId);
-	}
-
-	async upsertVault(
-		vault: CachedVaultMetadata,
-		accountId: string,
-	): Promise<void> {
-		await this.getOrCreate(accountId).upsertCachedVault(vault, accountId);
+		await this.getOrCreate(accountId).removeItem(itemId);
 	}
 
 	async upsertCachedVault(
 		vault: CachedVaultMetadata,
 		accountId: string,
 	): Promise<void> {
-		await this.upsertVault(vault, accountId);
-	}
-
-	async removeVault(vaultId: string, accountId: string): Promise<void> {
-		await this.getOrCreate(accountId).removeCachedVault(vaultId, accountId);
+		await this.getOrCreate(accountId).upsertCachedVault(vault, accountId);
 	}
 
 	async removeCachedVault(vaultId: string, accountId: string): Promise<void> {
-		await this.removeVault(vaultId, accountId);
+		await this.getOrCreate(accountId).removeCachedVault(vaultId, accountId);
 	}
 
 	async syncVaultKeys(

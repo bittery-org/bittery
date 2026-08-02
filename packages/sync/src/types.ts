@@ -228,21 +228,3 @@ export interface SyncItemCache extends ItemCacheAdapter {
 	): Promise<void>;
 	replaceItemId(tempId: string, realId: string, accountId: string): void;
 }
-
-/**
- * Conflict information
- */
-export interface ConflictInfo {
-	itemId: string;
-	localVersion: number;
-	serverVersion: number;
-	localData: unknown;
-	serverData: unknown;
-	lastModifiedBy: string;
-	lastModifiedAt: number;
-}
-
-/**
- * Conflict resolution choice
- */
-export type ConflictResolution = "keep_local" | "keep_server" | "merge";

@@ -166,7 +166,7 @@ pub(crate) async fn get_billing_status(
     actor
         .team_id
         .clone()
-        .ok_or_else(|| not_found_error("Team not found"))?;
+        .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor)?;
     let requires_payment = team.billing_plan != "free";
 
@@ -228,12 +228,12 @@ pub(crate) async fn get_billing_entitlements(
             limits: snapshot.limits,
         });
     }
-    let pool = db_pool.ok_or_else(|| internal_error("Database is not configured"))?;
+    let pool = db_pool.ok_or_else(|| AppError::internal("Database is not configured"))?;
     let actor = load_billing_actor(pool, user_id).await?;
     actor
         .team_id
         .clone()
-        .ok_or_else(|| not_found_error("Team not found"))?;
+        .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor)?;
     let snapshot = get_billing_snapshot(&mode, &team.billing_plan, &team.billing_status);
 
@@ -265,7 +265,7 @@ pub(crate) async fn get_attachment_usage(
     let team_id = actor
         .team_id
         .clone()
-        .ok_or_else(|| not_found_error("Team not found"))?;
+        .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor)?;
     let snapshot = get_billing_snapshot(&mode, &team.billing_plan, &team.billing_status);
 
@@ -287,7 +287,7 @@ pub(crate) async fn create_checkout_session(
     let team_id = actor
         .team_id
         .clone()
-        .ok_or_else(|| not_found_error("Team not found"))?;
+        .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor.clone())?;
     ensure_billing_admin(&actor.role)?;
 
@@ -297,20 +297,20 @@ pub(crate) async fn create_checkout_session(
         .unwrap_or(team.billing_plan.as_str())
         .to_string();
     if !is_paid_plan(&target_plan) {
-        return Err(bad_request_error("Free plan does not require checkout"));
+        return Err(AppError::bad_request("Free plan does not require checkout"));
     }
 
     if team.stripe_subscription_id.is_some()
         && is_billing_active(&team.billing_status)
         && team.billing_plan == target_plan
     {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "Subscription is already active for this plan",
         ));
     }
 
     let stripe_price_id = get_stripe_price_id(&target_plan).ok_or_else(|| {
-        internal_error(&format!("Missing Stripe price ID for {target_plan} plan"))
+        AppError::internal(&format!("Missing Stripe price ID for {target_plan} plan"))
     })?;
     let quantity = if target_plan == "team" {
         count_team_members(pool, &team_id).await?.max(1)
@@ -333,12 +333,12 @@ pub(crate) async fn create_checkout_session(
     .await
     .map_err(|error| {
         tracing::error!(error = %error, "Internal error");
-        internal_error("An internal error occurred")
+        AppError::internal("An internal error occurred")
     })?;
 
     let redirect_url = checkout
         .url
-        .ok_or_else(|| internal_error("Stripe checkout session has no redirect URL"))?;
+        .ok_or_else(|| AppError::internal("Stripe checkout session has no redirect URL"))?;
 
     query(
 		"UPDATE team SET billing_plan = $1::billing_plan, billing_status = 'incomplete', updated_at = $2 WHERE id = $3",
@@ -348,7 +348,7 @@ pub(crate) async fn create_checkout_session(
 	.bind(&team_id)
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to update team billing state"); internal_error("Failed to update team billing state") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to update team billing state"); AppError::internal("Failed to update team billing state") })?;
 
     Ok(CheckoutSessionResponse {
         url: redirect_url,
@@ -367,7 +367,7 @@ pub(crate) async fn create_portal_session(
 
     let snapshot = get_billing_snapshot(bittery_mode(), &team.billing_plan, &team.billing_status);
     if !snapshot.entitlements.billing_portal {
-        return Err(forbidden_error(
+        return Err(AppError::forbidden(
             "Billing portal is unavailable for your current plan",
         ));
     }
@@ -375,14 +375,14 @@ pub(crate) async fn create_portal_session(
     let stripe_customer_id = team
         .stripe_customer_id
         .as_deref()
-        .ok_or_else(|| bad_request_error("No Stripe customer found for this team"))?;
+        .ok_or_else(|| AppError::bad_request("No Stripe customer found for this team"))?;
     let base_url = web_app_url().trim_end_matches('/').to_string();
     let url =
         stripe_create_billing_portal_session(stripe_customer_id, &format!("{base_url}/billing"))
             .await
             .map_err(|error| {
                 tracing::error!(error = %error, "Internal error");
-                internal_error("An internal error occurred")
+                AppError::internal("An internal error occurred")
             })?;
 
     Ok(PortalSessionResponse { url })
@@ -398,13 +398,15 @@ pub(crate) async fn sync_seats(
     let team_id = actor
         .team_id
         .clone()
-        .ok_or_else(|| not_found_error("Team not found"))?;
+        .ok_or_else(|| AppError::not_found("Team not found"))?;
     let team = ensure_team_billing(actor.clone())?;
     ensure_billing_admin(&actor.role)?;
 
     let target_team_id = input.team_id.unwrap_or_else(|| team_id.clone());
     if target_team_id != team_id {
-        return Err(forbidden_error("You can only sync seats for your own team"));
+        return Err(AppError::forbidden(
+            "You can only sync seats for your own team",
+        ));
     }
 
     if team.billing_plan != "team" {
@@ -430,7 +432,7 @@ pub(crate) async fn sync_seats(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");
-            internal_error("An internal error occurred")
+            AppError::internal("An internal error occurred")
         })?;
 
     query("UPDATE team SET seats_purchased = $1, updated_at = $2 WHERE id = $3")
@@ -441,7 +443,7 @@ pub(crate) async fn sync_seats(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to update purchased seats");
-            internal_error("Failed to update purchased seats")
+            AppError::internal("Failed to update purchased seats")
         })?;
 
     Ok(SyncSeatsResponse {
@@ -893,10 +895,10 @@ fn ensure_team_billing(actor: DbBillingActorRow) -> Result<TeamBillingState, App
     Ok(TeamBillingState {
         billing_plan: actor
             .billing_plan
-            .ok_or_else(|| not_found_error("Team not found"))?,
+            .ok_or_else(|| AppError::not_found("Team not found"))?,
         billing_status: actor
             .billing_status
-            .ok_or_else(|| not_found_error("Team not found"))?,
+            .ok_or_else(|| AppError::not_found("Team not found"))?,
         stripe_customer_id: actor.stripe_customer_id,
         stripe_subscription_id: actor.stripe_subscription_id,
         stripe_subscription_item_id: actor.stripe_subscription_item_id,
@@ -932,7 +934,7 @@ async fn ensure_team_stripe_customer(
             name: actor.name.clone(),
         }),
     }
-    .ok_or_else(|| internal_error("No billing contact found for team"))?;
+    .ok_or_else(|| AppError::internal("No billing contact found for team"))?;
 
     let customer_id = stripe_create_customer(
         &billing_contact.email,
@@ -943,7 +945,7 @@ async fn ensure_team_stripe_customer(
     .await
     .map_err(|error| {
         tracing::error!(error = %error, "Internal error");
-        internal_error("An internal error occurred")
+        AppError::internal("An internal error occurred")
     })?;
 
     query("UPDATE team SET stripe_customer_id = $1, updated_at = $2 WHERE id = $3")
@@ -954,7 +956,7 @@ async fn ensure_team_stripe_customer(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to persist Stripe customer");
-            internal_error("Failed to persist Stripe customer")
+            AppError::internal("Failed to persist Stripe customer")
         })?;
 
     Ok(Some(customer_id))
@@ -1106,17 +1108,19 @@ fn cloud_billing_disabled_status() -> BillingStatusResponse {
 
 fn assert_cloud_billing_enabled() -> Result<(), AppError> {
     if bittery_mode() == "self-hosted" {
-        return Err(forbidden_error("Billing is disabled in self-hosted mode"));
+        return Err(AppError::forbidden(
+            "Billing is disabled in self-hosted mode",
+        ));
     }
 
     if !cloud_billing_enabled() {
-        return Err(forbidden_error(
+        return Err(AppError::forbidden(
             "Billing is disabled during the hosted beta",
         ));
     }
 
     if !is_stripe_api_configured() {
-        return Err(internal_error("Stripe is not configured"));
+        return Err(AppError::internal("Stripe is not configured"));
     }
 
     Ok(())
@@ -1130,7 +1134,7 @@ fn ensure_billing_admin(role: &str) -> Result<(), AppError> {
     if role == "owner" || role == "admin" {
         Ok(())
     } else {
-        Err(forbidden_error(
+        Err(AppError::forbidden(
             "Only team owner or admin can manage billing",
         ))
     }
@@ -1171,22 +1175,6 @@ fn web_app_url() -> String {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "http://localhost:3001".to_string())
-}
-
-fn forbidden_error(message: &str) -> AppError {
-    AppError::forbidden(message)
-}
-
-fn bad_request_error(message: &str) -> AppError {
-    AppError::bad_request(message)
-}
-
-fn not_found_error(message: &str) -> AppError {
-    AppError::not_found(message)
-}
-
-fn internal_error(message: &str) -> AppError {
-    AppError::internal(message)
 }
 
 #[cfg(test)]

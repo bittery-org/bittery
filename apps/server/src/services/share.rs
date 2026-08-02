@@ -226,11 +226,11 @@ pub(crate) async fn create_share_link(
     let pool = db_pool(app_state)?;
     let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
     let Some(scoped_item) = scoped_item else {
-        return Err(not_found_error("Item not found"));
+        return Err(AppError::not_found("Item not found"));
     };
 
     if scoped_item.role == "read-only" {
-        return Err(forbidden_error("Read-only users cannot share items"));
+        return Err(AppError::forbidden("Read-only users cannot share items"));
     }
 
     let share_links_access = assert_share_links_entitlement(pool, user_id).await?;
@@ -256,7 +256,7 @@ pub(crate) async fn create_share_link(
     let share_link_id = generate_resource_id("share_link");
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to create share link transaction");
-        internal_error("Failed to create share link transaction")
+        AppError::internal("Failed to create share link transaction")
     })?;
 
     if let Some(max_active_links) = share_links_access.max_active_links {
@@ -267,7 +267,7 @@ pub(crate) async fn create_share_link(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to lock share link scope");
-                internal_error("Failed to lock share link scope")
+                AppError::internal("Failed to lock share link scope")
             })?;
 
         let active_share_links = count_active_share_links(
@@ -278,7 +278,7 @@ pub(crate) async fn create_share_link(
         )
         .await?;
         if active_share_links >= max_active_links {
-            return Err(forbidden_error(&format!(
+            return Err(AppError::forbidden(&format!(
 				"Your plan allows up to {max_active_links} active share links. Revoke a link or upgrade to continue.",
 			)));
         }
@@ -303,7 +303,7 @@ pub(crate) async fn create_share_link(
 	.bind(expires_at)
 	.execute(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to insert share link"); internal_error("Failed to insert share link") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to insert share link"); AppError::internal("Failed to insert share link") })?;
 
     if input.access_mode == "email-restricted" {
         for email in input.allowed_emails.as_ref().into_iter().flatten() {
@@ -315,13 +315,13 @@ pub(crate) async fn create_share_link(
 			.bind(email.to_ascii_lowercase())
 			.execute(&mut *transaction)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to insert share link allowed email"); internal_error("Failed to insert share link allowed email") })?;
+			.map_err(|e| { tracing::error!(error = %e, "Failed to insert share link allowed email"); AppError::internal("Failed to insert share link allowed email") })?;
         }
     }
 
     transaction.commit().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to commit share link transaction");
-        internal_error("Failed to commit share link transaction")
+        AppError::internal("Failed to commit share link transaction")
     })?;
 
     record_share_audit_event(pool, user_id, "share_created", &share_link_id).await?;
@@ -343,7 +343,7 @@ pub(crate) async fn list_share_links_by_item(
 
     let scoped_item = load_scoped_item_access(pool, user_id, &input.item_id).await?;
     let Some(scoped_item) = scoped_item else {
-        return Err(not_found_error("Item not found"));
+        return Err(AppError::not_found("Item not found"));
     };
 
     let links = load_share_links_for_item(pool, &scoped_item.item_id).await?;
@@ -404,7 +404,7 @@ pub(crate) async fn get_share_link(
 
     let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     let Some(visible_link) = visible_link else {
-        return Err(not_found_error("Share link not found"));
+        return Err(AppError::not_found("Share link not found"));
     };
 
     Ok(ShareLinkDetailsResponse {
@@ -437,7 +437,7 @@ pub(crate) async fn revoke_share_link(
 ) -> Result<SuccessResponse, AppError> {
     let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     let Some(visible_link) = visible_link else {
-        return Err(not_found_error("Share link not found"));
+        return Err(AppError::not_found("Share link not found"));
     };
 
     let creator_role = query_scalar::<_, Option<String>>(
@@ -449,7 +449,7 @@ pub(crate) async fn revoke_share_link(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load share link creator role");
-        internal_error("Failed to load share link creator role")
+        AppError::internal("Failed to load share link creator role")
     })?
     .unwrap_or_else(|| "member".to_string());
 
@@ -457,7 +457,7 @@ pub(crate) async fn revoke_share_link(
         || (visible_link.actor_role == "member" && visible_link.link.created_by_id != user_id)
         || (visible_link.actor_role == "admin" && creator_role == "owner")
     {
-        return Err(forbidden_error(
+        return Err(AppError::forbidden(
             "You do not have permission to revoke this link",
         ));
     }
@@ -468,7 +468,7 @@ pub(crate) async fn revoke_share_link(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to revoke share link");
-            internal_error("Failed to revoke share link")
+            AppError::internal("Failed to revoke share link")
         })?;
 
     record_share_audit_event(pool, user_id, "share_revoked", &input.link_id).await?;
@@ -485,13 +485,13 @@ pub(crate) async fn update_share_link(
 
     let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     let Some(visible_link) = visible_link else {
-        return Err(not_found_error("Share link not found"));
+        return Err(AppError::not_found("Share link not found"));
     };
 
     if visible_link.actor_role == "read-only"
         || (visible_link.actor_role == "member" && visible_link.link.created_by_id != user_id)
     {
-        return Err(forbidden_error("Access denied"));
+        return Err(AppError::forbidden("Access denied"));
     }
 
     if let Some(is_one_time_use) = input.is_one_time_use {
@@ -503,17 +503,19 @@ pub(crate) async fn update_share_link(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to update share link");
-                internal_error("Failed to update share link")
+                AppError::internal("Failed to update share link")
             })?;
     }
 
     if let Some(add_emails) = input.add_emails.as_ref() {
         if add_emails.len() > 100 {
-            return Err(bad_request_error("Too many emails to add"));
+            return Err(AppError::bad_request("Too many emails to add"));
         }
         for email in add_emails {
             if !email_regex().is_match(email) {
-                return Err(bad_request_error(&format!("Invalid email format: {email}")));
+                return Err(AppError::bad_request(&format!(
+                    "Invalid email format: {email}"
+                )));
             }
         }
 
@@ -526,13 +528,13 @@ pub(crate) async fn update_share_link(
 			.bind(email.to_ascii_lowercase())
 			.execute(pool)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to add allowed email"); internal_error("Failed to add allowed email") })?;
+			.map_err(|e| { tracing::error!(error = %e, "Failed to add allowed email"); AppError::internal("Failed to add allowed email") })?;
         }
     }
 
     if let Some(remove_email_ids) = input.remove_email_ids.as_ref() {
         if remove_email_ids.len() > 100 {
-            return Err(bad_request_error("Too many email ids to remove"));
+            return Err(AppError::bad_request("Too many email ids to remove"));
         }
         let unique_ids = unique_email_ids(remove_email_ids)?;
         if !unique_ids.is_empty() {
@@ -543,10 +545,10 @@ pub(crate) async fn update_share_link(
 			.bind(&unique_ids)
 			.fetch_all(pool)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to remove allowed emails"); internal_error("Failed to remove allowed emails") })?;
+			.map_err(|e| { tracing::error!(error = %e, "Failed to remove allowed emails"); AppError::internal("Failed to remove allowed emails") })?;
 
             if removed_emails.len() != unique_ids.len() {
-                return Err(bad_request_error(
+                return Err(AppError::bad_request(
                     "One or more removeEmailIds are invalid for this share link",
                 ));
             }
@@ -564,7 +566,7 @@ pub(crate) async fn update_share_link(
 			.bind(&revoked_emails)
 			.execute(pool)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to invalidate removed email verifications"); internal_error("Failed to invalidate removed email verifications") })?;
+			.map_err(|e| { tracing::error!(error = %e, "Failed to invalidate removed email verifications"); AppError::internal("Failed to invalidate removed email verifications") })?;
         }
     }
 
@@ -580,7 +582,7 @@ pub(crate) async fn get_share_access_logs(
 
     let visible_link = load_visible_share_link(pool, &input.link_id, user_id).await?;
     if visible_link.is_none() {
-        return Err(not_found_error("Share link not found"));
+        return Err(AppError::not_found("Share link not found"));
     }
 
     let logs = load_share_access_logs(pool, &input.link_id, 100).await?;
@@ -606,7 +608,7 @@ pub(crate) async fn get_public_info(
     validate_public_token(&input.token)?;
     let link = load_public_share_link_by_token(pool, &input.token).await?;
     let Some(link) = link else {
-        return Err(not_found_error("Share link not found or invalid"));
+        return Err(AppError::not_found("Share link not found or invalid"));
     };
 
     let public_state = get_public_share_state(pool, &link).await?;
@@ -640,9 +642,9 @@ pub(crate) async fn access_public(
 	.bind(hash_token(&input.token))
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link"); internal_error("Failed to load public share link") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link"); AppError::internal("Failed to load public share link") })?;
     let Some(link) = link else {
-        return Err(not_found_error("Share link not found"));
+        return Err(AppError::not_found("Share link not found"));
     };
 
     let public_state = get_public_share_state(pool, &link).await?;
@@ -655,7 +657,7 @@ pub(crate) async fn access_public(
             Some("Share links disabled for creator plan"),
         )
         .await?;
-        return Err(bad_request_error("This share link is no longer valid"));
+        return Err(AppError::bad_request("This share link is no longer valid"));
     }
     if !public_state.valid && public_state.reason.as_deref() == Some("revoked") {
         log_share_access(
@@ -666,23 +668,23 @@ pub(crate) async fn access_public(
             Some(&format!("Link status: {}", link.status)),
         )
         .await?;
-        return Err(bad_request_error(&format!(
+        return Err(AppError::bad_request(&format!(
             "This share link has been {}",
             link.status
         )));
     }
     if !public_state.valid && public_state.reason.as_deref() == Some("expired") {
         log_share_access(pool, &link.id, None, false, Some("Link expired")).await?;
-        return Err(bad_request_error("This share link has expired"));
+        return Err(AppError::bad_request("This share link has expired"));
     }
     if !public_state.valid && public_state.reason.as_deref() == Some("exhausted") {
         log_share_access(pool, &link.id, None, false, Some("Access limit reached")).await?;
-        return Err(bad_request_error("This share link has been exhausted"));
+        return Err(AppError::bad_request("This share link has been exhausted"));
     }
 
     if !consume_share_link_access(pool, &link.id, time::OffsetDateTime::now_utc()).await? {
         log_share_access(pool, &link.id, None, false, Some("Access limit reached")).await?;
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "This share link has reached its access limit",
         ));
     }
@@ -708,12 +710,12 @@ pub(crate) async fn request_email_verification(
         load_public_share_link_details_by_token(pool, &input.token, Some("email-restricted"))
             .await?;
     let Some(details) = details else {
-        return Err(not_found_error("Share link not found"));
+        return Err(AppError::not_found("Share link not found"));
     };
 
     let public_state = get_public_share_state(pool, &details.link).await?;
     if !public_state.valid {
-        return Err(bad_request_error("This share link is no longer valid"));
+        return Err(AppError::bad_request("This share link is no longer valid"));
     }
 
     let now = time::OffsetDateTime::now_utc();
@@ -723,7 +725,7 @@ pub(crate) async fn request_email_verification(
         .iter()
         .any(|entry| entry.email.to_ascii_lowercase() == normalized_email);
     if !is_allowed {
-        return Err(forbidden_error(
+        return Err(AppError::forbidden(
             "This email is not authorized to access this link",
         ));
     }
@@ -735,7 +737,7 @@ pub(crate) async fn request_email_verification(
 	.bind(&normalized_email)
 	.fetch_one(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to count share email verification codes"); internal_error("Failed to count share email verification codes") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to count share email verification codes"); AppError::internal("Failed to count share email verification codes") })?;
     if total_codes >= MAX_VERIFICATION_CODES_PER_EMAIL {
         return Err(AppError::too_many_requests(
             "Too many verification attempts for this email. Contact the link creator.",
@@ -750,7 +752,7 @@ pub(crate) async fn request_email_verification(
 	.bind(now)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load existing share email verification"); internal_error("Failed to load existing share email verification") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load existing share email verification"); AppError::internal("Failed to load existing share email verification") })?;
 
     if let Some(existing_verification) = existing_verification {
         if (now - existing_verification.created_at) < time::Duration::minutes(1) {
@@ -783,12 +785,14 @@ pub(crate) async fn verify_email_and_access(
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
     if !VerificationCodeService::is_valid_code(&input.code) {
-        return Err(bad_request_error("Invalid or expired verification code"));
+        return Err(AppError::bad_request(
+            "Invalid or expired verification code",
+        ));
     }
 
     let details = load_public_share_link_details_by_token(pool, &input.token, None).await?;
     let Some(details) = details else {
-        return Err(not_found_error("Share link not found"));
+        return Err(AppError::not_found("Share link not found"));
     };
 
     let public_state = get_public_share_state(pool, &details.link).await?;
@@ -801,7 +805,7 @@ pub(crate) async fn verify_email_and_access(
             Some("Share links disabled for creator plan"),
         )
         .await?;
-        return Err(bad_request_error("This share link is no longer valid"));
+        return Err(AppError::bad_request("This share link is no longer valid"));
     }
     if !public_state.valid {
         log_share_access(
@@ -812,7 +816,7 @@ pub(crate) async fn verify_email_and_access(
             Some("Link no longer valid"),
         )
         .await?;
-        return Err(bad_request_error("This share link is no longer valid"));
+        return Err(AppError::bad_request("This share link is no longer valid"));
     }
 
     let now = time::OffsetDateTime::now_utc();
@@ -830,7 +834,7 @@ pub(crate) async fn verify_email_and_access(
             Some("Email no longer authorized for this link"),
         )
         .await?;
-        return Err(forbidden_error(
+        return Err(AppError::forbidden(
             "This email is not authorized to access this link",
         ));
     }
@@ -882,7 +886,9 @@ pub(crate) async fn verify_email_and_access(
                 Some("Invalid or expired verification code"),
             )
             .await?;
-            return Err(bad_request_error("Invalid or expired verification code"));
+            return Err(AppError::bad_request(
+                "Invalid or expired verification code",
+            ));
         }
     };
 
@@ -895,7 +901,7 @@ pub(crate) async fn verify_email_and_access(
             Some("Access limit reached"),
         )
         .await?;
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "This share link has reached its access limit",
         ));
     }
@@ -917,7 +923,9 @@ pub(crate) async fn verify_email_and_access(
             Some("Invalid or expired verification code"),
         )
         .await?;
-        return Err(bad_request_error("Invalid or expired verification code"));
+        return Err(AppError::bad_request(
+            "Invalid or expired verification code",
+        ));
     }
 
     query(
@@ -928,7 +936,7 @@ pub(crate) async fn verify_email_and_access(
 	.bind(&normalized_email)
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to mark allowed email as verified"); internal_error("Failed to mark allowed email as verified") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to mark allowed email as verified"); AppError::internal("Failed to mark allowed email as verified") })?;
 
     log_share_access(pool, &details.link.id, Some(&input.email), true, None).await?;
 
@@ -951,7 +959,7 @@ async fn load_visible_share_link(
 	.bind(link_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link"); internal_error("Failed to load share link") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link"); AppError::internal("Failed to load share link") })?;
 
     let Some(link) = link else {
         return Ok(None);
@@ -966,7 +974,7 @@ async fn load_visible_share_link(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load actor vault access");
-        internal_error("Failed to load actor vault access")
+        AppError::internal("Failed to load actor vault access")
     })?;
 
     let Some(actor_role) = actor_role else {
@@ -984,7 +992,7 @@ async fn load_visible_share_link(
 	.bind(link_id)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link allowed emails"); internal_error("Failed to load share link allowed emails") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load share link allowed emails"); AppError::internal("Failed to load share link allowed emails") })?;
 
     Ok(Some(VisibleShareLink {
         link,
@@ -1016,7 +1024,7 @@ async fn load_public_share_link_details_by_token(
 		.fetch_optional(pool)
 		.await,
 	}
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link details"); internal_error("Failed to load public share link details") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link details"); AppError::internal("Failed to load public share link details") })?;
 
     let Some(link) = link else {
         return Ok(None);
@@ -1027,7 +1035,7 @@ async fn load_public_share_link_details_by_token(
 	.bind(&link.id)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link allowed emails"); internal_error("Failed to load public share link allowed emails") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load public share link allowed emails"); AppError::internal("Failed to load public share link allowed emails") })?;
 
     Ok(Some(PublicShareLinkDetails {
         link,
@@ -1043,7 +1051,7 @@ async fn assert_share_links_entitlement(
     if access.enabled {
         Ok(access)
     } else {
-        Err(forbidden_error(SHARE_LINKS_UNAVAILABLE_MESSAGE))
+        Err(AppError::forbidden(SHARE_LINKS_UNAVAILABLE_MESSAGE))
     }
 }
 
@@ -1157,7 +1165,7 @@ fn unique_email_ids(ids: &[String]) -> Result<Vec<String>, AppError> {
     let mut unique = Vec::new();
     for id in ids {
         if unique.iter().any(|existing| existing == id) {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "Duplicate removeEmailIds are not allowed",
             ));
         }
@@ -1168,28 +1176,28 @@ fn unique_email_ids(ids: &[String]) -> Result<Vec<String>, AppError> {
 
 fn validate_create_share_input(input: &CreateShareLinkInput) -> Result<(), AppError> {
     if input.access_mode != "anyone" && input.access_mode != "email-restricted" {
-        return Err(bad_request_error("Invalid access mode"));
+        return Err(AppError::bad_request("Invalid access mode"));
     }
     if input.encrypted_item_data.is_empty()
         || input.encryption_iv.is_empty()
         || input.encrypted_share_key.is_empty()
         || input.share_key_iv.is_empty()
     {
-        return Err(bad_request_error("Missing encrypted share payload"));
+        return Err(AppError::bad_request("Missing encrypted share payload"));
     }
     if input.access_mode == "email-restricted" {
         let Some(allowed_emails) = input.allowed_emails.as_ref() else {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "At least one email address is required for email-restricted sharing",
             ));
         };
         if allowed_emails.is_empty() {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "At least one email address is required for email-restricted sharing",
             ));
         }
         if allowed_emails.len() > 100 {
-            return Err(bad_request_error("Too many allowed emails"));
+            return Err(AppError::bad_request("Too many allowed emails"));
         }
         for email in allowed_emails {
             validate_email(email)?;
@@ -1206,7 +1214,7 @@ fn calculate_expiration(expires_in: &str) -> Result<time::OffsetDateTime, AppErr
         "7days" => time::Duration::days(7),
         "14days" => time::Duration::days(14),
         "30days" => time::Duration::days(30),
-        _ => return Err(bad_request_error("Invalid expiration option")),
+        _ => return Err(AppError::bad_request("Invalid expiration option")),
     };
 
     Ok(time::OffsetDateTime::now_utc() + duration)
@@ -1218,7 +1226,7 @@ fn validate_public_token(token: &str) -> Result<(), AppError> {
             .chars()
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
     {
-        return Err(not_found_error("Share link not found or invalid"));
+        return Err(AppError::not_found("Share link not found or invalid"));
     }
     Ok(())
 }
@@ -1227,7 +1235,9 @@ fn validate_email(email: &str) -> Result<(), AppError> {
     if email_regex().is_match(email) {
         Ok(())
     } else {
-        Err(bad_request_error(&format!("Invalid email format: {email}")))
+        Err(AppError::bad_request(&format!(
+            "Invalid email format: {email}"
+        )))
     }
 }
 
@@ -1282,22 +1292,6 @@ fn email_regex() -> &'static Regex {
     EMAIL_REGEX.get_or_init(|| {
         Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").expect("email regex should compile")
     })
-}
-
-fn not_found_error(message: &str) -> AppError {
-    AppError::not_found(message)
-}
-
-fn forbidden_error(message: &str) -> AppError {
-    AppError::forbidden(message)
-}
-
-fn bad_request_error(message: &str) -> AppError {
-    AppError::bad_request(message)
-}
-
-fn internal_error(message: &str) -> AppError {
-    AppError::internal(message)
 }
 
 #[cfg(test)]

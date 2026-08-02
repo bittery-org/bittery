@@ -8,7 +8,15 @@ import {
 	useItems,
 	useUpdateVault,
 } from "@bittery/core/hooks";
-import { Button, Sheet, SheetContent, toast } from "@bittery/ui";
+import {
+	Button,
+	CreateVaultDialog,
+	EditVaultDialog,
+	Sheet,
+	SheetContent,
+	toast,
+	type UpdateVaultData,
+} from "@bittery/ui";
 import { IconVault as VaultIcon } from "@bittery/ui/icons";
 import {
 	createFileRoute,
@@ -18,12 +26,7 @@ import {
 } from "@tanstack/react-router";
 import { useState } from "react";
 import { VaultNavSidebar } from "@/components/vault/vault-nav-sidebar";
-import { CreateVaultDialog } from "@/components/vaults/create-vault-dialog";
 import { DeleteVaultDialog } from "@/components/vaults/delete-vault-dialog";
-import {
-	EditVaultDialog,
-	type UpdateVaultData,
-} from "@/components/vaults/edit-vault-dialog";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultDndProvider } from "@/providers/vault-dnd-provider";
