@@ -1,0 +1,1047 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Architecture review — bittery</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { curve: "basis" } });
+    </script>
+    <style>
+      body { font-feature-settings: "kern", "liga"; }
+      .lbl { font-size: 10px; letter-spacing: .09em; text-transform: uppercase; font-weight: 600; }
+      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .deep { background: linear-gradient(160deg,#0f172a,#1e293b); }
+      .hatch {
+        background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(220,38,38,.13) 5px, rgba(220,38,38,.13) 10px);
+      }
+      .dashed-seam { border-style: dashed; }
+      .mermaid { display: flex; justify-content: center; }
+      .mermaid svg { max-width: 100%; height: auto; }
+      details > summary { list-style: none; cursor: pointer; }
+      details > summary::-webkit-details-marker { display: none; }
+    </style>
+  </head>
+  <body class="bg-stone-50 text-slate-900 antialiased">
+    <main class="max-w-5xl mx-auto px-6 py-14 space-y-14">
+
+      <!-- ══════════════════ HEADER ══════════════════ -->
+      <header class="space-y-6">
+        <div class="flex items-baseline justify-between flex-wrap gap-3">
+          <h1 class="font-serif text-4xl tracking-tight">Architecture review</h1>
+          <div class="mono text-xs text-slate-500">bittery · 2026-08-02 · <span class="text-slate-400">3fab6b66</span></div>
+        </div>
+        <p class="text-slate-600 max-w-3xl leading-relaxed">
+          A cleanup step and eight deepening candidates, weighted toward the areas that keep changing — five of the last eight
+          commits touch unlock, session, and account lifecycle. <span class="text-slate-900 font-medium">packages/storage</span>
+          is the reference standard here: dumb total ports, one deep module above them, one conformance suite
+          across four adapters, and a <span class="mono text-xs">CONTEXT.md</span> that records why. Most candidates below
+          are "do what storage already did."
+        </p>
+
+        <div class="flex flex-wrap gap-x-7 gap-y-2 text-xs text-slate-600 border-y border-slate-200 py-3">
+          <span class="flex items-center gap-2"><span class="inline-block w-6 h-4 border-2 border-slate-700 rounded-sm"></span> module</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-6 h-4 border-2 border-slate-500 dashed-seam rounded-sm"></span> seam</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-6 h-4 deep rounded-sm"></span> deep module</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-6 h-0.5 bg-red-600"></span> leakage</span>
+          <span class="flex items-center gap-2"><span class="inline-block w-6 h-4 hatch border border-red-300 rounded-sm"></span> duplicated rule</span>
+        </div>
+
+        <!-- index -->
+        <nav class="grid sm:grid-cols-2 gap-x-8 gap-y-1.5 text-sm">
+          <a href="#c0" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">00</span><span class="flex-1">Delete what is already dead</span><span class="text-emerald-700 text-xs self-center">Do first</span></a>
+          <a href="#c1" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">01</span><span class="flex-1">Unlock has three implementations</span><span class="text-emerald-700 text-xs self-center">Strong</span></a>
+          <a href="#c2" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">02</span><span class="flex-1">Crypto: four adapters, no enforced seam</span><span class="text-emerald-700 text-xs self-center">Strong</span></a>
+          <a href="#c3" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">03</span><span class="flex-1">Auto-lock seam is in the wrong place</span><span class="text-emerald-700 text-xs self-center">Strong</span></a>
+          <a href="#c4" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">04</span><span class="flex-1">Vault-key granting lives in web dialogs</span><span class="text-emerald-700 text-xs self-center">Strong</span></a>
+          <a href="#c5" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">05</span><span class="flex-1">Server authorization re-derived per handler</span><span class="text-emerald-700 text-xs self-center">Strong</span></a>
+          <a href="#c6" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">06</span><span class="flex-1">Sync orchestration has no home</span><span class="text-amber-700 text-xs self-center">Worth exploring</span></a>
+          <a href="#c7" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">07</span><span class="flex-1">Import: parse is deep, execute is a hook</span><span class="text-amber-700 text-xs self-center">Worth exploring</span></a>
+          <a href="#c8" class="flex gap-3 hover:text-indigo-700"><span class="mono text-slate-400 w-5">08</span><span class="flex-1">The pass-through inventory</span><span class="text-slate-500 text-xs self-center">Speculative</span></a>
+        </nav>
+      </header>
+
+      <section id="candidates" class="space-y-16">
+
+      <!-- ══════════════════ 00 ══════════════════ -->
+      <article id="c0" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">00</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-600 text-white text-xs font-medium">Do first</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">no decisions required</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Delete what is already dead</h2>
+        </div>
+
+        <p class="text-sm text-slate-600 max-w-3xl leading-relaxed">
+          Not a candidate of its own — the parts of <a href="#c6" class="text-indigo-700 hover:underline">06</a>,
+          <a href="#c7" class="text-indigo-700 hover:underline">07</a> and
+          <a href="#c8" class="text-indigo-700 hover:underline">08</a> that need no design decision. Doing it first
+          shrinks the surface every later candidate has to move through. Two halves, and they are different jobs.
+        </p>
+
+        <!-- mass diagram: dead vs pass-through -->
+        <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
+          <div class="flex items-end gap-4 h-44">
+            <div class="flex flex-col justify-end items-center gap-1.5" style="width:62%">
+              <div class="w-full rounded-t border border-slate-300 bg-slate-100 flex flex-col items-center justify-center gap-0.5" style="height:100%">
+                <div class="font-serif text-3xl text-slate-800">973</div>
+                <div class="lbl text-slate-500">lines · zero importers</div>
+              </div>
+              <div class="lbl text-emerald-700">delete outright</div>
+            </div>
+            <div class="flex flex-col justify-end items-center gap-1.5" style="width:38%">
+              <div class="w-full rounded-t hatch border border-red-300 flex flex-col items-center justify-center gap-0.5" style="height:16%">
+                <div class="font-serif text-xl text-slate-800">~150</div>
+              </div>
+              <div class="lbl text-slate-500">lines · live pass-throughs</div>
+              <div class="lbl text-amber-700">inline at call sites</div>
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 leading-relaxed border-t border-slate-100 pt-3">
+            The distinction matters for planning. The left column is a deletion — nothing references it, nothing
+            downstream changes. The right column is called from somewhere, so removing it means moving the body to the
+            caller. Mechanical, but not free.
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-5">
+          <div class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+            <div class="px-4 py-2 bg-emerald-50 border-b border-emerald-200">
+              <span class="lbl text-emerald-800">Dead — verified zero importers</span>
+            </div>
+            <table class="w-full text-sm">
+              <tbody class="divide-y divide-slate-100">
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">apps/desktop/src/utils/import-parsers.ts</td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">543</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">apps/mobile/…/conflict-resolution-modal.tsx</td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">430</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">packages/sync/src/types.ts<br/><span class="text-slate-500">ConflictInfo · ConflictResolution — never constructed</span></td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">~15</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">commented-out sync-status UI<br/><span class="text-slate-500">desktop + web, independently dead</span></td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">~12</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+            <div class="px-4 py-2 bg-amber-50 border-b border-amber-200">
+              <span class="lbl text-amber-800">Live — inline, then delete</span>
+            </div>
+            <table class="w-full text-sm">
+              <tbody class="divide-y divide-slate-100">
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">vault-repository-coordinator.ts:473-528<br/><span class="text-slate-500">10 forwarding methods</span></td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">~56</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">services/{vault,team,share,sync}.rs<br/><span class="text-slate-500">forbidden_error et al ×4, byte-identical</span></td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">~60</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">hooks/vault/use-*-vault.ts<br/><span class="text-slate-500">same onSuccess block ×4</span></td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">~16</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">{web,desktop} create/edit-vault-dialog.tsx<br/><span class="text-slate-500">2-line re-export shims</span></td>
+                  <td class="px-4 py-2.5 text-right text-slate-500 mono text-xs">4 files</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              Roughly 1,100 lines carry no behaviour. Two whole files are unreachable, an exported type pair is never
+              constructed, and the rest are modules whose deletion would concentrate nothing — they only add a hop
+              between a call and its behaviour.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Delete the left column. Inline the right column. Ship it as its own change so the diff for every later
+              candidate is about design rather than about cleanup.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· every later wave moves less code</div>
+          <div>· navigation cost falls for people and agents</div>
+          <div>· the interface stops advertising conflict handling</div>
+          <div>· remaining indirection reads as intentional</div>
+        </div>
+
+        <div class="rounded border-l-4 border-amber-400 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <span class="font-medium">Two exceptions — leave them.</span>
+          <span class="mono text-xs">unlock.ts</span>'s two unused exports are not dead;
+          <a href="#c1" class="underline decoration-amber-400 underline-offset-2">01</a> makes them live.
+          <span class="mono text-xs">extension/background/session-manager.ts</span> is a deliberate facade — see
+          ADR-0007.
+        </div>
+      </article>
+
+      <!-- ══════════════════ 01 ══════════════════ -->
+      <article id="c1" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">01</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Unlock has three implementations, and the designed one is half dead</h2>
+        </div>
+
+        <div class="mono text-xs text-slate-600 space-y-0.5">
+          <div>packages/core/src/services/unlock.ts <span class="text-slate-400">327 · the intended module</span></div>
+          <div>packages/core/src/hooks/auth/use-quick-unlock.ts <span class="text-slate-400">110 · path B</span></div>
+          <div>packages/core/src/hooks/auth/use-biometric-unlock.ts <span class="text-slate-400">181 · path C</span></div>
+          <div>packages/core/src/services/auth-service.ts <span class="text-slate-400">1083</span> · services/travel-mode-enforcer.ts <span class="text-slate-400">359</span></div>
+        </div>
+
+        <!-- before / after -->
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+            <div class="lbl text-slate-400">Before — three paths</div>
+            <pre class="mermaid">
+flowchart TB
+  QA["useQuickUnlockAll"] --> UN["unlock.ts<br/>unlockAllWith*"]
+  QP["useQuickUnlock"] --> SRP["performSRPUnlock<br/>+ storeUnlockSession"]
+  BIO["useBiometricUnlock"] --> STO["storage.unlockWithBiometric"]
+  UN --> SRP
+  UN --> SEL["selectActiveAccountAfterUnlock"]
+  UN --> TM2["verifyOrClear"]
+  SRP --> TM1["verifyForUnlock"]
+  BIO --> TM3["verifyOrClear (own copy)"]
+  DEAD["unlockAccountWithPassword<br/>unlockAccountWithBiometric<br/>0 call sites"]
+  classDef dead fill:#f1f5f9,stroke:#cbd5e1,stroke-dasharray:4 4,color:#94a3b8;
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  class DEAD dead
+  class TM1,TM2,TM3 leak
+            </pre>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+            <div class="lbl text-slate-400">After — one funnel</div>
+            <pre class="mermaid">
+flowchart TB
+  QA["useQuickUnlockAll"] --> UN
+  QP["useQuickUnlock"] --> UN
+  BIO["useBiometricUnlock"] --> UN
+  UN["unlock.ts<br/>4 entry points<br/><i>plan · acquire · run</i>"]
+  UN --> OUT["UnlockOutcome"]
+  UN -.-> TM["travel-mode verified once"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#f8fafc,stroke-width:2px;
+  class UN deep
+            </pre>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              <span class="mono text-xs">unlock.ts:2</span> calls itself "the one wrapper around the unlock primitives",
+              but its per-account entry points have <span class="font-medium">0 call sites</span> — the two hooks that
+              need exactly them reimplement the sequence instead, and each ends up running a different subset of
+              travel-mode verification, active-account selection, and outcome reporting.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Route <span class="mono text-xs">useQuickUnlock</span> and <span class="mono text-xs">useBiometricUnlock</span>
+              through the two already-written entry points. Hooks keep React Query wiring and nothing else. Delete the
+              duplicated travel-mode closure in <span class="mono text-xs">use-biometric-unlock.ts:98-112</span>.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· locality: one place decides unlock</div>
+          <div>· travel-mode check stops running twice</div>
+          <div>· <span class="mono text-xs">unlock.test.ts</span> starts covering the UI paths</div>
+          <div>· two dead exports become load-bearing</div>
+        </div>
+
+        <div class="rounded border-l-4 border-amber-400 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <span class="font-medium">Check before moving:</span> biometric paths call two different storage methods —
+          <span class="mono text-xs">unlockWithBiometric</span> (per account) vs
+          <span class="mono text-xs">unlockAllAccountsWithBiometric</span> then filtered
+          (<span class="mono text-xs">unlock.ts:196</span>). Picking one is a real decision, not a mechanical merge.
+        </div>
+      </article>
+
+      <!-- ══════════════════ 02 ══════════════════ -->
+      <article id="c2" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">02</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">ports &amp; adapters</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Crypto has four adapters and no enforced seam</h2>
+        </div>
+
+        <div class="mono text-xs text-slate-600 space-y-0.5">
+          <div>apps/web/src/lib/wasm-crypto.ts <span class="text-slate-400">989 · 45 exports</span></div>
+          <div>apps/extension/src/lib/wasm-crypto.ts <span class="text-slate-400">629 · 29 exports</span></div>
+          <div>apps/mobile/src/lib/crypto/native-crypto.ts <span class="text-slate-400">411 · 23 exports</span></div>
+          <div>apps/desktop/src/lib/tauri-crypto.ts <span class="text-slate-400">509 · 19 exports</span></div>
+          <div>packages/types/src/index.ts:331 <span class="text-slate-400">· ICrypto, 12 members, 3 optional</span></div>
+        </div>
+
+        <!-- hand-built mass diagram -->
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
+            <div class="lbl text-slate-400">Before — interface narrower than reality</div>
+            <div>
+              <div class="border-2 border-slate-400 dashed-seam rounded px-3 py-1.5 text-center">
+                <div class="lbl text-slate-500">ICrypto · 12 members</div>
+                <div class="text-[10px] text-red-600 mono mt-0.5">rsaDecrypt? · validateKdfProfile? · generateUuid?</div>
+              </div>
+              <div class="text-center text-[10px] text-red-600 mono py-1">▲ 19 web files import the concrete module instead ▲</div>
+            </div>
+            <div class="flex items-end gap-2 h-40">
+              <div class="flex-1 flex flex-col justify-end items-center gap-1">
+                <div class="w-full hatch border border-red-300 rounded-t" style="height:100%"></div>
+                <div class="lbl text-slate-500">web 45</div>
+              </div>
+              <div class="flex-1 flex flex-col justify-end items-center gap-1">
+                <div class="w-full hatch border border-red-300 rounded-t" style="height:64%"></div>
+                <div class="lbl text-slate-500">ext 29</div>
+              </div>
+              <div class="flex-1 flex flex-col justify-end items-center gap-1">
+                <div class="w-full hatch border border-red-300 rounded-t" style="height:51%"></div>
+                <div class="lbl text-slate-500">mob 23</div>
+              </div>
+              <div class="flex-1 flex flex-col justify-end items-center gap-1">
+                <div class="w-full hatch border border-red-300 rounded-t" style="height:42%"></div>
+                <div class="lbl text-slate-500">desk 19</div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-500 leading-relaxed">
+              28 operations exist on web only. <span class="mono">generateRSAKeyPair</span> (web) and
+              <span class="mono">generateRsaKeyPair</span> (desktop) are the same operation, spelled differently.
+              No conformance suite.
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-4">
+            <div class="lbl text-slate-400">After — the storage shape, applied</div>
+            <div class="space-y-2">
+              <div class="deep rounded px-3 py-4 text-center">
+                <div class="lbl text-slate-300">VaultCrypto</div>
+                <div class="text-[11px] text-slate-400 mt-1 leading-snug">key derivation · wrapping · item encryption<br/>SRP · recovery · rotation</div>
+              </div>
+              <div class="text-center text-slate-300 text-lg leading-none">│</div>
+              <div class="border-2 border-slate-400 dashed-seam rounded px-3 py-1.5 text-center">
+                <div class="lbl text-slate-500">CryptoPort · total, no optional members</div>
+              </div>
+              <div class="grid grid-cols-4 gap-1.5">
+                <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">wasm</div>
+                <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">tauri</div>
+                <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">expo</div>
+                <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">chrome</div>
+              </div>
+              <div class="border border-emerald-300 bg-emerald-50 rounded px-3 py-1.5 text-center">
+                <div class="lbl text-emerald-800">port-conformance · one suite, four adapters</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              <span class="mono text-xs">ICrypto</span> is the declared seam but not the real one: it carries optional
+              members, unions sync with async (<span class="mono text-xs">boolean | Promise&lt;boolean&gt;</span>), and
+              <span class="mono text-xs">platform-context.tsx:70</span> instructs callers to
+              <span class="mono text-xs">import * as crypto</span> straight from the platform module. The four adapters
+              have drifted in surface, naming, and coverage, and nothing tests them against a shared contract.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Copy the pattern <span class="mono text-xs">packages/storage</span> already proved. Total
+              <span class="mono text-xs">CryptoPort</span> of primitives, one deep <span class="mono text-xs">VaultCrypto</span>
+              module holding every policy decision (KDF pinning, key-handle vs raw branching, envelope shape), and one
+              conformance suite run against all four adapters plus a fake.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· compiler verifies each adapter, no feature-detect</div>
+          <div>· leverage: one interface, four platforms</div>
+          <div>· 28 web-only operations become portable</div>
+          <div>· crypto gets its first cross-adapter tests</div>
+        </div>
+
+        <div class="rounded border-l-4 border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
+          <span class="font-medium">Precedent, not conflict:</span>
+          <span class="mono text-xs">packages/storage/CONTEXT.md §2</span> already states the rule this candidate applies —
+          "every method is total, so the compiler verifies that an adapter satisfies the contract". Crypto is the
+          package that never got it.
+        </div>
+      </article>
+
+      <!-- ══════════════════ 03 ══════════════════ -->
+      <article id="c3" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">03</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">local-substitutable</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Auto-lock: the seam is one layer too high</h2>
+        </div>
+
+        <div class="mono text-xs text-slate-600 space-y-0.5">
+          <div>packages/types/src/index.ts:331 <span class="text-slate-400">· IAutolockService, 8 methods</span></div>
+          <div>packages/core/src/services/autolock-web.ts <span class="text-slate-400">206</span> · autolock-mobile.ts <span class="text-slate-400">229</span></div>
+          <div>apps/desktop/src/services/autolock-service.ts <span class="text-slate-400">194</span></div>
+          <div>apps/extension/src/background/vault-session/transitions.ts <span class="text-slate-400">408 · a fourth, different shape</span></div>
+        </div>
+
+        <!-- cross-section -->
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">Before — rule copied into every band</div>
+            <div class="border-2 border-slate-400 dashed-seam rounded px-3 py-1 text-center mb-2">
+              <span class="lbl text-slate-500">IAutolockService · 8 methods</span>
+            </div>
+            <div class="space-y-1.5">
+              <div class="hatch border-l-4 border-red-400 border border-red-200 rounded-r px-3 py-2.5">
+                <div class="lbl text-slate-600">web</div>
+                <div class="mono text-[10px] text-slate-500">setTimeout · visibilitychange · <span class="text-red-700">elapsed &gt;= timeout</span></div>
+              </div>
+              <div class="hatch border-l-4 border-red-400 border border-red-200 rounded-r px-3 py-2.5">
+                <div class="lbl text-slate-600">desktop</div>
+                <div class="mono text-[10px] text-slate-500">setInterval 5s · tauri listen · <span class="text-red-700">elapsed &gt;= timeout</span></div>
+              </div>
+              <div class="hatch border-l-4 border-red-400 border border-red-200 rounded-r px-3 py-2.5">
+                <div class="lbl text-slate-600">mobile</div>
+                <div class="mono text-[10px] text-slate-500">AppState · <span class="text-red-700">now - backgroundedAt &gt; timeout</span></div>
+              </div>
+              <div class="hatch border-l-4 border-red-400 border border-red-200 rounded-r px-3 py-2.5">
+                <div class="lbl text-slate-600">extension</div>
+                <div class="mono text-[10px] text-slate-500">chrome.alarms · reducer · <span class="text-red-700">at - lastActivityAt &gt;= timeout</span></div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-500">Four timer mechanisms — legitimate. Four copies of the rule — not.</div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">After — one rule, four clocks</div>
+            <div class="deep rounded px-3 py-6 text-center">
+              <div class="lbl text-slate-300">VaultSession · pure reducer</div>
+              <div class="text-[11px] text-slate-400 mt-1.5 leading-snug">
+                idle timeout · desktop ownership<br/>lock vs sign-out · "-1 means never"
+              </div>
+            </div>
+            <div class="text-center text-slate-300 text-lg leading-none">│</div>
+            <div class="border-2 border-slate-400 dashed-seam rounded px-3 py-1 text-center">
+              <span class="lbl text-slate-500">ActivityPort · now() · schedule(ms) · onActivity()</span>
+            </div>
+            <div class="grid grid-cols-4 gap-1.5">
+              <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">timeout</div>
+              <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">interval</div>
+              <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">AppState</div>
+              <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">alarms</div>
+            </div>
+            <div class="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-1.5">
+              The extension already built this: <span class="mono text-[11px]">vault-session.test.ts</span> — 36 tests, 1 mock.
+            </div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              <span class="mono text-xs">IAutolockService</span> puts the seam above the decision, so every adapter
+              carries its own copy of "has the idle window elapsed" welded to its own timer. Three of the four
+              implementations have <span class="font-medium">zero tests</span>. The one that is well tested is the
+              extension's — because it alone separated the reducer from the clock.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Lift <span class="mono text-xs">vault-session/transitions.ts</span> into
+              <span class="mono text-xs">packages/core</span> as the auto-lock decision module. Drop the seam to a
+              three-primitive <span class="mono text-xs">ActivityPort</span>. Each platform supplies a clock and an
+              activity source; nobody re-derives the rule.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· 36 existing tests start covering all four platforms</div>
+          <div>· interface shrinks 8 members → 3</div>
+          <div>· the duplicated <span class="mono text-xs">10 * 60 * 1000</span> literal can go</div>
+          <div>· lock policy changes land once</div>
+        </div>
+
+        <div class="rounded border-l-4 border-amber-400 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <span class="font-medium">Deliberate decision in the way:</span>
+          <span class="mono text-xs">transitions.ts:20</span> duplicates
+          <span class="mono text-xs">DEFAULT_AUTO_LOCK_TIMEOUT_MS</span> on purpose — "duplicated so this module
+          imports nothing." Moving the reducer into <span class="mono text-xs">packages/core</span> should preserve
+          that import-freedom, or replace it with an explicit reason to drop it.
+        </div>
+      </article>
+
+      <!-- ══════════════════ 04 ══════════════════ -->
+      <article id="c4" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">04</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Vault-key granting is implemented inside web dialogs</h2>
+        </div>
+
+        <div class="mono text-xs text-slate-600 space-y-0.5">
+          <div>apps/web/src/components/vaults/add-member-dialog.tsx <span class="text-slate-400">329</span> · vault-member-list.tsx <span class="text-slate-400">400</span></div>
+          <div>apps/web/src/components/teams/invite-dialog.tsx <span class="text-slate-400">486</span> · member-list.tsx <span class="text-slate-400">385</span> · leave-team-dialog.tsx <span class="text-slate-400">188</span></div>
+          <div>apps/web/src/components/settings/change-password-dialog.tsx <span class="text-slate-400">340</span> · regenerate-secret-key-dialog.tsx <span class="text-slate-400">485</span></div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">Before — key policy embedded in render trees</div>
+            <div class="grid grid-cols-2 gap-2">
+              <div class="border border-slate-300 rounded p-2 space-y-1.5">
+                <div class="lbl text-slate-500">add-member</div>
+                <div class="hatch border border-red-300 rounded h-6 flex items-center justify-center mono text-[9px] text-red-700">rsaEncrypt ×4</div>
+              </div>
+              <div class="border border-slate-300 rounded p-2 space-y-1.5">
+                <div class="lbl text-slate-500">member-list</div>
+                <div class="hatch border border-red-300 rounded h-6 flex items-center justify-center mono text-[9px] text-red-700">×3</div>
+              </div>
+              <div class="border border-slate-300 rounded p-2 space-y-1.5">
+                <div class="lbl text-slate-500">invite</div>
+                <div class="hatch border border-red-300 rounded h-6 flex items-center justify-center mono text-[9px] text-red-700">×3</div>
+              </div>
+              <div class="border border-slate-300 rounded p-2 space-y-1.5">
+                <div class="lbl text-slate-500">leave-team</div>
+                <div class="hatch border border-red-300 rounded h-6 flex items-center justify-center mono text-[9px] text-red-700">×3</div>
+              </div>
+              <div class="border border-slate-300 rounded p-2 space-y-1.5">
+                <div class="lbl text-slate-500">change-password</div>
+                <div class="hatch border border-red-300 rounded h-6 flex items-center justify-center mono text-[9px] text-red-700">×7</div>
+              </div>
+              <div class="border border-slate-300 rounded p-2 space-y-1.5">
+                <div class="lbl text-slate-500">regen-secret-key</div>
+                <div class="hatch border border-red-300 rounded h-6 flex items-center justify-center mono text-[9px] text-red-700">×9</div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-500 leading-relaxed">
+              <span class="mono text-[11px]">add-member-dialog.tsx:122</span> unwraps a vault key and rewraps it under a
+              member's RSA public key — inside a click handler. Zero tests. Web only.
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">After — one module the dialogs call</div>
+            <div class="grid grid-cols-3 gap-1.5">
+              <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">dialogs</div>
+              <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">desktop</div>
+              <div class="border border-slate-300 rounded py-2 text-center lbl text-slate-500">mobile</div>
+            </div>
+            <div class="text-center text-slate-300 text-lg leading-none">│</div>
+            <div class="deep rounded px-3 py-6 text-center">
+              <div class="lbl text-slate-300">VaultAccess</div>
+              <div class="text-[11px] text-slate-400 mt-1.5 leading-snug">
+                grant(vault, member) · revoke(vault, member)<br/>
+                rotateAfterDeparture(vault) · rewrapForNewMuk(account)
+              </div>
+            </div>
+            <div class="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-1.5">
+              Testable the way <span class="mono text-[11px]">auth-service.test.ts</span> already is: real in-memory store, fake crypto.
+            </div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              Seven React components each hold a piece of the rule for who may hold a vault key and how it is rewrapped.
+              The rules are security-critical, have no module, no tests, and cannot be reached from desktop or mobile —
+              which is why those apps have no team management at all.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Extract a <span class="mono text-xs">VaultAccess</span> module in <span class="mono text-xs">packages/core</span>
+              taking the crypto seam and an RPC client. Dialogs shrink to form state plus one call. Candidate 02 is a
+              prerequisite for making it portable — but the extraction pays off on web alone.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· key-wrapping rules become testable at all</div>
+          <div>· locality: security review reads one module</div>
+          <div>· team features stop being web-shaped</div>
+          <div>· 2600 lines of dialog lose their crypto</div>
+        </div>
+      </article>
+
+      <!-- ══════════════════ 05 ══════════════════ -->
+      <article id="c5" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">05</span>
+            <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-xs font-medium">Strong</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Server authorization is re-derived at every call site</h2>
+        </div>
+
+        <div class="mono text-xs text-slate-600 space-y-0.5">
+          <div>apps/server/src/services/team.rs <span class="text-slate-400">2409 · 22 inline membership checks</span></div>
+          <div>apps/server/src/services/vault.rs <span class="text-slate-400">3539 · 6 inline role checks</span></div>
+          <div>apps/server/src/services/team_admin.rs <span class="text-slate-400">56 · the one real gate</span></div>
+          <div>apps/server/src/test_support.rs <span class="text-slate-400">· CREATE DATABASE per test</span></div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">Before — 28 gates, 28 chances to differ</div>
+            <div class="space-y-2">
+              <div class="border border-slate-300 rounded px-3 py-2">
+                <div class="lbl text-slate-500 mb-1.5">team.rs</div>
+                <div class="flex flex-wrap gap-1">
+                  <span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span>
+                </div>
+                <div class="mono text-[10px] text-slate-500 mt-1.5">"You are not a member of this team" ×22</div>
+              </div>
+              <div class="border border-slate-300 rounded px-3 py-2">
+                <div class="lbl text-slate-500 mb-1.5">vault.rs</div>
+                <div class="flex flex-wrap gap-1">
+                  <span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span><span class="w-3.5 h-3.5 hatch border border-red-300 rounded-sm"></span>
+                </div>
+                <div class="mono text-[10px] text-slate-500 mt-1.5">role != "owner" &amp;&amp; role != "admin" ×6</div>
+              </div>
+              <div class="border border-emerald-300 bg-emerald-50 rounded px-3 py-2">
+                <div class="lbl text-emerald-800">team_admin.rs · authorize_team_admin</div>
+                <div class="text-[10px] text-emerald-900 mt-1">"the single place that decides who may look. Keep it that way."</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">After — the counterexample, generalised</div>
+            <pre class="mermaid">
+flowchart TB
+  H["rpc handlers"] --> G["authorize(actor, resource, action)"]
+  G --> S["team.rs · vault.rs · share.rs<br/><i>policy only</i>"]
+  S --> P[("Postgres")]
+  G -.-> F["in-memory actor fixture"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#f8fafc,stroke-width:2px;
+  classDef seam stroke-dasharray:4 4,fill:#f8fafc;
+  class G deep
+  class F seam
+            </pre>
+            <div class="text-xs text-slate-500 leading-relaxed">
+              Today the four domain suites are ~1:1 test-to-database —
+              <span class="mono text-[11px]">auth 34/35</span>, <span class="mono text-[11px]">share 26/27</span>,
+              <span class="mono text-[11px]">team 13/14</span>, <span class="mono text-[11px]">vault 11/12</span>
+              (tests / <span class="mono text-[11px]">CREATE DATABASE</span> calls). The only suites that run without
+              Postgres sit behind the codebase's two seams: <span class="mono text-[11px]">RateLimiter</span> (a trait)
+              and <span class="mono text-[11px]">SessionBackend::Memory</span> (an enum).
+            </div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              The rule "may this actor touch this resource" is copy-pasted 28 times across two files, each preceded by
+              its own hand-rolled row fetch. One missed check is a data-isolation bug, and there is no single place a
+              reviewer can read to know the answer.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Generalise <span class="mono text-xs">authorize_team_admin</span> into one authorization module that
+              loads the actor once and answers <span class="mono text-xs">(actor, resource, action)</span>. Services
+              call it and stop re-deriving. Its input is a loaded actor, so it unit-tests without Postgres.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· locality: one module is the access-control audit</div>
+          <div>· authorization gets tests that don't need a database</div>
+          <div>· a new handler cannot forget the check</div>
+          <div>· the 4 copies of <span class="mono text-xs">forbidden_error</span> collapse</div>
+        </div>
+
+        <div class="rounded border-l-4 border-amber-400 bg-amber-50 px-4 py-2.5 text-sm text-amber-900">
+          <span class="font-medium">Pushes against a recent decision:</span> commit <span class="mono text-xs">5eec0c71</span>
+          deliberately folded the repo layer back into services. This candidate does not undo that — it adds one policy
+          module, not a repo tier. But the missing test seam is a direct consequence of that commit and is worth naming
+          out loud before layering anything new on top.
+        </div>
+      </article>
+
+      <!-- ══════════════════ 06 ══════════════════ -->
+      <article id="c6" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">06</span>
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-medium">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">local-substitutable</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Sync orchestration has no home, so four apps built it</h2>
+        </div>
+
+        <div class="mono text-xs text-slate-600 space-y-0.5">
+          <div>packages/sync/src/use-sync.ts <span class="text-slate-400">421 · takes SyncSource[] pre-resolved</span></div>
+          <div>apps/desktop/src/hooks/use-desktop-sync.ts <span class="text-slate-400">427</span> · mobile <span class="text-slate-400">294</span> · web <span class="text-slate-400">149</span></div>
+          <div>apps/{desktop,web,mobile}/src/providers/sync-provider.tsx <span class="text-slate-400">84/81/84 — 7 lines differ</span></div>
+          <div>apps/extension/src/background/sync-manager.ts <span class="text-slate-400">407 · a second SSE engine</span></div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+            <div class="lbl text-slate-400">Before</div>
+            <pre class="mermaid">
+flowchart TB
+  subgraph apps[" "]
+    D["useDesktopSync 427<br/><i>poll 5s · revalidate 5m</i>"]
+    M["useMobileSync 294<br/><i>poll 30s · AppState</i>"]
+    W["useWebSync 149<br/><i>external store</i>"]
+  end
+  D --> US["useSync"]
+  M --> US
+  W --> US
+  US --> ORCH["SyncOrchestrator<br/>OutboundQueue"]
+  X["extension sync-manager 407<br/>+ sync-cache-service 519"] --> DELTA["performDeltaSync"]
+  D -.dup.-> R["resolveLegacyAccountId"]
+  M -.dup.-> R
+  W -.dup.-> R
+  X -.dup.-> R
+  classDef leak stroke:#dc2626,stroke-width:2px,fill:#fef2f2;
+  classDef dup fill:#fff7ed,stroke:#fb923c;
+  class R leak
+  class X dup
+            </pre>
+          </div>
+          <div class="rounded-lg border border-slate-200 bg-white p-4 space-y-2">
+            <div class="lbl text-slate-400">After</div>
+            <pre class="mermaid">
+flowchart TB
+  D["desktop"] --> SS
+  M["mobile"] --> SS
+  W["web"] --> SS
+  X["extension"] --> SS
+  SS["SyncSession<br/><i>discovers accounts · resolves sources<br/>revalidates · drains queue</i>"]
+  SS --> TP["TimerPort"]
+  TP --> T1["interval"]
+  TP --> T2["chrome.alarms"]
+  classDef deep fill:#0f172a,stroke:#0f172a,color:#f8fafc,stroke-width:2px;
+  classDef seam stroke-dasharray:4 4,fill:#f8fafc;
+  class SS deep
+  class TP seam
+            </pre>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              <span class="mono text-xs">useSync</span> is deep for a known set of sources but does no account
+              discovery, so desktop and mobile each grew their own polling loop to keep that list fresh — the only
+              reason those hooks use <span class="mono text-xs">useEffect</span> at all. The extension needed
+              <span class="mono text-xs">chrome.alarms</span> instead of <span class="mono text-xs">setInterval</span>,
+              and with no timer seam to swap it rewrote the whole SSE engine. None of the four has a test.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Move account discovery and revalidation into <span class="mono text-xs">packages/sync</span> behind a
+              <span class="mono text-xs">TimerPort</span>, with <span class="mono text-xs">resolveLegacyAccountId</span>
+              as its default. The extension supplies an alarms adapter instead of a second engine; the three providers
+              collapse to one.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· the <span class="mono text-xs">useEffect</span> polling loops disappear</div>
+          <div>· ~900 extension lines stop shadowing the engine</div>
+          <div>· <span class="mono text-xs">sync-engine.test.ts</span> covers all four platforms</div>
+          <div>· 4 copies of <span class="mono text-xs">resolveLegacyAccountId</span> → 1</div>
+        </div>
+
+        <div class="rounded border-l-4 border-slate-300 bg-slate-50 px-4 py-2.5 text-sm text-slate-700">
+          <span class="font-medium">Cheap wins available first:</span> the exported
+          <span class="mono text-xs">ConflictInfo</span> / <span class="mono text-xs">ConflictResolution</span> types
+          are never constructed anywhere — the interface advertises conflict handling the engine does not do
+          (it is last-write-wins). <span class="mono text-xs">conflict-resolution-modal.tsx</span> (430 lines) has no
+          importers, and the sync-status indicator is commented out in both desktop and web.
+        </div>
+      </article>
+
+      <!-- ══════════════════ 07 ══════════════════ -->
+      <article id="c7" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">07</span>
+            <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-xs font-medium">Worth exploring</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">Import: the parse half is deep, the execute half is a React hook</h2>
+        </div>
+
+        <div class="mono text-xs text-slate-600 space-y-0.5">
+          <div>packages/shared/src/import/ <span class="text-slate-400">· provider registry, 5 providers, fixture-tested</span></div>
+          <div>apps/web/src/hooks/use-vault-import.ts <span class="text-slate-400">810 · 16-member return · 0 tests</span></div>
+          <div>apps/web/src/components/import/vault-import-dialog.tsx <span class="text-slate-400">1297</span></div>
+          <div>apps/desktop/src/utils/import-parsers.ts <span class="text-slate-400">543 · 0 importers</span></div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-4">
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">Before — half the flow has a module</div>
+            <div class="flex gap-3 items-end h-52">
+              <div class="flex-1 flex flex-col justify-end gap-1">
+                <div class="border-2 border-slate-400 dashed-seam rounded flex items-center justify-center" style="height:22%">
+                  <span class="lbl text-slate-500">registry</span>
+                </div>
+                <div class="deep rounded flex items-center justify-center" style="height:60%">
+                  <span class="lbl text-slate-300">5 providers</span>
+                </div>
+                <div class="lbl text-emerald-700 text-center">parse · tested</div>
+              </div>
+              <div class="flex-1 flex flex-col justify-end gap-1">
+                <div class="border-2 border-red-400 dashed-seam rounded flex items-center justify-center" style="height:62%">
+                  <span class="lbl text-red-600">16-member hook</span>
+                </div>
+                <div class="hatch border border-red-300 rounded flex items-center justify-center" style="height:20%">
+                  <span class="lbl text-slate-500">logic</span>
+                </div>
+                <div class="lbl text-red-600 text-center">execute · 0 tests</div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-500 leading-relaxed">
+              Mapping, batching, vault-key crypto, progress and error localisation live in a hook only web can reach.
+              Desktop's 543-line copy of the parsers is orphaned.
+            </div>
+          </div>
+
+          <div class="rounded-lg border border-slate-200 bg-white p-5 space-y-3">
+            <div class="lbl text-slate-400">After — both halves are modules</div>
+            <div class="flex gap-3 items-end h-52">
+              <div class="flex-1 flex flex-col justify-end gap-1">
+                <div class="border-2 border-slate-400 dashed-seam rounded flex items-center justify-center" style="height:22%">
+                  <span class="lbl text-slate-500">registry</span>
+                </div>
+                <div class="deep rounded flex items-center justify-center" style="height:60%">
+                  <span class="lbl text-slate-300">5 providers</span>
+                </div>
+                <div class="lbl text-emerald-700 text-center">parse</div>
+              </div>
+              <div class="flex-1 flex flex-col justify-end gap-1">
+                <div class="border-2 border-slate-400 dashed-seam rounded flex items-center justify-center" style="height:16%">
+                  <span class="lbl text-slate-500">plan · run</span>
+                </div>
+                <div class="deep rounded flex items-center justify-center" style="height:66%">
+                  <span class="lbl text-slate-300">ImportRun</span>
+                </div>
+                <div class="lbl text-emerald-700 text-center">execute</div>
+              </div>
+            </div>
+            <div class="text-xs text-slate-500 leading-relaxed">
+              The hook keeps <span class="mono text-[11px]">useState</span> and renders progress the module emits.
+              Desktop and mobile gain import by calling it.
+            </div>
+          </div>
+        </div>
+
+        <div class="grid md:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+          <div>
+            <div class="lbl text-slate-400 mb-1">Problem</div>
+            <p class="text-slate-700 leading-relaxed">
+              Everything after parsing — deciding which source vault maps where, batching 200 items at a time,
+              encrypting under the right vault key, reporting partial failure — sits in an 810-line hook with a
+              16-member return and no tests, in one app.
+            </p>
+          </div>
+          <div>
+            <div class="lbl text-slate-400 mb-1">Solution</div>
+            <p class="text-slate-700 leading-relaxed">
+              Pull the execution half into an <span class="mono text-xs">ImportRun</span> module beside the providers:
+              <span class="mono text-xs">plan(preview, mappings)</span> returns a plan,
+              <span class="mono text-xs">run(plan)</span> emits progress and a summary. Delete the orphaned
+              desktop parsers.
+            </p>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· import execution becomes testable with fixtures</div>
+          <div>· hook surface shrinks from 16 members</div>
+          <div>· 543 dead lines deleted outright</div>
+          <div>· leverage: one import, four platforms</div>
+        </div>
+      </article>
+
+      <!-- ══════════════════ 08 ══════════════════ -->
+      <article id="c8" class="scroll-mt-8 space-y-5">
+        <div class="space-y-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="mono text-xs text-slate-400">08</span>
+            <span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700 text-xs font-medium">Speculative</span>
+            <span class="px-2 py-0.5 rounded bg-slate-100 text-slate-600 text-xs">in-process</span>
+          </div>
+          <h2 class="font-serif text-2xl tracking-tight">The pass-through inventory</h2>
+        </div>
+
+        <p class="text-sm text-slate-600 max-w-3xl leading-relaxed">
+          Each of these fails the deletion test: removing it moves no complexity anywhere. Grouped because none is
+          worth a change on its own — but they are what makes the codebase read as more layered than it is.
+        </p>
+
+        <div class="rounded-lg border border-slate-200 bg-white overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead class="bg-slate-50 border-b border-slate-200">
+                <tr class="text-left">
+                  <th class="px-4 py-2 lbl text-slate-500 font-semibold">Module</th>
+                  <th class="px-4 py-2 lbl text-slate-500 font-semibold">What it does</th>
+                  <th class="px-4 py-2 lbl text-slate-500 font-semibold text-right">Delete?</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">vault-repository-coordinator.ts:473-528</td>
+                  <td class="px-4 py-2.5 text-slate-600">10 methods that look up a repository by accountId and forward the same-named call</td>
+                  <td class="px-4 py-2.5 text-right text-emerald-700 text-xs">inline</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">account-resolver.ts:166-179</td>
+                  <td class="px-4 py-2.5 text-slate-600">Class methods delegating to free functions of the same name, which wrap <span class="mono text-xs">rpc-client.ts</span> — three layers, one behaviour</td>
+                  <td class="px-4 py-2.5 text-right text-emerald-700 text-xs">collapse</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">vault-service.ts:269-279</td>
+                  <td class="px-4 py-2.5 text-slate-600"><span class="mono text-xs">deleteVault</span>: resolve client, call mutate. Whole 291-line module has 0 tests</td>
+                  <td class="px-4 py-2.5 text-right text-emerald-700 text-xs">inline</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">services/{vault,team,share}.rs</td>
+                  <td class="px-4 py-2.5 text-slate-600"><span class="mono text-xs">forbidden_error</span> et al — byte-identical one-line wrappers over <span class="mono text-xs">AppError::*</span>, redefined in 4 files</td>
+                  <td class="px-4 py-2.5 text-right text-emerald-700 text-xs">delete</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">apps/{web,desktop}/…/create-vault-dialog.tsx</td>
+                  <td class="px-4 py-2.5 text-slate-600">2-line re-export shims over <span class="mono text-xs">@bittery/ui</span> (also <span class="mono text-xs">edit-vault-dialog.tsx</span>)</td>
+                  <td class="px-4 py-2.5 text-right text-emerald-700 text-xs">delete</td>
+                </tr>
+                <tr>
+                  <td class="px-4 py-2.5 mono text-xs">hooks/vault/use-*-vault.ts</td>
+                  <td class="px-4 py-2.5 text-slate-600">Same 4-statement <span class="mono text-xs">onSuccess</span> block copied into 4 files; the items hooks already factored theirs into <span class="mono text-xs">mutation-utils.ts</span></td>
+                  <td class="px-4 py-2.5 text-right text-emerald-700 text-xs">factor</td>
+                </tr>
+                <tr class="bg-amber-50/40">
+                  <td class="px-4 py-2.5 mono text-xs">extension/background/session-manager.ts</td>
+                  <td class="px-4 py-2.5 text-slate-600">Facade over <span class="mono text-xs">vault-session/</span>, every export a one-liner — <span class="text-amber-800">kept on purpose: 8 modules import it, 5 tests mock it</span></td>
+                  <td class="px-4 py-2.5 text-right text-amber-700 text-xs">leave</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="grid sm:grid-cols-2 gap-x-8 gap-y-1 text-sm text-slate-700">
+          <div class="lbl text-slate-400 sm:col-span-2 mb-0.5">Wins</div>
+          <div>· fewer hops between a call and its behaviour</div>
+          <div>· interface count drops without losing capability</div>
+          <div>· navigation cost falls for people and agents</div>
+          <div>· the remaining indirection reads as intentional</div>
+        </div>
+      </article>
+
+      </section>
+
+      <!-- ══════════════════ TOP RECOMMENDATION ══════════════════ -->
+      <section id="top-recommendation" class="rounded-xl deep text-slate-100 px-8 py-8 space-y-5">
+        <div class="lbl text-slate-400">The first real decision</div>
+        <h2 class="font-serif text-3xl tracking-tight">
+          <a href="#c1" class="hover:underline decoration-slate-500 underline-offset-4">01 — Unlock has three implementations</a>
+        </h2>
+        <p class="text-slate-400 text-sm leading-relaxed max-w-3xl border-l-2 border-slate-700 pl-3">
+          <a href="#c0" class="text-slate-200 underline decoration-slate-600 underline-offset-2 hover:decoration-slate-300">00</a>
+          comes before it in time but not in importance — it is cleanup, it asks nothing of you, and it makes this diff
+          smaller.
+        </p>
+        <p class="text-slate-300 leading-relaxed max-w-3xl">
+          It is the smallest change with the largest effect, and it is already half done. Two entry points on
+          <span class="mono text-sm text-slate-100">unlock.ts</span> exist, are tested, and have zero callers; two hooks
+          reimplement exactly what they do. Routing the hooks through them is mostly deletion — no new seam, no new
+          module, no port to design.
+        </p>
+        <p class="text-slate-300 leading-relaxed max-w-3xl">
+          It also sits where the work is: five of the last eight commits touch unlock, session, and account lifecycle,
+          and every one of them had to be reasoned about three times. Closing that first makes candidates
+          <a href="#c2" class="text-slate-100 underline decoration-slate-600 underline-offset-2 hover:decoration-slate-300">02</a>
+          and
+          <a href="#c3" class="text-slate-100 underline decoration-slate-600 underline-offset-2 hover:decoration-slate-300">03</a>
+          — which both reshape what unlock stands on — a single-caller change rather than a three-caller one.
+        </p>
+        <div class="flex flex-wrap gap-2 pt-1">
+          <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs text-slate-300">00 first · cleanup</span>
+          <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs text-slate-300">then 02 · crypto seam</span>
+          <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs text-slate-300">then 03 · auto-lock reducer</span>
+          <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs text-slate-300">04 unblocked by 02</span>
+          <span class="px-2.5 py-1 rounded bg-slate-800 border border-slate-700 text-xs text-slate-300">05 independent · server-side</span>
+        </div>
+      </section>
+
+      <footer class="text-xs text-slate-400 pt-2 pb-8 border-t border-slate-200">
+        Vocabulary from <span class="mono">/codebase-design</span>: module · interface · implementation · depth ·
+        seam · adapter · leverage · locality. No <span class="mono">CONTEXT.md</span> at repo root and no
+        <span class="mono">docs/adr/</span> — <span class="mono">packages/storage/CONTEXT.md</span> is currently the
+        only recorded design context, and it is the model the strongest candidates here point back to.
+      </footer>
+
+    </main>
+  </body>
+</html>

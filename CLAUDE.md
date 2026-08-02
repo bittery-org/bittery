@@ -1,6 +1,7 @@
 ## Must Follow Guidelines
 
 - For user-facing UI, follow the design system spec in `DESIGN.md` (tokens, elevation ladder, selection/hover/button recipes).
+- Name concepts with the vocabulary in `CONTEXT.md`, in code and in UI copy alike. Settled architectural decisions are recorded in `docs/adr/` — read the relevant one before proposing a change that contradicts it.
 - Verify changes with `pnpm check-types` and `pnpm test` (`pnpm test:server` for Rust).
 - Never hand-fix formatting or class sorting — run `pnpm biome check --write <changed files>` instead. Don't run `pnpm check:fix`; it applies `--unsafe` fixes repo-wide.
 - Never run the dev server (one is always running) and never run a build command unless explicitly asked.

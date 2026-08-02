@@ -18,7 +18,7 @@ We appreciate responsible disclosure and will credit reporters (with permission)
 
 ## Security Model Overview
 
-Bittery uses a **dual-key architecture**: your account password and a randomly generated **Secret Key** are both required to derive encryption keys. This means that even if the server database is fully compromised, an attacker cannot decrypt your data without both factors — neither of which the server ever sees.
+Bittery uses a **dual-key architecture**: your master password and a randomly generated **Secret Key** are both required to derive encryption keys. This means that even if the server database is fully compromised, an attacker cannot decrypt your data without both factors — neither of which the server ever sees.
 
 ### What the Server Stores
 
@@ -49,7 +49,7 @@ Bittery uses a **dual-key architecture**: your account password and a randomly g
 
 Your master password and Secret Key are combined into a single input using length-prefixed concatenation (preventing collision attacks), then processed through two stages:
 
-1. **PBKDF2-SHA256** with 310,000 iterations and your lowercase email as the salt, producing a 256-bit master key
+1. **PBKDF2-SHA256** with 600,000 iterations and your lowercase email as the salt, producing a 256-bit master key
 2. **HKDF-SHA256** splits this master key into two purpose-specific keys:
    - **Auth Key** (info: `"bittery-auth-key"`) — used for SRP-6a authentication
    - **Master Unlock Key** (info: `"bittery-unlock-key"`) — encrypts your vault keys and RSA private key
@@ -128,12 +128,15 @@ At no point does the server see the password, the Auth Key, or any value that co
 During login challenge (`startLogin`), the server returns explicit KDF parameters (`schemaVersion`, `algorithm`, `iterations`, `salt`).
 
 The client enforces:
+- `schemaVersion` must be `1`
 - `algorithm` must be `pbkdf2-sha256`
-- `iterations` must be at least `310,000`
+- `iterations` must fall within `600,000`–`1,200,000` — the upper bound keeps a tampered challenge from imposing unbounded work
 - `salt` must be valid hex and at least 16 bytes
 - after first successful login, the client pins values locally; future logins reject schema/algorithm/salt changes and iteration downgrades
 
 This blocks KDF downgrade/tampering attempts if the login challenge path is manipulated.
+
+The client bounds come from `packages/crypto/kdf-policy.json`, which the crypto core reads directly. The server declares the profile it serves independently, as constants in `apps/server/src/services/auth.rs` — the two are separate sources and must be changed together. See `docs/kdf-policy.md` for the deployment policy behind the numbers.
 
 ### Session Management
 
@@ -268,7 +271,7 @@ Audit logs use a non-foreign-key user reference so they survive account deletion
 | Parameter | Value |
 |-----------|-------|
 | Key derivation | PBKDF2-SHA256 + HKDF-SHA256 |
-| PBKDF2 iterations | 310,000 |
+| PBKDF2 iterations | 600,000 (accepted range 600,000–1,200,000) |
 | Master key size | 256 bits |
 | Vault key size | 256 bits |
 | Symmetric encryption | AES-256-GCM (`AES-GCM-AAD-V1`) |
