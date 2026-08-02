@@ -405,7 +405,7 @@ impl PostgresSessionStore {
 
         let mut transaction = self.pool.begin().await.map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         if client_id.is_some() {
@@ -417,7 +417,7 @@ impl PostgresSessionStore {
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Session store is unavailable");
-                    internal_handler_error("Session store is unavailable")
+                    AppError::internal("Session store is unavailable")
                 })?;
         }
 
@@ -471,12 +471,12 @@ impl PostgresSessionStore {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         transaction.commit().await.map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         Ok(CreatedSession {
@@ -532,7 +532,7 @@ impl PostgresSessionStore {
     ) -> Result<RefreshSessionResponse, AppError> {
         let mut transaction = self.pool.begin().await.map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         let current = sqlx::query_as::<_, DbSessionRecord>(
@@ -564,7 +564,7 @@ impl PostgresSessionStore {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?
         .ok_or_else(|| handler_unauthorized_error("Session expired"))?;
 
@@ -607,7 +607,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })?;
 
             grouped
@@ -629,7 +629,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })?;
         } else {
             sqlx::query(r#"DELETE FROM session WHERE id = $1"#)
@@ -638,7 +638,7 @@ impl PostgresSessionStore {
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Session store is unavailable");
-                    internal_handler_error("Session store is unavailable")
+                    AppError::internal("Session store is unavailable")
                 })?;
         }
 
@@ -684,12 +684,12 @@ impl PostgresSessionStore {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         transaction.commit().await.map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         Ok(RefreshSessionResponse {
@@ -706,7 +706,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })
     }
 
@@ -717,7 +717,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })
     }
 
@@ -735,7 +735,7 @@ impl PostgresSessionStore {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })
     }
 
@@ -772,7 +772,7 @@ impl PostgresSessionStore {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         let sessions = rows
@@ -816,7 +816,7 @@ impl PostgresSessionStore {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Session store is unavailable");
-            internal_handler_error("Session store is unavailable")
+            AppError::internal("Session store is unavailable")
         })?;
 
         Ok(row.map(snapshot_from_db_session))
@@ -842,7 +842,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })?;
 
             query("DELETE FROM session WHERE user_id = $1 AND platform = $2 AND client_id = $3")
@@ -853,7 +853,7 @@ impl PostgresSessionStore {
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Session store is unavailable");
-                    internal_handler_error("Session store is unavailable")
+                    AppError::internal("Session store is unavailable")
                 })?;
 
             return Ok(grouped_sessions);
@@ -866,7 +866,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })?;
 
         Ok(vec![existing_session.id])
@@ -892,7 +892,7 @@ impl PostgresSessionStore {
 			.bind(existing_session.client_id.as_deref())
 			.execute(&self.pool)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Session store is unavailable"); internal_handler_error("Session store is unavailable") })?;
+			.map_err(|e| { tracing::error!(error = %e, "Session store is unavailable"); AppError::internal("Session store is unavailable") })?;
             return Ok(());
         }
 
@@ -904,7 +904,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })?;
         Ok(())
     }
@@ -917,7 +917,7 @@ impl PostgresSessionStore {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Session store is unavailable");
-                internal_handler_error("Session store is unavailable")
+                AppError::internal("Session store is unavailable")
             })?;
         Ok(())
     }
@@ -1381,10 +1381,6 @@ pub(crate) fn now_utc() -> OffsetDateTime {
 
 fn handler_unauthorized_error(message: &str) -> AppError {
     AppError::unauthorized(message)
-}
-
-fn internal_handler_error(message: &str) -> AppError {
-    AppError::internal(message)
 }
 
 // ---------------------------------------------------------------------------

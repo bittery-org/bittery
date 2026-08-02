@@ -658,7 +658,7 @@ pub(crate) async fn request_signup_verification(
     let pool = app_state
         .db_pool
         .as_ref()
-        .ok_or_else(|| internal_handler_error("Database is not configured"))?;
+        .ok_or_else(|| AppError::internal("Database is not configured"))?;
     let normalized_email = normalize_email(&input.email);
 
     // Two independent counters, as in `request_recovery_verification`: a composite
@@ -717,7 +717,7 @@ pub(crate) async fn verify_signup_verification(
     let pool = app_state
         .db_pool
         .as_ref()
-        .ok_or_else(|| internal_handler_error("Database is not configured"))?;
+        .ok_or_else(|| AppError::internal("Database is not configured"))?;
     let normalized_email = normalize_email(&input.email);
     let limiter = app_state.rate_limiter.as_ref();
 
@@ -865,7 +865,7 @@ pub(crate) async fn signup(
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start signup transaction");
-        internal_handler_error("Failed to start signup transaction")
+        AppError::internal("Failed to start signup transaction")
     })?;
 
     insert_user_account(
@@ -904,7 +904,7 @@ pub(crate) async fn signup(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to link user to team");
-            internal_handler_error("Failed to link user to team")
+            AppError::internal("Failed to link user to team")
         })?;
     insert_personal_vault(
         &mut transaction,
@@ -916,7 +916,7 @@ pub(crate) async fn signup(
 
     transaction.commit().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to commit signup");
-        internal_handler_error("Failed to commit signup")
+        AppError::internal("Failed to commit signup")
     })?;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
@@ -982,7 +982,7 @@ pub(crate) async fn signup_with_invitation(
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to load team members");
-                    internal_handler_error("Failed to load team members")
+                    AppError::internal("Failed to load team members")
                 })?;
         if current_members >= i64::from(member_limit) {
             return Err(AppError::bad_request("Team has reached member limit"));
@@ -1014,7 +1014,7 @@ pub(crate) async fn signup_with_invitation(
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start invited signup transaction");
-        internal_handler_error("Failed to start invited signup transaction")
+        AppError::internal("Failed to start invited signup transaction")
     })?;
 
     insert_user_account(
@@ -1043,7 +1043,7 @@ pub(crate) async fn signup_with_invitation(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to link invited user to team");
-            internal_handler_error("Failed to link invited user to team")
+            AppError::internal("Failed to link invited user to team")
         })?;
     insert_personal_vault(
         &mut transaction,
@@ -1064,7 +1064,7 @@ pub(crate) async fn signup_with_invitation(
 		.bind(vault_role)
 		.execute(transaction.as_mut())
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to provision invited vault access"); internal_handler_error("Failed to provision invited vault access") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to provision invited vault access"); AppError::internal("Failed to provision invited vault access") })?;
     }
 
     query("UPDATE team_invitation SET status = 'accepted', accepted_at = $1 WHERE id = $2")
@@ -1074,12 +1074,12 @@ pub(crate) async fn signup_with_invitation(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to accept invitation");
-            internal_handler_error("Failed to accept invitation")
+            AppError::internal("Failed to accept invitation")
         })?;
 
     transaction.commit().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to commit invited signup");
-        internal_handler_error("Failed to commit invited signup")
+        AppError::internal("Failed to commit invited signup")
     })?;
 
     sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
@@ -1148,7 +1148,7 @@ pub(crate) async fn start_login(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to prune login attempts");
-            internal_handler_error("Failed to prune login attempts")
+            AppError::internal("Failed to prune login attempts")
         })?;
 
     let user = query_as::<_, DbLoginUserRow>(
@@ -1157,7 +1157,7 @@ pub(crate) async fn start_login(
 	.bind(&normalized_email)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load login account"); internal_handler_error("Failed to load login account") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load login account"); AppError::internal("Failed to load login account") })?;
 
     let salt = user
         .as_ref()
@@ -1169,7 +1169,7 @@ pub(crate) async fn start_login(
         .unwrap_or_else(|| FAKE_SRP_VERIFIER.to_string());
     let ephemeral = server.generate_ephemeral(&verifier).map_err(|e| {
         tracing::error!(error = %e, "Failed to create login challenge");
-        internal_handler_error("Failed to create login challenge")
+        AppError::internal("Failed to create login challenge")
     })?;
     let attempt_id = build_login_attempt_id(&normalized_email_hash);
 
@@ -1184,7 +1184,7 @@ pub(crate) async fn start_login(
 	.bind(now + Duration::seconds(LOGIN_ATTEMPT_TTL_SECONDS))
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create login attempt"); internal_handler_error("Failed to create login attempt") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to create login attempt"); AppError::internal("Failed to create login attempt") })?;
 
     // The database constraint and verifier-write validation guarantee that a
     // real account uses the same profile as this decoy. Do not introduce a
@@ -1192,10 +1192,10 @@ pub(crate) async fn start_login(
     let kdf_params = match user.as_ref() {
         Some(existing) => LoginKdfParamsResponse {
             schema_version: u32::try_from(existing.kdf_schema_version)
-                .map_err(|_| internal_handler_error("Stored KDF profile violates server policy"))?,
+                .map_err(|_| AppError::internal("Stored KDF profile violates server policy"))?,
             algorithm: existing.kdf_algorithm.clone(),
             iterations: u32::try_from(existing.kdf_iterations)
-                .map_err(|_| internal_handler_error("Stored KDF profile violates server policy"))?,
+                .map_err(|_| AppError::internal("Stored KDF profile violates server policy"))?,
         },
         None => LoginKdfParamsResponse {
             schema_version: CURRENT_KDF_SCHEMA_VERSION,
@@ -1229,7 +1229,7 @@ async fn verify_login_proof_and_get_user(
 	.bind(&input.attempt_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to consume login attempt"); internal_handler_error("Failed to consume login attempt") })?
+	.map_err(|e| { tracing::error!(error = %e, "Failed to consume login attempt"); AppError::internal("Failed to consume login attempt") })?
 	.ok_or_else(|| AppError::unauthorized("Invalid credentials"))?;
 
     if attempt.expires_at <= now_utc() || attempt.client_public_key != input.client_public_key {
@@ -1245,7 +1245,7 @@ async fn verify_login_proof_and_get_user(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load login account"); internal_handler_error("Failed to load login account") })?
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load login account"); AppError::internal("Failed to load login account") })?
 	.ok_or_else(|| AppError::unauthorized("Invalid credentials"))?;
 
     let server = SrpServer::new(HashAlgorithm::Sha256, PrimeGroup::G4096);
@@ -1346,7 +1346,7 @@ pub(crate) async fn request_recovery_verification(
 	.bind(&normalized_email)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load recovery account"); internal_handler_error("Failed to load recovery account") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load recovery account"); AppError::internal("Failed to load recovery account") })?;
 
     if existing_user
         .as_ref()
@@ -1444,7 +1444,7 @@ async fn load_user_id_by_email(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to load user for recovery lockout");
-            internal_handler_error("Failed to load user for recovery lockout")
+            AppError::internal("Failed to load user for recovery lockout")
         })
 }
 
@@ -1520,7 +1520,7 @@ pub(crate) async fn reset_password(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record session revocations");
-        internal_handler_error("Failed to record session revocations")
+        AppError::internal("Failed to record session revocations")
     })?;
     let session = app_state.sessions.create_session(&user_id, request).await?;
 
@@ -1536,7 +1536,7 @@ pub(crate) async fn reset_password(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record recovery audit event");
-        internal_handler_error("Failed to record recovery audit event")
+        AppError::internal("Failed to record recovery audit event")
     })?;
 
     Ok(ResetPasswordResponse {
@@ -1565,7 +1565,7 @@ pub(crate) async fn update_email(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to check email");
-                internal_handler_error("Failed to check email")
+                AppError::internal("Failed to check email")
             })?;
     if existing_user_id
         .as_deref()
@@ -1595,7 +1595,7 @@ pub(crate) async fn update_email(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record session revocations");
-        internal_handler_error("Failed to record session revocations")
+        AppError::internal("Failed to record session revocations")
     })?;
     insert_audit_event(
         pool,
@@ -1607,7 +1607,7 @@ pub(crate) async fn update_email(
         Some(json!({ "newEmail": normalized_new_email, "vaultKeysUpdated": input.encrypted_vault_keys.len() })),
     )
     .await
-    .map_err(|e| { tracing::error!(error = %e, "Failed to record email change audit event"); internal_handler_error("Failed to record email change audit event") })?;
+    .map_err(|e| { tracing::error!(error = %e, "Failed to record email change audit event"); AppError::internal("Failed to record email change audit event") })?;
 
     Ok(LogoutResponse { success: true })
 }
@@ -1637,7 +1637,7 @@ pub(crate) async fn change_password(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record session revocations");
-        internal_handler_error("Failed to record session revocations")
+        AppError::internal("Failed to record session revocations")
     })?;
     insert_audit_event(
         pool,
@@ -1651,7 +1651,7 @@ pub(crate) async fn change_password(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record password change audit event");
-        internal_handler_error("Failed to record password change audit event")
+        AppError::internal("Failed to record password change audit event")
     })?;
 
     Ok(LogoutResponse { success: true })
@@ -1682,7 +1682,7 @@ pub(crate) async fn regenerate_secret_key(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record session revocations");
-        internal_handler_error("Failed to record session revocations")
+        AppError::internal("Failed to record session revocations")
     })?;
     insert_audit_event(
         pool,
@@ -1696,7 +1696,7 @@ pub(crate) async fn regenerate_secret_key(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record secret key regeneration audit event");
-        internal_handler_error("Failed to record secret key regeneration audit event")
+        AppError::internal("Failed to record secret key regeneration audit event")
     })?;
 
     Ok(LogoutResponse { success: true })
@@ -1714,7 +1714,7 @@ pub(crate) async fn store_recovery_key(
 	.bind(&session.user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); internal_handler_error("Failed to load user") })?
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); AppError::internal("Failed to load user") })?
 	.ok_or_else(|| AppError::not_found("User not found"))?;
     let had_recovery_key = user.encrypted_master_key.is_some();
 
@@ -1735,7 +1735,7 @@ pub(crate) async fn store_recovery_key(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record recovery key audit event");
-        internal_handler_error("Failed to record recovery key audit event")
+        AppError::internal("Failed to record recovery key audit event")
     })?;
 
     Ok(LogoutResponse { success: true })
@@ -1753,7 +1753,7 @@ pub(crate) async fn delete_account(
 	.bind(&session.user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); internal_handler_error("Failed to load user") })?
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); AppError::internal("Failed to load user") })?
 	.ok_or_else(|| AppError::not_found("User not found"))?;
 
     if normalize_email(&user.email) != normalize_email(&input.confirm_email) {
@@ -1770,7 +1770,7 @@ pub(crate) async fn delete_account(
                     .await
                     .map_err(|e| {
                         tracing::error!(error = %e, "Failed to load team members");
-                        internal_handler_error("Failed to load team members")
+                        AppError::internal("Failed to load team members")
                     })?;
             let remaining_vaults =
                 query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM vault WHERE team_id = $1")
@@ -1779,7 +1779,7 @@ pub(crate) async fn delete_account(
                     .await
                     .map_err(|e| {
                         tracing::error!(error = %e, "Failed to load team vaults");
-                        internal_handler_error("Failed to load team vaults")
+                        AppError::internal("Failed to load team vaults")
                     })?;
             if remaining_members > 1 || remaining_vaults > 0 {
                 return Err(bad_request_handler_error(
@@ -1801,7 +1801,7 @@ pub(crate) async fn delete_account(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to record account deletion audit event");
-        internal_handler_error("Failed to record account deletion audit event")
+        AppError::internal("Failed to record account deletion audit event")
     })?;
 
     delete_user_account_data(pool, &session.user_id).await?;
@@ -1860,7 +1860,7 @@ pub(crate) async fn check_email(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to load account");
-            internal_handler_error("Failed to load account")
+            AppError::internal("Failed to load account")
         })?
         .and_then(|row| row.secret_key_hint)
         .unwrap_or_else(|| deterministic_fake_hint(&normalized_email)),
@@ -1880,14 +1880,14 @@ pub(crate) async fn get_me(
     let pool = app_state
         .db_pool
         .as_ref()
-        .ok_or_else(|| internal_handler_error("Database is not configured"))?;
+        .ok_or_else(|| AppError::internal("Database is not configured"))?;
     let user = query_as::<_, DbMeRow>(
 		"SELECT u.id, u.email, u.name, u.team_id, t.name AS team_name, t.type::text AS team_type, t.image_key AS team_image_key, u.role::text AS role, u.secret_key_hint, u.public_key, u.encrypted_private_key, u.encrypted_master_key, u.created_at FROM \"user\" u LEFT JOIN team t ON u.team_id = t.id WHERE u.id = $1 LIMIT 1",
 	)
 	.bind(&session.user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); internal_handler_error("Failed to load user") })?
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load user"); AppError::internal("Failed to load user") })?
 	.ok_or_else(|| AppError::not_found("User not found"))?;
 
     Ok(MeResponse {
@@ -1975,7 +1975,7 @@ pub(crate) async fn revoke_device(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to record session revocations");
-                internal_handler_error("Failed to record session revocations")
+                AppError::internal("Failed to record session revocations")
             })?;
             insert_audit_event(
                 pool,
@@ -1992,7 +1992,7 @@ pub(crate) async fn revoke_device(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to record device revoke audit event");
-                internal_handler_error("Failed to record device revoke audit event")
+                AppError::internal("Failed to record device revoke audit event")
             })?;
         }
     }
@@ -2043,7 +2043,7 @@ pub(crate) async fn do_logout(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to record session revocations");
-                internal_handler_error("Failed to record session revocations")
+                AppError::internal("Failed to record session revocations")
             })?;
     }
     Ok(LogoutResponse { success: true })
@@ -2063,7 +2063,7 @@ pub(crate) async fn do_logout_all(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to record session revocations");
-                internal_handler_error("Failed to record session revocations")
+                AppError::internal("Failed to record session revocations")
             })?;
         insert_audit_event(
             pool,
@@ -2080,7 +2080,7 @@ pub(crate) async fn do_logout_all(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to record logout audit event");
-            internal_handler_error("Failed to record logout audit event")
+            AppError::internal("Failed to record logout audit event")
         })?;
     }
 
@@ -2291,7 +2291,7 @@ fn create_signup_verification_token(
     )
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to create signup verification token");
-        internal_handler_error("Failed to create signup verification token")
+        AppError::internal("Failed to create signup verification token")
     })?;
     if is_dev_auth_stub_enabled() {
         info!(
@@ -2330,7 +2330,7 @@ fn create_recovery_token(
     )
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to create recovery token");
-        internal_handler_error("Failed to create recovery token")
+        AppError::internal("Failed to create recovery token")
     })?;
     if is_dev_auth_stub_enabled() {
         info!(
@@ -2779,7 +2779,7 @@ fn send_signup_verification_code(
     invitation_token: Option<&str>,
 ) -> Result<(), AppError> {
     if !is_dev_auth_stub_enabled() {
-        return Err(internal_handler_error(
+        return Err(AppError::internal(
 			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
 		));
     }
@@ -2799,7 +2799,7 @@ fn send_signup_verification_code(
 
 fn send_recovery_code(email: &str, code: &str) -> Result<(), AppError> {
     if !is_dev_auth_stub_enabled() {
-        return Err(internal_handler_error(
+        return Err(AppError::internal(
 			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
 		));
     }
@@ -3263,10 +3263,6 @@ fn requires_signup_email_verification() -> bool {
 
 fn unauthorized_error(message: &str) -> RpcError {
     AppError::unauthorized(message).into()
-}
-
-fn internal_handler_error(message: &str) -> AppError {
-    AppError::internal(message)
 }
 
 fn unauthorized_handler_error(message: &str) -> AppError {

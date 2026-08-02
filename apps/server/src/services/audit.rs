@@ -245,7 +245,7 @@ fn normalize_input(input: &TeamEventsInput) -> Result<NormalizedInput, AppError>
     let to = input.to.as_deref().map(parse_timestamp).transpose()?;
     if let (Some(from), Some(to)) = (from, to) {
         if from > to {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "The from date must be before the to date",
             ));
         }
@@ -275,15 +275,15 @@ fn normalize_input(input: &TeamEventsInput) -> Result<NormalizedInput, AppError>
 
 fn parse_timestamp(value: &str) -> Result<OffsetDateTime, AppError> {
     OffsetDateTime::parse(value, &Rfc3339)
-        .map_err(|_| bad_request_error("Invalid RFC3339 timestamp"))
+        .map_err(|_| AppError::bad_request("Invalid RFC3339 timestamp"))
 }
 
 fn decode_cursor(raw: &str) -> Result<CursorPayload, AppError> {
     let decoded = URL_SAFE_NO_PAD
         .decode(raw)
-        .map_err(|_| bad_request_error("Invalid pagination cursor"))?;
+        .map_err(|_| AppError::bad_request("Invalid pagination cursor"))?;
     let cursor = serde_json::from_slice::<CursorPayload>(&decoded)
-        .map_err(|_| bad_request_error("Invalid pagination cursor"))?;
+        .map_err(|_| AppError::bad_request("Invalid pagination cursor"))?;
     parse_timestamp(&cursor.timestamp)?;
     Ok(cursor)
 }
@@ -472,10 +472,6 @@ fn mask_user_agent(user_agent: Option<&str>) -> Option<String> {
                 .to_string(),
         )
     }
-}
-
-fn bad_request_error(message: &str) -> AppError {
-    AppError::bad_request(message)
 }
 
 #[derive(Debug, Clone)]

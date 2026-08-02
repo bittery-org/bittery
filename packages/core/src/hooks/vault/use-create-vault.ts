@@ -6,10 +6,8 @@
 
 import { useRPCClient } from "@bittery/shared/rpc";
 import { useMutation } from "@tanstack/react-query";
-import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
+import { useCoreContext } from "../../context/platform-context";
+import { useRefreshAfterVaultMutation } from "./mutation-utils";
 
 /**
  * Image file input - supports File (browser) or Blob
@@ -41,18 +39,11 @@ export interface CreateVaultResult {
 export function useCreateVault() {
 	const defaultClient = useRPCClient();
 	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const refreshAfterMutation = useRefreshAfterVaultMutation();
 
 	return useMutation({
 		mutationFn: (input: CreateVaultInput): Promise<CreateVaultResult> =>
 			core.vaults.createVault(input, defaultClient),
-		onSuccess: async (_data, variables) => {
-			await core.vaults.refreshVaultKeys(defaultClient, variables.accountId);
-			const { accountsInfo } = await core.accounts.resolveAccounts();
-			if (accountsInfo.length > 0) {
-				await core.vaultCoordinator.refreshFromServer(accountsInfo);
-			}
-			await invalidator.invalidateVaultKeys();
-		},
+		onSuccess: (_data, variables) => refreshAfterMutation(variables.accountId),
 	});
 }

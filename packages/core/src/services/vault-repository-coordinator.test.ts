@@ -106,7 +106,7 @@ describe("VaultRepositoryCoordinator", () => {
 			coordinator.setActiveAccounts([accountA, accountB]);
 
 			// Seed the vault ONLY into acc-b's repo.
-			await coordinator.upsertVault(
+			await coordinator.upsertCachedVault(
 				{
 					id: "vault-1",
 					name: "Vault 1",

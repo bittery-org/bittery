@@ -113,7 +113,7 @@ export function createLocalItemCacheService(
 				updatedAt: now,
 				deletedAt: null,
 			};
-			await vaultCoordinator.upsertEncrypted(item, resolvedAccount.accountId);
+			await vaultCoordinator.upsertCachedItem(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},
 
@@ -156,7 +156,7 @@ export function createLocalItemCacheService(
 				deletedAt: existing.deletedAt,
 				attachments: existing.attachments,
 			};
-			await vaultCoordinator.upsertEncrypted(item, resolvedAccount.accountId);
+			await vaultCoordinator.upsertCachedItem(item, resolvedAccount.accountId);
 			deps.desktopClient.clearCache();
 		},
 	};

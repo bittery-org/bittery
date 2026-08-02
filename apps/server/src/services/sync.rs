@@ -199,7 +199,7 @@ pub(crate) async fn check_conflict(
 
     let accessible_item = load_scoped_item_access(pool, user_id, &input.item_id)
         .await?
-        .ok_or_else(|| not_found_error("Item not found"))?;
+        .ok_or_else(|| AppError::not_found("Item not found"))?;
 
     let latest_item_event = query_as::<_, DbSyncConflictRow>(
 		"SELECT version, user_id, created_at FROM sync_event WHERE entity_id = $1 AND entity_type = 'item'::sync_entity_type AND vault_id = $2 ORDER BY created_at DESC LIMIT 1",
@@ -208,7 +208,7 @@ pub(crate) async fn check_conflict(
 	.bind(&accessible_item.vault_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load latest sync event"); internal_error("Failed to load latest sync event") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load latest sync event"); AppError::internal("Failed to load latest sync event") })?;
 
     let Some(latest_item_event) = latest_item_event else {
         return Ok(CheckConflictResponse {
@@ -237,7 +237,7 @@ pub(crate) async fn get_events_since(
     }
     if let Some(vault_ids) = &input.vault_ids {
         if vault_ids.len() > 200 {
-            return Err(bad_request_error("Invalid params"));
+            return Err(AppError::bad_request("Invalid params"));
         }
         for vault_id in vault_ids {
             validate_resource_id(vault_id)?;
@@ -245,7 +245,7 @@ pub(crate) async fn get_events_since(
     }
     let limit = input.limit.unwrap_or(DEFAULT_EVENTS_LIMIT);
     if !(1..=1000).contains(&limit) {
-        return Err(bad_request_error("Invalid params"));
+        return Err(AppError::bad_request("Invalid params"));
     }
     let user_vault_ids = fetch_user_vault_ids(pool, user_id).await?;
     let target_vault_ids = match input.vault_ids {
@@ -309,7 +309,7 @@ pub(crate) async fn bootstrap_items(
     }
     let limit = input.limit.unwrap_or(DEFAULT_BOOTSTRAP_LIMIT);
     if !(1..=1000).contains(&limit) {
-        return Err(bad_request_error("Invalid params"));
+        return Err(AppError::bad_request("Invalid params"));
     }
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let user_vaults = query_as::<_, DbBootstrapVaultAccessRow>(
@@ -318,7 +318,7 @@ pub(crate) async fn bootstrap_items(
 	.bind(user_id)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vaults"); internal_error("Failed to load user vaults") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vaults"); AppError::internal("Failed to load user vaults") })?;
     if user_vaults.is_empty() {
         return Ok(BootstrapItemsResponse {
             items: Vec::new(),
@@ -409,7 +409,7 @@ pub(crate) async fn acknowledge_events(
 ) -> Result<AcknowledgeEventsResponse, AppError> {
     validate_client_id(&input.client_id)?;
     if input.event_ids.len() > 500 {
-        return Err(bad_request_error("Invalid params"));
+        return Err(AppError::bad_request("Invalid params"));
     }
     for event_id in &input.event_ids {
         validate_resource_id(event_id)?;
@@ -425,7 +425,7 @@ pub(crate) async fn acknowledge_events(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load sync events");
-        internal_error("Failed to load sync events")
+        AppError::internal("Failed to load sync events")
     })?;
     let user_vaults =
         query_as::<_, DbVaultAccessRow>("SELECT vault_id FROM vault_key WHERE user_id = $1")
@@ -434,7 +434,7 @@ pub(crate) async fn acknowledge_events(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to load vault access");
-                internal_error("Failed to load vault access")
+                AppError::internal("Failed to load vault access")
             })?;
     let accessible_vault_ids: std::collections::HashSet<String> = user_vaults
         .into_iter()
@@ -465,7 +465,7 @@ pub(crate) async fn acknowledge_events(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to acknowledge sync event");
-            internal_error("Failed to acknowledge sync event")
+            AppError::internal("Failed to acknowledge sync event")
         })?;
     }
 
@@ -487,7 +487,7 @@ pub(crate) async fn get_last_acknowledged(
 	.bind(&input.client_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load last acknowledged event"); internal_error("Failed to load last acknowledged event") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load last acknowledged event"); AppError::internal("Failed to load last acknowledged event") })?;
 
     Ok(last_ack.map(|ack| LastAcknowledgedResponse {
         event_id: ack.event_id,
@@ -501,7 +501,7 @@ pub(crate) async fn get_sync_state(
     input: GetSyncStateInput,
 ) -> Result<std::collections::BTreeMap<String, SyncStateEntry>, AppError> {
     if input.vault_ids.len() > 200 {
-        return Err(bad_request_error("Invalid params"));
+        return Err(AppError::bad_request("Invalid params"));
     }
     for vault_id in &input.vault_ids {
         validate_resource_id(vault_id)?;
@@ -515,7 +515,7 @@ pub(crate) async fn get_sync_state(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load accessible vaults");
-        internal_error("Failed to load accessible vaults")
+        AppError::internal("Failed to load accessible vaults")
     })?;
 
     let mut states = std::collections::BTreeMap::new();
@@ -526,7 +526,7 @@ pub(crate) async fn get_sync_state(
 		.bind(&vault_access.vault_id)
 		.fetch_optional(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load latest sync state event"); internal_error("Failed to load latest sync state event") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load latest sync state event"); AppError::internal("Failed to load latest sync state event") })?;
 
         states.insert(
             vault_access.vault_id,
@@ -551,7 +551,7 @@ fn validate_client_id(client_id: &str) -> Result<(), AppError> {
     if RE.is_match(client_id) {
         Ok(())
     } else {
-        Err(bad_request_error("Invalid client ID"))
+        Err(AppError::bad_request("Invalid client ID"))
     }
 }
 
@@ -564,7 +564,7 @@ fn validate_resource_id(value: &str) -> Result<(), AppError> {
     if value.len() <= 64 && RE.is_match(value) {
         Ok(())
     } else {
-        Err(bad_request_error("Invalid resource ID"))
+        Err(AppError::bad_request("Invalid resource ID"))
     }
 }
 
@@ -585,7 +585,7 @@ fn sync_event_dto(event: DbSyncEventRow) -> Result<SyncEventDto, AppError> {
         Some(value) => Some(
             serde_json::from_str::<serde_json::Value>(&value).map_err(|e| {
                 tracing::error!(error = %e, "Failed to parse sync event metadata");
-                internal_error("Failed to parse sync event metadata")
+                AppError::internal("Failed to parse sync event metadata")
             })?,
         ),
         None => None,
@@ -611,7 +611,7 @@ pub(crate) fn sse_json_event<T: Serialize>(
 ) -> Result<Event, AppError> {
     let data = serde_json::to_string(payload).map_err(|e| {
         tracing::error!(error = %e, "Failed to serialize sync event");
-        internal_error("Failed to serialize sync event")
+        AppError::internal("Failed to serialize sync event")
     })?;
     Ok(Event::default().event(event_name).data(data))
 }
@@ -621,10 +621,6 @@ pub(crate) fn sse_heartbeat_event() -> Result<Event, AppError> {
         "heartbeat {}",
         timestamp_millis(OffsetDateTime::now_utc())
     )))
-}
-
-fn bad_request_error(message: &str) -> AppError {
-    AppError::bad_request(message)
 }
 
 async fn attachments_enabled_for_user(pool: &PgPool, user_id: &str) -> Result<bool, AppError> {
@@ -681,14 +677,6 @@ async fn load_bootstrap_attachments(
     }
 
     Ok(grouped)
-}
-
-fn not_found_error(message: &str) -> AppError {
-    AppError::not_found(message)
-}
-
-fn internal_error(message: &str) -> AppError {
-    AppError::internal(message)
 }
 
 #[cfg(test)]

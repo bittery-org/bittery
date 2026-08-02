@@ -6,10 +6,8 @@
 
 import { useRPCClient } from "@bittery/shared/rpc";
 import { useMutation } from "@tanstack/react-query";
-import {
-	useCoreContext,
-	useQueryInvalidator,
-} from "../../context/platform-context";
+import { useCoreContext } from "../../context/platform-context";
+import { useRefreshAfterVaultMutation } from "./mutation-utils";
 
 /**
  * Input for deleting a vault
@@ -25,7 +23,7 @@ export interface DeleteVaultInput {
 export function useDeleteVault() {
 	const defaultClient = useRPCClient();
 	const core = useCoreContext();
-	const invalidator = useQueryInvalidator();
+	const refreshAfterMutation = useRefreshAfterVaultMutation();
 
 	return useMutation({
 		mutationFn: async (input: DeleteVaultInput): Promise<void> => {
@@ -35,13 +33,6 @@ export function useDeleteVault() {
 				input.accountId,
 			);
 		},
-		onSuccess: async (_data, variables) => {
-			await core.vaults.refreshVaultKeys(defaultClient, variables.accountId);
-			const { accountsInfo } = await core.accounts.resolveAccounts();
-			if (accountsInfo.length > 0) {
-				await core.vaultCoordinator.refreshFromServer(accountsInfo);
-			}
-			await invalidator.invalidateVaultKeys();
-		},
+		onSuccess: (_data, variables) => refreshAfterMutation(variables.accountId),
 	});
 }

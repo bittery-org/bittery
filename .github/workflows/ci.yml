@@ -572,7 +572,7 @@ jobs:
   #
   # Same GHA cache scopes as release.yml, so the two workflows warm each other's
   # layers rather than each paying for a cold Rust build.
-  docker:
+  docker-build:
     runs-on: ubuntu-latest
     strategy:
       # One broken image must not hide the state of the other two.
@@ -615,6 +615,24 @@ jobs:
           set -euo pipefail
           elapsed="$(( $(date +%s) - DOCKER_BUILD_START ))"
           echo "docker ${{ matrix.name }} image: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+  # `docker` is the required status check, but a matrix job reports one context
+  # per leg (`docker (server, ., apps/server/Dockerfile)`), so the bare name was
+  # never reported and the requirement sat pending on every PR. This job owns
+  # that name and survives matrix edits, which the per-leg contexts do not.
+  docker:
+    if: always()
+    needs: docker-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check image builds
+        run: |
+          set -euo pipefail
+          result="${{ needs.docker-build.result }}"
+          if [ "$result" != "success" ]; then
+            echo "docker-build: $result"
+            exit 1
+          fi
 
   # The self-hosting Compose stack ships no Dockerfile of its own - it pins
   # published images - so there is nothing to build, but an interpolation typo or

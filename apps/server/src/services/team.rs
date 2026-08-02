@@ -335,8 +335,8 @@ pub(crate) async fn get_invitation_by_token(
 	.bind(hash_token(&input.token))
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
-	.ok_or_else(|| not_found_error("Invitation not found"))?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); AppError::internal("Failed to load invitation") })?
+	.ok_or_else(|| AppError::not_found("Invitation not found"))?;
 
     let invitation_status = if invitation.expires_at < OffsetDateTime::now_utc() {
         "expired".to_string()
@@ -370,9 +370,9 @@ pub(crate) async fn get_pending_invitations(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user");
-        internal_error("Failed to load user")
+        AppError::internal("Failed to load user")
     })?
-    .ok_or_else(|| not_found_error("User not found"))?;
+    .ok_or_else(|| AppError::not_found("User not found"))?;
 
     let invitations = query_as::<_, DbPendingTeamInvitationRow>(
 		"SELECT ti.id, ti.team_id, t.name AS team_name, ti.role::text AS role, invited_by.name AS invited_by_name, ti.expires_at FROM team_invitation ti INNER JOIN team t ON ti.team_id = t.id INNER JOIN \"user\" invited_by ON ti.invited_by_id = invited_by.id WHERE ti.email = $1 AND ti.status = 'pending' AND ti.expires_at > $2 ORDER BY ti.created_at DESC",
@@ -381,7 +381,7 @@ pub(crate) async fn get_pending_invitations(
 	.bind(OffsetDateTime::now_utc())
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitations"); internal_error("Failed to load invitations") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitations"); AppError::internal("Failed to load invitations") })?;
 
     Ok(invitations
         .into_iter()
@@ -406,8 +406,8 @@ pub(crate) async fn list_teams(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); internal_error("Failed to load team") })?
-	.ok_or_else(|| not_found_error("User has no team"))?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); AppError::internal("Failed to load team") })?
+	.ok_or_else(|| AppError::not_found("User has no team"))?;
 
     Ok(TeamSummaryResponse {
         id: team.id,
@@ -438,14 +438,14 @@ pub(crate) async fn get_team(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user");
-        internal_error("Failed to load user")
+        AppError::internal("Failed to load user")
     })?;
     if current_user
         .as_ref()
         .and_then(|user| user.team_id.as_deref())
         != Some(input.team_id.as_str())
     {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
 
     let team = query_as::<_, DbTeamDetailsRow>(
@@ -455,8 +455,8 @@ pub(crate) async fn get_team(
 	.bind(&input.team_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); internal_error("Failed to load team") })?
-	.ok_or_else(|| not_found_error("Team not found"))?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); AppError::internal("Failed to load team") })?
+	.ok_or_else(|| AppError::not_found("Team not found"))?;
 
     Ok(TeamDetailsResponse {
         id: team.id,
@@ -488,10 +488,10 @@ pub(crate) async fn get_team_vaults(
         .map(|team_id| team_id != &input.team_id)
         .unwrap_or(true)
     {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
 
-    let actor = actor.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+    let actor = actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
     ensure_team_admin(&actor.role)?;
     assert_optional_team_management_entitlement(
         actor.billing_plan.as_deref(),
@@ -506,7 +506,7 @@ pub(crate) async fn get_team_vaults(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load team vaults");
-        internal_error("Failed to load team vaults")
+        AppError::internal("Failed to load team vaults")
     })?;
     if team_vaults.is_empty() {
         return Ok(Vec::new());
@@ -520,7 +520,7 @@ pub(crate) async fn get_team_vaults(
 	.bind(&team_vault_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vault keys"); internal_error("Failed to load user vault keys") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vault keys"); AppError::internal("Failed to load user vault keys") })?;
 
     let key_map: HashMap<String, String> = user_vault_keys
         .into_iter()
@@ -543,7 +543,7 @@ pub(crate) async fn create_team(
     _user_id: &str,
     _input: CreateTeamInput,
 ) -> Result<SuccessResponse, AppError> {
-    Err(bad_request_error(
+    Err(AppError::bad_request(
         "Teams are automatically created on signup. Contact support to upgrade your team type.",
     ))
 }
@@ -561,18 +561,18 @@ pub(crate) async fn update_team(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user");
-        internal_error("Failed to load user")
+        AppError::internal("Failed to load user")
     })?;
     if current_user
         .as_ref()
         .and_then(|user| user.team_id.as_deref())
         != Some(input.team_id.as_str())
     {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
 
     let current_user =
-        current_user.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+        current_user.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
     ensure_team_admin(&current_user.role)?;
 
     let updated_at = OffsetDateTime::now_utc();
@@ -587,7 +587,7 @@ pub(crate) async fn update_team(
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to update team");
-                    internal_error("Failed to update team")
+                    AppError::internal("Failed to update team")
                 })?;
         }
         (Some(name), None) => {
@@ -599,7 +599,7 @@ pub(crate) async fn update_team(
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to update team");
-                    internal_error("Failed to update team")
+                    AppError::internal("Failed to update team")
                 })?;
         }
         (None, Some(image_key)) => {
@@ -611,7 +611,7 @@ pub(crate) async fn update_team(
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to update team");
-                    internal_error("Failed to update team")
+                    AppError::internal("Failed to update team")
                 })?;
         }
         (None, None) => {
@@ -622,7 +622,7 @@ pub(crate) async fn update_team(
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to update team");
-                    internal_error("Failed to update team")
+                    AppError::internal("Failed to update team")
                 })?;
         }
     }
@@ -636,7 +636,7 @@ pub(crate) async fn create_team_image_upload(
     input: CreateImageUploadInput,
 ) -> Result<storage::PresignedUploadResult, AppError> {
     if !input.content_type.starts_with("image/") {
-        return Err(bad_request_error("Only image files are allowed"));
+        return Err(AppError::bad_request("Only image files are allowed"));
     }
 
     let current_user = query_as::<_, DbTeamUserRow>(
@@ -647,18 +647,18 @@ pub(crate) async fn create_team_image_upload(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user");
-        internal_error("Failed to load user")
+        AppError::internal("Failed to load user")
     })?;
     if current_user
         .as_ref()
         .and_then(|user| user.team_id.as_deref())
         != Some(input.team_id.as_str())
     {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
 
     let current_user =
-        current_user.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+        current_user.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
     ensure_team_admin(&current_user.role)?;
 
     let key = storage::create_team_image_key(&input.team_id, &input.file_name);
@@ -666,7 +666,7 @@ pub(crate) async fn create_team_image_upload(
         .await
         .map_err(|error| {
             tracing::error!(error = %error, "Internal error");
-            internal_error("An internal error occurred")
+            AppError::internal("An internal error occurred")
         })
 }
 
@@ -676,7 +676,7 @@ pub(crate) async fn delete_team(
     input: TeamIdInput,
 ) -> Result<SuccessResponse, AppError> {
     if bittery_mode() == "self-hosted" {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "Team deletion is disabled in self-hosted mode. This instance uses a single team.",
         ));
     }
@@ -687,25 +687,27 @@ pub(crate) async fn delete_team(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load team actor"); internal_error("Failed to load team actor") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load team actor"); AppError::internal("Failed to load team actor") })?;
     let Some(actor) = actor else {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     };
     if actor.team_id != input.team_id {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
     if actor.role != "owner" {
-        return Err(forbidden_error("Only the team owner can delete the team"));
+        return Err(AppError::forbidden(
+            "Only the team owner can delete the team",
+        ));
     }
     if actor.team_type == "personal" {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "Personal teams cannot be deleted. To close your account, use Account Settings.",
         ));
     }
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start transaction");
-        internal_error("Failed to start transaction")
+        AppError::internal("Failed to start transaction")
     })?;
 
     let actor = query_as::<_, DbDeleteTeamActorRow>(
@@ -714,12 +716,16 @@ pub(crate) async fn delete_team(
 	.bind(user_id)
 	.fetch_optional(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to reload team actor"); internal_error("Failed to reload team actor") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to reload team actor"); AppError::internal("Failed to reload team actor") })?;
     let Some(actor) = actor else {
-        return Err(forbidden_error("Only the team owner can delete the team"));
+        return Err(AppError::forbidden(
+            "Only the team owner can delete the team",
+        ));
     };
     if actor.team_id != input.team_id || actor.role != "owner" || actor.team_type == "personal" {
-        return Err(forbidden_error("Only the team owner can delete the team"));
+        return Err(AppError::forbidden(
+            "Only the team owner can delete the team",
+        ));
     }
 
     let member_count =
@@ -729,10 +735,10 @@ pub(crate) async fn delete_team(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to count team members");
-                internal_error("Failed to count team members")
+                AppError::internal("Failed to count team members")
             })?;
     if member_count != 1 {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "Team deletion is blocked until the owner is the only remaining member.",
         ));
     }
@@ -744,10 +750,10 @@ pub(crate) async fn delete_team(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to count team vaults");
-                internal_error("Failed to count team vaults")
+                AppError::internal("Failed to count team vaults")
             })?;
     if team_vault_count > 0 {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "Team deletion is blocked until all team vaults have been removed or converted.",
         ));
     }
@@ -759,7 +765,7 @@ pub(crate) async fn delete_team(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to delete team invitations");
-            internal_error("Failed to delete team invitations")
+            AppError::internal("Failed to delete team invitations")
         })?;
     query("DELETE FROM team WHERE id = $1")
         .bind(&input.team_id)
@@ -767,12 +773,12 @@ pub(crate) async fn delete_team(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to delete team");
-            internal_error("Failed to delete team")
+            AppError::internal("Failed to delete team")
         })?;
 
     transaction.commit().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to commit team deletion");
-        internal_error("Failed to commit team deletion")
+        AppError::internal("Failed to commit team deletion")
     })?;
 
     Ok(SuccessResponse { success: true })
@@ -792,18 +798,18 @@ pub(crate) async fn leave_team(
 	.bind(user_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load team membership"); internal_error("Failed to load team membership") })?
-	.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load team membership"); AppError::internal("Failed to load team membership") })?
+	.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
     if actor.team_id != input.team_id {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
     if actor.role == "owner" {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "The team owner cannot leave. Transfer ownership first.",
         ));
     }
     if actor.team_type == "personal" {
-        return Err(bad_request_error("You cannot leave a personal team."));
+        return Err(AppError::bad_request("You cannot leave a personal team."));
     }
     let team_vaults = load_team_vaults_with_user_access(pool, &input.team_id, user_id).await?;
     let accessible_vault_ids: HashSet<String> =
@@ -832,7 +838,7 @@ pub(crate) async fn leave_team(
         .collect();
     let member_actor = load_team_membership_actor(pool, user_id)
         .await?
-        .ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+        .ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
     let billing_plan = member_actor
         .billing_plan
         .unwrap_or_else(|| "free".to_string());
@@ -840,7 +846,7 @@ pub(crate) async fn leave_team(
     let result = async {
         let mut transaction = pool.begin().await.map_err(|e| {
             tracing::error!(error = %e, "Failed to start leave-team transaction");
-            internal_error("Failed to start leave-team transaction")
+            AppError::internal("Failed to start leave-team transaction")
         })?;
         apply_team_vault_rotations(
             &mut transaction,
@@ -855,7 +861,7 @@ pub(crate) async fn leave_team(
         create_personal_team_for_user(&mut transaction, user_id, &actor.user_name).await?;
         transaction.commit().await.map_err(|e| {
             tracing::error!(error = %e, "Failed to commit leave-team transaction");
-            internal_error("Failed to commit leave-team transaction")
+            AppError::internal("Failed to commit leave-team transaction")
         })?;
         Ok::<(), AppError>(())
     }
@@ -863,14 +869,14 @@ pub(crate) async fn leave_team(
 
     if let Err(error) = result {
         mark_rotation_records_failed(pool, &rotation_records, &error.message).await?;
-        return Err(internal_error(
+        return Err(AppError::internal(
             "Failed to leave team during key rotation. Please try again.",
         ));
     }
 
     let revoked_session_ids = load_user_session_ids(pool, user_id).await.map_err(|e| {
         tracing::error!(error = %e, "Failed to load sessions after leaving team");
-        internal_error("Failed to load sessions after leaving team")
+        AppError::internal("Failed to load sessions after leaving team")
     })?;
     query("DELETE FROM session WHERE user_id = $1")
         .bind(user_id)
@@ -878,13 +884,13 @@ pub(crate) async fn leave_team(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to revoke sessions after leaving team");
-            internal_error("Failed to revoke sessions after leaving team")
+            AppError::internal("Failed to revoke sessions after leaving team")
         })?;
     record_session_revocations(pool, user_id, &revoked_session_ids, "team_left")
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to record session revocations after leaving team");
-            internal_error("Failed to record session revocations after leaving team")
+            AppError::internal("Failed to record session revocations after leaving team")
         })?;
     insert_team_member_audit_log(
         pool,
@@ -915,14 +921,14 @@ pub(crate) async fn get_leave_rotation_data(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user");
-        internal_error("Failed to load user")
+        AppError::internal("Failed to load user")
     })?;
     if current_user
         .as_ref()
         .and_then(|user| user.team_id.as_deref())
         != Some(input.team_id.as_str())
     {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
 
     let team_vaults = load_team_vaults_with_user_access(pool, &input.team_id, user_id).await?;
@@ -945,10 +951,10 @@ pub(crate) async fn send_invitation(
         .map(|team_id| team_id != &input.team_id)
         .unwrap_or(true)
     {
-        return Err(forbidden_error("You are not a member of this team"));
+        return Err(AppError::forbidden("You are not a member of this team"));
     }
 
-    let actor = actor.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+    let actor = actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
     ensure_team_admin(&actor.role)?;
 
     let team = query_as::<_, DbTeamInvitationSendTeamRow>(
@@ -957,8 +963,8 @@ pub(crate) async fn send_invitation(
 	.bind(&input.team_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); internal_error("Failed to load team") })?
-	.ok_or_else(|| not_found_error("Team not found"))?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load team"); AppError::internal("Failed to load team") })?
+	.ok_or_else(|| AppError::not_found("Team not found"))?;
     assert_team_management_entitlement(&team.billing_plan, &team.billing_status)?;
 
     if let Some(member_limit) = team.member_limit {
@@ -969,7 +975,7 @@ pub(crate) async fn send_invitation(
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to count team members");
-                    internal_error("Failed to count team members")
+                    AppError::internal("Failed to count team members")
                 })?;
         let pending_invitations = query_scalar::<_, i64>(
 			"SELECT COUNT(*)::bigint FROM team_invitation WHERE team_id = $1 AND status = 'pending'",
@@ -977,9 +983,9 @@ pub(crate) async fn send_invitation(
 		.bind(&input.team_id)
 		.fetch_one(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to count pending invitations"); internal_error("Failed to count pending invitations") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to count pending invitations"); AppError::internal("Failed to count pending invitations") })?;
         if current_members + pending_invitations >= i64::from(member_limit) {
-            return Err(bad_request_error("Team has reached member limit"));
+            return Err(AppError::bad_request("Team has reached member limit"));
         }
     }
 
@@ -991,14 +997,14 @@ pub(crate) async fn send_invitation(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load existing user");
-        internal_error("Failed to load existing user")
+        AppError::internal("Failed to load existing user")
     })?;
     if existing_user
         .as_ref()
         .and_then(|value| value.team_id.as_ref())
         .is_some()
     {
-        return Err(bad_request_error("This user already belongs to a team"));
+        return Err(AppError::bad_request("This user already belongs to a team"));
     }
 
     let has_pending_invitation = query_scalar::<_, bool>(
@@ -1008,9 +1014,9 @@ pub(crate) async fn send_invitation(
 	.bind(&input.email)
 	.fetch_one(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to check pending invitations"); internal_error("Failed to check pending invitations") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to check pending invitations"); AppError::internal("Failed to check pending invitations") })?;
     if has_pending_invitation {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "An invitation is already pending for this email",
         ));
     }
@@ -1032,7 +1038,7 @@ pub(crate) async fn send_invitation(
     } else {
         Some(serde_json::to_string(&pending_vault_keys).map_err(|e| {
             tracing::error!(error = %e, "Failed to serialize pendingVaultKeys");
-            internal_error("Failed to serialize pendingVaultKeys")
+            AppError::internal("Failed to serialize pendingVaultKeys")
         })?)
     };
 
@@ -1049,7 +1055,7 @@ pub(crate) async fn send_invitation(
 	.bind(expires_at)
 	.execute(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create invitation"); internal_error("Failed to create invitation") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to create invitation"); AppError::internal("Failed to create invitation") })?;
 
     Ok(SendInvitationResponse {
         invitation_id,
@@ -1071,8 +1077,8 @@ async fn load_pending_invitation_by_token(
 	.bind(hash_token(token))
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
-	.ok_or_else(|| not_found_error("Invitation not found or already used"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); AppError::internal("Failed to load invitation") })?
+	.ok_or_else(|| AppError::not_found("Invitation not found or already used"))
 }
 
 /// Loads a still-pending invitation by its opaque id. Used by the in-app pending
@@ -1089,8 +1095,8 @@ async fn load_pending_invitation_by_id(
 	.bind(invitation_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
-	.ok_or_else(|| not_found_error("Invitation not found or already used"))
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); AppError::internal("Failed to load invitation") })?
+	.ok_or_else(|| AppError::not_found("Invitation not found or already used"))
 }
 
 pub(crate) async fn accept_invitation(
@@ -1126,10 +1132,10 @@ async fn accept_loaded_invitation(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to expire invitation");
-                internal_error("Failed to expire invitation")
+                AppError::internal("Failed to expire invitation")
             })?;
 
-        return Err(bad_request_error("Invitation has expired"));
+        return Err(AppError::bad_request("Invitation has expired"));
     }
 
     assert_team_management_entitlement(&invitation.billing_plan, &invitation.billing_status)?;
@@ -1142,16 +1148,16 @@ async fn accept_loaded_invitation(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user");
-        internal_error("Failed to load user")
+        AppError::internal("Failed to load user")
     })?
-    .ok_or_else(|| not_found_error("User not found"))?;
+    .ok_or_else(|| AppError::not_found("User not found"))?;
 
     if current_user.email != invitation.email {
-        return Err(forbidden_error("This invitation is not for you"));
+        return Err(AppError::forbidden("This invitation is not for you"));
     }
 
     if current_user.team_id.is_some() {
-        return Err(bad_request_error("You already belong to a team"));
+        return Err(AppError::bad_request("You already belong to a team"));
     }
 
     let pending_keys = parse_pending_vault_keys(invitation.pending_vault_keys.as_deref())?;
@@ -1171,7 +1177,7 @@ async fn accept_loaded_invitation(
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start transaction");
-        internal_error("Failed to start transaction")
+        AppError::internal("Failed to start transaction")
     })?;
 
     query("UPDATE \"user\" SET team_id = $1, role = $2::team_role WHERE id = $3")
@@ -1182,7 +1188,7 @@ async fn accept_loaded_invitation(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to update team membership");
-            internal_error("Failed to update team membership")
+            AppError::internal("Failed to update team membership")
         })?;
 
     for pending_key in pending_keys {
@@ -1195,7 +1201,7 @@ async fn accept_loaded_invitation(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to load existing vault access");
-            internal_error("Failed to load existing vault access")
+            AppError::internal("Failed to load existing vault access")
         })?;
 
         if !existing_key {
@@ -1209,7 +1215,7 @@ async fn accept_loaded_invitation(
 			.bind(vault_role)
 			.execute(&mut *transaction)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to provision vault access"); internal_error("Failed to provision vault access") })?;
+			.map_err(|e| { tracing::error!(error = %e, "Failed to provision vault access"); AppError::internal("Failed to provision vault access") })?;
         }
     }
 
@@ -1220,12 +1226,12 @@ async fn accept_loaded_invitation(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to accept invitation");
-            internal_error("Failed to accept invitation")
+            AppError::internal("Failed to accept invitation")
         })?;
 
     transaction.commit().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to commit invitation acceptance");
-        internal_error("Failed to commit invitation acceptance")
+        AppError::internal("Failed to commit invitation acceptance")
     })?;
 
     sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
@@ -1270,12 +1276,12 @@ async fn decline_loaded_invitation(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user");
-        internal_error("Failed to load user")
+        AppError::internal("Failed to load user")
     })?
-    .ok_or_else(|| not_found_error("User not found"))?;
+    .ok_or_else(|| AppError::not_found("User not found"))?;
 
     if current_user.email != invitation.email {
-        return Err(forbidden_error("This invitation is not for you"));
+        return Err(AppError::forbidden("This invitation is not for you"));
     }
 
     query("UPDATE team_invitation SET status = 'declined' WHERE id = $1")
@@ -1284,7 +1290,7 @@ async fn decline_loaded_invitation(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to decline invitation");
-            internal_error("Failed to decline invitation")
+            AppError::internal("Failed to decline invitation")
         })?;
 
     Ok(SuccessResponse { success: true })
@@ -1301,8 +1307,8 @@ pub(crate) async fn cancel_invitation(
 	.bind(&input.invitation_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
-	.ok_or_else(|| not_found_error("Invitation not found"))?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); AppError::internal("Failed to load invitation") })?
+	.ok_or_else(|| AppError::not_found("Invitation not found"))?;
 
     let actor = load_team_membership_actor(pool, user_id).await?;
     let is_admin_or_owner = actor
@@ -1313,7 +1319,7 @@ pub(crate) async fn cancel_invitation(
         })
         .unwrap_or(false);
     if !is_admin_or_owner {
-        return Err(forbidden_error("Insufficient permissions"));
+        return Err(AppError::forbidden("Insufficient permissions"));
     }
 
     assert_team_management_entitlement(&invitation.billing_plan, &invitation.billing_status)?;
@@ -1324,7 +1330,7 @@ pub(crate) async fn cancel_invitation(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to cancel invitation");
-            internal_error("Failed to cancel invitation")
+            AppError::internal("Failed to cancel invitation")
         })?;
 
     Ok(SuccessResponse { success: true })
@@ -1348,8 +1354,8 @@ pub(crate) async fn resend_invitation(
 	.bind(&input.invitation_id)
 	.fetch_optional(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); internal_error("Failed to load invitation") })?
-	.ok_or_else(|| not_found_error("Invitation not found"))?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load invitation"); AppError::internal("Failed to load invitation") })?
+	.ok_or_else(|| AppError::not_found("Invitation not found"))?;
 
     let actor = load_team_membership_actor(pool, user_id).await?;
     let is_admin_or_owner = actor
@@ -1360,7 +1366,7 @@ pub(crate) async fn resend_invitation(
         })
         .unwrap_or(false);
     if !is_admin_or_owner {
-        return Err(forbidden_error("Insufficient permissions"));
+        return Err(AppError::forbidden("Insufficient permissions"));
     }
 
     assert_team_management_entitlement(&invitation.billing_plan, &invitation.billing_status)?;
@@ -1376,7 +1382,7 @@ pub(crate) async fn resend_invitation(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to resend invitation");
-        internal_error("Failed to resend invitation")
+        AppError::internal("Failed to resend invitation")
     })?;
 
     Ok(ResendInvitationResponse {
@@ -1401,14 +1407,14 @@ pub(crate) mod member_handlers {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to load user");
-            internal_error("Failed to load user")
+            AppError::internal("Failed to load user")
         })?;
         if current_user
             .as_ref()
             .and_then(|user| user.team_id.as_deref())
             != Some(input.team_id.as_str())
         {
-            return Err(forbidden_error("You are not a member of this team"));
+            return Err(AppError::forbidden("You are not a member of this team"));
         }
 
         let members = query_as::<_, DbTeamMemberRow>(
@@ -1417,7 +1423,7 @@ pub(crate) mod member_handlers {
 		.bind(&input.team_id)
 		.fetch_all(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load team members"); internal_error("Failed to load team members") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load team members"); AppError::internal("Failed to load team members") })?;
 
         Ok(members
             .into_iter()
@@ -1438,12 +1444,13 @@ pub(crate) mod member_handlers {
     ) -> Result<RotationDataResponse, AppError> {
         let actor = load_team_membership_actor(pool, user_id).await?;
         if actor.as_ref().and_then(|user| user.team_id.as_deref()) != Some(input.team_id.as_str()) {
-            return Err(forbidden_error("You are not a member of this team"));
+            return Err(AppError::forbidden("You are not a member of this team"));
         }
 
-        let actor = actor.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+        let actor =
+            actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
         if !matches!(actor.role.as_str(), "owner" | "admin") {
-            return Err(forbidden_error(
+            return Err(AppError::forbidden(
                 "Only owner or admin can perform key rotation",
             ));
         }
@@ -1455,7 +1462,7 @@ pub(crate) mod member_handlers {
         let removal_scope =
             load_team_removal_scope(pool, &input.team_id, user_id, &input.exclude_user_id).await?;
         if !removal_scope.inaccessible_target_vault_ids.is_empty() {
-            return Err(forbidden_error(
+            return Err(AppError::forbidden(
                 "You cannot remove this member from only part of their team vault access.",
             ));
         }
@@ -1478,18 +1485,19 @@ pub(crate) mod member_handlers {
 
         let actor = load_team_membership_actor(pool, user_id).await?;
         if actor.as_ref().and_then(|user| user.team_id.as_deref()) != Some(input.team_id.as_str()) {
-            return Err(forbidden_error("You are not a member of this team"));
+            return Err(AppError::forbidden("You are not a member of this team"));
         }
-        let actor = actor.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+        let actor =
+            actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
         if !matches!(actor.role.as_str(), "owner" | "admin") {
-            return Err(forbidden_error("Insufficient permissions"));
+            return Err(AppError::forbidden("Insufficient permissions"));
         }
         assert_optional_team_management_entitlement(
             actor.billing_plan.as_deref(),
             actor.billing_status.as_deref(),
         )?;
         if user_id == input.user_id {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "You cannot remove yourself from the team",
             ));
         }
@@ -1501,14 +1509,14 @@ pub(crate) mod member_handlers {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to load target user");
-            internal_error("Failed to load target user")
+            AppError::internal("Failed to load target user")
         })?
-        .ok_or_else(|| not_found_error("Team member not found"))?;
+        .ok_or_else(|| AppError::not_found("Team member not found"))?;
         if target_user.team_id.as_deref() != Some(input.team_id.as_str()) {
-            return Err(not_found_error("Team member not found"));
+            return Err(AppError::not_found("Team member not found"));
         }
         if target_user.role == "owner" {
-            return Err(forbidden_error("The team owner cannot be removed"));
+            return Err(AppError::forbidden("The team owner cannot be removed"));
         }
         let target_user_name =
             query_scalar::<_, String>("SELECT name FROM \"user\" WHERE id = $1 LIMIT 1")
@@ -1517,13 +1525,13 @@ pub(crate) mod member_handlers {
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to load target user name");
-                    internal_error("Failed to load target user name")
+                    AppError::internal("Failed to load target user name")
                 })?
-                .ok_or_else(|| not_found_error("Team member not found"))?;
+                .ok_or_else(|| AppError::not_found("Team member not found"))?;
         let removal_scope =
             load_team_removal_scope(pool, &input.team_id, user_id, &input.user_id).await?;
         if !removal_scope.inaccessible_target_vault_ids.is_empty() {
-            return Err(forbidden_error(
+            return Err(AppError::forbidden(
                 "You cannot remove this member from only part of their team vault access.",
             ));
         }
@@ -1560,7 +1568,7 @@ pub(crate) mod member_handlers {
         let result = async {
             let mut transaction = pool.begin().await.map_err(|e| {
                 tracing::error!(error = %e, "Failed to start team member removal transaction");
-                internal_error("Failed to start team member removal transaction")
+                AppError::internal("Failed to start team member removal transaction")
             })?;
             apply_team_vault_rotations(
                 &mut transaction,
@@ -1576,14 +1584,14 @@ pub(crate) mod member_handlers {
                 .await?;
             transaction.commit().await.map_err(|e| {
                 tracing::error!(error = %e, "Failed to commit team member removal");
-                internal_error("Failed to commit team member removal")
+                AppError::internal("Failed to commit team member removal")
             })?;
             Ok::<(), AppError>(())
         }
         .await;
         if let Err(error) = result {
             mark_rotation_records_failed(pool, &rotation_records, &error.message).await?;
-            return Err(internal_error(
+            return Err(AppError::internal(
                 "Team member removal failed during key rotation. Please try again.",
             ));
         }
@@ -1592,7 +1600,7 @@ pub(crate) mod member_handlers {
                 .await
                 .map_err(|e| {
                     tracing::error!(error = %e, "Failed to load removed user sessions");
-                    internal_error("Failed to load removed user sessions")
+                    AppError::internal("Failed to load removed user sessions")
                 })?;
         query("DELETE FROM session WHERE user_id = $1")
             .bind(&input.user_id)
@@ -1600,7 +1608,7 @@ pub(crate) mod member_handlers {
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to revoke removed user sessions");
-                internal_error("Failed to revoke removed user sessions")
+                AppError::internal("Failed to revoke removed user sessions")
             })?;
         record_session_revocations(
             pool,
@@ -1611,7 +1619,7 @@ pub(crate) mod member_handlers {
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to record removed user session revocations");
-            internal_error("Failed to record removed user session revocations")
+            AppError::internal("Failed to record removed user session revocations")
         })?;
         insert_team_member_audit_log(
             pool,
@@ -1645,10 +1653,10 @@ pub(crate) mod member_handlers {
         input: DeleteAccountInput,
     ) -> Result<SuccessResponse, AppError> {
         if input.confirmation != "DELETE" {
-            return Err(bad_request_error("Invalid params"));
+            return Err(AppError::bad_request("Invalid params"));
         }
 
-        Err(bad_request_error(
+        Err(AppError::bad_request(
 			"Account deletion by team admins is no longer supported. Use 'Remove member' instead. The removed user can delete their own account.",
 		))
     }
@@ -1681,10 +1689,11 @@ pub(crate) mod invitation_handlers {
             .map(|team_id| team_id != &input.team_id)
             .unwrap_or(true)
         {
-            return Err(forbidden_error("You are not a member of this team"));
+            return Err(AppError::forbidden("You are not a member of this team"));
         }
 
-        let actor = actor.ok_or_else(|| forbidden_error("You are not a member of this team"))?;
+        let actor =
+            actor.ok_or_else(|| AppError::forbidden("You are not a member of this team"))?;
         ensure_team_admin(&actor.role)?;
         assert_optional_team_management_entitlement(
             actor.billing_plan.as_deref(),
@@ -1697,7 +1706,7 @@ pub(crate) mod invitation_handlers {
 		.bind(&input.team_id)
 		.fetch_all(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load invitations"); internal_error("Failed to load invitations") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load invitations"); AppError::internal("Failed to load invitations") })?;
 
         Ok(invitations
             .into_iter()
@@ -1721,7 +1730,7 @@ fn assert_team_management_entitlement(
     if shared_team_management_enabled(bittery_mode(), Some(billing_plan), Some(billing_status)) {
         Ok(())
     } else {
-        Err(forbidden_error(TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE))
+        Err(AppError::forbidden(TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE))
     }
 }
 
@@ -1729,8 +1738,8 @@ fn assert_optional_team_management_entitlement(
     billing_plan: Option<&str>,
     billing_status: Option<&str>,
 ) -> Result<(), AppError> {
-    let plan = billing_plan.ok_or_else(|| not_found_error("Team not found"))?;
-    let status = billing_status.ok_or_else(|| not_found_error("Team not found"))?;
+    let plan = billing_plan.ok_or_else(|| AppError::not_found("Team not found"))?;
+    let status = billing_status.ok_or_else(|| AppError::not_found("Team not found"))?;
     assert_team_management_entitlement(plan, status)
 }
 
@@ -1744,7 +1753,7 @@ fn validate_token(token: &str) -> Result<(), AppError> {
             character.is_ascii_alphanumeric() || character == '_' || character == '-'
         })
     {
-        return Err(bad_request_error("Invalid token"));
+        return Err(AppError::bad_request("Invalid token"));
     }
 
     Ok(())
@@ -1752,17 +1761,17 @@ fn validate_token(token: &str) -> Result<(), AppError> {
 
 fn validate_rotation_vault_inputs(vault_rotations: &[RotationVaultInput]) -> Result<(), AppError> {
     if vault_rotations.len() > MAX_ROTATION_VAULTS {
-        return Err(bad_request_error("Too many vault rotations provided."));
+        return Err(AppError::bad_request("Too many vault rotations provided."));
     }
 
     for vault_rotation in vault_rotations {
         if vault_rotation.key_rotation.member_keys.len() > MAX_ROTATION_MEMBER_KEYS {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "Too many member key rotations provided for a vault.",
             ));
         }
         if vault_rotation.key_rotation.re_encrypted_items.len() > MAX_ROTATION_REENCRYPTED_ITEMS {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "Too many re-encrypted items provided for a vault.",
             ));
         }
@@ -1781,7 +1790,7 @@ fn ensure_exact_rotation_vault_set(
         .map(|rotation| rotation.vault_id.clone())
         .collect();
     if provided_vault_ids.len() != vault_rotations.len() {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "Duplicate vault rotation entries are not allowed.",
         ));
     }
@@ -1792,7 +1801,7 @@ fn ensure_exact_rotation_vault_set(
         .iter()
         .any(|vault_id| !expected_vault_ids.contains(vault_id));
     if has_missing || has_extra {
-        return Err(bad_request_error(mismatch_message));
+        return Err(AppError::bad_request(mismatch_message));
     }
 
     Ok(())
@@ -1814,13 +1823,13 @@ fn normalize_pending_vault_keys(
         let vault_id = entry.vault_id.trim().to_string();
         let encrypted_vault_key = entry.encrypted_vault_key.trim().to_string();
         if vault_id.is_empty() || encrypted_vault_key.is_empty() {
-            return Err(bad_request_error(&format!(
+            return Err(AppError::bad_request(format!(
                 "Invalid pendingVaultKeys entry at index {index}",
             )));
         }
 
         if !seen_vault_ids.insert(vault_id.clone()) {
-            return Err(bad_request_error(
+            return Err(AppError::bad_request(
                 "Duplicate vault IDs are not allowed in pendingVaultKeys",
             ));
         }
@@ -1845,7 +1854,7 @@ fn parse_pending_vault_keys(
     }
 
     let parsed = serde_json::from_str::<Vec<PendingVaultKeyEntry>>(raw_value)
-        .map_err(|_| bad_request_error("Invalid pendingVaultKeys payload"))?;
+        .map_err(|_| AppError::bad_request("Invalid pendingVaultKeys payload"))?;
     normalize_pending_vault_keys(Some(parsed))
 }
 
@@ -1872,10 +1881,10 @@ async fn assert_invitation_pending_vault_keys_are_authorized(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to validate pendingVaultKeys vaults");
-        internal_error("Failed to validate pendingVaultKeys vaults")
+        AppError::internal("Failed to validate pendingVaultKeys vaults")
     })?;
     if team_vault_count != vault_ids.len() as i64 {
-        return Err(bad_request_error(
+        return Err(AppError::bad_request(
             "pendingVaultKeys contains vaults outside the invited team",
         ));
     }
@@ -1887,7 +1896,7 @@ async fn assert_invitation_pending_vault_keys_are_authorized(
 	.bind(&vault_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to validate inviter vault access"); internal_error("Failed to validate inviter vault access") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to validate inviter vault access"); AppError::internal("Failed to validate inviter vault access") })?;
 
     let authorized_vault_ids: HashSet<String> = authorized_vault_roles
         .into_iter()
@@ -1895,7 +1904,7 @@ async fn assert_invitation_pending_vault_keys_are_authorized(
         .map(|record| record.vault_id)
         .collect();
     if authorized_vault_ids.len() != vault_ids.len() {
-        return Err(forbidden_error(
+        return Err(AppError::forbidden(
             "You do not have permission to grant access for one or more vaults",
         ));
     }
@@ -1916,7 +1925,7 @@ async fn load_team_vaults_with_user_access(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load team vaults");
-        internal_error("Failed to load team vaults")
+        AppError::internal("Failed to load team vaults")
     })?;
     if team_vaults.is_empty() {
         return Ok(Vec::new());
@@ -1930,7 +1939,7 @@ async fn load_team_vaults_with_user_access(
 	.bind(&team_vault_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vault access"); internal_error("Failed to load user vault access") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vault access"); AppError::internal("Failed to load user vault access") })?;
     let accessible_vault_ids: HashSet<String> = user_vault_keys
         .into_iter()
         .map(|record| record.vault_id)
@@ -1961,7 +1970,7 @@ async fn load_team_removal_scope(
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load team vaults");
-        internal_error("Failed to load team vaults")
+        AppError::internal("Failed to load team vaults")
     })?;
     if team_vaults.is_empty() {
         return Ok(TeamRemovalScope {
@@ -1978,7 +1987,7 @@ async fn load_team_removal_scope(
 	.bind(&team_vault_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load actor vault access"); internal_error("Failed to load actor vault access") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load actor vault access"); AppError::internal("Failed to load actor vault access") })?;
     let target_vault_keys = query_as::<_, DbVaultRoleRow>(
 		"SELECT vault_id, role::text AS role FROM vault_key WHERE user_id = $1 AND vault_id = ANY($2)",
 	)
@@ -1986,7 +1995,7 @@ async fn load_team_removal_scope(
 	.bind(&team_vault_ids)
 	.fetch_all(pool)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load target vault access"); internal_error("Failed to load target vault access") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to load target vault access"); AppError::internal("Failed to load target vault access") })?;
 
     let actor_admin_vault_ids: HashSet<String> = actor_vault_keys
         .into_iter()
@@ -2029,14 +2038,14 @@ async fn load_rotation_vault_data(
 		.bind(excluded_user_id)
 		.fetch_all(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); internal_error("Failed to load rotation members") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); AppError::internal("Failed to load rotation members") })?;
         let items = query_as::<_, DbRotationItemRow>(
 			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
 		)
 		.bind(&vault.id)
 		.fetch_all(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation items"); internal_error("Failed to load rotation items") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation items"); AppError::internal("Failed to load rotation items") })?;
 
         rotation_vaults.push(RotationVaultResponse {
             vault_id: vault.id,
@@ -2099,7 +2108,7 @@ async fn create_rotation_records(
 		.bind(OffsetDateTime::now_utc())
 		.execute(pool)
 		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to create vault key rotation"); internal_error("Failed to create vault key rotation") })?;
+		.map_err(|e| { tracing::error!(error = %e, "Failed to create vault key rotation"); AppError::internal("Failed to create vault key rotation") })?;
         records.push(TeamVaultRotationRecordInternal {
             vault_id: vault_rotation.vault_id.clone(),
             rotation_id,
@@ -2122,7 +2131,7 @@ async fn mark_rotation_records_failed(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to mark rotation as failed");
-                internal_error("Failed to mark rotation as failed")
+                AppError::internal("Failed to mark rotation as failed")
             })?;
     }
     Ok(())
@@ -2148,11 +2157,11 @@ async fn apply_team_vault_rotations(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to remove rotated vault access");
-                internal_error("Failed to remove rotated vault access")
+                AppError::internal("Failed to remove rotated vault access")
             })?
             .rows_affected();
         if deleted_rows == 0 {
-            return Err(not_found_error("Vault key not found during rotation"));
+            return Err(AppError::not_found("Vault key not found during rotation"));
         }
         for member_key in &vault_rotation.key_rotation.member_keys {
             let updated_rows = query(
@@ -2163,10 +2172,10 @@ async fn apply_team_vault_rotations(
 			.bind(&member_key.user_id)
 			.execute(&mut **transaction)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to update rotated vault key"); internal_error("Failed to update rotated vault key") })?
+			.map_err(|e| { tracing::error!(error = %e, "Failed to update rotated vault key"); AppError::internal("Failed to update rotated vault key") })?
 			.rows_affected();
             if updated_rows == 0 {
-                return Err(not_found_error("Member key not found during rotation"));
+                return Err(AppError::not_found("Member key not found during rotation"));
             }
         }
         for item in &vault_rotation.key_rotation.re_encrypted_items {
@@ -2180,10 +2189,10 @@ async fn apply_team_vault_rotations(
 			.bind(&vault_rotation.vault_id)
 			.execute(&mut **transaction)
 			.await
-			.map_err(|e| { tracing::error!(error = %e, "Failed to update rotated item"); internal_error("Failed to update rotated item") })?
+			.map_err(|e| { tracing::error!(error = %e, "Failed to update rotated item"); AppError::internal("Failed to update rotated item") })?
 			.rows_affected();
             if updated_rows == 0 {
-                return Err(not_found_error("Item not found during rotation"));
+                return Err(AppError::not_found("Item not found during rotation"));
             }
         }
         query("UPDATE vault SET key_version = $1, updated_at = $2 WHERE id = $3")
@@ -2194,7 +2203,7 @@ async fn apply_team_vault_rotations(
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to update vault key version");
-                internal_error("Failed to update vault key version")
+                AppError::internal("Failed to update vault key version")
             })?;
         query(
             "UPDATE vault_key_rotation SET status = 'completed', completed_at = $1 WHERE id = $2",
@@ -2205,7 +2214,7 @@ async fn apply_team_vault_rotations(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to finalize vault key rotation");
-            internal_error("Failed to finalize vault key rotation")
+            AppError::internal("Failed to finalize vault key rotation")
         })?;
         insert_team_vault_access_revoked_sync_event(
             transaction,
@@ -2339,7 +2348,7 @@ async fn create_personal_team_for_user(
 	.bind(user_id)
 	.execute(&mut **transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to create personal team"); internal_error("Failed to create personal team") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to create personal team"); AppError::internal("Failed to create personal team") })?;
     query("UPDATE \"user\" SET team_id = $1, role = 'owner' WHERE id = $2")
         .bind(&team_id)
         .bind(user_id)
@@ -2347,7 +2356,7 @@ async fn create_personal_team_for_user(
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to reassign team owner");
-            internal_error("Failed to reassign team owner")
+            AppError::internal("Failed to reassign team owner")
         })?;
 
     Ok(team_id)
@@ -2357,7 +2366,7 @@ fn ensure_team_admin(role: &str) -> Result<(), AppError> {
     if matches!(role, "owner" | "admin") {
         Ok(())
     } else {
-        Err(forbidden_error("Insufficient permissions"))
+        Err(AppError::forbidden("Insufficient permissions"))
     }
 }
 
@@ -2370,22 +2379,6 @@ fn generate_secure_token() -> String {
             ALPHABET[index] as char
         })
         .collect()
-}
-
-fn forbidden_error(message: &str) -> AppError {
-    AppError::forbidden(message)
-}
-
-fn bad_request_error(message: &str) -> AppError {
-    AppError::bad_request(message)
-}
-
-fn not_found_error(message: &str) -> AppError {
-    AppError::not_found(message)
-}
-
-fn internal_error(message: &str) -> AppError {
-    AppError::internal(message)
 }
 
 async fn load_team_membership_actor(
