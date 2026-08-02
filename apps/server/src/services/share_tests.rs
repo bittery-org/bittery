@@ -5,8 +5,8 @@ use sqlx::{query, query_as, query_scalar, FromRow};
 use super::*;
 use crate::error::AppErrorCode;
 use crate::test_support::{
-    acquire_env_lock, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app, EnvVarGuard,
 };
 
 struct ShareActorFixture {
@@ -1479,6 +1479,75 @@ async fn verify_email_and_access_rejects_invalid_codes_and_increments_attempts()
 			assert!(verification_state.used_at.is_none());
 		})
 		.await;
+}
+
+#[tokio::test]
+async fn share_email_verification_lockout_burns_pending_code() {
+    let _env_lock = acquire_env_lock_async().await;
+    let _env = EnvVarGuard::set(&[
+        ("RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX", "2"),
+        ("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", "15"),
+    ]);
+
+    with_rpc_test_app("share_email_verification_lockout", |app| async move {
+        let fixture = build_share_router_fixture(&app.pool).await;
+
+        let wrong = || async {
+            app.rpc_call(
+                "share.verifyEmailAndAccess",
+                json!([{
+                    "token": fixture.email_link_token.clone(),
+                    "email": fixture.allowed_email.clone(),
+                    "code": "000000"
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await
+        };
+
+        let first = wrong().await;
+        assert_handler_error(
+            &first.body,
+            "BAD_REQUEST",
+            "Invalid or expired verification code",
+        );
+
+        let locked = wrong().await;
+        assert_handler_error(
+            &locked.body,
+            "TOO_MANY_REQUESTS",
+            crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+        );
+
+        let state = query_as::<_, ShareVerificationStateRow>(
+            "SELECT attempts, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 LIMIT 1",
+        )
+        .bind(&fixture.email_link_id)
+        .bind(&fixture.allowed_email)
+        .fetch_one(&app.pool)
+        .await
+        .expect("share verification state should load");
+        assert_eq!(state.attempts, 2);
+        assert!(state.used_at.is_some());
+
+        let correct = app
+            .rpc_call(
+                "share.verifyEmailAndAccess",
+                json!([{
+                    "token": fixture.email_link_token,
+                    "email": fixture.allowed_email,
+                    "code": fixture.verification_code
+                }]),
+                unauthenticated_json_headers(),
+            )
+            .await;
+        assert_handler_error(
+            &correct.body,
+            "TOO_MANY_REQUESTS",
+            crate::services::rate_limit::RATE_LIMITED_MESSAGE,
+        );
+    })
+    .await;
 }
 
 #[tokio::test]

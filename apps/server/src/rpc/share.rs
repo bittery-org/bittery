@@ -101,12 +101,7 @@ pub async fn requestEmailVerification(
     ctx: AppContext,
     input: RequestEmailVerificationInput,
 ) -> Result<RequestEmailVerificationResponse, AppError> {
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| AppError::internal("Database is not configured"))?;
-    share::request_email_verification(pool, input).await
+    share::request_email_verification(&ctx.app_state, input).await
 }
 
 #[allow(non_snake_case)]
@@ -115,12 +110,7 @@ pub async fn verifyEmailAndAccess(
     ctx: AppContext,
     input: VerifyEmailAndAccessInput,
 ) -> Result<PublicShareAccessResponse, AppError> {
-    let pool = ctx
-        .app_state
-        .db_pool
-        .as_ref()
-        .ok_or_else(|| AppError::internal("Database is not configured"))?;
-    share::verify_email_and_access(pool, input).await
+    share::verify_email_and_access(&ctx.app_state, input).await
 }
 
 pub fn create_share_router() -> Router<AppState> {

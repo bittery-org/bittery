@@ -6,8 +6,8 @@ mod native_messaging_installer;
 
 use base64::Engine;
 use desktop_ipc::{
-    write_frame, DesktopEnvelope, DesktopEventKind, DesktopRequest, DesktopResponse,
-    DESKTOP_PROTOCOL_VERSION,
+    write_frame, AccountUnlockData, BiometricUnlockAllMaterial, BiometricUnlockMaterial,
+    DesktopEnvelope, DesktopEventKind, DesktopRequest, DesktopResponse, DESKTOP_PROTOCOL_VERSION,
 };
 #[cfg(windows)]
 use ipc_security::desktop_ipc_socket_path;
@@ -534,6 +534,10 @@ fn now_timestamp_ms() -> i64 {
         .unwrap_or_default()
 }
 
+fn biometric_signature(challenge: &str, bound_to: impl std::fmt::Display) -> String {
+    base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", challenge, bound_to))
+}
+
 fn is_clean_disconnect(error: &str) -> bool {
     error.contains("early eof") || error.contains("unexpected end of file")
 }
@@ -1040,39 +1044,13 @@ async fn handle_desktop_ipc_message(
         .await
         {
             Ok(response) => DesktopResponse::BiometricUnlockSuccess {
-                account_id: response
-                    .get("accountId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                email: response
-                    .get("email")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                encrypted_session: response
-                    .get("encrypted_session")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                device_key: response
-                    .get("device_key")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                signature: response
-                    .get("signature")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                auth_token: response
-                    .get("auth_token")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                vault_keys: response
-                    .get("vault_keys")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
+                account_id: response.account.account_id,
+                email: response.account.email,
+                encrypted_session: response.account.encrypted_session,
+                device_key: response.device_key,
+                signature: response.signature,
+                auth_token: response.account.auth_token,
+                vault_keys: response.account.vault_keys,
             },
             Err(error) => DesktopResponse::BiometricUnlockFailed { error },
         },
@@ -1081,43 +1059,11 @@ async fn handle_desktop_ipc_message(
             extension_id,
         } => match biometric_unlock_all_internal(app_handle, &challenge, &extension_id).await {
             Ok(response) => DesktopResponse::BiometricUnlockAllSuccess {
-                device_key: response
-                    .get("device_key")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                signature: response
-                    .get("signature")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or_default()
-                    .to_string(),
-                accounts: serde_json::from_value(
-                    response
-                        .get("accounts")
-                        .cloned()
-                        .unwrap_or_else(|| serde_json::json!([])),
-                )
-                .unwrap_or_default(),
-                unlocked: response
-                    .get("unlocked")
-                    .and_then(|v| v.as_array())
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                failed: response
-                    .get("failed")
-                    .and_then(|v| v.as_array())
-                    .map(|values| {
-                        values
-                            .iter()
-                            .filter_map(|value| value.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
+                device_key: response.device_key,
+                signature: response.signature,
+                accounts: response.accounts,
+                unlocked: response.unlocked,
+                failed: response.failed,
             },
             Err(error) => DesktopResponse::BiometricUnlockAllFailed { error },
         },
@@ -1548,7 +1494,7 @@ async fn extension_biometric_unlock(
     challenge: String,
     extension_id: String,
     account_id: Option<String>,
-) -> Result<serde_json::Value, String> {
+) -> Result<BiometricUnlockMaterial, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
 
@@ -1636,28 +1582,21 @@ async fn extension_biometric_unlock(
     let vault_keys = read_key_ref(&store, &account.vault_keys);
 
     // Sign the response with challenge to prevent replay attacks
-    let signature_data = format!("{}:{}", challenge, encrypted_session_b64);
-    let signature = base64::engine::general_purpose::STANDARD.encode(signature_data.as_bytes());
+    let signature = biometric_signature(&challenge, &encrypted_session_b64);
 
     eprintln!("[Biometric Unlock] ✓ Response prepared and signed");
 
-    let mut response = serde_json::json!({
-        "accountId": target_account_id,
-        "email": target_email,
-        "encrypted_session": encrypted_session_b64,
-        "device_key": device_key_base64,
-        "signature": signature,
-    });
-
-    // Include auth token and vault keys if available
-    if let Some(token) = auth_token {
-        response["auth_token"] = serde_json::Value::String(token);
-    }
-    if let Some(keys) = vault_keys {
-        response["vault_keys"] = serde_json::Value::String(keys);
-    }
-
-    Ok(response)
+    Ok(BiometricUnlockMaterial {
+        account: AccountUnlockData {
+            account_id: target_account_id,
+            email: target_email,
+            encrypted_session: encrypted_session_b64,
+            auth_token,
+            vault_keys,
+        },
+        device_key: device_key_base64,
+        signature,
+    })
 }
 
 /// Check biometric status
@@ -1674,7 +1613,7 @@ async fn biometric_unlock_internal(
     challenge: &str,
     extension_id: &str,
     account_id: Option<&str>,
-) -> Result<serde_json::Value, String> {
+) -> Result<BiometricUnlockMaterial, String> {
     // Call the Tauri command
     extension_biometric_unlock(
         app_handle.clone(),
@@ -1690,7 +1629,7 @@ async fn biometric_unlock_all_internal(
     app_handle: &tauri::AppHandle,
     challenge: &str,
     extension_id: &str,
-) -> Result<serde_json::Value, String> {
+) -> Result<BiometricUnlockAllMaterial, String> {
     use tauri_plugin_biometry::BiometryExt;
     use tauri_plugin_store::StoreExt;
 
@@ -1728,7 +1667,7 @@ async fn biometric_unlock_all_internal(
     let device_key_base64 = load_device_key_base64(&store, &view)?;
 
     // 4. Unlock all accounts (no additional biometric prompts)
-    let mut accounts_data = Vec::new();
+    let mut accounts_data: Vec<AccountUnlockData> = Vec::new();
     let mut unlocked_account_ids = Vec::new();
     let mut failed_account_ids = Vec::new();
 
@@ -1780,19 +1719,13 @@ async fn biometric_unlock_all_internal(
         let auth_token = get_bearer_token_for_account_id(&store, account);
         let vault_keys = read_key_ref(&store, &account.vault_keys);
 
-        // Build account data
-        let mut account_data = serde_json::json!({
-            "accountId": account_id,
-            "email": email,
-            "encrypted_session": encrypted_session_b64,
-        });
-
-        if let Some(token) = auth_token {
-            account_data["auth_token"] = serde_json::Value::String(token);
-        }
-        if let Some(keys) = vault_keys {
-            account_data["vault_keys"] = serde_json::Value::String(keys);
-        }
+        let account_data = AccountUnlockData {
+            account_id: account_id.clone(),
+            email: email.clone(),
+            encrypted_session: encrypted_session_b64,
+            auth_token,
+            vault_keys,
+        };
 
         accounts_data.push(account_data);
         unlocked_account_ids.push(account_id);
@@ -1804,8 +1737,7 @@ async fn biometric_unlock_all_internal(
     }
 
     // Sign the response with challenge to prevent replay attacks
-    let signature_data = format!("{}:{}", challenge, accounts_data.len());
-    let signature = base64::engine::general_purpose::STANDARD.encode(signature_data.as_bytes());
+    let signature = biometric_signature(challenge, accounts_data.len());
 
     eprintln!(
         "[Biometric Unlock All] ✓ Unlocked {} accounts, {} failed",
@@ -1813,15 +1745,13 @@ async fn biometric_unlock_all_internal(
         failed_account_ids.len()
     );
 
-    let response = serde_json::json!({
-        "device_key": device_key_base64,
-        "signature": signature,
-        "accounts": accounts_data,
-        "unlocked": unlocked_account_ids,
-        "failed": failed_account_ids,
-    });
-
-    Ok(response)
+    Ok(BiometricUnlockAllMaterial {
+        device_key: device_key_base64,
+        signature,
+        accounts: accounts_data,
+        unlocked: unlocked_account_ids,
+        failed: failed_account_ids,
+    })
 }
 
 /// The lock state this process reports to the extension.
@@ -2209,11 +2139,26 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_snapshot_item_payload, decode_records, parse_native_view, read_key_ref_with,
-        records_under_prefix, serialize_encryption_context, unwrap_plaintext_with_context,
-        CachedItemRecord, CachedVaultRecord, NativeKeyStore, NativeViewProblem,
-        CONTEXT_ENVELOPE_MARKER, NATIVE_VIEW_VERSION,
+        biometric_signature, build_snapshot_item_payload, decode_records, parse_native_view,
+        read_key_ref_with, records_under_prefix, serialize_encryption_context,
+        unwrap_plaintext_with_context, CachedItemRecord, CachedVaultRecord, NativeKeyStore,
+        NativeViewProblem, CONTEXT_ENVELOPE_MARKER, NATIVE_VIEW_VERSION,
     };
+
+    #[test]
+    fn biometric_signature_binds_the_issued_challenge_and_material() {
+        let signature = biometric_signature("challenge-1", "encrypted-session");
+
+        assert_eq!(signature, "Y2hhbGxlbmdlLTE6ZW5jcnlwdGVkLXNlc3Npb24=");
+        assert_ne!(
+            signature,
+            biometric_signature("challenge-2", "encrypted-session")
+        );
+        assert_ne!(
+            signature,
+            biometric_signature("challenge-1", "other-session")
+        );
+    }
 
     // ----------------------------------------------------------------------
     // The published native-host view

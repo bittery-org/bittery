@@ -11,7 +11,18 @@ const libDir = path.resolve(import.meta.dir, "../../src/lib");
 
 const CHALLENGE = "11111111-2222-3333-4444-555555555555";
 const ACCOUNT_ID = "account-1";
-const ENCRYPTED_SESSION = btoa(JSON.stringify({ ciphertext: "x" }));
+const ENCRYPTED_SESSION = btoa(
+	JSON.stringify({ algorithm: "AES-GCM", ciphertext: "x", iv: "iv" }),
+);
+const VAULT_KEYS = JSON.stringify([
+	{
+		vaultId: "v1",
+		vaultName: "Personal",
+		vaultType: "personal",
+		encryptedVaultKey: "encrypted-vault-key",
+		role: "owner",
+	},
+]);
 
 const setBiometricEnabledCalls: Array<[string, boolean]> = [];
 const setActiveAccountCalls: unknown[] = [];
@@ -112,6 +123,7 @@ describe("handleNativeBiometricUnlock challenge binding", () => {
 		nativeResponse = {
 			type: "BIOMETRIC_UNLOCK_SUCCESS",
 			accountId: ACCOUNT_ID,
+			email: "a@example.com",
 			encrypted_session: ENCRYPTED_SESSION,
 			device_key: btoa("device-key"),
 			// Bound to a different challenge - i.e. a replayed/stale response.
@@ -129,6 +141,7 @@ describe("handleNativeBiometricUnlock challenge binding", () => {
 		nativeResponse = {
 			type: "BIOMETRIC_UNLOCK_SUCCESS",
 			accountId: ACCOUNT_ID,
+			email: "a@example.com",
 			encrypted_session: ENCRYPTED_SESSION,
 			device_key: btoa("device-key"),
 			signature: btoa(`${CHALLENGE}:${ENCRYPTED_SESSION}`),
@@ -145,10 +158,11 @@ describe("handleNativeBiometricUnlock challenge binding", () => {
 		nativeResponse = {
 			type: "BIOMETRIC_UNLOCK_SUCCESS",
 			accountId: ACCOUNT_ID,
+			email: "a@example.com",
 			encrypted_session: ENCRYPTED_SESSION,
 			device_key: btoa("device-key"),
 			signature: btoa(`${CHALLENGE}:${ENCRYPTED_SESSION}`),
-			vault_keys: JSON.stringify([{ vaultId: "v1" }]),
+			vault_keys: VAULT_KEYS,
 		};
 
 		const result = await handleNativeBiometricUnlock();
@@ -171,8 +185,10 @@ function biometricUnlockAllResponse(
 			email: account.email,
 			encrypted_session: ENCRYPTED_SESSION,
 			auth_token: "token",
-			vault_keys: JSON.stringify([{ vaultId: "v1" }]),
+			vault_keys: VAULT_KEYS,
 		})),
+		unlocked: unlockAccounts.map((account) => account.accountId),
+		failed: [],
 	};
 }
 

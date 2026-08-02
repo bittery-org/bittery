@@ -5,6 +5,7 @@ import {
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
+	decodeVaultType,
 	type ServerVaultListEntry,
 	type ServerVaultSummary,
 	toCachedVaultFields,
@@ -879,7 +880,7 @@ export class VaultRepository {
 			this.vaultKeyEntries.set(vault.id, {
 				...existingVaultKey,
 				vaultName: vault.name,
-				vaultType: vault.type as VaultKeyData["vaultType"],
+				vaultType: decodeVaultType(vault.type),
 				vaultIcon: vault.icon,
 				vaultImageUrl: vault.imageUrl,
 			});

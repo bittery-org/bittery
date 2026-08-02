@@ -1,6 +1,6 @@
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import {
-	normalizeVaultType,
+	decodeVaultType,
 	type ServerVaultListEntry,
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
@@ -261,8 +261,8 @@ export class VaultService {
 		return {
 			success: true,
 			vaultId: result.vaultId,
-			previousType: normalizeVaultType(result.previousType),
-			newType: normalizeVaultType(result.newType),
+			previousType: decodeVaultType(result.previousType),
+			newType: decodeVaultType(result.newType),
 		};
 	}
 

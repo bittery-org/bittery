@@ -10,7 +10,6 @@ use bittery_crypto_core::{
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use qubit::server::{Extensions, FromRequestExtensions, RpcError};
-use rand::RngExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -35,9 +34,8 @@ use crate::{
     services::billing::sync_team_seats_best_effort,
     services::rate_limit::{
         self, generic_ip_limit, login_email_limit, login_ip_limit, rate_limited_error,
-        recovery_request_limit, recovery_verify_lock_duration, recovery_verify_max_attempts,
-        signup_email_limit, signup_ip_limit, signup_verification_request_limit,
-        signup_verify_lock_duration, signup_verify_max_attempts, RateLimiter, WindowLimit,
+        recovery_request_limit, signup_email_limit, signup_ip_limit,
+        signup_verification_request_limit, RateLimiter, WindowLimit,
     },
     services::session::{
         format_rfc3339, generate_opaque_session_token, hash_token, is_grouped_client_session,
@@ -45,6 +43,9 @@ use crate::{
         SessionIdInput, VerifiedSession,
     },
     services::session_control::record_session_revocations,
+    services::verification_code::{
+        LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
+    },
     AppState,
 };
 
@@ -515,6 +516,8 @@ struct SignupVerificationTokenClaims {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RecoveryTokenClaims {
+    verification_id: String,
+    user_id: String,
     email: String,
     #[serde(rename = "type")]
     token_type: String,
@@ -624,9 +627,14 @@ pub(crate) async fn request_signup_verification(
         return Ok(LogoutResponse { success: true });
     }
 
-    let code =
-        create_signup_verification(pool, &normalized_email, input.invitation_token.as_deref())
-            .await?;
+    let code = VerificationCodeService::new(pool)
+        .issue(
+            VerificationPurpose::Signup {
+                invitation_token: input.invitation_token.as_deref(),
+            },
+            &normalized_email,
+        )
+        .await?;
     send_signup_verification_code(&normalized_email, &code, input.invitation_token.as_deref())?;
 
     Ok(LogoutResponse { success: true })
@@ -642,7 +650,6 @@ pub(crate) async fn verify_signup_verification(
         .as_ref()
         .ok_or_else(|| internal_handler_error("Database is not configured"))?;
     let normalized_email = normalize_email(&input.email);
-    let email_hash = hash_normalized_email(&normalized_email);
     let limiter = app_state.rate_limiter.as_ref();
 
     // Generic per-IP throttle guards against high-volume guessing spread across
@@ -655,90 +662,52 @@ pub(crate) async fn verify_signup_verification(
     )
     .await?;
 
-    // A correct code while locked out must still fail. Enumeration-safe: the lock
-    // is keyed on the email hash whether or not a code exists for it.
-    if limiter
-        .is_locked(rate_limit::SCOPE_SIGNUP_VERIFY, &email_hash)
-        .await?
-        .is_limited()
-    {
-        return Err(rate_limited_error());
-    }
-
-    // Reject malformed codes before touching the database, as the share flow does.
-    if !is_valid_verification_code(&input.code) {
-        return Ok(VerifySignupVerificationResponse {
-            success: false,
-            signup_verification_token: None,
-        });
-    }
-
     if let Some(invitation_token) = input.invitation_token.as_deref() {
         let _ =
             get_pending_invitation_for_signup(pool, invitation_token, &normalized_email).await?;
     }
 
-    // Captured before the attempt, which may consume the row at the per-code cap.
-    // Only failures against a genuinely pending code count toward the lockout, so
-    // a caller cannot lock an arbitrary address out of signup. The response is the
-    // same either way, so this leaks nothing about whether a code exists.
-    let had_active_verification =
-        repo_auth::has_active_signup_verification(pool, &normalized_email).await?;
-
-    let success = consume_signup_verification_code(
-        pool,
-        &normalized_email,
-        &input.code,
-        input.invitation_token.as_deref(),
-    )
-    .await?;
-    if success {
-        limiter
-            .clear(rate_limit::SCOPE_SIGNUP_VERIFY, &email_hash)
-            .await?;
-        return Ok(VerifySignupVerificationResponse {
-            success: true,
-            signup_verification_token: Some(create_signup_verification_token(
-                &normalized_email,
-                input.invitation_token.as_deref(),
-            )?),
-        });
-    }
-
-    if !had_active_verification {
-        return Ok(VerifySignupVerificationResponse {
-            success: false,
-            signup_verification_token: None,
-        });
-    }
-
-    // The lifetime counter lives on the limiter, keyed on the identity, so
-    // requesting a fresh code cannot reset it the way `signup_verification.attempts`
-    // does.
-    let outcome = limiter
-        .record_failure(
-            rate_limit::SCOPE_SIGNUP_VERIFY,
-            &email_hash,
-            signup_verify_max_attempts(),
-            signup_verify_lock_duration(),
+    let verification_codes = VerificationCodeService::new(pool);
+    let outcome = verification_codes
+        .verify_with_lockout(
+            VerificationPurpose::Signup {
+                invitation_token: input.invitation_token.as_deref(),
+            },
+            &normalized_email,
+            &input.code,
+            limiter,
         )
         .await?;
 
-    if outcome.is_limited() {
-        repo_auth::invalidate_pending_signup_verifications(pool, &normalized_email).await?;
-        return Err(rate_limited_error());
-    }
+    let success = match outcome {
+        LockoutVerificationCodeOutcome::Valid { verification_id } => {
+            verification_codes
+                .consume(
+                    VerificationPurpose::Signup {
+                        invitation_token: input.invitation_token.as_deref(),
+                    },
+                    &verification_id,
+                )
+                .await?
+        }
+        LockoutVerificationCodeOutcome::Locked
+        | LockoutVerificationCodeOutcome::LockoutTriggered => return Err(rate_limited_error()),
+        LockoutVerificationCodeOutcome::Invalid | LockoutVerificationCodeOutcome::Exhausted => {
+            false
+        }
+    };
 
     Ok(VerifySignupVerificationResponse {
-        success: false,
-        signup_verification_token: None,
+        success,
+        signup_verification_token: success
+            .then(|| {
+                create_signup_verification_token(
+                    &normalized_email,
+                    input.invitation_token.as_deref(),
+                )
+            })
+            .transpose()?,
     })
-}
-
-/// Signup and recovery codes are exactly six ASCII digits
-/// (see `generate_signup_verification_code`).
-fn is_valid_verification_code(code: &str) -> bool {
-    code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 pub(crate) async fn signup(
@@ -1315,7 +1284,9 @@ pub(crate) async fn request_recovery_verification(
         .and_then(|row| row.encrypted_master_key.as_ref())
         .is_some()
     {
-        let code = create_recovery_verification(pool, &normalized_email).await?;
+        let code = VerificationCodeService::new(pool)
+            .issue(VerificationPurpose::Recovery, &normalized_email)
+            .await?;
         send_recovery_code(&normalized_email, &code)?;
     }
 
@@ -1329,7 +1300,6 @@ pub(crate) async fn verify_recovery_code(
 ) -> Result<VerifyRecoveryCodeResponse, AppError> {
     let pool = db_pool(app_state)?;
     let normalized_email = normalize_email(&input.email);
-    let email_hash = hash_normalized_email(&normalized_email);
     let limiter = app_state.rate_limiter.as_ref();
 
     // Generic per-IP throttle guards against high-volume guessing that spreads
@@ -1342,58 +1312,18 @@ pub(crate) async fn verify_recovery_code(
     )
     .await?;
 
-    // A correct code while locked out must still fail. Enumeration-safe: the lock is
-    // keyed on the email hash regardless of whether the account exists.
-    if limiter
-        .is_locked(rate_limit::SCOPE_RECOVERY_VERIFY, &email_hash)
-        .await?
-        .is_limited()
-    {
-        return Err(rate_limited_error());
-    }
-
-    // Capture whether a pending recovery code exists *before* attempting the code,
-    // because the attempt itself may consume/expire the row at the per-code cap.
-    // We only record failures toward the per-email lockout when there is actually an
-    // active pending code to guess. This prevents a caller from driving the lockout
-    // (and invalidating a future code / spamming audit events) for an email that has
-    // no pending recovery flow. The response is the same generic invalid-code error
-    // either way, so this does not leak whether a code exists.
-    let had_active_recovery =
-        repo_auth::has_active_recovery_verification(pool, &normalized_email).await?;
-
-    let is_valid = verify_recovery_code_attempt(pool, &normalized_email, &input.code).await?;
-
-    if is_valid {
-        limiter
-            .clear(rate_limit::SCOPE_RECOVERY_VERIFY, &email_hash)
-            .await?;
-        return Ok(VerifyRecoveryCodeResponse {
-            success: true,
-            recovery_token: Some(create_recovery_token(&normalized_email)?),
-        });
-    }
-
-    if !had_active_recovery {
-        return Ok(VerifyRecoveryCodeResponse {
-            success: false,
-            recovery_token: None,
-        });
-    }
-
-    let outcome = limiter
-        .record_failure(
-            rate_limit::SCOPE_RECOVERY_VERIFY,
-            &email_hash,
-            recovery_verify_max_attempts(),
-            recovery_verify_lock_duration(),
+    let outcome = VerificationCodeService::new(pool)
+        .verify_with_lockout_and_consume(
+            VerificationPurpose::Recovery,
+            &normalized_email,
+            &input.code,
+            limiter,
         )
         .await?;
 
-    if outcome.is_limited() {
+    if outcome == LockoutVerificationCodeOutcome::LockoutTriggered {
         // Threshold reached: invalidate any pending recovery code and record an audit
         // event so the lockout is observable.
-        invalidate_pending_recovery_verifications(pool, &normalized_email).await?;
         if let Some(user_id) = load_user_id_by_email(pool, &normalized_email).await? {
             if let Err(error) = insert_audit_event(
                 pool,
@@ -1412,26 +1342,27 @@ pub(crate) async fn verify_recovery_code(
         return Err(rate_limited_error());
     }
 
-    Ok(VerifyRecoveryCodeResponse {
-        success: false,
-        recovery_token: None,
-    })
-}
+    if outcome == LockoutVerificationCodeOutcome::Locked {
+        return Err(rate_limited_error());
+    }
 
-async fn invalidate_pending_recovery_verifications(
-    pool: &PgPool,
-    normalized_email: &str,
-) -> Result<(), AppError> {
-    query("UPDATE recovery_verification SET used_at = $1 WHERE email = $2 AND used_at IS NULL")
-        .bind(now_utc())
-        .bind(normalized_email)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to invalidate recovery verification");
-            internal_handler_error("Failed to invalidate recovery verification")
-        })?;
-    Ok(())
+    let recovery_token = match outcome {
+        LockoutVerificationCodeOutcome::Valid { verification_id } => {
+            load_user_id_by_email(pool, &normalized_email)
+                .await?
+                .map(|user_id| create_recovery_token(&verification_id, &user_id, &normalized_email))
+                .transpose()?
+        }
+        LockoutVerificationCodeOutcome::Invalid | LockoutVerificationCodeOutcome::Exhausted => None,
+        LockoutVerificationCodeOutcome::Locked
+        | LockoutVerificationCodeOutcome::LockoutTriggered => {
+            unreachable!("recovery lockout outcomes are handled above")
+        }
+    };
+    Ok(VerifyRecoveryCodeResponse {
+        success: recovery_token.is_some(),
+        recovery_token,
+    })
 }
 
 async fn load_user_id_by_email(
@@ -1461,12 +1392,16 @@ pub(crate) async fn get_recovery_data(
         generic_ip_limit(),
     )
     .await?;
-    let recovery_email = verify_recovery_token(&input.recovery_token)
+    let recovery_claims = verify_recovery_token(&input.recovery_token)
         .await
         .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
-    let recovery_data = load_recovery_data(pool, &recovery_email)
-        .await?
-        .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
+    let recovery_data = load_recovery_data(
+        pool,
+        &recovery_claims.verification_id,
+        &recovery_claims.user_id,
+    )
+    .await?
+    .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
     let vault_keys = load_recovery_vault_keys(pool, &recovery_data.id).await?;
 
     Ok(GetRecoveryDataResponse {
@@ -1495,13 +1430,18 @@ pub(crate) async fn reset_password(
         generic_ip_limit(),
     )
     .await?;
-    let recovery_email = verify_recovery_token(&input.recovery_token)
+    let recovery_claims = verify_recovery_token(&input.recovery_token)
         .await
         .ok_or_else(|| unauthorized_handler_error("Invalid recovery session"))?;
-    let (user_id, revoked_session_ids) =
-        reset_user_password_with_recovery(pool, &recovery_email, &input, kdf_profile)
-            .await
-            .map_err(|_| unauthorized_handler_error("Invalid recovery session"))?;
+    let (user_id, revoked_session_ids) = reset_user_password_with_recovery(
+        pool,
+        &recovery_claims.verification_id,
+        &recovery_claims.user_id,
+        &input,
+        kdf_profile,
+    )
+    .await
+    .map_err(|_| unauthorized_handler_error("Invalid recovery session"))?;
     record_session_revocations(
         pool,
         &user_id,
@@ -2227,10 +2167,6 @@ fn deterministic_fake_hint(email: &str) -> String {
     format!("A3-{}", hex::encode_upper(&digest[..4]))
 }
 
-fn generate_signup_verification_code() -> String {
-    rand::rng().random_range(100000..=999999).to_string()
-}
-
 fn jwt_signing_secret() -> String {
     match std::env::var("JWT_SECRET") {
         Ok(secret) if !secret.trim().is_empty() => secret,
@@ -2299,11 +2235,17 @@ fn create_signup_verification_token(
     Ok(token)
 }
 
-fn create_recovery_token(email: &str) -> Result<String, AppError> {
+fn create_recovery_token(
+    verification_id: &str,
+    user_id: &str,
+    email: &str,
+) -> Result<String, AppError> {
     let issued_at = now_utc().unix_timestamp() as usize;
     let expires_at = (now_utc() + Duration::minutes(RECOVERY_VERIFICATION_TTL_MINUTES))
         .unix_timestamp() as usize;
     let claims = RecoveryTokenClaims {
+        verification_id: verification_id.to_string(),
+        user_id: user_id.to_string(),
         email: email.to_string(),
         token_type: "recovery".to_string(),
         iss: JWT_ISSUER.to_string(),
@@ -2331,7 +2273,7 @@ fn create_recovery_token(email: &str) -> Result<String, AppError> {
     Ok(token)
 }
 
-async fn verify_recovery_token(token: &str) -> Option<String> {
+async fn verify_recovery_token(token: &str) -> Option<RecoveryTokenClaims> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_audience(&[RECOVERY_JWT_AUDIENCE]);
     validation.set_issuer(&[JWT_ISSUER]);
@@ -2342,13 +2284,7 @@ async fn verify_recovery_token(token: &str) -> Option<String> {
         &validation,
     )
     .ok()
-    .and_then(|data| {
-        if data.claims.token_type != "recovery" {
-            None
-        } else {
-            Some(data.claims.email)
-        }
-    })
+    .and_then(|data| (data.claims.token_type == "recovery").then_some(data.claims))
 }
 
 pub async fn verify_signup_verification_token(token: &str) -> Option<(String, Option<String>)> {
@@ -2386,51 +2322,12 @@ async fn get_pending_invitation_for_signup(
     .await
 }
 
-async fn create_signup_verification(
-    pool: &PgPool,
-    email: &str,
-    invitation_token: Option<&str>,
-) -> Result<String, AppError> {
-    let code = generate_signup_verification_code();
-    let id = format!(
-        "signup_verify_{}",
-        &hash_token(&generate_opaque_session_token())[..16]
-    );
-    let expires_at = now_utc() + Duration::minutes(SIGNUP_VERIFICATION_TTL_MINUTES);
-    repo_auth::create_signup_verification(pool, &id, email, invitation_token, &code, expires_at)
-        .await?;
-    Ok(code)
-}
-
-async fn create_recovery_verification(pool: &PgPool, email: &str) -> Result<String, AppError> {
-    let code = generate_signup_verification_code();
-    let expires_at = now_utc() + Duration::minutes(RECOVERY_VERIFICATION_TTL_MINUTES);
-    repo_auth::create_recovery_verification(pool, email, &code, expires_at).await?;
-    Ok(code)
-}
-
-async fn consume_signup_verification_code(
-    pool: &PgPool,
-    email: &str,
-    code: &str,
-    invitation_token: Option<&str>,
-) -> Result<bool, AppError> {
-    repo_auth::consume_signup_verification_code(pool, email, code, invitation_token).await
-}
-
-async fn verify_recovery_code_attempt(
-    pool: &PgPool,
-    email: &str,
-    code: &str,
-) -> Result<bool, AppError> {
-    repo_auth::verify_recovery_code_attempt(pool, email, code).await
-}
-
 async fn load_recovery_data(
     pool: &PgPool,
-    email: &str,
+    verification_id: &str,
+    user_id: &str,
 ) -> Result<Option<DbRecoveryUserDataRow>, AppError> {
-    repo_auth::load_recovery_data(pool, email).await
+    repo_auth::load_recovery_data(pool, verification_id, user_id).await
 }
 
 async fn load_recovery_vault_keys(
@@ -2442,13 +2339,15 @@ async fn load_recovery_vault_keys(
 
 async fn reset_user_password_with_recovery(
     pool: &PgPool,
-    email: &str,
+    verification_id: &str,
+    user_id: &str,
     input: &ResetPasswordInput,
     kdf_profile: ValidatedKdfProfile,
 ) -> Result<(String, Vec<String>), AppError> {
     repo_auth::reset_user_password_with_recovery(
         pool,
-        email,
+        verification_id,
+        user_id,
         &input.srp_salt,
         &input.srp_verifier,
         &input.encrypted_private_key,

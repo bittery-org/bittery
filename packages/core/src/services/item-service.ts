@@ -9,8 +9,8 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import {
-	normalizeVaultType,
 	type ServerVaultSummary,
+	toCachedVaultFields,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import {
@@ -151,12 +151,13 @@ function normalizeVaultSummary(
 	vault: RpcVaultSummary,
 	vaultId: string,
 ): RawEncryptedItemWithVault["vault"] {
+	const decodedVault = vault ? toCachedVaultFields(vault) : undefined;
 	return {
-		id: vault?.id ?? vaultId,
-		name: vault?.name ?? "Unknown Vault",
-		type: normalizeVaultType(vault?.vaultType),
-		icon: vault?.icon ?? null,
-		imageUrl: vault?.imageUrl ?? null,
+		id: decodedVault?.id ?? vaultId,
+		name: decodedVault?.name ?? "Unknown Vault",
+		type: decodedVault?.type ?? "personal",
+		icon: decodedVault?.icon ?? null,
+		imageUrl: decodedVault?.imageUrl ?? null,
 	};
 }
 

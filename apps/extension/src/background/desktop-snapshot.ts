@@ -27,6 +27,7 @@
 
 import type { MultiAccountItem } from "@bittery/core/services/item-service";
 import type { ItemCategory } from "@bittery/shared/types";
+import { decodeVaultType } from "@bittery/shared/vault-mapping";
 
 function isItemCategory(value: unknown): value is ItemCategory {
 	return (
@@ -82,7 +83,7 @@ export function parseDesktopSnapshotItem(
 		vault: {
 			id: vault.id,
 			name: vault.name,
-			type: vault.type,
+			type: decodeVaultType(vault.type),
 			icon: typeof vault.icon === "string" ? vault.icon : null,
 			imageUrl: typeof vault.imageUrl === "string" ? vault.imageUrl : null,
 		},

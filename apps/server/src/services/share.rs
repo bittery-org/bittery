@@ -19,6 +19,9 @@ use crate::{
     services::rate_limit,
     services::session::hash_token,
     services::team_billing::{load_team_billing_entitlement, resolve_share_links_policy},
+    services::verification_code::{
+        LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
+    },
     AppState,
 };
 
@@ -695,9 +698,10 @@ pub(crate) async fn access_public(
 }
 
 pub(crate) async fn request_email_verification(
-    pool: &PgPool,
+    app_state: &AppState,
     input: RequestEmailVerificationInput,
 ) -> Result<RequestEmailVerificationResponse, AppError> {
+    let pool = db_pool(app_state)?;
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
     let details =
@@ -756,21 +760,14 @@ pub(crate) async fn request_email_verification(
         }
     }
 
-    let code = generate_verification_code();
-    let expires_at = now + time::Duration::minutes(15);
-    // Only the SHA-256 digest is persisted; the raw code leaves the process in the
-    // outbound email, never in a column.
-    query(
-		"INSERT INTO share_email_verification (id, share_link_id, email, code_hash, expires_at) VALUES ($1, $2, $3, $4, $5)",
-	)
-	.bind(generate_resource_id("share_verification"))
-	.bind(&details.link.id)
-	.bind(&normalized_email)
-	.bind(hash_token(&code))
-	.bind(expires_at)
-	.execute(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to insert share email verification"); internal_error("Failed to insert share email verification") })?;
+    let _code = VerificationCodeService::new(pool)
+        .issue(
+            VerificationPurpose::ShareEmail {
+                share_link_id: &details.link.id,
+            },
+            &normalized_email,
+        )
+        .await?;
 
     Ok(RequestEmailVerificationResponse {
         success: true,
@@ -779,12 +776,13 @@ pub(crate) async fn request_email_verification(
 }
 
 pub(crate) async fn verify_email_and_access(
-    pool: &PgPool,
+    app_state: &AppState,
     input: VerifyEmailAndAccessInput,
 ) -> Result<PublicShareAccessResponse, AppError> {
+    let pool = db_pool(app_state)?;
     validate_public_token(&input.token)?;
     validate_email(&input.email)?;
-    if input.code.len() != 6 {
+    if !VerificationCodeService::is_valid_code(&input.code) {
         return Err(bad_request_error("Invalid or expired verification code"));
     }
 
@@ -837,78 +835,56 @@ pub(crate) async fn verify_email_and_access(
         ));
     }
 
-    let verification = query_as::<_, DbShareEmailVerificationRow>(
-		"SELECT id, share_link_id, email, code_hash, attempts, max_attempts, expires_at, created_at, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 AND code_hash = $3 AND expires_at > $4 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-	)
-	.bind(&details.link.id)
-	.bind(&normalized_email)
-	.bind(hash_token(&input.code))
-	.bind(now)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load verification code"); internal_error("Failed to load verification code") })?;
-
-    let verification = if let Some(verification) = verification {
-        verification
-    } else {
-        let any_verification = query_as::<_, DbShareEmailVerificationRow>(
-			"SELECT id, share_link_id, email, code_hash, attempts, max_attempts, expires_at, created_at, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-		)
-		.bind(&details.link.id)
-		.bind(&normalized_email)
-		.bind(now)
-		.fetch_optional(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load fallback verification code"); internal_error("Failed to load fallback verification code") })?;
-
-        if let Some(any_verification) = any_verification {
-            query("UPDATE share_email_verification SET attempts = $1 WHERE id = $2")
-                .bind(any_verification.attempts + 1)
-                .bind(&any_verification.id)
-                .execute(pool)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to increment verification attempts");
-                    internal_error("Failed to increment verification attempts")
-                })?;
-
-            if any_verification.attempts + 1 >= any_verification.max_attempts {
-                query("UPDATE share_email_verification SET used_at = $1 WHERE id = $2")
-                    .bind(now)
-                    .bind(&any_verification.id)
-                    .execute(pool)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!(error = %e, "Failed to exhaust verification code");
-                        internal_error("Failed to exhaust verification code")
-                    })?;
-            }
+    let verification_codes = VerificationCodeService::new(pool);
+    let verification_id = match verification_codes
+        .verify_with_lockout(
+            VerificationPurpose::ShareEmail {
+                share_link_id: &details.link.id,
+            },
+            &normalized_email,
+            &input.code,
+            app_state.rate_limiter.as_ref(),
+        )
+        .await?
+    {
+        LockoutVerificationCodeOutcome::Valid { verification_id } => verification_id,
+        LockoutVerificationCodeOutcome::Exhausted => {
+            log_share_access(
+                pool,
+                &details.link.id,
+                Some(&input.email),
+                false,
+                Some("Max verification attempts exceeded"),
+            )
+            .await?;
+            return Err(AppError::too_many_requests(
+                "Maximum verification attempts exceeded. Please request a new code.",
+            ));
         }
-
-        log_share_access(
-            pool,
-            &details.link.id,
-            Some(&input.email),
-            false,
-            Some("Invalid or expired verification code"),
-        )
-        .await?;
-        return Err(bad_request_error("Invalid or expired verification code"));
+        LockoutVerificationCodeOutcome::Locked
+        | LockoutVerificationCodeOutcome::LockoutTriggered => {
+            log_share_access(
+                pool,
+                &details.link.id,
+                Some(&input.email),
+                false,
+                Some("Verification lockout"),
+            )
+            .await?;
+            return Err(rate_limit::rate_limited_error());
+        }
+        LockoutVerificationCodeOutcome::Invalid => {
+            log_share_access(
+                pool,
+                &details.link.id,
+                Some(&input.email),
+                false,
+                Some("Invalid or expired verification code"),
+            )
+            .await?;
+            return Err(bad_request_error("Invalid or expired verification code"));
+        }
     };
-
-    if verification.attempts >= verification.max_attempts {
-        log_share_access(
-            pool,
-            &details.link.id,
-            Some(&input.email),
-            false,
-            Some("Max verification attempts exceeded"),
-        )
-        .await?;
-        return Err(AppError::too_many_requests(
-            "Maximum verification attempts exceeded. Please request a new code.",
-        ));
-    }
 
     if !consume_share_link_access(pool, &details.link.id, now).await? {
         log_share_access(
@@ -924,15 +900,25 @@ pub(crate) async fn verify_email_and_access(
         ));
     }
 
-    query("UPDATE share_email_verification SET used_at = $1 WHERE id = $2")
-        .bind(now)
-        .bind(&verification.id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to mark verification as used");
-            internal_error("Failed to mark verification as used")
-        })?;
+    if !verification_codes
+        .consume(
+            VerificationPurpose::ShareEmail {
+                share_link_id: &details.link.id,
+            },
+            &verification_id,
+        )
+        .await?
+    {
+        log_share_access(
+            pool,
+            &details.link.id,
+            Some(&input.email),
+            false,
+            Some("Invalid or expired verification code"),
+        )
+        .await?;
+        return Err(bad_request_error("Invalid or expired verification code"));
+    }
 
     query(
 		"UPDATE share_link_allowed_email SET verified = true, verified_at = $1 WHERE share_link_id = $2 AND lower(email) = lower($3)",
@@ -1281,10 +1267,6 @@ fn generate_secure_token() -> String {
             ALPHABET[index] as char
         })
         .collect()
-}
-
-fn generate_verification_code() -> String {
-    rand::rng().random_range(100000..=999999).to_string()
 }
 
 fn share_link_daily_limit() -> i64 {

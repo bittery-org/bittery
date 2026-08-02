@@ -1,13 +1,9 @@
 use std::{env, net::SocketAddr};
 
-use axum::{middleware, routing::get, Json, Router};
 use bittery_server::{
-    build_rate_limiter, catch_panic_layer, create_public_http_router, create_rpc_router,
-    create_sync_http_router, db, edge_http_middleware, http_trace_layer, init_redis,
-    load_edge_http_config, rpc_request_context_middleware, rpc_request_guard_middleware,
-    rpc_tracing_middleware, AppState, JobRunner, SyncPubSub,
+    build_rate_limiter, create_app, db, init_redis, load_edge_http_config, AppState, JobRunner,
+    SyncPubSub,
 };
-use serde_json::json;
 use tokio::net::TcpListener;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
@@ -61,40 +57,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         .map(JobRunner::start)
         .transpose()?;
     let seeded_session = app_state.sessions.seeded_session();
-    let (qubit_service, _server_handle) = create_rpc_router().to_service(app_state.clone());
-    let rpc_routes = Router::new()
-        .nest_service("/rpc", qubit_service)
-        .route_layer(middleware::from_fn(rpc_tracing_middleware))
-        .route_layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            rpc_request_context_middleware,
-        ))
-        .layer(middleware::from_fn(rpc_request_guard_middleware));
-    let sync_routes = create_sync_http_router()
-        .route_layer(middleware::from_fn_with_state(
-            app_state.clone(),
-            rpc_request_context_middleware,
-        ))
-        .with_state(app_state.clone());
-    let public_http_routes = create_public_http_router().with_state(app_state.clone());
-    let app = Router::new()
-        .route("/", get(|| async { "OK" }))
-        .route(
-            "/healthz",
-            get(|| async { Json(json!({ "status": "ok" })) }),
-        )
-        .merge(public_http_routes)
-        .nest("/sync", sync_routes)
-        .merge(rpc_routes)
-        // Innermost of the three so that a panic becomes a normal `500` that
-        // still picks up the security and CORS headers on the way out, and so
-        // that the trace layer records it like any other response.
-        .layer(catch_panic_layer())
-        .layer(middleware::from_fn_with_state(
-            edge_http_config,
-            edge_http_middleware,
-        ))
-        .layer(http_trace_layer());
+    let app = create_app(app_state, edge_http_config);
 
     let listener = TcpListener::bind(&bind_address).await?;
     info!(address = %bind_address, "rust rpc server listening");
@@ -111,9 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         info!("using database-backed session service");
     }
 
-    // `ConnectInfo` carries the TCP peer address, which is the rate limiter's
-    // client identity whenever `TRUST_PROXY_MODE` does not opt into the
-    // forwarded-for headers.
+    // ConnectInfo preserves TCP peer identity unless trusted proxy settings select forwarded headers.
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

@@ -37,6 +37,7 @@ pub const SCOPE_SIGNUP_VERIFY: &str = "auth_signup_verify";
 pub const SCOPE_RECOVERY_REQUEST_EMAIL: &str = "auth_recovery_request_email";
 pub const SCOPE_RECOVERY_REQUEST_IP: &str = "auth_recovery_request_ip";
 pub const SCOPE_RECOVERY_VERIFY: &str = "auth_recovery_verify";
+pub const SCOPE_SHARE_EMAIL_VERIFY: &str = "share_email_verify";
 pub const SCOPE_GENERIC_IP: &str = "auth_generic_ip";
 pub const SCOPE_SHARE_CREATE_DAILY: &str = "share_create_daily";
 
@@ -160,6 +161,15 @@ pub fn recovery_verify_max_attempts() -> i64 {
 
 pub fn recovery_verify_lock_duration() -> Duration {
     let minutes = env_i64("RATE_LIMIT_RECOVERY_LOCK_MINUTES", 15);
+    Duration::from_secs((minutes as u64) * 60)
+}
+
+pub fn share_email_verify_max_attempts() -> i64 {
+    env_i64("RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX", 5)
+}
+
+pub fn share_email_verify_lock_duration() -> Duration {
+    let minutes = env_i64("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", 15);
     Duration::from_secs((minutes as u64) * 60)
 }
 

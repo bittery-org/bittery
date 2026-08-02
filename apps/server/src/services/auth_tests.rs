@@ -752,6 +752,17 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .expect("recovery token should exist")
                     .to_string();
 
+                let replayed_code = app
+                    .rpc_call(
+                        "auth.verifyRecoveryCode",
+                        json!([{ "email": fixture.email, "code": code }]),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_eq!(replayed_code.status, StatusCode::OK);
+                assert_eq!(replayed_code.body["result"]["Ok"]["success"], json!(false));
+                assert!(replayed_code.body["result"]["Ok"]["recoveryToken"].is_null());
+
                 let invalid_recovery = app
                     .rpc_call(
                         "auth.getRecoveryData",
@@ -769,7 +780,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 let recovery_data = app
                     .rpc_call(
                         "auth.getRecoveryData",
-                        json!([{ "recoveryToken": recovery_token }]),
+                        json!([{ "recoveryToken": recovery_token.clone() }]),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -807,6 +818,19 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .await;
                 assert_eq!(reset.status, StatusCode::OK);
                 assert_eq!(reset.body["result"]["Ok"]["userId"], json!(fixture.user_id));
+
+                let reused_recovery = app
+                    .rpc_call(
+                        "auth.getRecoveryData",
+                        json!([{ "recoveryToken": recovery_token }]),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_handler_error(
+                    &reused_recovery.body,
+                    "UNAUTHORIZED",
+                    "Invalid recovery session",
+                );
 
                 let session_count = query_scalar::<_, i64>(
                     "SELECT COUNT(*)::bigint FROM session WHERE user_id = $1",

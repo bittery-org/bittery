@@ -10,6 +10,7 @@ use crate::{
         AuthVaultKeyResponse, EncryptedVaultKeyInput, RecoveryVaultKeyResponse, ValidatedKdfProfile,
     },
     services::session::hash_token,
+    services::verification_code::VerificationCodeService,
 };
 
 // ---------------------------------------------------------------------------
@@ -338,7 +339,8 @@ pub async fn update_user_secret_key_data(
 #[allow(clippy::too_many_arguments)]
 pub async fn reset_user_password_with_recovery(
     pool: &PgPool,
-    email: &str,
+    verification_id: &str,
+    expected_user_id: &str,
     srp_salt: &str,
     srp_verifier: &str,
     encrypted_private_key: &str,
@@ -355,9 +357,9 @@ pub async fn reset_user_password_with_recovery(
     })?;
 
     let verification = query_as::<_, DbRecoveryVerificationRow>(
-        "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
+        "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE id = $1 AND expires_at > $2 AND used_at IS NOT NULL AND attempts < max_attempts FOR UPDATE",
     )
-    .bind(email)
+    .bind(verification_id)
     .bind(now)
     .fetch_optional(transaction.as_mut())
     .await
@@ -367,18 +369,22 @@ pub async fn reset_user_password_with_recovery(
     })?
     .ok_or_else(|| AppError::unauthorized("Invalid recovery session"))?;
 
-    let user_id =
-        query_scalar::<_, String>("SELECT id FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1")
-            .bind(email)
-            .fetch_optional(transaction.as_mut())
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to load recovery account");
-                AppError::internal("Failed to load recovery account")
-            })?
-            .ok_or_else(|| AppError::unauthorized("Invalid recovery session"))?;
+    let user_id = query_scalar::<_, String>(
+        "SELECT id FROM \"user\" WHERE id = $1 AND LOWER(email) = LOWER($2) LIMIT 1",
+    )
+    .bind(expected_user_id)
+    .bind(&verification.email)
+    .fetch_optional(transaction.as_mut())
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load recovery account");
+        AppError::internal("Failed to load recovery account")
+    })?
+    .ok_or_else(|| AppError::unauthorized("Invalid recovery session"))?;
     let revoked_session_ids =
-        crate::services::session_control::load_user_session_ids(pool, &user_id)
+        query_scalar::<_, String>("SELECT id FROM session WHERE user_id = $1 FOR UPDATE")
+            .bind(&user_id)
+            .fetch_all(transaction.as_mut())
             .await
             .map_err(|e| {
                 tracing::error!(error = %e, "Failed to load recovery sessions");
@@ -426,15 +432,12 @@ pub async fn reset_user_password_with_recovery(
             tracing::error!(error = %e, "Failed to revoke sessions after recovery");
             AppError::internal("Failed to revoke sessions after recovery")
         })?;
-    query("UPDATE recovery_verification SET used_at = $1 WHERE id = $2")
-        .bind(now)
-        .bind(&verification.id)
-        .execute(transaction.as_mut())
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to finalize recovery verification");
-            AppError::internal("Failed to finalize recovery verification")
-        })?;
+    if !VerificationCodeService::new(pool)
+        .consume_recovery_session(&mut transaction, &verification.id)
+        .await?
+    {
+        return Err(AppError::unauthorized("Invalid recovery session"));
+    }
 
     transaction.commit().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to commit recovery reset");
@@ -446,28 +449,16 @@ pub async fn reset_user_password_with_recovery(
 
 pub async fn load_recovery_data(
     pool: &PgPool,
-    email: &str,
+    verification_id: &str,
+    expected_user_id: &str,
 ) -> Result<Option<DbRecoveryUserDataRow>, AppError> {
     let now = OffsetDateTime::now_utc();
-    let active = query_scalar::<_, String>(
-        "SELECT id FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(email)
-    .bind(now)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load recovery session");
-        AppError::internal("Failed to load recovery session")
-    })?;
-    if active.is_none() {
-        return Ok(None);
-    }
-
     let user = query_as::<_, DbRecoveryUserDataRow>(
-        "SELECT id, encrypted_master_key, encrypted_private_key, secret_key_hint, recovery_key_hint FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
+        "SELECT u.id, u.encrypted_master_key, u.encrypted_private_key, u.secret_key_hint, u.recovery_key_hint FROM recovery_verification rv INNER JOIN \"user\" u ON LOWER(u.email) = LOWER(rv.email) WHERE rv.id = $1 AND rv.expires_at > $2 AND rv.used_at IS NOT NULL AND rv.attempts < rv.max_attempts AND u.id = $3 AND u.encrypted_master_key IS NOT NULL LIMIT 1",
     )
-    .bind(email)
+    .bind(verification_id)
+    .bind(now)
+    .bind(expected_user_id)
     .fetch_optional(pool)
     .await
     .map_err(|e| {
@@ -475,7 +466,7 @@ pub async fn load_recovery_data(
         AppError::internal("Failed to load recovery account")
     })?;
 
-    Ok(user.filter(|record| record.encrypted_master_key.is_some()))
+    Ok(user)
 }
 
 pub async fn load_recovery_vault_keys(
@@ -533,331 +524,6 @@ pub async fn load_auth_vault_keys(
             role: row.role,
         })
         .collect())
-}
-
-// ---------------------------------------------------------------------------
-// Signup verification
-// ---------------------------------------------------------------------------
-
-/// Create a new signup verification record.
-///
-/// Invalidates any existing active verification for the same email/invitation_token combo,
-/// then inserts a new one with the given `id` and `code`.
-///
-/// Only SHA-256 digests of `code` and `invitation_token` are persisted; the raw
-/// values live solely in the outbound email and the caller's request.
-pub async fn create_signup_verification(
-    pool: &PgPool,
-    id: &str,
-    email: &str,
-    invitation_token: Option<&str>,
-    code: &str,
-    expires_at: OffsetDateTime,
-) -> Result<(), AppError> {
-    let now = OffsetDateTime::now_utc();
-    let invitation_token_hash = invitation_token.map(hash_token);
-    match invitation_token_hash.as_deref() {
-        Some(invitation_token_hash) => {
-            query(
-                "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND invitation_token_hash = $3 AND used_at IS NULL",
-            )
-            .bind(now)
-            .bind(email)
-            .bind(invitation_token_hash)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to update signup verification");
-                AppError::internal("Failed to update signup verification")
-            })?;
-        }
-        None => {
-            query(
-                "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND invitation_token_hash IS NULL AND used_at IS NULL",
-            )
-            .bind(now)
-            .bind(email)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to update signup verification");
-                AppError::internal("Failed to update signup verification")
-            })?;
-        }
-    }
-
-    query(
-        "INSERT INTO signup_verification (id, email, invitation_token_hash, code_hash, expires_at) VALUES ($1, $2, $3, $4, $5)",
-    )
-    .bind(id)
-    .bind(email)
-    .bind(invitation_token_hash)
-    .bind(hash_token(code))
-    .bind(expires_at)
-    .execute(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to create signup verification");
-        AppError::internal("Failed to create signup verification")
-    })?;
-
-    Ok(())
-}
-
-pub async fn create_recovery_verification(
-    pool: &PgPool,
-    email: &str,
-    code: &str,
-    expires_at: OffsetDateTime,
-) -> Result<(), AppError> {
-    let now = OffsetDateTime::now_utc();
-    query("UPDATE recovery_verification SET used_at = $1 WHERE email = $2 AND used_at IS NULL")
-        .bind(now)
-        .bind(email)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to update recovery verification");
-            AppError::internal("Failed to update recovery verification")
-        })?;
-
-    query(
-        "INSERT INTO recovery_verification (id, email, code_hash, expires_at) VALUES ($1, $2, $3, $4)",
-    )
-    .bind(generate_resource_id("recovery_verification"))
-    .bind(email)
-    .bind(hash_token(code))
-    .bind(expires_at)
-    .execute(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to create recovery verification");
-        AppError::internal("Failed to create recovery verification")
-    })?;
-
-    Ok(())
-}
-
-pub async fn consume_signup_verification_code(
-    pool: &PgPool,
-    email: &str,
-    code: &str,
-    invitation_token: Option<&str>,
-) -> Result<bool, AppError> {
-    let now = OffsetDateTime::now_utc();
-    let invitation_token_hash = invitation_token.map(hash_token);
-    let code_hash = hash_token(code);
-    let valid = match invitation_token_hash.as_deref() {
-        Some(invitation_token_hash) => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash = $2 AND code_hash = $3 AND expires_at > $4 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(email)
-        .bind(invitation_token_hash)
-        .bind(&code_hash)
-        .bind(now)
-        .fetch_optional(pool)
-        .await,
-        None => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash IS NULL AND code_hash = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(email)
-        .bind(&code_hash)
-        .bind(now)
-        .fetch_optional(pool)
-        .await,
-    }
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load signup verification");
-        AppError::internal("Failed to load signup verification")
-    })?;
-
-    if let Some(valid) = valid {
-        if valid.attempts >= valid.max_attempts {
-            return Ok(false);
-        }
-        query("UPDATE signup_verification SET attempts = $1, used_at = $2, updated_at = $2 WHERE id = $3")
-            .bind(valid.attempts + 1)
-            .bind(now)
-            .bind(valid.id)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to consume signup verification");
-                AppError::internal("Failed to consume signup verification")
-            })?;
-        return Ok(true);
-    }
-
-    let active = match invitation_token_hash.as_deref() {
-        Some(invitation_token_hash) => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(email)
-        .bind(invitation_token_hash)
-        .bind(now)
-        .fetch_optional(pool)
-        .await,
-        None => query_as::<_, DbSignupVerificationRow>(
-            "SELECT id, email, invitation_token_hash, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM signup_verification WHERE email = $1 AND invitation_token_hash IS NULL AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-        )
-        .bind(email)
-        .bind(now)
-        .fetch_optional(pool)
-        .await,
-    }
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load active signup verification");
-        AppError::internal("Failed to load active signup verification")
-    })?;
-
-    if let Some(active) = active {
-        let next_attempts = active.attempts + 1;
-        let used_at = if next_attempts >= active.max_attempts {
-            Some(now)
-        } else {
-            None
-        };
-        query(
-            "UPDATE signup_verification SET attempts = $1, used_at = $2, updated_at = $3 WHERE id = $4",
-        )
-        .bind(next_attempts)
-        .bind(used_at)
-        .bind(now)
-        .bind(active.id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to update signup verification attempts");
-            AppError::internal("Failed to update signup verification attempts")
-        })?;
-    }
-
-    Ok(false)
-}
-
-/// Whether the email has a signup verification code that is still live.
-///
-/// Used to decide whether a failed attempt should count toward the per-email
-/// lockout: without this, anyone could lock an arbitrary address out of signup
-/// by guessing against an email that has no pending code.
-pub async fn has_active_signup_verification(pool: &PgPool, email: &str) -> Result<bool, AppError> {
-    let now = OffsetDateTime::now_utc();
-    let exists = query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM signup_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL)",
-    )
-    .bind(email)
-    .bind(now)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to check active signup verification");
-        AppError::internal("Failed to check active signup verification")
-    })?;
-    Ok(exists)
-}
-
-/// Burns every live signup verification code for the email. Called when the
-/// per-email lockout trips so that a code an attacker may have narrowed down
-/// cannot be redeemed once the lock expires.
-pub async fn invalidate_pending_signup_verifications(
-    pool: &PgPool,
-    email: &str,
-) -> Result<(), AppError> {
-    let now = OffsetDateTime::now_utc();
-    query(
-        "UPDATE signup_verification SET used_at = $1, updated_at = $1 WHERE email = $2 AND used_at IS NULL",
-    )
-    .bind(now)
-    .bind(email)
-    .execute(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to invalidate signup verifications");
-        AppError::internal("Failed to invalidate signup verifications")
-    })?;
-    Ok(())
-}
-
-pub async fn verify_recovery_code_attempt(
-    pool: &PgPool,
-    email: &str,
-    code: &str,
-) -> Result<bool, AppError> {
-    let now = OffsetDateTime::now_utc();
-    let valid = query_as::<_, DbRecoveryVerificationRow>(
-        "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND code_hash = $2 AND expires_at > $3 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(email)
-    .bind(hash_token(code))
-    .bind(now)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load recovery verification");
-        AppError::internal("Failed to load recovery verification")
-    })?;
-
-    if let Some(valid) = valid {
-        if valid.attempts >= valid.max_attempts {
-            return Ok(false);
-        }
-        return Ok(true);
-    }
-
-    let active = query_as::<_, DbRecoveryVerificationRow>(
-        "SELECT id, email, code_hash, attempts, max_attempts, expires_at, used_at, created_at FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL ORDER BY created_at DESC LIMIT 1",
-    )
-    .bind(email)
-    .bind(now)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load active recovery verification");
-        AppError::internal("Failed to load active recovery verification")
-    })?;
-
-    if let Some(active) = active {
-        let next_attempts = active.attempts + 1;
-        let used_at = if next_attempts >= active.max_attempts {
-            Some(now)
-        } else {
-            None
-        };
-        query("UPDATE recovery_verification SET attempts = $1, used_at = $2 WHERE id = $3")
-            .bind(next_attempts)
-            .bind(used_at)
-            .bind(active.id)
-            .execute(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to update recovery verification attempts");
-                AppError::internal("Failed to update recovery verification attempts")
-            })?;
-    }
-
-    Ok(false)
-}
-
-/// Returns true when an active (non-expired, unused) recovery verification row
-/// exists for the given email. Used to gate rate-limiter failure recording so a
-/// caller cannot drive the recovery lockout for an email with no pending code.
-pub async fn has_active_recovery_verification(
-    pool: &PgPool,
-    email: &str,
-) -> Result<bool, AppError> {
-    let now = OffsetDateTime::now_utc();
-    let exists = query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM recovery_verification WHERE email = $1 AND expires_at > $2 AND used_at IS NULL)",
-    )
-    .bind(email)
-    .bind(now)
-    .fetch_one(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to check active recovery verification");
-        AppError::internal("Failed to check active recovery verification")
-    })?;
-    Ok(exists)
 }
 
 // ---------------------------------------------------------------------------

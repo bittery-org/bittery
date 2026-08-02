@@ -1,6 +1,4 @@
-// Kept at 1: the `theme` field and `theme_changed` event are additive and
-// tolerated by older peers, so no version bump (a bump hard-breaks mixed
-// extension/desktop versions during staggered rollouts).
+// Kept at 1: additive fields remain compatible with older desktop peers.
 export const DESKTOP_PROTOCOL_VERSION = 1;
 
 export type DesktopTheme = "light" | "dark" | "system";

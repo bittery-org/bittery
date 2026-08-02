@@ -21,6 +21,60 @@ type NativeMessagingClientDeps = {
 	connectNative?: typeof chrome.runtime.connectNative;
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDesktopResponseEnvelope(
+	value: unknown,
+): value is DesktopEnvelope<DesktopResponse> {
+	return (
+		isRecord(value) &&
+		(value.protocolVersion === undefined ||
+			typeof value.protocolVersion === "number") &&
+		typeof value.type === "string" &&
+		(value.requestId === undefined || typeof value.requestId === "string")
+	);
+}
+
+function isDesktopEventPayload(value: unknown): value is DesktopEventPayload {
+	if (!isRecord(value) || !isRecord(value.payload)) {
+		return false;
+	}
+
+	switch (value.event) {
+		case "lock":
+			return (
+				typeof value.payload.reason === "string" &&
+				typeof value.payload.timestamp === "number"
+			);
+		case "unlock":
+			return (
+				Array.isArray(value.payload.accounts) &&
+				value.payload.accounts.every(
+					(account) => typeof account === "string",
+				) &&
+				typeof value.payload.timestamp === "number"
+			);
+		case "desktop_close":
+			return typeof value.payload.timestamp === "number";
+		case "active_account_changed":
+			return (
+				typeof value.payload.accountId === "string" &&
+				typeof value.payload.timestamp === "number"
+			);
+		case "theme_changed":
+			return (
+				(value.payload.theme === "light" ||
+					value.payload.theme === "dark" ||
+					value.payload.theme === "system") &&
+				typeof value.payload.timestamp === "number"
+			);
+		default:
+			return false;
+	}
+}
+
 function getDefaultConnectNative(): typeof chrome.runtime.connectNative {
 	return (application: string) => {
 		if (!globalThis.chrome?.runtime?.connectNative) {
@@ -64,7 +118,7 @@ export class NativeMessagingClient {
 
 		const port = this.connectNativeImpl(NATIVE_HOST_NAME);
 		port.onMessage.addListener((message) => {
-			this.handleMessage(message as DesktopEnvelope<DesktopResponse>);
+			this.handleMessage(message);
 		});
 		port.onDisconnect.addListener(() => {
 			this.handleDisconnect(port);
@@ -74,21 +128,32 @@ export class NativeMessagingClient {
 		return port;
 	}
 
-	private handleMessage(message: DesktopEnvelope<DesktopResponse>): void {
+	private handleMessage(message: unknown): void {
+		if (!isDesktopResponseEnvelope(message)) {
+			return;
+		}
 		if (message.protocolVersion !== DESKTOP_PROTOCOL_VERSION) {
 			this.handleProtocolMismatch(message.protocolVersion);
 			return;
 		}
 		if (message.type === "PROTOCOL_MISMATCH") {
-			this.handleProtocolMismatch(
-				message.receivedVersion,
-				message.expectedVersion,
-			);
+			const receivedVersion =
+				typeof message.receivedVersion === "number"
+					? message.receivedVersion
+					: undefined;
+			const expectedVersion =
+				typeof message.expectedVersion === "number"
+					? message.expectedVersion
+					: DESKTOP_PROTOCOL_VERSION;
+			this.handleProtocolMismatch(receivedVersion, expectedVersion);
 			return;
 		}
 
 		if (message.type === "DESKTOP_EVENT") {
-			const event = message as unknown as DesktopEventPayload;
+			const event: unknown = message;
+			if (!isDesktopEventPayload(event)) {
+				return;
+			}
 			for (const listener of this.desktopEventListeners) {
 				listener(event);
 			}
@@ -163,10 +228,10 @@ export class NativeMessagingClient {
 		}
 	}
 
-	request<TResponse extends DesktopResponse = DesktopResponse>(
+	request(
 		message: DesktopRequest,
 		timeoutMs = REQUEST_TIMEOUT_MS,
-	): Promise<TResponse> {
+	): Promise<DesktopResponse> {
 		return new Promise((resolve, reject) => {
 			let requestId: string | undefined;
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -180,7 +245,7 @@ export class NativeMessagingClient {
 				}, timeoutMs);
 
 				this.pendingRequests.set(nextRequestId, {
-					resolve: (value) => resolve(value as TResponse),
+					resolve,
 					reject,
 					timeoutId,
 				});
@@ -263,8 +328,8 @@ export class NativeMessagingClient {
 
 export const nativeMessagingClient = new NativeMessagingClient();
 
-export function sendNativeMessage<
-	TResponse extends DesktopResponse = DesktopResponse,
->(message: DesktopRequest): Promise<TResponse> {
-	return nativeMessagingClient.request<TResponse>(message);
+export function sendNativeMessage(
+	message: DesktopRequest,
+): Promise<DesktopResponse> {
+	return nativeMessagingClient.request(message);
 }

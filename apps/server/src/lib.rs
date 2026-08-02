@@ -1,3 +1,4 @@
+mod app;
 pub(crate) mod config;
 pub mod db;
 pub mod error;
@@ -22,9 +23,10 @@ use serde::Serialize;
 
 use services::rate_limit::{NoopRateLimiter, PostgresRateLimiter};
 
+pub use app::create_app;
 pub use http::middleware::{
     catch_panic_layer, edge_http_middleware, http_trace_layer, load_edge_http_config,
-    rpc_request_guard_middleware,
+    rpc_request_guard_middleware, EdgeHttpConfig,
 };
 pub use http::public::create_public_http_router;
 pub use http::rpc_tracing::rpc_tracing_middleware;

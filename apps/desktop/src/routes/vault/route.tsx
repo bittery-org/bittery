@@ -327,7 +327,7 @@ function RouteComponent() {
 						vaultKeys?.map((v) => ({
 							id: v.vaultId,
 							name: v.vaultName,
-							type: v.vaultType as "personal" | "team",
+							type: v.vaultType,
 							icon: v.vaultIcon,
 							imageUrl: v.vaultImageUrl,
 							accountId: v.accountId,

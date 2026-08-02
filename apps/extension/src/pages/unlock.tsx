@@ -10,8 +10,9 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import iconMark from "../../icons/icon-128.png";
+import { BIOMETRIC_TRANSFER_FAILURE } from "../background/biometric-transfer";
 import { storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
@@ -39,19 +40,34 @@ function getInitials(account: {
  */
 const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock";
 
-/**
- * Error codes the background raises instead of a sentence, because the service
- * worker has no message bundles (see `native-messaging.ts`). Anything else it
- * returns is already a human-readable string.
- */
-const STALE_DESKTOP_UNLOCK_RESPONSE = "stale-desktop-unlock-response";
-
 export function UnlockPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { m } = useI18n();
+	const biometricErrorMessage = (error: unknown) => {
+		const code = error instanceof Error ? error.message : undefined;
+		switch (code) {
+			case BIOMETRIC_TRANSFER_FAILURE.ACCOUNT_MISMATCH:
+				return m.ext_unlock_toast_biometric_account_mismatch();
+			case BIOMETRIC_TRANSFER_FAILURE.MALFORMED_RESPONSE:
+				return m.ext_unlock_toast_biometric_malformed_response();
+			case BIOMETRIC_TRANSFER_FAILURE.STALE_RESPONSE:
+				return m.ext_unlock_toast_stale_desktop_response();
+			case BIOMETRIC_TRANSFER_FAILURE.TRANSPORT_FAILED:
+				return m.ext_unlock_toast_biometric_transport_failed();
+			case BIOMETRIC_TRANSFER_FAILURE.UNEXPECTED_RESPONSE:
+				return m.ext_unlock_toast_biometric_unexpected_response();
+			case BIOMETRIC_TRANSFER_FAILURE.UNLOCK_FAILED:
+				return m.ext_unlock_toast_biometric_unlock_failed();
+			case "travel-mode-unverified":
+				return m.auth_error_travel_mode_verify_failed();
+			default:
+				return error instanceof Error && error.message
+					? error.message
+					: m.toast_auth_unlock_error_biometric_failed();
+		}
+	};
 	const [showPassword, setShowPassword] = useState(false);
-	const [biometricAvailable, setBiometricAvailable] = useState(false);
 	const [vaultState, setVaultState] = useState<VaultIconState>("locked");
 	const hasAttemptedBiometric = useRef(false);
 
@@ -207,43 +223,34 @@ export function UnlockPage() {
 		},
 		onError: (error: Error) => {
 			setVaultState("locked");
-			if (error.message === STALE_DESKTOP_UNLOCK_RESPONSE) {
-				toast.error(m.ext_unlock_toast_stale_desktop_response());
-				return;
-			}
-			toast.error(
-				error.message || m.toast_auth_unlock_error_biometric_failed(),
-			);
+			toast.error(biometricErrorMessage(error));
 		},
 	});
 
-	// Initialize biometric check
-	useEffect(() => {
-		if (accounts.length === 0) return;
-
-		// Check if native biometric is available from desktop app
-		chrome.runtime
-			.sendMessage({ type: "CHECK_NATIVE_BIOMETRIC" })
-			.then((response) => {
-				const desktopAvailable =
-					response.available && response.enabled && response.appRunning;
-
-				setBiometricAvailable(Boolean(desktopAvailable));
-
-				// Automatically trigger biometric unlock if desktop app is available (only once)
-				// The actual biometric unlock handler will check which accounts have biometric enabled
+	const { data: biometricAvailable = false } = useQuery({
+		queryKey: ["native-biometric-availability", accounts.length],
+		enabled: accounts.length > 0,
+		retry: false,
+		staleTime: Number.POSITIVE_INFINITY,
+		queryFn: async () => {
+			try {
+				const response = await chrome.runtime.sendMessage({
+					type: "CHECK_NATIVE_BIOMETRIC",
+				});
+				const desktopAvailable = Boolean(
+					response.available && response.enabled && response.appRunning,
+				);
 				if (desktopAvailable && !hasAttemptedBiometric.current) {
 					hasAttemptedBiometric.current = true;
-					// Use a small delay to ensure everything is initialized
-					setTimeout(() => {
-						biometricUnlockMutation.mutate();
-					}, 100);
+					setTimeout(() => biometricUnlockMutation.mutate(), 100);
 				}
-			})
-			.catch((error) => {
+				return desktopAvailable;
+			} catch (error) {
 				console.error("Failed to check biometric:", error);
-			});
-	}, [accounts.length, biometricUnlockMutation.mutate]);
+				return false;
+			}
+		},
+	});
 
 	const form = useForm({
 		defaultValues: {

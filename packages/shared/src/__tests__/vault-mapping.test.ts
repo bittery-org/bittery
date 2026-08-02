@@ -1,8 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
-	normalizeVaultRole,
-	normalizeVaultType,
+	decodeVaultRole,
+	decodeVaultType,
+	type ServerAuthVaultKeyEntry,
 	type ServerVaultListEntry,
+	toAuthVaultKeyEntry,
 	toCachedVaultFields,
 	toVaultKeyEntry,
 } from "../vault-mapping";
@@ -22,16 +24,26 @@ function serverEntry(
 	};
 }
 
+function authVaultKey(
+	overrides: Partial<ServerAuthVaultKeyEntry> = {},
+): ServerAuthVaultKeyEntry {
+	return {
+		vaultId: "vault_1",
+		vaultName: "Team Vault",
+		vaultType: "team",
+		vaultIcon: "lock",
+		vaultImageUrl: null,
+		encryptedVaultKey: "ZW5jcnlwdGVk",
+		role: "owner",
+		...overrides,
+	};
+}
+
 describe("toVaultKeyEntry", () => {
 	it("reads the vault type from the wire field the server actually sends", () => {
 		expect(toVaultKeyEntry(serverEntry()).vaultType).toBe("team");
 	});
 
-	// Regression guard: clients used to read `vault.type`, which does not exist on
-	// the camelCased server payload. The resulting `undefined` matched neither
-	// "team" nor "personal", so the vault detail page rendered the members dialog
-	// with no "add member" button and no personal-vault hint — sharing looked
-	// impossible until a cache rebuild happened to restore the field.
 	it("never produces a vault key entry without a usable type", () => {
 		const payloadWithLegacyKey = {
 			...serverEntry(),
@@ -59,15 +71,32 @@ describe("toVaultKeyEntry", () => {
 	});
 });
 
+describe("toAuthVaultKeyEntry", () => {
+	it("decodes auth wire fields into the canonical key shape", () => {
+		expect(toAuthVaultKeyEntry(authVaultKey())).toEqual({
+			vaultId: "vault_1",
+			vaultName: "Team Vault",
+			vaultType: "team",
+			vaultIcon: "lock",
+			vaultImageUrl: null,
+			encryptedVaultKey: "ZW5jcnlwdGVk",
+			role: "owner",
+		});
+	});
+});
+
 describe("toCachedVaultFields", () => {
 	it("renames the wire's vaultType to the cache's type", () => {
-		expect(toCachedVaultFields(serverEntry())).toEqual({
+		const decoded = toCachedVaultFields(serverEntry());
+
+		expect(decoded).toEqual({
 			id: "vault_1",
 			name: "Team Vault",
 			type: "team",
 			icon: "lock",
 			imageUrl: null,
 		});
+		expect(decoded).not.toHaveProperty("vaultType");
 	});
 
 	it("keeps personal vaults personal", () => {
@@ -77,23 +106,23 @@ describe("toCachedVaultFields", () => {
 	});
 });
 
-describe("normalizeVaultType", () => {
+describe("decodeVaultType", () => {
 	it("falls back to personal for unknown or missing values", () => {
-		expect(normalizeVaultType(undefined)).toBe("personal");
-		expect(normalizeVaultType(null)).toBe("personal");
-		expect(normalizeVaultType("nonsense")).toBe("personal");
+		expect(decodeVaultType(undefined)).toBe("personal");
+		expect(decodeVaultType(null)).toBe("personal");
+		expect(decodeVaultType("nonsense")).toBe("personal");
 	});
 });
 
-describe("normalizeVaultRole", () => {
+describe("decodeVaultRole", () => {
 	it("passes through known roles", () => {
-		expect(normalizeVaultRole("owner")).toBe("owner");
-		expect(normalizeVaultRole("admin")).toBe("admin");
-		expect(normalizeVaultRole("read-only")).toBe("read-only");
+		expect(decodeVaultRole("owner")).toBe("owner");
+		expect(decodeVaultRole("admin")).toBe("admin");
+		expect(decodeVaultRole("read-only")).toBe("read-only");
 	});
 
 	it("falls back to the least privileged writable role", () => {
-		expect(normalizeVaultRole(undefined)).toBe("member");
-		expect(normalizeVaultRole("superuser")).toBe("member");
+		expect(decodeVaultRole(undefined)).toBe("member");
+		expect(decodeVaultRole("superuser")).toBe("member");
 	});
 });

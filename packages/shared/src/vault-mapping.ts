@@ -1,17 +1,5 @@
-/**
- * Vault payload mapping.
- *
- * The server serialises vault payloads with `#[serde(rename_all = "camelCase")]`,
- * so the Rust field `vault_type` reaches clients as `vaultType` — never `type`.
- * Every client that reads a vault off the wire must go through this module.
- *
- * Reading `vault.type` from a server payload silently yields `undefined`, which
- * strips the vault of its type in local caches. UI that branches on
- * `vaultType === "team"` (member management, sharing) then disappears until the
- * cache is rebuilt by a code path that happened to map the field correctly.
- */
-
 import type {
+	AuthVaultKeyResponse,
 	BootstrapItemResponse,
 	VaultDetailsResponse,
 	VaultListEntryResponse,
@@ -20,11 +8,7 @@ import type {
 export type VaultType = "personal" | "team";
 export type VaultRole = "owner" | "admin" | "member" | "read-only";
 
-/**
- * The vault fields every server payload carries. Structural on purpose: clients
- * declare their own RPC client interfaces, and typing those against this shape
- * makes a future rename fail the build instead of silently producing `undefined`.
- */
+/** Structural wire shape keeps client-specific RPC interfaces checked at compile time. */
 export interface ServerVaultSummary {
 	id: string;
 	name: string;
@@ -34,6 +18,17 @@ export interface ServerVaultSummary {
 }
 
 export interface ServerVaultListEntry extends ServerVaultSummary {
+	encryptedVaultKey: string;
+	role: string;
+}
+
+/** Wire DTO returned as part of signup and recovery auth payloads. */
+export interface ServerAuthVaultKeyEntry {
+	vaultId: string;
+	vaultName: string;
+	vaultType: string;
+	vaultIcon: string | null;
+	vaultImageUrl: string | null;
 	encryptedVaultKey: string;
 	role: string;
 }
@@ -49,13 +44,22 @@ export interface VaultKeyEntry {
 	role: VaultRole;
 }
 
-export function normalizeVaultType(
+/** Canonical vault metadata used by item caches and downstream domain models. */
+export interface VaultSummary {
+	id: string;
+	name: string;
+	type: VaultType;
+	icon: string | null;
+	imageUrl: string | null;
+}
+
+export function decodeVaultType(
 	vaultType: string | null | undefined,
 ): VaultType {
 	return vaultType === "team" ? "team" : "personal";
 }
 
-export function normalizeVaultRole(role: string | null | undefined): VaultRole {
+export function decodeVaultRole(role: string | null | undefined): VaultRole {
 	switch (role) {
 		case "owner":
 		case "admin":
@@ -67,45 +71,67 @@ export function normalizeVaultRole(role: string | null | undefined): VaultRole {
 	}
 }
 
-/** Map a `vault.list` entry to the locally stored vault key record. */
-export function toVaultKeyEntry(vault: ServerVaultListEntry): VaultKeyEntry {
+function toCanonicalVaultKeyEntry(input: {
+	vaultId: string;
+	vaultName: string;
+	vaultType: string;
+	vaultIcon: string | null;
+	vaultImageUrl: string | null;
+	encryptedVaultKey: string;
+	role: string;
+}): VaultKeyEntry {
 	return {
+		vaultId: input.vaultId,
+		vaultName: input.vaultName,
+		vaultType: decodeVaultType(input.vaultType),
+		vaultIcon: input.vaultIcon,
+		vaultImageUrl: input.vaultImageUrl,
+		encryptedVaultKey: input.encryptedVaultKey,
+		role: decodeVaultRole(input.role),
+	};
+}
+
+/** Decode a `vault.list` payload into the local key-storage shape. */
+export function toVaultKeyEntry(vault: ServerVaultListEntry): VaultKeyEntry {
+	return toCanonicalVaultKeyEntry({
 		vaultId: vault.id,
 		vaultName: vault.name,
-		vaultType: normalizeVaultType(vault.vaultType),
 		vaultIcon: vault.icon,
 		vaultImageUrl: vault.imageUrl,
+		vaultType: vault.vaultType,
 		encryptedVaultKey: vault.encryptedVaultKey,
-		role: normalizeVaultRole(vault.role),
-	};
+		role: vault.role,
+	});
 }
 
 /**
  * Map any server vault payload to the cached metadata shape, whose `type` field
  * is the local name for the wire's `vaultType`.
  */
-export function toCachedVaultFields(vault: ServerVaultSummary): {
-	id: string;
-	name: string;
-	type: VaultType;
-	icon: string | null;
-	imageUrl: string | null;
-} {
+export function toCachedVaultFields(vault: ServerVaultSummary): VaultSummary {
 	return {
 		id: vault.id,
 		name: vault.name,
-		type: normalizeVaultType(vault.vaultType),
+		type: decodeVaultType(vault.vaultType),
 		icon: vault.icon,
 		imageUrl: vault.imageUrl,
 	};
 }
 
-// Compile-time drift guards. If the RPC schema renames or drops a vault field,
-// these stop assigning and `check-types` fails here rather than at runtime in a
-// cache write that nothing observes.
+/** Decode auth's vault-key DTO into the local key-storage shape. */
+export function toAuthVaultKeyEntry(
+	vault: ServerAuthVaultKeyEntry,
+): VaultKeyEntry {
+	return toCanonicalVaultKeyEntry(vault);
+}
+
+// Schema drift fails type checks here rather than silently corrupting a cache write.
 const _listEntryMatchesServer = (
 	entry: VaultListEntryResponse,
 ): ServerVaultListEntry => entry;
+const _authVaultKeyMatchesServer = (
+	entry: AuthVaultKeyResponse,
+): ServerAuthVaultKeyEntry => entry;
 const _bootstrapSummaryMatchesServer = (
 	summary: NonNullable<BootstrapItemResponse["vault"]>,
 ): ServerVaultListEntry => summary;
@@ -114,5 +140,6 @@ const _detailsMatchServer = (
 ): ServerVaultSummary => details;
 
 void _listEntryMatchesServer;
+void _authVaultKeyMatchesServer;
 void _bootstrapSummaryMatchesServer;
 void _detailsMatchServer;
