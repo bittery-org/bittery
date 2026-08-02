@@ -135,9 +135,10 @@ export {
 } from "./items";
 // Share Mutation Hooks (write operations)
 export {
-	buildShareUrl,
 	type CreateShareInput,
 	type CreateShareResult,
+	readShareKeyFromUrl,
+	SHARE_EXPIRATION_OPTIONS,
 	type ShareAccessMode,
 	type ShareExpirationOption,
 	useCreateShare,

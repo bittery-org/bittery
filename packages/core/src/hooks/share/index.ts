@@ -6,7 +6,10 @@
  */
 
 export {
-	buildShareUrl,
+	readShareKeyFromUrl,
+	SHARE_EXPIRATION_OPTIONS,
+} from "../../services/share-service";
+export {
 	type CreateShareInput,
 	type CreateShareResult,
 	type ShareAccessMode,

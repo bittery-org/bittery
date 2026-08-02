@@ -2,18 +2,22 @@ import {
 	getDecryptedVaultKey as getDecryptedVaultKeyUtil,
 	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
-import type { DecryptedItem } from "@bittery/shared/types";
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
+import type { DecryptedItem, SharedItemPayload } from "@bittery/shared/types";
 import type { AccountStore } from "@bittery/storage";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
 
-export type ShareExpirationOption =
-	| "1hour"
-	| "1day"
-	| "7days"
-	| "14days"
-	| "30days";
+export const SHARE_EXPIRATION_OPTIONS = [
+	"1hour",
+	"1day",
+	"7days",
+	"14days",
+	"30days",
+] as const;
+
+export type ShareExpirationOption = (typeof SHARE_EXPIRATION_OPTIONS)[number];
 
 export type ShareAccessMode = "anyone" | "email-restricted";
 
@@ -26,22 +30,64 @@ export interface CreateShareInput {
 	accountEmail?: string;
 }
 
+// The share key only ever exists in the URL fragment, so a link assembled from
+// parts without it is permanently undecryptable — hence the parts never leave here.
 export interface CreateShareResult {
+	shareUrl: string;
+	expiresAt: string;
+}
+
+interface ShareUrlParts {
+	baseShareUrl: string;
 	token: string;
 	shareKeyBase64: string;
-	expiresAt: string;
-	baseShareUrl: string;
 }
 
-/**
- * Build the full share URL.
- */
-export function buildShareUrl(result: CreateShareResult): string {
-	return `${result.baseShareUrl}${result.token}#${result.shareKeyBase64}`;
+function buildShareUrl(parts: ShareUrlParts): string {
+	return `${parts.baseShareUrl}${parts.token}#${parts.shareKeyBase64}`;
 }
 
-function arrayBufferToBase64(buffer: Uint8Array): string {
-	return btoa(String.fromCharCode(...buffer));
+export function readShareKeyFromUrl(url: string): string | null {
+	const fragmentStart = url.indexOf("#");
+	if (fragmentStart === -1) {
+		return null;
+	}
+	return url.slice(fragmentStart + 1) || null;
+}
+
+function buildSharedItemPayload(item: DecryptedItem): SharedItemPayload {
+	return {
+		title: item.title,
+		category: item.category,
+		url: item.url,
+		urls: item.urls,
+		username: item.username,
+		password: item.password,
+		notes: item.notes,
+		note: item.note,
+		customFields: item.customFields,
+		cardholderName: item.cardholderName,
+		cardNumber: item.cardNumber,
+		cvv: item.cvv,
+		expiryDate: item.expiryDate,
+		billingAddress: item.billingAddress,
+		firstName: item.firstName,
+		middleName: item.middleName,
+		lastName: item.lastName,
+		email: item.email,
+		addresses: item.addresses,
+		phoneNumbers: item.phoneNumbers,
+		ssn: item.ssn,
+		passportNumber: item.passportNumber,
+		driversLicense: item.driversLicense,
+		dateOfBirth: item.dateOfBirth,
+		totpSecret: item.totpSecret,
+		totpIssuer: item.totpIssuer,
+		totpAccountName: item.totpAccountName,
+		totpAlgorithm: item.totpAlgorithm,
+		totpDigits: item.totpDigits,
+		totpPeriod: item.totpPeriod,
+	};
 }
 
 interface ShareServiceDeps {
@@ -74,18 +120,19 @@ export class ShareService {
 			accountEmail,
 		} = input;
 
-		const accountId = await resolveAccountScopeId(this.storage, accountEmail);
-		if (!accountId) {
-			throw new Error("Account not found for the provided email address");
-		}
+		const accountId = await resolveAccountScopeId(this.storage, accountEmail, {
+			errorMessage: "Account not found for the provided email address",
+		});
 
-		const vaultKey = await getDecryptedVaultKeyUtil({
+		// `item` is already decrypted, so this decrypt is purely an unlock gate:
+		// sharing must be refused unless this account can still open the vault.
+		const vaultUnlockProof = await getDecryptedVaultKeyUtil({
 			vaultId: item.vaultId,
 			accountId,
 			storage: this.storage,
 			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
 		});
-		if (!vaultKey) {
+		if (!vaultUnlockProof) {
 			throw new Error("Could not decrypt vault key. Please log in again.");
 		}
 
@@ -96,41 +143,8 @@ export class ShareService {
 
 		const shareKey = await this.crypto.generateEncryptionKey();
 
-		const itemDataToShare = {
-			title: item.title,
-			category: item.category,
-			url: item.url,
-			urls: item.urls,
-			username: item.username,
-			password: item.password,
-			notes: item.notes,
-			note: item.note,
-			customFields: item.customFields,
-			cardholderName: item.cardholderName,
-			cardNumber: item.cardNumber,
-			cvv: item.cvv,
-			expiryDate: item.expiryDate,
-			billingAddress: item.billingAddress,
-			firstName: item.firstName,
-			middleName: item.middleName,
-			lastName: item.lastName,
-			email: item.email,
-			addresses: item.addresses,
-			phoneNumbers: item.phoneNumbers,
-			ssn: item.ssn,
-			passportNumber: item.passportNumber,
-			driversLicense: item.driversLicense,
-			dateOfBirth: item.dateOfBirth,
-			totpSecret: item.totpSecret,
-			totpIssuer: item.totpIssuer,
-			totpAccountName: item.totpAccountName,
-			totpAlgorithm: item.totpAlgorithm,
-			totpDigits: item.totpDigits,
-			totpPeriod: item.totpPeriod,
-		};
-
 		const encryptedData = await this.crypto.encrypt(
-			JSON.stringify(itemDataToShare),
+			JSON.stringify(buildSharedItemPayload(item)),
 			shareKey,
 		);
 
@@ -154,14 +168,12 @@ export class ShareService {
 		});
 
 		return {
-			token: result.token,
-			shareKeyBase64,
+			shareUrl: buildShareUrl({
+				baseShareUrl: result.baseShareUrl,
+				token: result.token,
+				shareKeyBase64,
+			}),
 			expiresAt: result.expiresAt,
-			baseShareUrl: result.baseShareUrl,
 		};
-	}
-
-	buildShareUrl(result: CreateShareResult): string {
-		return buildShareUrl(result);
 	}
 }

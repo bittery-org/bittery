@@ -1,5 +1,5 @@
 import {
-	buildShareUrl,
+	SHARE_EXPIRATION_OPTIONS,
 	type ShareAccessMode,
 	type ShareExpirationOption,
 	useCreateShare,
@@ -55,14 +55,6 @@ interface ShareItemDialogProps {
 	onOpenChange?: (open: boolean) => void;
 }
 
-const EXPIRATION_OPTIONS: ShareExpirationOption[] = [
-	"1hour",
-	"1day",
-	"7days",
-	"14days",
-	"30days",
-];
-
 export function ShareItemDialog({
 	item,
 	open: controlledOpen,
@@ -108,8 +100,7 @@ export function ShareItemDialog({
 					accessMode === "email-restricted" ? allowedEmails : undefined,
 			});
 
-			const shareUrl = buildShareUrl(result);
-			setGeneratedLink(shareUrl);
+			setGeneratedLink(result.shareUrl);
 			toast.success(m.sharing_item_dialog_toast_create_success());
 		} catch (error) {
 			const errorMessage =
@@ -348,7 +339,7 @@ export function ShareItemDialog({
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
-										{EXPIRATION_OPTIONS.map((value) => (
+										{SHARE_EXPIRATION_OPTIONS.map((value) => (
 											<SelectItem key={value} value={value}>
 												{expirationLabels[value]}
 											</SelectItem>

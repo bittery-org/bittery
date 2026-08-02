@@ -1,5 +1,6 @@
+import { readShareKeyFromUrl } from "@bittery/core";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
-import type { ItemCategory } from "@bittery/shared/types";
+import type { SharedItemPayload } from "@bittery/shared/types";
 import {
 	Button,
 	Card,
@@ -52,36 +53,6 @@ export const Route = createFileRoute("/share/$token")({
 	}),
 });
 
-interface SharedItemData {
-	title: string;
-	category: ItemCategory;
-	url?: string;
-	urls?: string[];
-	username?: string;
-	password?: string;
-	notes?: string;
-	note?: string;
-	// Credit card fields
-	cardholderName?: string;
-	cardNumber?: string;
-	cvv?: string;
-	expiryDate?: string;
-	billingAddress?: string;
-	// Identity fields
-	firstName?: string;
-	middleName?: string;
-	lastName?: string;
-	email?: string;
-	ssn?: string;
-	passportNumber?: string;
-	driversLicense?: string;
-	dateOfBirth?: string;
-	// TOTP fields
-	totpSecret?: string;
-	totpIssuer?: string;
-	totpAccountName?: string;
-}
-
 function ShareAccessPage() {
 	const { token } = Route.useParams();
 	const rpc = useRPC();
@@ -91,15 +62,14 @@ function ShareAccessPage() {
 	const [email, setEmail] = useState("");
 	const [verificationCode, setVerificationCode] = useState("");
 	const [emailSent, setEmailSent] = useState(false);
-	const [decryptedItem, setDecryptedItem] = useState<SharedItemData | null>(
+	const [decryptedItem, setDecryptedItem] = useState<SharedItemPayload | null>(
 		null,
 	);
 	const [decryptionError, setDecryptionError] = useState<string | null>(null);
 
-	const [shareKey] = useState<string | null>(() => {
-		const fragment = window.location.hash.slice(1);
-		return fragment || null;
-	});
+	const [shareKey] = useState<string | null>(() =>
+		readShareKeyFromUrl(window.location.href),
+	);
 
 	// Get share link info
 	const linkInfoQuery = useQuery(
@@ -165,7 +135,7 @@ function ShareAccessPage() {
 			shareKeyBytes,
 		);
 
-		return JSON.parse(decrypted) as SharedItemData;
+		return JSON.parse(decrypted) as SharedItemPayload;
 	}
 	// Consuming the link is a deliberate user action, never a side effect of
 	// navigation: `share.accessPublic` increments `access_count` server-side, so
@@ -589,7 +559,7 @@ function OneTimeUseWarning({ message }: { message: string }) {
 }
 
 // Component to display the shared item data
-function SharedItemDisplay({ item }: { item: SharedItemData }) {
+function SharedItemDisplay({ item }: { item: SharedItemPayload }) {
 	const [showPassword, setShowPassword] = useState(false);
 	const [showCardNumber, setShowCardNumber] = useState(false);
 	const [showCVV, setShowCVV] = useState(false);

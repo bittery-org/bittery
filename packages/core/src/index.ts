@@ -78,9 +78,10 @@ export {
 	type UpdateItemResult,
 } from "./services/item-service";
 export {
-	buildShareUrl,
 	type CreateShareInput,
 	type CreateShareResult,
+	readShareKeyFromUrl,
+	SHARE_EXPIRATION_OPTIONS,
 	type ShareAccessMode,
 	type ShareExpirationOption,
 	ShareService,
