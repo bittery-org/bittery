@@ -278,7 +278,7 @@ pub(crate) async fn create_share_link(
         )
         .await?;
         if active_share_links >= max_active_links {
-            return Err(AppError::forbidden(&format!(
+            return Err(AppError::forbidden(format!(
 				"Your plan allows up to {max_active_links} active share links. Revoke a link or upgrade to continue.",
 			)));
         }
@@ -513,7 +513,7 @@ pub(crate) async fn update_share_link(
         }
         for email in add_emails {
             if !email_regex().is_match(email) {
-                return Err(AppError::bad_request(&format!(
+                return Err(AppError::bad_request(format!(
                     "Invalid email format: {email}"
                 )));
             }
@@ -668,7 +668,7 @@ pub(crate) async fn access_public(
             Some(&format!("Link status: {}", link.status)),
         )
         .await?;
-        return Err(AppError::bad_request(&format!(
+        return Err(AppError::bad_request(format!(
             "This share link has been {}",
             link.status
         )));
@@ -1235,7 +1235,7 @@ fn validate_email(email: &str) -> Result<(), AppError> {
     if email_regex().is_match(email) {
         Ok(())
     } else {
-        Err(AppError::bad_request(&format!(
+        Err(AppError::bad_request(format!(
             "Invalid email format: {email}"
         )))
     }

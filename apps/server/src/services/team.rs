@@ -1823,7 +1823,7 @@ fn normalize_pending_vault_keys(
         let vault_id = entry.vault_id.trim().to_string();
         let encrypted_vault_key = entry.encrypted_vault_key.trim().to_string();
         if vault_id.is_empty() || encrypted_vault_key.is_empty() {
-            return Err(AppError::bad_request(&format!(
+            return Err(AppError::bad_request(format!(
                 "Invalid pendingVaultKeys entry at index {index}",
             )));
         }

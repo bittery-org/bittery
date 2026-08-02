@@ -310,7 +310,7 @@ pub(crate) async fn create_checkout_session(
     }
 
     let stripe_price_id = get_stripe_price_id(&target_plan).ok_or_else(|| {
-        AppError::internal(&format!("Missing Stripe price ID for {target_plan} plan"))
+        AppError::internal(format!("Missing Stripe price ID for {target_plan} plan"))
     })?;
     let quantity = if target_plan == "team" {
         count_team_members(pool, &team_id).await?.max(1)

@@ -1094,7 +1094,7 @@ pub(crate) async fn create_vault(
                 AppError::internal("Failed to count shared vaults")
             })?;
             if existing_count >= limit {
-                return Err(AppError::forbidden(&format!(
+                return Err(AppError::forbidden(format!(
                     "Your current plan allows up to {limit} shared vaults. Upgrade to add more.",
                 )));
             }
@@ -1307,7 +1307,7 @@ pub(crate) async fn convert_vault_type(
                 AppError::internal("Failed to count shared vaults")
             })?;
             if existing_count >= limit {
-                return Err(AppError::forbidden(&format!(
+                return Err(AppError::forbidden(format!(
                     "Your current plan allows up to {limit} shared vaults. Upgrade to add more.",
                 )));
             }
