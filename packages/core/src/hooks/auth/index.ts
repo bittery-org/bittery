@@ -40,6 +40,7 @@ export {
 // Quick unlock hook (password unlock with stored secret key)
 export {
 	type QuickUnlockInput,
+	type QuickUnlockResult,
 	type UseQuickUnlockOptions,
 	useQuickUnlock,
 } from "./use-quick-unlock";

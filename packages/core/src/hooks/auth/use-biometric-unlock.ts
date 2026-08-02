@@ -1,19 +1,51 @@
 /**
  * useBiometricUnlock Hook
  *
- * React hook for performing biometric unlock (Touch ID / Face ID).
- * Desktop and mobile only - web/extension don't support biometric.
+ * React Query wrapper around the shared biometric unlock for a single account.
+ * Desktop and mobile only — web/extension have no biometric.
  */
 
-import { m } from "@bittery/i18n/paraglide/messages";
-import type { BiometricAuthResult, BiometricErrorType } from "@bittery/storage";
-import { type UseMutationResult, useMutation } from "@tanstack/react-query";
+import type { BiometricErrorType } from "@bittery/storage";
+import {
+	type UseMutationResult,
+	useMutation,
+	useQueryClient,
+} from "@tanstack/react-query";
 import {
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
-import { createStoredAccountRpcClient } from "../../services/rpc-client";
-import { getTravelModeEnforcer } from "../../services/travel-mode-enforcer";
+import {
+	type UnlockFailure,
+	type UnlockOutcome,
+	unlockAccountWithBiometric,
+} from "../../services/unlock";
+
+/**
+ * Input for biometric unlock
+ */
+export interface BiometricUnlockInput {
+	/** Account to unlock; the OS prompt and the stored key are both per-account. */
+	accountId: string;
+}
+
+/** Surfaced as-is: consumers read `unlocked` and `failed.length`. */
+export type BiometricUnlockResult = UnlockOutcome;
+
+/**
+ * Biometric failure as a structured code. No message travels with it: callers own
+ * the copy (see `apps/mobile/src/lib/biometric-error-message.ts`) and this package
+ * authors none.
+ */
+export interface BiometricUnlockError {
+	/**
+	 * Wider than the OS verdict: travel mode can stop an unlock the biometric
+	 * itself passed, and `BiometricErrorType` has no member for a policy stop.
+	 */
+	type: BiometricErrorType | "travel_mode_unverified";
+	/** Set with `master_password_required` when storage published a re-entry period. */
+	masterPasswordReentryPeriodMs?: number;
+}
 
 /**
  * Options for useBiometricUnlock hook
@@ -21,72 +53,79 @@ import { getTravelModeEnforcer } from "../../services/travel-mode-enforcer";
 export interface UseBiometricUnlockOptions {
 	/**
 	 * Callback when biometric unlock succeeds.
+	 * Use this for navigation, showing success messages, etc.
 	 */
-	onSuccess?: () => void | Promise<void>;
+	onSuccess?: (
+		result: BiometricUnlockResult,
+		input: BiometricUnlockInput,
+	) => void | Promise<void>;
 
 	/**
 	 * Callback when biometric unlock fails.
+	 * Use this for showing error messages.
 	 */
-	onError?: (error: BiometricUnlockError) => void;
+	onError?: (error: BiometricUnlockError, input: BiometricUnlockInput) => void;
 
 	/**
-	 * Prompt message shown during biometric authentication.
-	 * Defaults to "Unlock Bittery"
+	 * Prompt the OS shows. Required and already translated: it is user-facing copy,
+	 * which this package must never author.
 	 */
-	promptMessage?: string;
+	promptMessage: string;
+}
+
+function biometricError(
+	failure: UnlockFailure | undefined,
+): BiometricUnlockError {
+	if (failure?.biometric) {
+		return {
+			type: failure.biometric.error,
+			masterPasswordReentryPeriodMs:
+				failure.biometric.masterPasswordReentryPeriodMs,
+		};
+	}
+	// The only reason the biometric path reports without an OS verdict: the account
+	// is not on this device.
+	if (failure?.reason === "no_stored_secret_key") {
+		return { type: "account_not_found" };
+	}
+	// Reported under its own reason because claiming `authentication_failed`
+	// would blame the fingerprint for a policy stop.
+	if (failure?.reason === "travel_mode_unverified") {
+		return { type: "travel_mode_unverified" };
+	}
+	return { type: "unknown" };
 }
 
 /**
- * Input for biometric unlock
- */
-export interface BiometricUnlockInput {
-	/**
-	 * Account ID or email for multi-account platforms.
-	 * Optional - uses active account if not provided.
-	 */
-	accountId?: string;
-}
-
-/**
- * Biometric unlock error with structured error type
- */
-export interface BiometricUnlockError {
-	type: BiometricErrorType;
-	message: string;
-}
-
-/**
- * Result from biometric unlock
- */
-export interface BiometricUnlockResult {
-	success: boolean;
-}
-
-/**
- * Hook for performing biometric unlock.
+ * Hook for unlocking one account with Touch ID / Face ID.
  *
  * @example
  * ```tsx
  * const biometricUnlock = useBiometricUnlock({
+ *   promptMessage: m.biometric_prompt_unlock_bittery(),
  *   onSuccess: () => navigate('/vault'),
  *   onError: (error) => {
+ *     // Without the period the copy falls back to the variant that cannot name it.
+ *     const message = resolveBiometricErrorMessage(
+ *       {
+ *         error: error.type,
+ *         masterPasswordReentryPeriodMs: error.masterPasswordReentryPeriodMs,
+ *       },
+ *       m,
+ *     );
  *     if (error.type === 'master_password_required') {
- *       showPasswordPrompt();
+ *       showPasswordPrompt(message);
  *     } else {
- *       toast.error(error.message);
+ *       toast.error(message);
  *     }
  *   },
  * });
  *
- * // Check if biometric is available
- * const canUseBiometric = await storage.canBiometricUnlock();
- * if (canUseBiometric) {
- *   biometricUnlock.mutate({});
- * }
+ * biometricUnlock.mutate({ accountId });
  * ```
  */
 export function useBiometricUnlock(
-	options: UseBiometricUnlockOptions = {},
+	options: UseBiometricUnlockOptions,
 ): UseMutationResult<
 	BiometricUnlockResult,
 	BiometricUnlockError,
@@ -94,88 +133,34 @@ export function useBiometricUnlock(
 > {
 	const storage = usePlatformStorage();
 	const itemCache = usePlatformItemCache();
-
-	const verifyTravelMode = async (accountId: string): Promise<void> => {
-		const client = await createStoredAccountRpcClient(storage, accountId).catch(
-			() => null,
-		);
-		const verified = await getTravelModeEnforcer(
-			storage,
-			itemCache,
-		).verifyOrClear(accountId, client);
-		if (!verified) {
-			throw {
-				type: "authentication_failed",
-				message: m.auth_error_travel_mode_verify_failed(),
-			} as BiometricUnlockError;
-		}
-	};
+	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: async (input: BiometricUnlockInput) => {
-			const accountId = input.accountId;
-			if (!accountId) {
-				throw {
-					type: "account_not_found",
-					message: "",
-				} as BiometricUnlockError;
-			}
-
-			if (!(await storage.isBiometricAvailable())) {
-				throw {
-					type: "not_available",
-					message: "Biometric authentication is not available on this device",
-				} as BiometricUnlockError;
-			}
-
-			// Check if master password re-entry is required by policy
-			// This check happens before biometric auth for better UX
-			if (await storage.isMasterPasswordReentryRequired(accountId)) {
-				throw {
-					type: "master_password_required",
-					message:
-						"For security, please enter your master password. This is required periodically based on your settings.",
-				} as BiometricUnlockError;
-			}
-
-			const result: BiometricAuthResult =
-				await storage.authenticateWithBiometricEnhanced(
-					options.promptMessage ?? "Unlock Bittery",
-					accountId,
-				);
-
-			if (!result.success) {
-				throw {
-					type: result.error ?? "unknown",
-					message: result.message ?? "Biometric authentication failed",
-				} as BiometricUnlockError;
-			}
-
-			// Now restore the MUK using biometric unlock. The prompt normally does not
-			// re-appear here (the call above just refreshed the biometric grace window), but
-			// the reason is threaded through anyway: if it ever does appear, the OS must not
-			// show `AccountStore`'s English fallback in place of the caller's translated
-			// prompt.
-			const unlocked = await storage.unlockWithBiometric(
-				accountId,
-				options.promptMessage,
+			const outcome = await unlockAccountWithBiometric(
+				{
+					accountId: input.accountId,
+					promptMessage: options.promptMessage,
+				},
+				{ storage, itemCache },
 			);
-			if (!unlocked) {
-				throw {
-					type: "authentication_failed",
-					message: "Failed to unlock vault after biometric authentication",
-				} as BiometricUnlockError;
+			// The unlock reports rather than throws; React Query needs a rejection to
+			// route a failure to `onError`.
+			if (outcome.unlocked.length === 0) {
+				throw biometricError(outcome.failed[0]);
 			}
-
-			await verifyTravelMode(accountId);
-
-			return { success: true };
+			return outcome;
 		},
-		onSuccess: () => {
-			options.onSuccess?.();
+		onSuccess: (result, input) => {
+			queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] });
+			queryClient.invalidateQueries({ queryKey: ["auth"] });
+			queryClient.invalidateQueries({ queryKey: ["vaults"] });
+			queryClient.invalidateQueries({ queryKey: ["items"] });
+
+			options.onSuccess?.(result, input);
 		},
-		onError: (error) => {
-			options.onError?.(error);
+		onError: (error, input) => {
+			options.onError?.(error, input);
 		},
 	});
 }
