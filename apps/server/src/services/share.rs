@@ -512,11 +512,7 @@ pub(crate) async fn update_share_link(
             return Err(AppError::bad_request("Too many emails to add"));
         }
         for email in add_emails {
-            if !email_regex().is_match(email) {
-                return Err(AppError::bad_request(format!(
-                    "Invalid email format: {email}"
-                )));
-            }
+            validate_email(email)?;
         }
 
         for email in add_emails {
