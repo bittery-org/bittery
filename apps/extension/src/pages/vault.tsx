@@ -1,4 +1,4 @@
-import { useAccountSwitcher } from "@bittery/core/hooks";
+import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import type { DecryptedItemWithContext } from "@bittery/shared/types";
 import { Button, cn, Skeleton, toast } from "@bittery/ui";
 import {
@@ -19,6 +19,8 @@ import { Favicon } from "@/components/favicon";
 import { ItemDetailPanel } from "@/components/item-detail-panel";
 import { fillItemIntoActiveTab } from "@/lib/autofill-active-tab";
 import { hostnameMatches } from "@/lib/hostname";
+import { lockVaultThroughWorker } from "@/lib/lock-vault";
+import { useSessionStatus } from "@/lib/session-status";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -166,7 +168,7 @@ export function VaultPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { m } = useI18n();
-	const { lockAllAccounts } = useAccountSwitcher();
+	const [isLocking, setIsLocking] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [manualSelectionByScope, setManualSelectionByScope] = useState<
 		Record<string, string>
@@ -214,18 +216,12 @@ export function VaultPage() {
 	});
 
 	// Footer session status (drives the auto-lock countdown / desktop-sync label).
-	const sessionStatusQuery = useQuery<{
-		unlocked?: boolean;
-		desktopMode?: boolean;
-		remainingMs?: number | null;
-	}>({
-		queryKey: ["session-status"],
-		queryFn: async () =>
-			chrome.runtime.sendMessage({ type: "GET_SESSION_STATUS" }),
-		refetchInterval: 15000,
-	});
-	const isDesktopMode = sessionStatusQuery.data?.desktopMode === true;
-	const remainingMs = sessionStatusQuery.data?.remainingMs ?? null;
+	const sessionStatus = useSessionStatus();
+	const isDesktopMode = sessionStatus.data?.owner === "desktop";
+	// Same field the account switcher's "Lock all" reads, so the two lock
+	// affordances can never disagree about who owns the vault.
+	const canLockLocally = sessionStatus.data?.canLockLocally !== false;
+	const remainingMs = sessionStatus.data?.remainingMs ?? null;
 	const locksInMinutes =
 		remainingMs != null ? Math.max(1, Math.ceil(remainingMs / 60000)) : null;
 
@@ -340,14 +336,30 @@ export function VaultPage() {
 	);
 
 	const handleLockNow = useCallback(async () => {
-		try {
-			await lockAllAccounts.mutateAsync();
-			navigate({ to: "/unlock" });
-		} catch (error) {
-			console.error("Failed to lock:", error);
-			toast.error(m.ext_account_switcher_toast_lock_failed());
+		if (isLocking) return;
+		setIsLocking(true);
+		// A refused lock resolves, it does not reject — branch on the decision, never on catch.
+		const decision = await lockVaultThroughWorker();
+		setIsLocking(false);
+
+		if (!decision.ok) {
+			toast.error(
+				decision.code === "desktop_owns_lock"
+					? m.ext_lock_refused_desktop_owns()
+					: m.ext_account_switcher_toast_lock_failed(),
+			);
+			return;
 		}
-	}, [lockAllAccounts, navigate, m]);
+
+		queryClient.clear();
+		// The popup keeps its own per-context AccountStore view (storage CONTEXT.md §4.5).
+		await peekAccountSessionManager()
+			?.refresh()
+			.catch((error: unknown) => {
+				console.error("Failed to refresh account session after lock:", error);
+			});
+		navigate({ to: "/unlock" });
+	}, [isLocking, navigate, queryClient, m]);
 
 	const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -619,11 +631,12 @@ export function VaultPage() {
 							className="size-1.5 rounded-full bg-success shadow-[0_0_6px_color-mix(in_oklab,var(--color-success)_60%,transparent)]"
 						/>
 						<span className="truncate">{footerText}</span>
-						{!isDesktopMode && (
+						{canLockLocally && (
 							<button
 								type="button"
 								onClick={handleLockNow}
-								className="ml-auto inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-[5px] px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+								disabled={isLocking}
+								className="ml-auto inline-flex h-[22px] shrink-0 items-center gap-1.5 rounded-[5px] px-2 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
 							>
 								<IconLock className="size-3" />
 								{m.ext_vault_lock_now()}

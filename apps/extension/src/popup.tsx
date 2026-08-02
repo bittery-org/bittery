@@ -1,5 +1,4 @@
 import "./index.css";
-import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
 import { RpcProvider } from "@bittery/shared/rpc";
 import { createAppRpcClient } from "@bittery/shared/rpc-client";
 import { buildRpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
@@ -10,8 +9,9 @@ import {
 	createRouter,
 	RouterProvider,
 } from "@tanstack/react-router";
-import React, { useEffect } from "react";
+import React from "react";
 import ReactDOM from "react-dom/client";
+import { subscribeBackgroundPushes } from "./lib/background-events";
 import { storage } from "./lib/storage";
 import { applyEarlyTheme } from "./lib/theme";
 import { I18nProvider } from "./providers/i18n-provider";
@@ -81,43 +81,9 @@ declare module "@tanstack/react-router" {
 	}
 }
 
+subscribeBackgroundPushes(queryClient, router);
+
 function Popup() {
-	// Listen for desktop lock/unlock events
-	useEffect(() => {
-		const handleMessage = (message: {
-			type: string;
-			reason?: string;
-			accounts?: string[];
-		}) => {
-			if (message.type === "DESKTOP_LOCKED") {
-				// Clear all cached data
-				queryClient.clear();
-				// Navigate to unlock screen
-				router.navigate({ to: "/unlock" });
-			} else if (message.type === "DESKTOP_UNLOCKED") {
-				// Clear all cached data to fetch fresh
-				queryClient.clear();
-				// Navigate to vault screen
-				router.navigate({ to: "/vault" });
-			} else if (message.type === "ACTIVE_ACCOUNT_CHANGED") {
-				void peekAccountSessionManager()
-					?.refresh()
-					.then(() =>
-						Promise.all([
-							queryClient.invalidateQueries({ queryKey: ["vault-items"] }),
-							queryClient.invalidateQueries({ queryKey: ["items"] }),
-							queryClient.invalidateQueries({ queryKey: ["accounts"] }),
-							queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
-							queryClient.invalidateQueries({ queryKey: ["all-vault-keys"] }),
-						]),
-					);
-			}
-		};
-
-		chrome.runtime.onMessage.addListener(handleMessage);
-		return () => chrome.runtime.onMessage.removeListener(handleMessage);
-	}, []);
-
 	return (
 		<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
 			<QueryClientProvider client={queryClient}>

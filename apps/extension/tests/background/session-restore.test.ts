@@ -26,9 +26,6 @@ let sessionScope: Record<string, string> = {};
 /** In-memory master unlock keys; cleared by every service-worker restart. */
 let mukCache = new Map<string, Uint8Array>();
 
-const setMasterUnlockKeyCalls: Uint8Array[] = [];
-let updateActivityCalls = 0;
-
 mock.module(path.join(libDir, "storage.ts"), () => ({
 	storage: {
 		getAccountsList: async () => [
@@ -56,15 +53,6 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 	},
 }));
 
-mock.module(path.join(bgDir, "session-manager.ts"), () => ({
-	setMasterUnlockKey: (muk: Uint8Array) => {
-		setMasterUnlockKeyCalls.push(muk);
-	},
-	updateActivity: async () => {
-		updateActivityCalls++;
-	},
-}));
-
 mock.module("@bittery/core/services/account-session-manager", () => ({
 	peekAccountSessionManager: () => null,
 	getAccountSessionManager: ({
@@ -88,8 +76,6 @@ const { restoreUnlockedSessions } = await import(
 
 beforeEach(() => {
 	mukCache = new Map();
-	setMasterUnlockKeyCalls.length = 0;
-	updateActivityCalls = 0;
 });
 
 describe("restoreUnlockedSessions", () => {
@@ -102,13 +88,11 @@ describe("restoreUnlockedSessions", () => {
 
 		const restored = await restoreUnlockedSessions();
 
-		expect(restored).toEqual([ACCOUNT_A, ACCOUNT_B]);
+		expect(restored.accountIds).toEqual([ACCOUNT_A, ACCOUNT_B]);
 		expect([...mukCache.keys()]).toEqual([ACCOUNT_A, ACCOUNT_B]);
-		// The session manager's global MUK is seeded from the first restored account, and
-		// the activity timestamp is bumped first so `isUnlocked()` does not auto-lock it
-		// straight back.
-		expect(setMasterUnlockKeyCalls).toHaveLength(1);
-		expect(updateActivityCalls).toBe(1);
+		// The device-wide key is reported, not installed: bootstrap hands it to the
+		// vault session together with the accounts, in one atomic event.
+		expect(restored.muk).toEqual(new Uint8Array([1, 2, 3]));
 	});
 
 	test("browser restart: chrome.storage.session is gone, so nothing is restored or claimed", async () => {
@@ -116,10 +100,9 @@ describe("restoreUnlockedSessions", () => {
 
 		const restored = await restoreUnlockedSessions();
 
-		expect(restored).toEqual([]);
+		expect(restored.accountIds).toEqual([]);
 		expect([...mukCache.keys()]).toEqual([]);
-		expect(setMasterUnlockKeyCalls).toHaveLength(0);
-		expect(updateActivityCalls).toBe(0);
+		expect(restored.muk).toBeNull();
 	});
 
 	test("partial restore: only the account whose session survived comes back", async () => {
@@ -127,7 +110,7 @@ describe("restoreUnlockedSessions", () => {
 
 		const restored = await restoreUnlockedSessions();
 
-		expect(restored).toEqual([ACCOUNT_B]);
-		expect(setMasterUnlockKeyCalls).toHaveLength(1);
+		expect(restored.accountIds).toEqual([ACCOUNT_B]);
+		expect(restored.muk).toEqual(new Uint8Array([1, 2, 3]));
 	});
 });

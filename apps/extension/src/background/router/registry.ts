@@ -122,10 +122,12 @@ export const routeRegistry: RouteRegistry = {
 		handle: () => handleLogout(),
 	},
 
+	/**
+	 * No `before` teardown: a refused lock must leave the SSE stream up. Sync is
+	 * torn down by the reducer's `disconnect_sync` effect, which only fires when
+	 * the vault actually transitions to locked.
+	 */
 	LOCK: {
-		before: () => {
-			disconnectSync("manual lock");
-		},
 		handle: () => handleLock(),
 	},
 

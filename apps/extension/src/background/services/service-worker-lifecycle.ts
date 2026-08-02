@@ -10,16 +10,16 @@ import { initWasmCrypto } from "../../lib/wasm-crypto";
 import { desktopSync } from "../desktop-sync";
 import {
 	handleAutoLockAlarm,
-	initializeLockBadge,
 	refreshAutoLockTimeout,
 } from "../session-manager";
 import { handleSyncReconnectAlarm } from "../sync-manager";
+import { vaultSession } from "../vault-session";
 import { restoreUnlockedSessions } from "./session-restore";
 
 let bootstrapPromise: Promise<void> | null = null;
 
 async function bootstrap(): Promise<void> {
-	initializeLockBadge();
+	await vaultSession.dispatch({ type: "BOOT" });
 
 	await initWasmCrypto().catch((error) => {
 		console.error(
@@ -29,14 +29,23 @@ async function bootstrap(): Promise<void> {
 	});
 
 	await initializeStorage().catch((error) => {
-		console.error("[Background lifecycle] Failed to initialize storage:", error);
+		console.error(
+			"[Background lifecycle] Failed to initialize storage:",
+			error,
+		);
 	});
 
 	// The explicit unlock restore. `AccountStore.getUnlockedAccounts()` reports only what
 	// is in memory, and MV3 empties that on every service-worker recycle, so this has to
 	// run before anything reads it. See `session-restore.ts` for the full rationale and
 	// which restart cases it covers.
-	await restoreUnlockedSessions();
+	const restored = await restoreUnlockedSessions();
+	await vaultSession.dispatch({
+		type: "STARTUP_RESTORED",
+		accountIds: restored.accountIds,
+		muk: restored.muk,
+		at: Date.now(),
+	});
 
 	// Prime cached timeout early so auto-lock checks remain deterministic
 	// across service worker restarts.

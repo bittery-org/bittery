@@ -141,7 +141,6 @@ mock.module(path.join(bgDir, "session-manager.ts"), () => ({
 	getLastActivityTimestamp: () => Date.now(),
 	isDesktopMode: () => false,
 	isUnlocked: () => false,
-	lock: async () => {},
 	setDesktopModeSentinel: () => {},
 	setMasterUnlockKey: (value: unknown) => {
 		setMasterUnlockKeyCalls.push(value);

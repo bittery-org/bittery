@@ -326,10 +326,6 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			});
 		}
 
-		// IMPORTANT: Update activity FIRST to set timestamp, otherwise isUnlocked()
-		// will see lastActivityTimestamp=0 and immediately lock everything!
-		await updateActivity();
-
 		const activeMuk = await storage.getMasterUnlockKey(activeAccountId);
 		if (activeMuk) {
 			setMasterUnlockKey(activeMuk);

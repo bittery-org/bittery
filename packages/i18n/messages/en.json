@@ -1897,6 +1897,8 @@
 	"ext_account_switcher_toast_all_locked": "All accounts locked",
 	"ext_account_switcher_toast_lock_failed": "Failed to lock accounts",
 	"ext_account_switcher_unlocked_count": "{count} unlocked",
+	"ext_lock_refused_desktop_owns": "The desktop app manages locking. Lock Bittery there instead.",
+	"ext_toast_session_revoked": "Your session was ended. Sign in again.",
 	"ext_detail_toast_no_url": "No URL to open",
 	"ext_detail_click_to_copy": "Click to copy",
 	"ext_detail_otp": "One-time password",

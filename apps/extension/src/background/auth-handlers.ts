@@ -22,16 +22,13 @@ import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import { restoreUnlockedSessions } from "./services/session-restore";
 import {
-	getAutoLockTimeoutCached,
-	getLastActivityTimestamp,
-	isDesktopMode,
 	isUnlocked,
-	lock,
 	setDesktopModeSentinel,
 	setMasterUnlockKey,
 	updateActivity,
 } from "./session-manager";
 import type { MessageResponse } from "./types";
+import { vaultSession } from "./vault-session";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
 
@@ -136,7 +133,10 @@ export async function handleCheckAuth(): Promise<MessageResponse> {
 	// (`restoreUnlockedSessions`); this covers the case where the worker stayed alive
 	// through a lock and the popup is asking again.
 	if (localAuthenticated && !isUnlocked()) {
-		await restoreUnlockedSessions();
+		const restored = await restoreUnlockedSessions();
+		if (restored.muk) {
+			setMasterUnlockKey(restored.muk);
+		}
 	}
 
 	const desktopUnlocked = await isDesktopUnlockedNow();
@@ -267,10 +267,11 @@ export async function handleLogout(): Promise<MessageResponse> {
 	const outcome = accountId
 		? await invalidateAccountSession({ accountId }, lifecycleDeps)
 		: null;
-	// `lock()` refuses while the desktop app owns the lock state; that is not a reason to
-	// fail the sign-out.
-	await lock().catch((error) => {
-		console.warn("[Auth] Lock during logout deferred to desktop app:", error);
+	// `source: "logout"` never refuses: signing out must lock even next to a desktop app.
+	await vaultSession.dispatch({
+		type: "LOCK_REQUESTED",
+		source: "logout",
+		at: Date.now(),
 	});
 
 	// The module reports instead of throwing, so a genuinely failed storage step
@@ -283,55 +284,33 @@ export async function handleLogout(): Promise<MessageResponse> {
 }
 
 /**
- * Handle GET_SESSION_STATUS message - Report unlock/lock timing for the popup
- * footer. Returns the remaining time before auto-lock when it can be computed
- * cheaply from in-memory session state; otherwise `remainingMs` is null.
+ * Handle GET_SESSION_STATUS message - the whole vault-session snapshot, so lock
+ * state and ownership reach the popup as one consistent value. Reading it also
+ * re-evaluates the desktop and the auto-lock deadline (fail-closed by design).
  */
 export async function handleGetSessionStatus(): Promise<MessageResponse> {
-	const unlocked = isUnlocked();
-	const desktopMode = isDesktopMode();
-
-	// Desktop mode has no independent countdown (lock state follows the app),
-	// and a "never" timeout (-1) has no countdown either.
-	const timeoutMs = getAutoLockTimeoutCached();
-	let remainingMs: number | null = null;
-
-	if (unlocked && !desktopMode && timeoutMs !== -1) {
-		const lastActivity = getLastActivityTimestamp();
-		if (lastActivity > 0) {
-			remainingMs = Math.max(0, timeoutMs - (Date.now() - lastActivity));
-		}
-	}
-
-	return {
-		success: true,
-		unlocked,
-		desktopMode,
-		remainingMs,
-		timeoutMs,
-	};
+	return { success: true, ...vaultSession.getSnapshot() };
 }
 
 /**
  * Handle LOCK message - Manual lock (clears MUK but keeps vault keys)
+ *
+ * Refusals travel as a machine-readable `code`, never as prose: the popup owns
+ * the translated string (strict i18n).
  */
 export async function handleLock(): Promise<MessageResponse> {
-	try {
-		// Lock extension (clears session manager's global MUK and all per-account MUKs)
-		// This will throw an error if desktop is running
-		await lock();
+	await vaultSession.dispatch({
+		type: "LOCK_REQUESTED",
+		source: "popup",
+		at: Date.now(),
+	});
 
-		return { success: true };
-	} catch (error) {
-		// Return user-friendly error when desktop is managing lock state
-		return {
-			success: false,
-			error:
-				error instanceof Error
-					? error.message
-					: "Failed to lock - desktop app is managing vault state",
-		};
+	const refusal = vaultSession.consumeRefusal();
+	if (refusal) {
+		return { success: false, code: refusal };
 	}
+
+	return { success: true };
 }
 
 /**

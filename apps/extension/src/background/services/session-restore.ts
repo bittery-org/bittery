@@ -35,20 +35,28 @@ import {
 	peekAccountSessionManager,
 } from "@bittery/core/services/account-session-manager";
 import { itemCache, storage } from "../../lib/storage";
-import { setMasterUnlockKey, updateActivity } from "../session-manager";
+
+export interface RestoredSessions {
+	/** Restored accountIds; newest-first is not guaranteed. */
+	accountIds: string[];
+	/** The device-wide key seeded from the first restored account, if any. */
+	muk: Uint8Array | null;
+}
 
 /**
  * Bring every account whose stored session is still usable back to "unlocked".
  *
- * @returns the accountIds that were restored, newest-first is not guaranteed.
+ * Reporting the key rather than installing it lets the caller hand the vault
+ * session both the accounts and the key in one atomic event.
  */
-export async function restoreUnlockedSessions(): Promise<string[]> {
+export async function restoreUnlockedSessions(): Promise<RestoredSessions> {
 	const restoredAccountIds: string[] = [];
+	let muk: Uint8Array | null = null;
 
 	try {
 		const accounts = await storage.getAccountsList();
 		if (accounts.length === 0) {
-			return restoredAccountIds;
+			return { accountIds: restoredAccountIds, muk };
 		}
 
 		// The background wires no platform callbacks, so whichever background caller
@@ -72,18 +80,11 @@ export async function restoreUnlockedSessions(): Promise<string[]> {
 
 		const firstRestoredAccountId = restoredAccountIds[0];
 		if (firstRestoredAccountId) {
-			// Update the activity timestamp FIRST: `isUnlocked()` compares against it and
-			// would otherwise see 0 and immediately auto-lock everything just restored.
-			await updateActivity();
-
-			const muk = await storage.getMasterUnlockKey(firstRestoredAccountId);
-			if (muk) {
-				setMasterUnlockKey(muk);
-			}
+			muk = await storage.getMasterUnlockKey(firstRestoredAccountId);
 		}
 	} catch (error) {
 		console.error("[session-restore] Failed to restore sessions:", error);
 	}
 
-	return restoredAccountIds;
+	return { accountIds: restoredAccountIds, muk };
 }
