@@ -1,3 +1,4 @@
+import { wipeDevice } from "@bittery/core/services/account-lifecycle";
 import { invoke } from "@tauri-apps/api/core";
 import {
 	Menu,
@@ -6,7 +7,7 @@ import {
 	Submenu,
 } from "@tauri-apps/api/menu";
 import { Store } from "@tauri-apps/plugin-store";
-import { itemCache, storage } from "@/lib/storage";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { clearDesktopSyncState } from "@/lib/sync-client-id";
 
 const RESET_MENU_ITEM_ID = "bittery-reset-app-completely";
@@ -25,26 +26,18 @@ async function resetDesktopAppCompletely(): Promise<void> {
 	// the per-account keys. Every per-account secret (`session_data`, `vault_keys`,
 	// `jwt_token`, `secret_key`, `encrypted_private_key`) is secret-tier now and lives in
 	// the OS keychain, so clearing `store.json` alone would leave all of it behind.
-	// `clearAllStoredData` routes each delete to whichever store actually holds it, and
-	// drops `device_key` once the last account is gone.
-	try {
-		const accounts = await storage.getAccountsList();
-		console.log("[macos-reset-menu] Clearing stored account data", {
-			accountCount: accounts.length,
-		});
-		for (const account of accounts) {
-			// A sibling of `storage`, never reachable through it — the cached ciphertext has
-			// to be dropped explicitly (packages/storage/CONTEXT.md §4.2).
-			await itemCache.clearItemCache(account.accountId);
-			await storage.clearAllStoredData(account.accountId);
-		}
-		console.log("[macos-reset-menu] Cleared stored account data");
-	} catch (error) {
-		console.warn(
-			"[macos-reset-menu] Failed to clear stored account data",
-			error,
+	console.log("[macos-reset-menu] Clearing stored account data");
+	const outcome = await wipeDevice(lifecycleDeps);
+	if (outcome.failures.length > 0) {
+		console.error(
+			"[macos-reset-menu] Some account data survived the wipe",
+			outcome.failures,
 		);
 	}
+	console.log("[macos-reset-menu] Cleared stored account data", {
+		accountCount: outcome.affected.length,
+		failureCount: outcome.failures.length,
+	});
 
 	try {
 		console.log("[macos-reset-menu] Deleting keychain device key");

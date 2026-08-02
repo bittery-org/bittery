@@ -4,6 +4,10 @@
  */
 
 import { createMobileAutolockService } from "@bittery/core/hooks/services/autolock-mobile";
+import {
+	lockAccount,
+	lockAllAccounts,
+} from "@bittery/core/services/account-lifecycle";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
@@ -21,6 +25,7 @@ import {
 import { AppState, type AppStateStatus, Platform } from "react-native";
 import CredentialProvider from "../../modules/credential-provider";
 import { useI18n } from "../providers/i18n-provider";
+import { lifecycleDeps } from "../services/lifecycle";
 import {
 	type BiometricAuthResult,
 	itemCache,
@@ -135,13 +140,9 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 					: false;
 
 				if (shouldRequireAuth) {
-					// IMPORTANT: Clear MUK from native VaultStateManager when auto-lock triggers
-					// This prevents autofill from working while app is locked
-					if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-						CredentialProvider.clearAllMasterUnlockKeys();
-					}
-
-					await storage.lockAllAccounts();
+					// The native autofill mirror is purged inside this call, before the store
+					// lock, so autofill cannot serve credentials while the app says locked.
+					await lockAllAccounts(lifecycleDeps);
 
 					const fallbackAccountId =
 						activeAccount?.accountId ?? allAccounts[0]?.accountId;
@@ -255,7 +256,9 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						}
 					}
 				} catch (error) {
-					await storage.clearSession(accountId);
+					// The MUK restore failed halfway, so drop back to a clean locked account
+					// rather than leaving a half-unlocked one behind.
+					await lockAccount(accountId, lifecycleDeps);
 					console.error(
 						"[BiometricAuth] Failed to restore MUK after biometric auth:",
 						error,

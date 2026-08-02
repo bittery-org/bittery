@@ -3,9 +3,11 @@
  * Manages Master Unlock Key in memory, auto-lock timers, and keepalive mechanism
  */
 
+import { lockAllAccounts } from "@bittery/core/services/account-lifecycle";
 import { DEFAULT_AUTO_LOCK_TIMEOUT_MS, storage } from "../lib/storage";
 import { AUTO_LOCK_ALARM_NAME, KEEPALIVE_INTERVAL_MS } from "./constants";
 import { desktopSync } from "./desktop-sync";
+import { lifecycleDeps } from "./lifecycle";
 
 const LOCKED_ACTION_ICON_PATH = "icons/lock-icon.png";
 const DEFAULT_ACTION_ICON_PATHS = {
@@ -177,8 +179,10 @@ export async function _lockInternal(): Promise<void> {
 	chrome.alarms.clear(AUTO_LOCK_ALARM_NAME);
 	stopKeepalive();
 
-	// Clear all per-account MUKs from the AccountStore's in-memory cache
-	await storage.lockAllAccounts();
+	// The service-worker lifetime effects above run first and unconditionally:
+	// the lifecycle module reports storage failures instead of throwing, so a
+	// failed lock must never leave alarms armed or the keepalive running.
+	await lockAllAccounts(lifecycleDeps);
 }
 
 /**

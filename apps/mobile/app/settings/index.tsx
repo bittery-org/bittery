@@ -1,3 +1,4 @@
+import { lockAllAccounts } from "@bittery/core/services/account-lifecycle";
 import { useRouter } from "expo-router";
 import {
 	Button,
@@ -33,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
+import { lifecycleDeps } from "../../src/services/lifecycle";
 import { storage } from "../../src/services/storage";
 import { saveThemePreference } from "../../src/services/theme-storage";
 
@@ -233,15 +235,10 @@ export default function SettingsScreen() {
 	);
 
 	const handleLock = async () => {
-		// Lock, don't sign out: `lockAllAccounts` drops every in-memory master unlock key and
-		// the session-bound secrets but keeps `session_data`, so quick-unlock still works.
-		await storage.lockAllAccounts();
-
-		// IMPORTANT: Clear MUK from native VaultStateManager for autofill security
-		// Without this, autofill will still work even when app is locked!
-		if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-			CredentialProvider.clearAllMasterUnlockKeys();
-		}
+		// Lock, don't sign out: `lockAllAccounts` drops every in-memory master unlock key —
+		// including the native autofill mirror, purged first — but keeps `session_data`, so
+		// quick-unlock still works.
+		await lockAllAccounts(lifecycleDeps);
 
 		router.replace("/(auth)/unlock");
 	};
@@ -256,11 +253,18 @@ export default function SettingsScreen() {
 				text: m.mob_settings_sign_out(),
 				style: "destructive",
 				onPress: async () => {
-					if (activeAccount) {
-						await removeAccount(activeAccount.accountId);
-					}
+					// Removal, not a session end: this drops the account from the device
+					// entirely, which is what "sign out" has always meant on mobile.
+					const outcome = activeAccount
+						? await removeAccount(activeAccount.accountId)
+						: null;
 					await refreshAccounts();
-					router.replace("/(auth)/login");
+					// A promoted successor is left locked, so it needs unlocking, not login.
+					router.replace(
+						outcome && outcome.remaining.length > 0
+							? "/(auth)/unlock"
+							: "/(auth)/login",
+					);
 				},
 			},
 		]);
@@ -276,8 +280,10 @@ export default function SettingsScreen() {
 					text: m.mob_settings_remove_account_confirm(),
 					style: "destructive",
 					onPress: async () => {
-						await removeAccount(accountId);
-						if (allAccounts.length <= 1) {
+						// `outcome.remaining`, not the `allAccounts` snapshot this callback
+						// closed over — that one still counts the account just removed.
+						const outcome = await removeAccount(accountId);
+						if (outcome.remaining.length === 0) {
 							router.replace("/(auth)/login");
 						}
 					},

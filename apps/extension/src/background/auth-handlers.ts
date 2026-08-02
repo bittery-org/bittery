@@ -11,11 +11,13 @@ import {
 	storeLoginSession,
 	storeUnlockSession,
 } from "@bittery/core";
+import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { itemCache, storage } from "../lib/storage";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
+import { lifecycleDeps } from "./lifecycle";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import { restoreUnlockedSessions } from "./services/session-restore";
@@ -259,25 +261,24 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 
 /**
  * Handle LOGOUT message - Sign out of the active account and lock
- *
- * `forgetSession`, not `clearSession`: the latter only locks and deliberately keeps
- * `session_data` so quick-unlock still works. Signing out has to destroy that too.
- *
- * `AccountStore` sits on a `PlatformPort` and cannot reach the record-backed cache, so the
- * encrypted item cache is dropped from here (packages/storage/CONTEXT.md §4.2). Leaving it
- * behind after a sign-out is a real leak.
  */
 export async function handleLogout(): Promise<MessageResponse> {
 	const accountId = (await storage.getActiveAccount())?.accountId;
-	await storage.forgetSession(accountId);
-	if (accountId) {
-		await itemCache.clearItemCache(accountId);
-	}
+	const outcome = accountId
+		? await invalidateAccountSession({ accountId }, lifecycleDeps)
+		: null;
 	// `lock()` refuses while the desktop app owns the lock state; that is not a reason to
 	// fail the sign-out.
 	await lock().catch((error) => {
 		console.warn("[Auth] Lock during logout deferred to desktop app:", error);
 	});
+
+	// The module reports instead of throwing, so a genuinely failed storage step
+	// has to be surfaced here or the popup would call a partial wipe a success.
+	if (outcome && outcome.failures.length > 0) {
+		console.error("[Auth] Sign-out steps failed:", outcome.failures);
+		return { success: false };
+	}
 	return { success: true };
 }
 

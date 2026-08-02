@@ -1,3 +1,4 @@
+import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
 import {
 	type AccountSessionManager,
 	getAccountSessionManager,
@@ -14,6 +15,7 @@ import {
 	useSyncExternalStore,
 } from "react";
 
+import { lifecycleDeps } from "@/services/lifecycle";
 import {
 	type AccountMetadata,
 	type ActiveAccount,
@@ -28,8 +30,18 @@ interface AccountContextValue {
 	isLoading: boolean;
 	refreshAccounts: () => Promise<void>;
 	switchAccount: (accountId: string) => Promise<void>;
-	removeAccount: (accountId: string) => Promise<void>;
+	removeAccount: (accountId: string) => Promise<LifecycleOutcome>;
 }
+
+/** Outside a provider nothing was removed, so the outcome reports an untouched device. */
+const NOTHING_REMOVED: LifecycleOutcome = {
+	affected: [],
+	activeAccountId: undefined,
+	activeAccount: null,
+	wasActive: false,
+	remaining: [],
+	failures: [],
+};
 
 const AccountContext = createContext<AccountContextValue>({
 	allAccounts: [],
@@ -38,7 +50,7 @@ const AccountContext = createContext<AccountContextValue>({
 	isLoading: true,
 	refreshAccounts: async () => {},
 	switchAccount: async () => {},
-	removeAccount: async () => {},
+	removeAccount: async () => NOTHING_REMOVED,
 });
 
 export function useAccount() {
@@ -62,6 +74,9 @@ export function AccountProvider({ children }: AccountProviderProps) {
 			// account's cached ciphertext as well as its session, and `AccountStore` sits on a
 			// `PlatformPort` that cannot see the record store.
 			itemCache,
+			// Removals routed through the manager must drop the native autofill MUK mirror
+			// too, otherwise autofill outlives the account it belonged to.
+			credentialMirror: lifecycleDeps.credentialMirror,
 			invalidateQueries: async (keys) => {
 				await Promise.all(
 					keys.map((key) =>
@@ -97,9 +112,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
 	);
 
 	const removeAccount = useCallback(
-		async (accountId: string) => {
-			await manager.removeAccount(accountId);
-		},
+		async (accountId: string) => manager.removeAccount(accountId),
 		[manager],
 	);
 

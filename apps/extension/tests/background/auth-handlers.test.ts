@@ -23,6 +23,9 @@ let unlockableAccountIds: string[] | null = null;
 const setActiveAccountCalls: unknown[] = [];
 const getMasterUnlockKeyCalls: (string | undefined)[] = [];
 const setMasterUnlockKeyCalls: unknown[] = [];
+const forgetSessionCalls: (string | undefined)[] = [];
+const clearItemCacheCalls: (string | undefined)[] = [];
+let forgetSessionError: Error | null = null;
 
 // resolveAccountIdFromEmail only matches on email; for an accountId (UUID) it
 // resolves to undefined. This mirrors the real behavior that exposed the bug.
@@ -46,13 +49,21 @@ const storageMock = {
 		getMasterUnlockKeyCalls.push(accountId);
 		return new Uint8Array([9]);
 	},
+	forgetSession: async (accountId?: string) => {
+		if (forgetSessionError) {
+			throw forgetSessionError;
+		}
+		forgetSessionCalls.push(accountId);
+	},
 };
 
 mock.module(path.join(libDir, "storage.ts"), () => ({
 	storage: storageMock,
 	// Sibling of `storage`; the handlers now sequence both (packages/storage/CONTEXT.md §4.2).
 	itemCache: {
-		clearItemCache: async () => {},
+		clearItemCache: async (accountId?: string) => {
+			clearItemCacheCalls.push(accountId);
+		},
 	},
 }));
 
@@ -130,7 +141,7 @@ mock.module(path.join(bgDir, "session-manager.ts"), () => ({
 	getLastActivityTimestamp: () => Date.now(),
 	isDesktopMode: () => false,
 	isUnlocked: () => false,
-	lock: () => {},
+	lock: async () => {},
 	setDesktopModeSentinel: () => {},
 	setMasterUnlockKey: (value: unknown) => {
 		setMasterUnlockKeyCalls.push(value);
@@ -154,9 +165,11 @@ mock.module("@bittery/core/services/account-session-manager", () => ({
 
 mock.module("@bittery/shared/rpc-client-factory", () => ({
 	createAccountRpcClient: () => ({}),
+	// The lifecycle `CredentialMirror` drops cached clients holding a revoked token.
+	clearAccountRpcClient: () => {},
 }));
 
-const { handleQuickUnlockAll } = await import(
+const { handleLogout, handleQuickUnlockAll } = await import(
 	path.join(bgDir, "auth-handlers.ts")
 );
 
@@ -167,6 +180,9 @@ beforeEach(() => {
 	setActiveAccountCalls.length = 0;
 	getMasterUnlockKeyCalls.length = 0;
 	setMasterUnlockKeyCalls.length = 0;
+	forgetSessionCalls.length = 0;
+	clearItemCacheCalls.length = 0;
+	forgetSessionError = null;
 	desktopStatus = null;
 	triggerDesktopUnlockResult = true;
 	triggerDesktopUnlockCalls = 0;
@@ -257,6 +273,32 @@ describe("handleQuickUnlockAll", () => {
 			"Failed to unlock any accounts",
 		);
 		expect(setActiveAccountCalls).toEqual([]);
+	});
+});
+
+describe("handleLogout", () => {
+	test("drops the session and its item cache together", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		activeAccount = { type: "single", accountId: "acc-uuid-1" };
+
+		const response = await handleLogout();
+
+		expect(response).toEqual({ success: true });
+		expect(clearItemCacheCalls).toEqual(["acc-uuid-1"]);
+		expect(forgetSessionCalls).toEqual(["acc-uuid-1"]);
+	});
+
+	test("reports a failed storage step instead of claiming success", async () => {
+		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
+		activeAccount = { type: "single", accountId: "acc-uuid-1" };
+		forgetSessionError = new Error("chrome.storage unavailable");
+
+		const response = await handleLogout();
+
+		expect(response.success).toBe(false);
+		// Best effort is the module's contract: the ciphertext goes even when the
+		// record that names its keys survives.
+		expect(clearItemCacheCalls).toEqual(["acc-uuid-1"]);
 	});
 });
 

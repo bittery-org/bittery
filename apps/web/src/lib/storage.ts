@@ -11,6 +11,10 @@
  */
 
 import {
+	invalidateAccountSession,
+	removeAccount,
+} from "@bittery/core/services/account-lifecycle";
+import {
 	type AccountStore,
 	createAccountStore,
 	createItemCache,
@@ -22,6 +26,7 @@ import {
 	createWebRecordPort,
 } from "@bittery/storage/adapters/web";
 import type { KdfProfile } from "@bittery/types";
+import { lifecycleDeps } from "./lifecycle";
 import {
 	decrypt,
 	decryptKeyHandleWithWrappingKey,
@@ -162,26 +167,18 @@ export async function initializeStorage(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// Sign-out helpers
+// Destructive flows — web platform adapters
 //
-// `AccountStore` sits on a `PlatformPort` and cannot reach the record-backed cache, so
-// every flow that drops one has to drop the other from here (packages/storage/CONTEXT.md §4.2).
-// Leaving the encrypted cache behind after a sign-out is a real leak.
+// The sequencing lives in `@bittery/core/services/account-lifecycle`; what stays here is
+// the web-only reactivity around it: `initializeStorage()` first, because every
+// account-scoped call needs the synthetic account to exist, and `refreshActiveAccountId()`
+// after, to republish the `useSyncExternalStore` snapshot.
 // ---------------------------------------------------------------------------
 
-/**
- * Sign out of the active account: drop the session-bound secrets *and* `session_data`,
- * so no quick-unlock offer survives, plus the encrypted item cache.
- *
- * This is `forgetSession`, not `clearSession` — the latter only locks.
- */
+/** Sign out of the active account: no quick-unlock offer and no cached ciphertext survive. */
 export async function forgetActiveSession(): Promise<void> {
 	await initializeStorage();
-	const accountId = (await storage.getActiveAccount())?.accountId;
-	await storage.forgetSession(accountId);
-	if (accountId) {
-		await itemCache.clearItemCache(accountId);
-	}
+	await invalidateAccountSession("active", lifecycleDeps);
 	await refreshActiveAccountId();
 }
 
@@ -189,9 +186,8 @@ export async function forgetActiveSession(): Promise<void> {
 export async function clearActiveAccountData(): Promise<void> {
 	await initializeStorage();
 	const accountId = (await storage.getActiveAccount())?.accountId;
-	await storage.clearAllStoredData(accountId);
 	if (accountId) {
-		await itemCache.clearItemCache(accountId);
+		await removeAccount(accountId, lifecycleDeps);
 	}
 	await refreshActiveAccountId();
 }

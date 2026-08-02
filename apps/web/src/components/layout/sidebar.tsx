@@ -75,7 +75,10 @@ function UserNav() {
 				.slice(0, 2)
 		: "??";
 
-	const handleLogout = async () => {
+	// Signing out of web removes the whole account: the secret tier is plain
+	// `localStorage`, so leaving `secret_key` behind on a shared machine is worse, and
+	// web has no UI to manage a left-behind account.
+	const handleRemoveAccount = async () => {
 		await clearActiveAccountData();
 		queryClient.clear();
 		navigate({ to: "/login" });
@@ -126,7 +129,7 @@ function UserNav() {
 						</DropdownMenuItem>
 						<DropdownMenuSeparator />
 						<DropdownMenuItem
-							onClick={handleLogout}
+							onClick={handleRemoveAccount}
 							className="cursor-pointer text-destructive"
 						>
 							<LogOut className="mr-2 h-4 w-4" />

@@ -1,6 +1,11 @@
 /**
  * AccountSessionManager — single source of truth for multi-account state.
  * Framework-agnostic; platform specifics injected via callbacks.
+ *
+ * The destructive sequences themselves live in `./account-lifecycle`, which owns
+ * durable state (account records, item cache segments, the stored active
+ * pointer). What stays here is the volatile half: lock state, the in-memory
+ * account list, and the notifications that tell the app both changed.
  */
 
 import type { AccountStore, ItemCache } from "@bittery/storage";
@@ -10,6 +15,15 @@ import {
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
 import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import {
+	type CredentialMirror,
+	type LifecycleDeps,
+	type LifecycleOutcome,
+	lockAccount as lifecycleLockAccount,
+	lockAllAccounts as lifecycleLockAllAccounts,
+	removeAccount as lifecycleRemoveAccount,
+	NO_CREDENTIAL_MIRROR,
+} from "./account-lifecycle";
 import { createStoredAccountRpcClient } from "./rpc-client";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
@@ -20,6 +34,11 @@ export interface AccountSessionManagerOptions {
 	 * cached ciphertext, and `AccountStore` cannot reach it. See packages/storage/CONTEXT.md §4.2.
 	 */
 	itemCache: ItemCache;
+	/**
+	 * Optional here, unlike in `LifecycleDeps`: the manager is constructed once per
+	 * app, so a platform that mirrors nothing cannot silently forget to answer twice.
+	 */
+	credentialMirror?: CredentialMirror;
 	onActiveChanged?: (active: ActiveAccount) => void | Promise<void>;
 	onLockBroadcast?: (reason: string) => void | Promise<void>;
 	invalidateQueries?: (keys: string[][]) => void | Promise<void>;
@@ -46,8 +65,15 @@ export class AccountSessionManager {
 	private initialization: Promise<void> | null = null;
 	private snapshot = 0;
 	private readonly listeners = new Set<() => void>();
+	private readonly lifecycle: LifecycleDeps;
 
-	constructor(private readonly options: AccountSessionManagerOptions) {}
+	constructor(private readonly options: AccountSessionManagerOptions) {
+		this.lifecycle = {
+			storage: options.storage,
+			itemCache: options.itemCache,
+			credentialMirror: options.credentialMirror ?? NO_CREDENTIAL_MIRROR,
+		};
+	}
 
 	get storage(): AccountStore {
 		return this.options.storage;
@@ -235,7 +261,7 @@ export class AccountSessionManager {
 	}
 
 	async lockAccount(accountId: string): Promise<void> {
-		await this.storage.clearSession(accountId);
+		await lifecycleLockAccount(accountId, this.lifecycle);
 		this.lockState.set(accountId, "locked");
 		await this.options.invalidateQueries?.([
 			["accounts", "unlocked"],
@@ -246,7 +272,9 @@ export class AccountSessionManager {
 	}
 
 	async lockAll(reason = "manual"): Promise<void> {
-		await this.storage.lockAllAccounts();
+		// `reason` is broadcast metadata for the app, not part of the sequence, so it
+		// stops here rather than travelling into the lifecycle module.
+		await lifecycleLockAllAccounts(this.lifecycle);
 		for (const account of this.accounts) {
 			this.lockState.set(account.accountId, "locked");
 		}
@@ -259,40 +287,22 @@ export class AccountSessionManager {
 		this.emit();
 	}
 
-	async removeAccount(accountId: string): Promise<void> {
-		const wasActive =
-			this.active?.type === "single" && this.active.accountId === accountId;
-		const nextAccount = wasActive
-			? this.accounts.find((account) => account.accountId !== accountId)
-			: undefined;
+	async removeAccount(accountId: string): Promise<LifecycleOutcome> {
+		const outcome = await lifecycleRemoveAccount(accountId, this.lifecycle);
+		// Re-reads the list, the pointer the module may have moved, and the lock
+		// states, then emits — so nothing in-memory has to be patched by hand here.
+		await this.refresh();
 
-		if (wasActive) {
-			await this.storage.setActiveAccount(null);
-			this.active = null;
+		if (outcome.wasActive) {
+			await this.options.onActiveChanged?.(this.active);
+			await this.options.invalidateQueries?.([
+				["accounts"],
+				["auth"],
+				["vaults"],
+				["items"],
+			]);
 		}
-
-		await this.storage.removeAccount(accountId);
-		// Removing the account must not leave its encrypted items behind. `AccountStore`
-		// holds only a `PlatformPort`; the cache lives behind a `RecordPort`, so the
-		// caller sequences the two. See packages/storage/CONTEXT.md §4.2.
-		await this.itemCache.clearItemCache(accountId);
-
-		if (wasActive) {
-			if (nextAccount) {
-				this.accounts = this.accounts.filter(
-					(account) => account.accountId !== accountId,
-				);
-				this.lockState.delete(accountId);
-				await this.switchAccount({
-					type: "single",
-					accountId: nextAccount.accountId,
-				});
-			} else {
-				await this.refresh();
-			}
-		} else {
-			await this.refresh();
-		}
+		return outcome;
 	}
 
 	async unlockAccount(

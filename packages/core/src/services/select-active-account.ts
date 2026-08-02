@@ -32,3 +32,32 @@ export function selectActiveAccountAfterUnlock({
 
 	return unlockedAccountIds[0] ?? accounts[0]?.accountId;
 }
+
+export interface SelectActiveAccountAfterRemovalInput {
+	removedAccountId: string;
+	/** Active account as persisted before the removal, from `getActiveAccount()`. */
+	previousActive: ActiveAccount;
+	/** Accounts as they were *before* the removal — the removed one still included. */
+	accounts: AccountMetadata[];
+}
+
+/**
+ * Pick the account to make active once an account is removed.
+ *
+ * Only the removal of the active account may move the pointer; removing any
+ * other account leaves the user where they were. `undefined` therefore means
+ * "leave the pointer alone" when a non-active account went away, and "no
+ * account left to point at" when the last one did.
+ */
+export function selectActiveAccountAfterRemoval({
+	removedAccountId,
+	previousActive,
+	accounts,
+}: SelectActiveAccountAfterRemovalInput): string | undefined {
+	if (previousActive?.accountId !== removedAccountId) {
+		return undefined;
+	}
+
+	return accounts.find((account) => account.accountId !== removedAccountId)
+		?.accountId;
+}

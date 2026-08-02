@@ -3,6 +3,7 @@ import {
 	useQuickUnlock,
 	useSessionState,
 } from "@bittery/core/hooks";
+import { removeAccount } from "@bittery/core/services/account-lifecycle";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Button, Input, Label, TextField } from "heroui-native";
 import {
@@ -45,7 +46,8 @@ import { resolveBiometricErrorMessage } from "../src/lib/biometric-error-message
 import { arrayBufferToBase64 } from "../src/lib/crypto";
 import { useServerUrl } from "../src/lib/rpc";
 import { useI18n } from "../src/providers/i18n-provider";
-import { itemCache, storage } from "../src/services/storage";
+import { lifecycleDeps } from "../src/services/lifecycle";
+import { storage } from "../src/services/storage";
 
 /**
  * Autofill Unlock Screen
@@ -168,12 +170,10 @@ export default function AutofillUnlockScreen() {
 					m.mob_unlock_alert_session_expired_title(),
 					m.mob_unlock_alert_session_expired_message(),
 				);
-				// Sign-out-grade wipe, so the encrypted item cache has to go with it:
-				// `AccountStore` sits on a `PlatformPort` and cannot reach the record
-				// store, so leaving this out would strand this account's ciphertext on
-				// disk after its keys are gone. See packages/storage/CONTEXT.md §4.2.
-				await storage.clearAllStoredData(activeAccount.accountId);
-				await itemCache.clearItemCache(activeAccount.accountId);
+				// The stored session is unusable, so the account goes off the device
+				// entirely — removal sequences the store, the item cache and the native
+				// autofill mirror together.
+				await removeAccount(activeAccount.accountId, lifecycleDeps);
 				router.replace("/(auth)/login");
 			}
 		},

@@ -1,6 +1,9 @@
 import { m } from "@bittery/i18n/paraglide/messages";
 import { RpcProvider } from "@bittery/shared/rpc";
-import { createAppRpcOptionsProxy } from "@bittery/shared/rpc-client";
+import {
+	createAppRpcOptionsProxy,
+	isUnauthorizedRpcError,
+} from "@bittery/shared/rpc-client";
 import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
@@ -28,18 +31,6 @@ import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
 
-function isUnauthorizedError(error: unknown): boolean {
-	if (
-		error &&
-		typeof error === "object" &&
-		"data" in error &&
-		(error as any).data?.code === "UNAUTHORIZED"
-	) {
-		return true;
-	}
-	return false;
-}
-
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
 
@@ -51,19 +42,22 @@ function handleUnauthorizedError() {
 
 	queryClient.clear();
 
-	// An expired session is a sign-out: `forgetSession` also drops `session_data`, avoiding
-	// a stale quick-unlock offer. The encrypted item cache goes with it — `AccountStore`
-	// cannot reach it (packages/storage/CONTEXT.md §4.2).
-	forgetActiveSession().then(() => {
-		toast.error(m.toast_auth_session_expired());
-		window.location.href = "/login";
-	});
+	// An expired session is a sign-out, so the quick-unlock offer in `session_data` goes too.
+	forgetActiveSession()
+		.then(() => {
+			toast.error(m.toast_auth_session_expired());
+			window.location.href = "/login";
+		})
+		// Without this reset one rejection pins the latch and every later 401 is dropped.
+		.catch(() => {
+			isHandlingAuthError = false;
+		});
 }
 
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
-			if (isUnauthorizedError(error)) {
+			if (isUnauthorizedRpcError(error)) {
 				handleUnauthorizedError();
 				return;
 			}
@@ -79,7 +73,7 @@ export const queryClient = new QueryClient({
 	}),
 	mutationCache: new MutationCache({
 		onError: (error) => {
-			if (isUnauthorizedError(error)) {
+			if (isUnauthorizedRpcError(error)) {
 				handleUnauthorizedError();
 			}
 		},

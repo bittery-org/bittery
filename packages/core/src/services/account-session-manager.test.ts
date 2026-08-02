@@ -154,9 +154,32 @@ describe("AccountSessionManager", () => {
 		expect(await storage.getUnlockedAccounts()).toEqual([]);
 	});
 
+	it("lockAll broadcasts the reason only after storage is locked", async () => {
+		const storage = await createStore({ unlockAcc2: true });
+		const order: string[] = [];
+		spyOn(storage, "lockAllAccounts").mockImplementation(async () => {
+			order.push("storage");
+		});
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			// A listener that unlocks again on the broadcast must find the locked
+			// state already committed, so the order is part of the contract.
+			onLockBroadcast: async (reason) => {
+				order.push(`broadcast:${reason}`);
+			},
+			verifyUnlockPolicy: async () => {},
+		});
+
+		await manager.initialize();
+		await manager.lockAll("autolock");
+
+		expect(order).toEqual(["storage", "broadcast:autolock"]);
+	});
+
 	it("removeAccount switches to remaining account when active is removed", async () => {
 		const storage = await createStore();
-		const removeAccount = spyOn(storage, "removeAccount");
+		const clearAllStoredData = spyOn(storage, "clearAllStoredData");
 		const setActiveAccount = spyOn(storage, "setActiveAccount");
 		const manager = new AccountSessionManager({
 			storage,
@@ -165,11 +188,13 @@ describe("AccountSessionManager", () => {
 		});
 
 		await manager.initialize();
-		await manager.removeAccount("acc-1");
+		const outcome = await manager.removeAccount("acc-1");
 
-		expect(removeAccount).toHaveBeenCalledWith("acc-1");
-		expect(setActiveAccount).toHaveBeenNthCalledWith(1, null);
-		expect(setActiveAccount).toHaveBeenNthCalledWith(2, {
+		expect(clearAllStoredData).toHaveBeenCalledWith("acc-1");
+		// The successor is written once, and never a `null` on the way there: the
+		// pointer must not be observable as empty while accounts remain.
+		expect(setActiveAccount).toHaveBeenCalledTimes(1);
+		expect(setActiveAccount).toHaveBeenCalledWith({
 			type: "single",
 			accountId: "acc-2",
 		});
@@ -177,6 +202,58 @@ describe("AccountSessionManager", () => {
 			type: "single",
 			accountId: "acc-2",
 		});
+		expect(outcome.failures).toEqual([]);
+		expect(outcome.wasActive).toBe(true);
+		expect(outcome.remaining.map((account) => account.accountId)).toEqual([
+			"acc-2",
+		]);
+	});
+
+	it("removeAccount leaves in-memory state consistent with storage", async () => {
+		const storage = await createStore({ unlockAcc2: true });
+		const onActiveChanged = mock(async () => {});
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			onActiveChanged,
+			verifyUnlockPolicy: async () => {},
+		});
+
+		await manager.initialize();
+		await manager.removeAccount("acc-1");
+
+		expect(manager.getAccounts().map((account) => account.accountId)).toEqual(
+			(await storage.getAccountsList()).map((account) => account.accountId),
+		);
+		expect(manager.getUnlockedAccountIds().sort()).toEqual(
+			(await storage.getUnlockedAccounts()).sort(),
+		);
+		expect(manager.isUnlocked("acc-1")).toBe(false);
+		expect(onActiveChanged).toHaveBeenCalledTimes(1);
+		expect(onActiveChanged).toHaveBeenCalledWith({
+			type: "single",
+			accountId: "acc-2",
+		});
+	});
+
+	it("removeAccount purges the injected credential mirror", async () => {
+		const storage = await createStore();
+		const purge = mock(async () => {});
+		const manager = new AccountSessionManager({
+			storage,
+			itemCache,
+			credentialMirror: { purge },
+			verifyUnlockPolicy: async () => {},
+		});
+
+		await manager.initialize();
+		await manager.removeAccount("acc-1");
+
+		// Snapshotted before the account row goes: a mirror keyed by a token we
+		// already dropped can no longer be found.
+		expect(purge).toHaveBeenCalledWith([
+			{ accountId: "acc-1", authToken: "token-acc-1", serverUrl: null },
+		]);
 	});
 
 	it("removing the only active account persists null", async () => {
@@ -192,7 +269,9 @@ describe("AccountSessionManager", () => {
 		await manager.initialize();
 		await manager.removeAccount("acc-1");
 
-		expect(setActiveAccount).toHaveBeenLastCalledWith(null);
+		// Clearing the last account's data drops the pointer itself, so there is no
+		// successor to promote and nothing to write.
+		expect(setActiveAccount).not.toHaveBeenCalled();
 		expect(await storage.getActiveAccount()).toBeNull();
 		expect(manager.getActiveAccount()).toBeNull();
 	});

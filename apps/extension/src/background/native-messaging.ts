@@ -3,6 +3,7 @@
  * Handles communication with the desktop app for biometric unlock
  */
 
+import { lockAccount } from "@bittery/core/services/account-lifecycle";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
@@ -15,6 +16,7 @@ import {
 } from "./biometric-transfer";
 import { desktopSync } from "./desktop-sync";
 import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
+import { lifecycleDeps } from "./lifecycle";
 import { sendNativeMessage } from "./native-messaging-client";
 import {
 	setDesktopModeSentinel,
@@ -289,7 +291,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 
 				unlocked.push(accountId);
 			} catch (error) {
-				if (accountId) await storage.clearSession(accountId);
+				if (accountId) await lockAccount(accountId, lifecycleDeps);
 				failed.push({
 					accountId,
 					email,

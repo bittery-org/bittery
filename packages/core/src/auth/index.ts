@@ -8,7 +8,6 @@ export {
 	type BiometricUnlockAvailability,
 	type CheckEmailResult,
 	checkEmailExists,
-	clearSession,
 	deriveSrpLoginProof,
 	type FinishLoginResponse,
 	getBiometricUnlockAvailability,

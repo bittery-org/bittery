@@ -1,3 +1,4 @@
+import type { LifecycleOutcome } from "@bittery/core/services/account-lifecycle";
 import {
 	type AccountSessionManager,
 	getAccountSessionManager,
@@ -15,6 +16,7 @@ import {
 	useState,
 	useSyncExternalStore,
 } from "react";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { type AccountMetadata, itemCache, storage } from "@/lib/storage";
 import { createDesktopAutolockService } from "@/services/autolock-service";
 
@@ -23,7 +25,7 @@ interface AccountContextValue {
 	allAccounts: AccountMetadata[];
 	switchAccount: (accountId: string) => Promise<void>;
 	addAccount: (account: AccountMetadata) => Promise<void>;
-	removeAccount: (accountId: string) => Promise<void>;
+	removeAccount: (accountId: string) => Promise<LifecycleOutcome>;
 	lockAccount: (accountId: string) => Promise<void>;
 	lockAllAccounts: () => Promise<void>;
 	refreshAccounts: () => Promise<void>;
@@ -40,6 +42,7 @@ function createDesktopAccountManager(
 		// Sibling of `storage`: `removeAccount` has to wipe the account's cached ciphertext,
 		// and `AccountStore` cannot reach it (packages/storage/CONTEXT.md §4.2).
 		itemCache,
+		credentialMirror: lifecycleDeps.credentialMirror,
 		onActiveChanged: async (active) => {
 			if (active?.type !== "single") {
 				return;
@@ -125,9 +128,9 @@ export function AccountProvider({
 	);
 
 	const removeAccount = useCallback(
-		async (accountId: string) => {
-			await manager.removeAccount(accountId);
-		},
+		// The outcome is the caller's only complete view of what happened, so it is
+		// returned rather than dropped — nothing re-reads storage after a removal.
+		async (accountId: string) => manager.removeAccount(accountId),
 		[manager],
 	);
 

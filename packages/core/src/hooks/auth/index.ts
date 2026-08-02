@@ -31,13 +31,6 @@ export {
 	type UseLoginOptions,
 	useLogin,
 } from "./use-login";
-// Logout hook
-export {
-	type LogoutInput,
-	type UseLogoutOptions,
-	useLock,
-	useLogout,
-} from "./use-logout";
 // Quick unlock hook (password unlock with stored secret key)
 export {
 	type QuickUnlockInput,

@@ -9,6 +9,25 @@ export {
 	resolveRepositoryForVault,
 } from "./services/account-context-resolver";
 export {
+	type AccountDeletionDeps,
+	type CredentialMirror,
+	deleteAccountEverywhere,
+	type InvalidationTarget,
+	invalidateAccountSession,
+	type LifecycleDeps,
+	type LifecycleOutcome,
+	type LifecycleServerClient,
+	type LifecycleStep,
+	type LifecycleStepFailure,
+	lockAccount,
+	lockAllAccounts,
+	NO_CREDENTIAL_MIRROR,
+	removeAccount,
+	type SessionCredentialRef,
+	signOutAccount,
+	wipeDevice,
+} from "./services/account-lifecycle";
+export {
 	type AccountInfo,
 	AccountResolver,
 	createStoredAccountRpcClient,
@@ -23,7 +42,6 @@ export {
 	type BiometricUnlockAvailability,
 	type CheckEmailResult,
 	checkEmailExists,
-	clearSession,
 	deriveSrpLoginProof,
 	type FinishLoginResponse,
 	getBiometricUnlockAvailability,

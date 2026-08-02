@@ -15,6 +15,7 @@ import {
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
+import type { LifecycleOutcome } from "../../services/account-lifecycle";
 import {
 	type AccountSessionManager,
 	getAccountSessionManager,
@@ -32,7 +33,8 @@ export interface UseAccountSwitcherResult {
 	isInitialized: boolean;
 	refresh(): Promise<void>;
 	switchAccount: UseMutationResult<void, Error, ActiveAccount, unknown>;
-	removeAccount: UseMutationResult<void, Error, string, unknown>;
+	/** Resolves the outcome so callers can branch on `remaining`/`activeAccount` without re-reading storage. */
+	removeAccount: UseMutationResult<LifecycleOutcome, Error, string, unknown>;
 	updateAccount: UseMutationResult<void, Error, AccountMetadata, unknown>;
 	lockAllAccounts: UseMutationResult<void, Error, void, unknown>;
 }
@@ -82,9 +84,7 @@ export function useAccountSwitcher(
 	});
 
 	const removeAccount = useMutation({
-		mutationFn: async (accountId: string) => {
-			await manager.removeAccount(accountId);
-		},
+		mutationFn: (accountId: string) => manager.removeAccount(accountId),
 	});
 
 	const updateAccount = useMutation({

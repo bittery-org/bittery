@@ -134,6 +134,15 @@ export class RpcClientError extends Error {
 	}
 }
 
+export function isUnauthorizedRpcError(error: unknown): boolean {
+	if (!error || typeof error !== "object" || !("data" in error)) {
+		return false;
+	}
+
+	const { data } = error as { data?: { code?: unknown } };
+	return data?.code === "UNAUTHORIZED";
+}
+
 function normalizeEndpointPath(pathname: string): string {
 	const withLeadingSlash = pathname.startsWith("/") ? pathname : `/${pathname}`;
 	const normalized = withLeadingSlash.replace(/\/+$/, "");

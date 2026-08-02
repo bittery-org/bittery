@@ -105,9 +105,8 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 	}, []);
 
 	const onSessionRevoked = useCallback(async () => {
-		// Server-side revocation is a sign-out, not a lock: `forgetSession` drops
-		// `session_data` too, so the quick-unlock prompt cannot reappear for a session
-		// the server has already killed.
+		// Server-side revocation is a sign-out, not a lock: the quick-unlock prompt must
+		// not reappear for a session the server has already killed.
 		await forgetActiveSession();
 		queryClient.clear();
 

@@ -8,7 +8,6 @@ import {
 	createTestItemCache,
 } from "../testing/account-store-harness";
 import {
-	clearSession,
 	deriveSrpLoginProof,
 	getBiometricUnlockAvailability,
 	type IAuthClient,
@@ -612,61 +611,5 @@ describe("storeUnlockSession active account", () => {
 			type: "single",
 			accountId: "account-b",
 		});
-	});
-});
-
-/**
- * `AccountStore` holds only a `PlatformPort` and cannot reach the record cache, so
- * sign-out has to sequence the two clears here. Leaving the cache behind is the leak
- * packages/storage/CONTEXT.md §4.2 names — and lock is deliberately not sign-out.
- */
-describe("clearSession item-cache handling", () => {
-	async function seeded() {
-		const { storage } = await makeStore();
-		const { cache: itemCache } = await createTestItemCache();
-		await storage.addAccount({
-			accountId: "acc-1",
-			email: "user@example.com",
-			userId: "user-1",
-			name: "User",
-			serverUrl: "https://cloud.example",
-			secretKeyHint: "ABCD",
-			addedAt: 1,
-			lastActiveAt: 1,
-			biometricEnabled: false,
-		});
-		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
-		await itemCache.setCachedItems(
-			[{ id: "item-1", vaultId: "vault-1" } as never],
-			"acc-1",
-		);
-		return { storage, itemCache };
-	}
-
-	it("wipes the account's cached ciphertext on a full sign-out", async () => {
-		const { storage, itemCache } = await seeded();
-
-		await clearSession(storage, itemCache, "acc-1", true);
-
-		expect(await itemCache.getCachedItems("acc-1")).toBeNull();
-	});
-
-	it("resolves the active account when the caller has no id", async () => {
-		const { storage, itemCache } = await seeded();
-
-		await clearSession(storage, itemCache, undefined, true);
-
-		expect(await itemCache.getCachedItems("acc-1")).toBeNull();
-		// Never the `"default"` segment: that belongs to a different account
-		// everywhere except web.
-		expect(await itemCache.getCachedItems()).toBeNull();
-	});
-
-	it("keeps the cache on a lock, so quick-unlock stays cheap", async () => {
-		const { storage, itemCache } = await seeded();
-
-		await clearSession(storage, itemCache, "acc-1", false);
-
-		expect(await itemCache.getCachedItems("acc-1")).toHaveLength(1);
 	});
 });

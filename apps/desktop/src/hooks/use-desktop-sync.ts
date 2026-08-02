@@ -5,6 +5,11 @@ import {
 	handleTravelModeSyncEvent,
 	type RpcVaultClient,
 } from "@bittery/core";
+import {
+	invalidateAccountSession,
+	type LifecycleOutcome,
+} from "@bittery/core/services/account-lifecycle";
+import { isUnauthorizedRpcError } from "@bittery/shared/rpc-client";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type {
 	OutboundQueueClient,
@@ -15,11 +20,7 @@ import { useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-	findAccountEmailBySessionId,
-	invalidateDesktopAccountSession,
-	isUnauthorizedRpcError,
-} from "@/lib/session-invalidation";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
 import {
 	getDesktopSyncStore,
@@ -238,49 +239,51 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		return matches[0]?.accountId;
 	}, []);
 
-	const handleAccountSessionInvalidation = useCallback(
-		async (email: string) => {
-			const normalizedEmail = email.toLowerCase();
-			const accounts = await storage.getAccountsList();
-			const account = accounts.find(
-				(candidate) => candidate.email.toLowerCase() === normalizedEmail,
-			);
-			if (!account) {
-				return;
+	/** The UI half of an invalidation; the record half already happened in core. */
+	const applyInvalidatedSession = useCallback(
+		async (outcome: LifecycleOutcome) => {
+			const invalidated = outcome.affected[0];
+			if (!invalidated) {
+				return null;
 			}
 
-			await invalidateDesktopAccountSession(account.accountId);
 			await queryClient.cancelQueries();
 			queryClient.clear();
 
-			const activeAccount = await storage.getActiveAccount();
-			if (
-				activeAccount?.type === "single" &&
-				activeAccount.accountId === account.accountId
-			) {
-				window.location.href = `/unlock?email=${encodeURIComponent(normalizedEmail)}`;
-				return;
+			if (outcome.wasActive) {
+				window.location.href = `/unlock?email=${encodeURIComponent(invalidated.email.toLowerCase())}`;
 			}
+			return invalidated;
 		},
 		[queryClient],
 	);
 
+	const handleAccountSessionInvalidation = useCallback(
+		async (email: string) => {
+			await applyInvalidatedSession(
+				await invalidateAccountSession({ email }, lifecycleDeps),
+			);
+		},
+		[applyInvalidatedSession],
+	);
+
 	const onSessionRevoked = useCallback(
 		async (payload: { sessionId: string }) => {
-			const revokedEmail = await findAccountEmailBySessionId(payload.sessionId);
-			if (!revokedEmail) {
+			const revoked = await applyInvalidatedSession(
+				await invalidateAccountSession(
+					{ sessionId: payload.sessionId },
+					lifecycleDeps,
+				),
+			);
+			if (!revoked) {
 				return;
 			}
 
-			await handleAccountSessionInvalidation(revokedEmail);
 			setSyncContexts((current) =>
-				current.filter(
-					(context) =>
-						context.email?.toLowerCase() !== revokedEmail.toLowerCase(),
-				),
+				current.filter((context) => context.accountId !== revoked.accountId),
 			);
 		},
-		[handleAccountSessionInvalidation],
+		[applyInvalidatedSession],
 	);
 
 	// Revalidate persisted sessions on startup/interval when online.

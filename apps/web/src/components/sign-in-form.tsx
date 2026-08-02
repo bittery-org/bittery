@@ -376,8 +376,7 @@ function SignInFormContent({
 						variant="link"
 						onClick={async () => {
 							// "Use a different account" must remove the quick-unlock offer,
-							// which lives in `session_data` — that is `forgetSession`, not
-							// `clearSession` (which only locks and keeps it).
+							// which a lock would keep.
 							await forgetActiveSession();
 							window.location.reload();
 						}}

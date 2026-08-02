@@ -19,7 +19,6 @@ import {
 	findAccountById,
 	findAccountByServerEmail,
 	normalizeAccountServerUrl,
-	resolveAccountScopeId,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
 import type { EncryptedData, ICrypto, KdfProfile } from "@bittery/types";
@@ -1076,39 +1075,6 @@ export async function getBiometricUnlockAvailability(
 		requiresPasswordReentry ||= state.requiresPasswordReentry;
 	}
 	return { canUnlock: false, requiresPasswordReentry };
-}
-
-/**
- * Clear session data for logout.
- *
- * `clearSecretKey` is what separates a **lock** from a **sign-out**:
- *
- * - `false` (lock): drop the session-bound secrets and keep everything that makes
- *   quick-unlock work — including the encrypted item cache, which is useless without
- *   the vault keys and expensive to rebuild.
- * - `true` (sign-out): wipe the account's stored data *and* its cached ciphertext.
- *   `AccountStore.clearAllStoredData` cannot reach the cache (it holds only a
- *   `PlatformPort`), so the caller has to sequence the second half. Skipping it is the
- *   leak described in packages/storage/CONTEXT.md §4.2.
- */
-export async function clearSession(
-	storage: AccountStore,
-	itemCache: ItemCache,
-	accountId?: string,
-	clearSecretKey = false,
-): Promise<void> {
-	if (!clearSecretKey) {
-		await storage.clearSession(accountId);
-		return;
-	}
-
-	// `ItemCache` has no notion of an active account, and omitting the id makes it
-	// write to the literal `"default"` segment. Resolve the real id here instead.
-	const resolvedAccountId = accountId ?? (await resolveAccountScopeId(storage));
-	await storage.clearAllStoredData(resolvedAccountId);
-	if (resolvedAccountId) {
-		await itemCache.clearItemCache(resolvedAccountId);
-	}
 }
 
 /**
