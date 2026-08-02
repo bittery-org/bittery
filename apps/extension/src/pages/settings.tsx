@@ -57,8 +57,7 @@ export function SettingsPage() {
 	const { theme, setTheme, isDesktopManaged } = useTheme();
 	const { accounts, activeAccount: activeSelection } = useAccountSwitcher();
 
-	const activeAccountId =
-		activeSelection?.type === "single" ? activeSelection.accountId : null;
+	const activeAccountId = activeSelection ?? null;
 	const activeAccount = accounts.find((a) => a.accountId === activeAccountId);
 
 	// Auto-lock timeout options (in milliseconds)

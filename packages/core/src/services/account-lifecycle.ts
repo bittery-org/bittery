@@ -10,9 +10,7 @@
  *
  * Three binding rules:
  *
- * - Every per-account entry point takes a **required** `accountId`. Omitting it
- *   makes `ItemCache` write the literal `"default"` segment (§4.1), which is
- *   only ever correct on web.
+ * - Every per-account entry point takes a **required** `accountId` (§4.1).
  * - Nothing here throws. A failed step is recorded in `failures` and the next
  *   step still runs, so a half-failed sequence never strands ciphertext whose
  *   keys are gone. `failures.length === 0` is the success test.
@@ -31,7 +29,7 @@
 
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { findAccountById } from "@bittery/storage/account-id";
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import { selectActiveAccountAfterRemoval } from "./select-active-account";
 
 /**
@@ -125,7 +123,7 @@ export type InvalidationTarget =
  */
 interface LifecyclePreState {
 	accounts: AccountMetadata[];
-	previousActive: ActiveAccount;
+	previousActive: ActiveAccountId;
 }
 
 async function readPreState(
@@ -275,7 +273,7 @@ async function removeOne(
 		return;
 	}
 	await step(failures, accountId, "set_active_account", () =>
-		deps.storage.setActiveAccount({ type: "single", accountId: successor }),
+		deps.storage.setActiveAccount(successor),
 	);
 }
 
@@ -287,7 +285,7 @@ async function resolveTarget(
 	failures: LifecycleStepFailure[],
 ): Promise<string | null> {
 	if (target === "active") {
-		return previousActive?.accountId ?? null;
+		return previousActive;
 	}
 	// An id the device does not know is still returned: a half-removed account
 	// must stay cleanable, so the full destructive path runs anyway.
@@ -338,7 +336,7 @@ async function buildOutcome(
 	const active = await step(failures, null, "read_account_state", () =>
 		storage.getActiveAccount(),
 	);
-	const activeAccountId = active?.accountId;
+	const activeAccountId = active ?? undefined;
 
 	return {
 		affected,
@@ -347,7 +345,7 @@ async function buildOutcome(
 			? (findAccountById(remaining, activeAccountId) ?? null)
 			: null,
 		wasActive: affected.some(
-			(account) => account.accountId === pre.previousActive?.accountId,
+			(account) => account.accountId === pre.previousActive,
 		),
 		remaining,
 		failures,
@@ -446,11 +444,6 @@ export async function wipeDevice(
 		await removeOne(account.accountId, pre, deps, failures);
 	}
 
-	// The only legitimate bare call in the module: the web `"default"` segment
-	// (§4.1) is named by no account, so nothing else can ever enumerate it.
-	await step(failures, null, "clear_item_cache", () =>
-		deps.itemCache.clearItemCache(),
-	);
 	// Device-scoped pass so an already-empty device still drops `device_key`,
 	// which only becomes droppable once no account is left to unwrap.
 	await step(failures, null, "clear_account_data", () =>

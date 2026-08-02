@@ -36,10 +36,9 @@ import { itemCache, storage } from "../services/storage";
 /**
  * `accountId` is deliberately non-nullable.
  *
- * It becomes `SyncSource.itemCacheAccountId`, and `ItemCache` falls back to the literal
- * collection segment `"default"` when it is not given one — so a `null` here would not fail,
- * it would silently read and write a collection that belongs to no account. Sync is simply
- * not enabled until a real account is resolved. See packages/storage/CONTEXT.md §4.1.
+ * It becomes `SyncSource.itemCacheAccountId`, and every `ItemCache` method now requires an
+ * `accountId` argument — there is no account-less collection to fall back to. Sync is simply
+ * not enabled until a real account is resolved.
  */
 interface SyncConnectionContext {
 	accountId: string;
@@ -106,8 +105,8 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
 	]);
 
 	const candidateIds: string[] = [];
-	if (activeAccount?.type === "single") {
-		candidateIds.push(activeAccount.accountId);
+	if (activeAccount) {
+		candidateIds.push(activeAccount);
 	}
 	for (const account of accounts) {
 		if (!candidateIds.includes(account.accountId)) {

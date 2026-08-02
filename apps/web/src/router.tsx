@@ -115,7 +115,7 @@ const rpcClient = createSessionRefreshingRpcClient({
 	},
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		await initializeStorage();
-		const accountId = (await storage.getActiveAccount())?.accountId;
+		const accountId = await storage.getActiveAccount();
 		if (!accountId) {
 			return;
 		}

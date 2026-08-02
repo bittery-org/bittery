@@ -31,7 +31,7 @@ const LAST_SELECTED_ITEM_BY_SCOPE_KEY =
 
 function getSelectionScope(activeAccount: PopupActiveAccount): string {
 	if (!activeAccount) return "none";
-	return `single:${activeAccount.accountId}`;
+	return `single:${activeAccount}`;
 }
 
 function readSelectedItemForScope(scope: string): string | null {
@@ -267,8 +267,7 @@ export function VaultPage() {
 
 		try {
 			const activeAccount = await storage.getActiveAccount();
-			const accountId =
-				activeAccount?.type === "single" ? activeAccount.accountId : null;
+			const accountId = activeAccount ?? null;
 			const serverUrl = accountId
 				? await storage.getServerUrl(accountId)
 				: null;

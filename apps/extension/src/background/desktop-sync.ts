@@ -116,20 +116,14 @@ class DesktopSyncService {
 								accounts,
 							});
 							if (accountId) {
-								await storage.setActiveAccount({
-									type: "single",
-									accountId,
-								});
+								await storage.setActiveAccount(accountId);
 							}
 						} else {
 							const account = accounts.find(
 								(item) => item.accountId === previousState.activeAccount,
 							);
 							if (account) {
-								await storage.setActiveAccount({
-									type: "single",
-									accountId: account.accountId,
-								});
+								await storage.setActiveAccount(account.accountId);
 							}
 						}
 					} catch (error) {
@@ -233,20 +227,14 @@ class DesktopSyncService {
 						accounts: refreshedAccounts,
 					});
 					if (accountId) {
-						await storage.setActiveAccount({
-							type: "single",
-							accountId,
-						});
+						await storage.setActiveAccount(accountId);
 					}
 				} else {
 					const active = refreshedAccounts.find(
 						(item) => item.accountId === accountsData.activeAccount,
 					);
 					if (active) {
-						await storage.setActiveAccount({
-							type: "single",
-							accountId: active.accountId,
-						});
+						await storage.setActiveAccount(active.accountId);
 					}
 				}
 			}
@@ -423,10 +411,7 @@ class DesktopSyncService {
 
 		// Update active account in extension storage to match desktop
 		try {
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: event.accountId,
-			});
+			await storage.setActiveAccount(event.accountId);
 			// The background wires no platform callbacks, so whichever background caller
 			// runs first after a service-worker wake may construct the shared manager.
 			await (
@@ -519,8 +504,7 @@ class DesktopSyncService {
 			const activeAccount = await storage.getActiveAccount();
 			const state: DesktopModeStateSnapshot = {
 				lastConnectedAt: Date.now(),
-				activeAccount:
-					activeAccount?.type === "single" ? activeAccount.accountId : null,
+				activeAccount: activeAccount ?? null,
 			};
 			await chrome.storage.local.set({ [STORAGE_KEY_DESKTOP_MODE]: state });
 		} catch (error) {

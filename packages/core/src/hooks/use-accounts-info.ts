@@ -47,10 +47,7 @@ export function useAccountsInfo(options: UseAccountsInfoOptions = {}) {
 		: activeAccount;
 
 	const activeAccountKey = useMemo(
-		() =>
-			effectiveActiveAccount?.type === "single"
-				? `single:${effectiveActiveAccount.accountId}`
-				: (effectiveActiveAccount?.type ?? "none"),
+		() => effectiveActiveAccount ?? "none",
 		[effectiveActiveAccount],
 	);
 

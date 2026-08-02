@@ -17,27 +17,21 @@ export const Route = createFileRoute("/")({
 
 		if (!activeAccount) {
 			// Has accounts but none active, set first as active
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: accountsList[0].accountId,
-			});
-			activeAccount = {
-				type: "single",
-				accountId: accountsList[0].accountId,
-			};
+			await storage.setActiveAccount(accountsList[0].accountId);
+			activeAccount = accountsList[0].accountId;
 		}
 
 		// Single account mode: check if active account has valid session
 		const activeAccountEmail = accountsList.find(
-			(account) => account.accountId === activeAccount.accountId,
+			(account) => account.accountId === activeAccount,
 		)?.email;
-		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
+		const sessionValid = await storage.isSessionValid(activeAccount);
 
 		if (sessionValid) {
 			// This guard can run before AccountProvider constructs the manager; with no
 			// manager there is no verified unlock, so fall through to /unlock.
 			const restored = await peekAccountSessionManager()?.unlockAccount(
-				activeAccount.accountId,
+				activeAccount,
 				true,
 			);
 			if (restored) {

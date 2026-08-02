@@ -93,7 +93,7 @@ export function createMobileAutolockService(
 			return getActiveAccountId();
 		}
 		const active = await storage.getActiveAccount();
-		return active?.type === "single" ? active.accountId : undefined;
+		return active ?? undefined;
 	};
 
 	const clearBackgroundTimestamps = async (): Promise<void> => {

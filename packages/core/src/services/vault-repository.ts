@@ -107,11 +107,8 @@ export class VaultRepository {
 	private serverUrl?: string;
 
 	/**
-	 * `accountId` is required, not optional. Every cache read and write below keys off
-	 * it, and `ItemCache` falls back to the literal account segment `"default"` when it
-	 * is omitted — so an undefined id here would silently read and write another
-	 * account's collection instead of failing. The only constructor call sites
-	 * (`VaultRepositoryCoordinator.getOrCreate`, and the tests) always have one.
+	 * One repo is bound to one account for its whole life: every cache read, write,
+	 * RPC and crypto call below keys off this `accountId` rather than re-resolving.
 	 */
 	constructor(
 		private readonly crypto: ICrypto,
@@ -231,10 +228,11 @@ export class VaultRepository {
 		}
 	}
 
-	private shouldHandleAccountId(accountId?: string): boolean {
-		if (!accountId) {
-			return true;
-		}
+	/**
+	 * A repo only ever handles its own account. The former "no accountId means
+	 * everyone" branch applied scopeless sync events to every open repo.
+	 */
+	private isForThisAccount(accountId: string): boolean {
 		return this.accountId === accountId;
 	}
 
@@ -523,9 +521,9 @@ export class VaultRepository {
 
 	async upsertEncrypted(
 		item: CachedEncryptedItem,
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		const decrypted = await this.decryptItem(item);
@@ -850,13 +848,13 @@ export class VaultRepository {
 	// --- SyncItemCache surface (packages/sync/src/types.ts) ---
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
 		await this.upsertEncrypted(item, accountId);
 	}
 
-	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+	async removeCachedItem(itemId: string, accountId: string): Promise<void> {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		await this.removeItem(itemId);
@@ -864,9 +862,9 @@ export class VaultRepository {
 
 	async upsertCachedVault(
 		vault: CachedVaultMetadata,
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		this.vaults.set(vault.id, {
@@ -891,9 +889,9 @@ export class VaultRepository {
 
 	async syncVaultKeys(
 		vaultKeys: VaultKeyData[],
-		accountId?: string,
+		accountId: string,
 	): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 
@@ -907,8 +905,8 @@ export class VaultRepository {
 		this.emit();
 	}
 
-	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+	async removeCachedVault(vaultId: string, accountId: string): Promise<void> {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		this.vaults.delete(vaultId);
@@ -922,8 +920,8 @@ export class VaultRepository {
 		this.emit();
 	}
 
-	async clearItemCache(accountId?: string): Promise<void> {
-		if (!this.shouldHandleAccountId(accountId)) {
+	async clearItemCache(accountId: string): Promise<void> {
+		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
 		await this.itemCache.clearItemCache(this.accountId);

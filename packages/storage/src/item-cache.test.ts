@@ -170,12 +170,12 @@ describe("ItemCache per-account isolation", () => {
 		);
 	});
 
-	it("uses the 'default' account segment when accountId is omitted", async () => {
+	it("never leaks one account's items into another's collection", async () => {
 		const { cache, port } = makeCache();
-		await cache.setCachedItems([item("i1", "v1")]);
-		expect(port.collections()).toContain(itemsCollection("default"));
-		expect(ids(await cache.getCachedItems())).toEqual(["i1"]);
-		expect(await cache.getCachedItems("a")).toBeNull();
+		await cache.setCachedItems([item("i1", "v1")], "a");
+		expect(port.collections()).toContain(itemsCollection("a"));
+		expect(port.collections()).not.toContain(itemsCollection("b"));
+		expect(await cache.getCachedItems("b")).toBeNull();
 	});
 });
 

@@ -125,7 +125,7 @@ describe("unlock all accounts", () => {
 
 	it("returns the user to the account they were last using", async () => {
 		const { storage } = await createStorage();
-		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
+		await storage.setActiveAccount("acc-1");
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
@@ -135,10 +135,7 @@ describe("unlock all accounts", () => {
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
 		expect(outcome.failed).toEqual([]);
 		expect(outcome.activeAccountId).toBe("acc-1");
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(await storage.getActiveAccount()).toEqual("acc-1");
 		expect((await storage.getUnlockedAccounts()).sort()).toEqual([
 			"acc-1",
 			"acc-2",
@@ -165,10 +162,7 @@ describe("unlock all accounts", () => {
 			},
 		]);
 		// The previously active account is gone, so an unlocked one takes over.
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(await storage.getActiveAccount()).toEqual("acc-2");
 	});
 
 	it("reports no_auth_token when the account has a secret key but no token", async () => {
@@ -231,7 +225,7 @@ describe("unlock all accounts", () => {
 
 	it("does not move the active account when nothing unlocks", async () => {
 		const { storage } = await createStorage({ withSecretKey: [] });
-		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
+		await storage.setActiveAccount("acc-1");
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
@@ -240,10 +234,7 @@ describe("unlock all accounts", () => {
 
 		expect(outcome.unlocked).toEqual([]);
 		expect(outcome.activeAccountId).toBeUndefined();
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(await storage.getActiveAccount()).toEqual("acc-1");
 	});
 
 	it("unlocks every account restored by one biometric prompt", async () => {
@@ -257,10 +248,7 @@ describe("unlock all accounts", () => {
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
 		expect(outcome.failed).toEqual([]);
 		expect(port.calls.biometricAuthenticate).toBe(1);
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(await storage.getActiveAccount()).toEqual("acc-1");
 	});
 
 	it("excludes an account that fails travel mode from active selection", async () => {
@@ -268,7 +256,7 @@ describe("unlock all accounts", () => {
 			biometric: true,
 			verifiable: ["acc-2"],
 		});
-		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
+		await storage.setActiveAccount("acc-1");
 
 		const outcome = await unlockAllWithBiometric(
 			{ promptMessage: PROMPT },
@@ -283,15 +271,12 @@ describe("unlock all accounts", () => {
 				reason: "travel_mode_unverified",
 			},
 		]);
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(await storage.getActiveAccount()).toEqual("acc-2");
 	});
 
 	it("reports travel_mode_unverified when a password unlock cannot verify the policy", async () => {
 		const { storage } = await createStorage({ verifiable: ["acc-2"] });
-		await storage.setActiveAccount({ type: "single", accountId: "acc-1" });
+		await storage.setActiveAccount("acc-1");
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
@@ -306,10 +291,7 @@ describe("unlock all accounts", () => {
 				reason: "travel_mode_unverified",
 			},
 		]);
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(await storage.getActiveAccount()).toEqual("acc-2");
 		// Fail closed: the unverified account must not stay unlocked.
 		expect(await storage.getUnlockedAccounts()).toEqual(["acc-2"]);
 	});
@@ -348,10 +330,7 @@ describe("unlock one account", () => {
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
 		expect(await storage.getUnlockedAccounts()).toEqual(["acc-2"]);
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(await storage.getActiveAccount()).toEqual("acc-2");
 	});
 
 	it("reports an unknown account instead of throwing", async () => {

@@ -141,10 +141,7 @@ export default function AutofillUnlockScreen() {
 				}
 
 				// Set as active account
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: activeAccount.accountId,
-				});
+				await storage.setActiveAccount(activeAccount.accountId);
 				await refreshAccounts();
 
 				// Show success message and close (user returns to autofill)

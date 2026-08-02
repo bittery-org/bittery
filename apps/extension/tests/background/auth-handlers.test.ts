@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import path from "node:path";
 import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
+import type { ActiveAccountId } from "@bittery/storage/types";
 
 // Regression coverage for the "Unlock All" password flow in the single-account
 // case. The bug: the handler treated the entries of `unlocked` (which are
@@ -17,7 +18,7 @@ interface StoredAccount {
 }
 
 let accounts: StoredAccount[] = [];
-let activeAccount: { type: "single"; accountId: string } | null = null;
+let activeAccount: ActiveAccountId = null;
 /** `null` unlocks every account; otherwise only the listed accountIds unlock. */
 let unlockableAccountIds: string[] | null = null;
 const setActiveAccountCalls: unknown[] = [];
@@ -94,10 +95,7 @@ mock.module("@bittery/core/services/unlock", () => ({
 			accounts,
 		});
 		if (activeAccountId) {
-			await storageMock.setActiveAccount({
-				type: "single",
-				accountId: activeAccountId,
-			});
+			await storageMock.setActiveAccount(activeAccountId);
 		}
 		return { activeAccountId, unlocked, failed };
 	},
@@ -199,9 +197,7 @@ describe("handleQuickUnlockAll", () => {
 			failed: [],
 		});
 		// The active account must be the unlocked accountId, not undefined.
-		expect(setActiveAccountCalls).toEqual([
-			{ type: "single", accountId: "acc-uuid-1" },
-		]);
+		expect(setActiveAccountCalls).toEqual(["acc-uuid-1"]);
 		// MUK lookup must use the accountId directly.
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-1"]);
 		expect(setMasterUnlockKeyCalls.length).toBe(1);
@@ -217,9 +213,7 @@ describe("handleQuickUnlockAll", () => {
 
 		expect(response.success).toBe(true);
 		// All accounts stay unlocked, but the active pointer is a single account.
-		expect(setActiveAccountCalls).toEqual([
-			{ type: "single", accountId: "acc-uuid-1" },
-		]);
+		expect(setActiveAccountCalls).toEqual(["acc-uuid-1"]);
 		// MUK is seeded from the first unlocked accountId.
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-1"]);
 	});
@@ -229,13 +223,11 @@ describe("handleQuickUnlockAll", () => {
 			{ accountId: "acc-uuid-1", email: "a@example.com" },
 			{ accountId: "acc-uuid-2", email: "b@example.com" },
 		];
-		activeAccount = { type: "single", accountId: "acc-uuid-2" };
+		activeAccount = "acc-uuid-2";
 
 		await handleQuickUnlockAll({ password: "pw" });
 
-		expect(setActiveAccountCalls).toEqual([
-			{ type: "single", accountId: "acc-uuid-2" },
-		]);
+		expect(setActiveAccountCalls).toEqual(["acc-uuid-2"]);
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-uuid-2"]);
 	});
 
@@ -244,7 +236,7 @@ describe("handleQuickUnlockAll", () => {
 			{ accountId: "acc-uuid-1", email: "a@example.com" },
 			{ accountId: "acc-uuid-2", email: "b@example.com" },
 		];
-		activeAccount = { type: "single", accountId: "acc-uuid-2" };
+		activeAccount = "acc-uuid-2";
 		unlockableAccountIds = ["acc-uuid-1"];
 
 		const response = await handleQuickUnlockAll({ password: "pw" });
@@ -259,9 +251,7 @@ describe("handleQuickUnlockAll", () => {
 				},
 			],
 		});
-		expect(setActiveAccountCalls).toEqual([
-			{ type: "single", accountId: "acc-uuid-1" },
-		]);
+		expect(setActiveAccountCalls).toEqual(["acc-uuid-1"]);
 	});
 
 	test("fails when no account unlocks", async () => {
@@ -278,7 +268,7 @@ describe("handleQuickUnlockAll", () => {
 describe("handleLogout", () => {
 	test("drops the session and its item cache together", async () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
-		activeAccount = { type: "single", accountId: "acc-uuid-1" };
+		activeAccount = "acc-uuid-1";
 
 		const response = await handleLogout();
 
@@ -289,7 +279,7 @@ describe("handleLogout", () => {
 
 	test("reports a failed storage step instead of claiming success", async () => {
 		accounts = [{ accountId: "acc-uuid-1", email: "a@example.com" }];
-		activeAccount = { type: "single", accountId: "acc-uuid-1" };
+		activeAccount = "acc-uuid-1";
 		forgetSessionError = new Error("chrome.storage unavailable");
 
 		const response = await handleLogout();

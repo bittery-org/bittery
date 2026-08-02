@@ -84,7 +84,7 @@ describe("performDeltaSync vault mapping", () => {
 	it("keeps the team type when refreshing vault keys after a member change", async () => {
 		const { cache, vaultKeys } = recordingCache();
 
-		await performDeltaSync(client(), cache, event());
+		await performDeltaSync(client(), cache, event(), "acc_1");
 
 		expect(vaultKeys).toHaveLength(1);
 		expect(vaultKeys[0]?.vaultType).toBe("team");
@@ -95,7 +95,12 @@ describe("performDeltaSync vault mapping", () => {
 	it("keeps the team type when caching vault metadata after a vault update", async () => {
 		const { cache, vaults } = recordingCache();
 
-		await performDeltaSync(client(), cache, event({ type: "vault_updated" }));
+		await performDeltaSync(
+			client(),
+			cache,
+			event({ type: "vault_updated" }),
+			"acc_1",
+		);
 
 		const cached = vaults.find((vault) => vault.id === "vault_1");
 		expect(cached?.type).toBe("team");
@@ -104,7 +109,12 @@ describe("performDeltaSync vault mapping", () => {
 	it("still refreshes vault keys when a vault is created", async () => {
 		const { cache, vaultKeys } = recordingCache();
 
-		await performDeltaSync(client(), cache, event({ type: "vault_created" }));
+		await performDeltaSync(
+			client(),
+			cache,
+			event({ type: "vault_created" }),
+			"acc_1",
+		);
 
 		expect(vaultKeys[0]?.vaultType).toBe("team");
 	});

@@ -37,10 +37,7 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 	DEFAULT_AUTO_LOCK_TIMEOUT_MS: -1,
 	storage: {
 		getAccountsList: async () => ACCOUNTS,
-		getActiveAccount: async () => ({
-			type: "single" as const,
-			accountId: "acc-1",
-		}),
+		getActiveAccount: async () => "acc-1",
 		getAuthToken: async () => "token",
 		getServerUrl: async () => "http://localhost:3000",
 		lockAllAccounts: async () => {

@@ -1,7 +1,7 @@
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { AccountStore } from "@bittery/storage";
-import type { ActiveAccount } from "@bittery/storage/types";
+import type { ActiveAccountId } from "@bittery/storage/types";
 import {
 	createStoredAccountRpcClient,
 	type DefaultRpcClient,
@@ -26,7 +26,7 @@ export interface AccountInfo {
 }
 
 export interface ResolveAccountsResult {
-	activeAccount: ActiveAccount;
+	activeAccount: ActiveAccountId;
 	accountsInfo: AccountInfo[];
 }
 
@@ -78,7 +78,7 @@ export class AccountResolver {
 	constructor(private readonly storage: AccountStore) {}
 
 	async resolveAccounts(
-		activeAccountOverride?: ActiveAccount,
+		activeAccountOverride?: ActiveAccountId,
 	): Promise<ResolveAccountsResult> {
 		const activeAccount =
 			typeof activeAccountOverride === "undefined"
@@ -92,7 +92,7 @@ export class AccountResolver {
 			};
 		}
 
-		const accountIds = [activeAccount.accountId];
+		const accountIds = [activeAccount];
 
 		const accountsInfo = await this.buildAccountInfos(accountIds);
 

@@ -14,7 +14,7 @@ import {
 	resolveActiveAccountId,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import {
 	type CredentialMirror,
 	type LifecycleDeps,
@@ -39,7 +39,7 @@ export interface AccountSessionManagerOptions {
 	 * app, so a platform that mirrors nothing cannot silently forget to answer twice.
 	 */
 	credentialMirror?: CredentialMirror;
-	onActiveChanged?: (active: ActiveAccount) => void | Promise<void>;
+	onActiveChanged?: (active: ActiveAccountId) => void | Promise<void>;
 	onLockBroadcast?: (reason: string) => void | Promise<void>;
 	invalidateQueries?: (keys: string[][]) => void | Promise<void>;
 	verifyUnlockPolicy?: (accountId: string) => void | Promise<void>;
@@ -60,7 +60,7 @@ type LockState = "locked" | "unlocked";
 export class AccountSessionManager {
 	private accounts: AccountMetadata[] = [];
 	private lockState = new Map<string, LockState>();
-	private active: ActiveAccount = null;
+	private active: ActiveAccountId = null;
 	private initialized = false;
 	private initialization: Promise<void> | null = null;
 	private snapshot = 0;
@@ -140,10 +140,7 @@ export class AccountSessionManager {
 		// that does not resolve to a known account is treated as "no active
 		// account" so the normal selection path takes over.
 		this.active =
-			active?.type === "single" &&
-			!resolveActiveAccountId(active.accountId, accounts)
-				? null
-				: active;
+			active && !resolveActiveAccountId(active, accounts) ? null : active;
 		this.lockState.clear();
 		const verifiedUnlocked = new Set(
 			(
@@ -172,15 +169,15 @@ export class AccountSessionManager {
 		return this.accounts;
 	}
 
-	getActiveAccount(): ActiveAccount {
+	getActiveAccount(): ActiveAccountId {
 		return this.active;
 	}
 
 	getActiveAccountMetadata(): AccountMetadata | null {
-		if (this.active?.type !== "single") {
+		if (!this.active) {
 			return null;
 		}
-		return findAccountById(this.accounts, this.active.accountId) ?? null;
+		return findAccountById(this.accounts, this.active) ?? null;
 	}
 
 	getUnlockedAccountIds(): string[] {
@@ -193,30 +190,26 @@ export class AccountSessionManager {
 		return this.lockState.get(accountId) === "unlocked";
 	}
 
-	async switchAccount(account: ActiveAccount): Promise<void> {
-		await this.storage.setActiveAccount(account);
-		this.active = account;
+	async switchAccount(accountId: ActiveAccountId): Promise<void> {
+		await this.storage.setActiveAccount(accountId);
+		this.active = accountId;
 
-		if (account?.type === "single") {
-			const meta = findAccountById(this.accounts, account.accountId);
+		if (accountId) {
+			const meta = findAccountById(this.accounts, accountId);
 			if (meta) {
 				meta.lastActiveAt = Date.now();
 				// Persist so storage-backed sorting sees the real value after
 				// reload. addAccount upserts an existing account by accountId.
 				await this.storage.addAccount(meta);
 			}
-			if (!this.isUnlocked(account.accountId)) {
-				let restored = await this.storage.tryRestoreSession(
-					true,
-					account.accountId,
-				);
-				if (restored)
-					restored = await this.verifyUnlockPolicy(account.accountId);
-				this.lockState.set(account.accountId, restored ? "unlocked" : "locked");
+			if (!this.isUnlocked(accountId)) {
+				let restored = await this.storage.tryRestoreSession(true, accountId);
+				if (restored) restored = await this.verifyUnlockPolicy(accountId);
+				this.lockState.set(accountId, restored ? "unlocked" : "locked");
 			}
 		}
 
-		await this.options.onActiveChanged?.(account);
+		await this.options.onActiveChanged?.(accountId);
 		await this.options.invalidateQueries?.([
 			["accounts"],
 			["auth"],
@@ -255,7 +248,7 @@ export class AccountSessionManager {
 		};
 
 		await this.storage.addAccount(metadata);
-		await this.storage.setActiveAccount({ type: "single", accountId });
+		await this.storage.setActiveAccount(accountId);
 		await this.refresh();
 		return accountId;
 	}

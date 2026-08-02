@@ -79,19 +79,31 @@ export function resolveAccountIdFromEmailInList(
 
 /**
  * Resolve a storage scope identifier (accountId or display email) to an accountId.
- * Falls back to the active single account when scope is omitted.
+ * Falls back to the active account when scope is omitted.
  *
- * `AccountStore` keys by accountId on all four platforms, so a scope that matches
- * neither an id nor exactly one email is genuinely unresolvable rather than
- * "probably the active account".
+ * Throws rather than returning `undefined`. An unresolved scope used to flow into
+ * `AccountStore`, whose omitted-accountId fallback resolves to the *active* account —
+ * so a scope naming one account silently read and wrote another's data.
  */
 export async function resolveAccountScopeId(
 	storage: AccountStore,
 	scope?: string,
+	opts?: { errorMessage?: string },
+): Promise<string> {
+	const resolved = await tryResolveAccountScopeId(storage, scope);
+	if (!resolved) {
+		throw new Error(opts?.errorMessage ?? "Account identity is required");
+	}
+	return resolved;
+}
+
+/** Split out only so {@link resolveAccountScopeId} reads as resolve-or-throw. */
+async function tryResolveAccountScopeId(
+	storage: AccountStore,
+	scope?: string,
 ): Promise<string | undefined> {
 	if (!scope) {
-		const active = await storage.getActiveAccount();
-		return active?.type === "single" ? active.accountId : undefined;
+		return (await storage.getActiveAccount()) ?? undefined;
 	}
 
 	const accounts = await storage.getAccountsList();

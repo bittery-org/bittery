@@ -68,7 +68,7 @@ export async function initializeStorage(): Promise<void> {
 export type {
 	AccountMetadata,
 	AccountStore,
-	ActiveAccount,
+	ActiveAccountId,
 	BiometricAuthResult,
 	BiometricErrorType,
 	ItemCache,

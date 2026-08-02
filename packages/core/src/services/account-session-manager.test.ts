@@ -27,7 +27,7 @@ async function createStore(
 		accountMetadata({ accountId: "acc-2", addedAt: 2, lastActiveAt: 2 }),
 		{ unlocked: opts.unlockAcc2 ?? false },
 	);
-	await store.setActiveAccount({ type: "single", accountId: "acc-1" });
+	await store.setActiveAccount("acc-1");
 	return store;
 }
 
@@ -82,21 +82,12 @@ describe("AccountSessionManager", () => {
 		});
 
 		await manager.initialize();
-		await manager.switchAccount({ type: "single", accountId: "acc-2" });
+		await manager.switchAccount("acc-2");
 
 		expect(clearSession).not.toHaveBeenCalled();
-		expect(setActiveAccount).toHaveBeenCalledWith({
-			type: "single",
-			accountId: "acc-2",
-		});
-		expect(onActiveChanged).toHaveBeenCalledWith({
-			type: "single",
-			accountId: "acc-2",
-		});
-		expect(manager.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(setActiveAccount).toHaveBeenCalledWith("acc-2");
+		expect(onActiveChanged).toHaveBeenCalledWith("acc-2");
+		expect(manager.getActiveAccount()).toEqual("acc-2");
 		expect(manager.isUnlocked("acc-1")).toBe(true);
 		expect(manager.isUnlocked("acc-2")).toBe(true);
 	});
@@ -111,7 +102,7 @@ describe("AccountSessionManager", () => {
 		});
 
 		await manager.initialize();
-		await manager.switchAccount({ type: "single", accountId: "acc-2" });
+		await manager.switchAccount("acc-2");
 
 		expect(tryRestoreSession).not.toHaveBeenCalled();
 		expect(manager.getUnlockedAccountIds().sort()).toEqual(["acc-1", "acc-2"]);
@@ -128,7 +119,7 @@ describe("AccountSessionManager", () => {
 		});
 
 		await manager.initialize();
-		await manager.switchAccount({ type: "single", accountId: "acc-2" });
+		await manager.switchAccount("acc-2");
 
 		expect(tryRestoreSession).toHaveBeenCalledWith(true, "acc-2");
 		expect(tryRestoreSession).toHaveBeenCalledTimes(1);
@@ -194,14 +185,8 @@ describe("AccountSessionManager", () => {
 		// The successor is written once, and never a `null` on the way there: the
 		// pointer must not be observable as empty while accounts remain.
 		expect(setActiveAccount).toHaveBeenCalledTimes(1);
-		expect(setActiveAccount).toHaveBeenCalledWith({
-			type: "single",
-			accountId: "acc-2",
-		});
-		expect(manager.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(setActiveAccount).toHaveBeenCalledWith("acc-2");
+		expect(manager.getActiveAccount()).toEqual("acc-2");
 		expect(outcome.failures).toEqual([]);
 		expect(outcome.wasActive).toBe(true);
 		expect(outcome.remaining.map((account) => account.accountId)).toEqual([
@@ -230,10 +215,7 @@ describe("AccountSessionManager", () => {
 		);
 		expect(manager.isUnlocked("acc-1")).toBe(false);
 		expect(onActiveChanged).toHaveBeenCalledTimes(1);
-		expect(onActiveChanged).toHaveBeenCalledWith({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(onActiveChanged).toHaveBeenCalledWith("acc-2");
 	});
 
 	it("removeAccount purges the injected credential mirror", async () => {
@@ -311,20 +293,14 @@ describe("AccountSessionManager", () => {
 		await manager.removeAccount("acc-2");
 
 		expect(setActiveAccount).not.toHaveBeenCalled();
-		expect(manager.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(manager.getActiveAccount()).toEqual("acc-1");
 	});
 
 	it("treats a stored active accountId that matches no account as null", async () => {
 		// Older builds persisted an email into the accountId field. It reads back
 		// as a valid-looking id, so refresh must validate it against the list.
 		const storage = await createStore();
-		await storage.setActiveAccount({
-			type: "single",
-			accountId: "a@test.com",
-		});
+		await storage.setActiveAccount("a@test.com");
 		const manager = new AccountSessionManager({
 			storage,
 			itemCache,
@@ -339,7 +315,7 @@ describe("AccountSessionManager", () => {
 
 	it("keeps a stored active accountId that matches a known account", async () => {
 		const storage = await createStore();
-		await storage.setActiveAccount({ type: "single", accountId: "acc-2" });
+		await storage.setActiveAccount("acc-2");
 		const manager = new AccountSessionManager({
 			storage,
 			itemCache,
@@ -348,10 +324,7 @@ describe("AccountSessionManager", () => {
 
 		await manager.initialize();
 
-		expect(manager.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(manager.getActiveAccount()).toEqual("acc-2");
 	});
 
 	it("clears a restored session when travel mode cannot be verified", async () => {

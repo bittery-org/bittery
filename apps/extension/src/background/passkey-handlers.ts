@@ -268,8 +268,8 @@ async function resolveAccountEmailForItem(
 	}
 
 	const activeAccount = await storage.getActiveAccount();
-	return activeAccount?.type === "single"
-		? await resolveEmailFromAccountId(activeAccount.accountId)
+	return activeAccount
+		? await resolveEmailFromAccountId(activeAccount)
 		: undefined;
 }
 

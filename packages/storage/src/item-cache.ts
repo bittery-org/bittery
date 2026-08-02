@@ -31,16 +31,6 @@ import type { RecordPort } from "./record-port";
  */
 const META_RECORD_ID = "meta";
 
-/**
- * Collection-name account segment used when a caller omits `accountId`.
- *
- * `ItemCache` deliberately has no `AccountStore` dependency — they are siblings, not nested
- * — so it cannot resolve "the active account". On web there is exactly one implicit account
- * today, and this constant preserves that behaviour. Multi-account callers must pass an
- * explicit `accountId`.
- */
-const DEFAULT_ACCOUNT_SEGMENT = "default";
-
 /** Schema version of {@link ItemCacheStateDocument}. Bump when the shape changes. */
 export const ITEM_CACHE_STATE_VERSION = 1 as const;
 
@@ -78,42 +68,39 @@ export interface ItemCache {
 	/** Replaces the whole set for the account. Not a merge. */
 	setCachedItems(
 		items: CachedEncryptedItem[],
-		accountId?: string,
+		accountId: string,
 	): Promise<void>;
 	/** `null` means "never synced"; `[]` means "synced, and there is nothing". */
-	getCachedItems(accountId?: string): Promise<CachedEncryptedItem[] | null>;
+	getCachedItems(accountId: string): Promise<CachedEncryptedItem[] | null>;
 	/** Exactly one `recordPut`. */
-	upsertCachedItem(
-		item: CachedEncryptedItem,
-		accountId?: string,
-	): Promise<void>;
+	upsertCachedItem(item: CachedEncryptedItem, accountId: string): Promise<void>;
 	/** Exactly one `recordDelete`. */
-	removeCachedItem(itemId: string, accountId?: string): Promise<void>;
+	removeCachedItem(itemId: string, accountId: string): Promise<void>;
 
 	// --- vaults ---
 	/** Replaces the whole set for the account. Not a merge. */
 	setCachedVaults(
 		vaults: CachedVaultMetadata[],
-		accountId?: string,
+		accountId: string,
 	): Promise<void>;
 	/** `null` means "never synced"; `[]` means "synced, and there is nothing". */
-	getCachedVaults(accountId?: string): Promise<CachedVaultMetadata[] | null>;
+	getCachedVaults(accountId: string): Promise<CachedVaultMetadata[] | null>;
 	upsertCachedVault(
 		vault: CachedVaultMetadata,
-		accountId?: string,
+		accountId: string,
 	): Promise<void>;
 	/** Also removes every cached item belonging to that vault. */
-	removeCachedVault(vaultId: string, accountId?: string): Promise<void>;
+	removeCachedVault(vaultId: string, accountId: string): Promise<void>;
 
 	// --- metadata ---
-	getItemCacheMetadata(accountId?: string): Promise<ItemCacheMetadata | null>;
+	getItemCacheMetadata(accountId: string): Promise<ItemCacheMetadata | null>;
 	setItemCacheMetadata(
 		metadata: ItemCacheMetadata,
-		accountId?: string,
+		accountId: string,
 	): Promise<void>;
 
 	/** Wipes items, vaults and metadata **for this account only**. */
-	clearItemCache(accountId?: string): Promise<void>;
+	clearItemCache(accountId: string): Promise<void>;
 }
 
 // ============================================================================
@@ -170,14 +157,6 @@ function coldState(): ItemCacheStateDocument {
 
 export function createItemCache(options: ItemCacheOptions): ItemCache {
 	const { port } = options;
-
-	/**
-	 * The account segment of every collection name. `ItemCache` never resolves the active
-	 * account — see {@link DEFAULT_ACCOUNT_SEGMENT}.
-	 */
-	function segment(accountId?: string): string {
-		return accountId ? accountId : DEFAULT_ACCOUNT_SEGMENT;
-	}
 
 	// ------------------------------------------------------------------
 	// The meta record — the one place cold-vs-empty and metadata are tracked
@@ -280,77 +259,73 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 
 		async setCachedItems(
 			items: CachedEncryptedItem[],
-			accountId?: string,
+			accountId: string,
 		): Promise<void> {
-			const account = segment(accountId);
 			await replaceCollection(
-				account,
-				itemsCollection(account),
+				accountId,
+				itemsCollection(accountId),
 				items,
 				"items",
 			);
 		},
 
 		async getCachedItems(
-			accountId?: string,
+			accountId: string,
 		): Promise<CachedEncryptedItem[] | null> {
-			const account = segment(accountId);
 			return readCollection<CachedEncryptedItem>(
-				itemsCollection(account),
+				itemsCollection(accountId),
 				"item",
-				async () => (await readState(account)).itemsPrimed,
+				async () => (await readState(accountId)).itemsPrimed,
 			);
 		},
 
 		/** One `recordPut`. Never reads the collection. */
 		async upsertCachedItem(
 			item: CachedEncryptedItem,
-			accountId?: string,
+			accountId: string,
 		): Promise<void> {
 			await port.recordPut(
-				itemsCollection(segment(accountId)),
+				itemsCollection(accountId),
 				item.id,
 				JSON.stringify(item),
 			);
 		},
 
 		/** One `recordDelete`. Deleting an absent item is a no-op at the port. */
-		async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
-			await port.recordDelete(itemsCollection(segment(accountId)), itemId);
+		async removeCachedItem(itemId: string, accountId: string): Promise<void> {
+			await port.recordDelete(itemsCollection(accountId), itemId);
 		},
 
 		// --- vaults ---
 
 		async setCachedVaults(
 			vaults: CachedVaultMetadata[],
-			accountId?: string,
+			accountId: string,
 		): Promise<void> {
-			const account = segment(accountId);
 			await replaceCollection(
-				account,
-				vaultsCollection(account),
+				accountId,
+				vaultsCollection(accountId),
 				vaults,
 				"vaults",
 			);
 		},
 
 		async getCachedVaults(
-			accountId?: string,
+			accountId: string,
 		): Promise<CachedVaultMetadata[] | null> {
-			const account = segment(accountId);
 			return readCollection<CachedVaultMetadata>(
-				vaultsCollection(account),
+				vaultsCollection(accountId),
 				"vault",
-				async () => (await readState(account)).vaultsPrimed,
+				async () => (await readState(accountId)).vaultsPrimed,
 			);
 		},
 
 		async upsertCachedVault(
 			vault: CachedVaultMetadata,
-			accountId?: string,
+			accountId: string,
 		): Promise<void> {
 			await port.recordPut(
-				vaultsCollection(segment(accountId)),
+				vaultsCollection(accountId),
 				vault.id,
 				JSON.stringify(vault),
 			);
@@ -360,14 +335,10 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 		 * Removing a vault cascades to its items. Leaving them behind would strand items
 		 * whose vault key is gone, and they would still be counted by every list read.
 		 */
-		async removeCachedVault(
-			vaultId: string,
-			accountId?: string,
-		): Promise<void> {
-			const account = segment(accountId);
-			await port.recordDelete(vaultsCollection(account), vaultId);
+		async removeCachedVault(vaultId: string, accountId: string): Promise<void> {
+			await port.recordDelete(vaultsCollection(accountId), vaultId);
 
-			const collection = itemsCollection(account);
+			const collection = itemsCollection(accountId);
 			for (const record of await port.recordList(collection)) {
 				const item = parseRecord<CachedEncryptedItem>(record, "item");
 				if (item !== null && item.vaultId === vaultId) {
@@ -379,29 +350,27 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 		// --- metadata ---
 
 		async getItemCacheMetadata(
-			accountId?: string,
+			accountId: string,
 		): Promise<ItemCacheMetadata | null> {
-			return (await readState(segment(accountId))).metadata;
+			return (await readState(accountId)).metadata;
 		},
 
 		async setItemCacheMetadata(
 			metadata: ItemCacheMetadata,
-			accountId?: string,
+			accountId: string,
 		): Promise<void> {
-			const account = segment(accountId);
-			const state = await readState(account);
-			await writeState(account, { ...state, metadata });
+			const state = await readState(accountId);
+			await writeState(accountId, { ...state, metadata });
 		},
 
 		/**
 		 * Dropping the meta record returns the account to cold, which is correct: nothing is
 		 * cached, so the next read must say "never synced" rather than "empty".
 		 */
-		async clearItemCache(accountId?: string): Promise<void> {
-			const account = segment(accountId);
-			await port.recordClear(itemsCollection(account));
-			await port.recordClear(vaultsCollection(account));
-			await port.recordClear(metaCollection(account));
+		async clearItemCache(accountId: string): Promise<void> {
+			await port.recordClear(itemsCollection(accountId));
+			await port.recordClear(vaultsCollection(accountId));
+			await port.recordClear(metaCollection(accountId));
 		},
 	};
 

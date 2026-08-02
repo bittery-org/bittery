@@ -50,7 +50,7 @@ import {
 } from "./tiers";
 import {
 	type AccountMetadata,
-	type ActiveAccount,
+	type ActiveAccountId,
 	BIOMETRIC_GRACE_PERIOD_MS,
 	type BiometricAuthResult,
 	type BiometricErrorType,
@@ -156,8 +156,8 @@ export interface AccountStore {
 	initialize(): Promise<void>;
 
 	// --- accounts ---
-	getActiveAccount(): Promise<ActiveAccount>;
-	setActiveAccount(account: ActiveAccount): Promise<void>;
+	getActiveAccount(): Promise<ActiveAccountId>;
+	setActiveAccount(accountId: ActiveAccountId): Promise<void>;
 	getActiveAccountUserId(): Promise<string | null>;
 	getAccountsList(): Promise<AccountMetadata[]>;
 	getAccountMetadata(accountId: string): Promise<AccountMetadata | null>;
@@ -306,24 +306,6 @@ export interface AccountStore {
 
 interface AccountsListDocument {
 	accounts: AccountMetadata[];
-}
-
-/**
- * Parse the stored active-account pointer.
- *
- * There are no users and no back-compat: `active_account` is a plain accountId string, or
- * absent.
- */
-function parseStoredActiveAccount(stored: string | null): ActiveAccount {
-	if (!stored) {
-		return null;
-	}
-	return { type: "single", accountId: stored };
-}
-
-/** Serialize the active-account pointer. `null` means "delete the key". */
-function serializeActiveAccount(account: ActiveAccount): string | null {
-	return account ? account.accountId : null;
 }
 
 /**
@@ -581,8 +563,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		if (accountId) {
 			return accountId;
 		}
-		const active = await getActiveAccount();
-		return active?.accountId ?? null;
+		return await getActiveAccount();
 	}
 
 	/** For operations that cannot proceed without an account. */
@@ -639,7 +620,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		const accounts = await readAccountsList();
 		const active = await getActiveAccount();
 		const autoLockTimeoutMs = await getAutoLockTimeoutOrDefault(
-			active?.accountId,
+			active ?? undefined,
 		);
 
 		const projected: NativeHostView["accounts"] = [];
@@ -683,7 +664,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 
 		const view: NativeHostView = {
 			v: NATIVE_VIEW_VERSION,
-			activeAccountId: active?.accountId ?? null,
+			activeAccountId: active,
 			unlockedAccountIds: [...mukCache.keys()],
 			autoLockTimeoutMs,
 			deviceKey: keyRefFor("device_key", globalKey("device_key")),
@@ -755,15 +736,15 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		await refreshNativeView();
 	}
 
-	async function getActiveAccount(): Promise<ActiveAccount> {
-		return parseStoredActiveAccount(await readGlobal("active_account"));
+	/** `active_account` is stored as a plain accountId string, or absent. */
+	async function getActiveAccount(): Promise<ActiveAccountId> {
+		return (await readGlobal("active_account")) || null;
 	}
 
 	/** Every active-account write goes through here so the projection stays fresh. */
-	async function writeActiveAccount(account: ActiveAccount): Promise<void> {
-		const serialized = serializeActiveAccount(account);
-		if (serialized) {
-			await writeGlobal("active_account", serialized);
+	async function writeActiveAccount(accountId: ActiveAccountId): Promise<void> {
+		if (accountId) {
+			await writeGlobal("active_account", accountId);
 		} else {
 			await deleteGlobal("active_account");
 		}
@@ -1062,7 +1043,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 
 	async function removeAccountInternal(accountId: string): Promise<void> {
 		const active = await getActiveAccount();
-		if (active?.accountId === accountId) {
+		if (active === accountId) {
 			await writeActiveAccount(null);
 		}
 
@@ -1102,12 +1083,12 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 
 		getActiveAccount,
 
-		async setActiveAccount(account: ActiveAccount): Promise<void> {
-			await writeActiveAccount(account);
+		async setActiveAccount(accountId: ActiveAccountId): Promise<void> {
+			await writeActiveAccount(accountId);
 
-			if (account) {
+			if (accountId) {
 				const accounts = await readAccountsList();
-				const metadata = findAccountById(accounts, account.accountId);
+				const metadata = findAccountById(accounts, accountId);
 				if (metadata) {
 					metadata.lastActiveAt = Date.now();
 					await writeAccountsList(accounts);
@@ -1120,14 +1101,11 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			if (!active) {
 				return null;
 			}
-			const session = await getStoredSessionData(active.accountId);
+			const session = await getStoredSessionData(active);
 			if (session?.userId) {
 				return session.userId;
 			}
-			const metadata = findAccountById(
-				await readAccountsList(),
-				active.accountId,
-			);
+			const metadata = findAccountById(await readAccountsList(), active);
 			return metadata?.userId ?? null;
 		},
 

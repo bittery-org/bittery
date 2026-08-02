@@ -10,7 +10,7 @@
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { findAccountById } from "@bittery/storage/account-id";
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import type { ICrypto } from "@bittery/types";
 import { performSRPUnlock, storeUnlockSession } from "./auth-service";
 import {
@@ -86,7 +86,7 @@ interface UnlockPlan {
 	 * Read before the credential is spent: the account the user was last using is
 	 * the answer, and acquiring can move the stored pointer.
 	 */
-	previousActive: ActiveAccount;
+	previousActive: ActiveAccountId;
 }
 
 async function planAll(
@@ -254,10 +254,7 @@ async function runUnlock(
 		accounts,
 	});
 	if (activeAccountId && opts?.setActive !== false) {
-		await storage.setActiveAccount({
-			type: "single",
-			accountId: activeAccountId,
-		});
+		await storage.setActiveAccount(activeAccountId);
 	}
 
 	return { activeAccountId, unlocked, failed };

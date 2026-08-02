@@ -77,10 +77,9 @@ const queryClient = new QueryClient({
 
 async function resolveDesktopServerUrl(): Promise<string> {
 	const activeAccount = await storage.getActiveAccount();
-	const accountServerUrl =
-		activeAccount?.type === "single"
-			? await storage.getServerUrl(activeAccount.accountId)
-			: null;
+	const accountServerUrl = activeAccount
+		? await storage.getServerUrl(activeAccount)
+		: null;
 	const activeAuthServerUrl = await resolveActiveAuthServerUrl();
 	return (
 		normalizeServerUrl(accountServerUrl ?? "") ??
@@ -95,13 +94,13 @@ const rpcClient = createSessionRefreshingRpcClient({
 	appPlatform: "desktop",
 	getSessionSnapshot: async () => {
 		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount?.type !== "single") {
+		if (!activeAccount) {
 			return { token: null, issuedAt: null, expiresAt: null };
 		}
 
 		const [token, sessionData] = await Promise.all([
-			storage.getAuthToken(activeAccount.accountId),
-			storage.getStoredSessionData(activeAccount.accountId),
+			storage.getAuthToken(activeAccount),
+			storage.getStoredSessionData(activeAccount),
 		]);
 
 		return {
@@ -112,16 +111,16 @@ const rpcClient = createSessionRefreshingRpcClient({
 	},
 	getRefreshToken: async () => {
 		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount?.type !== "single") {
+		if (!activeAccount) {
 			return null;
 		}
-		return storage.getAuthToken(activeAccount.accountId);
+		return storage.getAuthToken(activeAccount);
 	},
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount?.type === "single") {
-			await storage.storeAuthToken(token, activeAccount.accountId);
-			await storage.updateStoredSessionMetadata(activeAccount.accountId, {
+		if (activeAccount) {
+			await storage.storeAuthToken(token, activeAccount);
+			await storage.updateStoredSessionMetadata(activeAccount, {
 				sessionId,
 				expiresAt,
 			});

@@ -515,10 +515,7 @@ export function useVaultImport() {
 				}
 
 				const activeAccount = await storage.getActiveAccount();
-				const defaultAccountId =
-					activeAccount?.type === "single"
-						? activeAccount.accountId
-						: undefined;
+				const defaultAccountId = activeAccount ?? undefined;
 				const defaultAccountEmail = defaultAccountId
 					? (await storage.getAccountsList()).find(
 							(a) => a.accountId === defaultAccountId,
@@ -614,11 +611,6 @@ export function useVaultImport() {
 							storage,
 							resolvedTarget.accountEmail,
 						);
-						if (!accountId) {
-							throw new VaultImportError("vault-import-failed", {
-								targetVaultName: resolvedTarget.vaultName,
-							});
-						}
 						const vaultRpcClient = await getClientForAccount(
 							storage,
 							rpcClient,
@@ -737,8 +729,7 @@ export function useVaultImport() {
 				}));
 
 				// An import can target several accounts, and `ItemCache` is namespaced
-				// per account — omitting the id would clear the literal `"default"`
-				// collection and leave every real account's stale ciphertext in place.
+				// per account, so each one must be cleared explicitly.
 				for (const account of await storage.getAccountsList()) {
 					await itemCache.clearItemCache(account.accountId);
 				}

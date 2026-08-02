@@ -254,14 +254,11 @@ describe("VaultRepository per-item persistence is O(1)", () => {
 		expect(recordPort.calls.recordPut).toBe(0);
 	});
 
-	it("writes into the account's own collection, never the default one", async () => {
+	it("writes into its own account's collection and no other", async () => {
 		const { repo, recordPort } = await setup();
 
 		await repo.upsertCachedItem(cachedItem("item_new"), ACCOUNT_ID);
 
-		// `ItemCache` falls back to the literal account segment "default" when the id
-		// is omitted, so a `VaultRepository` with an undefined accountId would write
-		// another account's collection instead of failing. Hence the required ctor arg.
 		expect(recordPort.collections()).toEqual([`${ACCOUNT_ID}:items`]);
 	});
 });

@@ -40,9 +40,8 @@ export function SettingsAdvancedPanel({
 			syncContext.outboundQueue.clear();
 
 			try {
-				// Always an explicit accountId: omitting it routes the cache to the literal
-				// `"default"` collection, which is only ever right on web (packages/storage/CONTEXT.md §4.1).
-				// With no accounts there is nothing cached, so there is nothing to clear.
+				// `clearItemCache` requires an accountId per account, so each is cleared
+				// individually; with no accounts there is nothing cached to clear.
 				const accounts = await storage.getAccountsList();
 				await Promise.all(
 					accounts.map((account) =>

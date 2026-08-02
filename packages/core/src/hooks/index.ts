@@ -37,7 +37,7 @@
  * ```
  */
 
-export type { ActiveAccount } from "@bittery/storage/types";
+export type { ActiveAccountId } from "@bittery/storage/types";
 // Auth Utilities (for extension service worker - non-React usage)
 export {
 	type CheckEmailResult,

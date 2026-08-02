@@ -88,10 +88,10 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 	);
 
 	/**
-	 * The accountId the item cache is namespaced under. Passing `null` here would make
-	 * every cached read and write land in the literal `"default"` collection, so it is
-	 * read from the live active-account snapshot instead. The snapshot is refreshed
-	 * whenever the unlocked set changes and explicitly after a login.
+	 * The accountId the item cache is namespaced under. `ItemCache` requires a real
+	 * accountId for every call, so it is read from the live active-account snapshot
+	 * instead of `null`. The snapshot is refreshed whenever the unlocked set changes
+	 * and explicitly after a login.
 	 */
 	const syncAccountId = useSyncExternalStore(
 		subscribeActiveAccountId,

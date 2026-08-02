@@ -132,7 +132,7 @@ async function createFixture(
 			accountId,
 		);
 	}
-	await store.setActiveAccount({ type: "single", accountId: "acc-1" });
+	await store.setActiveAccount("acc-1");
 
 	const mirror = createRecordingMirror(store, options.mirrorThrows === true);
 	return {
@@ -219,10 +219,7 @@ describe("lockAccount", () => {
 
 		const outcome = await lockAccount("acc-1", fixture.deps);
 
-		expect(await fixture.storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(await fixture.storage.getActiveAccount()).toEqual("acc-1");
 		expect(await fixture.storage.getAccountsList()).toEqual(before);
 		expect(outcome.activeAccountId).toBe("acc-1");
 		expect(outcome.remaining.map((account) => account.accountId)).toEqual([
@@ -302,10 +299,7 @@ describe("lockAllAccounts", () => {
 			...segmentsOf("acc-1"),
 			...segmentsOf("acc-2"),
 		]);
-		expect(await fixture.storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(await fixture.storage.getActiveAccount()).toEqual("acc-1");
 	});
 
 	it("is a no-op when every account is already locked", async () => {
@@ -374,10 +368,7 @@ describe("signOutAccount / invalidateAccountSession", () => {
 
 		const outcome = await signOutAccount("acc-1", fixture.deps);
 
-		expect(await fixture.storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(await fixture.storage.getActiveAccount()).toEqual("acc-1");
 		expect(outcome.activeAccountId).toBe("acc-1");
 		expect(outcome.wasActive).toBe(true);
 	});
@@ -527,10 +518,7 @@ describe("removeAccount", () => {
 		expect(outcome.wasActive).toBe(true);
 		expect(outcome.activeAccountId).toBe("acc-2");
 		expect(outcome.activeAccount?.accountId).toBe("acc-2");
-		expect(await fixture.storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(await fixture.storage.getActiveAccount()).toEqual("acc-2");
 	});
 
 	it("does not move the pointer when a non-active account is removed", async () => {
@@ -540,10 +528,7 @@ describe("removeAccount", () => {
 
 		expect(outcome.wasActive).toBe(false);
 		expect(outcome.activeAccountId).toBe("acc-1");
-		expect(await fixture.storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-1",
-		});
+		expect(await fixture.storage.getActiveAccount()).toEqual("acc-1");
 	});
 
 	it("keeps the device key while another account remains", async () => {
@@ -575,7 +560,7 @@ describe("removeAccount", () => {
 			fixture.itemCache,
 		);
 		fixture.itemCache.clearItemCache = async (
-			accountId?: string,
+			accountId: string,
 		): Promise<void> => {
 			rowsAtCacheClear.push(await accountIds(fixture.storage));
 			await clearItemCache(accountId);
@@ -611,10 +596,7 @@ describe("removeAccount", () => {
 		const outcome = await removeAccount("acc-1", fixture.deps);
 
 		expect(outcome.failures).toEqual([]);
-		expect(await fixture.storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "acc-2",
-		});
+		expect(await fixture.storage.getActiveAccount()).toEqual("acc-2");
 		expect(fullState(fixture)).toEqual(before);
 	});
 
@@ -633,8 +615,6 @@ describe("removeAccount", () => {
 describe("wipeDevice", () => {
 	it("empties the accounts list, the pointer, the device key and every segment", async () => {
 		const fixture = await createFixture();
-		// The web-only `"default"` segment is named by no account, so only a wipe reaches it.
-		await fixture.itemCache.setCachedItems([cachedItem("item-default")]);
 
 		const outcome = await wipeDevice(fixture.deps);
 

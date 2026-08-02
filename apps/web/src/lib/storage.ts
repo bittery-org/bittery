@@ -98,7 +98,7 @@ const activeAccountListeners = new Set<() => void>();
  */
 export async function refreshActiveAccountId(): Promise<void> {
 	const active = await storage.getActiveAccount();
-	const next = active?.accountId ?? null;
+	const next = active ?? null;
 	if (next === activeAccountIdSnapshot) {
 		return;
 	}
@@ -154,10 +154,7 @@ export async function initializeStorage(): Promise<void> {
 			await itemCache.initialize();
 
 			if ((await storage.getActiveAccount()) === null) {
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: getOrCreateWebAccountId(),
-				});
+				await storage.setActiveAccount(getOrCreateWebAccountId());
 			}
 
 			await refreshActiveAccountId();
@@ -185,7 +182,7 @@ export async function forgetActiveSession(): Promise<void> {
 /** Wipe everything stored for the active account, including its encrypted item cache. */
 export async function clearActiveAccountData(): Promise<void> {
 	await initializeStorage();
-	const accountId = (await storage.getActiveAccount())?.accountId;
+	const accountId = await storage.getActiveAccount();
 	if (accountId) {
 		await removeAccount(accountId, lifecycleDeps);
 	}
@@ -205,21 +202,21 @@ export async function getActiveAccountKdfProfile(): Promise<{
 	profile: KdfProfile;
 }> {
 	const active = await storage.getActiveAccount();
-	if (active?.type !== "single") {
+	if (!active) {
 		throw new Error("No active account");
 	}
-	const profile = await storage.getPinnedKdfProfile(active.accountId);
+	const profile = await storage.getPinnedKdfProfile(active);
 	if (!profile) {
 		throw new Error("Pinned KDF profile missing; sign in again");
 	}
-	return { accountId: active.accountId, profile };
+	return { accountId: active, profile };
 }
 
 // Re-export types for convenience
 export type {
 	AccountMetadata,
 	AccountStore,
-	ActiveAccount,
+	ActiveAccountId,
 	ItemCache,
 	StoredSessionData,
 	VaultKeyData,

@@ -1,9 +1,9 @@
 import { findAccountById } from "@bittery/storage/account-id";
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 
 export interface SelectActiveAccountAfterUnlockInput {
 	/** Active account as persisted before the unlock, from `getActiveAccount()`. */
-	previousActive: ActiveAccount;
+	previousActive: ActiveAccountId;
 	/** Account ids that are unlocked and usable — never emails. */
 	unlockedAccountIds: string[];
 	accounts: AccountMetadata[];
@@ -23,11 +23,11 @@ export function selectActiveAccountAfterUnlock({
 	accounts,
 }: SelectActiveAccountAfterUnlockInput): string | undefined {
 	if (
-		previousActive?.type === "single" &&
-		unlockedAccountIds.includes(previousActive.accountId) &&
-		findAccountById(accounts, previousActive.accountId)
+		previousActive &&
+		unlockedAccountIds.includes(previousActive) &&
+		findAccountById(accounts, previousActive)
 	) {
-		return previousActive.accountId;
+		return previousActive;
 	}
 
 	return unlockedAccountIds[0] ?? accounts[0]?.accountId;
@@ -36,7 +36,7 @@ export function selectActiveAccountAfterUnlock({
 export interface SelectActiveAccountAfterRemovalInput {
 	removedAccountId: string;
 	/** Active account as persisted before the removal, from `getActiveAccount()`. */
-	previousActive: ActiveAccount;
+	previousActive: ActiveAccountId;
 	/** Accounts as they were *before* the removal — the removed one still included. */
 	accounts: AccountMetadata[];
 }
@@ -54,7 +54,7 @@ export function selectActiveAccountAfterRemoval({
 	previousActive,
 	accounts,
 }: SelectActiveAccountAfterRemovalInput): string | undefined {
-	if (previousActive?.accountId !== removedAccountId) {
+	if (previousActive !== removedAccountId) {
 		return undefined;
 	}
 

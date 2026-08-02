@@ -195,22 +195,21 @@ export interface SyncVaultKeyEntry {
  * The encrypted-blob cache, as sync sees it. Names match `ItemCache`
  * (`packages/storage/src/item-cache.ts`), which satisfies this interface structurally.
  *
- * `accountId` is optional in the *signature* only because `ItemCache` allows omitting it
- * (falling back to the `"default"` account segment). Every caller in this repo passes an
- * explicit id; omitting it silently reads and writes the wrong collection.
+ * `accountId` is required: an omitted one used to name the wrong collection, and an
+ * email passed in its place named a collection after an email.
  */
 export interface ItemCacheAdapter {
 	upsertCachedItem(
 		item: import("@bittery/types").CachedEncryptedItem,
-		accountId?: string,
+		accountId: string,
 	): Promise<void>;
-	removeCachedItem(itemId: string, accountId?: string): Promise<void>;
+	removeCachedItem(itemId: string, accountId: string): Promise<void>;
 	upsertCachedVault(
 		vault: import("@bittery/types").CachedVaultMetadata,
-		accountId?: string,
+		accountId: string,
 	): Promise<void>;
-	removeCachedVault(vaultId: string, accountId?: string): Promise<void>;
-	clearItemCache(accountId?: string): Promise<void>;
+	removeCachedVault(vaultId: string, accountId: string): Promise<void>;
+	clearItemCache(accountId: string): Promise<void>;
 }
 
 /**
@@ -225,9 +224,9 @@ export interface ItemCacheAdapter {
 export interface SyncItemCache extends ItemCacheAdapter {
 	syncVaultKeys(
 		vaultKeys: SyncVaultKeyEntry[],
-		accountId?: string,
+		accountId: string,
 	): Promise<void>;
-	replaceItemId(tempId: string, realId: string, accountId?: string): void;
+	replaceItemId(tempId: string, realId: string, accountId: string): void;
 }
 
 /**

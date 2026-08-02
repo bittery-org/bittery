@@ -121,8 +121,15 @@ export class SyncOrchestrator {
 		return this.itemCacheAccountEmail ?? undefined;
 	}
 
-	private getDeltaSyncAccountScope(): string | undefined {
-		return this.itemCacheAccountId ?? this.itemCacheAccountEmail ?? undefined;
+	/**
+	 * An email is not an account identity. Falling back to one named an `ItemCache`
+	 * collection after an email and made the coordinator mint a repo keyed by one.
+	 */
+	private getDeltaSyncAccountScope(): string {
+		if (!this.itemCacheAccountId) {
+			throw new Error("Sync requires an accountId scope");
+		}
+		return this.itemCacheAccountId;
 	}
 
 	private getDeltaSyncServerUrl(): string | undefined {

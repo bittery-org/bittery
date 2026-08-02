@@ -212,7 +212,7 @@ describe("account-routed authentication", () => {
 		const { storage } = await makeStore([
 			account("cloud", "cloud-user", "https://cloud.example"),
 		]);
-		await storage.setActiveAccount({ type: "single", accountId: "cloud" });
+		await storage.setActiveAccount("cloud");
 
 		const writes = {
 			storeAuthToken: spyOn(storage, "storeAuthToken"),
@@ -244,10 +244,7 @@ describe("account-routed authentication", () => {
 		);
 
 		expect(result.serverUrl).toBe("https://self-hosted.example");
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "cloud",
-		});
+		expect(await storage.getActiveAccount()).toEqual("cloud");
 		for (const write of Object.values(writes)) {
 			expect(write).not.toHaveBeenCalled();
 		}
@@ -585,7 +582,7 @@ describe("storeUnlockSession active account", () => {
 				accountId,
 			);
 		}
-		await storage.setActiveAccount({ type: "single", accountId: "account-a" });
+		await storage.setActiveAccount("account-a");
 		return { storage, itemCache: (await createTestItemCache()).cache };
 	}
 
@@ -596,10 +593,7 @@ describe("storeUnlockSession active account", () => {
 			setActive: false,
 		});
 
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "account-a",
-		});
+		expect(await storage.getActiveAccount()).toEqual("account-a");
 	});
 
 	it("claims the active account when the caller says nothing", async () => {
@@ -607,9 +601,6 @@ describe("storeUnlockSession active account", () => {
 
 		await storeUnlockSession(unlockResult(), storage, itemCache, "account-b");
 
-		expect(await storage.getActiveAccount()).toEqual({
-			type: "single",
-			accountId: "account-b",
-		});
+		expect(await storage.getActiveAccount()).toEqual("account-b");
 	});
 });

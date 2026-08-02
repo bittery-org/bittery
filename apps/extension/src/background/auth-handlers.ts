@@ -86,24 +86,21 @@ export async function handleQuickUnlock(payload: {
 	// Get stored email for multi-account support
 	const activeAccount = await storage.getActiveAccount();
 
-	if (!activeAccount || activeAccount.type !== "single") {
+	if (!activeAccount) {
 		throw new Error("Quick unlock not available - no active account");
 	}
 
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
-		{ accountId: activeAccount.accountId, password },
+		{ accountId: activeAccount, password },
 		{ crypto: cryptoAdapter, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(
-		result,
-		storage,
-		itemCache,
-		activeAccount.accountId,
-		{ travelModeRpcClient: rpcClient, setActive: true },
-	);
+	await storeUnlockSession(result, storage, itemCache, activeAccount, {
+		travelModeRpcClient: rpcClient,
+		setActive: true,
+	});
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
 	if (result.masterUnlockKey) {
@@ -176,10 +173,7 @@ async function ensureActiveAccountSet(): Promise<void> {
 			// Single account - set it as active
 			const firstAccount = accounts[0];
 			if (!firstAccount) return; // Should never happen but satisfies TS
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: firstAccount.accountId,
-			});
+			await storage.setActiveAccount(firstAccount.accountId);
 		} else {
 			// Multiple accounts - check if any are unlocked
 			const unlockedAccountIds = await storage.getUnlockedAccounts();
@@ -188,18 +182,12 @@ async function ensureActiveAccountSet(): Promise<void> {
 				// One or more unlocked - use the first unlocked account as active
 				const unlockedAccountId = unlockedAccountIds[0];
 				if (!unlockedAccountId) return; // Should never happen but satisfies TS
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: unlockedAccountId,
-				});
+				await storage.setActiveAccount(unlockedAccountId);
 			} else {
 				// None unlocked - default to first account
 				const firstAccount = accounts[0];
 				if (!firstAccount) return; // Should never happen but satisfies TS
-				await storage.setActiveAccount({
-					type: "single",
-					accountId: firstAccount.accountId,
-				});
+				await storage.setActiveAccount(firstAccount.accountId);
 			}
 		}
 	} catch (error) {
@@ -223,7 +211,7 @@ export async function handleCanQuickUnlock(): Promise<MessageResponse> {
 		return { success: true, canQuickUnlock: false };
 	}
 
-	const { accountId } = activeAccount;
+	const accountId = activeAccount;
 	const canQuickUnlock =
 		(await storage.hasStoredSecretKey(accountId)) &&
 		(await storage.getPinnedKdfProfile(accountId)) !== null;
@@ -247,10 +235,9 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
 	const userId = await storage.getActiveAccountUserId();
 	const sessionValid = await storage.isSessionValid();
 
-	const email =
-		activeAccount?.type === "single"
-			? await resolveEmailFromAccountId(activeAccount.accountId)
-			: null;
+	const email = activeAccount
+		? await resolveEmailFromAccountId(activeAccount)
+		: null;
 
 	return {
 		success: true,
@@ -263,7 +250,7 @@ export async function handleGetSessionData(): Promise<MessageResponse> {
  * Handle LOGOUT message - Sign out of the active account and lock
  */
 export async function handleLogout(): Promise<MessageResponse> {
-	const accountId = (await storage.getActiveAccount())?.accountId;
+	const accountId = await storage.getActiveAccount();
 	const outcome = accountId
 		? await invalidateAccountSession({ accountId }, lifecycleDeps)
 		: null;

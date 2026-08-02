@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { ActiveAccountId } from "@bittery/storage/types";
 import type { SyncEvent, SyncItemCache } from "@bittery/sync";
 import {
 	createSyncCacheService,
@@ -6,8 +7,6 @@ import {
 	type SyncCacheStorage,
 	type SyncEventQueryClient,
 } from "../../src/background/services/sync-cache-service";
-
-type ActiveAccount = { type: "single"; accountId: string } | null;
 
 type AccountInput =
 	| string
@@ -56,7 +55,7 @@ function createClientStub(): SyncEventQueryClient {
 }
 
 function createStorageStub(input: {
-	activeAccount: ActiveAccount;
+	activeAccount: ActiveAccountId;
 	accounts: AccountInput[];
 	tokensByAccountId: Record<string, string | undefined>;
 	serverUrlsByAccountId?: Record<string, string | undefined>;
@@ -88,8 +87,8 @@ function createStorageStub(input: {
 			}
 
 			const active = input.activeAccount;
-			if (active && active.type === "single") {
-				return tokenMap.get(active.accountId) ?? null;
+			if (active) {
+				return tokenMap.get(active) ?? null;
 			}
 			return input.fallbackToken ?? null;
 		},
@@ -126,7 +125,9 @@ function createStorageStub(input: {
  * Stands in for `VaultRepositoryCoordinator`. Clearing the cache is `ItemCache`'s job —
  * `AccountStore` cannot reach the record port at all.
  */
-function createItemCacheStub(): SyncItemCache & { clearedAccountIds: string[] } {
+function createItemCacheStub(): SyncItemCache & {
+	clearedAccountIds: string[];
+} {
 	const clearedAccountIds: string[] = [];
 	return {
 		clearedAccountIds,
@@ -238,7 +239,7 @@ describe("sync-cache-service", () => {
 		const bobAccountId = "acc_bob_example_com";
 
 		const storage = createStorageStub({
-			activeAccount: { type: "single", accountId: bobAccountId },
+			activeAccount: bobAccountId,
 			accounts: [
 				{ accountId: "acc_z_example_com", email: "z@example.com" },
 				{ accountId: bobAccountId, email: "bob@example.com" },

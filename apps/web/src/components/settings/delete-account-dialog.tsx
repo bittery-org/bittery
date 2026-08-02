@@ -50,7 +50,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const deleteAccountMutation = useMutation({
 		mutationFn: async (input: { confirmEmail: string }) => {
 			await initializeStorage();
-			const accountId = (await storage.getActiveAccount())?.accountId;
+			const accountId = await storage.getActiveAccount();
 			if (!accountId) {
 				throw new Error("No active account to delete");
 			}

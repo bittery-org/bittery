@@ -135,9 +135,9 @@ describe("sync engine regressions", () => {
 		const storage = new MemoryStorage();
 		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
-		const clearedAccounts: Array<string | undefined> = [];
+		const clearedAccounts: string[] = [];
 		const itemCache = stubItemCache({
-			clearItemCache: async (accountId?: string) => {
+			clearItemCache: async (accountId: string) => {
 				clearedAccounts.push(accountId);
 			},
 		});
@@ -184,6 +184,8 @@ describe("sync engine regressions", () => {
 				},
 			},
 			itemCache,
+			// Scoped by accountId, never the email: an email is not an identity.
+			itemCacheAccountId: "acc_alice",
 			itemCacheAccountEmail: "alice@example.com",
 			outboundQueue,
 		});
@@ -192,7 +194,88 @@ describe("sync engine regressions", () => {
 
 		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
 		expect(cursor?.id).toBe("evt_20");
-		expect(clearedAccounts).toEqual(["alice@example.com"]);
+		expect(clearedAccounts).toEqual(["acc_alice"]);
+
+		orchestrator.dispose();
+	});
+
+	// An email is not an account identity. Letting one name a cache scope makes
+	// `ItemCache` create a collection keyed by an email, and makes
+	// `VaultRepositoryCoordinator.getOrCreate` mint a repo under one.
+	test("never scopes a cache write by an email", async () => {
+		const storage = new MemoryStorage();
+		const outboundQueue = new OutboundQueue(storage, "self_client");
+		const upsertScopes: Array<string | undefined> = [];
+		const itemCache = stubItemCache({
+			upsertCachedItem: async (_item, accountId?: string) => {
+				upsertScopes.push(accountId);
+			},
+		});
+
+		const orchestrator = new SyncOrchestrator({
+			syncManager: {
+				serverUrl: "http://localhost:3000",
+				getAuthToken: async () => "token",
+				clientId: "self_client",
+				storage,
+			},
+			rpcClient: {
+				sync: {
+					getEventsSince: {
+						query: async () => ({
+							events: [],
+							hasMore: false,
+							requiresFullRefresh: false,
+							cursor: null,
+						}),
+					},
+				},
+				vault: {
+					getItem: {
+						query: async () => ({
+							id: "item_1",
+							vaultId: "vault_1",
+							category: "login",
+							favorite: false,
+							encryptedData: "ciphertext",
+							encryptionIv: "iv",
+							encryptionAlgorithm: "aes-256-gcm",
+							version: 1,
+							lastModifiedBy: "user_1",
+							createdAt: "2026-03-13T00:00:00.000Z",
+							updatedAt: "2026-03-13T00:00:00.000Z",
+							deletedAt: null,
+							attachments: [],
+						}),
+					},
+					get: {
+						query: async () => ({
+							id: "vault_1",
+							name: "Vault",
+							vaultType: "personal",
+							icon: null,
+							imageUrl: null,
+						}),
+					},
+					listItems: { query: async () => [] },
+					list: { query: async () => [] },
+				},
+			},
+			itemCache,
+			// Only an email is configured — no accountId to scope by.
+			itemCacheAccountEmail: "alice@example.com",
+			outboundQueue,
+		});
+
+		try {
+			await (orchestrator as any).applyEvent(
+				buildEvent({ id: "evt_1", type: "item_updated", entityId: "item_1" }),
+			);
+		} catch {
+			// Refusing the write outright is the correct outcome.
+		}
+
+		expect(upsertScopes).not.toContain("alice@example.com");
 
 		orchestrator.dispose();
 	});

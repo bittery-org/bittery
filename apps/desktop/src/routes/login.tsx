@@ -49,22 +49,19 @@ export const Route = createFileRoute("/login")({
 			if (!firstAccount) {
 				return;
 			}
-			activeAccount = {
-				type: "single",
-				accountId: firstAccount.accountId,
-			};
+			activeAccount = firstAccount.accountId;
 			await storage.setActiveAccount(activeAccount);
 		}
 
 		const activeAccountMetadata = accountsList.find(
-			(account) => account.accountId === activeAccount.accountId,
+			(account) => account.accountId === activeAccount,
 		);
-		const sessionValid = await storage.isSessionValid(activeAccount.accountId);
+		const sessionValid = await storage.isSessionValid(activeAccount);
 		if (sessionValid) {
 			// This guard can run before AccountProvider constructs the manager; with no
 			// manager there is no verified unlock, so fall through to /unlock.
 			const restored = await peekAccountSessionManager()?.unlockAccount(
-				activeAccount.accountId,
+				activeAccount,
 				true,
 			);
 			if (restored) {
@@ -181,11 +178,8 @@ export function LoginPage() {
 
 			if (normalizedServerUrl) {
 				const activeAccount = await storage.getActiveAccount();
-				if (activeAccount?.type === "single") {
-					await storage.storeServerUrl(
-						normalizedServerUrl,
-						activeAccount.accountId,
-					);
+				if (activeAccount) {
+					await storage.storeServerUrl(normalizedServerUrl, activeAccount);
 				}
 			}
 

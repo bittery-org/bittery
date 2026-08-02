@@ -4,7 +4,7 @@
  * React hook for managing multi-account operations via AccountSessionManager.
  */
 
-import type { AccountMetadata, ActiveAccount } from "@bittery/storage/types";
+import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import {
 	type UseMutationResult,
 	useMutation,
@@ -28,11 +28,11 @@ export interface UseAccountSwitcherOptions {
 
 export interface UseAccountSwitcherResult {
 	accounts: AccountMetadata[];
-	activeAccount: ActiveAccount;
+	activeAccount: ActiveAccountId;
 	unlockedAccountIds: string[];
 	isInitialized: boolean;
 	refresh(): Promise<void>;
-	switchAccount: UseMutationResult<void, Error, ActiveAccount, unknown>;
+	switchAccount: UseMutationResult<void, Error, ActiveAccountId, unknown>;
 	/** Resolves the outcome so callers can branch on `remaining`/`activeAccount` without re-reading storage. */
 	removeAccount: UseMutationResult<LifecycleOutcome, Error, string, unknown>;
 	updateAccount: UseMutationResult<void, Error, AccountMetadata, unknown>;
@@ -78,7 +78,7 @@ export function useAccountSwitcher(
 	}, [manager, enabled]);
 
 	const switchAccount = useMutation({
-		mutationFn: async (account: ActiveAccount) => {
+		mutationFn: async (account: ActiveAccountId) => {
 			await manager.switchAccount(account);
 		},
 	});

@@ -155,7 +155,7 @@ async function seedAccount(
 ): Promise<void> {
 	await store.addAccount(metadataFor(accountId));
 	if (active) {
-		await store.setActiveAccount({ type: "single", accountId });
+		await store.setActiveAccount(accountId);
 	}
 }
 
@@ -216,7 +216,7 @@ describe("AccountStore — accountId namespacing", () => {
 		await seedAccount(store, "b");
 		await store.storeServerUrl("https://a.example.com");
 
-		await store.setActiveAccount({ type: "single", accountId: "b" });
+		await store.setActiveAccount("b");
 		await store.storeServerUrl("https://b.example.com");
 
 		expect(await store.getServerUrl()).toBe("https://b.example.com");
@@ -1095,7 +1095,7 @@ describe("AccountStore — native host projection", () => {
 		const { port, store } = await makeStore();
 		await seedAccount(store, "a");
 
-		await store.setActiveAccount({ type: "single", accountId: "a" });
+		await store.setActiveAccount("a");
 		expect(nativeView(port).activeAccountId).toBe("a");
 
 		await store.setActiveAccount(null);
@@ -1303,7 +1303,7 @@ describe("AccountStore — accounts and settings", () => {
 		const { store } = await makeStore();
 		await seedAccount(store, "a");
 
-		await store.setActiveAccount({ type: "single", accountId: "a" });
+		await store.setActiveAccount("a");
 
 		expect((await store.getAccountMetadata("a"))?.lastActiveAt).toBeGreaterThan(
 			1,

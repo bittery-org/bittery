@@ -395,17 +395,8 @@ export class VaultRepositoryCoordinator {
 		return undefined;
 	}
 
-	replaceItemId(tempId: string, realId: string, accountId?: string): void {
-		if (accountId) {
-			this.getOrCreate(accountId).replaceItemId(tempId, realId);
-			return;
-		}
-
-		const located = this.findAccountForItem(tempId);
-		if (!located) {
-			return;
-		}
-		located.repo.replaceItemId(tempId, realId);
+	replaceItemId(tempId: string, realId: string, accountId: string): void {
+		this.getOrCreate(accountId).replaceItemId(tempId, realId);
 	}
 
 	findAccountForVault(
@@ -494,20 +485,11 @@ export class VaultRepositoryCoordinator {
 		await this.upsertEncrypted(item, accountId);
 	}
 
-	async removeItem(itemId: string, accountId?: string): Promise<void> {
-		if (accountId) {
-			await this.getOrCreate(accountId).removeItem(itemId);
-			return;
-		}
-		for (const entry of this.repos.values()) {
-			if (entry.repo.getById(itemId)) {
-				await entry.repo.removeItem(itemId);
-				return;
-			}
-		}
+	async removeItem(itemId: string, accountId: string): Promise<void> {
+		await this.getOrCreate(accountId).removeItem(itemId);
 	}
 
-	async removeCachedItem(itemId: string, accountId?: string): Promise<void> {
+	async removeCachedItem(itemId: string, accountId: string): Promise<void> {
 		await this.removeItem(itemId, accountId);
 	}
 
@@ -525,19 +507,11 @@ export class VaultRepositoryCoordinator {
 		await this.upsertVault(vault, accountId);
 	}
 
-	async removeVault(vaultId: string, accountId?: string): Promise<void> {
-		if (accountId) {
-			await this.getOrCreate(accountId).removeCachedVault(vaultId, accountId);
-			return;
-		}
-		for (const entry of this.repos.values()) {
-			if (entry.repo.hasVault(vaultId)) {
-				await entry.repo.removeCachedVault(vaultId);
-			}
-		}
+	async removeVault(vaultId: string, accountId: string): Promise<void> {
+		await this.getOrCreate(accountId).removeCachedVault(vaultId, accountId);
 	}
 
-	async removeCachedVault(vaultId: string, accountId?: string): Promise<void> {
+	async removeCachedVault(vaultId: string, accountId: string): Promise<void> {
 		await this.removeVault(vaultId, accountId);
 	}
 
@@ -548,14 +522,8 @@ export class VaultRepositoryCoordinator {
 		await this.getOrCreate(accountId).syncVaultKeys(vaultKeys, accountId);
 	}
 
-	async clearItemCache(accountId?: string): Promise<void> {
-		if (accountId) {
-			await this.getOrCreate(accountId).clearItemCache(accountId);
-			return;
-		}
-		for (const [repoAccountId, entry] of this.repos.entries()) {
-			await entry.repo.clearItemCache(repoAccountId);
-		}
+	async clearItemCache(accountId: string): Promise<void> {
+		await this.getOrCreate(accountId).clearItemCache(accountId);
 	}
 
 	purgeHiddenVaultsForAccount(

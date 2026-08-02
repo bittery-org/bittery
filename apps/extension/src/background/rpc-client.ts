@@ -34,8 +34,7 @@ async function getOrCreateSyncClientId(): Promise<string> {
 
 async function getAuthToken(): Promise<string | null> {
 	const activeAccount = await storage.getActiveAccount();
-	const accountId =
-		activeAccount?.type === "single" ? activeAccount.accountId : undefined;
+	const accountId = activeAccount ?? undefined;
 
 	if (accountId && desktopSync.isDesktopAvailable()) {
 		try {
@@ -60,8 +59,7 @@ export const rpcClient = createSessionRefreshingRpcClient({
 	},
 	getSessionSnapshot: async () => {
 		const activeAccount = await storage.getActiveAccount();
-		const accountId =
-			activeAccount?.type === "single" ? activeAccount.accountId : undefined;
+		const accountId = activeAccount ?? undefined;
 		const [token, sessionData] = await Promise.all([
 			getAuthToken(),
 			storage.getStoredSessionData(accountId),
@@ -76,8 +74,7 @@ export const rpcClient = createSessionRefreshingRpcClient({
 	getRefreshToken: getAuthToken,
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		const activeAccount = await storage.getActiveAccount();
-		const accountId =
-			activeAccount?.type === "single" ? activeAccount.accountId : undefined;
+		const accountId = activeAccount ?? undefined;
 		await storage.storeAuthToken(token, accountId);
 		if (accountId) {
 			await storage.updateStoredSessionMetadata(accountId, {

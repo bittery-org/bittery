@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import path from "node:path";
+import type { ActiveAccountId } from "@bittery/storage/types";
 
 // Regression coverage for the challenge binding on biometric unlock. The bug:
 // `biometricEnabled` was persisted before the response was checked against the
@@ -30,7 +31,7 @@ const storeVaultKeysCalls: Array<[unknown, string | undefined]> = [];
 const getMasterUnlockKeyCalls: (string | undefined)[] = [];
 let nativeResponse: Record<string, unknown> = {};
 let accounts: Array<{ accountId: string; email: string }> = [];
-let activeAccount: { type: "single"; accountId: string } | null = null;
+let activeAccount: ActiveAccountId = null;
 /** `null` verifies every account; otherwise only the listed accountIds pass. */
 let verifiableAccountIds: string[] | null = null;
 
@@ -111,7 +112,7 @@ beforeEach(() => {
 	storeVaultKeysCalls.length = 0;
 	getMasterUnlockKeyCalls.length = 0;
 	accounts = [{ accountId: ACCOUNT_ID, email: "a@example.com" }];
-	activeAccount = { type: "single", accountId: ACCOUNT_ID };
+	activeAccount = ACCOUNT_ID;
 	verifiableAccountIds = null;
 	// @ts-expect-error - minimal chrome stub for the background handler
 	globalThis.chrome = { runtime: { id: "extension-id" } };
@@ -202,14 +203,12 @@ describe("handleNativeBiometricUnlockAll active account", () => {
 	});
 
 	test("returns the user to the account they were last using", async () => {
-		activeAccount = { type: "single", accountId: "acc-2" };
+		activeAccount = "acc-2";
 
 		const result = await handleNativeBiometricUnlockAll();
 
 		expect(result.success).toBe(true);
-		expect(setActiveAccountCalls).toEqual([
-			{ type: "single", accountId: "acc-2" },
-		]);
+		expect(setActiveAccountCalls).toEqual(["acc-2"]);
 		expect(getMasterUnlockKeyCalls).toEqual(["acc-2"]);
 	});
 
@@ -218,13 +217,11 @@ describe("handleNativeBiometricUnlockAll active account", () => {
 
 		await handleNativeBiometricUnlockAll();
 
-		expect(setActiveAccountCalls).toEqual([
-			{ type: "single", accountId: "acc-1" },
-		]);
+		expect(setActiveAccountCalls).toEqual(["acc-1"]);
 	});
 
 	test("preserveActiveAccount skips the active-account write", async () => {
-		activeAccount = { type: "single", accountId: "acc-2" };
+		activeAccount = "acc-2";
 
 		const result = await handleNativeBiometricUnlockAll({
 			forceLocalUnlock: true,

@@ -51,8 +51,7 @@ export function AccountSwitcher() {
 
 	const accountsData = accounts;
 	const unlockedAccountIdsList = unlockedAccountIds;
-	const activeAccountId =
-		activeSelection?.type === "single" ? activeSelection.accountId : null;
+	const activeAccountId = activeSelection ?? null;
 	const activeAccount = accountsData.find(
 		(a) => a.accountId === activeAccountId,
 	);
@@ -87,7 +86,7 @@ export function AccountSwitcher() {
 		if (!account) return;
 
 		try {
-			await switchAccount.mutateAsync({ type: "single", accountId });
+			await switchAccount.mutateAsync(accountId);
 
 			const sessionValid = await storage.isSessionValid(accountId);
 			if (!sessionValid) {

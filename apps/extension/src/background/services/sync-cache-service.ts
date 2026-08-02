@@ -16,6 +16,7 @@ import {
 	type VaultRepositoryCoordinator,
 } from "@bittery/core";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import type { ActiveAccountId } from "@bittery/storage/types";
 import type { DeltaSyncClient, SyncEvent, SyncItemCache } from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
@@ -31,8 +32,6 @@ export type SyncConnectionContext = {
 	token: string;
 };
 
-type ActiveAccount = { type: "single"; accountId: string } | null;
-
 type VaultKeyLike = {
 	vaultId: string;
 };
@@ -44,7 +43,7 @@ type VaultKeyLike = {
  * through `itemCache`.
  */
 export interface SyncCacheStorage {
-	getActiveAccount: () => Promise<ActiveAccount>;
+	getActiveAccount: () => Promise<ActiveAccountId>;
 	getAccountsList: () => Promise<
 		Array<{ accountId: string; email: string; userId?: string }>
 	>;
@@ -93,7 +92,7 @@ export interface SyncCacheServiceDeps {
 		client: DeltaSyncClient,
 		cache: SyncItemCache,
 		event: SyncEvent,
-		accountScope?: string,
+		accountScope: string,
 		serverUrl?: string,
 		accountEmail?: string | null,
 	) => Promise<void>;
@@ -175,22 +174,18 @@ export function createSyncCacheService(
 		...overrides,
 	};
 
-	async function clearItemCacheForAccountId(accountId?: string): Promise<void> {
+	async function clearItemCacheForAccountId(accountId: string): Promise<void> {
 		try {
 			await deps.itemCache.clearItemCache(accountId);
 		} catch (error) {
 			deps.logger.debug(
-				`[sync-cache-service] Item cache clear skipped for ${accountId ?? "global"}: ${String(error)}`,
+				`[sync-cache-service] Item cache clear skipped for ${accountId}: ${String(error)}`,
 			);
 		}
 	}
 
 	async function resolveActiveSingleAccountId(): Promise<string | null> {
-		const active = await deps.storage.getActiveAccount();
-		if (!active || active.type !== "single") {
-			return null;
-		}
-		return active.accountId;
+		return await deps.storage.getActiveAccount();
 	}
 
 	async function getAllKnownAccountIds(): Promise<string[]> {
@@ -436,10 +431,8 @@ export function createSyncCacheService(
 			}`,
 		);
 
-		// `ItemCache` collections are per account, and omitting the accountId writes into a
-		// collection literally named `default` (packages/storage/CONTEXT.md §4.1). With no known account
-		// there is nothing to apply the delta to, so drop it rather than stash it somewhere
-		// nothing will ever read.
+		// `ItemCache` requires an accountId for every write. With no known account there is
+		// nothing to scope the delta to, so drop it rather than guess.
 		if (candidateAccountIds.length === 0) {
 			deps.logger.warn(
 				`[sync-cache-service] Dropping ${event.type}: no known account to scope the cache write to`,
@@ -506,8 +499,7 @@ export function createSyncCacheService(
 			allAccountIds,
 		);
 
-		// No known accounts means no collections to clear; `ItemCache`'s literal `"default"`
-		// account segment only ever exists on web.
+		// No known accounts means no collections to clear.
 		if (candidates.length === 0) {
 			return;
 		}

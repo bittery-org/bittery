@@ -44,13 +44,13 @@ function createDesktopAccountManager(
 		itemCache,
 		credentialMirror: lifecycleDeps.credentialMirror,
 		onActiveChanged: async (active) => {
-			if (active?.type !== "single") {
+			if (!active) {
 				return;
 			}
 			try {
 				const { invoke } = await import("@tauri-apps/api/core");
 				await invoke("broadcast_active_account_changed", {
-					accountId: active.accountId,
+					accountId: active,
 				});
 			} catch (error) {
 				console.error(
@@ -115,7 +115,7 @@ export function AccountProvider({
 
 	const switchAccount = useCallback(
 		async (accountId: string) => {
-			await manager.switchAccount({ type: "single", accountId });
+			await manager.switchAccount(accountId);
 		},
 		[manager],
 	);

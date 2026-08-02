@@ -25,7 +25,7 @@ describe("selectActiveAccountAfterUnlock", () => {
 	it("keeps the previously active account when it was unlocked", () => {
 		expect(
 			selectActiveAccountAfterUnlock({
-				previousActive: { type: "single", accountId: "acc-2" },
+				previousActive: "acc-2",
 				unlockedAccountIds: ["acc-1", "acc-2"],
 				accounts,
 			}),
@@ -35,7 +35,7 @@ describe("selectActiveAccountAfterUnlock", () => {
 	it("falls back to the first unlocked account when the previous one failed to unlock", () => {
 		expect(
 			selectActiveAccountAfterUnlock({
-				previousActive: { type: "single", accountId: "acc-2" },
+				previousActive: "acc-2",
 				unlockedAccountIds: ["acc-3"],
 				accounts,
 			}),
@@ -55,7 +55,7 @@ describe("selectActiveAccountAfterUnlock", () => {
 	it("falls back when the previously active account no longer exists", () => {
 		expect(
 			selectActiveAccountAfterUnlock({
-				previousActive: { type: "single", accountId: "removed" },
+				previousActive: "removed",
 				unlockedAccountIds: ["acc-2"],
 				accounts,
 			}),
@@ -65,7 +65,7 @@ describe("selectActiveAccountAfterUnlock", () => {
 	it("ignores a previously active value that is an email rather than an accountId", () => {
 		expect(
 			selectActiveAccountAfterUnlock({
-				previousActive: { type: "single", accountId: "acc-2@test.com" },
+				previousActive: "acc-2@test.com",
 				unlockedAccountIds: ["acc-1", "acc-2"],
 				accounts,
 			}),
@@ -98,7 +98,7 @@ describe("selectActiveAccountAfterRemoval", () => {
 		expect(
 			selectActiveAccountAfterRemoval({
 				removedAccountId: "acc-1",
-				previousActive: { type: "single", accountId: "acc-1" },
+				previousActive: "acc-1",
 				accounts,
 			}),
 		).toBe("acc-2");
@@ -108,7 +108,7 @@ describe("selectActiveAccountAfterRemoval", () => {
 		expect(
 			selectActiveAccountAfterRemoval({
 				removedAccountId: "acc-1",
-				previousActive: { type: "single", accountId: "acc-1" },
+				previousActive: "acc-1",
 				accounts: [account("acc-1")],
 			}),
 		).toBeUndefined();
@@ -118,7 +118,7 @@ describe("selectActiveAccountAfterRemoval", () => {
 		expect(
 			selectActiveAccountAfterRemoval({
 				removedAccountId: "acc-3",
-				previousActive: { type: "single", accountId: "acc-2" },
+				previousActive: "acc-2",
 				accounts,
 			}),
 		).toBeUndefined();
@@ -138,7 +138,7 @@ describe("selectActiveAccountAfterRemoval", () => {
 		expect(
 			selectActiveAccountAfterRemoval({
 				removedAccountId: "unknown",
-				previousActive: { type: "single", accountId: "acc-2" },
+				previousActive: "acc-2",
 				accounts,
 			}),
 		).toBeUndefined();

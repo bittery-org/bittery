@@ -75,7 +75,7 @@ export async function performDeltaSync(
 	rpcClient: DeltaSyncClient,
 	cache: SyncItemCache,
 	event: SyncEvent,
-	accountScope?: string,
+	accountScope: string,
 	serverUrl?: string,
 	accountEmail?: string | null,
 ): Promise<void> {

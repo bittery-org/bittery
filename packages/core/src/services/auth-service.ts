@@ -636,7 +636,7 @@ export async function storeLoginSession(
 		biometricEnabled: await storage.isBiometricEnabled(accountId),
 	});
 
-	await storage.setActiveAccount({ type: "single", accountId });
+	await storage.setActiveAccount(accountId);
 
 	await peekAccountSessionManager()?.refresh();
 	return accountId;
@@ -1006,12 +1006,8 @@ export async function storeUnlockSession(
 
 	if (options?.setActive ?? true) {
 		const currentActive = await storage.getActiveAccount();
-		if (
-			!currentActive ||
-			currentActive.type !== "single" ||
-			currentActive.accountId !== accountId
-		) {
-			await storage.setActiveAccount({ type: "single", accountId });
+		if (currentActive !== accountId) {
+			await storage.setActiveAccount(accountId);
 		}
 	}
 
@@ -1026,8 +1022,7 @@ export async function getSessionState(
 	accountId?: string,
 ): Promise<SessionState> {
 	const active = accountId ? null : await storage.getActiveAccount();
-	const resolvedAccountId =
-		accountId ?? (active?.type === "single" ? active.accountId : undefined);
+	const resolvedAccountId = accountId ?? active ?? undefined;
 
 	const [
 		metadata,

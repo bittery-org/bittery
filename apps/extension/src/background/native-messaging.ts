@@ -75,12 +75,12 @@ function decodeMasterUnlockKey(value: string): Uint8Array {
 export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 	try {
 		const activeAccount = await storage.getActiveAccount();
-		if (!activeAccount || activeAccount.type !== "single") {
+		if (!activeAccount) {
 			throw new Error("No active account. Please log in again.");
 		}
 
 		const transfer = await requestSingleBiometricTransfer({
-			accountId: activeAccount.accountId,
+			accountId: activeAccount,
 			extensionId: chrome.runtime.id,
 		});
 		if (!transfer.ok) {
@@ -88,42 +88,40 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 		}
 
 		const { material } = transfer;
-		await storage.setBiometricEnabled(activeAccount.accountId, true);
+		await storage.setBiometricEnabled(activeAccount, true);
 
 		const mukBase64 = await decrypt(material.encryptedMuk, material.deviceKey);
 		const muk = decodeMasterUnlockKey(mukBase64);
 
 		if (material.authToken) {
-			await storage.storeAuthToken(material.authToken, activeAccount.accountId);
-		} else if (!(await storage.getAuthToken(activeAccount.accountId))) {
+			await storage.storeAuthToken(material.authToken, activeAccount);
+		} else if (!(await storage.getAuthToken(activeAccount))) {
 			throw new Error("Missing auth token in response and storage");
 		}
 
 		const enforcer = getTravelModeEnforcer(storage, itemCache);
 		const client = await createStoredAccountRpcClient(
 			storage,
-			activeAccount.accountId,
+			activeAccount,
 		).catch(() => null);
-		if (!(await enforcer.verifyOrClear(activeAccount.accountId, client))) {
+		if (!(await enforcer.verifyOrClear(activeAccount, client))) {
 			throw new Error(TRAVEL_MODE_UNVERIFIED);
 		}
 
 		if (material.vaultKeys) {
 			await storage.storeVaultKeys(
-				enforcer.filterVaultKeys(activeAccount.accountId, material.vaultKeys),
-				activeAccount.accountId,
+				enforcer.filterVaultKeys(activeAccount, material.vaultKeys),
+				activeAccount,
 			);
 		} else {
-			const storedVaultKeys = await storage.getVaultKeys(
-				activeAccount.accountId,
-			);
+			const storedVaultKeys = await storage.getVaultKeys(activeAccount);
 			if (!storedVaultKeys || storedVaultKeys.length === 0) {
 				throw new Error("Missing vault keys in response and storage");
 			}
 		}
 
 		setMasterUnlockKey(muk);
-		await storage.setMasterUnlockKey(muk, activeAccount.accountId);
+		await storage.setMasterUnlockKey(muk, activeAccount);
 		await updateActivity();
 
 		return {
@@ -320,10 +318,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 		}
 
 		if (!options?.preserveActiveAccount) {
-			await storage.setActiveAccount({
-				type: "single",
-				accountId: activeAccountId,
-			});
+			await storage.setActiveAccount(activeAccountId);
 		}
 
 		const activeMuk = await storage.getMasterUnlockKey(activeAccountId);

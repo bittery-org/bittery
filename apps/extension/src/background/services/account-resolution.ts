@@ -34,8 +34,8 @@ export async function resolveAccountEmailForVault(
 	vaultId: string,
 ): Promise<string | undefined> {
 	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return await resolveEmailFromAccountId(activeAccount.accountId);
+	if (activeAccount) {
+		return await resolveEmailFromAccountId(activeAccount);
 	}
 
 	const cached = core.vaultCoordinator.findAccountForVault(vaultId);
@@ -95,8 +95,8 @@ export async function resolveAccountEmailForItemId(
 	}
 
 	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return await resolveEmailFromAccountId(activeAccount.accountId);
+	if (activeAccount) {
+		return await resolveEmailFromAccountId(activeAccount);
 	}
 
 	return undefined;

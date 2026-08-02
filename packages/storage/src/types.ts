@@ -71,11 +71,13 @@ export interface AccountMetadata {
 }
 
 /**
- * Active account configuration
- * - { type: "single", accountId: string } - A specific account is active
- * - null - No account is active (logged out)
+ * The active account pointer: an accountId, or `null` when logged out.
+ *
+ * Named rather than a bare `string | null` because an accountId is one of several
+ * bare-string identities in flight (email, userId, serverUrl, vaultId) and confusing
+ * them silently crosses accounts.
  */
-export type ActiveAccount = { type: "single"; accountId: string } | null;
+export type ActiveAccountId = string | null;
 
 /**
  * Platform types

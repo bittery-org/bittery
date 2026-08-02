@@ -76,8 +76,7 @@ export function ExtensionAccountSwitcher() {
 		new Set([...localUnlockedAccountIds, ...desktopUnlockedAccountIds]),
 	);
 
-	const activeAccountId =
-		activeSelection?.type === "single" ? activeSelection.accountId : null;
+	const activeAccountId = activeSelection ?? null;
 	// Update team names for accounts that don't have them
 	useEffect(() => {
 		const updateMissingTeamNames = async () => {
@@ -127,10 +126,7 @@ export function ExtensionAccountSwitcher() {
 		if (!account) return;
 
 		try {
-			await switchAccount.mutateAsync({
-				type: "single",
-				accountId,
-			});
+			await switchAccount.mutateAsync(accountId);
 
 			// Check if desktop is available and has this account unlocked
 			const desktopStatus = await chrome.runtime.sendMessage({

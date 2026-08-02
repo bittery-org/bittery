@@ -143,12 +143,23 @@ distinguish a cold cache from an empty vault.
 
 ## 4. Invariants the types cannot enforce
 
-### 4.1 The `"default"` account segment is web-only
+### 4.1 An account identity is an accountId, and it is never optional
 
-`ItemCache` falls back to the literal account segment `"default"` when `accountId` is
-omitted. That is only ever correct on web. **Every other call site must pass an explicit
-accountId.** A missed one silently reads and writes the wrong collection instead of
-failing — the worst kind of bug this codebase can have.
+Every `ItemCache` method takes a required `accountId`. There is no implicit fallback: the
+literal `"default"` segment this section used to describe is gone, because an omitted id
+silently read and wrote the wrong collection instead of failing.
+
+Two rules keep it that way, and both are load-bearing:
+
+- **An email is not an identity.** Emails, userIds, serverUrls and vaultIds are all bare
+  strings too, and passing one where an accountId belongs names a collection after it.
+  `resolveAccountScopeId` maps a scope (accountId *or* legacy display email) to an accountId
+  and **throws** when it cannot, so an unresolved scope fails loudly at the boundary rather
+  than quietly downgrading to whichever account happens to be active.
+- **`AccountStore` still resolves an omitted `accountId` to the active account**, which is
+  correct for UI code that genuinely means "the current account" — but it is a *different*
+  answer from what `ItemCache` would have given. That divergence is why nothing may reach
+  either seam with an unresolved identity.
 
 ### 4.2 Dropping a session must also drop the item cache
 

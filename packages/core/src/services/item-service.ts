@@ -684,13 +684,7 @@ export class ItemService {
 		let rawItem: RawEncryptedItemWithVersion | null = null;
 
 		const accountId = await resolveAccountScopeId(this.storage, accountEmail);
-		// No account resolved means no collection to read: `ItemCache` would fall back
-		// to the literal `"default"` account segment, which belongs to a different
-		// account on every platform except web. The fetch path below throws for the
-		// same reason a line later.
-		const cachedItems = accountId
-			? await this.itemCache.getCachedItems(accountId)
-			: null;
+		const cachedItems = await this.itemCache.getCachedItems(accountId);
 		const cached = cachedItems?.find((item) => item.id === itemId);
 		if (cached) {
 			rawItem = {
@@ -711,7 +705,6 @@ export class ItemService {
 		}
 
 		if (!rawItem) {
-			if (!accountId) throw new Error("Account identity is required");
 			const client = await this.accounts.getClientForAccount(
 				defaultClient,
 				accountId,
@@ -908,7 +901,6 @@ export class ItemService {
 			this.storage,
 			input.accountEmail,
 		);
-		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
 			accountId,
@@ -991,7 +983,6 @@ export class ItemService {
 			this.storage,
 			input.accountEmail,
 		);
-		if (!accountId) throw new Error("Account identity is required");
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
 			accountId,

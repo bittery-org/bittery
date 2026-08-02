@@ -18,14 +18,14 @@ import {
 import { lifecycleDeps } from "@/services/lifecycle";
 import {
 	type AccountMetadata,
-	type ActiveAccount,
+	type ActiveAccountId,
 	itemCache,
 	storage,
 } from "@/services/storage";
 
 interface AccountContextValue {
 	allAccounts: AccountMetadata[];
-	activeAccountConfig: ActiveAccount;
+	activeAccountConfig: ActiveAccountId;
 	activeAccount: AccountMetadata | null;
 	isLoading: boolean;
 	refreshAccounts: () => Promise<void>;
@@ -106,7 +106,7 @@ export function AccountProvider({ children }: AccountProviderProps) {
 
 	const switchAccount = useCallback(
 		async (accountId: string) => {
-			await manager.switchAccount({ type: "single", accountId });
+			await manager.switchAccount(accountId);
 		},
 		[manager],
 	);

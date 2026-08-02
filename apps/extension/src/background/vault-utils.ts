@@ -67,8 +67,8 @@ export async function mergeDesktopAndLocalItemSources(
 
 async function getDesktopTargetAccountIds(): Promise<string[]> {
 	const activeAccount = await storage.getActiveAccount();
-	if (activeAccount?.type === "single") {
-		return [activeAccount.accountId];
+	if (activeAccount) {
+		return [activeAccount];
 	}
 
 	return [];
@@ -80,9 +80,9 @@ async function filterItemsForTravelMode(
 	const enforcer = getTravelModeEnforcer(storage, itemCache);
 	const activeAccount = await storage.getActiveAccount();
 
-	if (activeAccount?.type === "single") {
-		await enforcer.hydrateFromStorage(activeAccount.accountId);
-		return enforcer.filterItems(activeAccount.accountId, items);
+	if (activeAccount) {
+		await enforcer.hydrateFromStorage(activeAccount);
+		return enforcer.filterItems(activeAccount, items);
 	}
 
 	// No single active account means we cannot determine which account's travel

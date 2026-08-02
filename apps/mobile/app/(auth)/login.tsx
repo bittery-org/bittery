@@ -181,19 +181,14 @@ export default function LoginScreen() {
 
 			if (normalizedServerUrl) {
 				const activeAccount = await storage.getActiveAccount();
-				if (activeAccount?.type === "single") {
-					await storage.storeServerUrl(
-						normalizedServerUrl,
-						activeAccount.accountId,
-					);
+				if (activeAccount) {
+					await storage.storeServerUrl(normalizedServerUrl, activeAccount);
 				}
 			}
 
 			await refreshAccounts();
 
-			const activeConfig = await storage.getActiveAccount();
-			const accountId =
-				activeConfig?.type === "single" ? activeConfig.accountId : null;
+			const accountId = await storage.getActiveAccount();
 
 			if (
 				Platform.OS === "android" &&

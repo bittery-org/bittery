@@ -33,10 +33,7 @@ export function AccountSwitcher() {
 	const [switching, setSwitching] = useState(false);
 	const [isOpen, setIsOpen] = useState(false);
 	const handleAccountSwitch = async (account: AccountMetadata) => {
-		if (
-			activeAccountConfig?.type === "single" &&
-			account.accountId === activeAccountConfig.accountId
-		) {
+		if (activeAccountConfig && account.accountId === activeAccountConfig) {
 			setIsOpen(false);
 			return;
 		}
@@ -152,8 +149,8 @@ export function AccountSwitcher() {
 					<View className="pb-4">
 						{allAccounts.map((account) => {
 							const isActive =
-								activeAccountConfig?.type === "single" &&
-								account.accountId === activeAccountConfig.accountId;
+								activeAccountConfig &&
+								account.accountId === activeAccountConfig;
 							return (
 								<PressableFeedback
 									key={account.accountId}
