@@ -50,6 +50,8 @@ let crypto: ICrypto;
 let itemCache: ItemCache;
 
 interface SeedOptions {
+	/** Overrides the seeded `[accountId, email]` pairs; every other list defaults to all of them. */
+	accounts?: readonly (readonly [string, string])[];
 	/** Accounts whose password unlock can succeed at all. */
 	withSecretKey?: string[];
 	withAuthToken?: string[];
@@ -67,11 +69,13 @@ interface SeedOptions {
 async function createStorage(
 	options: SeedOptions = {},
 ): Promise<{ storage: AccountStore; port: InMemoryPlatformPort }> {
+	const seeded = options.accounts ?? ACCOUNTS;
+	const seededIds = seeded.map(([accountId]) => accountId);
 	const {
-		withSecretKey = ["acc-1", "acc-2"],
-		withAuthToken = ["acc-1", "acc-2"],
-		withKdfProfile = ["acc-1", "acc-2"],
-		verifiable = ["acc-1", "acc-2"],
+		withSecretKey = seededIds,
+		withAuthToken = seededIds,
+		withKdfProfile = seededIds,
+		verifiable = seededIds,
 		biometric = false,
 	} = options;
 
@@ -82,7 +86,7 @@ async function createStorage(
 		port.biometricState.authenticates = true;
 	}
 
-	for (const [accountId, email] of ACCOUNTS) {
+	for (const [accountId, email] of seeded) {
 		await store.addAccount(accountMetadata({ accountId, email }));
 		await store.storeServerUrl(OFFLINE_SERVER_URL, accountId);
 		await store.storeSessionData(
@@ -352,6 +356,64 @@ describe("unlock all accounts", () => {
 		expect((await storage.getAccountMetadata("acc-2"))?.lastActiveAt).toBe(1);
 	});
 
+	it("locks the rest of the collateral accounts when one lock fails", async () => {
+		const { storage } = await createStorage({
+			accounts: [...ACCOUNTS, ["acc-3", "c@test.com"]],
+			biometric: true,
+		});
+		const clearMasterUnlockKey = storage.clearMasterUnlockKey.bind(storage);
+		spyOn(storage, "clearMasterUnlockKey").mockImplementation(
+			async (accountId?: string) => {
+				if (accountId === "acc-1") {
+					throw new Error("keychain unavailable");
+				}
+				await clearMasterUnlockKey(accountId);
+			},
+		);
+
+		const outcome = await unlockAllWithBiometric(
+			{ promptMessage: PROMPT, emails: ["c@test.com"] },
+			{ storage, itemCache },
+		);
+
+		expect(outcome.unlocked).toEqual(["acc-3"]);
+		// Only the account whose lock failed may stay unlocked: aborting the loop
+		// would leave the rest of the collateral unlocked, travel mode unverified.
+		expect((await storage.getUnlockedAccounts()).sort()).toEqual([
+			"acc-1",
+			"acc-3",
+		]);
+	});
+
+	it("reports travel_mode_unverified even when clearing the session fails", async () => {
+		const { storage } = await createStorage({ verifiable: ["acc-2"] });
+		const clearSession = storage.clearSession.bind(storage);
+		spyOn(storage, "clearSession").mockImplementation(
+			async (accountId?: string) => {
+				if (accountId === "acc-1") {
+					throw new Error("keychain unavailable");
+				}
+				await clearSession(accountId);
+			},
+		);
+
+		const outcome = await unlockAllWithPassword(
+			{ password: "pw" },
+			{ storage, itemCache, crypto },
+		);
+
+		// A cleanup that throws must neither escape the batch nor cost the
+		// remaining accounts their unlock.
+		expect(outcome.unlocked).toEqual(["acc-2"]);
+		expect(outcome.failed).toEqual([
+			{
+				accountId: "acc-1",
+				email: "a@test.com",
+				reason: "travel_mode_unverified",
+			},
+		]);
+	});
+
 	it("clears the session of an account that fails travel mode", async () => {
 		const { storage } = await createStorage({
 			biometric: true,
@@ -495,9 +557,8 @@ describe("unlock one account", () => {
 });
 
 /**
- * Driven straight through `storeUnlockSession`: only a server that answers can report
- * a team the stored record does not already have, and an offline unlock reads its own
- * `result.user` back out of that record.
+ * Driven straight through `storeUnlockSession`: an offline unlock reads `result.user`
+ * back out of the record being written, so going via `unlockAccountWithPassword` asserts nothing.
  */
 describe("stored account refresh", () => {
 	beforeEach(async () => {

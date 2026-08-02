@@ -137,13 +137,26 @@ export function useBiometricUnlock(
 
 	return useMutation({
 		mutationFn: async (input: BiometricUnlockInput) => {
-			const outcome = await unlockAccountWithBiometric(
-				{
-					accountId: input.accountId,
-					promptMessage: options.promptMessage,
-				},
-				{ storage, itemCache },
-			);
+			let outcome: BiometricUnlockResult;
+			try {
+				outcome = await unlockAccountWithBiometric(
+					{
+						accountId: input.accountId,
+						promptMessage: options.promptMessage,
+					},
+					{ storage, itemCache },
+				);
+			} catch (error) {
+				// Consumers branch on `error.type`, so a raw storage throw would escape as
+				// an error this mutation's declared type says cannot happen.
+				console.error(
+					"[BiometricUnlock] Unlock threw:",
+					input.accountId,
+					error,
+				);
+				const unknown: BiometricUnlockError = { type: "unknown" };
+				throw unknown;
+			}
 			// The unlock reports rather than throws; React Query needs a rejection to
 			// route a failure to `onError`.
 			if (outcome.unlocked.length === 0) {

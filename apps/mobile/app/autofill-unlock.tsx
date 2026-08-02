@@ -208,14 +208,21 @@ export default function AutofillUnlockScreen() {
 					activeAccount.accountId,
 				);
 				if (biometricAvailable && biometricEnabled) {
-					try {
-						await CredentialProvider.escrowMukWithBiometric({
-							email: activeAccount.email,
-							userId: activeAccount.userId,
-						});
-					} catch (escrowError) {
-						// Escrow is optional, don't fail the unlock
-						console.warn("Failed to escrow MUK with biometric:", escrowError);
+					// The escrow has to name the same id the native provider was keyed with
+					// above: the session's userId, not the account record's.
+					const sessionData = await storage.getStoredSessionData(
+						activeAccount.accountId,
+					);
+					if (sessionData?.userId) {
+						try {
+							await CredentialProvider.escrowMukWithBiometric({
+								email: activeAccount.email,
+								userId: sessionData.userId,
+							});
+						} catch (escrowError) {
+							// Escrow is optional, don't fail the unlock
+							console.warn("Failed to escrow MUK with biometric:", escrowError);
+						}
 					}
 				}
 			}

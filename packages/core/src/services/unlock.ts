@@ -197,9 +197,19 @@ async function acquireWithPassword(
 			// The credential was accepted before travel mode is verified, so a
 			// verification failure must not be reported as a rejected password.
 			if (error instanceof TravelModeVerificationError) {
-				// Fail closed: a `local`-mode unlock writes nothing before verifying,
-				// so any session already on disk would survive unverified.
-				await storage.clearSession(accountId);
+				try {
+					// Fail closed: a `local`-mode unlock writes nothing before verifying,
+					// so any session already on disk would survive unverified.
+					await storage.clearSession(accountId);
+				} catch (clearError) {
+					// Best-effort: the remaining accounts in the batch still owe the
+					// caller an outcome rather than a rejection.
+					console.error(
+						"[Unlock] Failed to clear an unverified session:",
+						accountId,
+						clearError,
+					);
+				}
 				failed.push({ accountId, email, reason: "travel_mode_unverified" });
 				continue;
 			}
@@ -276,8 +286,19 @@ async function acquireWithBiometric(
 	// verified. Lock it rather than `clearSession`: the user asked for a narrower
 	// unlock, not to discard these accounts' vault keys and auth token.
 	for (const accountId of restored) {
-		if (!requested.has(accountId)) {
+		if (requested.has(accountId)) {
+			continue;
+		}
+		try {
 			await storage.clearMasterUnlockKey(accountId);
+		} catch (error) {
+			// Best-effort: one account that refuses to lock must not leave the rest of
+			// the collateral unlocked with travel mode never verified.
+			console.error(
+				"[Unlock] Failed to lock a collateral account:",
+				accountId,
+				error,
+			);
 		}
 	}
 
