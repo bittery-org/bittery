@@ -8,16 +8,16 @@
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
-	performSRPUnlock,
-	type SRPUnlockInput,
-	storeUnlockSession,
-	type UnlockResult,
-} from "../../auth";
-import {
 	usePlatformCrypto,
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
+import {
+	performSRPUnlock,
+	type SRPUnlockInput,
+	storeUnlockSession,
+	type UnlockResult,
+} from "../../services/auth-service";
 import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
 
 /**

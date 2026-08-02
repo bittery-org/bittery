@@ -1,4 +1,4 @@
-import { storeLoginSession } from "@bittery/core/hooks/auth";
+import { storeLoginSession } from "@bittery/core/services/auth-service";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";

@@ -2,7 +2,6 @@ import { useRPCClient } from "@bittery/shared/rpc";
 import type { AccountStore } from "@bittery/storage";
 import type { TravelModeConfig } from "@bittery/storage/types";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { deriveSrpLoginProof, type IAuthClient } from "../auth";
 import {
 	useCoreContext,
 	usePlatformCrypto,
@@ -12,6 +11,10 @@ import {
 	type DefaultRpcClient,
 	getClientForAccount,
 } from "../services/account-resolver";
+import {
+	deriveSrpLoginProof,
+	type IAuthClient,
+} from "../services/auth-service";
 import { getTravelModeEnforcer } from "../services/travel-mode-enforcer";
 import type { TravelModeRpcClient } from "../services/travel-mode-service";
 import { restoreAfterTravelModeDisabled } from "../services/travel-mode-sync";

@@ -3,11 +3,11 @@
  * Bottom sheet modal for configuring and creating share links on mobile
  */
 
+import { useCreateShare } from "@bittery/core/hooks";
 import {
 	SHARE_EXPIRATION_OPTIONS,
 	type ShareExpirationOption,
-	useCreateShare,
-} from "@bittery/core/hooks";
+} from "@bittery/core/services/share-service";
 import type { DecryptedItem } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { Button, ControlField, Label, Switch, useToast } from "heroui-native";

@@ -7,7 +7,7 @@
  * transition (it is what the old poll-edge guard used to swallow).
  */
 
-import type { DesktopStatus } from "../../desktop-client";
+import type { DesktopStatus } from "../../desktop-protocol";
 import { desktopSync } from "../../desktop-sync";
 import type { DesktopPort } from "../ports";
 import type { DesktopSnapshot } from "../types";

@@ -8,10 +8,8 @@
  * - Web autolock service
  */
 
-import {
-	createWebAutolockService,
-	PlatformProvider,
-} from "@bittery/core/hooks";
+import { PlatformProvider } from "@bittery/core/hooks";
+import { createWebAutolockService } from "@bittery/core/hooks/services/autolock-web";
 import type { IAutolockService, ICrypto, ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";

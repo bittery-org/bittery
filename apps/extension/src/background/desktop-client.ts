@@ -2,7 +2,7 @@ import {
 	type DesktopEventPayload,
 	DesktopProtocolMismatchError,
 	type DesktopResponse,
-	type DesktopTheme,
+	type DesktopStatus,
 } from "./desktop-protocol";
 import {
 	type NativeMessagingClient,
@@ -26,16 +26,6 @@ function describeSnapshotTransportError(error: unknown): string {
 		return `transport error: ${error.message}`;
 	}
 	return "unknown transport error";
-}
-
-export interface DesktopStatus {
-	available: boolean;
-	locked: boolean;
-	unlockedAccounts: string[];
-	timestamp: number;
-	autolockTimeoutMs: number;
-	/** The desktop app's appearance setting; null when unknown. */
-	theme: DesktopTheme | null;
 }
 
 interface CachedData<T> {

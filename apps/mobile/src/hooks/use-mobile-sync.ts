@@ -1,10 +1,10 @@
 import {
 	AccountResolver,
 	createStoredAccountRpcClient,
-	getOrCreateVaultRepositoryCoordinator,
-	handleTravelModeSyncEvent,
-	type RpcVaultClient,
-} from "@bittery/core";
+} from "@bittery/core/services/account-resolver";
+import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
+import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
+import type { RpcVaultClient } from "@bittery/core/services/vault-service";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";

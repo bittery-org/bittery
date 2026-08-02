@@ -3,6 +3,41 @@ export const DESKTOP_PROTOCOL_VERSION = 1;
 
 export type DesktopTheme = "light" | "dark" | "system";
 
+export interface DesktopStatus {
+	available: boolean;
+	locked: boolean;
+	unlockedAccounts: string[];
+	timestamp: number;
+	autolockTimeoutMs: number;
+	/** The desktop app's appearance setting; null when unknown. */
+	theme: DesktopTheme | null;
+}
+
+/**
+ * True when the desktop app is available, unlocked, and has at least one
+ * unlocked account.
+ *
+ * Accepts a partial status because callers in the UI read it straight off a
+ * `chrome.runtime.sendMessage` response, where every field may be absent.
+ */
+export function isDesktopStatusUnlocked(
+	status: Partial<DesktopStatus> | null | undefined,
+): boolean {
+	return !!(
+		status?.available &&
+		!status.locked &&
+		(status.unlockedAccounts?.length ?? 0) > 0
+	);
+}
+
+/**
+ * Status the background returns instead of unlocking when a connected desktop
+ * app is locked — the desktop was asked to raise its own unlock screen (see
+ * `desktop-unlock.ts`), and the popup waits for the pushed `DESKTOP_UNLOCKED`
+ * event.
+ */
+export const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock" as const;
+
 export type DesktopRequest =
 	| { type: "PING" }
 	| { type: "GET_DESKTOP_STATUS" }

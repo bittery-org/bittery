@@ -5,18 +5,19 @@
  * Uses shared auth utilities from @bittery/core for SRP login/unlock logic.
  */
 
+import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import {
 	performSRPLogin,
 	performSRPUnlock,
 	storeLoginSession,
 	storeUnlockSession,
-} from "@bittery/core";
-import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
+} from "@bittery/core/services/auth-service";
 import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { cryptoAdapter } from "../lib/crypto-adapter";
 import { itemCache, storage } from "../lib/storage";
+import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { isDesktopUnlockedNow } from "./desktop-status";
-import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
+import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
 import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";

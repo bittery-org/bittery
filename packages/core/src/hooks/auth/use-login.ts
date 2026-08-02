@@ -12,16 +12,16 @@ import {
 } from "@bittery/shared/rpc-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
-	type LoginResult,
-	performSRPLogin,
-	type SRPLoginInput,
-	storeLoginSession,
-} from "../../auth";
-import {
 	usePlatformCrypto,
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
+import {
+	type LoginResult,
+	performSRPLogin,
+	type SRPLoginInput,
+	storeLoginSession,
+} from "../../services/auth-service";
 
 /**
  * Options for useLogin hook

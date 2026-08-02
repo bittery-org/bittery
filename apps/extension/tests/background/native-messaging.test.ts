@@ -73,7 +73,6 @@ mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
 }));
 
 mock.module(path.join(bgDir, "desktop-unlock.ts"), () => ({
-	PENDING_DESKTOP_UNLOCK: "pending-desktop-unlock",
 	requireDesktopUnlock: async () => ({ required: false, triggered: false }),
 }));
 

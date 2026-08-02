@@ -9,12 +9,10 @@
  * - Fall back to global cache updates when account-scoped updates cannot be applied.
  */
 
-import {
-	AccountResolver,
-	handleTravelModeSyncEvent,
-	type RpcVaultClient,
-	type VaultRepositoryCoordinator,
-} from "@bittery/core";
+import { AccountResolver } from "@bittery/core/services/account-resolver";
+import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
+import type { VaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
+import type { RpcVaultClient } from "@bittery/core/services/vault-service";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { ActiveAccountId } from "@bittery/storage/types";
 import type { DeltaSyncClient, SyncEvent, SyncItemCache } from "@bittery/sync";

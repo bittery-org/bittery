@@ -1,14 +1,14 @@
 import {
-	AccountResolver,
-	createStoredAccountRpcClient,
-	getOrCreateVaultRepositoryCoordinator,
-	handleTravelModeSyncEvent,
-	type RpcVaultClient,
-} from "@bittery/core";
-import {
 	invalidateAccountSession,
 	type LifecycleOutcome,
 } from "@bittery/core/services/account-lifecycle";
+import {
+	AccountResolver,
+	createStoredAccountRpcClient,
+} from "@bittery/core/services/account-resolver";
+import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
+import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
+import type { RpcVaultClient } from "@bittery/core/services/vault-service";
 import { isUnauthorizedRpcError } from "@bittery/shared/rpc-client";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type {

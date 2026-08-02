@@ -11,8 +11,8 @@ import {
 } from "@bittery/core/services/account-session-manager";
 import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { itemCache, storage } from "../lib/storage";
-import { type DesktopStatus, desktopClient } from "./desktop-client";
-import type { DesktopEventPayload } from "./desktop-protocol";
+import { desktopClient } from "./desktop-client";
+import type { DesktopEventPayload, DesktopStatus } from "./desktop-protocol";
 import {
 	type DesktopModeStateSnapshot,
 	evaluateDesktopRecoveryDecision,

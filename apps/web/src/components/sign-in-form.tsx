@@ -1,5 +1,8 @@
 import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
-import { performSRPLogin, storeLoginSession } from "@bittery/core/hooks/auth";
+import {
+	performSRPLogin,
+	storeLoginSession,
+} from "@bittery/core/services/auth-service";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";

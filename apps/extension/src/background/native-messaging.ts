@@ -14,8 +14,9 @@ import {
 	requestSingleBiometricTransfer,
 	STALE_DESKTOP_UNLOCK_RESPONSE,
 } from "./biometric-transfer";
+import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { desktopSync } from "./desktop-sync";
-import { PENDING_DESKTOP_UNLOCK, requireDesktopUnlock } from "./desktop-unlock";
+import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
 import { sendNativeMessage } from "./native-messaging-client";
 import {

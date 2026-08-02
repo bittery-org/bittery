@@ -1,6 +1,6 @@
-import { getBiometricUnlockAvailability } from "@bittery/core";
 import { useAccountSwitcher, useQuickUnlockAll } from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
+import { getBiometricUnlockAvailability } from "@bittery/core/services/auth-service";
 import { unlockAllWithBiometric } from "@bittery/core/services/unlock";
 import {
 	AccountAvatarGroup as AvatarGroup,

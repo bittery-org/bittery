@@ -7,7 +7,7 @@
 
 import { useRPCClient } from "@bittery/shared/rpc";
 import { type UseQueryResult, useQuery } from "@tanstack/react-query";
-import type { CheckEmailResult } from "../../auth";
+import type { CheckEmailResult } from "../../services/auth-service";
 
 /**
  * Options for useCheckEmail hook

@@ -35,9 +35,9 @@ import {
 	handleUpdateExistingCredential,
 } from "../credential-handlers";
 import { desktopClient } from "../desktop-client";
+import { PENDING_DESKTOP_UNLOCK } from "../desktop-protocol";
 import { getDesktopStatus } from "../desktop-status";
 import { desktopSync } from "../desktop-sync";
-import { PENDING_DESKTOP_UNLOCK } from "../desktop-unlock";
 import {
 	handleCheckNativeBiometric,
 	handleNativeBiometricUnlock,

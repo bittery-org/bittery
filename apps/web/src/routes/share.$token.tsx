@@ -1,4 +1,4 @@
-import { readShareKeyFromUrl } from "@bittery/core";
+import { readShareKeyFromUrl } from "@bittery/core/services/share-service";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import type { SharedItemPayload } from "@bittery/shared/types";
 import {

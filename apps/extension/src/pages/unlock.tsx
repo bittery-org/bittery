@@ -13,6 +13,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
 import iconMark from "../../icons/icon-128.png";
 import { BIOMETRIC_TRANSFER_FAILURE } from "../background/biometric-transfer";
+import { PENDING_DESKTOP_UNLOCK } from "../background/desktop-protocol";
 import { storage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
@@ -32,13 +33,6 @@ function getInitials(account: {
 	}
 	return account.email.slice(0, 2).toUpperCase();
 }
-
-/**
- * The background returns this instead of unlocking when a connected desktop app
- * is locked — the desktop was asked to raise its own unlock screen, and the
- * popup waits for the pushed `DESKTOP_UNLOCKED` event (see `desktop-unlock.ts`).
- */
-const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock";
 
 export function UnlockPage() {
 	const navigate = useNavigate();

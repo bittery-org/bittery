@@ -1,5 +1,5 @@
-import { getClientForAccount } from "@bittery/core";
 import { useAllVaultKeys, useCoreContext } from "@bittery/core/hooks";
+import { getClientForAccount } from "@bittery/core/services/account-resolver";
 import {
 	getDecryptedVaultKey,
 	getImportProvider,

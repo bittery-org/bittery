@@ -22,9 +22,6 @@
 import { desktopClient } from "./desktop-client";
 import { isDesktopLockedNow } from "./desktop-status";
 
-/** Status returned to the UI when the desktop was asked to unlock instead. */
-export const PENDING_DESKTOP_UNLOCK = "pending-desktop-unlock" as const;
-
 export interface DesktopUnlockOutcome {
 	/**
 	 * `true` when a locked desktop app is present. The caller must not unlock

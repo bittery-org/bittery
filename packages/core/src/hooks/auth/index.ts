@@ -6,6 +6,12 @@
  * for state management and caching.
  */
 
+// Account metadata sync hooks
+export {
+	type UseAccountMetadataSyncOptions,
+	useAccountMetadataSync,
+	useAccountMetadataSyncAll,
+} from "./use-account-metadata-sync";
 // Account switcher hook (multi-account management)
 export {
 	type UseAccountSwitcherOptions,

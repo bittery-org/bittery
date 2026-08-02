@@ -1,4 +1,4 @@
-import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core";
+import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
 import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
 import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";

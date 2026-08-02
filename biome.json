@@ -73,6 +73,18 @@
 				}
 			},
 			"style": {
+				"noRestrictedImports": {
+					"level": "error",
+					"options": {
+						"paths": {
+							"@bittery/core/hooks/auth": "Removed alias. Import from \"@bittery/core/services/auth-service\" instead.",
+							"@bittery/core/hooks/utils": "Removed barrel over compatibility wrappers. Import the underlying service from \"@bittery/core/services/*\" instead.",
+							"@bittery/core/hooks/services": "Removed forwarder. Import from \"@bittery/core/hooks/services/autolock-web\" or \"@bittery/core/hooks/services/autolock-mobile\" instead.",
+							"@bittery/core/types": "Removed cross-package alias. Import from \"@bittery/types\" instead.",
+							"@bittery/core/core-context": "Removed subpath export. Import from the \"@bittery/core\" root entry instead."
+						}
+					}
+				},
 				"noParameterAssign": "error",
 				"useAsConstAssertion": "error",
 				"useDefaultParameterLast": "error",

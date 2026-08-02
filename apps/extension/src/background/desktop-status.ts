@@ -7,10 +7,11 @@
  * needs an up-to-date read (see `refresh`).
  */
 
-import type { DesktopStatus } from "./desktop-client";
+import {
+	type DesktopStatus,
+	isDesktopStatusUnlocked,
+} from "./desktop-protocol";
 import { desktopSync } from "./desktop-sync";
-
-export type { DesktopStatus };
 
 /**
  * Get the current desktop status.
@@ -31,21 +32,13 @@ export async function getDesktopStatus(opts?: {
 	);
 }
 
-function isStatusUnlocked(status: DesktopStatus | null): boolean {
-	return !!(
-		status?.available &&
-		!status.locked &&
-		(status.unlockedAccounts?.length ?? 0) > 0
-	);
-}
-
 /**
  * True when the desktop app is available, unlocked, and has at least one
  * unlocked account.
  */
 export async function isDesktopUnlockedNow(): Promise<boolean> {
 	const status = await getDesktopStatus();
-	return isStatusUnlocked(status);
+	return isDesktopStatusUnlocked(status);
 }
 
 /**

@@ -6,8 +6,11 @@
  */
 
 import { type UseQueryResult, useQuery } from "@tanstack/react-query";
-import { getSessionState, type SessionState } from "../../auth";
 import { usePlatformStorage } from "../../context/platform-context";
+import {
+	getSessionState,
+	type SessionState,
+} from "../../services/auth-service";
 
 /**
  * Options for useSessionState hook

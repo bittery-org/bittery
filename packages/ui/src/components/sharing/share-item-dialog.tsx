@@ -1,9 +1,9 @@
+import { useCreateShare } from "@bittery/core/hooks";
 import {
 	SHARE_EXPIRATION_OPTIONS,
 	type ShareAccessMode,
 	type ShareExpirationOption,
-	useCreateShare,
-} from "@bittery/core/hooks";
+} from "@bittery/core/services/share-service";
 import { useI18n } from "@bittery/i18n/react";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
