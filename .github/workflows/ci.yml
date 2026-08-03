@@ -256,7 +256,7 @@ jobs:
           elapsed="$(( $(date +%s) - start ))"
           echo "crypto WASM build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: crypto-wasm
           path: packages/crypto/wasm
