@@ -151,7 +151,7 @@ jobs:
         shell: bash
         run: node scripts/sync-version.mjs "${GITHUB_REF#refs/tags/v}"
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -254,7 +254,7 @@ jobs:
         with:
           workspaces: packages/crypto/core
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
