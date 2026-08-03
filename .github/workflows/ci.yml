@@ -334,7 +334,7 @@ jobs:
           name: crypto-wasm
           path: packages/crypto/wasm
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -394,7 +394,7 @@ jobs:
           name: crypto-wasm
           path: packages/crypto/wasm
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
@@ -442,7 +442,7 @@ jobs:
           name: crypto-wasm
           path: packages/crypto/wasm
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: ${{ env.PNPM_VERSION }}
 
