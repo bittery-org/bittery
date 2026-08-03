@@ -31,7 +31,7 @@ time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
 ts-rs = { version = "10.1.0", features = ["serde-json-impl"] }
 fred = { version = "10", features = ["subscriber-client", "i-hashes", "i-keys", "i-scripts", "i-pubsub", "sha-1"] }
 dotenvy = "0.15"
-base64 = "0.22"
+base64 = "0.23"
 uuid = { version = "1", features = ["v4"] }
 hex = "0.4"
 # `unbiased` restores rand 0.8's rejection-sampling guarantee for `random_range`.
