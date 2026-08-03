@@ -125,9 +125,8 @@ export class RpcClientError extends Error {
 		this.name = "RpcClientError";
 		this.code = options?.code;
 		const data = options?.data ?? {};
-		// A JSON-RPC protocol error carries the numeric transport code beside the
-		// server's string one under `data`; the string code is what callers match on,
-		// so it must survive the merge.
+		// Callers match on the server's string code under `data`, so the numeric
+		// transport code must never overwrite it.
 		this.data =
 			options?.code !== undefined && data.code === undefined
 				? { ...data, code: options.code }

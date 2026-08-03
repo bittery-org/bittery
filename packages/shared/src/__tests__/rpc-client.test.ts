@@ -5,11 +5,8 @@ import {
 	RpcClientError,
 } from "../rpc-client";
 
-/**
- * The auth extractor rejects before the handler runs, so the server answers with
- * a JSON-RPC *protocol* error rather than a `result.Err` envelope: the numeric
- * transport code sits next to the string code under `data`.
- */
+// The auth extractor rejects before the handler runs, so the server answers with
+// a JSON-RPC protocol error rather than a `result.Err` envelope.
 function unauthorizedProtocolErrorFetch(): typeof fetch {
 	return (async (_url: RequestInfo | URL, options?: RequestInit) => {
 		const payload = JSON.parse(String(options?.body)) as { id: number };
