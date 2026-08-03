@@ -31,8 +31,8 @@ tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["full"] }
-dirs = "5.0"
-base64 = "0.22"
+dirs = "6.0"
+base64 = "0.23"
 
 # Native crypto
 bittery-crypto-core = { path = "../../../packages/crypto/core/crates/bittery-crypto-core" }
@@ -58,7 +58,7 @@ features = ["linux-native"]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
+winreg = "0.55"
 # Named pipe security descriptor (SDDL), peer process id and peer executable
 # lookup. Also already in the graph via tauri/tokio.
 windows-sys = { version = "0.61", features = [

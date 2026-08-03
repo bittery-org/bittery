@@ -41,7 +41,7 @@ num-traits = "0.2"
 num-integer = "0.1"
 
 # Encoding
-base64 = "0.22"
+base64 = "0.23"
 hex = "0.4"
 ciborium = "0.2"
 
@@ -65,7 +65,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # Error handling
-thiserror = "1.0"
+thiserror = "2.0"
 subtle = "2"
 zeroize = { version = "1", features = ["derive"] }
 unicode-normalization = "0.1"
