@@ -1011,6 +1011,23 @@ export async function storeUnlockSession(
 		}
 	}
 
+	// `addAccount` replaces the record wholesale, so spread the stored one to keep the
+	// fields an unlock never sees — `lastActiveAt` among them, which `setActiveAccount`
+	// owns because an unlock-all runs this for every account.
+	const storedAccount = await storage.getAccountMetadata(accountId);
+	if (storedAccount) {
+		await storage.addAccount({
+			...storedAccount,
+			// Keys the account de-dupe, and a `local` unlock only knows the session's copy.
+			userId: storedAccount.userId || result.user.id,
+			name: result.user.name || storedAccount.name,
+			// Absent means "not reported" as often as "no team": the metadata sync corrects
+			// a stale name, nothing recovers a blanked one.
+			teamName: result.user.teamName ?? storedAccount.teamName,
+			teamAvatarUrl: result.user.teamAvatarUrl ?? storedAccount.teamAvatarUrl,
+		});
+	}
+
 	await storage.updateLastMasterPasswordEntry(accountId);
 }
 

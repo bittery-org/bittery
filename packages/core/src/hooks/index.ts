@@ -61,6 +61,7 @@ export {
 	type QuickUnlockAllInput,
 	type QuickUnlockAllResult,
 	type QuickUnlockInput,
+	type QuickUnlockResult,
 	type UseAccountMetadataSyncOptions,
 	type UseAccountSwitcherOptions,
 	type UseAccountSwitcherResult,

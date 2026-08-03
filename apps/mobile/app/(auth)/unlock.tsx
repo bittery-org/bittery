@@ -194,8 +194,8 @@ export default function UnlockScreen() {
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
-		// The OS renders this string, so it is user-facing copy and has to be translated
-		// here; the hook's own default is a hardcoded English fallback.
+		// The OS renders this string, so it is user-facing copy and has to be
+		// translated here rather than authored inside the hook.
 		promptMessage: m.biometric_prompt_unlock_bittery(),
 		onSuccess: async () => {
 			if (!targetAccount) return;
@@ -205,20 +205,7 @@ export default function UnlockScreen() {
 			const vaultKeys = await storage.getVaultKeys(targetAccount.accountId);
 
 			if (token && vaultKeys) {
-				// Decrypt and store master unlock key
-				const masterUnlockKey = await storage.decryptStoredMasterUnlockKey(
-					targetAccount.accountId,
-					true, // Skip biometric since we just authenticated
-				);
-
-				if (masterUnlockKey) {
-					await storage.setMasterUnlockKey(
-						masterUnlockKey,
-						targetAccount.accountId,
-					);
-
-					await setNativeMuksForAccountIds([targetAccount.accountId]);
-				}
+				await setNativeMuksForAccountIds([targetAccount.accountId]);
 
 				// Load server URL for this account
 				const serverUrl = await storage.getServerUrl(targetAccount.accountId);
@@ -226,8 +213,6 @@ export default function UnlockScreen() {
 					setGlobalServerUrl(serverUrl);
 				}
 
-				// Set as active account
-				await storage.setActiveAccount(targetAccount.accountId);
 				await refreshAccounts();
 
 				router.replace("/(vault)");
@@ -244,11 +229,13 @@ export default function UnlockScreen() {
 			}
 		},
 		onError: (error) => {
-			// Render from `error.type`, never from `error.message`: that string is an
-			// English diagnostic (`AccountStore`'s fallbacks, or the raw native error code
-			// the react-native port carries through) and is for logs, not for a screen.
+			// The period only rides along with `master_password_required`, and without it
+			// the copy falls back to the variant that cannot name the interval.
 			const errorMessage = resolveBiometricErrorMessage(
-				{ error: error.type },
+				{
+					error: error.type,
+					masterPasswordReentryPeriodMs: error.masterPasswordReentryPeriodMs,
+				},
 				m,
 			);
 
@@ -268,7 +255,7 @@ export default function UnlockScreen() {
 
 	// Quick unlock (password) hook
 	const quickUnlock = useQuickUnlock({
-		onSuccess: async (result) => {
+		onSuccess: async () => {
 			if (!targetAccount) return;
 
 			// Load server URL for this account
@@ -290,25 +277,24 @@ export default function UnlockScreen() {
 					targetAccount.accountId,
 				);
 				if (biometricAvailable && biometricEnabled) {
-					try {
-						await CredentialProvider.escrowMukWithBiometric({
-							email: targetAccount.email,
-							userId: result.user.id,
-						});
-					} catch (escrowError) {
-						// Escrow is optional, don't fail the unlock
-						console.warn("Failed to escrow MUK with biometric:", escrowError);
+					// The escrow has to name the same id the native provider was keyed with
+					// above: the session's userId, not the account record's.
+					const sessionData = await storage.getStoredSessionData(
+						targetAccount.accountId,
+					);
+					if (sessionData?.userId) {
+						try {
+							await CredentialProvider.escrowMukWithBiometric({
+								email: targetAccount.email,
+								userId: sessionData.userId,
+							});
+						} catch (escrowError) {
+							// Escrow is optional, don't fail the unlock
+							console.warn("Failed to escrow MUK with biometric:", escrowError);
+						}
 					}
 				}
 			}
-
-			// Update account metadata
-			const updatedMetadata: AccountMetadata = {
-				...targetAccount,
-				teamName: result.user.teamName,
-				lastActiveAt: Date.now(),
-			};
-			await storage.addAccount(updatedMetadata);
 
 			// Refresh account context
 			await refreshAccounts();

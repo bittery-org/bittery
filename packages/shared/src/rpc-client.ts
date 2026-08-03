@@ -124,10 +124,13 @@ export class RpcClientError extends Error {
 		super(message);
 		this.name = "RpcClientError";
 		this.code = options?.code;
-		this.data = {
-			...(options?.data ?? {}),
-			...(options?.code !== undefined ? { code: options.code } : {}),
-		};
+		const data = options?.data ?? {};
+		// Callers match on the server's string code under `data`, so the numeric
+		// transport code must never overwrite it.
+		this.data =
+			options?.code !== undefined && data.code === undefined
+				? { ...data, code: options.code }
+				: { ...data };
 		if (options?.cause !== undefined) {
 			this.cause = options.cause;
 		}

@@ -1,5 +1,5 @@
 /**
- * Biometric failures — the one place a `BiometricErrorType` becomes user-facing copy.
+ * Biometric failures — the one place a biometric unlock failure becomes user-facing copy.
  *
  * `BiometricAuthResult.message` is **diagnostic only**: `AccountStore` fills it with English
  * fallbacks and the react-native port carries the raw native error code through it, so it is
@@ -27,7 +27,8 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
  * which carries a `type` and no period — can be adapted at the call site without a cast.
  */
 export interface BiometricErrorDetail {
-	error?: BiometricErrorType;
+	/** A superset of the OS verdict: `useBiometricUnlock` also reports a travel mode stop. */
+	error?: BiometricErrorType | "travel_mode_unverified";
 	masterPasswordReentryPeriodMs?: number;
 }
 
@@ -94,6 +95,10 @@ export function resolveBiometricErrorMessage(
 			return m.mob_biometric_error_session_expired();
 		case "account_not_found":
 			return m.mob_biometric_error_account_not_found();
+		// Not an OS verdict: the biometric passed and travel mode stopped the unlock,
+		// so the copy is shared with the password path rather than blaming the sensor.
+		case "travel_mode_unverified":
+			return m.auth_error_travel_mode_verify_failed();
 		default:
 			return m.mob_biometric_error_unknown();
 	}

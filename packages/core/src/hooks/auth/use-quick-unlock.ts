@@ -1,24 +1,37 @@
 /**
  * useQuickUnlock Hook
  *
- * React hook for performing password unlock with stored secret key.
- * Wraps the core performSRPUnlock utility with React Query mutation.
+ * React Query wrapper around the shared password unlock for a single account.
  */
 
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
-import { type UseMutationResult, useMutation } from "@tanstack/react-query";
+import { m } from "@bittery/i18n/paraglide/messages";
+import {
+	type UseMutationResult,
+	useMutation,
+	useQueryClient,
+} from "@tanstack/react-query";
 import {
 	usePlatformCrypto,
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
 import {
-	performSRPUnlock,
-	type SRPUnlockInput,
-	storeUnlockSession,
-	type UnlockResult,
-} from "../../services/auth-service";
-import { createStaticStoredAccountRpcClient } from "../../services/rpc-client";
+	type UnlockFailureReason,
+	type UnlockOutcome,
+	unlockAccountWithPassword,
+} from "../../services/unlock";
+
+/**
+ * Input for quick unlock of a single account
+ */
+export interface QuickUnlockInput {
+	/** Account to unlock; its stored Secret Key supplies the other half of the key. */
+	accountId: string;
+	password: string;
+}
+
+/** Surfaced as-is: consumers read `unlocked` and `failed.length`. */
+export type QuickUnlockResult = UnlockOutcome;
 
 /**
  * Options for useQuickUnlock hook
@@ -29,26 +42,31 @@ export interface UseQuickUnlockOptions {
 	 * Use this for navigation, showing success messages, etc.
 	 */
 	onSuccess?: (
-		result: UnlockResult,
-		input: SRPUnlockInput,
+		result: QuickUnlockResult,
+		input: QuickUnlockInput,
 	) => void | Promise<void>;
 
 	/**
 	 * Callback when unlock fails.
 	 * Use this for showing error messages.
 	 */
-	onError?: (error: Error, input: SRPUnlockInput) => void;
+	onError?: (error: Error, input: QuickUnlockInput) => void;
+}
+
+/** Only the reasons a user can act on get their own copy. */
+function failureMessage(reason: UnlockFailureReason | undefined): string {
+	switch (reason) {
+		case "no_stored_secret_key":
+			return m.auth_error_no_stored_secret_key();
+		case "travel_mode_unverified":
+			return m.auth_error_travel_mode_verify_failed();
+		default:
+			return m.toast_auth_unlock_error_failed();
+	}
 }
 
 /**
- * Extended unlock input
- */
-export interface QuickUnlockInput extends SRPUnlockInput {
-	// No additional fields currently, but interface is here for future expansion
-}
-
-/**
- * Hook for performing password unlock with stored secret key.
+ * Hook for performing quick unlock of one account with its master password.
  *
  * @example
  * ```tsx
@@ -57,50 +75,36 @@ export interface QuickUnlockInput extends SRPUnlockInput {
  *   onError: (error) => toast.error(error.message),
  * });
  *
- * const handleSubmit = (email, password) => {
- *   quickUnlock.mutate({ email, password });
- * };
+ * quickUnlock.mutate({ accountId, password });
  * ```
  */
 export function useQuickUnlock(
 	options: UseQuickUnlockOptions = {},
-): UseMutationResult<UnlockResult, Error, QuickUnlockInput> {
+): UseMutationResult<QuickUnlockResult, Error, QuickUnlockInput> {
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
 	const itemCache = usePlatformItemCache();
+	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: async (input: QuickUnlockInput) => {
-			// Build a per-account RPC client so travel mode can be re-verified
-			// against the server during unlock. Without this, storeUnlockSession
-			// silently trusts stale local cache (travel mode fail-open).
-			const serverUrl =
-				(await storage.getServerUrl(input.accountId)) || getDefaultServerUrl();
-			const accountRpcClient = await createStaticStoredAccountRpcClient(
-				storage,
-				input.accountId,
+			const outcome = await unlockAccountWithPassword(
+				{ accountId: input.accountId, password: input.password },
+				{ crypto, storage, itemCache },
 			);
-
-			// Perform SRP unlock
-			const result = await performSRPUnlock(
-				{
-					accountId: input.accountId,
-					password: input.password,
-				},
-				{ crypto, rpcClient: accountRpcClient, storage },
-			);
-
-			// Store unlock session data, re-verifying travel mode against the
-			// server via the account RPC client.
-			await storeUnlockSession(result, storage, itemCache, input.accountId, {
-				travelModeRpcClient: accountRpcClient,
-				serverUrl,
-				setActive: true,
-			});
-
-			return result;
+			// The unlock reports rather than throws; React Query needs a rejection to
+			// route a total failure to `onError`.
+			if (outcome.unlocked.length === 0) {
+				throw new Error(failureMessage(outcome.failed[0]?.reason));
+			}
+			return outcome;
 		},
 		onSuccess: (result, input) => {
+			queryClient.invalidateQueries({ queryKey: ["accounts", "unlocked"] });
+			queryClient.invalidateQueries({ queryKey: ["auth"] });
+			queryClient.invalidateQueries({ queryKey: ["vaults"] });
+			queryClient.invalidateQueries({ queryKey: ["items"] });
+
 			options.onSuccess?.(result, input);
 		},
 		onError: (error, input) => {

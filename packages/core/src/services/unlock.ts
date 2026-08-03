@@ -8,7 +8,11 @@
  */
 
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
-import type { AccountStore, ItemCache } from "@bittery/storage";
+import type {
+	AccountStore,
+	BiometricErrorType,
+	ItemCache,
+} from "@bittery/storage";
 import { findAccountById } from "@bittery/storage/account-id";
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import type { ICrypto } from "@bittery/types";
@@ -34,10 +38,23 @@ export type UnlockFailureReason =
 	| "credential_rejected"
 	| "travel_mode_unverified";
 
+/**
+ * Why the OS said no, kept structured so the UI can tell "not enrolled" from
+ * "locked out" from "your password is due again" — `credential_rejected` alone
+ * cannot. Deliberately shaped like the mobile `BiometricErrorDetail` renderer so
+ * it can be handed straight to it.
+ */
+export interface BiometricFailureDetail {
+	error: BiometricErrorType;
+	masterPasswordReentryPeriodMs?: number;
+}
+
 export interface UnlockFailure {
 	accountId: string;
 	email: string;
 	reason: UnlockFailureReason;
+	/** Only ever set alongside `credential_rejected` on a biometric unlock. */
+	biometric?: BiometricFailureDetail;
 }
 
 export interface UnlockOutcome {
@@ -66,10 +83,16 @@ export interface UnlockOptions {
 	setActive?: boolean;
 }
 
-/** An account whose secrets are restored but whose policy is not verified yet. */
+/** An account whose secrets are restored, ready for the shared finish step. */
 interface UnlockCandidate {
 	account: AccountMetadata;
 	rpcClient: TravelModeRpcClient | null;
+	/**
+	 * Whether the acquire step already verified travel mode. Only the password
+	 * path has, through `storeUnlockSession`; re-verifying would cost a second
+	 * server round trip and a second purge per account.
+	 */
+	verified: boolean;
 }
 
 interface AcquireResult {
@@ -108,7 +131,7 @@ async function planAll(
 async function planOne(
 	storage: AccountStore,
 	accountId: string,
-): Promise<UnlockPlan | null> {
+): Promise<(UnlockPlan & { target: AccountMetadata }) | null> {
 	const accounts = await storage.getAccountsList();
 	const account = findAccountById(accounts, accountId);
 	if (!account) {
@@ -117,6 +140,7 @@ async function planOne(
 	return {
 		accounts,
 		targets: [account],
+		target: account,
 		previousActive: await storage.getActiveAccount(),
 	};
 }
@@ -168,22 +192,81 @@ async function acquireWithPassword(
 				setActive: false,
 			});
 
-			candidates.push({ account, rpcClient });
+			candidates.push({ account, rpcClient, verified: true });
 		} catch (error) {
 			// The credential was accepted before travel mode is verified, so a
 			// verification failure must not be reported as a rejected password.
-			failed.push({
-				accountId,
-				email,
-				reason:
-					error instanceof TravelModeVerificationError
-						? "travel_mode_unverified"
-						: "credential_rejected",
-			});
+			if (error instanceof TravelModeVerificationError) {
+				try {
+					// Fail closed: a `local`-mode unlock writes nothing before verifying,
+					// so any session already on disk would survive unverified.
+					await storage.clearSession(accountId);
+				} catch (clearError) {
+					// Best-effort: the remaining accounts in the batch still owe the
+					// caller an outcome rather than a rejection.
+					console.error(
+						"[Unlock] Failed to clear an unverified session:",
+						accountId,
+						clearError,
+					);
+				}
+				failed.push({ accountId, email, reason: "travel_mode_unverified" });
+				continue;
+			}
+			failed.push({ accountId, email, reason: "credential_rejected" });
 		}
 	}
 
 	return { candidates, failed };
+}
+
+function biometricFailure(
+	{ accountId, email }: AccountMetadata,
+	detail: BiometricFailureDetail,
+): UnlockFailure {
+	return { accountId, email, reason: "credential_rejected", biometric: detail };
+}
+
+/**
+ * The narrowed acquire: one account's prompt, one account's key. The batched
+ * call below cannot express that, because its single prompt covers the device.
+ */
+async function acquireOneWithBiometric(
+	account: AccountMetadata,
+	promptMessage: string,
+	{ storage }: UnlockDeps,
+): Promise<AcquireResult> {
+	const { accountId } = account;
+
+	const result = await storage.authenticateWithBiometricEnhanced(
+		promptMessage,
+		accountId,
+	);
+	if (!result.success) {
+		const detail: BiometricFailureDetail = { error: result.error ?? "unknown" };
+		if (result.masterPasswordReentryPeriodMs !== undefined) {
+			detail.masterPasswordReentryPeriodMs =
+				result.masterPasswordReentryPeriodMs;
+		}
+		return { candidates: [], failed: [biometricFailure(account, detail)] };
+	}
+
+	// The prompt normally does not re-appear here — the call above just refreshed
+	// the grace window — but the reason is threaded through so that if it ever
+	// does, the OS shows the caller's translated copy over the English fallback.
+	if (!(await storage.unlockWithBiometric(accountId, promptMessage))) {
+		return {
+			candidates: [],
+			failed: [biometricFailure(account, { error: "authentication_failed" })],
+		};
+	}
+
+	// A missing token is not fatal: the enforcer then verifies offline.
+	const rpcClient = await createStoredAccountRpcClient(
+		storage,
+		accountId,
+	).catch(() => null);
+	return { candidates: [{ account, rpcClient, verified: false }], failed: [] };
 }
 
 async function acquireWithBiometric(
@@ -196,6 +279,28 @@ async function acquireWithBiometric(
 	const { unlocked } =
 		await storage.unlockAllAccountsWithBiometric(promptMessage);
 	const restored = new Set(unlocked);
+	const requested = new Set(targets.map(({ accountId }) => accountId));
+
+	// The prompt covers the device, the caller's narrowing does not, so anything
+	// it restored outside `targets` would sit unlocked with travel mode never
+	// verified. Lock it rather than `clearSession`: the user asked for a narrower
+	// unlock, not to discard these accounts' vault keys and auth token.
+	for (const accountId of restored) {
+		if (requested.has(accountId)) {
+			continue;
+		}
+		try {
+			await storage.clearMasterUnlockKey(accountId);
+		} catch (error) {
+			// Best-effort: one account that refuses to lock must not leave the rest of
+			// the collateral unlocked with travel mode never verified.
+			console.error(
+				"[Unlock] Failed to lock a collateral account:",
+				accountId,
+				error,
+			);
+		}
+	}
 
 	const candidates: UnlockCandidate[] = [];
 	const failed: UnlockFailure[] = [];
@@ -212,7 +317,7 @@ async function acquireWithBiometric(
 			storage,
 			accountId,
 		).catch(() => null);
-		candidates.push({ account, rpcClient });
+		candidates.push({ account, rpcClient, verified: false });
 	}
 
 	return { candidates, failed };
@@ -230,8 +335,11 @@ async function runUnlock(
 ): Promise<UnlockOutcome> {
 	const enforcer = getTravelModeEnforcer(storage, itemCache);
 	const unlocked: string[] = [];
-	for (const { account, rpcClient } of candidates) {
-		if (await enforcer.verifyOrClear(account.accountId, rpcClient)) {
+	for (const { account, rpcClient, verified } of candidates) {
+		if (
+			verified ||
+			(await enforcer.verifyOrClear(account.accountId, rpcClient))
+		) {
 			unlocked.push(account.accountId);
 			continue;
 		}
@@ -318,8 +426,8 @@ export async function unlockAccountWithBiometric(
 	if (!plan) {
 		return unknownAccountOutcome(input.accountId);
 	}
-	const acquired = await acquireWithBiometric(
-		plan.targets,
+	const acquired = await acquireOneWithBiometric(
+		plan.target,
 		input.promptMessage,
 		deps,
 	);
