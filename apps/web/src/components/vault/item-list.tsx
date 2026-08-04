@@ -284,6 +284,8 @@ function ItemRow({
 			isDragging={isDragging}
 			onPrimaryAction={() => onSelect?.(item)}
 			onToggleCheck={onToggleCheck}
+			dataTestId="item-row"
+			dataItemId={item.id}
 		/>
 	);
 }

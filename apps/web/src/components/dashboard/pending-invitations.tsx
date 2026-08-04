@@ -114,6 +114,7 @@ export function PendingInvitations() {
 										declineMutation.mutate({ invitationId: invitation.id })
 									}
 									disabled={declineMutation.isPending}
+									data-testid="invitation-decline-button"
 								>
 									<X className="h-4 w-4" />
 								</Button>

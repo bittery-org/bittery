@@ -530,6 +530,7 @@ function ShareAccessPage() {
 						type="button"
 						className="w-full"
 						onClick={() => revealMutation.mutate()}
+						data-testid="share-reveal-button"
 					>
 						<Eye className="mr-2 h-4 w-4" />
 						{isOneTimeUse

@@ -191,6 +191,8 @@ function VaultTrashPage() {
 												disabled={restoreItem.isPending}
 												title={m.vaults_trash_item_action_restore()}
 												aria-label={m.vaults_trash_item_action_restore()}
+												data-testid="trash-restore-button"
+												data-item-id={item.id}
 											>
 												<Restore className="size-4" />
 											</Button>
@@ -208,6 +210,8 @@ function VaultTrashPage() {
 												disabled={permanentDeleteItem.isPending}
 												title={m.vaults_trash_item_action_delete_forever()}
 												aria-label={m.vaults_trash_item_action_delete_forever()}
+												data-testid="trash-delete-forever-button"
+												data-item-id={item.id}
 											>
 												<Trash className="size-4" />
 											</Button>

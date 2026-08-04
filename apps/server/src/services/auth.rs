@@ -696,15 +696,14 @@ pub(crate) async fn request_signup_verification(
         return Ok(LogoutResponse { success: true });
     }
 
-    let code = VerificationCodeService::new(pool)
-        .issue(
+    VerificationCodeService::new(pool)
+        .issue_and_deliver(
             VerificationPurpose::Signup {
                 invitation_token: input.invitation_token.as_deref(),
             },
             &normalized_email,
         )
         .await?;
-    send_signup_verification_code(&normalized_email, &code, input.invitation_token.as_deref())?;
 
     Ok(LogoutResponse { success: true })
 }
@@ -1353,10 +1352,9 @@ pub(crate) async fn request_recovery_verification(
         .and_then(|row| row.encrypted_master_key.as_ref())
         .is_some()
     {
-        let code = VerificationCodeService::new(pool)
-            .issue(VerificationPurpose::Recovery, &normalized_email)
+        VerificationCodeService::new(pool)
+            .issue_and_deliver(VerificationPurpose::Recovery, &normalized_email)
             .await?;
-        send_recovery_code(&normalized_email, &code)?;
     }
 
     Ok(LogoutResponse { success: true })
@@ -2255,7 +2253,7 @@ fn is_production() -> bool {
     )
 }
 
-fn is_dev_auth_stub_enabled() -> bool {
+pub(crate) fn is_dev_auth_stub_enabled() -> bool {
     matches!(
         std::env::var("BITTERY_ENABLE_DEV_AUTH_STUBS")
             .ok()
@@ -2725,91 +2723,6 @@ async fn apply_encrypted_vault_key_updates(
                 AppError::internal("Failed to update vault keys")
             })?;
     }
-    Ok(())
-}
-
-/// Captures the codes that would be emailed, so tests can act as the recipient.
-///
-/// Verification codes are stored as SHA-256 digests, so the plaintext exists only
-/// here and in the outbound mail — there is nothing left in the database for a
-/// test (or an attacker with a database read) to look up.
-#[cfg(test)]
-pub(crate) mod emailed_code_capture {
-    use std::{
-        collections::HashMap,
-        sync::{Mutex, OnceLock},
-    };
-
-    fn store() -> &'static Mutex<HashMap<String, String>> {
-        static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-        STORE.get_or_init(|| Mutex::new(HashMap::new()))
-    }
-
-    pub(crate) fn signup_key(email: &str, invitation_token: Option<&str>) -> String {
-        format!(
-            "signup|{}|{}",
-            email.to_ascii_lowercase(),
-            invitation_token.unwrap_or("")
-        )
-    }
-
-    pub(crate) fn recovery_key(email: &str) -> String {
-        format!("recovery|{}", email.to_ascii_lowercase())
-    }
-
-    pub(crate) fn record(key: String, code: &str) {
-        store()
-            .lock()
-            .expect("emailed code capture should not be poisoned")
-            .insert(key, code.to_string());
-    }
-
-    pub(crate) fn latest(key: &str) -> Option<String> {
-        store()
-            .lock()
-            .expect("emailed code capture should not be poisoned")
-            .get(key)
-            .cloned()
-    }
-}
-
-fn send_signup_verification_code(
-    email: &str,
-    code: &str,
-    invitation_token: Option<&str>,
-) -> Result<(), AppError> {
-    if !is_dev_auth_stub_enabled() {
-        return Err(AppError::internal(
-			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
-		));
-    }
-    #[cfg(test)]
-    emailed_code_capture::record(
-        emailed_code_capture::signup_key(email, invitation_token),
-        code,
-    );
-    info!(
-        email = %email,
-        code = %code,
-        invitation_token = invitation_token.unwrap_or("<none>"),
-        "[auth-email] Signup verification code"
-    );
-    Ok(())
-}
-
-fn send_recovery_code(email: &str, code: &str) -> Result<(), AppError> {
-    if !is_dev_auth_stub_enabled() {
-        return Err(AppError::internal(
-			"Auth email delivery is not configured. Set BITTERY_ENABLE_DEV_AUTH_STUBS=true for local development or configure a real email provider.",
-		));
-    }
-    #[cfg(test)]
-    emailed_code_capture::record(emailed_code_capture::recovery_key(email), code);
-    info!(
-        email = %email,
-        code = %code,
-        "[auth-email] Recovery code"
-    );
     Ok(())
 }
 

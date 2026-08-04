@@ -654,7 +654,10 @@ export function VaultImportDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={handleDialogOpenChange}>
-			<DialogContent className="flex max-h-[92vh] max-w-[calc(100%-1rem)] flex-col overflow-hidden p-0 sm:max-w-4xl">
+			<DialogContent
+				className="flex max-h-[92vh] max-w-[calc(100%-1rem)] flex-col overflow-hidden p-0 sm:max-w-4xl"
+				data-testid="import-dialog"
+			>
 				<DialogHeader className="space-y-4 border-b px-6 py-5">
 					<div className="space-y-1">
 						<DialogTitle>{m.vaults_import_dialog_title()}</DialogTitle>
@@ -771,6 +774,7 @@ export function VaultImportDialog({
 														: "border-border bg-card hover:border-foreground/30 hover:bg-accent/30",
 												)}
 												aria-pressed={isSelected}
+												data-testid={`import-provider-${provider.id}`}
 											>
 												<ImportProviderLogo
 													provider={provider}
@@ -890,6 +894,7 @@ export function VaultImportDialog({
 									className="hidden"
 									onChange={handleFileChange}
 									disabled={isBusy || !selectedProvider}
+									data-testid="import-file-input"
 								/>
 							</div>
 						</div>
@@ -1287,6 +1292,7 @@ export function VaultImportDialog({
 									type="button"
 									onClick={handleStartImport}
 									disabled={!canStartImport || isBusy}
+									data-testid="import-confirm-button"
 								>
 									{isBusy ? (
 										<>

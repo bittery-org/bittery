@@ -70,7 +70,7 @@ export function SignupVerificationDialog(
 
 	return (
 		<Dialog open={props.open} onOpenChange={props.onOpenChange}>
-			<DialogContent>
+			<DialogContent data-testid="signup-verification-dialog">
 				<DialogHeader>
 					<DialogTitle>{m.auth_signup_verify_title()}</DialogTitle>
 					<DialogDescription>
@@ -102,6 +102,7 @@ export function SignupVerificationDialog(
 						type="button"
 						onClick={props.onVerify}
 						disabled={props.isRequesting || props.isVerifying}
+						data-testid="signup-verification-submit"
 					>
 						{props.isVerifying ? (
 							<>
@@ -147,7 +148,7 @@ export function SignupVerificationStep(
 		: m.auth_signup_button_verifying();
 
 	return (
-		<div className="space-y-4">
+		<div className="space-y-4" data-testid="signup-verification-dialog">
 			<div className="rounded-2xl border bg-muted/20 p-4">
 				<p className="font-semibold text-base">
 					{m.auth_signup_verify_title()}
@@ -272,6 +273,7 @@ export function SignupVerificationStep(
 					disabled={
 						props.isRequesting || props.isVerifying || props.isFinishing
 					}
+					data-testid="signup-verification-submit"
 				>
 					{props.isVerifying || props.isFinishing ? (
 						<>

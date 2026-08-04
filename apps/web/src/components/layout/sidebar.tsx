@@ -92,6 +92,7 @@ function UserNav() {
 						<SidebarMenuButton
 							size="lg"
 							className="text-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-foreground"
+							data-testid="user-menu"
 						>
 							<Avatar className="h-7 w-7 rounded-md">
 								<AvatarFallback className="rounded-md bg-linear-to-br from-primary to-primary-deep font-semibold text-[10.5px] text-white shadow-[inset_0_0_0_1px_oklch(1_0_0/0.12)]">
@@ -131,6 +132,7 @@ function UserNav() {
 						<DropdownMenuItem
 							onClick={handleRemoveAccount}
 							className="cursor-pointer text-destructive"
+							data-testid="sign-out-button"
 						>
 							<LogOut className="mr-2 h-4 w-4" />
 							{m.nav_menu_log_out()}

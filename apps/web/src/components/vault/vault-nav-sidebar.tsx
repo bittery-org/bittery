@@ -130,6 +130,9 @@ function DroppableVaultEntry({
 				params={{ vaultId: vault.vaultId }}
 				className="flex h-7 items-center px-2"
 				onClick={onNavigate}
+				data-testid="vault-nav-link"
+				data-vault-id={vault.vaultId}
+				data-vault-name={vault.vaultName}
 			>
 				<div className="flex min-w-0 items-center gap-2">
 					<VaultAvatar
@@ -307,6 +310,7 @@ export function VaultNavSidebar({
 						storageKey="web-vaults"
 						defaultOpen={true}
 						onAdd={onNewVault}
+						addButtonTestId="new-vault-button"
 					>
 						{vaults.map((vault) => {
 							const isActive =
@@ -349,6 +353,8 @@ export function VaultNavSidebar({
 										search={{ itemId: undefined }}
 										className={cn(navLinkClass(isActive), "mb-0.5")}
 										onClick={onNavigate}
+										data-testid="tag-filter"
+										data-tag-name={tagName}
 									>
 										{isActive && (
 											<span

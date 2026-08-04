@@ -61,11 +61,11 @@ export function useMoveItem() {
 				);
 			}
 
+			// Matched on accountId: `accountEmail` falls back to the account id when
+			// the sync source supplies no email, so an email match never hits.
 			const resolvedAccounts = await core.accounts.resolveAccounts();
 			const sourceAccount = resolvedAccounts.accountsInfo.find(
-				(account) =>
-					account.email.toLowerCase() ===
-					sourceContext.accountEmail.toLowerCase(),
+				(account) => account.accountId === sourceContext.accountId,
 			);
 			if (!sourceAccount) {
 				throw new Error("Source account not found");

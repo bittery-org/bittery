@@ -108,6 +108,7 @@
 	"auth_signup_verify_summary_email": "E-Mail",
 	"auth_signup_verify_verified_title": "E-Mail bestätigt",
 	"auth_signup_verify_verified_description": "Die Bestätigung ist abgeschlossen. Fahre fort, wenn du dein Konto erstellen möchtest.",
+	"auth_signup_toast_created_sign_in_again": "Dein Konto wurde erstellt, aber dieses Gerät konnte die Einrichtung nicht abschließen. Bitte melde dich erneut an.",
 	"auth_signup_toast_account_created": "Konto erfolgreich erstellt!",
 	"auth_signup_toast_quick_unlock_days": "Konto erstellt! Schnellentsperrung für {daysUntil} Tage verfügbar.",
 	"auth_self_hosted_title_accept_invitation": "Einladung annehmen",

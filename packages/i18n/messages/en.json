@@ -108,6 +108,7 @@
 	"auth_signup_verify_summary_email": "Email",
 	"auth_signup_verify_verified_title": "Email verified",
 	"auth_signup_verify_verified_description": "Verification is complete. Continue when you are ready to create your account.",
+	"auth_signup_toast_created_sign_in_again": "Your account was created, but this device could not finish setting it up. Please sign in again.",
 	"auth_signup_toast_account_created": "Account created successfully!",
 	"auth_signup_toast_quick_unlock_days": "Account created! Quick unlock available for {daysUntil} days.",
 	"auth_self_hosted_title_accept_invitation": "Accept Invitation",

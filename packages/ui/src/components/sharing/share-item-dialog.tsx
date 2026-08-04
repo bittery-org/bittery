@@ -199,7 +199,7 @@ export function ShareItemDialog({
 						</Button>
 					</DialogTrigger>
 				)}
-				<DialogContent className="sm:max-w-md">
+				<DialogContent className="sm:max-w-md" data-testid="share-item-dialog">
 					<DialogHeader>
 						<DialogTitle>{m.sharing_item_dialog_title()}</DialogTitle>
 						<DialogDescription>
@@ -238,6 +238,7 @@ export function ShareItemDialog({
 									value={generatedLink}
 									readOnly
 									className="flex-1 font-mono text-xs"
+									data-testid="share-link-value"
 								/>
 								<Button
 									onClick={handleCopyLink}
@@ -367,6 +368,7 @@ export function ShareItemDialog({
 								</Button>
 								<Button
 									onClick={handleCreateLink}
+									data-testid="share-create-button"
 									disabled={
 										createShare.isPending ||
 										(accessMode === "email-restricted" &&

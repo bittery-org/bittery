@@ -557,6 +557,168 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+  # The Playwright suite is the only check that drives the real client crypto
+  # against a real server through a browser, and no workflow ever referenced it,
+  # which is exactly why it rotted. It builds `bittery-server` and `migrate`
+  # from source (apps/web/tests/e2e-launch.mjs), so it carries the server job's
+  # Rust toolchain and cache alongside the JS toolchain.
+  #
+  # Takes the crypto WASM as an artifact like js-static / js-types / js-tests:
+  # the web app does not resolve without it, and rebuilding it here would mean a
+  # fourth copy of the pinned wasm-pack install for no gain.
+  web-e2e:
+    if: github.event_name != 'schedule'
+    needs: crypto-wasm
+    runs-on: ubuntu-latest
+    # A cache-cold debug build of the server is many minutes before a single
+    # spec runs, and CI runs 2 workers with 2 retries, so a bad-luck run can be
+    # several times the median. A false timeout costs more than a slow job.
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: postgres
+        ports:
+          # 5436, not the 5432 the server job uses:
+          # apps/web/tests/fixtures/e2e-database.ts holds the only copy of this
+          # URL and points at the port apps/server/docker-compose.yml publishes
+          # locally. Publishing the same port here keeps that single copy true in
+          # both places.
+          - 5436:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      RUSTC_WRAPPER: sccache
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: crypto-wasm
+          path: packages/crypto/wasm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: mozilla-actions/sccache-action@v0.0.11
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/server
+          key: e2e
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm install --frozen-lockfile
+          elapsed="$(( $(date +%s) - start ))"
+          echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # playwright.config.ts generates this on load if it is missing, but doing
+      # it here keeps the cost out of the webServer startup window.
+      - name: Generate i18n
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run i18n:generate
+          elapsed="$(( $(date +%s) - start ))"
+          echo "i18n generate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # e2e-launch.mjs builds these on demand, but it does so inside Playwright's
+      # webServer timeout and with both API servers contending for the same cargo
+      # target lock. Building once, up front, keeps a cold build in its own step.
+      - name: Build server binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          cargo build --manifest-path apps/server/Cargo.toml --bin bittery-server --bin migrate
+          elapsed="$(( $(date +%s) - start ))"
+          echo "e2e server build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # tests/fixtures/e2e-database.ts drives psql over the same DATABASE_URL the
+      # servers use (locally it falls back to `docker exec bittery-postgres`,
+      # which no runner has). The runner image ships psql today, but not by
+      # contract, so install it when it is absent.
+      - name: Ensure psql
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+          psql --version
+
+      # `playwright` is a dependency of `web` only, so it is not on the root bin
+      # path.
+      - name: Install Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm --filter web exec playwright install --with-deps chromium
+          elapsed="$(( $(date +%s) - start ))"
+          echo "playwright install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # Chromium runs with --disable-dev-shm-usage, so its shared-memory segments
+      # land in TMPDIR; a RAM-backed one filled at 2 workers locally and killed
+      # renderers. playwright.config.ts points TMPDIR at the workspace disk, so
+      # this only has to confirm the runner matches what `workers` assumes.
+      - name: Runner capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### Runner capacity"
+            echo '```'
+            echo "nproc: $(nproc)"
+            df -hT /tmp /dev/shm "$GITHUB_WORKSPACE"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Web E2E tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm --filter web test:e2e
+          elapsed="$(( $(date +%s) - start ))"
+          echo "web E2E: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # Only on failure: `test-results/` carries a video and a trace per failed
+      # attempt, so a green run would upload tens of megabytes nobody opens.
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report/
+            apps/web/test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
   # Nothing in CI built a container image; the release workflow was the first
   # thing to try, which is how an unreachable HEALTHCHECK probe and a corepack
   # removal in a floating Node base tag both reached a tag before anyone noticed.

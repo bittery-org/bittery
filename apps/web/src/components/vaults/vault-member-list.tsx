@@ -280,6 +280,9 @@ export function VaultMemberList({
 						<div
 							key={member.userId}
 							className="flex items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
+							data-testid="member-row"
+							data-member-id={member.userId}
+							data-member-email={member.email}
 						>
 							<Avatar className="h-9 w-9 shrink-0">
 								<AvatarFallback className="font-medium text-xs">
@@ -312,7 +315,10 @@ export function VaultMemberList({
 											(userRole === "admin" && member.role === "admin")
 										}
 									>
-										<SelectTrigger className="h-7 w-28 text-xs">
+										<SelectTrigger
+											className="h-7 w-28 text-xs"
+											data-testid="member-role-select"
+										>
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>

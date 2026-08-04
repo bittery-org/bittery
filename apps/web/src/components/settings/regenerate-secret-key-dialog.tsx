@@ -334,7 +334,10 @@ export function RegenerateSecretKeyDialog({
 					{m.settings_secret_key_regenerate_trigger()}
 				</Button>
 			</DialogTrigger>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent
+				className="sm:max-w-md"
+				data-testid="regenerate-secret-key-dialog"
+			>
 				{step === "confirm" ? (
 					<form onSubmit={handleGenerateNewKey}>
 						<DialogHeader>

@@ -288,6 +288,9 @@ export function MemberList({
 					<div
 						key={member.userId}
 						className="group relative overflow-hidden rounded-xl border border-border/70 bg-card/90 p-4 transition-all hover:-translate-y-0.5 hover:shadow-md"
+						data-testid="member-row"
+						data-member-id={member.userId}
+						data-member-email={member.email}
 					>
 						<div className="flex items-start gap-3.5">
 							<Avatar className="h-10 w-10 border shadow-sm">

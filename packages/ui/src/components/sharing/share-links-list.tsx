@@ -337,6 +337,8 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 											onClick={() => setLinkToRevoke(link.id)}
 											className="text-destructive hover:bg-destructive/10 hover:text-destructive"
 											title={m.sharing_links_list_action_revoke_link()}
+											data-testid="share-revoke-button"
+											data-share-link-id={link.id}
 										>
 											<IconTrash className="h-4 w-4" />
 										</Button>

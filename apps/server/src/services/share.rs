@@ -758,8 +758,8 @@ pub(crate) async fn request_email_verification(
         }
     }
 
-    let _code = VerificationCodeService::new(pool)
-        .issue(
+    VerificationCodeService::new(pool)
+        .issue_and_deliver(
             VerificationPurpose::ShareEmail {
                 share_link_id: &details.link.id,
             },

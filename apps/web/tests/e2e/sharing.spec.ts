@@ -1,527 +1,551 @@
+import type { Browser, Locator, Page } from "@playwright/test";
+import { nanoid } from "nanoid";
+import {
+	expect,
+	generateTestLoginItem,
+	generateTestUser,
+	signIn,
+	signUp,
+	type TestUser,
+	test,
+} from "../fixtures/auth";
+import { activateTeamPlan } from "../fixtures/billing";
+import { mailOutboxNow, waitForCode } from "../fixtures/mail-outbox";
+import { uiText } from "../fixtures/messages";
+import {
+	confirmAlertDialog,
+	copyShareLink,
+	createShareLink,
+	expireShareLinksForItem,
+	openShareDialog,
+	openShareHistory,
+	revokeButton,
+} from "../fixtures/sharing";
+import {
+	createItem,
+	createVault,
+	gotoRoute,
+	openItem,
+	toastWithText,
+	VAULT_READY_TIMEOUT_MS,
+} from "../fixtures/vault";
+
 /**
- * E2E Tests for Password Sharing Functionality
+ * Share links end to end: the owner-side dialogs, and what the recipient gets
+ * when they open the URL in a browser that has never seen this account.
  *
- * Tests the secure sharing feature including:
- * - Creating share links
- * - Share link access modes (anyone, email-restricted)
- * - Share link expiration
- * - Accessing shared items
- * - Email verification flow for restricted links
+ * One signup for the whole file, on a throwaway context - PBKDF2 at 600k
+ * iterations plus SRP and RSA key generation is far too expensive to repeat per
+ * test. That account's team is then put on an active Team plan (see
+ * `../fixtures/billing`), because `resolve_share_links_policy` allows a Free
+ * plan zero active share links and every create would 403.
+ *
+ * No test here needs a second *account*: a share link is explicitly for someone
+ * who has none, so every recipient is an anonymous browser context.
  */
 
-import {
-	createNetworkSimulator,
-	waitForDialog,
-	waitForSharePageReady,
-	waitForVaultDetailReady,
-	waitForVaultsPageReady,
-} from "../fixtures/network-helpers";
-import {
-	BitteryPage,
-	expect,
-	generateTestUser,
-	test,
-} from "../fixtures/test-fixtures";
+/** One SRP handshake, a vault, an item, a share link and a recipient context. */
+const TEST_BUDGET_MS = 180000;
 
-test.describe("Share Access Page", () => {
-	test("should show error for invalid share token", async ({ page }) => {
-		// Navigate to a share page with an invalid token
-		await page.goto("/share/invalid-token-12345");
-		await waitForSharePageReady(page);
+/**
+ * `apps/web/src/routes/share.$token.tsx` renders these strings inline instead
+ * of through `packages/i18n/messages/en.json`, so `uiText()` cannot reach them
+ * and the literal is the only selector available. See the i18n gap in the
+ * step report.
+ */
+const RECIPIENT_COPY = {
+	notFoundTitle: "Share Link Not Found",
+	expiredTitle: "Link Expired",
+	revokedTitle: "Link Revoked",
+	exhaustedTitle: "Link Already Used",
+	decryptionFailedTitle: "Decryption Failed",
+	missingKey: "Missing decryption key. Please use the complete share link.",
+	emailGateTitle: "Email Verification Required",
+	sendCode: "Send Verification Code",
+	verifyAndAccess: "Verify & Access",
+	fieldWebsite: "Website",
+	fieldUsername: "Username",
+	fieldPassword: "Password",
+};
 
-		// Should show error state - either "Share Link Not Found" (query error) or "Link Not Available" (invalid link)
-		// Use text locators combined with .or() for reliable matching
-		const errorTitle = page
-			.locator("text=Share Link Not Found")
-			.or(page.locator("text=Link Not Available"))
-			.or(page.locator("text=Link Expired"));
-		await expect(errorTitle.first()).toBeVisible({ timeout: 10000 });
+// The dialog's copy button is the only way to clear its uncopied-link guard,
+// and reading the clipboard back needs both halves of the permission.
+test.use({ permissions: ["clipboard-read", "clipboard-write"] });
 
-		// Should have a "Go Home" button
-		await expect(page.getByRole("button", { name: "Go Home" })).toBeVisible();
-	});
+let user: TestUser;
 
-	test("should display loading state while fetching share info", async ({
-		page,
-	}) => {
-		const networkSimulator = createNetworkSimulator(page);
-
-		// Slow down network to see loading state
-		await networkSimulator.simulateSlowNetwork(3000);
-
-		await page.goto("/share/test-token-123");
-
-		// Should show loading indicator
-		const loadingIndicator = page
-			.locator("text=Loading shared item")
-			.or(page.locator('[class*="animate-spin"]'));
-		await loadingIndicator.isVisible({ timeout: 2000 }).catch(() => false);
-
-		// Either shows loading or error (if token is invalid)
-		expect(true).toBeTruthy();
-
-		await networkSimulator.clearInterceptions();
-	});
-
-	test("should handle expired share link", async ({ page }) => {
-		// This test would need a pre-created expired link
-		// For now, we test the UI shows the correct error for expired links
-
-		// Navigate to share page with a mock expired token
-		await page.goto("/share/expired-token");
-		await waitForSharePageReady(page);
-
-		// Should show some error state (expired, not found, etc.)
-		const errorState = page
-			.locator("text=Expired")
-			.or(
-				page.locator("text=Not Found").or(page.locator("text=Not Available")),
-			);
-
-		// Wait for error state to appear
-		await errorState.waitFor({ state: "visible", timeout: 10000 }).catch(() => {
-			// Error state might not appear if page handles differently
-		});
-	});
-
-	test("should display Go Home button on error pages", async ({ page }) => {
-		await page.goto("/share/nonexistent-token");
-		await waitForSharePageReady(page);
-
-		const goHomeButton = page
-			.locator('button:has-text("Go Home")')
-			.or(page.locator('a:has-text("Go Home")'));
-
-		if (await goHomeButton.isVisible({ timeout: 5000 })) {
-			await goHomeButton.click();
-
-			// Should navigate to home or login
-			await expect(page).toHaveURL(/\/(home|login)?$/);
-		}
-	});
-});
-
-test.describe("Share Dialog - Authenticated User", () => {
-	let secretKey: string;
-	let testUser: ReturnType<typeof generateTestUser>;
-
-	test.beforeAll(async ({ browser }) => {
-		testUser = generateTestUser();
-		const context = await browser.newContext();
-		const page = await context.newPage();
-		const bitteryPage = new BitteryPage(page);
-
-		secretKey = await bitteryPage.completeSignup(testUser);
-
+test.beforeAll(async ({ browser }) => {
+	test.setTimeout(300000);
+	const context = await browser.newContext();
+	try {
+		user = await signUp(await context.newPage(), generateTestUser());
+	} finally {
 		await context.close();
-	});
-
-	test.beforeEach(async ({ page }) => {
-		const bitteryPage = new BitteryPage(page);
-		testUser.secretKey = secretKey;
-		await bitteryPage.login(
-			testUser.email,
-			testUser.password,
-			testUser.secretKey,
-		);
-	});
-
-	test("should find share button in item detail view", async ({ page }) => {
-		await page.goto("/vaults");
-		await waitForVaultsPageReady(page);
-
-		// Navigate to a vault
-		const vaultLink = page.locator('a[href*="/vaults/"]').first();
-
-		if (await vaultLink.isVisible({ timeout: 5000 })) {
-			await vaultLink.click();
-			await waitForVaultDetailReady(page);
-
-			// Find an item
-			const itemRow = page
-				.locator('[class*="rounded-lg"][class*="border"]')
-				.filter({
-					has: page.locator(".font-medium"),
-				})
-				.first();
-
-			if (await itemRow.isVisible({ timeout: 5000 })) {
-				await itemRow.click();
-
-				// Wait for sheet to open
-				await waitForDialog(page);
-
-				// Look for share button
-				const shareButton = page.locator('button:has-text("Share")');
-				await shareButton.isVisible({ timeout: 5000 }).catch(() => false);
-
-				// Share button may or may not be present depending on item
-				expect(true).toBeTruthy();
-			}
-		}
-	});
-
-	test("should display share dialog configuration options", async ({
-		page,
-	}) => {
-		await page.goto("/vaults");
-		await waitForVaultsPageReady(page);
-
-		const vaultLink = page.locator('a[href*="/vaults/"]').first();
-
-		if (await vaultLink.isVisible({ timeout: 5000 })) {
-			await vaultLink.click();
-			await waitForVaultDetailReady(page);
-
-			const itemRow = page
-				.locator('[class*="rounded-lg"][class*="border"]')
-				.filter({
-					has: page.locator(".font-medium"),
-				})
-				.first();
-
-			if (await itemRow.isVisible({ timeout: 5000 })) {
-				await itemRow.click();
-				await waitForDialog(page);
-
-				const shareButton = page.locator('button:has-text("Share")');
-
-				if (await shareButton.isVisible({ timeout: 5000 })) {
-					await shareButton.click();
-
-					// Share dialog should open
-					const dialog = page.locator('[role="dialog"]');
-					await expect(dialog).toBeVisible({ timeout: 5000 });
-
-					// Should show access mode selection
-					await expect(page.locator("text=Who can access")).toBeVisible();
-
-					// Should show expiration selection
-					await expect(page.locator("text=Link expires")).toBeVisible();
-
-					// Should show one-time use checkbox
-					await expect(page.locator("text=One-time use")).toBeVisible();
-				}
-			}
-		}
-	});
-
-	test("should allow selecting email-restricted access mode", async ({
-		page,
-	}) => {
-		await page.goto("/vaults");
-		await waitForVaultsPageReady(page);
-
-		const vaultLink = page.locator('a[href*="/vaults/"]').first();
-
-		if (await vaultLink.isVisible({ timeout: 5000 })) {
-			await vaultLink.click();
-			await waitForVaultDetailReady(page);
-
-			const itemRow = page
-				.locator('[class*="rounded-lg"][class*="border"]')
-				.filter({
-					has: page.locator(".font-medium"),
-				})
-				.first();
-
-			if (await itemRow.isVisible({ timeout: 5000 })) {
-				await itemRow.click();
-				await waitForDialog(page);
-
-				const shareButton = page.locator('button:has-text("Share")');
-
-				if (await shareButton.isVisible({ timeout: 5000 })) {
-					await shareButton.click();
-
-					// Click access mode dropdown
-					const accessModeSelect = page.locator('[role="combobox"]').first();
-					await accessModeSelect.click();
-
-					// Select email-restricted
-					await page
-						.locator('[role="option"]:has-text("Specific email")')
-						.or(page.locator('[role="option"]:has-text("email-restricted")'))
-						.click();
-
-					// Should show email input field
-					await expect(
-						page.locator("text=Allowed email addresses"),
-					).toBeVisible({ timeout: 5000 });
-				}
-			}
-		}
-	});
-
-	test("should allow adding email addresses for restricted sharing", async ({
-		page,
-	}) => {
-		await page.goto("/vaults");
-		await waitForVaultsPageReady(page);
-
-		const vaultLink = page.locator('a[href*="/vaults/"]').first();
-
-		if (await vaultLink.isVisible({ timeout: 5000 })) {
-			await vaultLink.click();
-			await waitForVaultDetailReady(page);
-
-			const itemRow = page
-				.locator('[class*="rounded-lg"][class*="border"]')
-				.filter({
-					has: page.locator(".font-medium"),
-				})
-				.first();
-
-			if (await itemRow.isVisible({ timeout: 5000 })) {
-				await itemRow.click();
-				await waitForDialog(page);
-
-				const shareButton = page.locator('button:has-text("Share")');
-
-				if (await shareButton.isVisible({ timeout: 5000 })) {
-					await shareButton.click();
-
-					// Select email-restricted mode
-					const accessModeSelect = page.locator('[role="combobox"]').first();
-					await accessModeSelect.click();
-					await page
-						.locator('[role="option"]:has-text("Specific email")')
-						.or(page.locator('[role="option"]:has-text("email-restricted")'))
-						.click();
-
-					// Add an email
-					const emailInput = page
-						.locator('input[type="email"]')
-						.or(page.locator('input[placeholder*="email"]'));
-					await emailInput.fill("test@example.com");
-
-					const addButton = page.locator('button:has-text("Add")');
-					await addButton.click();
-
-					// Email should be added as a badge
-					await expect(page.locator("text=test@example.com")).toBeVisible({
-						timeout: 5000,
-					});
-				}
-			}
-		}
-	});
-
-	test("should validate email format before adding", async ({ page }) => {
-		await page.goto("/vaults");
-		await waitForVaultsPageReady(page);
-
-		const vaultLink = page.locator('a[href*="/vaults/"]').first();
-
-		if (await vaultLink.isVisible({ timeout: 5000 })) {
-			await vaultLink.click();
-			await waitForVaultDetailReady(page);
-
-			const itemRow = page
-				.locator('[class*="rounded-lg"][class*="border"]')
-				.filter({
-					has: page.locator(".font-medium"),
-				})
-				.first();
-
-			if (await itemRow.isVisible({ timeout: 5000 })) {
-				await itemRow.click();
-				await waitForDialog(page);
-
-				const shareButton = page.locator('button:has-text("Share")');
-
-				if (await shareButton.isVisible({ timeout: 5000 })) {
-					await shareButton.click();
-
-					// Select email-restricted mode
-					const accessModeSelect = page.locator('[role="combobox"]').first();
-					await accessModeSelect.click();
-					await page
-						.locator('[role="option"]:has-text("Specific email")')
-						.or(page.locator('[role="option"]:has-text("email-restricted")'))
-						.click();
-
-					// Try to add invalid email
-					const emailInput = page
-						.locator('input[type="email"]')
-						.or(page.locator('input[placeholder*="email"]'));
-					await emailInput.fill("invalid-email");
-
-					const addButton = page.locator('button:has-text("Add")');
-					await addButton.click();
-
-					// Should show error toast
-					const toast = page
-						.locator("[data-sonner-toast]")
-						.filter({ hasText: /invalid|valid email/i });
-					await expect(toast).toBeVisible({ timeout: 5000 });
-				}
-			}
-		}
-	});
-
-	test("should toggle one-time use option", async ({ page }) => {
-		await page.goto("/vaults");
-		await waitForVaultsPageReady(page);
-
-		const vaultLink = page.locator('a[href*="/vaults/"]').first();
-
-		if (await vaultLink.isVisible({ timeout: 5000 })) {
-			await vaultLink.click();
-			await waitForVaultDetailReady(page);
-
-			const itemRow = page
-				.locator('[class*="rounded-lg"][class*="border"]')
-				.filter({
-					has: page.locator(".font-medium"),
-				})
-				.first();
-
-			if (await itemRow.isVisible({ timeout: 5000 })) {
-				await itemRow.click();
-				await waitForDialog(page);
-
-				const shareButton = page.locator('button:has-text("Share")');
-
-				if (await shareButton.isVisible({ timeout: 5000 })) {
-					await shareButton.click();
-
-					// Find and click one-time use checkbox
-					const oneTimeCheckbox = page
-						.locator("#one-time")
-						.or(page.locator("[data-state]").filter({ hasText: /one-time/i }));
-					await oneTimeCheckbox.click();
-
-					// Checkbox should be checked
-					await expect(oneTimeCheckbox)
-						.toHaveAttribute("data-state", "checked")
-						.catch(() => {
-							// Alternative: check aria-checked
-							return expect(oneTimeCheckbox).toHaveAttribute(
-								"aria-checked",
-								"true",
-							);
-						});
-				}
-			}
-		}
-	});
+	}
+	activateTeamPlan(user.email);
 });
 
-test.describe("Email Verification Flow", () => {
-	test("should display email verification form for restricted links", async ({
-		page: _page,
-	}) => {
-		// This would require a pre-created restricted share link
-		// We're testing the UI components exist and function correctly
+/**
+ * One field of the revealed item. The recipient page binds no label to its
+ * inputs and gives them no id, so the field's label text is what identifies the
+ * row that holds it.
+ */
+function sharedField(page: Page, label: string): Locator {
+	return page
+		.locator("div.space-y-1")
+		.filter({ has: page.getByText(label, { exact: true }) });
+}
 
-		// The share access page should show email verification for restricted links
-		// This is tested implicitly in the share dialog tests
-		expect(true).toBeTruthy();
+/**
+ * A per-test recipient address. Lowercase on purpose: the share dialog
+ * lowercases every address it accepts, so a mixed-case one would never match
+ * the badge it renders.
+ */
+function recipientAddress(): string {
+	return `share-recipient-${nanoid(8).toLowerCase()}@test.bittery.com`;
+}
+
+/** Sign in and put one fresh login item in a fresh vault, ready to share. */
+async function signInWithItem(
+	page: Page,
+): Promise<{ itemId: string; item: ReturnType<typeof generateTestLoginItem> }> {
+	await signIn(page, user);
+	await createVault(page, `Sharing ${nanoid(6)}`);
+	const item = generateTestLoginItem();
+	const itemId = await createItem(page, "login", async (sheet) => {
+		await sheet.locator("#title").fill(item.title);
+		await sheet.locator("#username").fill(item.username);
+		await sheet.locator("#password").fill(item.password);
+		await sheet.locator("#url").fill(item.url);
 	});
+	return { itemId, item };
+}
 
-	test("should show verification code input after email submission", async ({
-		page,
-	}) => {
-		// This test would require a real email-restricted share link
-		// For now, we verify the component structure exists
+/**
+ * Open a URL in a browser context that has never held this account.
+ *
+ * `ready` names the screen this recipient is expected to get, because
+ * `/share/$token` renders a different one per link state and shares no wrapper
+ * between them - and because a context this cold is the likeliest place for a
+ * route chunk to stall (see `gotoRoute`).
+ */
+async function openAsRecipient(
+	browser: Browser,
+	url: string,
+	ready: (page: Page) => Locator,
+): Promise<{ page: Page; close: () => Promise<void> }> {
+	const context = await browser.newContext();
+	const page = await context.newPage();
+	await gotoRoute(page, url, ready(page));
+	return { page, close: () => context.close() };
+}
 
-		// Navigate to a hypothetical restricted share link
-		// In production, this would be a real link
-		await page.goto("/share/email-restricted-test");
-		await waitForSharePageReady(page);
+test("a share link only decrypts with its fragment key, and reveals the item", async ({
+	page,
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	const { item } = await signInWithItem(page);
 
-		// The page will either show:
-		// 1. Email verification form
-		// 2. Link not found error
-		// 3. Already accessed message
+	// Created without copying, so the dialog's uncopied-link guard has to fire.
+	const shareUrl = await createShareLink(page, { copyBeforeClose: false });
+	await page
+		.getByRole("button", { name: uiText("sharing_item_dialog_action_done") })
+		.click();
+	const guard = page.getByRole("alertdialog");
+	await expect(guard).toContainText(
+		uiText("sharing_item_dialog_close_without_copy_description"),
+	);
+	await guard
+		.getByRole("button", { name: uiText("sharing_item_dialog_action_cancel") })
+		.click();
+	await expect(guard).toBeHidden();
 
-		// We accept any of these outcomes for this test
-		expect(true).toBeTruthy();
-	});
+	await copyShareLink(page);
+	await expect(
+		toastWithText(page, uiText("sharing_common_link_label")),
+	).toBeVisible();
+	expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
+		shareUrl,
+	);
+	await page
+		.getByRole("button", { name: uiText("sharing_item_dialog_action_done") })
+		.click();
+	await expect(page.getByTestId("share-item-dialog")).toBeHidden();
+
+	// Same token, fragment dropped: the page must refuse before offering any
+	// action, because an access that could never decrypt would still be spent.
+	const withoutKey = shareUrl.slice(0, shareUrl.indexOf("#"));
+	const stripped = await openAsRecipient(browser, withoutKey, (view) =>
+		view.getByText(RECIPIENT_COPY.decryptionFailedTitle),
+	);
+	try {
+		await expect(
+			stripped.page.getByText(RECIPIENT_COPY.missingKey),
+		).toBeVisible();
+		await expect(stripped.page.getByTestId("share-reveal-button")).toHaveCount(
+			0,
+		);
+	} finally {
+		await stripped.close();
+	}
+
+	const recipient = await openAsRecipient(browser, shareUrl, (view) =>
+		view.getByText(uiText("share_access_gate_title"), { exact: true }),
+	);
+	try {
+		const view = recipient.page;
+		await expect(
+			view.getByText(uiText("share_access_gate_access_anyone")),
+		).toBeVisible();
+		await expect(
+			view.getByText(uiText("share_access_gate_usage_multi")),
+		).toBeVisible();
+		await view.getByTestId("share-reveal-button").click();
+
+		await expect(view.getByText(item.title, { exact: true })).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+		await expect(
+			sharedField(view, RECIPIENT_COPY.fieldUsername).locator("input"),
+		).toHaveValue(item.username);
+		await expect(
+			sharedField(view, RECIPIENT_COPY.fieldWebsite).locator("input"),
+		).toHaveValue(item.url);
+
+		// The password arrives concealed; only the eye toggle un-conceals it.
+		const password = sharedField(view, RECIPIENT_COPY.fieldPassword);
+		await expect(password.locator("input")).toHaveAttribute("type", "password");
+		await expect(password.locator("input")).toHaveValue(item.password);
+		await password.locator("button:has(svg.lucide-eye)").click();
+		await expect(password.locator("input")).toHaveAttribute("type", "text");
+		await expect(
+			password.locator("button:has(svg.lucide-eye-off)"),
+		).toHaveCount(1);
+	} finally {
+		await recipient.close();
+	}
 });
 
-test.describe("Share Link Network Resilience", () => {
-	test("should handle network failure when loading share page", async ({
-		page,
-	}) => {
-		const networkSimulator = createNetworkSimulator(page);
+test("a one-time link is spent by the first reveal", async ({
+	page,
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	const { item } = await signInWithItem(page);
+	const shareUrl = await createShareLink(page, { oneTimeUse: true });
 
-		// Simulate network failure
-		await networkSimulator.simulateRpcFailure(
-			"share.getPublicInfo",
-			"INTERNAL_SERVER_ERROR",
-		);
+	const recipient = await openAsRecipient(browser, shareUrl, (view) =>
+		view.getByText(uiText("share_access_gate_title_one_time"), { exact: true }),
+	);
+	try {
+		const view = recipient.page;
+		await expect(
+			view.getByText(uiText("share_access_gate_usage_one_time")),
+		).toBeVisible();
+		await expect(
+			view.getByText(uiText("share_access_gate_one_time_warning")),
+		).toBeVisible();
 
-		await page.goto("/share/test-token");
-
-		// Wait for error state to appear
-		const errorState = page
-			.locator("text=error")
-			.or(page.locator("text=Not Found"))
-			.or(page.locator("text=failed"));
-
-		await errorState.waitFor({ state: "visible", timeout: 10000 }).catch(() => {
-			// Error might not appear, page handles gracefully
+		await view
+			.getByRole("button", {
+				name: uiText("share_access_gate_action_reveal_one_time"),
+			})
+			.click();
+		await expect(view.getByText(item.title, { exact: true })).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
 		});
 
-		// Page should handle the error gracefully
-		expect(true).toBeTruthy();
+		// A reload is the cheapest proof the link is spent: the decrypted item
+		// lives in component state only, so the page has to ask the server again.
+		await view.reload();
+		await expect(view.getByText(RECIPIENT_COPY.exhaustedTitle)).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+		await expect(view.getByTestId("share-reveal-button")).toHaveCount(0);
+	} finally {
+		await recipient.close();
+	}
 
-		await networkSimulator.clearInterceptions();
-	});
-
-	test("should handle slow network when accessing share", async ({ page }) => {
-		const networkSimulator = createNetworkSimulator(page);
-
-		// Slow network
-		await networkSimulator.simulateSlowNetwork(5000);
-
-		await page.goto("/share/test-token");
-
-		// Wait for page to settle (either loading or content/error)
-		await page.waitForLoadState("domcontentloaded");
-		await waitForSharePageReady(page);
-
-		await networkSimulator.clearInterceptions();
-	});
-
-	test("should handle intermittent connectivity", async ({ page }) => {
-		const networkSimulator = createNetworkSimulator(page);
-
-		// Intermittent failures
-		await networkSimulator.simulateIntermittentConnectivity(0.5);
-
-		await page.goto("/share/test-token");
-
-		// Page should eventually load or show error
-		await waitForSharePageReady(page);
-
-		await networkSimulator.clearInterceptions();
-	});
+	const history = await openShareHistory(page);
+	await expect(
+		history.getByText(uiText("sharing_links_list_status_exhausted")),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await expect(
+		history.getByText(uiText("sharing_links_list_badge_one_time")),
+	).toBeVisible();
+	await expect(
+		history.getByText(
+			uiText("sharing_links_list_access_count_with_limit_single", {
+				count: 1,
+				max: 1,
+			}),
+		),
+	).toBeVisible();
+	// A spent link is no longer revocable, so its revoke action is gone.
+	await expect(revokeButton(page)).toHaveCount(0);
 });
 
-test.describe("Share Link Security", () => {
-	test("should not expose encryption key in URL path", async ({ page }) => {
-		// Navigate to share page
-		await page.goto("/share/test-token#encryption-key-in-hash");
+test("an expired link tells the recipient it expired", async ({
+	page,
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	const { itemId } = await signInWithItem(page);
+	const shareUrl = await createShareLink(page, { expiresIn: "1hour" });
 
-		// Verify the encryption key is in the hash (fragment), not the path
-		const url = page.url();
+	// The shortest expiry the dialog offers is an hour and the server stamps
+	// `expires_at` from its own clock, so backdating the row is the only way to
+	// reach this state without sleeping - see `expireShareLinksForItem`.
+	expireShareLinksForItem(itemId);
 
-		// The token should be in the path
-		expect(url).toContain("/share/test-token");
+	const recipient = await openAsRecipient(browser, shareUrl, (view) =>
+		view.getByText(RECIPIENT_COPY.expiredTitle),
+	);
+	try {
+		await expect(recipient.page.getByTestId("share-reveal-button")).toHaveCount(
+			0,
+		);
+	} finally {
+		await recipient.close();
+	}
 
-		// The key should be in the hash (not sent to server)
-		expect(url).toContain("#encryption-key-in-hash");
+	const history = await openShareHistory(page);
+	await expect(
+		history.getByText(uiText("sharing_links_list_status_expired")),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await expect(revokeButton(page)).toHaveCount(0);
+});
+
+test("revoking a link disables it for the recipient", async ({
+	page,
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	const { item } = await signInWithItem(page);
+	const shareUrl = await createShareLink(page);
+
+	const history = await openShareHistory(page);
+	await expect(
+		history.getByText(uiText("sharing_links_list_status_active")),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await expect(revokeButton(page)).toHaveCount(1);
+	await expect(revokeButton(page)).toHaveAttribute("data-share-link-id", /.+/);
+
+	// Revoking is a two-step action: the button only opens the confirmation.
+	await revokeButton(page).click();
+	await confirmAlertDialog(
+		page,
+		uiText("sharing_links_list_action_revoke_link"),
+	);
+	await expect(
+		toastWithText(page, uiText("sharing_links_list_toast_revoke_success")),
+	).toBeVisible();
+
+	// The list is only correct after a fresh load: `invalidateShare` invalidates
+	// `["share", ...]` while the RPC queries are keyed `["rpc", "share", ...]`,
+	// so nothing it does can match. Reported as a product bug for this step.
+	await page.reload();
+	await openItem(page, item.title);
+	const refreshed = await openShareHistory(page);
+	await expect(
+		refreshed.getByText(uiText("sharing_links_list_status_revoked")),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await expect(revokeButton(page)).toHaveCount(0);
+
+	const recipient = await openAsRecipient(browser, shareUrl, (view) =>
+		view.getByText(RECIPIENT_COPY.revokedTitle),
+	);
+	try {
+		await expect(recipient.page.getByTestId("share-reveal-button")).toHaveCount(
+			0,
+		);
+	} finally {
+		await recipient.close();
+	}
+});
+
+test("share history counts the access and the access log records it", async ({
+	page,
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	const { item } = await signInWithItem(page);
+	const shareUrl = await createShareLink(page);
+
+	const history = await openShareHistory(page);
+	await expect(
+		history.getByText(
+			uiText("sharing_links_list_access_count_plural", { count: 0 }),
+		),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await history
+		.getByTitle(uiText("sharing_links_list_action_view_access_logs"))
+		.click();
+	const logs = page.getByRole("dialog", {
+		name: uiText("sharing_links_list_logs_title"),
+	});
+	await expect(
+		logs.getByText(uiText("sharing_links_list_empty_logs")),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await page.keyboard.press("Escape");
+	await expect(logs).toBeHidden();
+	await page.keyboard.press("Escape");
+	await expect(history).toBeHidden();
+
+	const recipient = await openAsRecipient(browser, shareUrl, (view) =>
+		view.getByTestId("share-reveal-button"),
+	);
+	try {
+		await recipient.page.getByTestId("share-reveal-button").click();
+		await expect(
+			recipient.page.getByText(item.title, { exact: true }),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	} finally {
+		await recipient.close();
+	}
+
+	// Reloaded rather than reopened: the share queries are never invalidated, so
+	// a second open of the dialog would replay the counts read above. Reported
+	// as a product bug for this step.
+	await page.reload();
+	await openItem(page, item.title);
+	const reopened = await openShareHistory(page);
+	await expect(
+		reopened.getByText(
+			uiText("sharing_links_list_access_count_single", { count: 1 }),
+		),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await reopened
+		.getByTitle(uiText("sharing_links_list_action_view_access_logs"))
+		.click();
+	await expect(
+		logs.getByText(uiText("sharing_links_list_logs_status_success")),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await expect(
+		logs.getByText(uiText("sharing_links_list_empty_logs")),
+	).toHaveCount(0);
+});
+
+test("an email-restricted link needs the code from the recipient's mailbox", async ({
+	page,
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	const { item } = await signInWithItem(page);
+	const recipientEmail = recipientAddress();
+	const shareUrl = await createShareLink(page, {
+		accessMode: "email-restricted",
+		allowedEmails: [recipientEmail],
 	});
 
-	test("should show security indicators on share page", async ({ page }) => {
-		await page.goto("/share/test-token");
-		await waitForSharePageReady(page);
+	const recipient = await openAsRecipient(browser, shareUrl, (view) =>
+		view.getByText(RECIPIENT_COPY.emailGateTitle),
+	);
+	try {
+		const view = recipient.page;
+		// An email-restricted link never offers the anyone-mode reveal action.
+		await expect(view.getByTestId("share-reveal-button")).toHaveCount(0);
 
-		// Look for security indicators (lock icon, "encrypted" text)
-		// The indicator may or may not be visible depending on page state
-		expect(true).toBeTruthy();
-	});
+		await view.locator("#email").fill(recipientEmail);
+		// Watermark before the request, or the code lands "before" the wait.
+		const since = mailOutboxNow();
+		await view.getByRole("button", { name: RECIPIENT_COPY.sendCode }).click();
+		await expect(view.locator("#code")).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+
+		const code = await waitForCode({
+			purpose: "share_email",
+			email: recipientEmail,
+			since,
+		});
+		await view.locator("#code").fill(code);
+		await view
+			.getByRole("button", { name: RECIPIENT_COPY.verifyAndAccess })
+			.click();
+
+		await expect(view.getByText(item.title, { exact: true })).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+		await expect(
+			sharedField(view, RECIPIENT_COPY.fieldUsername).locator("input"),
+		).toHaveValue(item.username);
+	} finally {
+		await recipient.close();
+	}
+
+	// The owner's history marks exactly the address that verified.
+	const history = await openShareHistory(page);
+	await expect(
+		history.getByText(
+			uiText("sharing_links_list_access_mode_email_restricted"),
+		),
+	).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+	await expect(
+		history.getByText(
+			`${recipientEmail}${uiText("sharing_links_list_allowed_email_verified_suffix")}`,
+		),
+	).toBeVisible();
+});
+
+test("an unusable share token shows the not-found page", async ({
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+
+	// A well-formed token that was never issued, and a malformed one the server
+	// rejects on length alone - both are dead ends for the recipient.
+	for (const token of ["a".repeat(32), "not-a-token"]) {
+		const recipient = await openAsRecipient(
+			browser,
+			`/share/${token}#${nanoid(16)}`,
+			(view) => view.getByText(RECIPIENT_COPY.notFoundTitle, { exact: true }),
+		);
+		try {
+			await expect(
+				recipient.page.getByTestId("share-reveal-button"),
+			).toHaveCount(0);
+		} finally {
+			await recipient.close();
+		}
+	}
+});
+
+test("an email-restricted link cannot be created without an address", async ({
+	page,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+	const { item } = await signInWithItem(page);
+
+	const dialog = await openShareDialog(page);
+	await expect(dialog).toContainText(
+		uiText("sharing_item_dialog_description", { itemTitle: item.title }),
+	);
+	await expect(page.getByTestId("share-create-button")).toBeEnabled();
+
+	const accessMode = dialog
+		.getByRole("combobox")
+		.filter({ hasText: uiText("sharing_item_dialog_access_mode_anyone") });
+	await accessMode.click();
+	await page
+		.getByRole("option")
+		.filter({
+			hasText: uiText("sharing_item_dialog_access_mode_email_restricted"),
+		})
+		.click();
+
+	await expect(page.getByTestId("share-create-button")).toBeDisabled();
+	const allowed = recipientAddress();
+	await dialog
+		.getByPlaceholder(uiText("sharing_item_dialog_placeholder_email"))
+		.fill(allowed);
+	await dialog
+		.getByRole("button", {
+			name: uiText("sharing_item_dialog_action_add_email"),
+			exact: true,
+		})
+		.click();
+	await expect(dialog.getByText(allowed, { exact: true })).toBeVisible();
+	await expect(page.getByTestId("share-create-button")).toBeEnabled();
 });

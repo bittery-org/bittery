@@ -97,21 +97,37 @@ function SettingsPage() {
 			{/* Tabs Area */}
 			<Tabs defaultValue="account">
 				<TabsList className="w-full sm:w-fit">
-					<TabsTrigger value="account" className="flex-1 sm:flex-none">
+					<TabsTrigger
+						value="account"
+						className="flex-1 sm:flex-none"
+						data-testid="settings-tab-account"
+					>
 						<User className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">{m.settings_tab_account()}</span>
 					</TabsTrigger>
-					<TabsTrigger value="security" className="flex-1 sm:flex-none">
+					<TabsTrigger
+						value="security"
+						className="flex-1 sm:flex-none"
+						data-testid="settings-tab-security"
+					>
 						<Shield className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">
 							{m.settings_tab_security()}
 						</span>
 					</TabsTrigger>
-					<TabsTrigger value="devices" className="flex-1 sm:flex-none">
+					<TabsTrigger
+						value="devices"
+						className="flex-1 sm:flex-none"
+						data-testid="settings-tab-devices"
+					>
 						<Mobile className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">{m.settings_tab_devices()}</span>
 					</TabsTrigger>
-					<TabsTrigger value="general" className="flex-1 sm:flex-none">
+					<TabsTrigger
+						value="general"
+						className="flex-1 sm:flex-none"
+						data-testid="settings-tab-general"
+					>
 						<Gear className="h-4 w-4 sm:mr-2" />
 						<span className="hidden sm:inline">{m.settings_tab_general()}</span>
 					</TabsTrigger>

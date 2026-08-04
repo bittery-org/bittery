@@ -97,7 +97,10 @@ export function VaultExportDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={handleOpenChange}>
-			<DialogContent className="max-w-[calc(100%-1rem)] sm:max-w-md">
+			<DialogContent
+				className="max-w-[calc(100%-1rem)] sm:max-w-md"
+				data-testid="export-dialog"
+			>
 				<DialogHeader>
 					<DialogTitle>{m.vault_export_dialog_title()}</DialogTitle>
 					<DialogDescription>
@@ -116,7 +119,10 @@ export function VaultExportDialog({
 								>
 									{m.vault_export_dialog_cancel()}
 								</Button>
-								<Button onClick={startExport}>
+								<Button
+									onClick={startExport}
+									data-testid="export-confirm-button"
+								>
 									{m.vault_export_dialog_confirm_button()}
 								</Button>
 							</div>

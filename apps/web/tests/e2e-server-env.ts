@@ -29,13 +29,11 @@
  *
  * Per-IP budgets are set high because "one IP" is meaningless here. Per-email
  * budgets stay modest on purpose: every spec signs up with a freshly generated
- * address (`generateTestUser()` in `tests/fixtures/test-fixtures.ts`), so a
- * per-email limit that trips still points at a real bug.
+ * address (`generateTestUser()` in `tests/fixtures/auth.ts`), so a per-email
+ * limit that trips still points at a real bug.
  *
- * Note: `webServer.reuseExistingServer` is true outside CI, so when a dev
- * server is already running locally these overrides are NOT applied to it - the
- * running server keeps its own environment. They take effect in CI, where
- * Playwright owns the server process.
+ * `webServer.reuseExistingServer` is false everywhere precisely so that these
+ * overrides always apply: a reused server would keep its own environment.
  */
 export const E2E_SERVER_RATE_LIMITS: Record<string, string> = {
 	// Per-IP windows: raised well past a whole suite run (with CI retries).
@@ -56,6 +54,19 @@ export const E2E_SERVER_RATE_LIMITS: Record<string, string> = {
 	// recovers inside the same run instead of poisoning the address for 15 min.
 	RATE_LIMIT_SIGNUP_VERIFY_MAX: "500", // default 10 (lifetime, survives re-request)
 	RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES: "1", // default 15
+
+	// Account recovery, same shape as signup: the request limit is enforced per
+	// email *and* per IP, so with CI `retries` a twice-retried recovery spec
+	// exhausts the per-IP hour budget and fails with "Too many requests",
+	// masking whatever went wrong the first time. The lockouts are shortened so
+	// a spec that submits a wrong code on purpose recovers inside the same run.
+	RATE_LIMIT_RECOVERY_REQUEST: "2000", // default 5/hour, per email AND per IP
+	RATE_LIMIT_RECOVERY_VERIFY_MAX: "500", // default 5
+	RATE_LIMIT_RECOVERY_LOCK_MINUTES: "1", // default 15
+
+	// Share-link email verification: same lifetime-counter plus lockout shape.
+	RATE_LIMIT_SHARE_EMAIL_VERIFY_MAX: "500", // default 5
+	RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES: "1", // default 15
 
 	// Share links are capped per *day*, so this one leaks across runs on the
 	// same database if left at the default.
