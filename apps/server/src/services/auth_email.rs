@@ -1,6 +1,9 @@
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
-use std::{fs::OpenOptions, io::Write};
+use std::{
+    fs::{File, OpenOptions},
+    io::Write,
+};
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -91,13 +94,34 @@ fn append_to_dev_outbox(purpose: &VerificationPurpose<'_>, email: &str, code: &s
     // The file holds plaintext codes, so no other account on the box may read it.
     #[cfg(unix)]
     options.mode(0o600);
-    let write = options
-        .open(&path)
+    let write = options.open(&path).and_then(|mut file| {
+        restrict_to_owner(&file)?;
         // One `writeln!` per record: a tailing reader must never see a torn line.
-        .and_then(|mut file| writeln!(file, "{line}"));
+        writeln!(file, "{line}")
+    });
     if let Err(error) = write {
         warn!(error = %error, path = %path, "[auth-email] Failed to append to dev mail outbox");
     }
+}
+
+/// `OpenOptions::mode` only covers a file this call creates, so an outbox left behind
+/// with looser bits would hand every local account the plaintext codes. Tighten the
+/// open handle, and let a failure abort the append rather than leak.
+#[cfg(unix)]
+fn restrict_to_owner(file: &File) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let mut permissions = file.metadata()?.permissions();
+    if permissions.mode() & 0o077 == 0 {
+        return Ok(());
+    }
+    permissions.set_mode(0o600);
+    file.set_permissions(permissions)
+}
+
+#[cfg(not(unix))]
+fn restrict_to_owner(_file: &File) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn dev_outbox_path() -> Option<String> {

@@ -167,6 +167,41 @@ fn deliver_code_succeeds_when_the_outbox_path_cannot_be_written() {
     .expect("an unwritable outbox must not fail the request");
 }
 
+#[cfg(unix)]
+#[test]
+fn deliver_code_tightens_an_outbox_that_already_exists_world_readable() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let _lock = acquire_env_lock();
+    let outbox = OutboxFile::new("loose-permissions");
+    fs::write(&outbox.path, "").expect("outbox should be creatable");
+    fs::set_permissions(&outbox.path, fs::Permissions::from_mode(0o644))
+        .expect("outbox permissions should be settable");
+    let _env = EnvVarGuard::set(&[
+        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
+        ("NODE_ENV", "development"),
+        (DEV_MAIL_OUTBOX_ENV, outbox.as_str()),
+    ]);
+
+    deliver_code(
+        &VerificationPurpose::Recovery,
+        "recovery@test.bittery.com",
+        "100007",
+    )
+    .expect("recovery delivery should succeed");
+
+    let mode = fs::metadata(&outbox.path)
+        .expect("outbox should exist")
+        .permissions()
+        .mode();
+    assert_eq!(
+        mode & 0o777,
+        0o600,
+        "an existing outbox must be tightened before plaintext codes are appended"
+    );
+    assert_eq!(outbox.lines()[0]["code"], "100007");
+}
+
 #[test]
 fn deliver_code_writes_nothing_when_the_outbox_is_unset() {
     let _lock = acquire_env_lock();
