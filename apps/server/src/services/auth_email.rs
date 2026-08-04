@@ -1,6 +1,6 @@
-use std::{fs::OpenOptions, io::Write};
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+use std::{fs::OpenOptions, io::Write};
 
 use serde::Serialize;
 use serde_json::{json, Value};
