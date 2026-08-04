@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import type { PlaywrightTestConfig } from "@playwright/test";
 import { defineConfig, devices } from "@playwright/test";
 import { E2E_SERVER_RATE_LIMITS } from "./tests/e2e-server-env";
+import { E2E_POSTGRES_BASE_URL } from "./tests/fixtures/e2e-database";
 import { MAIL_OUTBOX_PATHS } from "./tests/fixtures/mail-outbox";
 
 /**
@@ -63,10 +64,6 @@ if (!process.env.TEST_WORKER_INDEX) {
 		{ cwd: repoRoot, stdio: "inherit" },
 	);
 }
-
-// 5436 is what apps/server/docker-compose.yml publishes locally, so the CI
-// Postgres service publishes the same port rather than copying this URL.
-const POSTGRES_BASE_URL = "postgres://postgres:password@localhost:5436";
 
 // The API server is `cargo build`-ed on first boot. CI pre-builds it in a step
 // of its own, but a cache-cold runner still has to fit a full debug build here.
@@ -139,7 +136,7 @@ function apiServerEnv(options: {
 		...E2E_SERVER_RATE_LIMITS,
 		HOST: "127.0.0.1",
 		PORT: String(options.port),
-		DATABASE_URL: `${POSTGRES_BASE_URL}/${options.database}`,
+		DATABASE_URL: `${E2E_POSTGRES_BASE_URL}/${options.database}`,
 		// With the postgres rate-limit adapter below, every auth request holds a
 		// second connection for the limiter write; the default pool of 5 queues on
 		// sqlx's acquire timeout and surfaces as intermittent 500s.

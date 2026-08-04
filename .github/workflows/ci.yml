@@ -582,10 +582,11 @@ jobs:
           POSTGRES_PASSWORD: password
           POSTGRES_DB: postgres
         ports:
-          # 5436, not the 5432 the server job uses: apps/web/playwright.config.ts
-          # holds the only copy of this URL and points at the port
-          # apps/server/docker-compose.yml publishes locally. Publishing the same
-          # port here is what keeps that single copy true in both places.
+          # 5436, not the 5432 the server job uses:
+          # apps/web/tests/fixtures/e2e-database.ts holds the only copy of this
+          # URL and points at the port apps/server/docker-compose.yml publishes
+          # locally. Publishing the same port here keeps that single copy true in
+          # both places.
           - 5436:5432
         options: >-
           --health-cmd "pg_isready -U postgres -d postgres"
@@ -651,6 +652,20 @@ jobs:
           cargo build --manifest-path apps/server/Cargo.toml --bin bittery-server --bin migrate
           elapsed="$(( $(date +%s) - start ))"
           echo "e2e server build: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # tests/fixtures/e2e-database.ts drives psql over the same DATABASE_URL the
+      # servers use (locally it falls back to `docker exec bittery-postgres`,
+      # which no runner has). The runner image ships psql today, but not by
+      # contract, so install it when it is absent.
+      - name: Ensure psql
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v psql >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends postgresql-client
+          fi
+          psql --version
 
       # `playwright` is a dependency of `web` only, so it is not on the root bin
       # path.
