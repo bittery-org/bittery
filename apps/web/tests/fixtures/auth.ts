@@ -377,10 +377,8 @@ export async function signIn(page: Page, user: TestUser): Promise<void> {
  * from the device, so the next sign-in is a full one.
  */
 export async function signOut(page: Page): Promise<void> {
-	await page
-		.locator('[data-sidebar="footer"] [data-sidebar="menu-button"]')
-		.click();
-	await page.getByRole("menuitem", { name: "Log out" }).click();
+	await page.getByTestId("user-menu").click();
+	await page.getByTestId("sign-out-button").click();
 	await page.waitForURL("**/login", { timeout: COLD_START_TIMEOUT_MS });
 }
 
@@ -548,14 +546,8 @@ export const RESTORE_BUDGET_MS = 20000;
  * Signed-in and unlocked without re-running the KDF. Lands on /home (or
  * `options.route`).
  *
- * This replays the browser profile a real sign-in would have produced, so it is
- * only ever a *shortcut past* the sign-in - never a substitute for testing it.
- * Nine real sign-ins stay in the suite on purpose, one per branch of that flow:
- * fresh-device full sign-in with the Secret Key hint, quick unlock, wrong
- * password, sign-out clearing the device, the expired-session banner,
- * `?redirect=`, the three credential-change re-logins in settings, and the
- * post-recovery sign-in. Do not "optimise" those into restores; there would then
- * be no coverage of the code path this fixture bypasses.
+ * A restore is only ever a shortcut *past* the sign-in, never a replacement for
+ * a test of it. See `apps/web/tests/CONTEXT.md`.
  */
 export async function restoreSession(
 	page: Page,

@@ -45,6 +45,10 @@ import {
  * signed up *outside* the invitation - so the three cannot share one account.
  */
 
+// Every test accumulates members, vaults and invitations on the one owner team,
+// so a failure has to stop the ones that assert over that accumulated state.
+test.describe.configure({ mode: "serial" });
+
 /** One SRP handshake plus a vault, an invitation and its assertions. */
 const TEST_BUDGET_MS = 240000;
 
@@ -533,13 +537,8 @@ test("a pending invitation reaches an account that signed up on its own", async 
 				.first(),
 		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 
-		// Declining is the only action that resolves the invitation. Its button
-		// carries no label, so the accept button is what locates its row.
-		await accept
-			.locator('xpath=ancestor::div[contains(@class,"rounded-md")][1]')
-			.getByRole("button")
-			.first()
-			.click();
+		// Declining is the only action that resolves the invitation.
+		await invitedPage.getByTestId("invitation-decline-button").click();
 		await expect(
 			toastWithText(invitedPage, uiText("dashboard_pending_toast_declined")),
 		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });

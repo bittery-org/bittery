@@ -6,6 +6,7 @@ import {
 	signUp,
 	test,
 } from "../fixtures/auth";
+import { itemRow } from "../fixtures/vault";
 
 /**
  * Proves the harness end to end: a fresh database, the dev mail outbox, real
@@ -48,17 +49,12 @@ test("signup, vault, item, sign out, full sign-in", async ({
 	await page.getByTestId("item-form-submit-button").click();
 	await expect(createItemSheet).toBeHidden();
 
-	// The draggable row wrapper carries the same accessible name, so only the
-	// exact match picks out the row's own select button.
-	const itemRow = page.getByRole("button", {
-		name: `Select ${item.title}`,
-		exact: true,
-	});
-	await expect(itemRow).toBeVisible({ timeout: 30000 });
+	const row = itemRow(page, item.title);
+	await expect(row).toBeVisible({ timeout: 30000 });
 
 	await signOut(page);
 	await signIn(page, user);
 
 	await page.goto("/vaults");
-	await expect(itemRow).toBeVisible({ timeout: 30000 });
+	await expect(row).toBeVisible({ timeout: 30000 });
 });

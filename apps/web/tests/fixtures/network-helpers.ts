@@ -95,7 +95,14 @@ async function settleAfterDelay(
 	await new Promise((resolve) => setTimeout(resolve, delayMs));
 	try {
 		await settle();
-	} catch {}
+	} catch (error) {
+		if (
+			!(error instanceof Error) ||
+			!error.message.includes("already handled")
+		) {
+			throw error;
+		}
+	}
 }
 
 /**

@@ -87,9 +87,17 @@ function filterSelect(page: Page, currentLabel: string): Locator {
 	return page.getByRole("combobox").filter({ hasText: currentLabel });
 }
 
-/** An event row in the activity table, addressed by the action it renders. */
+/**
+ * An event row in the activity table, addressed by the action it renders.
+ *
+ * Scoped to the open tab panel: the People tab renders the same events, so an
+ * unscoped match would count them twice.
+ */
 function eventRow(page: Page, actionLabel: string): Locator {
-	return page.getByRole("button").filter({ hasText: actionLabel });
+	return page
+		.getByRole("tabpanel")
+		.getByRole("button")
+		.filter({ hasText: actionLabel });
 }
 
 test("an unentitled account is redirected off /admin to /billing", async ({

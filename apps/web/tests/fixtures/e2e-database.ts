@@ -67,6 +67,9 @@ export function runE2eSql(
 
 	return execFileSync(command, [...args, "-v", "ON_ERROR_STOP=1", "-c", sql], {
 		encoding: "utf8",
+		// An unreachable container otherwise blocks the worker until Playwright's
+		// own timeout, which reports as the test rather than as the database.
+		timeout: 30000,
 	}).trim();
 }
 

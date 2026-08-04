@@ -34,6 +34,10 @@ import {
  * devices rather than one, and what the last test pins.
  */
 
+// Each test asserts over the list the previous ones wrote into, so a failure has
+// to stop the run rather than resurface as a list mismatch further down.
+test.describe.configure({ mode: "serial" });
+
 /** Signup, two SRP sign-ins and the seed item. */
 const SETUP_BUDGET_MS = 600000;
 

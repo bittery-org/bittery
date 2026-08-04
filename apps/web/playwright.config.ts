@@ -262,12 +262,18 @@ export default defineConfig({
 		{
 			name: "cloud",
 			testIgnore: /self-hosted\.spec\.ts$/,
-			use: { ...devices["Desktop Chrome"], baseURL: "http://localhost:3011" },
+			use: {
+				...devices["Desktop Chrome"],
+				baseURL: `http://localhost:${STACK_PORTS.cloud.web}`,
+			},
 		},
 		{
 			name: "self-hosted",
 			testMatch: /self-hosted\.spec\.ts$/,
-			use: { ...devices["Desktop Chrome"], baseURL: "http://localhost:3021" },
+			use: {
+				...devices["Desktop Chrome"],
+				baseURL: `http://localhost:${STACK_PORTS["self-hosted"].web}`,
+			},
 		},
 	],
 	webServer: selectedStacks().flatMap(stackServers),

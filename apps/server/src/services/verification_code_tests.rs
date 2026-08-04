@@ -41,7 +41,7 @@ async fn codes_expire_exhaust_and_consume_once_for_each_purpose() {
         assert_consumes_once(&codes, recovery).await;
         assert_consumes_once(&codes, share_email).await;
 
-        let code = codes
+        let (_, code) = codes
             .issue(share_email, EMAIL)
             .await
             .expect("code should issue");
@@ -75,7 +75,7 @@ async fn signup_lockout_burns_pending_codes() {
         let purpose = VerificationPurpose::Signup {
             invitation_token: None,
         };
-        let code = codes
+        let (_, code) = codes
             .issue(purpose, EMAIL)
             .await
             .expect("code should issue");
@@ -105,12 +105,53 @@ async fn signup_lockout_burns_pending_codes() {
     .await;
 }
 
+#[tokio::test]
+async fn a_code_that_could_not_be_delivered_is_not_left_active() {
+    let _env_lock = acquire_env_lock_async().await;
+    let _env = EnvVarGuard::set(&[("BITTERY_ENABLE_DEV_AUTH_STUBS", "false")]);
+
+    with_rpc_test_app("verification_code_undelivered", |app| async move {
+        seed_share_link(&app.pool).await;
+        let codes = VerificationCodeService::new(&app.pool);
+
+        for (purpose, table) in [
+            (
+                VerificationPurpose::Signup {
+                    invitation_token: None,
+                },
+                "signup_verification",
+            ),
+            (VerificationPurpose::Recovery, "recovery_verification"),
+            (
+                VerificationPurpose::ShareEmail {
+                    share_link_id: SHARE_LINK_ID,
+                },
+                "share_email_verification",
+            ),
+        ] {
+            codes
+                .issue_and_deliver(purpose, EMAIL)
+                .await
+                .expect_err("delivery should fail without the dev stub");
+
+            assert!(
+                !codes
+                    .has_active_code(purpose, EMAIL)
+                    .await
+                    .expect("active code check should resolve"),
+                "{table} kept an undelivered code active"
+            );
+        }
+    })
+    .await;
+}
+
 async fn assert_exhausts_after_five_wrong_attempts(
     codes: &VerificationCodeService<'_>,
     purpose: VerificationPurpose<'_>,
     table: &str,
 ) {
-    let code = codes
+    let (_, code) = codes
         .issue(purpose, EMAIL)
         .await
         .expect("code should issue");
@@ -140,7 +181,7 @@ async fn assert_consumes_once(
     codes: &VerificationCodeService<'_>,
     purpose: VerificationPurpose<'_>,
 ) {
-    let code = codes
+    let (_, code) = codes
         .issue(purpose, EMAIL)
         .await
         .expect("code should issue");

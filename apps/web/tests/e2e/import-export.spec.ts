@@ -12,6 +12,7 @@ import { uiText } from "../fixtures/messages";
 import {
 	createItem,
 	createVault,
+	cssAttributeValue,
 	gotoRoute,
 	itemRowTitles,
 	toastWithText,
@@ -286,7 +287,7 @@ async function importedVaultItemTitles(
 	expectedItemCount: number,
 ): Promise<string[]> {
 	const navLink = page.locator(
-		`[data-testid="vault-nav-link"][data-vault-name="${vaultName}"]`,
+		`[data-testid="vault-nav-link"][data-vault-name="${cssAttributeValue(vaultName)}"]`,
 	);
 	await gotoRoute(page, "/vaults", navLink);
 	const vaultId = await navLink.getAttribute("data-vault-id");

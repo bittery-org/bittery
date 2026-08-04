@@ -156,21 +156,8 @@ function recordRouteRetry(url: string): void {
 
 /**
  * Navigate to a route and wait for the element that proves it rendered,
- * reloading in between if it does not.
- *
- * The router code-splits every route, so a navigation fetches that route's
- * chunk from the Vite dev server - and late in a long serial run that dev
- * server occasionally never answers. The document still loads, so nothing
- * throws: the router simply sits on an empty outlet until the test times out,
- * which reads exactly like a product bug. Reloading re-issues those requests.
- *
- * The retries are bounded and the last attempt asserts unconditionally, so a
- * route that genuinely never renders still fails - and says where the page
- * ended up, which is what tells a stalled chunk apart from an unexpected
- * redirect.
- *
- * `E2E_STRICT_ROUTES=1` drops the retries and asserts on the first attempt,
- * which is how the papering-over gets switched off to see the raw truth.
+ * reloading in between if it does not. Retries are bounded and the last attempt
+ * asserts; `E2E_STRICT_ROUTES=1` drops them. See `apps/web/tests/CONTEXT.md`.
  */
 export async function gotoRoute(
 	page: Page,
@@ -290,6 +277,6 @@ function vaultIdFromUrl(page: Page): string {
 }
 
 /** Test titles are generated, but an unescaped quote would still break the selector. */
-function cssAttributeValue(value: string): string {
+export function cssAttributeValue(value: string): string {
 	return value.replace(/["\\]/g, "\\$&");
 }

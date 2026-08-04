@@ -337,7 +337,10 @@ export function useSignupForm({
 			// the master unlock key under the other - and nothing decrypts.
 			const accountId = await storage.getActiveAccount();
 			if (!accountId) {
-				throw new Error("No active account; storage was not initialized.");
+				// The server already holds the account, so this is recoverable by
+				// signing in - never the generic "could not create it" failure.
+				toast.error(m.auth_signup_toast_created_sign_in_again());
+				return;
 			}
 			await storage.storePinnedKdfProfile(kdfProfile, accountId);
 			await storage.setMasterUnlockKey(masterUnlockKey, accountId);
@@ -357,13 +360,14 @@ export function useSignupForm({
 			// Without a row in the accounts list the account resolver cannot build an
 			// `AccountInfo`, so every vault, item and sync query comes back empty
 			// until the user signs out and in again.
-			await storage.storeServerUrl(getDefaultServerUrl(), accountId);
+			const serverUrl = getDefaultServerUrl();
+			await storage.storeServerUrl(serverUrl, accountId);
 			await storage.addAccount({
 				accountId,
 				email,
 				userId: result.userId,
 				name: value.name || email.split("@")[0] || "User",
-				serverUrl: getDefaultServerUrl(),
+				serverUrl,
 				secretKeyHint,
 				addedAt: Date.now(),
 				lastActiveAt: Date.now(),

@@ -12,6 +12,7 @@ import { uiText } from "../fixtures/messages";
 import {
 	createItem,
 	createVault,
+	cssAttributeValue,
 	itemRow,
 	itemRowTitles,
 	openItem,
@@ -229,7 +230,9 @@ test("tagging an item adds a sidebar tag that lists only the tagged items", asyn
 		.click();
 	await expect(pane.getByText(tagName)).toBeVisible();
 
-	const tagLink = page.getByTestId(`tag-filter-${tagName}`);
+	const tagLink = page.locator(
+		`[data-testid="tag-filter"][data-tag-name="${cssAttributeValue(tagName)}"]`,
+	);
 	await expect(tagLink).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
 	await tagLink.click();
 

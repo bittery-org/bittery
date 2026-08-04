@@ -11,7 +11,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
 import { type TestUser, waitForAppReady } from "./auth";
 import { mailOutboxNow, waitForCode } from "./mail-outbox";
 import { uiText } from "./messages";
-import { gotoRoute, VAULT_READY_TIMEOUT_MS } from "./vault";
+import { cssAttributeValue, gotoRoute, VAULT_READY_TIMEOUT_MS } from "./vault";
 
 export type TeamRole = "member" | "admin";
 
@@ -55,7 +55,7 @@ export async function openInviteLink(
 /** One team- or vault-member card, addressed by the email it renders. */
 export function memberRow(page: Page, email: string): Locator {
 	return page.locator(
-		`[data-testid="member-row"][data-member-email="${email}"]`,
+		`[data-testid="member-row"][data-member-email="${cssAttributeValue(email)}"]`,
 	);
 }
 

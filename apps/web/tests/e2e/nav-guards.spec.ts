@@ -28,6 +28,10 @@ import { gotoRoute, VAULT_READY_TIMEOUT_MS } from "../fixtures/vault";
  * covers three plans instead of three sign-ins covering one each.
  */
 
+// The plan and the role are moved underneath one shared account, so a test that
+// fails to establish them must stop the ones that read them back.
+test.describe.configure({ mode: "serial" });
+
 /** One SRP sign-in plus several full route loads. */
 const TEST_BUDGET_MS = 240000;
 

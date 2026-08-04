@@ -967,6 +967,7 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
     let _env = EnvVarGuard::set(&[
         ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
         ("NODE_ENV", "development"),
+        ("BITTERY_DEV_MAIL_OUTBOX", ""),
     ]);
 
     with_rpc_test_app("share_request_email_verification_paths", |app| async move {
@@ -1047,6 +1048,7 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
     let _env = EnvVarGuard::set(&[
         ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
         ("NODE_ENV", "development"),
+        ("BITTERY_DEV_MAIL_OUTBOX", ""),
     ]);
 
     with_rpc_test_app(
@@ -1094,15 +1096,15 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
     .await;
 }
 
-/// Finding 5c: `share_email_verification.code_hash` must never hold the 6-digit
-/// code. A freshly generated code is persisted as a digest, the seeded code still
-/// verifies end to end, and the stored digest cannot be replayed as a code.
+/// A database read must not hand out a working code: `code_hash` holds the
+/// digest, and the digest itself is not replayable as a code.
 #[tokio::test]
 async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
     let _env_lock = acquire_env_lock_async().await;
     let _env = EnvVarGuard::set(&[
         ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
         ("NODE_ENV", "development"),
+        ("BITTERY_DEV_MAIL_OUTBOX", ""),
     ]);
 
     with_rpc_test_app("share_verification_code_hashed", |app| async move {

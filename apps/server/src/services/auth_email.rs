@@ -1,4 +1,6 @@
 use std::{fs::OpenOptions, io::Write};
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -84,9 +86,12 @@ fn append_to_dev_outbox(purpose: &VerificationPurpose<'_>, email: &str, code: &s
         return;
     };
 
-    let write = OpenOptions::new()
-        .create(true)
-        .append(true)
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    // The file holds plaintext codes, so no other account on the box may read it.
+    #[cfg(unix)]
+    options.mode(0o600);
+    let write = options
         .open(&path)
         // One `writeln!` per record: a tailing reader must never see a torn line.
         .and_then(|mut file| writeln!(file, "{line}"));
@@ -138,11 +143,8 @@ fn capture_key(purpose: &VerificationPurpose<'_>, email: &str) -> String {
     }
 }
 
-/// Captures the codes that would be emailed, so tests can act as the recipient.
-///
-/// Verification codes are stored as SHA-256 digests, so the plaintext exists only
-/// here and in the outbound mail — there is nothing left in the database for a
-/// test (or an attacker with a database read) to look up.
+/// Codes are persisted as digests, so a test can only act as the recipient by
+/// capturing the plaintext on its way out.
 #[cfg(test)]
 pub(crate) mod emailed_code_capture {
     use std::{

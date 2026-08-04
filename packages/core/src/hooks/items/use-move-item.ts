@@ -61,10 +61,8 @@ export function useMoveItem() {
 				);
 			}
 
-			// Matched on accountId, never on email: a cached item's `accountEmail`
-			// falls back to the account *id* when the platform's sync source does
-			// not supply an email (the web app does not), so an email match here
-			// fails for every same-account move.
+			// Matched on accountId: `accountEmail` falls back to the account id when
+			// the sync source supplies no email, so an email match never hits.
 			const resolvedAccounts = await core.accounts.resolveAccounts();
 			const sourceAccount = resolvedAccounts.accountsInfo.find(
 				(account) => account.accountId === sourceContext.accountId,

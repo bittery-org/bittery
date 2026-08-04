@@ -21,7 +21,12 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const manifestPath = resolve(repoRoot, "apps/server/Cargo.toml");
-const binDir = resolve(repoRoot, "apps/server/target/debug");
+// Cargo writes to CARGO_TARGET_DIR when it is set, so reading the binaries from
+// the default location would find a stale build or none at all.
+const targetDir = process.env.CARGO_TARGET_DIR
+	? resolve(repoRoot, process.env.CARGO_TARGET_DIR)
+	: resolve(repoRoot, "apps/server/target");
+const binDir = resolve(targetDir, "debug");
 
 function fail(message) {
 	console.error(`[e2e-launch] ${message}`);
@@ -67,6 +72,13 @@ run("cargo", [
 run(resolve(binDir, "migrate"), ["--fresh"]);
 
 const serverBin = resolve(binDir, "bittery-server");
+// POSIX-only, and Node 22.12+. Without this the failure surfaces as a Playwright
+// `webServer` timeout, which reads as a broken app rather than a broken launcher.
+if (typeof process.execve !== "function") {
+	fail(
+		`process.execve is unavailable on ${process.platform} / Node ${process.version}; the E2E API server cannot be launched here.`,
+	);
+}
 process.chdir(repoRoot);
 // A real exec, not a child: Playwright kills this pid on teardown and the
 // server has to be the thing that receives it.

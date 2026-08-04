@@ -353,7 +353,7 @@ export function VaultNavSidebar({
 										search={{ itemId: undefined }}
 										className={cn(navLinkClass(isActive), "mb-0.5")}
 										onClick={onNavigate}
-										data-testid={`tag-filter-${tagName}`}
+										data-testid="tag-filter"
 										data-tag-name={tagName}
 									>
 										{isActive && (

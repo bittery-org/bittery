@@ -9,7 +9,7 @@
  * undecryptable.
  */
 import { expect, type Locator, type Page } from "@playwright/test";
-import { runE2eSql, sqlString } from "./e2e-database";
+import { DEFAULT_E2E_DATABASE, runE2eSql, sqlString } from "./e2e-database";
 import { uiText } from "./messages";
 import { VAULT_READY_TIMEOUT_MS } from "./vault";
 
@@ -201,9 +201,13 @@ export function revokeButton(page: Page): Locator {
  * server's own check. Writing the column is the same fixture pattern
  * `./billing` uses for the Stripe webhook's plan columns.
  */
-export function expireShareLinksForItem(itemId: string): void {
+export function expireShareLinksForItem(
+	itemId: string,
+	database = DEFAULT_E2E_DATABASE,
+): void {
 	const result = runE2eSql(
 		`UPDATE share_link SET expires_at = now() - interval '1 hour' WHERE item_id = '${sqlString(itemId)}' AND status = 'active'`,
+		database,
 	);
 	if (result !== "UPDATE 1") {
 		throw new Error(

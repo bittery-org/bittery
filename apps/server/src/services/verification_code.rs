@@ -59,16 +59,29 @@ impl<'a> VerificationCodeService<'a> {
         purpose: VerificationPurpose<'_>,
         email: &str,
     ) -> Result<(), AppError> {
-        let code = self.issue(purpose, email).await?;
-        deliver_code(&purpose, email, &code)
+        let (verification_id, code) = self.issue(purpose, email).await?;
+        let Err(error) = deliver_code(&purpose, email, &code) else {
+            return Ok(());
+        };
+        // A code nobody received still counts as an active code, which would burn
+        // the caller's lockout budget on a verification they can never pass.
+        if let Err(cleanup_error) = self.consume(purpose, &verification_id).await {
+            tracing::error!(error = %cleanup_error, "Failed to invalidate an undelivered verification code");
+        }
+        Err(error)
     }
 
     async fn issue(
         &self,
         purpose: VerificationPurpose<'_>,
         email: &str,
-    ) -> Result<String, AppError> {
+    ) -> Result<(String, String), AppError> {
         let code = generate_code();
+        let verification_id = generate_resource_id(match purpose {
+            VerificationPurpose::Signup { .. } => "signup_verify",
+            VerificationPurpose::Recovery => "recovery_verification",
+            VerificationPurpose::ShareEmail { .. } => "share_verification",
+        });
         let now = OffsetDateTime::now_utc();
         let expires_at = now + VERIFICATION_CODE_TTL;
 
@@ -108,7 +121,7 @@ impl<'a> VerificationCodeService<'a> {
                 query(
                     "INSERT INTO signup_verification (id, email, invitation_token_hash, code_hash, expires_at) VALUES ($1, $2, $3, $4, $5)",
                 )
-                .bind(generate_resource_id("signup_verify"))
+                .bind(&verification_id)
                 .bind(email)
                 .bind(invitation_token_hash)
                 .bind(hash_token(&code))
@@ -134,7 +147,7 @@ impl<'a> VerificationCodeService<'a> {
                 query(
                     "INSERT INTO recovery_verification (id, email, code_hash, expires_at) VALUES ($1, $2, $3, $4)",
                 )
-                .bind(generate_resource_id("recovery_verification"))
+                .bind(&verification_id)
                 .bind(email)
                 .bind(hash_token(&code))
                 .bind(expires_at)
@@ -149,7 +162,7 @@ impl<'a> VerificationCodeService<'a> {
                 query(
                     "INSERT INTO share_email_verification (id, share_link_id, email, code_hash, expires_at) VALUES ($1, $2, $3, $4, $5)",
                 )
-                .bind(generate_resource_id("share_verification"))
+                .bind(&verification_id)
                 .bind(share_link_id)
                 .bind(email)
                 .bind(hash_token(&code))
@@ -163,7 +176,7 @@ impl<'a> VerificationCodeService<'a> {
             }
         }
 
-        Ok(code)
+        Ok((verification_id, code))
     }
 
     pub(crate) async fn verify(
