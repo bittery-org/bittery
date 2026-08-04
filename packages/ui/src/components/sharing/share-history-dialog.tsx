@@ -46,7 +46,10 @@ export function ShareHistoryDialog({
 					)}
 				</DialogTrigger>
 			)}
-			<DialogContent className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden">
+			<DialogContent
+				className="flex max-h-[80vh] max-w-2xl flex-col overflow-hidden"
+				data-testid="share-history-dialog"
+			>
 				<DialogHeader>
 					<DialogTitle>{m.sharing_history_dialog_title()}</DialogTitle>
 					<DialogDescription>

@@ -109,7 +109,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 					{m.settings_delete_account_dialog_trigger()}
 				</Button>
 			</AlertDialogTrigger>
-			<AlertDialogContent>
+			<AlertDialogContent data-testid="delete-account-dialog">
 				<AlertDialogHeader>
 					<AlertDialogTitle>
 						{m.settings_delete_account_dialog_title()}

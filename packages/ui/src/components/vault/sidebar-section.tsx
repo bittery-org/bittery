@@ -18,6 +18,7 @@ interface SidebarSectionProps {
 	defaultOpen?: boolean;
 	storageKey?: string;
 	onAdd?: () => void;
+	addButtonTestId?: string;
 }
 
 export function SidebarSection({
@@ -27,6 +28,7 @@ export function SidebarSection({
 	defaultOpen = true,
 	storageKey,
 	onAdd,
+	addButtonTestId,
 }: SidebarSectionProps) {
 	const [isOpen, setIsOpen] = useState(() => {
 		if (!storageKey) return defaultOpen;
@@ -72,6 +74,7 @@ export function SidebarSection({
 						variant="ghost"
 						size="sm"
 						className="h-5 w-5 shrink-0 p-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 group-hover/section:opacity-100"
+						data-testid={addButtonTestId}
 						onClick={(e) => {
 							e.stopPropagation();
 							onAdd();

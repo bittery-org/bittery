@@ -125,6 +125,7 @@ export default function SelfHostedSignUpForm({
 							form.handleSubmit();
 						}}
 						className="space-y-4"
+						data-testid="signup-form"
 					>
 						{isInvitationSignup ? (
 							<div className="rounded-lg border bg-muted/30 p-4">
@@ -253,6 +254,7 @@ export default function SelfHostedSignUpForm({
 							type="button"
 							disabled={!hasAllKeyMaterial}
 							onClick={downloadEmergencyKit}
+							data-testid="emergency-kit-download-button"
 							className={cn(
 								"flex w-full items-center gap-2.5 rounded-lg border px-3.5 py-3 text-left transition-colors",
 								hasDownloadedKit
@@ -287,6 +289,7 @@ export default function SelfHostedSignUpForm({
 							<Button
 								type="submit"
 								className="h-10 w-full"
+								data-testid="signup-submit-button"
 								disabled={
 									isEncrypting || signupMutation.isPending || !hasDownloadedKit
 								}

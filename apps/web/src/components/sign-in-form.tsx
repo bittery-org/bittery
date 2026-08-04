@@ -242,6 +242,7 @@ function SignInFormContent({
 				form.handleSubmit();
 			}}
 			className="space-y-4"
+			data-testid="signin-form"
 		>
 			<div>
 				<form.Field name="email">
@@ -359,6 +360,7 @@ function SignInFormContent({
 				type="submit"
 				className="h-10 w-full font-medium"
 				disabled={loginMutation.isPending}
+				data-testid="signin-submit-button"
 			>
 				{loginMutation.isPending ? (
 					<>

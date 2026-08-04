@@ -524,6 +524,7 @@ function AccountSetupStep({
 				form.handleSubmit();
 			}}
 			className="space-y-4"
+			data-testid="signup-form"
 		>
 			{/* Plan summary chip */}
 			<form.Subscribe
@@ -656,6 +657,7 @@ function AccountSetupStep({
 				type="button"
 				disabled={!hasAllKeyMaterial}
 				onClick={downloadEmergencyKit}
+				data-testid="emergency-kit-download-button"
 				className={cn(
 					"group relative flex w-full items-center gap-3 overflow-hidden rounded-xl border px-4 py-3.5 text-left transition-all duration-200",
 					hasDownloadedKit
@@ -708,6 +710,7 @@ function AccountSetupStep({
 				<Button
 					type="submit"
 					className="h-10 w-full font-medium shadow-sm"
+					data-testid="signup-submit-button"
 					disabled={
 						isEncrypting ||
 						signupMutation.isPending ||

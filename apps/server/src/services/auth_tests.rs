@@ -11,11 +11,11 @@ use sqlx::{query, query_scalar, PgPool};
 use std::future::Future;
 
 use super::{
-    deterministic_fake_hint, emailed_code_capture, header_value, normalize_email,
-    normalize_signup_plan, parse_bearer_token, parse_pending_vault_keys, plan_member_limit,
-    signup_team_name, validate_hex_string, validate_login_attempt_id, validate_resource_id,
-    validate_token,
+    deterministic_fake_hint, header_value, normalize_email, normalize_signup_plan,
+    parse_bearer_token, parse_pending_vault_keys, plan_member_limit, signup_team_name,
+    validate_hex_string, validate_login_attempt_id, validate_resource_id, validate_token,
 };
+use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
     seed_vault_key, with_raw_test_db, with_rpc_test_app, RpcTestApp,

@@ -83,7 +83,11 @@ export const Route = createRootRouteWithContext<RouterAppContext>()({
 
 function RootDocument() {
 	const { locale } = useI18n();
-	const isDev = import.meta.env.DEV;
+	// Both devtools launchers are fixed overlays pinned to the bottom corners,
+	// where they sit on top of real controls and swallow their clicks; automated
+	// runs against the dev server turn them off.
+	const isDev =
+		import.meta.env.DEV && import.meta.env.VITE_DISABLE_DEVTOOLS !== "true";
 
 	return (
 		<html lang={locale} suppressHydrationWarning>

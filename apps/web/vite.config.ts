@@ -4,6 +4,10 @@ import viteReact from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";
 
+// Deliberately unprefixed: this configures the dev server itself, not client
+// code, so it must not reach `import.meta.env`. Set by playwright.config.ts.
+const isE2E = process.env.E2E === "1";
+
 export default defineConfig({
 	plugins: [
 		tsconfigPaths(),
@@ -28,5 +32,14 @@ export default defineConfig({
 		host: true,
 		port: 3001,
 		allowedHosts: ["bittery.test"],
+		// One dev server serves every Playwright worker, and a dependency
+		// re-optimization broadcasts `full-reload` to all of them at once - so one
+		// worker's navigation reloads the others' pages mid-flow.
+		...(isE2E && { hmr: false }),
 	},
+	// Discovered lazily (recovery-kit imports pdf-lib on demand, and the router
+	// code-splits every route), which is what triggers that mid-run re-optimize.
+	...(isE2E && {
+		optimizeDeps: { include: ["pdf-lib", "jszip", "zxcvbn"] },
+	}),
 });

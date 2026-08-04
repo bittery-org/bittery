@@ -61,11 +61,13 @@ export function useMoveItem() {
 				);
 			}
 
+			// Matched on accountId, never on email: a cached item's `accountEmail`
+			// falls back to the account *id* when the platform's sync source does
+			// not supply an email (the web app does not), so an email match here
+			// fails for every same-account move.
 			const resolvedAccounts = await core.accounts.resolveAccounts();
 			const sourceAccount = resolvedAccounts.accountsInfo.find(
-				(account) =>
-					account.email.toLowerCase() ===
-					sourceContext.accountEmail.toLowerCase(),
+				(account) => account.accountId === sourceContext.accountId,
 			);
 			if (!sourceAccount) {
 				throw new Error("Source account not found");

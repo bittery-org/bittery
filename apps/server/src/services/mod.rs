@@ -1,6 +1,7 @@
 pub(crate) mod access;
 pub(crate) mod audit;
 pub(crate) mod auth;
+pub(crate) mod auth_email;
 pub(crate) mod billing;
 pub(crate) mod connection_registry;
 pub(crate) mod rate_limit;

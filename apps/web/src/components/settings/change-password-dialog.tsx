@@ -230,7 +230,7 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 					{m.settings_change_password_dialog_trigger()}
 				</Button>
 			</DialogTrigger>
-			<DialogContent>
+			<DialogContent data-testid="change-password-dialog">
 				<form onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>

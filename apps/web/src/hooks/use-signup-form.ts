@@ -2,6 +2,7 @@ import { m } from "@bittery/i18n/paraglide/messages";
 import { buildVaultKeyEncryptionContext } from "@bittery/shared";
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import type { KdfProfile } from "@bittery/types";
@@ -330,7 +331,14 @@ export function useSignupForm({
 				kdfProfile,
 			});
 
-			const accountId = crypto.randomUUID();
+			// The token and vault keys stored in `signupMutation.onSuccess` resolve
+			// through the active account, so the key material has to land on that
+			// same id. A fresh id splits the account in two - vault keys under one,
+			// the master unlock key under the other - and nothing decrypts.
+			const accountId = await storage.getActiveAccount();
+			if (!accountId) {
+				throw new Error("No active account; storage was not initialized.");
+			}
 			await storage.storePinnedKdfProfile(kdfProfile, accountId);
 			await storage.setMasterUnlockKey(masterUnlockKey, accountId);
 			await storage.storeEncryptedPrivateKey(
@@ -346,6 +354,21 @@ export function useSignupForm({
 				result.expiresAt,
 				result.sessionId,
 			);
+			// Without a row in the accounts list the account resolver cannot build an
+			// `AccountInfo`, so every vault, item and sync query comes back empty
+			// until the user signs out and in again.
+			await storage.storeServerUrl(getDefaultServerUrl(), accountId);
+			await storage.addAccount({
+				accountId,
+				email,
+				userId: result.userId,
+				name: value.name || email.split("@")[0] || "User",
+				serverUrl: getDefaultServerUrl(),
+				secretKeyHint,
+				addedAt: Date.now(),
+				lastActiveAt: Date.now(),
+				biometricEnabled: await storage.isBiometricEnabled(accountId),
+			});
 
 			const daysUntil = Math.floor(
 				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),

@@ -220,7 +220,10 @@ export function RegenerateRecoveryKeyDialog({
 					{m.settings_recovery_key_regenerate_trigger()}
 				</Button>
 			</DialogTrigger>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent
+				className="sm:max-w-md"
+				data-testid="regenerate-recovery-key-dialog"
+			>
 				{step === "verify" ? (
 					<form onSubmit={handleGenerateRecoveryKey}>
 						<DialogHeader>
@@ -295,7 +298,10 @@ export function RegenerateRecoveryKeyDialog({
 								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
 									{m.settings_recovery_key_regenerate_display_key_label()}
 								</div>
-								<div className="break-all font-mono text-sm tracking-wide">
+								<div
+									className="break-all font-mono text-sm tracking-wide"
+									data-testid="recovery-key-value"
+								>
 									{recoveryKey}
 								</div>
 							</div>

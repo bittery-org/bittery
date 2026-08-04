@@ -80,6 +80,25 @@ export const ApiErrors = {
 };
 
 /**
+ * Hold a route open for `delayMs`, then settle it.
+ *
+ * Teardown unroutes the page, and that settles whatever routes are still in
+ * flight - including this one, still inside its sleep. The late `continue` or
+ * `abort` then throws `Route is already handled!` from a handler no test is
+ * awaiting, so it lands on whichever test happens to be running by then. There
+ * is nothing left to do about a route someone else already settled.
+ */
+async function settleAfterDelay(
+	delayMs: number,
+	settle: () => Promise<void>,
+): Promise<void> {
+	await new Promise((resolve) => setTimeout(resolve, delayMs));
+	try {
+		await settle();
+	} catch {}
+}
+
+/**
  * Network failure simulator class
  */
 export class NetworkSimulator {
@@ -132,8 +151,7 @@ export class NetworkSimulator {
 	 */
 	async simulateSlowNetwork(delayMs = 2000) {
 		await this.routeApiRequests(async (route) => {
-			await new Promise((resolve) => setTimeout(resolve, delayMs));
-			await route.continue();
+			await settleAfterDelay(delayMs, () => route.continue());
 		});
 	}
 
@@ -198,9 +216,7 @@ export class NetworkSimulator {
 		this.interceptedRoutes.add(endpointPattern);
 
 		await this.page.route(endpointPattern, async (route) => {
-			// Wait longer than typical timeout
-			await new Promise((resolve) => setTimeout(resolve, timeoutMs));
-			await route.abort("timedout");
+			await settleAfterDelay(timeoutMs, () => route.abort("timedout"));
 		});
 	}
 
@@ -209,8 +225,7 @@ export class NetworkSimulator {
 	 */
 	async simulateProcedureTimeout(procedureName: string, timeoutMs = 30000) {
 		await this.routeProcedureRequests(procedureName, async (route) => {
-			await new Promise((resolve) => setTimeout(resolve, timeoutMs));
-			await route.abort("timedout");
+			await settleAfterDelay(timeoutMs, () => route.abort("timedout"));
 		});
 	}
 

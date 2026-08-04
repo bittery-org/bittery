@@ -281,7 +281,10 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 								<div className="mb-2 font-medium text-muted-foreground text-xs uppercase tracking-wider">
 									{m.settings_recovery_key_setup_display_key_label()}
 								</div>
-								<div className="break-all font-mono text-sm tracking-wide">
+								<div
+									className="break-all font-mono text-sm tracking-wide"
+									data-testid="recovery-key-value"
+								>
 									{recoveryKey}
 								</div>
 							</div>

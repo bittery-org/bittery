@@ -7,6 +7,7 @@ use crate::{
     db::models::{DbRecoveryVerificationRow, DbShareEmailVerificationRow, DbSignupVerificationRow},
     error::AppError,
     repo::common::{generate_resource_id, hash_token},
+    services::auth_email::deliver_code,
     services::rate_limit::{
         self, recovery_verify_lock_duration, recovery_verify_max_attempts,
         signup_verify_lock_duration, signup_verify_max_attempts, RateLimiter,
@@ -51,7 +52,18 @@ impl<'a> VerificationCodeService<'a> {
         code.len() == 6 && code.bytes().all(|byte| byte.is_ascii_digit())
     }
 
-    pub(crate) async fn issue(
+    /// Issuing and delivering are one step so that a caller cannot mint a code and
+    /// leave the recipient without it.
+    pub(crate) async fn issue_and_deliver(
+        &self,
+        purpose: VerificationPurpose<'_>,
+        email: &str,
+    ) -> Result<(), AppError> {
+        let code = self.issue(purpose, email).await?;
+        deliver_code(&purpose, email, &code)
+    }
+
+    async fn issue(
         &self,
         purpose: VerificationPurpose<'_>,
         email: &str,

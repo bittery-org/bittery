@@ -17,6 +17,9 @@ interface VaultItemListRowProps extends React.HTMLAttributes<HTMLDivElement> {
 	isDragging?: boolean;
 	onPrimaryAction: () => void;
 	onToggleCheck?: () => void;
+	/** Placed on the primary-action button, never the drag wrapper, so a row resolves to one element. */
+	dataTestId?: string;
+	dataItemId?: string;
 }
 
 export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps>(
@@ -35,6 +38,8 @@ export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps
 			isDragging = false,
 			onPrimaryAction,
 			onToggleCheck,
+			dataTestId,
+			dataItemId,
 			className,
 			...props
 		},
@@ -76,6 +81,9 @@ export const VaultItemListRow = forwardRef<HTMLDivElement, VaultItemListRowProps
 					onClick={() => (selectionMode ? onToggleCheck?.() : onPrimaryAction())}
 					className="absolute inset-0 z-0 cursor-pointer rounded-md"
 					aria-label={ariaLabel}
+					data-testid={dataTestId}
+					data-item-id={dataItemId}
+					data-item-title={itemTitle}
 				/>
 
 				<div className="pointer-events-none relative z-10 flex min-w-0 flex-1 items-center gap-2.5">

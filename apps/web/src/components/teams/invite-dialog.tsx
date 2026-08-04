@@ -224,7 +224,10 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 					<span className="text-xs">{m.team_invite_dialog_trigger()}</span>
 				</Button>
 			</DialogTrigger>
-			<DialogContent className="max-h-[85vh] overflow-y-auto">
+			<DialogContent
+				className="max-h-[85vh] overflow-y-auto"
+				data-testid="invite-dialog"
+			>
 				{(() => {
 					const seatDelta = seatPreview
 						? Number(seatPreview.nextQuantity - seatPreview.currentQuantity)
@@ -439,7 +442,10 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 										<p className="mb-2 font-medium text-sm">
 											{m.team_invite_dialog_invite_link_title()}
 										</p>
-										<p className="break-all text-muted-foreground text-xs">
+										<p
+											className="break-all text-muted-foreground text-xs"
+											data-testid="invite-link-value"
+										>
 											{inviteLink}
 										</p>
 										<Button
@@ -471,7 +477,11 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 								>
 									{m.team_common_action_cancel()}
 								</Button>
-								<Button type="submit" disabled={inviteMutation.isPending}>
+								<Button
+									type="submit"
+									disabled={inviteMutation.isPending}
+									data-testid="invite-submit-button"
+								>
 									{inviteMutation.isPending
 										? m.team_invite_dialog_button_sending()
 										: m.team_invite_dialog_button_create_invitation()}

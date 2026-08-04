@@ -53,6 +53,10 @@ const UNDOCUMENTED_SERVER_VARS = new Map([
 		"optional override that falls back to JWT_SECRET; no self-hoster needs to set it",
 	],
 	[
+		"BITTERY_DEV_MAIL_OUTBOX",
+		"local-development file the dev auth stubs append emailed verification codes to; must not be advertised as a deployment option",
+	],
+	[
 		"BITTERY_ENABLE_DEV_AUTH_STUBS",
 		"local-development stub for auth email delivery; must not be advertised as a deployment option",
 	],

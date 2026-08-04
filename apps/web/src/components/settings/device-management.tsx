@@ -263,6 +263,8 @@ function RevokeDeviceDialog({
 					variant="ghost"
 					size="icon"
 					className="h-8 w-8 text-destructive hover:text-destructive"
+					data-testid="revoke-device-button"
+					data-device-id={session.id}
 				>
 					<LogOut className="h-4 w-4" />
 				</Button>
@@ -311,6 +313,9 @@ function DeviceCard({
 	return (
 		<div
 			className={`flex items-center gap-3 rounded-xl border bg-card p-4 ${session.isCurrentSession ? "border-primary/40" : ""}`}
+			data-testid="device-row"
+			data-device-id={session.id}
+			data-device-current={session.isCurrentSession}
 		>
 			<div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
 				{getPlatformIcon(session.platform)}

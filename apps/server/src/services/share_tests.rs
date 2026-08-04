@@ -4,6 +4,7 @@ use sqlx::{query, query_as, query_scalar, FromRow};
 
 use super::*;
 use crate::error::AppErrorCode;
+use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
     seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app, EnvVarGuard,
@@ -962,6 +963,12 @@ async fn access_public_rejects_non_public_and_revoked_links() {
 
 #[tokio::test]
 async fn request_email_verification_persists_codes_for_allowed_emails_and_rejects_invalid_access() {
+    let _env_lock = acquire_env_lock_async().await;
+    let _env = EnvVarGuard::set(&[
+        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
+        ("NODE_ENV", "development"),
+    ]);
+
     with_rpc_test_app("share_request_email_verification_paths", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
@@ -1032,11 +1039,72 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
     .await;
 }
 
+/// An email-restricted link is only usable if the recipient actually receives the
+/// code: issuing one and dropping it made the whole access mode a dead end.
+#[tokio::test]
+async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
+    let _env_lock = acquire_env_lock_async().await;
+    let _env = EnvVarGuard::set(&[
+        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
+        ("NODE_ENV", "development"),
+    ]);
+
+    with_rpc_test_app(
+        "share_request_email_verification_delivers",
+        |app| async move {
+            let fixture = build_share_router_fixture(&app.pool).await;
+
+            let requested = app
+                .rpc_call(
+                    "share.requestEmailVerification",
+                    json!([{
+                        "token": fixture.email_link_token.clone(),
+                        "email": fixture.request_email.clone()
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(requested.status, StatusCode::OK);
+            assert_eq!(requested.body["result"]["Ok"]["success"], json!(true));
+
+            let code = emailed_code_capture::latest(&emailed_code_capture::share_key(
+                &fixture.email_link_id,
+                &fixture.request_email,
+            ))
+            .expect("share email verification code should have been emailed");
+
+            let accessed = app
+                .rpc_call(
+                    "share.verifyEmailAndAccess",
+                    json!([{
+                        "token": fixture.email_link_token.clone(),
+                        "email": fixture.request_email.clone(),
+                        "code": code
+                    }]),
+                    unauthenticated_json_headers(),
+                )
+                .await;
+            assert_eq!(accessed.status, StatusCode::OK);
+            assert_eq!(
+                accessed.body["result"]["Ok"]["encryptedItemData"],
+                json!(FIXTURE_ENCRYPTED_ITEM_DATA),
+            );
+        },
+    )
+    .await;
+}
+
 /// Finding 5c: `share_email_verification.code_hash` must never hold the 6-digit
 /// code. A freshly generated code is persisted as a digest, the seeded code still
 /// verifies end to end, and the stored digest cannot be replayed as a code.
 #[tokio::test]
 async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
+    let _env_lock = acquire_env_lock_async().await;
+    let _env = EnvVarGuard::set(&[
+        ("BITTERY_ENABLE_DEV_AUTH_STUBS", "true"),
+        ("NODE_ENV", "development"),
+    ]);
+
     with_rpc_test_app("share_verification_code_hashed", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 

@@ -143,6 +143,8 @@ export function ItemDetailPane({
 				"flex min-w-0 flex-1 flex-col",
 				!selectedItemId && "hidden md:flex",
 			)}
+			data-testid="item-detail-pane"
+			data-item-id={selectedItem?.id}
 		>
 			{selectedItem ? (
 				<>
@@ -162,12 +164,18 @@ export function ItemDetailPane({
 								variant="ghost"
 								size="sm"
 								onClick={() => setIsShareDialogOpen(true)}
+								data-testid="item-share-button"
 							>
 								<Share className="mr-1.5 h-4 w-4" />
 								{m.sharing_item_dialog_trigger()}
 							</Button>{" "}
 							{canWriteItems && (
-								<Button variant="ghost" size="sm" onClick={onEdit}>
+								<Button
+									variant="ghost"
+									size="sm"
+									onClick={onEdit}
+									data-testid="item-edit-button"
+								>
 									<Pen className="mr-1.5 h-4 w-4" />
 									{m.vaults_detail_items_detail_action_edit()}
 								</Button>
@@ -187,6 +195,7 @@ export function ItemDetailPane({
 												favorite: !selectedItem.favorite,
 											})
 										}
+										data-testid="item-favorite-button"
 									>
 										<Star
 											className="h-4 w-4"
@@ -209,7 +218,10 @@ export function ItemDetailPane({
 										</DropdownMenuItem>
 									)}{" "}
 									{canWriteItems && (
-										<DropdownMenuItem onClick={() => setIsMoveDialogOpen(true)}>
+										<DropdownMenuItem
+											onClick={() => setIsMoveDialogOpen(true)}
+											data-testid="item-move-button"
+										>
 											<ArrowLeftRight className="h-4 w-4" />
 											{m.vaults_detail_items_move_dialog_action_open()}
 										</DropdownMenuItem>
@@ -220,6 +232,7 @@ export function ItemDetailPane({
 											<DropdownMenuItem
 												variant="destructive"
 												onClick={onDelete}
+												data-testid="item-delete-button"
 											>
 												<Trash className="h-4 w-4" />
 												{m.vaults_detail_items_detail_action_delete()}
