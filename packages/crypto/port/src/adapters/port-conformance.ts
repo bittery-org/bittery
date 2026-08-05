@@ -55,6 +55,7 @@ export const CRYPTO_PORT_MEMBERS = [
 	"generateRsaKeyPair",
 	"rsaEncrypt",
 	"rsaDecrypt",
+	"decryptRsaWrappedKey",
 	"encryptVaultKeyForMember",
 	"encryptVaultKeyWithMuk",
 	"reEncryptItem",
@@ -482,6 +483,46 @@ export function runCryptoPortConformance(
 			expect((await port.exportKey(key)).length).toBeGreaterThan(0);
 		});
 
+		test("authenticated and legacy-envelope key plaintext stays behind the seam", async () => {
+			const port = await make();
+			const wrappingKey = await port.generateEncryptionKey();
+			const context = {
+				vaultId: "vault-key-context",
+				entityId: "vault-key-wrap",
+				entityType: "vault_key" as const,
+				version: 2,
+				userId: "user-key-context",
+			};
+			const keyBase64 = encodeBase64(AWKWARD_KEY_BYTES);
+			const authenticated = await port.encrypt(keyBase64, wrappingKey, context);
+			const restored = await port.unwrapKey(authenticated, wrappingKey, {
+				context,
+			});
+			expect([...(await port.exportKey(restored))]).toEqual([
+				...AWKWARD_KEY_BYTES,
+			]);
+
+			const legacy = await port.encrypt(
+				JSON.stringify({
+					marker: "legacy-marker",
+					context: "legacy-context",
+					payload: keyBase64,
+				}),
+				wrappingKey,
+				null,
+			);
+			const legacyRestored = await port.unwrapKey(legacy, wrappingKey, {
+				context: null,
+				legacyEnvelope: {
+					marker: "legacy-marker",
+					context: "legacy-context",
+				},
+			});
+			expect([...(await port.exportKey(legacyRestored))]).toEqual([
+				...AWKWARD_KEY_BYTES,
+			]);
+		});
+
 		test("wrapping a destroyed key throws", async () => {
 			const port = await make();
 			const key = await port.generateEncryptionKey();
@@ -896,6 +937,30 @@ export function runCryptoPortConformance(
 			const port = await make();
 
 			await expectPortError(() => port.rsaEncrypt("plain", "not a pem"));
+		});
+
+		test("an encrypted private key opens an RSA-wrapped symmetric key as a ref", async () => {
+			const port = await make();
+			const pair = await port.generateRsaKeyPair();
+			const wrappingKey = await port.generateEncryptionKey();
+			const encryptedPrivateKey = await port.encrypt(
+				pair.privateKey,
+				wrappingKey,
+				null,
+			);
+			const ciphertext = await port.rsaEncrypt(
+				encodeBase64(AWKWARD_KEY_BYTES),
+				pair.publicKey,
+			);
+
+			const key = await port.decryptRsaWrappedKey(
+				ciphertext,
+				encryptedPrivateKey,
+				wrappingKey,
+				null,
+			);
+
+			expect([...(await port.exportKey(key))]).toEqual([...AWKWARD_KEY_BYTES]);
 		});
 	});
 

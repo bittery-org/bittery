@@ -14,6 +14,7 @@ import type {
 } from "@bittery/types";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { type CoreContext, createCoreContext } from "../core-context";
+import type { CredentialMirror } from "../services/account-lifecycle";
 import type { VaultCrypto } from "../services/vault-crypto";
 
 /**
@@ -37,6 +38,9 @@ export interface PlatformContextValue {
 
 	/** The platform's crypto backend. Every key it hands out is an opaque `KeyRef`. */
 	crypto: CryptoPort;
+
+	/** Copies of session credentials held outside AccountStore, if any. */
+	credentialMirror: CredentialMirror;
 
 	/** Shared framework-agnostic business logic services */
 	core: CoreContext;
@@ -65,6 +69,9 @@ export interface PlatformProviderProps {
 	 * every `KeyRef` in the process comes from the same key table.
 	 */
 	crypto: CryptoPort;
+
+	/** Platform-owned credential copies that must be purged before a failed unlock locks. */
+	credentialMirror: CredentialMirror;
 
 	/** The ceremonies over {@link crypto}, built against the same `storage`. */
 	vaultCrypto: VaultCrypto;
@@ -115,6 +122,7 @@ export function PlatformProvider({
 	storage,
 	itemCache,
 	crypto,
+	credentialMirror,
 	vaultCrypto,
 	autolock,
 	sync,
@@ -136,11 +144,12 @@ export function PlatformProvider({
 			storage,
 			itemCache,
 			crypto,
+			credentialMirror,
 			core,
 			autolock,
 			sync,
 		}),
-		[storage, itemCache, crypto, core, autolock, sync],
+		[storage, itemCache, crypto, credentialMirror, core, autolock, sync],
 	);
 
 	return (
@@ -196,6 +205,11 @@ export function useCoreContext(): CoreContext {
  */
 export function usePlatformCrypto(): CryptoPort {
 	return usePlatform().crypto;
+}
+
+/** Credential copies that must be purged before AccountStore is locked. */
+export function usePlatformCredentialMirror(): CredentialMirror {
+	return usePlatform().credentialMirror;
 }
 
 /**

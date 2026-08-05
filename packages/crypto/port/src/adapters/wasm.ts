@@ -78,6 +78,7 @@ const FORWARDED_MEMBERS = [
 	"generateRsaKeyPair",
 	"rsaEncrypt",
 	"rsaDecrypt",
+	"decryptRsaWrappedKey",
 	"encryptVaultKeyForMember",
 	"encryptVaultKeyWithMuk",
 	"reEncryptItem",

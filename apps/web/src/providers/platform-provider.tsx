@@ -15,6 +15,7 @@ import type { IAutolockService, ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { crypto } from "@/lib/crypto";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
 import { useSyncContext } from "./sync-provider";
 
@@ -72,6 +73,7 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 			storage={storage}
 			itemCache={itemCache}
 			crypto={crypto}
+			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			sync={sync}
 			autolock={autolock}

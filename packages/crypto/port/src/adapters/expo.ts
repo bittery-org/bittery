@@ -76,6 +76,7 @@ import type {
 } from "@bittery/types";
 import type { CryptoPort, PasskeyKeypair } from "../crypto-port";
 import { CryptoPortError, type CryptoPortErrorCode } from "../errors";
+import { extractKeyPayload } from "../key-plaintext";
 import { createKeyRefTable } from "../key-ref";
 
 // ============================================================================
@@ -551,18 +552,15 @@ export function createExpoCryptoPort(deps: ExpoDeps = defaultDeps): CryptoPort {
 			);
 		},
 
-		unwrapKey: async (data, wrappingKey) => {
+		unwrapKey: async (data, wrappingKey, options) => {
 			const wrappingKeyBase64 = toBase64(keys.read(wrappingKey));
 			const mod = await ensureModule();
 			const plaintextBase64 = await withPortErrors(() =>
-				mod.decrypt(
-					data.ciphertext,
-					data.iv,
-					data.algorithm,
-					wrappingKeyBase64,
-				),
+				decryptOnce(mod, data, wrappingKeyBase64, options?.context ?? null),
 			);
-			return keys.create(fromBase64(plaintextBase64));
+			return keys.create(
+				fromBase64(extractKeyPayload(plaintextBase64, options?.legacyEnvelope)),
+			);
 		},
 
 		// ------------------------------------------------------------------
@@ -582,6 +580,28 @@ export function createExpoCryptoPort(deps: ExpoDeps = defaultDeps): CryptoPort {
 		rsaDecrypt: async (ciphertext, privateKeyPem) => {
 			const mod = await ensureModule();
 			return withPortErrors(() => mod.rsaDecrypt(ciphertext, privateKeyPem));
+		},
+
+		decryptRsaWrappedKey: async (
+			ciphertext,
+			encryptedPrivateKey,
+			privateKeyWrappingKey,
+			privateKeyContext,
+		) => {
+			const mod = await ensureModule();
+			const wrappingKeyBase64 = toBase64(keys.read(privateKeyWrappingKey));
+			const privateKeyPem = await withPortErrors(() =>
+				decryptOnce(
+					mod,
+					encryptedPrivateKey,
+					wrappingKeyBase64,
+					privateKeyContext,
+				),
+			);
+			const plaintextBase64 = await withPortErrors(() =>
+				mod.rsaDecrypt(ciphertext, privateKeyPem),
+			);
+			return keys.create(fromBase64(plaintextBase64));
 		},
 
 		// ------------------------------------------------------------------

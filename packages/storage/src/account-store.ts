@@ -594,13 +594,17 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			return cryptoPort.importKey(base64ToArrayBuffer(stored));
 		}
 		const generated = await cryptoPort.generateEncryptionKey();
-		const exported = await cryptoPort.exportKey(generated);
+		let exported: Uint8Array | undefined;
 		try {
+			exported = await cryptoPort.exportKey(generated);
 			await writeGlobal("device_key", arrayBufferToBase64(exported));
+			return generated;
+		} catch (error) {
+			await destroyKey(generated);
+			throw error;
 		} finally {
-			exported.fill(0);
+			exported?.fill(0);
 		}
-		return generated;
 	}
 
 	async function getDeviceKey(): Promise<KeyRef> {
@@ -630,7 +634,9 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	 * account, biometric-enabled, the unlocked set and the auto-lock timeout. It is one
 	 * function rather than five hand-written call sites precisely so those cannot drift.
 	 */
-	async function refreshNativeView(): Promise<void> {
+	async function refreshNativeView(
+		unlockedAccountIds: string[] = [...mukCache.keys()],
+	): Promise<void> {
 		const accounts = await readAccountsList();
 		const active = await getActiveAccount();
 		const autoLockTimeoutMs = await getAutoLockTimeoutOrDefault(
@@ -679,7 +685,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		const view: NativeHostView = {
 			v: NATIVE_VIEW_VERSION,
 			activeAccountId: active,
-			unlockedAccountIds: [...mukCache.keys()],
+			unlockedAccountIds,
 			autoLockTimeoutMs,
 			deviceKey: keyRefFor("device_key", globalKey("device_key")),
 			accounts: projected,
@@ -713,7 +719,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	}
 
 	/**
-	 * The single mutation point for the unlocked set: cache -> projection -> listeners.
+	 * The single mutation point for the unlocked set: projection -> cache -> listeners.
 	 * No IPC happens here; the desktop app owns `broadcast_unlock_event`.
 	 */
 	async function setUnlockEntry(
@@ -721,16 +727,18 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		entry: KeyRef | null,
 	): Promise<void> {
 		const previous = mukCache.get(accountId);
-		// Re-setting the very same ref must not destroy the key it is caching.
-		if (previous !== entry) {
-			await destroyKey(previous);
-		}
-		if (entry === null) {
-			mukCache.delete(accountId);
-		} else {
-			mukCache.set(accountId, entry);
-		}
-		await refreshNativeView();
+		const nextUnlocked = new Set(mukCache.keys());
+		if (entry === null) nextUnlocked.delete(accountId);
+		else nextUnlocked.add(accountId);
+
+		// Publish before taking ownership so a failed native-view write cannot leave the
+		// caller's ref cached and then destroyed by its ownership wrapper.
+		await refreshNativeView([...nextUnlocked]);
+		// Destruction is best-effort and cannot reject, leaving no fallible work after the
+		// cache accepts the incoming ref.
+		if (previous !== entry) await destroyKey(previous);
+		if (entry === null) mukCache.delete(accountId);
+		else mukCache.set(accountId, entry);
 		notifyUnlockListeners();
 	}
 

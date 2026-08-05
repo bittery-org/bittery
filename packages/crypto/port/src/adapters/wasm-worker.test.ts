@@ -56,6 +56,20 @@ function bytesIn(value: unknown): Uint8Array[] {
 	return [];
 }
 
+/** Every string anywhere inside a message, including encrypted-data objects. */
+function stringsIn(value: unknown): string[] {
+	if (typeof value === "string") {
+		return [value];
+	}
+	if (Array.isArray(value)) {
+		return value.flatMap(stringsIn);
+	}
+	if (typeof value === "object" && value !== null) {
+		return Object.values(value).flatMap(stringsIn);
+	}
+	return [];
+}
+
 /** The member each answer belongs to, matched back through its call id. */
 function methodOf(doubles: WasmWorkerDoubles, id: number): string {
 	return doubles.worker.calls.find((call) => call.id === id)?.method ?? "?";
@@ -147,6 +161,55 @@ describe("wasm-worker adapter — the thread boundary", () => {
 				.filter((reply) => reply.ok && bytesIn(reply.value).length > 0)
 				.map((reply) => methodOf(doubles, reply.id)),
 		).toEqual(["exportKey"]);
+	});
+
+	test("vault-key unwrap replies carry only handles", async () => {
+		const { port, doubles } = await makePort();
+		const pair = await port.generateRsaKeyPair();
+		const muk = await port.generateEncryptionKey();
+		const vaultKey = await port.importKey(new Uint8Array(32).fill(23));
+		const ownerEnvelope = JSON.parse(
+			await port.encryptVaultKeyWithMuk(
+				vaultKey,
+				muk,
+				"vault-opaque",
+				"user-opaque",
+				1,
+			),
+		);
+		const ownerContext = {
+			vaultId: "vault-opaque",
+			entityId: "vault-key-wrap",
+			entityType: "vault_key" as const,
+			version: 1,
+			userId: "user-opaque",
+		};
+		await port.unwrapKey(ownerEnvelope, muk, { context: ownerContext });
+
+		const encryptedPrivateKey = await port.encrypt(pair.privateKey, muk, null);
+		const memberEnvelope = await port.encryptVaultKeyForMember(
+			vaultKey,
+			pair.publicKey,
+		);
+		await port.decryptRsaWrappedKey(
+			memberEnvelope,
+			encryptedPrivateKey,
+			muk,
+			null,
+		);
+
+		for (const method of ["unwrapKey", "decryptRsaWrappedKey"] as const) {
+			const replies = doubles.worker.replies.filter(
+				(reply) => methodOf(doubles, reply.id) === method,
+			);
+			expect(replies).toHaveLength(1);
+			expect(replies[0]).toMatchObject({ ok: true });
+			expect(replies[0]?.ok && typeof replies[0].value).toBe("bigint");
+		}
+
+		const compositeCall = doubles.worker.callsTo("decryptRsaWrappedKey")[0];
+		expect(stringsIn(compositeCall?.args)).not.toContain(pair.privateKey);
+		expect(bytesIn(compositeCall?.args).length).toBe(0);
 	});
 
 	test("a foreign KeyRef is rejected before anything is posted", async () => {
@@ -258,6 +321,11 @@ describe("wasm-worker adapter — failure", () => {
 			code: "backend-failure",
 			message: "Worker terminated unexpectedly",
 		});
+		await expect(port.generateUuid()).rejects.toMatchObject({
+			code: "backend-failure",
+			message: "Worker terminated unexpectedly",
+		});
+		expect(doubles.workersCreated).toBe(1);
 	});
 
 	test("a WASM module that will not load fails the call, and is retried on the next", async () => {

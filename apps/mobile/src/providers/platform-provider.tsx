@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useMobileSync } from "../hooks/use-mobile-sync";
 import { crypto } from "../lib/crypto";
+import { lifecycleDeps } from "../services/lifecycle";
 import { itemCache, storage } from "../services/storage";
 
 const vaultCrypto = createVaultCrypto({ crypto, storage });
@@ -65,6 +66,7 @@ export function MobilePlatformProvider({
 			storage={storage}
 			itemCache={itemCache}
 			crypto={crypto}
+			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			sync={sync}
 		>

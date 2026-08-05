@@ -30,11 +30,7 @@ import type {
 	DecryptManyResult,
 	KeyRef,
 } from "@bittery/crypto-port";
-import {
-	base64ToArrayBuffer,
-	getRecoveryKeyHint,
-	getSecretKeyHint,
-} from "@bittery/shared/crypto";
+import { getRecoveryKeyHint, getSecretKeyHint } from "@bittery/shared/crypto";
 import {
 	currentKdfProfile,
 	validateKdfProfileOrThrow,
@@ -523,20 +519,29 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 				throw new Error("Vault key wrap user mismatch");
 			}
 
-			const vaultKeyBase64 = await decryptBoundToContext(
-				{
-					ciphertext: wrapped.ciphertext,
-					iv: wrapped.iv,
-					algorithm: wrapped.algorithm,
-				},
-				masterUnlockKey,
-				buildVaultKeyEncryptionContext({
-					vaultId: wrapContext.vaultId,
-					userId: wrapContext.userId,
-					keyVersion: wrapContext.keyVersion,
-				}),
-			);
-			return crypto.importKey(base64ToArrayBuffer(vaultKeyBase64));
+			const encryptedData = {
+				ciphertext: wrapped.ciphertext,
+				iv: wrapped.iv,
+				algorithm: wrapped.algorithm,
+			};
+			const context = buildVaultKeyEncryptionContext({
+				vaultId: wrapContext.vaultId,
+				userId: wrapContext.userId,
+				keyVersion: wrapContext.keyVersion,
+			});
+			try {
+				return await crypto.unwrapKey(encryptedData, masterUnlockKey, {
+					context,
+				});
+			} catch {
+				return crypto.unwrapKey(encryptedData, masterUnlockKey, {
+					context: null,
+					legacyEnvelope: {
+						marker: CONTEXT_ENVELOPE_MARKER,
+						context: serializeEncryptionContext(context),
+					},
+				});
+			}
 		}
 
 		if (!encryptedPrivateKey) {
@@ -545,16 +550,12 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 			);
 		}
 
-		const privateKeyPem = await crypto.decrypt(
+		return crypto.decryptRsaWrappedKey(
+			encryptedVaultKey,
 			parseEncryptedData(encryptedPrivateKey),
 			masterUnlockKey,
 			null,
 		);
-		const vaultKeyBase64 = await crypto.rsaDecrypt(
-			encryptedVaultKey,
-			privateKeyPem,
-		);
-		return crypto.importKey(base64ToArrayBuffer(vaultKeyBase64));
 	}
 
 	async function unwrapStoredVaultKey({
@@ -606,17 +607,21 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 				input.email,
 				input.profile,
 			);
+			let masterUnlockKey: KeyRef | null = null;
 			try {
-				const { authKey, masterUnlockKey } =
-					await crypto.deriveKeysFromMasterKey(masterKey, input.email);
+				const derivedKeys = await crypto.deriveKeysFromMasterKey(
+					masterKey,
+					input.email,
+				);
+				masterUnlockKey = derivedKeys.masterUnlockKey;
 				let srpPassword: string;
 				try {
-					srpPassword = await crypto.deriveSrpPassword(authKey);
+					srpPassword = await crypto.deriveSrpPassword(derivedKeys.authKey);
 				} finally {
-					await crypto.destroyKey(authKey);
+					await crypto.destroyKey(derivedKeys.authKey);
 				}
 
-				return {
+				const result: DerivedAccountKeys = {
 					srpPassword,
 					masterUnlockKey,
 					encryptedMasterKey: input.recoveryKey
@@ -627,7 +632,12 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 							)
 						: null,
 				};
+				masterUnlockKey = null;
+				return result;
 			} finally {
+				if (masterUnlockKey) {
+					await crypto.destroyKey(masterUnlockKey);
+				}
 				await crypto.destroyKey(masterKey);
 			}
 		},

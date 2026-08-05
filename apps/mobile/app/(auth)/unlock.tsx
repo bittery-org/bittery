@@ -351,7 +351,11 @@ export default function UnlockScreen() {
 						// here rather than defaulted to English inside `AccountStore`.
 						promptMessage: m.biometric_prompt_unlock_all_accounts(),
 					},
-					{ storage, itemCache },
+					{
+						storage,
+						itemCache,
+						credentialMirror: lifecycleDeps.credentialMirror,
+					},
 				);
 				if (outcome.unlocked.length === 0) {
 					setBiometricError(m.mob_unlock_biometric_failed());

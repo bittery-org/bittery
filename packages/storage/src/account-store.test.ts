@@ -488,6 +488,61 @@ describe("AccountStore — master unlock key cache", () => {
 			bytes(MUK_BYTES),
 		);
 	});
+
+	it("does not take ownership when publishing the unlocked view fails", async () => {
+		const { crypto, port, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		const kvSet = port.kvSet.bind(port);
+		port.kvSet = async (key, value, scope) => {
+			if (key === "bittery_native_view") {
+				throw new Error("native view write failed");
+			}
+			await kvSet(key, value, scope);
+		};
+
+		await expect(store.setMasterUnlockKey(muk, "a")).rejects.toThrow(
+			"native view write failed",
+		);
+
+		expect(await store.getUnlockedAccounts()).toEqual([]);
+		expect(await crypto.exportKey(muk)).toEqual(MUK_BYTES);
+	});
+});
+
+describe("AccountStore — device key failure cleanup", () => {
+	it("destroys a generated device key when export fails", async () => {
+		const { crypto, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		const before = crypto.liveKeyCount;
+		crypto.exportKey = async () => {
+			throw new Error("device key export failed");
+		};
+
+		await expect(
+			store.storeSessionData(muk, "a", "a@example.com", "user-a"),
+		).rejects.toThrow("device key export failed");
+
+		expect(crypto.liveKeyCount).toBe(before);
+	});
+
+	it("destroys a generated device key when persistence fails", async () => {
+		const { crypto, port, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		const before = crypto.liveKeyCount;
+		const secretSet = port.secretSet.bind(port);
+		port.secretSet = async (key, value) => {
+			if (key === "bittery_device_key") {
+				throw new Error("device key persistence failed");
+			}
+			await secretSet(key, value);
+		};
+
+		await expect(
+			store.storeSessionData(muk, "a", "a@example.com", "user-a"),
+		).rejects.toThrow("device key persistence failed");
+
+		expect(crypto.liveKeyCount).toBe(before);
+	});
 });
 
 // ============================================================================

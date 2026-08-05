@@ -5,6 +5,7 @@
 
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { TravelModeConfig, VaultKeyData } from "@bittery/storage/types";
+import { type CredentialMirror, lockAccount } from "./account-lifecycle";
 import {
 	filterItemsByTravelMode,
 	filterVaultKeys,
@@ -212,17 +213,23 @@ export class TravelModeEnforcer {
 	 */
 	async verifyOrClear(
 		accountId: string,
-		rpcClient?: TravelModeRpcClient | null,
+		rpcClient: TravelModeRpcClient | null | undefined,
+		credentialMirror: CredentialMirror,
 	): Promise<boolean> {
 		try {
 			await this.verifyForUnlock(accountId, rpcClient);
 			return true;
 		} catch (error) {
-			await this.storage.clearSession(accountId);
+			const outcome = await lockAccount(accountId, {
+				storage: this.storage,
+				itemCache: this.itemCache,
+				credentialMirror,
+			});
 			console.error(
 				"[TravelMode] Verification failed during unlock:",
 				accountId,
 				error,
+				outcome.failures,
 			);
 			return false;
 		}

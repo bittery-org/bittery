@@ -15,7 +15,7 @@ adapter suite can and cannot establish.
                          Rust crypto core      algorithms and formats
 ```
 
-`CryptoPort` has 38 required, asynchronous members. Callers never feature-detect a crypto
+`CryptoPort` has 39 required, asynchronous members. Callers never feature-detect a crypto
 capability and adapters never choose policy: each adapter satisfies the same complete
 contract or fails to typecheck. The algorithms and persisted formats remain in the single
 Rust core described by ADR 0001.
@@ -68,8 +68,8 @@ port depend on the store it is meant to serve.
 
 The port refuses to own:
 
-- application envelope policy, including wrap-context construction and legacy fallback
-  sequencing;
+- application envelope policy, including wrap-context construction, the accepted legacy
+  marker/context and fallback sequencing;
 - account ceremonies and the decision of what to persist or commit;
 - KDF-profile validation and pinning;
 - Secret Key and Recovery Key hint extraction; and
@@ -81,6 +81,11 @@ helpers are deterministic conversions that need no platform crypto backend.
 Some Rust primitives return an opaque persisted envelope, such as
 `encryptVaultKeyWithMuk`; the port forwards that core-owned format but does not construct,
 interpret or decide when to persist it.
+
+Key-opening primitives return a fresh `KeyRef`. `unwrapKey` can authenticate caller-supplied
+AAD or extract a payload from a caller-specified legacy envelope, but `VaultCrypto` validates
+the vault envelope and decides which context and fallback to try. `decryptRsaWrappedKey`
+keeps both the decrypted private-key PEM and RSA-unwrapped symmetric key below the seam.
 
 ---
 

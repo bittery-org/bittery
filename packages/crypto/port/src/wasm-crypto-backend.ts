@@ -29,6 +29,7 @@ import type {
 } from "@bittery/types";
 import type { WasmWorkerBackend } from "./adapters/wasm-worker";
 import type { CryptoPortErrorCode } from "./errors";
+import { extractKeyPayload } from "./key-plaintext";
 
 // ============================================================================
 // `@bittery/crypto-wasm`, as this backend uses it
@@ -555,10 +556,16 @@ export function createCryptoWasmBackend(wasm: CryptoWasm): WasmWorkerBackend {
 			);
 		},
 
-		async unwrapKey(data, wrappingKey) {
-			return wasm.decryptKeyHandleWithKey(
-				sealed(data),
-				wasm.exportKeyHandle(wrappingKey),
+		async unwrapKey(data, wrappingKey, options) {
+			if (!options) {
+				return wasm.decryptKeyHandleWithKey(
+					sealed(data),
+					wasm.exportKeyHandle(wrappingKey),
+				);
+			}
+			const plaintext = open(data, wrappingKey, options.context);
+			return wasm.importKeyHandle(
+				extractKeyPayload(plaintext, options.legacyEnvelope),
 			);
 		},
 
@@ -577,6 +584,20 @@ export function createCryptoWasmBackend(wasm: CryptoWasm): WasmWorkerBackend {
 
 		async rsaDecrypt(ciphertext, privateKeyPem) {
 			return wasm.rsaDecrypt(ciphertext, privateKeyPem);
+		},
+
+		async decryptRsaWrappedKey(
+			ciphertext,
+			encryptedPrivateKey,
+			privateKeyWrappingKey,
+			privateKeyContext,
+		) {
+			const privateKeyPem = open(
+				encryptedPrivateKey,
+				privateKeyWrappingKey,
+				privateKeyContext,
+			);
+			return wasm.importKeyHandle(wasm.rsaDecrypt(ciphertext, privateKeyPem));
 		},
 
 		// ------------------------------------------------------------------

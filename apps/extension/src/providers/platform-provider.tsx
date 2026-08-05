@@ -12,6 +12,7 @@ import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import type { ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { lifecycleDeps } from "@/background/lifecycle";
 import { crypto } from "@/lib/crypto";
 import { itemCache, storage } from "@/lib/storage";
 import { useSyncContext } from "./sync-provider";
@@ -62,6 +63,7 @@ export function ExtensionPlatformProvider({
 			storage={storage}
 			itemCache={itemCache}
 			crypto={crypto}
+			credentialMirror={lifecycleDeps.credentialMirror}
 			vaultCrypto={vaultCrypto}
 			sync={sync}
 		>

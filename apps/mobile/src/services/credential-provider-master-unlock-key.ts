@@ -25,10 +25,15 @@ export async function mirrorBorrowedMasterUnlockKeysToCredentialProvider(
 		}
 
 		// The separate Android process cannot receive a KeyRef; its frozen bridge accepts base64.
-		CredentialProvider.setMasterUnlockKey(
-			arrayBufferToBase64(await crypto.exportKey(masterUnlockKey)),
-			sessionData.userId,
-			autoLockTimeoutMs,
-		);
+		const exported = await crypto.exportKey(masterUnlockKey);
+		try {
+			CredentialProvider.setMasterUnlockKey(
+				arrayBufferToBase64(exported),
+				sessionData.userId,
+				autoLockTimeoutMs,
+			);
+		} finally {
+			exported.fill(0);
+		}
 	}
 }

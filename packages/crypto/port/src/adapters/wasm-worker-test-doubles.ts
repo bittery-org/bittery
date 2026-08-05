@@ -393,7 +393,7 @@ export class CryptoWasmDouble implements CryptoWasm {
 	/**
 	 * When set, the next `generateUuid` throws it. One cheap failure path is enough to
 	 * pin the worker's error classifier against real `CryptoError` strings without
-	 * growing a hook on all 38 members.
+	 * growing a hook on all 39 members.
 	 */
 	nextUuidFailure: unknown = null;
 

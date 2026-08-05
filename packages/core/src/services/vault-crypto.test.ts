@@ -786,6 +786,44 @@ describe("deriving the account keys", () => {
 		expect(harness.crypto.liveKeyCount).toBe(before);
 	});
 
+	test("destroys every derived key when SRP conversion fails", async () => {
+		const harness = createHarness();
+		const before = harness.crypto.liveKeyCount;
+		harness.crypto.deriveSrpPassword = async () => {
+			throw new Error("SRP conversion failed");
+		};
+
+		await expect(
+			harness.vaultCrypto.deriveAccountKeys({
+				accountPassword: PASSWORD,
+				secretKey: SECRET_KEY,
+				email: EMAIL,
+				profile: currentKdfProfile(),
+			}),
+		).rejects.toThrow("SRP conversion failed");
+		expect(harness.crypto.liveKeyCount).toBe(before);
+	});
+
+	test("destroys every derived key when Recovery Key wrapping fails", async () => {
+		const harness = createHarness();
+		const recoveryKey = await harness.crypto.generateRecoveryKey();
+		const before = harness.crypto.liveKeyCount;
+		harness.crypto.encryptMasterKey = async () => {
+			throw new Error("Recovery Key wrapping failed");
+		};
+
+		await expect(
+			harness.vaultCrypto.deriveAccountKeys({
+				accountPassword: PASSWORD,
+				secretKey: SECRET_KEY,
+				email: EMAIL,
+				profile: currentKdfProfile(),
+				recoveryKey,
+			}),
+		).rejects.toThrow("Recovery Key wrapping failed");
+		expect(harness.crypto.liveKeyCount).toBe(before);
+	});
+
 	test("seals the master key under the Recovery Key without letting it escape", async () => {
 		const harness = createHarness();
 		const recoveryKey = await harness.crypto.generateRecoveryKey();

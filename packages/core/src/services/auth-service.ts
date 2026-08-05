@@ -168,7 +168,7 @@ export interface UnlockResult {
 	expiresAt?: string | Date;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
-	/** Ownership transfers to the store on `storeUnlockSession`, as with {@link LoginResult}. */
+	/** Ownership transfers to the store on `storeUnlockSessionOwned`, as with {@link LoginResult}. */
 	masterUnlockKey: KeyRef;
 	kdfParams?: KdfProfile;
 }
@@ -540,8 +540,8 @@ export async function storeLoginSession(
 
 	await storage.storeSecretKey(secretKey, accountId);
 
-	// `storeSessionData` only borrows the ref; `setMasterUnlockKey` takes ownership, so it
-	// has to come second or the wrap would run against a key the store already owns.
+	// `storeSessionData` borrows the ref; ownership transfers only after every other
+	// fallible local write succeeds.
 	await storage.storeSessionData(
 		result.masterUnlockKey,
 		accountId,
@@ -550,9 +550,6 @@ export async function storeLoginSession(
 		result.expiresAt,
 		result.sessionId,
 	);
-	await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
-	options?.onMasterUnlockKeyTransferred?.();
-
 	await storage.addAccount({
 		accountId,
 		email: resolvedEmail,
@@ -568,15 +565,21 @@ export async function storeLoginSession(
 	});
 
 	await storage.setActiveAccount(accountId);
+	await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
+	options?.onMasterUnlockKeyTransferred?.();
 
-	await peekAccountSessionManager()?.refresh();
+	try {
+		await peekAccountSessionManager()?.refresh();
+	} catch (error) {
+		console.error("[auth-service] session manager refresh failed:", error);
+	}
 	return accountId;
 }
 
 /**
  * Stores a login while taking responsibility for the caller-owned MUK immediately.
- * Before the store accepts it, a failure destroys it; afterwards the live cached ref stays
- * with the store even if a later metadata write rejects.
+ * Before the store accepts it, a failure destroys it. Ownership transfer is the final
+ * state-changing step, so a successful transfer is never reported as a failed login.
  */
 export async function storeLoginSessionOwned(
 	result: LoginResult,
@@ -599,7 +602,11 @@ export async function storeLoginSessionOwned(
 				...options,
 				onMasterUnlockKeyTransferred: () => {
 					owner = "storage";
-					options?.onMasterUnlockKeyTransferred?.();
+					try {
+						options?.onMasterUnlockKeyTransferred?.();
+					} catch (error) {
+						console.error("[auth-service] transfer observer failed:", error);
+					}
 				},
 			},
 		);
@@ -888,7 +895,7 @@ export async function storeUnlockSession(
 			);
 		}
 
-		// Borrowed by `storeSessionData`, then handed over by `setMasterUnlockKey`.
+		// Borrowed by `storeSessionData`; ownership transfers after the remaining writes.
 		await storage.storeSessionData(
 			result.masterUnlockKey,
 			accountId,
@@ -897,9 +904,6 @@ export async function storeUnlockSession(
 			result.expiresAt,
 			result.sessionId,
 		);
-		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
-	} else {
-		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
 	}
 
 	if (options?.setActive ?? true) {
@@ -927,6 +931,38 @@ export async function storeUnlockSession(
 	}
 
 	await storage.updateLastMasterPasswordEntry(accountId);
+	await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
+	options?.onMasterUnlockKeyTransferred?.();
+}
+
+/** Stores an unlock while retaining responsibility for its MUK until the store accepts it. */
+export async function storeUnlockSessionOwned(
+	result: UnlockResult,
+	storage: AccountStore,
+	itemCache: ItemCache,
+	crypto: CryptoPort,
+	accountId: string,
+	options?: StoreAuthSessionOptions,
+): Promise<void> {
+	let owner: "caller" | "storage" = "caller";
+	try {
+		await storeUnlockSession(result, storage, itemCache, accountId, {
+			...options,
+			onMasterUnlockKeyTransferred: () => {
+				owner = "storage";
+				try {
+					options?.onMasterUnlockKeyTransferred?.();
+				} catch (error) {
+					console.error("[auth-service] transfer observer failed:", error);
+				}
+			},
+		});
+	} catch (error) {
+		if (owner === "caller") {
+			await crypto.destroyKey(result.masterUnlockKey);
+		}
+		throw error;
+	}
 }
 
 /**

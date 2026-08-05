@@ -13,6 +13,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import {
+	usePlatformCredentialMirror,
 	usePlatformCrypto,
 	usePlatformItemCache,
 	usePlatformStorage,
@@ -97,13 +98,14 @@ export function useQuickUnlockAll(
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
 	const itemCache = usePlatformItemCache();
+	const credentialMirror = usePlatformCredentialMirror();
 	const queryClient = useQueryClient();
 
 	return useMutation({
 		mutationFn: async (input: QuickUnlockAllInput) => {
 			const outcome = await unlockAllWithPassword(
 				{ password: input.password, emails: input.emails },
-				{ crypto, storage, itemCache },
+				{ crypto, storage, itemCache, credentialMirror },
 			);
 			// The unlock reports rather than throws; React Query needs a rejection to
 			// route a total failure to `onError`.

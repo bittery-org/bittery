@@ -42,6 +42,7 @@ import type {
 } from "@bittery/types";
 import type { CryptoPort } from "../crypto-port";
 import { CryptoPortError, type CryptoPortErrorCode } from "../errors";
+import { extractKeyPayload } from "../key-plaintext";
 import { createKeyRefTable } from "../key-ref";
 
 // ============================================================================
@@ -663,18 +664,15 @@ export function createTauriCryptoPort(
 			);
 		},
 
-		unwrapKey: async (data, wrappingKey) => {
+		unwrapKey: async (data, wrappingKey, options) => {
 			const wrappingKeyBase64 = toBase64(keys.read(wrappingKey));
 			const invoke = await ensureInvoke();
 			const plaintextBase64 = await withPortErrors(() =>
-				invoke("crypto_decrypt", {
-					ciphertext: data.ciphertext,
-					iv: data.iv,
-					algorithm: data.algorithm,
-					keyBase64: wrappingKeyBase64,
-				}),
+				decryptOnce(invoke, data, wrappingKeyBase64, options?.context ?? null),
 			);
-			return keys.create(fromBase64(plaintextBase64));
+			return keys.create(
+				fromBase64(extractKeyPayload(plaintextBase64, options?.legacyEnvelope)),
+			);
 		},
 
 		// ------------------------------------------------------------------
@@ -704,6 +702,28 @@ export function createTauriCryptoPort(
 			return withPortErrors(() =>
 				invoke("crypto_rsa_decrypt", { ciphertext, privateKeyPem }),
 			);
+		},
+
+		decryptRsaWrappedKey: async (
+			ciphertext,
+			encryptedPrivateKey,
+			privateKeyWrappingKey,
+			privateKeyContext,
+		) => {
+			const invoke = await ensureInvoke();
+			const wrappingKeyBase64 = toBase64(keys.read(privateKeyWrappingKey));
+			const privateKeyPem = await withPortErrors(() =>
+				decryptOnce(
+					invoke,
+					encryptedPrivateKey,
+					wrappingKeyBase64,
+					privateKeyContext,
+				),
+			);
+			const plaintextBase64 = await withPortErrors(() =>
+				invoke("crypto_rsa_decrypt", { ciphertext, privateKeyPem }),
+			);
+			return keys.create(fromBase64(plaintextBase64));
 		},
 
 		// ------------------------------------------------------------------

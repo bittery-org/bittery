@@ -22,6 +22,7 @@ import {
 	storeLoginSession,
 	storeLoginSessionOwned,
 	storeUnlockSession,
+	storeUnlockSessionOwned,
 	type UnlockResult,
 } from "./auth-service";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
@@ -614,20 +615,13 @@ describe("storeLoginSession travel mode verification", () => {
 		expect(crypto.liveKeyCount).toBe(0);
 	});
 
-	it("leaves a live store-owned MUK cached when metadata fails after transfer", async () => {
+	it("destroys the caller-owned MUK when metadata fails before transfer", async () => {
 		resetTravelModeEnforcerForTests();
 		const crypto = createInMemoryCryptoPort();
 		const { storage } = await makeStore([], crypto);
 		const { cache: itemCache } = await createTestItemCache();
 		const destroyKey = spyOn(crypto, "destroyKey");
-		const setMasterUnlockKey = storage.setMasterUnlockKey.bind(storage);
-		let accountId = "";
-		spyOn(storage, "setMasterUnlockKey").mockImplementation(
-			async (key, resolvedAccountId) => {
-				accountId = resolvedAccountId ?? "";
-				await setMasterUnlockKey(key, resolvedAccountId);
-			},
-		);
+		const setMasterUnlockKey = spyOn(storage, "setMasterUnlockKey");
 		spyOn(storage, "addAccount").mockImplementation(async () => {
 			throw new Error("account metadata write failed");
 		});
@@ -649,17 +643,11 @@ describe("storeLoginSession travel mode verification", () => {
 			),
 		).rejects.toThrow("account metadata write failed");
 
-		const cached = await storage.getMasterUnlockKey(accountId);
-		expect(cached).toBe(result.masterUnlockKey);
-		if (!cached) {
-			throw new Error("transferred MUK was not cached");
-		}
-		expect(await crypto.exportKey(cached)).toEqual(MUK);
-		expect(destroyKey).not.toHaveBeenCalled();
-		expect(crypto.liveKeyCount).toBe(2);
-
-		await storage.clearMasterUnlockKey(accountId);
-		expect(crypto.liveKeyCount).toBe(1);
+		expect(setMasterUnlockKey).not.toHaveBeenCalled();
+		expect(destroyKey).toHaveBeenCalledTimes(1);
+		await expect(crypto.exportKey(result.masterUnlockKey)).rejects.toThrow(
+			/destroyed/,
+		);
 		await storage.clearAllStoredData();
 		expect(crypto.liveKeyCount).toBe(0);
 	});
@@ -719,5 +707,81 @@ describe("storeUnlockSession active account", () => {
 		);
 
 		expect(await storage.getActiveAccount()).toEqual("account-b");
+	});
+
+	it("destroys a caller-owned MUK when its native-view transfer fails", async () => {
+		resetTravelModeEnforcerForTests();
+		const crypto = createInMemoryCryptoPort();
+		const { storage, port } = await makeStore(
+			[account("account-b", "user-b", "https://b.example")],
+			crypto,
+		);
+		await storage.storeTravelModeCache(
+			{ enabled: false, hiddenVaultIds: [] },
+			"account-b",
+		);
+		const { cache: itemCache } = await createTestItemCache();
+		const result: UnlockResult = {
+			mode: "local",
+			token: "unlock-token",
+			user: { id: "user-b", email: "same@example.com" },
+			vaultKeys: [],
+			masterUnlockKey: await crypto.importKey(MUK),
+		};
+		const kvSet = port.kvSet.bind(port);
+		port.kvSet = async (key, value, scope) => {
+			if (key === "bittery_native_view") {
+				throw new Error("native view write failed");
+			}
+			await kvSet(key, value, scope);
+		};
+
+		await expect(
+			storeUnlockSessionOwned(result, storage, itemCache, crypto, "account-b", {
+				setActive: false,
+			}),
+		).rejects.toThrow("native view write failed");
+
+		expect(await storage.getUnlockedAccounts()).toEqual([]);
+		await expect(crypto.exportKey(result.masterUnlockKey)).rejects.toThrow(
+			/destroyed/,
+		);
+	});
+
+	it("does not report a failed unlock after ownership transfer", async () => {
+		resetTravelModeEnforcerForTests();
+		const crypto = createInMemoryCryptoPort();
+		const { storage } = await makeStore(
+			[account("account-b", "user-b", "https://b.example")],
+			crypto,
+		);
+		await storage.storeTravelModeCache(
+			{ enabled: false, hiddenVaultIds: [] },
+			"account-b",
+		);
+		const { cache: itemCache } = await createTestItemCache();
+		const result: UnlockResult = {
+			mode: "local",
+			token: "unlock-token",
+			user: { id: "user-b", email: "same@example.com" },
+			vaultKeys: [],
+			masterUnlockKey: await crypto.importKey(MUK),
+		};
+		const log = spyOn(console, "error").mockImplementation(() => {});
+
+		await expect(
+			storeUnlockSessionOwned(result, storage, itemCache, crypto, "account-b", {
+				setActive: false,
+				onMasterUnlockKeyTransferred: () => {
+					throw new Error("observer failed");
+				},
+			}),
+		).resolves.toBeUndefined();
+
+		expect(log).toHaveBeenCalledTimes(1);
+		expect(await storage.getMasterUnlockKey("account-b")).toBe(
+			result.masterUnlockKey,
+		);
+		await storage.clearMasterUnlockKey("account-b");
 	});
 });

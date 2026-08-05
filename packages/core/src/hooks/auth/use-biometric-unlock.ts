@@ -12,6 +12,7 @@ import {
 	useQueryClient,
 } from "@tanstack/react-query";
 import {
+	usePlatformCredentialMirror,
 	usePlatformItemCache,
 	usePlatformStorage,
 } from "../../context/platform-context";
@@ -133,6 +134,7 @@ export function useBiometricUnlock(
 > {
 	const storage = usePlatformStorage();
 	const itemCache = usePlatformItemCache();
+	const credentialMirror = usePlatformCredentialMirror();
 	const queryClient = useQueryClient();
 
 	return useMutation({
@@ -144,7 +146,7 @@ export function useBiometricUnlock(
 						accountId: input.accountId,
 						promptMessage: options.promptMessage,
 					},
-					{ storage, itemCache },
+					{ storage, itemCache, credentialMirror },
 				);
 			} catch (error) {
 				// Consumers branch on `error.type`, so a raw storage throw would escape as

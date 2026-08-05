@@ -10,7 +10,7 @@ import {
 	performSRPLogin,
 	performSRPUnlock,
 	storeLoginSessionOwned,
-	storeUnlockSession,
+	storeUnlockSessionOwned,
 } from "@bittery/core/services/auth-service";
 import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { crypto } from "../lib/crypto";
@@ -104,10 +104,17 @@ export async function handleQuickUnlock(payload: {
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(result, storage, itemCache, activeAccount, {
-		travelModeRpcClient: rpcClient,
-		setActive: true,
-	});
+	await storeUnlockSessionOwned(
+		result,
+		storage,
+		itemCache,
+		crypto,
+		activeAccount,
+		{
+			travelModeRpcClient: rpcClient,
+			setActive: true,
+		},
+	);
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
 	if (result.masterUnlockKey) {
@@ -334,7 +341,12 @@ export async function handleQuickUnlockAll(payload: {
 
 	const { activeAccountId, unlocked, failed } = await unlockAllWithPassword(
 		{ password },
-		{ storage, itemCache, crypto },
+		{
+			storage,
+			itemCache,
+			crypto,
+			credentialMirror: lifecycleDeps.credentialMirror,
+		},
 	);
 
 	if (!activeAccountId) {

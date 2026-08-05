@@ -99,6 +99,17 @@ export interface PasskeyAssertion {
 	signatureDer: Uint8Array;
 }
 
+/** Generic description of the read-only plaintext envelope used by legacy ciphertexts. */
+export interface LegacyKeyEnvelope {
+	marker: string;
+	context: string;
+}
+
+export interface UnwrapKeyOptions {
+	context: EncryptionContext | null;
+	legacyEnvelope?: LegacyKeyEnvelope;
+}
+
 export interface CryptoPort {
 	/** Load the backend. Idempotent; every other member may assume it has run. */
 	initialize(): Promise<void>;
@@ -185,22 +196,34 @@ export interface CryptoPort {
 	/** Wrap `key` under `wrappingKey` so it can be persisted. */
 	wrapKey(key: KeyRef, wrappingKey: KeyRef): Promise<EncryptedData>;
 
-	/** Restore a wrapped key as a fresh ref with its own lifetime. */
-	unwrapKey(data: EncryptedData, wrappingKey: KeyRef): Promise<KeyRef>;
+	/** Restore a wrapped key as a fresh ref without exposing its plaintext above the seam. */
+	unwrapKey(
+		data: EncryptedData,
+		wrappingKey: KeyRef,
+		options?: UnwrapKeyOptions,
+	): Promise<KeyRef>;
 
 	// ------------------------------------------------------------------
 	// RSA
 	// ------------------------------------------------------------------
 
-	/**
-	 * RSA keys are PEM strings, not `KeyRef`s: the private key is itself stored encrypted
-	 * under the master unlock key and travels as text, and no backend has an RSA key table.
-	 */
+	/** RSA keys are PEM strings; symmetric keys remain `KeyRef`s across RSA operations. */
 	generateRsaKeyPair(): Promise<RsaKeyPair>;
 
 	rsaEncrypt(plaintext: string, publicKeyPem: string): Promise<string>;
 
 	rsaDecrypt(ciphertext: string, privateKeyPem: string): Promise<string>;
+
+	/**
+	 * Opens an encrypted RSA private key and an RSA-wrapped symmetric key in one backend call.
+	 * Neither the private-key PEM nor the symmetric-key plaintext is returned above the seam.
+	 */
+	decryptRsaWrappedKey(
+		ciphertext: string,
+		encryptedPrivateKey: EncryptedData,
+		privateKeyWrappingKey: KeyRef,
+		privateKeyContext: EncryptionContext | null,
+	): Promise<KeyRef>;
 
 	// ------------------------------------------------------------------
 	// Vault keys and rotation

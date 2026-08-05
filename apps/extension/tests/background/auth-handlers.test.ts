@@ -149,6 +149,7 @@ mock.module(path.join(bgDir, "session-manager.ts"), () => ({
 mock.module("@bittery/core/services/auth-service", () => ({
 	performSRPUnlock: async () => ({ masterUnlockKey: new Uint8Array([1]) }),
 	storeUnlockSession: async () => {},
+	storeUnlockSessionOwned: async () => {},
 	performSRPLogin: async () => ({}),
 	storeLoginSessionOwned: async () => {},
 }));

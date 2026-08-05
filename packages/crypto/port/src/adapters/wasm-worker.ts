@@ -3,7 +3,7 @@
  *
  * Because the port is **total** there is nothing to enumerate. Every member marshals the
  * same way — take the arguments, send them, wait for the answer — so this adapter is one
- * generic `(method, args)` forward rather than 38 hand-written message types on each side.
+ * generic `(method, args)` forward rather than 39 hand-written message types on each side.
  * `FORWARDED_MEMBERS` is the only list, it is data rather than logic, and the compiler
  * checks it against `keyof CryptoPort` in both directions: a name that no longer exists
  * fails the `satisfies`, and a member the port grows fails `EveryMemberIsForwarded`.
@@ -110,6 +110,7 @@ const FORWARDED_MEMBERS = [
 	"generateRsaKeyPair",
 	"rsaEncrypt",
 	"rsaDecrypt",
+	"decryptRsaWrappedKey",
 	"encryptVaultKeyForMember",
 	"encryptVaultKeyWithMuk",
 	"reEncryptItem",
@@ -258,6 +259,7 @@ export function createWasmWorkerCryptoPort(
 	const keys = createKeyRefTable<bigint>();
 	const pending = new Map<number, PendingCall>();
 	let worker: CryptoWorkerHandle | null = null;
+	let backendFailure: CryptoPortError | null = null;
 	let nextId = 0;
 
 	function settle(event: MessageEvent): void {
@@ -281,6 +283,13 @@ export function createWasmWorkerCryptoPort(
 			"backend-failure",
 			event.message.length > 0 ? event.message : "The crypto worker failed.",
 		);
+		const failedWorker = worker;
+		worker = null;
+		backendFailure = failure;
+		if (failedWorker) {
+			failedWorker.onmessage = null;
+			failedWorker.onerror = null;
+		}
 		for (const call of pending.values()) {
 			call.reject(failure);
 		}
@@ -288,6 +297,9 @@ export function createWasmWorkerCryptoPort(
 	}
 
 	function ensureWorker(): CryptoWorkerHandle {
+		if (backendFailure) {
+			throw backendFailure;
+		}
 		if (worker === null) {
 			worker = deps.createWorker();
 			worker.onmessage = settle;

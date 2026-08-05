@@ -114,7 +114,13 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 				storage,
 				activeAccount,
 			).catch(() => null);
-			if (!(await enforcer.verifyOrClear(activeAccount, client))) {
+			if (
+				!(await enforcer.verifyOrClear(
+					activeAccount,
+					client,
+					lifecycleDeps.credentialMirror,
+				))
+			) {
 				throw new Error(TRAVEL_MODE_UNVERIFIED);
 			}
 
@@ -283,7 +289,13 @@ export async function handleNativeBiometricUnlockAll(options?: {
 						storage,
 						accountId,
 					).catch(() => null);
-					if (!(await enforcer.verifyOrClear(accountId, client))) {
+					if (
+						!(await enforcer.verifyOrClear(
+							accountId,
+							client,
+							lifecycleDeps.credentialMirror,
+						))
+					) {
 						failed.push({
 							accountId,
 							email,
