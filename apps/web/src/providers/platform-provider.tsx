@@ -2,39 +2,23 @@
  * Web Platform Provider
  *
  * Configures the PlatformProvider for the web app with:
- * - Web storage adapter (injected with WASM crypto)
- * - WASM crypto module (decrypt, encrypt, generateEncryptionKey)
+ * - Web storage adapter and encrypted item cache
+ * - The WASM-worker `CryptoPort` and the `VaultCrypto` built over it
  * - Sync context from SyncProvider
  * - Web autolock service
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
 import { createWebAutolockService } from "@bittery/core/hooks/services/autolock-web";
-import type { IAutolockService, ICrypto, ISyncContext } from "@bittery/types";
+import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
+import type { IAutolockService, ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { crypto } from "@/lib/crypto";
 import { itemCache, storage } from "@/lib/storage";
-import * as wasmCrypto from "@/lib/wasm-crypto";
 import { useSyncContext } from "./sync-provider";
 
-/**
- * Crypto adapter that satisfies ICrypto interface
- * WASM crypto module exports all required methods for encryption and SRP authentication
- */
-const crypto: ICrypto = {
-	// Core encryption methods
-	decrypt: wasmCrypto.decrypt,
-	encrypt: wasmCrypto.encrypt,
-	rsaDecrypt: wasmCrypto.rsaDecrypt,
-	generateEncryptionKey: wasmCrypto.generateEncryptionKey,
-	generateUuid: wasmCrypto.generateUuid,
-	// SRP authentication methods
-	deriveKeys: wasmCrypto.deriveKeys,
-	generateClientEphemeral: wasmCrypto.generateClientEphemeralAsync,
-	deriveClientSession: wasmCrypto.deriveClientSession,
-	verifyServerSession: wasmCrypto.verifyServerSession,
-	validateSecretKey: wasmCrypto.validateSecretKeyAsync,
-};
+const vaultCrypto = createVaultCrypto({ crypto, storage });
 
 /**
  * Web autolock service instance (singleton)
@@ -88,6 +72,7 @@ export function WebPlatformProvider({ children }: WebPlatformProviderProps) {
 			storage={storage}
 			itemCache={itemCache}
 			crypto={crypto}
+			vaultCrypto={vaultCrypto}
 			sync={sync}
 			autolock={autolock}
 		>

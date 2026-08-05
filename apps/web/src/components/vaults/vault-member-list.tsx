@@ -1,8 +1,6 @@
-import {
-	getDecryptedVaultKey,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { useRPCClient } from "@bittery/shared/rpc";
+import type { KeyRotationResult } from "@bittery/types";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -33,7 +31,6 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
@@ -56,6 +53,8 @@ export function VaultMemberList({
 	userRole,
 }: VaultMemberListProps) {
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
+	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 	const canManage = userRole === "owner" || userRole === "admin";
@@ -99,19 +98,6 @@ export function VaultMemberList({
 		setRotatingUserId(userId);
 
 		try {
-			// Step 1: Get the current decrypted vault key and Master Unlock Key
-			const currentVaultKey = await getDecryptedVaultKey({
-				vaultId,
-				storage,
-				crypto: {
-					decrypt,
-					rsaDecrypt,
-				} as VaultKeyCryptoProvider,
-			});
-			if (!currentVaultKey) {
-				throw new Error("vault_key_decrypt_failed");
-			}
-
 			const masterUnlockKey = await storage.getMasterUnlockKey();
 			if (!masterUnlockKey) {
 				throw new Error("master_unlock_key_missing");
@@ -122,25 +108,35 @@ export function VaultMemberList({
 				throw new Error("session_data_missing");
 			}
 
-			// Step 2: Get rotation data from server
 			const rotationData = await rpcClient.vault.members.getRotationData.query({
 				vaultId,
 				excludeUserId: userId,
 			});
 
-			// Step 3: Perform key rotation on client side
-			const rotationResult = await performKeyRotation(
-				currentVaultKey,
-				rotationData.members.map((m) => ({
-					userId: m.userId,
-					publicKey: m.publicKey,
-				})),
-				rotationData.items,
-				vaultId,
-				rotationData.keyVersion + 1,
-				currentUserId,
-				masterUnlockKey,
-			);
+			const currentVaultKey = await vaultCrypto.getVaultKey({ vaultId });
+			if (!currentVaultKey) {
+				throw new Error("vault_key_decrypt_failed");
+			}
+
+			let rotationResult: KeyRotationResult;
+			try {
+				rotationResult = await crypto.performKeyRotation(
+					currentVaultKey,
+					rotationData.members.map((m) => ({
+						userId: m.userId,
+						publicKey: m.publicKey,
+					})),
+					rotationData.items,
+					vaultId,
+					rotationData.keyVersion + 1,
+					currentUserId,
+					masterUnlockKey,
+				);
+			} finally {
+				// The store owns the borrowed master unlock key; only this fresh vault-key ref
+				// is ours to retire, including when preparation fails before rotation.
+				await crypto.destroyKey(currentVaultKey);
+			}
 
 			// Step 4: Submit to server
 			const result = await rpcClient.vault.members.remove.mutate({

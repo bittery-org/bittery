@@ -17,7 +17,6 @@
 		"./services/account-lifecycle": "./src/services/account-lifecycle.ts",
 		"./services/account-resolver": "./src/services/account-resolver.ts",
 		"./services/auth-service": "./src/services/auth-service.ts",
-		"./services/encryption-context": "./src/services/encryption-context.ts",
 		"./services/item-service": "./src/services/item-service.ts",
 		"./services/vault-service": "./src/services/vault-service.ts",
 		"./services/share-service": "./src/services/share-service.ts",
@@ -26,9 +25,11 @@
 		"./services/travel-mode-enforcer": "./src/services/travel-mode-enforcer.ts",
 		"./services/travel-mode-sync": "./src/services/travel-mode-sync.ts",
 		"./services/unlock": "./src/services/unlock.ts",
+		"./services/vault-crypto": "./src/services/vault-crypto.ts",
 		"./services/vault-repository-coordinator": "./src/services/vault-repository-coordinator.ts"
 	},
 	"dependencies": {
+		"@bittery/crypto-port": "workspace:*",
 		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/storage": "workspace:*",

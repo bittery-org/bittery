@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import type { DecryptedItem } from "@bittery/shared/types";
 import {
 	type CreateShareInput,
 	readShareKeyFromUrl,
 	ShareService,
 } from "./share-service";
+import { createVaultCrypto } from "./vault-crypto";
 
 const ACCOUNT_ID = "acc_alice";
 const ACCOUNT_EMAIL = "alice@example.com";
@@ -14,18 +17,6 @@ const VAULT_ID = "vault_1";
 const SHARE_KEY_A = new Uint8Array([10, 20, 30, 40]);
 const SHARE_KEY_B = new Uint8Array([50, 60, 70, 80]);
 const VAULT_KEY_BYTES = new TextEncoder().encode("vault-key");
-
-const WRAPPED_VAULT_KEY = JSON.stringify({
-	ciphertext: "wrapped",
-	iv: "vault-iv",
-	algorithm: "aes-256-gcm",
-	context: {
-		vaultId: VAULT_ID,
-		userId: USER_ID,
-		keyVersion: 1,
-		purpose: "vault-key-wrap",
-	},
-});
 
 const CREATE_RESPONSE = {
 	token: "tok_abc123",
@@ -66,6 +57,7 @@ function shareInput(
 interface EncryptCall {
 	plaintext: string;
 	key: Uint8Array;
+	result: { ciphertext: string; iv: string; algorithm: string };
 }
 
 interface ClientRequest {
@@ -82,6 +74,7 @@ interface HarnessOptions {
 interface Harness {
 	service: ShareService;
 	defaultClient: never;
+	liveKeyCount(): number;
 	encryptCalls: EncryptCall[];
 	vaultKeyReads: Array<string | undefined>;
 	clientRequests: ClientRequest[];
@@ -89,10 +82,10 @@ interface Harness {
 	defaultClientMutateInputs: Array<Record<string, unknown>>;
 }
 
-function createHarness(options: HarnessOptions = {}): Harness {
+async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
 	const {
 		shareKeys = [SHARE_KEY_A, SHARE_KEY_B],
-		vaultKeys = [{ vaultId: VAULT_ID, encryptedVaultKey: WRAPPED_VAULT_KEY }],
+		vaultKeys,
 		accounts = [{ accountId: ACCOUNT_ID, email: ACCOUNT_EMAIL }],
 	} = options;
 
@@ -102,6 +95,53 @@ function createHarness(options: HarnessOptions = {}): Harness {
 	const mutateInputs: Array<Record<string, unknown>> = [];
 	const defaultClientMutateInputs: Array<Record<string, unknown>> = [];
 	const unusedShareKeys = [...shareKeys];
+	const backend = createInMemoryCryptoPort();
+	const masterUnlockKey = await backend.importKey(new Uint8Array(32).fill(9));
+	const crypto: CryptoPort = new Proxy(backend, {
+		get(target, property) {
+			if (property === "generateEncryptionKey") {
+				return async () => {
+					const key = unusedShareKeys.shift();
+					if (!key) throw new Error("Test harness ran out of share keys");
+					return target.importKey(key);
+				};
+			}
+			if (property === "encrypt") {
+				return async (
+					plaintext: string,
+					key: KeyRef,
+					context: Parameters<CryptoPort["encrypt"]>[2],
+				) => {
+					const result = await target.encrypt(plaintext, key, context);
+					encryptCalls.push({
+						plaintext,
+						key: await target.exportKey(key),
+						result,
+					});
+					return result;
+				};
+			}
+			const value = Reflect.get(target, property);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	});
+	const vaultCrypto = createVaultCrypto({
+		crypto,
+		storage: {} as never,
+	});
+	const vaultKey = await crypto.importKey(VAULT_KEY_BYTES);
+	const wrappedVaultKey = await vaultCrypto.wrapVaultKeyForOwner({
+		vaultKey,
+		masterUnlockKey,
+		vaultId: VAULT_ID,
+		userId: USER_ID,
+		keyVersion: 1,
+	});
+	await crypto.destroyKey(vaultKey);
+	const storedVaultKeys =
+		vaultKeys === null
+			? null
+			: [{ vaultId: VAULT_ID, encryptedVaultKey: wrappedVaultKey }];
 
 	const accountScopedClient = {
 		share: {
@@ -131,32 +171,25 @@ function createHarness(options: HarnessOptions = {}): Harness {
 			getAccountsList: async () => accounts,
 			getVaultKeys: async (accountId?: string) => {
 				vaultKeyReads.push(accountId);
-				return vaultKeys;
+				return storedVaultKeys;
 			},
-			getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
+			getMasterUnlockKey: async () => masterUnlockKey,
 			getEncryptedPrivateKey: async () => null,
 			getStoredSessionData: async () => ({ userId: USER_ID }),
 			getAccountMetadata: async () => null,
 			getActiveAccountUserId: async () => USER_ID,
 		} as never,
-		crypto: {
-			generateEncryptionKey: async () => {
-				const key = unusedShareKeys.shift();
-				if (!key) {
-					throw new Error("Test harness ran out of share keys");
-				}
-				return key;
+		crypto,
+		vaultCrypto: createVaultCrypto({
+			crypto,
+			storage: {
+				getVaultKeys: async () => storedVaultKeys,
+				getMasterUnlockKey: async () => masterUnlockKey,
+				getEncryptedPrivateKey: async () => null,
+				getStoredSessionData: async () => ({ userId: USER_ID }),
+				getPinnedKdfProfile: async () => null,
 			},
-			decrypt: async () => toBase64(VAULT_KEY_BYTES),
-			encrypt: async (plaintext: string, key: Uint8Array) => {
-				encryptCalls.push({ plaintext, key });
-				return {
-					ciphertext: `enc(${plaintext})`,
-					iv: `iv(${plaintext.length})`,
-					algorithm: "aes-256-gcm",
-				};
-			},
-		} as never,
+		}),
 		accounts: {
 			getClientForAccount: async (
 				passedDefaultClient: unknown,
@@ -171,6 +204,7 @@ function createHarness(options: HarnessOptions = {}): Harness {
 	return {
 		service,
 		defaultClient: defaultClient as never,
+		liveKeyCount: () => backend.liveKeyCount,
 		encryptCalls,
 		vaultKeyReads,
 		clientRequests,
@@ -181,7 +215,8 @@ function createHarness(options: HarnessOptions = {}): Harness {
 
 describe("ShareService.createShare link assembly", () => {
 	test("returns a link carrying the share key in the fragment", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
+		const before = harness.liveKeyCount();
 
 		const result = await harness.service.createShare(
 			shareInput(),
@@ -192,12 +227,13 @@ describe("ShareService.createShare link assembly", () => {
 			`https://bittery.test/share/tok_abc123#${toBase64(SHARE_KEY_A)}`,
 		);
 		expect(result.expiresAt).toBe("2026-08-30T00:00:00.000Z");
+		expect(harness.liveKeyCount()).toBe(before);
 	});
 
 	// Regression guard: a share link without its fragment is permanently
 	// undecryptable, so the parts it is assembled from must never escape here.
 	test("hands back no share key material besides the finished link", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 
 		const result = await harness.service.createShare(
 			shareInput(),
@@ -214,7 +250,9 @@ describe("ShareService.createShare link assembly", () => {
 	});
 
 	test("mints a fresh key for every share", async () => {
-		const harness = createHarness({ shareKeys: [SHARE_KEY_A, SHARE_KEY_B] });
+		const harness = await createHarness({
+			shareKeys: [SHARE_KEY_A, SHARE_KEY_B],
+		});
 
 		const first = await harness.service.createShare(
 			shareInput(),
@@ -233,7 +271,7 @@ describe("ShareService.createShare link assembly", () => {
 	});
 
 	test("produces a link readShareKeyFromUrl can read the key back from", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 
 		const result = await harness.service.createShare(
 			shareInput(),
@@ -246,19 +284,19 @@ describe("ShareService.createShare link assembly", () => {
 
 describe("ShareService.createShare encryption", () => {
 	test("encrypts under the share key, never the vault key", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 
 		await harness.service.createShare(shareInput(), harness.defaultClient);
 
 		expect(harness.encryptCalls).toHaveLength(2);
 		for (const call of harness.encryptCalls) {
-			expect(call.key).toBe(SHARE_KEY_A);
+			expect(call.key).toEqual(SHARE_KEY_A);
 			expect(toBase64(call.key)).not.toBe(toBase64(VAULT_KEY_BYTES));
 		}
 	});
 
 	test("shares only the payload fields, withholding local-only ones", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 		const customFields = [
 			{ id: "cf_1", label: "PIN", value: "1234", type: "password" as const },
 		];
@@ -320,12 +358,10 @@ describe("ShareService.createShare encryption", () => {
 });
 
 describe("ShareService.createShare server payload", () => {
-	// Pinned byte-for-byte: already-live share links are decrypted from exactly
-	// these fields, so any change to them breaks shares that are already out.
+	// Existing share links are decrypted from exactly these mutation fields, so the
+	// test pins the wire mapping while the real test port supplies randomized IVs.
 	test("sends the pinned share creation payload", async () => {
-		const harness = createHarness();
-		const payloadJson = '{"title":"Wire pin","category":"login"}';
-		const shareKeyBase64 = toBase64(SHARE_KEY_A);
+		const harness = await createHarness();
 
 		await harness.service.createShare(
 			shareInput({
@@ -335,6 +371,10 @@ describe("ShareService.createShare server payload", () => {
 			}),
 			harness.defaultClient,
 		);
+		expect(harness.encryptCalls.map((call) => call.plaintext)).toEqual([
+			'{"title":"Wire pin","category":"login"}',
+			toBase64(SHARE_KEY_A),
+		]);
 
 		expect(harness.mutateInputs[0]).toEqual({
 			itemId: "item_1",
@@ -342,15 +382,15 @@ describe("ShareService.createShare server payload", () => {
 			isOneTimeUse: true,
 			expiresIn: "1day",
 			allowedEmails: null,
-			encryptedItemData: `enc(${payloadJson})`,
-			encryptionIv: `iv(${payloadJson.length})`,
-			encryptedShareKey: `enc(${shareKeyBase64})`,
-			shareKeyIv: `iv(${shareKeyBase64.length})`,
+			encryptedItemData: harness.encryptCalls[0]?.result.ciphertext,
+			encryptionIv: harness.encryptCalls[0]?.result.iv,
+			encryptedShareKey: harness.encryptCalls[1]?.result.ciphertext,
+			shareKeyIv: harness.encryptCalls[1]?.result.iv,
 		});
 	});
 
 	test("forwards the allowed emails for an email-restricted share", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 
 		await harness.service.createShare(
 			shareInput({
@@ -368,7 +408,7 @@ describe("ShareService.createShare server payload", () => {
 	});
 
 	test("drops allowed emails when the share is open to anyone", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 
 		await harness.service.createShare(
 			shareInput({
@@ -387,7 +427,7 @@ describe("ShareService.createShare account identity", () => {
 	// fallback resolves to the *active* account — sharing one account's item with
 	// another account's vault key.
 	test("never reads vault keys when the account scope cannot be resolved", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 
 		await expect(
 			harness.service.createShare(
@@ -402,7 +442,7 @@ describe("ShareService.createShare account identity", () => {
 	});
 
 	test("refuses to share when the vault is locked", async () => {
-		const harness = createHarness({ vaultKeys: null });
+		const harness = await createHarness({ vaultKeys: null });
 
 		await expect(
 			harness.service.createShare(shareInput(), harness.defaultClient),
@@ -412,7 +452,7 @@ describe("ShareService.createShare account identity", () => {
 	});
 
 	test("creates the share on the account-scoped client", async () => {
-		const harness = createHarness();
+		const harness = await createHarness();
 
 		await harness.service.createShare(shareInput(), harness.defaultClient);
 

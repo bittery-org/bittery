@@ -1,15 +1,15 @@
+import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import {
 	buildAttachmentBlobEncryptionContext,
 	buildAttachmentContentTypeEncryptionContext,
 	buildAttachmentNameEncryptionContext,
-} from "@bittery/core/services/encryption-context";
-import {
-	type ExportedAttachment,
-	type ExportedItem,
-	type ExportedVault,
-	getDecryptedVaultKey,
-	type VaultExportPayload,
-	type VaultKeyCryptoProvider,
+} from "@bittery/core/services/vault-crypto";
+import type { KeyRef } from "@bittery/crypto-port";
+import type {
+	ExportedAttachment,
+	ExportedItem,
+	ExportedVault,
+	VaultExportPayload,
 } from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
 import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
@@ -17,12 +17,6 @@ import JSZip from "jszip";
 import { useCallback, useState } from "react";
 import { normalizeItemCategory } from "@/lib/rpc-normalizers";
 import { storage } from "@/lib/storage";
-import { decrypt, rsaDecrypt } from "@/lib/wasm-crypto";
-
-const vaultKeyCrypto: VaultKeyCryptoProvider = {
-	decrypt,
-	rsaDecrypt,
-};
 
 function normalizeVersion(version: number): number {
 	if (!Number.isFinite(version) || version < 1) {
@@ -61,6 +55,8 @@ function createEmptyProgress(): ExportProgress {
 
 export function useVaultExport() {
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
+	const { vaultCrypto } = useCoreContext();
 
 	const [progress, setProgress] = useState<ExportProgress>(
 		createEmptyProgress(),
@@ -77,6 +73,9 @@ export function useVaultExport() {
 	const startExport = useCallback(async () => {
 		setArchiveBlob(null);
 		setError(null);
+
+		// One ref per vault, held for the whole export and retired in `finally`.
+		const vaultKeyCache = new Map<string, KeyRef>();
 
 		try {
 			// ── Stage 1: fetch ─────────────────────────────────────────────
@@ -134,14 +133,8 @@ export function useVaultExport() {
 			const fallbackUserId =
 				(await storage.getActiveAccountUserId()) ?? me?.id ?? "";
 
-			// Build vault key map
-			const vaultKeyCache = new Map<string, Uint8Array>();
 			for (const vaultId of vaultMap.keys()) {
-				const key = await getDecryptedVaultKey({
-					vaultId,
-					storage,
-					crypto: vaultKeyCrypto,
-				});
+				const key = await vaultCrypto.getVaultKey({ vaultId });
 				if (key) {
 					vaultKeyCache.set(vaultId, key);
 				}
@@ -166,7 +159,7 @@ export function useVaultExport() {
 
 				for (let ver = storedVersion; ver >= 1; ver--) {
 					try {
-						decryptedStr = await decrypt(
+						decryptedStr = await vaultCrypto.decryptItem(
 							{
 								ciphertext: item.encryptedData,
 								iv: item.encryptionIv,
@@ -175,8 +168,7 @@ export function useVaultExport() {
 							vaultKey,
 							{
 								vaultId: item.vaultId,
-								entityId: item.id,
-								entityType: "item",
+								itemId: item.id,
 								version: ver,
 								userId: contextUserId,
 							},
@@ -268,13 +260,13 @@ export function useVaultExport() {
 							algorithm: string;
 						};
 
-						const base64File = await decrypt(
+						const base64File = await crypto.decrypt(
 							encryptedFile,
 							vaultKey,
 							blobContext,
 						);
 
-						const fileName = await decrypt(
+						const fileName = await crypto.decrypt(
 							{
 								ciphertext: encryptedName,
 								iv: encryptionIv,
@@ -284,7 +276,7 @@ export function useVaultExport() {
 							nameContext,
 						);
 
-						const contentType = await decrypt(
+						const contentType = await crypto.decrypt(
 							{
 								ciphertext: encryptedContentType,
 								iv: encryptedContentTypeIv ?? encryptionIv,
@@ -361,8 +353,12 @@ export function useVaultExport() {
 				...prev,
 				stage: "error",
 			}));
+		} finally {
+			for (const key of vaultKeyCache.values()) {
+				await crypto.destroyKey(key);
+			}
 		}
-	}, [rpcClient]);
+	}, [rpcClient, crypto, vaultCrypto]);
 
 	const downloadArchive = useCallback(() => {
 		if (!archiveBlob) return;

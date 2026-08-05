@@ -2,18 +2,21 @@
  * Extension Platform Provider
  *
  * Configures the PlatformProvider for the browser extension with:
- * - Chrome storage adapter (injected with WASM crypto)
- * - WASM crypto module (decrypt, encrypt, generateEncryptionKey)
+ * - Chrome storage adapter and the WASM `CryptoPort`
+ * - VaultCrypto over that port
  * - Sync context from ExtensionSyncProvider
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
+import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import type { ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { cryptoAdapter } from "@/lib/crypto-adapter";
+import { crypto } from "@/lib/crypto";
 import { itemCache, storage } from "@/lib/storage";
 import { useSyncContext } from "./sync-provider";
+
+const vaultCrypto = createVaultCrypto({ crypto, storage });
 
 /**
  * Props for ExtensionPlatformProvider
@@ -58,7 +61,8 @@ export function ExtensionPlatformProvider({
 		<PlatformProvider
 			storage={storage}
 			itemCache={itemCache}
-			crypto={cryptoAdapter}
+			crypto={crypto}
+			vaultCrypto={vaultCrypto}
 			sync={sync}
 		>
 			{children}

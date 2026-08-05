@@ -17,48 +17,6 @@ export interface DerivedKeys {
 	masterUnlockKey: Uint8Array;
 }
 
-/**
- * Crypto interface for platform-specific encryption operations.
- * All platforms (WASM, Tauri, FFI) implement this shape.
- */
-export interface ICrypto {
-	decrypt(
-		encryptedData: EncryptedData,
-		key: Uint8Array,
-		context?: EncryptionContext,
-	): Promise<string>;
-	encrypt(
-		plaintext: string,
-		key: Uint8Array,
-		context?: EncryptionContext,
-	): Promise<EncryptedData>;
-	rsaDecrypt?(ciphertext: string, privateKeyPem: string): Promise<string>;
-	generateEncryptionKey(): Promise<Uint8Array>;
-	deriveKeys(
-		password: string,
-		secretKey: string,
-		email: string,
-		profile: KdfProfile,
-	): Promise<DerivedKeys>;
-	validateKdfProfile?(
-		profile: KdfProfile,
-		pinnedProfile?: KdfProfile | null,
-	): Promise<void> | void;
-	generateClientEphemeral(): SRPClientEphemeral | Promise<SRPClientEphemeral>;
-	deriveClientSession(
-		secret: string,
-		challenge: SRPServerChallenge,
-		password: string,
-	): Promise<SRPClientSession>;
-	verifyServerSession(
-		publicKey: string,
-		session: SRPClientSession,
-		proof: string,
-	): Promise<void>;
-	validateSecretKey(secretKey: string): boolean | Promise<boolean>;
-	generateUuid?(): string | Promise<string>;
-}
-
 // ============================================================================
 // Encryption Types
 // ============================================================================
@@ -315,14 +273,6 @@ export interface ISyncContext {
 	isOnline: boolean;
 	invalidator: IQueryInvalidator;
 	outboundQueue: IPendingMutationQueue;
-}
-
-/**
- * Item decryption interface.
- * @deprecated Use ICrypto from @bittery/types instead.
- */
-export interface IItemDecrypt {
-	decrypt(encryptedData: EncryptedData, vaultKey: Uint8Array): Promise<string>;
 }
 
 /**

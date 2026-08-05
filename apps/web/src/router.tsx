@@ -12,11 +12,6 @@ import { PendingLoader } from "./components/loader";
 import { getServerUrl } from "./lib/auth-server";
 import { forgetActiveSession, initializeStorage, storage } from "./lib/storage";
 import "./index.css";
-import { initWasmCrypto } from "./lib/wasm-crypto";
-
-// Initialize WASM crypto module at app startup
-// This runs once and is safe to call multiple times
-initWasmCrypto();
 
 import {
 	MutationCache,

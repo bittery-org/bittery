@@ -7,6 +7,7 @@
  * through the machine here is what keeps that surface untouched.
  */
 
+import type { KeyRef } from "@bittery/crypto-port";
 import { AUTO_LOCK_ALARM_NAME } from "./constants";
 import { vaultSession, vaultSessionPorts } from "./vault-session";
 import type { DesktopSnapshot } from "./vault-session/types";
@@ -49,7 +50,7 @@ export async function updateActivity(): Promise<void> {
 }
 
 /** Also stamps activity, so callers no longer have to order the two. */
-export function setMasterUnlockKey(muk: Uint8Array): void {
+export function setMasterUnlockKey(muk: KeyRef): void {
 	vaultSession.dispatchNow({ type: "LOCAL_UNLOCKED", muk, at: Date.now() });
 }
 

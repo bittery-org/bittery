@@ -1,329 +1,281 @@
 import { describe, expect, test } from "bun:test";
-import type { EncryptedData, EncryptionContext } from "@bittery/types";
+import type { KeyRef } from "@bittery/crypto-port";
+import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
+import type { CachedEncryptedItem } from "@bittery/types";
+import {
+	encodeAttachmentBlobEnvelope,
+	encryptAttachmentParts,
+} from "./attachment-crypto";
 import { ItemService } from "./item-service";
+import { createVaultCrypto } from "./vault-crypto";
 
-describe("ItemService account identity", () => {
-	// An unresolvable scope must never reach `AccountStore`, whose omitted-accountId
-	// fallback resolves to the *active* account. Reaching it unwraps one account's
-	// vault key for another account's scope.
+interface TestAccount {
+	accountId: string;
+	email: string;
+	userId: string;
+	vaultIds: string[];
+}
+
+async function createFixture(
+	accounts: TestAccount[],
+	options: { sessionMetadataMissing?: boolean } = {},
+) {
+	const crypto = createInMemoryCryptoPort();
+	const masterUnlockKeys = new Map<string, KeyRef>();
+	const vaultKeysByAccount = new Map<
+		string,
+		Array<{ vaultId: string; encryptedVaultKey: string }>
+	>();
+	let vaultKeyReads = 0;
+	const storage = {
+		getActiveAccount: async () => accounts[0]?.accountId ?? null,
+		getAccountsList: async () =>
+			accounts.map(({ accountId, email }) => ({ accountId, email })),
+		getVaultKeys: async (accountId?: string) => {
+			vaultKeyReads += 1;
+			return vaultKeysByAccount.get(accountId ?? "") ?? null;
+		},
+		getMasterUnlockKey: async (accountId?: string) =>
+			masterUnlockKeys.get(accountId ?? "") ?? null,
+		getEncryptedPrivateKey: async () => null,
+		getStoredSessionData: async (accountId?: string) => {
+			if (options.sessionMetadataMissing) return null;
+			const account = accounts.find((entry) => entry.accountId === accountId);
+			return account ? { userId: account.userId } : null;
+		},
+		getAccountMetadata: async (accountId?: string) => {
+			const account = accounts.find((entry) => entry.accountId === accountId);
+			return account
+				? {
+						email: account.email,
+						userId: account.userId,
+						name: account.email,
+						secretKeyHint: "",
+						addedAt: 0,
+						lastActiveAt: 0,
+						biometricEnabled: false,
+					}
+				: null;
+		},
+		getActiveAccountUserId: async () => accounts[0]?.userId ?? null,
+		getPinnedKdfProfile: async () => null,
+	} as never;
+	const vaultCrypto = createVaultCrypto({ crypto, storage });
+
+	for (const [accountIndex, account] of accounts.entries()) {
+		const masterUnlockKey = await crypto.importKey(
+			new Uint8Array(32).fill(accountIndex + 1),
+		);
+		masterUnlockKeys.set(account.accountId, masterUnlockKey);
+		const entries: Array<{ vaultId: string; encryptedVaultKey: string }> = [];
+		for (const [vaultIndex, vaultId] of account.vaultIds.entries()) {
+			const vaultKey = await crypto.importKey(
+				new Uint8Array(32).fill(accountIndex * 20 + vaultIndex + 10),
+			);
+			try {
+				entries.push({
+					vaultId,
+					encryptedVaultKey: await vaultCrypto.wrapVaultKeyForOwner({
+						vaultKey,
+						masterUnlockKey,
+						vaultId,
+						userId: account.userId,
+						keyVersion: 1,
+					}),
+				});
+			} finally {
+				await crypto.destroyKey(vaultKey);
+			}
+		}
+		vaultKeysByAccount.set(account.accountId, entries);
+	}
+
+	return {
+		crypto,
+		storage,
+		vaultCrypto,
+		vaultKeyReads: () => vaultKeyReads,
+		service(
+			getClientForAccount: (accountId: string) => unknown,
+			itemCache: unknown = {},
+		) {
+			return new ItemService({
+				storage,
+				itemCache: itemCache as never,
+				crypto,
+				vaultCrypto,
+				accounts: {
+					getClientForAccount: async (_default: unknown, accountId: string) =>
+						getClientForAccount(accountId),
+				} as never,
+			});
+		},
+	};
+}
+
+const SOURCE = {
+	accountId: "acc_source",
+	email: "alice@example.com",
+	userId: "user_source",
+	vaultIds: ["vault_source"],
+};
+const TARGET = {
+	accountId: "acc_target",
+	email: "bob@example.com",
+	userId: "user_target",
+	vaultIds: ["vault_target"],
+};
+
+describe("ItemService", () => {
 	test("never reads vault keys when the account scope cannot be resolved", async () => {
-		const getVaultKeysScopes: Array<string | undefined> = [];
-		let decryptCalls = 0;
-
-		const service = new ItemService({
-			storage: {
-				getActiveAccount: async () => "acc_active",
-				getAccountsList: async () => [
-					{ accountId: "acc_active", email: "alice@example.com" },
-				],
-				getVaultKeys: async (accountId?: string) => {
-					getVaultKeysScopes.push(accountId);
-					return [
-						{
-							vaultId: "vault_1",
-							encryptedVaultKey: JSON.stringify({
-								ciphertext: "wrapped",
-								iv: "vault-iv",
-								algorithm: "aes-256-gcm",
-								context: {
-									vaultId: "vault_1",
-									userId: "user_active",
-									keyVersion: 1,
-									purpose: "vault-key-wrap",
-								},
-							}),
-						},
-					];
-				},
-				getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
-				getEncryptedPrivateKey: async () => null,
-				getStoredSessionData: async () => ({ userId: "user_active" }),
-				getAccountMetadata: async () => null,
-				getActiveAccountUserId: async () => "user_active",
-			} as never,
-			itemCache: {} as never,
-			crypto: {
-				generateUuid: async () => "item_123",
-				decrypt: async () => {
-					decryptCalls += 1;
-					return Buffer.from("vault-key").toString("base64");
-				},
-				encrypt: async () => ({
-					ciphertext: "ciphertext",
-					iv: "iv",
-					algorithm: "aes-256-gcm",
-				}),
-			} as never,
-			accounts: {} as never,
-		});
+		const fixture = await createFixture([SOURCE]);
+		const service = fixture.service(() => ({}));
 
 		await expect(
 			service.createItem(
 				{
-					vaultId: "vault_1",
+					vaultId: "vault_source",
 					category: "login",
 					data: { title: "example.com" },
-					// Belongs to no known account, so it resolves to nothing.
 					accountEmail: "stranger@example.com",
 				},
 				{} as never,
 			),
 		).rejects.toThrow();
-
-		// `toEqual` treats `[undefined]` as `[]`, so assert the length directly.
-		expect(getVaultKeysScopes.length).toBe(0);
-		expect(decryptCalls).toBe(0);
+		expect(fixture.vaultKeyReads()).toBe(0);
 	});
-});
 
-describe("ItemService", () => {
 	test("uses account metadata userId when session metadata is missing", async () => {
-		const encryptCalls: Array<{ context?: { userId?: string } }> = [];
-		const service = new ItemService({
-			storage: {
-				getVaultKeys: async () => [
-					{
-						vaultId: "vault_1",
-						encryptedVaultKey: JSON.stringify({
-							ciphertext: "wrapped",
-							iv: "vault-iv",
-							algorithm: "aes-256-gcm",
-							context: {
-								vaultId: "vault_1",
-								userId: "user_from_account_metadata",
-								keyVersion: 1,
-								purpose: "vault-key-wrap",
-							},
-						}),
-					},
-				],
-				getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
-				getEncryptedPrivateKey: async () => null,
-				getStoredSessionData: async () => null,
-				getAccountMetadata: async () => ({
-					email: "alice@example.com",
-					userId: "user_from_account_metadata",
-					name: "Alice",
-					secretKeyHint: "",
-					addedAt: 0,
-					lastActiveAt: 0,
-					biometricEnabled: false,
-				}),
-				getActiveAccountUserId: async () => null,
-				getAccountsList: async () => [
-					{ accountId: "acc_alice", email: "alice@example.com" },
-				],
-			} as never,
-			itemCache: {} as never,
-			crypto: {
-				generateUuid: async () => "item_123",
-				decrypt: async () => Buffer.from("vault-key").toString("base64"),
-				encrypt: async (
-					_plaintext: string,
-					_key: Uint8Array,
-					context?: EncryptionContext,
-				) => {
-					encryptCalls.push({ context });
-					return {
-						ciphertext: "ciphertext",
-						iv: "iv",
-						algorithm: "aes-256-gcm",
-					};
-				},
-			} as never,
-			accounts: {
-				getClientForAccount: async () => ({
-					vault: {
-						createItem: {
-							mutate: async ({ itemId }: { itemId: string }) => ({
-								itemId,
-							}),
-						},
-					},
-				}),
-			} as never,
+		const fixture = await createFixture([SOURCE], {
+			sessionMetadataMissing: true,
 		});
-
-		await service.createItem(
-			{
-				vaultId: "vault_1",
-				category: "login",
-				data: {
-					title: "example.com",
+		let mutation: Record<string, string> | undefined;
+		const service = fixture.service(() => ({
+			vault: {
+				createItem: {
+					mutate: async (input: Record<string, string>) => {
+						mutation = input;
+						return { itemId: input.itemId };
+					},
 				},
-				accountEmail: "alice@example.com",
+			},
+		}));
+
+		const result = await service.createItem(
+			{
+				vaultId: "vault_source",
+				category: "login",
+				data: { title: "example.com" },
+				accountEmail: SOURCE.email,
 			},
 			{} as never,
 		);
-
-		expect(encryptCalls).toHaveLength(1);
-		expect(encryptCalls[0]?.context?.userId).toBe("user_from_account_metadata");
+		const vaultKey = await fixture.vaultCrypto.getVaultKey({
+			vaultId: "vault_source",
+			accountId: SOURCE.accountId,
+			userId: SOURCE.userId,
+		});
+		if (!vaultKey || !mutation) throw new Error("Test fixture did not encrypt");
+		await expect(
+			fixture.vaultCrypto.decryptItem(
+				{
+					ciphertext: mutation.encryptedData ?? "",
+					iv: mutation.encryptionIv ?? "",
+					algorithm: mutation.encryptionAlgorithm ?? "",
+				},
+				vaultKey,
+				{
+					vaultId: "vault_source",
+					itemId: result.itemId,
+					version: 1,
+					userId: SOURCE.userId,
+				},
+			),
+		).resolves.toContain("example.com");
+		await fixture.crypto.destroyKey(vaultKey);
 	});
 
 	test("falls back to older encryption versions when cached item metadata drifted", async () => {
-		const attemptedVersions: number[] = [];
-		const service = new ItemService({
-			itemCache: {
-				getCachedItems: async () => [
-					{
-						id: "item_1",
-						vaultId: "vault_1",
-						category: "login",
-						favorite: false,
-						encryptedData: "ciphertext",
-						encryptionIv: "iv",
-						encryptionAlgorithm: "AES-GCM-AAD-V1",
-						version: 3,
-						lastModifiedBy: "user_1",
-						createdAt: "2026-03-13T00:00:00.000Z",
-						updatedAt: "2026-03-13T00:00:00.000Z",
-						deletedAt: null,
-						attachments: [],
-					},
-				],
-			} as never,
-			storage: {
-				getVaultKeys: async () => [
-					{
-						vaultId: "vault_1",
-						encryptedVaultKey: JSON.stringify({
-							ciphertext: "wrapped",
-							iv: "vault-iv",
-							algorithm: "AES-GCM-AAD-V1",
-							context: {
-								vaultId: "vault_1",
-								userId: "user_1",
-								keyVersion: 1,
-								purpose: "vault-key-wrap",
-							},
-						}),
-					},
-				],
-				getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
-				getEncryptedPrivateKey: async () => null,
-				getStoredSessionData: async () => ({ userId: "user_1" }),
-				getActiveAccountUserId: async () => "user_1",
-				getAccountsList: async () => [
-					{ accountId: "acc_alice", email: "alice@example.com" },
-				],
-			} as never,
-			crypto: {
-				decrypt: async (
-					_encryptedData: EncryptedData,
-					_key: Uint8Array,
-					context?: EncryptionContext,
-				) => {
-					if (context?.entityType === "vault_key") {
-						return Buffer.from("vault-key").toString("base64");
-					}
-					if (context?.entityType === "item") {
-						attemptedVersions.push(context.version);
-						if (context.version === 1) {
-							return JSON.stringify({ title: "Recovered item" });
-						}
-					}
-					throw new Error("AAD mismatch");
-				},
-			} as never,
-			accounts: {} as never,
+		const fixture = await createFixture([SOURCE]);
+		const vaultKey = await fixture.vaultCrypto.getVaultKey({
+			vaultId: "vault_source",
+			accountId: SOURCE.accountId,
+			userId: SOURCE.userId,
+		});
+		if (!vaultKey) throw new Error("Missing test vault key");
+		const encrypted = await fixture.vaultCrypto.encryptItem(
+			JSON.stringify({ title: "Recovered item" }),
+			vaultKey,
+			{
+				vaultId: "vault_source",
+				itemId: "item_1",
+				version: 1,
+				userId: SOURCE.userId,
+			},
+		);
+		await fixture.crypto.destroyKey(vaultKey);
+		const cached: CachedEncryptedItem = {
+			id: "item_1",
+			vaultId: "vault_source",
+			category: "login",
+			favorite: false,
+			encryptedData: encrypted.ciphertext,
+			encryptionIv: encrypted.iv,
+			encryptionAlgorithm: encrypted.algorithm,
+			version: 3,
+			lastModifiedBy: SOURCE.userId,
+			createdAt: "2026-03-13T00:00:00.000Z",
+			updatedAt: "2026-03-13T00:00:00.000Z",
+		};
+		const service = fixture.service(() => ({}), {
+			getCachedItems: async () => [cached],
 		});
 
 		const result = await service.fetchAndDecryptItem(
 			"item_1",
 			{} as never,
-			"alice@example.com",
+			SOURCE.email,
 		);
-
-		expect(attemptedVersions).toEqual([3, 2, 1]);
 		expect(result.decryptedData?.title).toBe("Recovered item");
 	});
 
 	test("performs a cross-account move while a single account is active", async () => {
-		// Regression guard for the "All Accounts" removal: a cross-account item
-		// move must keep working when only one account is active (the move dialog
-		// surfaces every unlocked account's vaults as targets regardless of the
-		// active-account view mode). See useMoveTargetVaults.
-		const createItemCalls: Array<{ vaultId: string; itemId: string }> = [];
+		const fixture = await createFixture([SOURCE, TARGET]);
+		const before = fixture.crypto.liveKeyCount;
 		const sourceDeletes: string[] = [];
-
-		const targetVaultKey = JSON.stringify({
-			ciphertext: "wrapped",
-			iv: "vault-iv",
-			algorithm: "aes-256-gcm",
-			context: {
-				vaultId: "vault_target",
-				userId: "user_target",
-				keyVersion: 1,
-				purpose: "vault-key-wrap",
-			},
-		});
-
-		const service = new ItemService({
-			storage: {
-				// One account active, the other merely unlocked in the background.
-				getActiveAccount: async () => "acc_source",
-				getAccountsList: async () => [
-					{ accountId: "acc_source", email: "alice@example.com" },
-					{ accountId: "acc_target", email: "bob@example.com" },
-				],
-				getVaultKeys: async () => [
-					{ vaultId: "vault_target", encryptedVaultKey: targetVaultKey },
-				],
-				getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
-				getEncryptedPrivateKey: async () => null,
-				getStoredSessionData: async () => ({ userId: "user_target" }),
-				getAccountMetadata: async () => ({ userId: "user_target" }),
-				getActiveAccountUserId: async () => "user_target",
-			} as never,
-			itemCache: {} as never,
-			crypto: {
-				generateUuid: async () => "item_new",
-				decrypt: async () => Buffer.from("vault-key").toString("base64"),
-				encrypt: async () => ({
-					ciphertext: "cipher",
-					iv: "iv",
-					algorithm: "aes-256-gcm",
-				}),
-			} as never,
-			accounts: {
-				getClientForAccount: async (_default: unknown, accountId: string) => {
-					if (accountId === "acc_target") {
-						return {
-							vault: {
-								createItem: {
-									mutate: async (input: {
-										vaultId: string;
-										itemId: string;
-									}) => {
-										createItemCalls.push({
-											vaultId: input.vaultId,
-											itemId: input.itemId,
-										});
-										return { itemId: input.itemId };
-									},
+		const createItemCalls: Array<{
+			itemId: string;
+			vaultId: string;
+			category: string;
+			encryptedData: string;
+			encryptionIv: string;
+			encryptionAlgorithm: string;
+			clientId: null;
+		}> = [];
+		const service = fixture.service((accountId) =>
+			accountId === TARGET.accountId
+				? {
+						vault: {
+							createItem: {
+								mutate: async (input: (typeof createItemCalls)[number]) => {
+									createItemCalls.push(input);
+									return { itemId: input.itemId };
 								},
 							},
-						};
+						},
 					}
-					return {
+				: {
 						vault: {
-							listAttachments: {
-								query: async () => [],
-							},
+							listAttachments: { query: async () => [] },
 							deleteItem: {
 								mutate: async ({ itemId }: { itemId: string }) => {
 									sourceDeletes.push(itemId);
-									return {};
 								},
 							},
-							permanentlyDeleteItem: {
-								mutate: async () => ({}),
-							},
+							permanentlyDeleteItem: { mutate: async () => ({}) },
 						},
-					};
-				},
-			} as never,
-		});
+					},
+		);
 
 		const result = await service.moveItem(
 			{
@@ -332,370 +284,191 @@ describe("ItemService", () => {
 				targetVaultId: "vault_target",
 				category: "login",
 				decryptedData: { title: "example.com" },
-				sourceAccountEmail: "alice@example.com",
-				targetAccountEmail: "bob@example.com",
+				sourceAccountEmail: SOURCE.email,
+				targetAccountEmail: TARGET.email,
 			},
 			{} as never,
 		);
 
 		expect(result.crossAccount).toBe(true);
-		expect(result.newItemId).toBe("item_new");
+		if (!result.newItemId)
+			throw new Error("Cross-account move returned no item ID");
 		expect(createItemCalls).toEqual([
-			{ vaultId: "vault_target", itemId: "item_new" },
+			{
+				itemId: result.newItemId,
+				vaultId: "vault_target",
+				category: "login",
+				encryptedData: result._encryptedData.ciphertext,
+				encryptionIv: result._encryptedData.iv,
+				encryptionAlgorithm: result._encryptedData.algorithm,
+				clientId: null,
+			},
 		]);
 		expect(sourceDeletes).toEqual(["item_1"]);
+		expect(fixture.crypto.liveKeyCount).toBe(before);
 	});
 
-	test("migrates attachments during a cross-account move before deleting the source", async () => {
+	test("migrates attachments before deleting the source", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		const before = fixture.crypto.liveKeyCount;
+		const sourceVaultKey = await fixture.vaultCrypto.getVaultKey({
+			vaultId: "vault_source",
+			accountId: SOURCE.accountId,
+			userId: SOURCE.userId,
+		});
+		if (!sourceVaultKey) throw new Error("Missing source key");
+		const sourceParts = await encryptAttachmentParts(
+			fixture.vaultCrypto,
+			sourceVaultKey,
+			{
+				vaultId: "vault_source",
+				attachmentKey: "source_key",
+				userId: SOURCE.userId,
+			},
+			{ base64File: "ZmlsZQ==", name: "secret.txt", contentType: "text/plain" },
+		);
+		await fixture.crypto.destroyKey(sourceVaultKey);
 		const originalFetch = globalThis.fetch;
-		const putBodies: string[] = [];
-		const createAttachmentCalls: Array<{
-			itemId: string;
-			storageKey: string;
-		}> = [];
-		const attachmentEncryptContexts: Array<string | undefined> = [];
-		const eventLog: string[] = [];
-
-		// Source vault key + target vault key (both need to be present so the
-		// source blob can be decrypted and re-encrypted for the target).
-		const wrappedKey = (vaultId: string, userId: string) =>
-			JSON.stringify({
-				ciphertext: "wrapped",
-				iv: "vault-iv",
-				algorithm: "aes-256-gcm",
-				context: { vaultId, userId, keyVersion: 1, purpose: "vault-key-wrap" },
-			});
-
-		globalThis.fetch = (async (_url: string, init?: { body?: unknown }) => {
+		const events: string[] = [];
+		globalThis.fetch = (async (_url: string, init?: RequestInit) => {
 			if (init?.body) {
-				eventLog.push("put");
-				putBodies.push(new TextDecoder().decode(init.body as Uint8Array));
-				return { ok: true } as never;
+				events.push("put");
+				return { ok: true } as Response;
 			}
-			eventLog.push("get");
-			// Downloaded blob envelope (source ciphertext).
+			events.push("get");
 			return {
 				ok: true,
 				text: async () =>
-					JSON.stringify({
-						ciphertext: "src-blob-cipher",
-						iv: "src-blob-iv",
-						algorithm: "aes-256-gcm",
-					}),
-			} as never;
-		}) as never;
-
+					new TextDecoder().decode(
+						encodeAttachmentBlobEnvelope(sourceParts.blobEnvelope),
+					),
+			} as Response;
+		}) as typeof fetch;
 		try {
-			const service = new ItemService({
-				storage: {
-					getAccountsList: async () => [
-						{ accountId: "acc_source", email: "alice@example.com" },
-						{ accountId: "acc_target", email: "bob@example.com" },
-					],
-					getVaultKeys: async (accountId: string) =>
-						accountId === "acc_target"
-							? [
-									{
-										vaultId: "vault_target",
-										encryptedVaultKey: wrappedKey(
-											"vault_target",
-											"user_target",
-										),
-									},
-								]
-							: [
-									{
-										vaultId: "vault_source",
-										encryptedVaultKey: wrappedKey(
-											"vault_source",
-											"user_source",
-										),
-									},
-								],
-					getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
-					getEncryptedPrivateKey: async () => null,
-					getStoredSessionData: async (accountId?: string) => ({
-						userId: accountId === "acc_target" ? "user_target" : "user_source",
-					}),
-					getAccountMetadata: async (accountId?: string) => ({
-						userId: accountId === "acc_target" ? "user_target" : "user_source",
-					}),
-					getActiveAccountUserId: async () => "user_target",
-				} as never,
-				itemCache: {} as never,
-				crypto: {
-					generateUuid: async () => "item_new",
-					decrypt: async (
-						_encryptedData: EncryptedData,
-						_key: Uint8Array,
-						context?: EncryptionContext,
-					) => {
-						if (context?.entityType === "vault_key") {
-							return Buffer.from("vault-key").toString("base64");
-						}
-						if (context?.entityType === "attachment_blob") {
-							return "ZmlsZQ=="; // base64("file")
-						}
-						if (context?.entityType === "attachment_name") {
-							return "secret.txt";
-						}
-						if (context?.entityType === "attachment_content_type") {
-							return "text/plain";
-						}
-						return Buffer.from("vault-key").toString("base64");
-					},
-					encrypt: async (
-						_plaintext: string,
-						_key: Uint8Array,
-						context?: EncryptionContext,
-					) => {
-						if (context?.entityType?.startsWith("attachment")) {
-							attachmentEncryptContexts.push(context.entityType);
-						}
-						return {
-							ciphertext: `re-${context?.entityType ?? "item"}`,
-							iv: "new-iv",
-							algorithm: "aes-256-gcm",
-						};
-					},
-				} as never,
-				accounts: {
-					getClientForAccount: async (_default: unknown, accountId: string) => {
-						if (accountId === "acc_target") {
-							return {
-								vault: {
-									createItem: {
-										mutate: async (input: { itemId: string }) => {
-											eventLog.push("createItem");
-											return { itemId: input.itemId };
-										},
-									},
-									createAttachmentUpload: {
-										mutate: async (input: { itemId: string }) => {
-											eventLog.push("createAttachmentUpload");
-											return {
-												key: `newkey_${input.itemId}`,
-												uploadUrl: "https://upload.example/put",
-												publicUrl: null,
-											};
-										},
-									},
-									createAttachment: {
-										mutate: async (input: {
-											itemId: string;
-											storageKey: string;
-										}) => {
-											eventLog.push("createAttachment");
-											createAttachmentCalls.push({
-												itemId: input.itemId,
-												storageKey: input.storageKey,
-											});
-											return { attachmentId: "att_new" };
-										},
+			const service = fixture.service((accountId) =>
+				accountId === TARGET.accountId
+					? {
+							vault: {
+								createItem: {
+									mutate: async (input: { itemId: string }) => ({
+										itemId: input.itemId,
+									}),
+								},
+								createAttachmentUpload: {
+									mutate: async () => ({
+										key: "target_key",
+										uploadUrl: "https://upload.test",
+									}),
+								},
+								createAttachment: {
+									mutate: async () => {
+										events.push("createAttachment");
 									},
 								},
-							};
+							},
 						}
-						return {
+					: {
 							vault: {
 								listAttachments: {
 									query: async () => [
 										{
-											id: "att_src",
-											itemId: "item_1",
-											vaultId: "vault_source",
-											storageKey: "srckey",
-											encryptedName: "enc-name",
-											encryptedContentType: "enc-ct",
-											encryptionIv: "name-iv",
-											encryptedContentTypeIv: "ct-iv",
-											encryptionAlgorithm: "aes-256-gcm",
+											id: "attachment_1",
+											storageKey: "source_key",
+											encryptedName: sourceParts.encryptedName,
+											encryptedContentType: sourceParts.encryptedContentType,
+											encryptionIv: sourceParts.encryptionIv,
+											encryptedContentTypeIv:
+												sourceParts.encryptedContentTypeIv,
+											encryptionAlgorithm: sourceParts.encryptionAlgorithm,
 											fileSize: 4,
-											uploadedBy: "user_source",
-											createdAt: "2026-01-01T00:00:00.000Z",
+											uploadedBy: SOURCE.userId,
 										},
 									],
 								},
 								getAttachmentDownloadUrl: {
 									mutate: async () => ({
-										downloadUrl: "https://download.example/get",
+										downloadUrl: "https://download.test",
 									}),
 								},
 								deleteItem: {
-									mutate: async () => {
-										eventLog.push("sourceDelete");
-										return {};
-									},
+									mutate: async () => events.push("sourceDelete"),
 								},
-								permanentlyDeleteItem: {
-									mutate: async () => ({}),
-								},
+								permanentlyDeleteItem: { mutate: async () => ({}) },
 							},
-						};
-					},
-				} as never,
-			});
-
-			const result = await service.moveItem(
+						},
+			);
+			await service.moveItem(
 				{
 					itemId: "item_1",
 					sourceVaultId: "vault_source",
 					targetVaultId: "vault_target",
 					category: "login",
 					decryptedData: { title: "example.com" },
-					sourceAccountEmail: "alice@example.com",
-					targetAccountEmail: "bob@example.com",
+					sourceAccountEmail: SOURCE.email,
+					targetAccountEmail: TARGET.email,
 				},
 				{} as never,
 			);
-
-			expect(result.crossAccount).toBe(true);
-			// Attachment re-created on the target item with the freshly-minted key.
-			expect(createAttachmentCalls).toEqual([
-				{ itemId: "item_new", storageKey: "newkey_item_new" },
-			]);
-			// Blob was re-encrypted for the target (fresh ciphertext PUT to storage).
-			expect(putBodies).toHaveLength(1);
-			expect(putBodies[0]).toContain("re-attachment_blob");
-			expect(attachmentEncryptContexts).toEqual([
-				"attachment_blob",
-				"attachment_name",
-				"attachment_content_type",
-			]);
-			// Source delete happens only AFTER the attachment was created.
-			expect(eventLog.indexOf("createAttachment")).toBeLessThan(
-				eventLog.indexOf("sourceDelete"),
+			expect(events.indexOf("createAttachment")).toBeLessThan(
+				events.indexOf("sourceDelete"),
 			);
+			expect(events).toContain("put");
+			expect(fixture.crypto.liveKeyCount).toBe(before);
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
 	});
 
 	test("does not delete the source when attachment migration fails", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		const before = fixture.crypto.liveKeyCount;
 		const originalFetch = globalThis.fetch;
-		let sourceDeleted = false;
-		let targetItemDeleted = false;
-
-		const wrappedKey = (vaultId: string, userId: string) =>
-			JSON.stringify({
-				ciphertext: "wrapped",
-				iv: "vault-iv",
-				algorithm: "aes-256-gcm",
-				context: { vaultId, userId, keyVersion: 1, purpose: "vault-key-wrap" },
-			});
-
-		// Blob download fails -> migration aborts before any source deletion.
 		globalThis.fetch = (async () => ({ ok: false })) as never;
-
+		let sourceDeleted = false;
+		let targetDeleted = false;
 		try {
-			const service = new ItemService({
-				storage: {
-					getAccountsList: async () => [
-						{ accountId: "acc_source", email: "alice@example.com" },
-						{ accountId: "acc_target", email: "bob@example.com" },
-					],
-					getVaultKeys: async (accountId: string) =>
-						accountId === "acc_target"
-							? [
-									{
-										vaultId: "vault_target",
-										encryptedVaultKey: wrappedKey(
-											"vault_target",
-											"user_target",
-										),
-									},
-								]
-							: [
-									{
-										vaultId: "vault_source",
-										encryptedVaultKey: wrappedKey(
-											"vault_source",
-											"user_source",
-										),
-									},
-								],
-					getMasterUnlockKey: async () => new Uint8Array([1, 2, 3]),
-					getEncryptedPrivateKey: async () => null,
-					getStoredSessionData: async (accountId?: string) => ({
-						userId: accountId === "acc_target" ? "user_target" : "user_source",
-					}),
-					getAccountMetadata: async (accountId?: string) => ({
-						userId: accountId === "acc_target" ? "user_target" : "user_source",
-					}),
-					getActiveAccountUserId: async () => "user_target",
-				} as never,
-				itemCache: {} as never,
-				crypto: {
-					generateUuid: async () => "item_new",
-					decrypt: async () => Buffer.from("vault-key").toString("base64"),
-					encrypt: async () => ({
-						ciphertext: "cipher",
-						iv: "iv",
-						algorithm: "aes-256-gcm",
-					}),
-				} as never,
-				accounts: {
-					getClientForAccount: async (_default: unknown, accountId: string) => {
-						if (accountId === "acc_target") {
-							return {
-								vault: {
-									createItem: {
-										mutate: async (input: { itemId: string }) => ({
-											itemId: input.itemId,
-										}),
-									},
-									deleteItem: {
-										mutate: async () => {
-											targetItemDeleted = true;
-											return {};
-										},
-									},
-									permanentlyDeleteItem: {
-										mutate: async () => ({}),
+			const service = fixture.service((accountId) =>
+				accountId === TARGET.accountId
+					? {
+							vault: {
+								createItem: {
+									mutate: async (input: { itemId: string }) => ({
+										itemId: input.itemId,
+									}),
+								},
+								deleteItem: {
+									mutate: async () => {
+										targetDeleted = true;
 									},
 								},
-							};
+								permanentlyDeleteItem: { mutate: async () => ({}) },
+							},
 						}
-						return {
+					: {
 							vault: {
 								listAttachments: {
 									query: async () => [
 										{
-											id: "att_src",
-											itemId: "item_1",
-											vaultId: "vault_source",
-											storageKey: "srckey",
-											encryptedName: "enc-name",
-											encryptedContentType: "enc-ct",
-											encryptionIv: "name-iv",
-											encryptedContentTypeIv: "ct-iv",
-											encryptionAlgorithm: "aes-256-gcm",
+											id: "attachment_1",
+											storageKey: "source_key",
 											fileSize: 4,
-											uploadedBy: "user_source",
-											createdAt: "2026-01-01T00:00:00.000Z",
 										},
 									],
 								},
 								getAttachmentDownloadUrl: {
 									mutate: async () => ({
-										downloadUrl: "https://download.example/get",
+										downloadUrl: "https://download.test",
 									}),
 								},
 								deleteItem: {
 									mutate: async () => {
 										sourceDeleted = true;
-										return {};
 									},
 								},
-								permanentlyDeleteItem: {
-									mutate: async () => ({}),
-								},
+								permanentlyDeleteItem: { mutate: async () => ({}) },
 							},
-						};
-					},
-				} as never,
-			});
-
+						},
+			);
 			await expect(
 				service.moveItem(
 					{
@@ -704,16 +477,15 @@ describe("ItemService", () => {
 						targetVaultId: "vault_target",
 						category: "login",
 						decryptedData: { title: "example.com" },
-						sourceAccountEmail: "alice@example.com",
-						targetAccountEmail: "bob@example.com",
+						sourceAccountEmail: SOURCE.email,
+						targetAccountEmail: TARGET.email,
 					},
 					{} as never,
 				),
-			).rejects.toThrow();
-
+			).rejects.toThrow("Failed to download attachment");
 			expect(sourceDeleted).toBe(false);
-			// Best-effort cleanup removed the partially-created target item.
-			expect(targetItemDeleted).toBe(true);
+			expect(targetDeleted).toBe(true);
+			expect(fixture.crypto.liveKeyCount).toBe(before);
 		} finally {
 			globalThis.fetch = originalFetch;
 		}

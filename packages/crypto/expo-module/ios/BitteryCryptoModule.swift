@@ -57,6 +57,66 @@ public class BitteryCryptoModule: Module {
             }
         }
 
+        AsyncFunction("deriveMasterKey") { (accountPassword: String, secretKey: String, email: String, schemaVersion: Int, algorithm: String, iterations: Int, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard schemaVersion == 1,
+                      algorithm == "pbkdf2-sha256",
+                      (600_000...1_200_000).contains(iterations),
+                      let schema = UInt32(exactly: schemaVersion),
+                      let count = UInt32(exactly: iterations) else {
+                    promise.reject("KEY_DERIVATION_FAILED", "Invalid KDF profile")
+                    return
+                }
+                guard let result = bittery_derive_master_key(accountPassword, secretKey, email, schema, algorithm, count) else {
+                    promise.reject("KEY_DERIVATION_FAILED", "Derivation returned null")
+                    return
+                }
+
+                let resultStr = String(cString: result)
+                bittery_free_string(result)
+
+                if resultStr.hasPrefix("ERROR:") {
+                    let errorMsg = String(resultStr.dropFirst(6))
+                    promise.reject("KEY_DERIVATION_FAILED", errorMsg)
+                } else {
+                    promise.resolve(resultStr)
+                }
+            }
+        }
+
+        AsyncFunction("deriveKeysFromMasterKey") { (masterKeyBase64: String, email: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = bittery_derive_keys_from_master_key(masterKeyBase64, email)
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_string(result.auth_key)
+                    bittery_free_string(result.master_unlock_key)
+                    bittery_free_string(result.error)
+                    promise.reject("KEY_DERIVATION_FAILED", errorStr)
+                    return
+                }
+
+                guard let authKey = result.auth_key, let muk = result.master_unlock_key else {
+                    bittery_free_string(result.auth_key)
+                    bittery_free_string(result.master_unlock_key)
+                    promise.reject("KEY_DERIVATION_FAILED", "No keys returned")
+                    return
+                }
+
+                let authKeyStr = String(cString: authKey)
+                let mukStr = String(cString: muk)
+
+                bittery_free_string(result.auth_key)
+                bittery_free_string(result.master_unlock_key)
+
+                promise.resolve([
+                    "authKey": authKeyStr,
+                    "masterUnlockKey": mukStr
+                ])
+            }
+        }
+
         // ============================================================================
         // AES-256-GCM Encryption
         // ============================================================================
@@ -188,6 +248,15 @@ public class BitteryCryptoModule: Module {
             return key
         }
 
+        Function("generateUuid") { () -> String in
+            guard let result = bittery_generate_uuid() else {
+                return ""
+            }
+            let uuid = String(cString: result)
+            bittery_free_string(result)
+            return uuid
+        }
+
         // ============================================================================
         // RSA-4096
         // ============================================================================
@@ -288,6 +357,78 @@ public class BitteryCryptoModule: Module {
             let hint = String(cString: result)
             bittery_free_string(result)
             return hint
+        }
+
+        Function("generateRecoveryKey") { () -> String in
+            guard let result = bittery_generate_recovery_key() else {
+                return ""
+            }
+            let key = String(cString: result)
+            bittery_free_string(result)
+            return key
+        }
+
+        Function("validateRecoveryKey") { (recoveryKey: String) -> Bool in
+            return bittery_validate_recovery_key(recoveryKey) == 1
+        }
+
+        AsyncFunction("encryptMasterKey") { (masterKeyBase64: String, recoveryKey: String, email: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = bittery_encrypt_master_key(masterKeyBase64, recoveryKey, email)
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_string(result.ciphertext)
+                    bittery_free_string(result.iv)
+                    bittery_free_string(result.algorithm)
+                    bittery_free_string(result.error)
+                    promise.reject("ENCRYPTION_FAILED", errorStr)
+                    return
+                }
+
+                guard let ciphertext = result.ciphertext,
+                      let iv = result.iv,
+                      let algorithm = result.algorithm else {
+                    bittery_free_string(result.ciphertext)
+                    bittery_free_string(result.iv)
+                    bittery_free_string(result.algorithm)
+                    promise.reject("ENCRYPTION_FAILED", "No result returned")
+                    return
+                }
+
+                let ciphertextStr = String(cString: ciphertext)
+                let ivStr = String(cString: iv)
+                let algorithmStr = String(cString: algorithm)
+
+                bittery_free_string(result.ciphertext)
+                bittery_free_string(result.iv)
+                bittery_free_string(result.algorithm)
+
+                promise.resolve([
+                    "ciphertext": ciphertextStr,
+                    "iv": ivStr,
+                    "algorithm": algorithmStr
+                ])
+            }
+        }
+
+        AsyncFunction("decryptMasterKey") { (ciphertext: String, iv: String, algorithm: String, recoveryKey: String, email: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let result = bittery_decrypt_master_key(ciphertext, iv, algorithm, recoveryKey, email) else {
+                    promise.reject("DECRYPTION_FAILED", "Decryption returned null")
+                    return
+                }
+
+                let resultStr = String(cString: result)
+                bittery_free_string(result)
+
+                if resultStr.hasPrefix("ERROR:") {
+                    let errorMsg = String(resultStr.dropFirst(6))
+                    promise.reject("DECRYPTION_FAILED", errorMsg)
+                } else {
+                    promise.resolve(resultStr)
+                }
+            }
         }
 
         // ============================================================================
@@ -562,6 +703,259 @@ public class BitteryCryptoModule: Module {
                 promise.resolve([
                     "key": keyStr,
                     "proof": proofStr
+                ])
+            }
+        }
+
+        // ============================================================================
+        // Passkey / WebAuthn
+        // ============================================================================
+
+        AsyncFunction("generatePasskeyKeypair") { (promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = bittery_passkey_generate_keypair()
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_string(result.private_key)
+                    bittery_free_string(result.public_key_cose)
+                    bittery_free_string(result.error)
+                    promise.reject("PASSKEY_GENERATION_FAILED", errorStr)
+                    return
+                }
+
+                guard let privateKey = result.private_key,
+                      let publicKeyCose = result.public_key_cose else {
+                    bittery_free_string(result.private_key)
+                    bittery_free_string(result.public_key_cose)
+                    promise.reject("PASSKEY_GENERATION_FAILED", "No keypair returned")
+                    return
+                }
+
+                let privateKeyStr = String(cString: privateKey)
+                let publicKeyCoseStr = String(cString: publicKeyCose)
+
+                bittery_free_string(result.private_key)
+                bittery_free_string(result.public_key_cose)
+
+                promise.resolve([
+                    "privateKey": privateKeyStr,
+                    "publicKeyCose": publicKeyCoseStr
+                ])
+            }
+        }
+
+        Function("generatePasskeyCredentialId") { () -> String in
+            guard let result = bittery_passkey_generate_credential_id() else {
+                return ""
+            }
+            let credentialId = String(cString: result)
+            bittery_free_string(result)
+            return credentialId
+        }
+
+        AsyncFunction("buildPasskeyAttestationObject") { (rpId: String, credentialIdBase64: String, cosePublicKeyBase64: String, signCount: Int, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let count = UInt32(exactly: signCount) else {
+                    promise.reject("PASSKEY_ATTESTATION_FAILED", "Invalid signCount")
+                    return
+                }
+                let result = bittery_passkey_build_attestation_object(rpId, credentialIdBase64, cosePublicKeyBase64, count)
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_string(result.authenticator_data)
+                    bittery_free_string(result.attestation_object)
+                    bittery_free_string(result.error)
+                    promise.reject("PASSKEY_ATTESTATION_FAILED", errorStr)
+                    return
+                }
+
+                guard let authenticatorData = result.authenticator_data,
+                      let attestationObject = result.attestation_object else {
+                    bittery_free_string(result.authenticator_data)
+                    bittery_free_string(result.attestation_object)
+                    promise.reject("PASSKEY_ATTESTATION_FAILED", "No result returned")
+                    return
+                }
+
+                let authenticatorDataStr = String(cString: authenticatorData)
+                let attestationObjectStr = String(cString: attestationObject)
+
+                bittery_free_string(result.authenticator_data)
+                bittery_free_string(result.attestation_object)
+
+                promise.resolve([
+                    "authenticatorData": authenticatorDataStr,
+                    "attestationObject": attestationObjectStr
+                ])
+            }
+        }
+
+        AsyncFunction("signPasskeyAssertion") { (privateKeyBase64: String, rpId: String, clientDataHashBase64: String, signCount: Int, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let count = UInt32(exactly: signCount) else {
+                    promise.reject("PASSKEY_ASSERTION_FAILED", "Invalid signCount")
+                    return
+                }
+                let result = bittery_passkey_sign_assertion(privateKeyBase64, rpId, clientDataHashBase64, count)
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_string(result.authenticator_data)
+                    bittery_free_string(result.signature_der)
+                    bittery_free_string(result.error)
+                    promise.reject("PASSKEY_ASSERTION_FAILED", errorStr)
+                    return
+                }
+
+                guard let authenticatorData = result.authenticator_data,
+                      let signatureDer = result.signature_der else {
+                    bittery_free_string(result.authenticator_data)
+                    bittery_free_string(result.signature_der)
+                    promise.reject("PASSKEY_ASSERTION_FAILED", "No result returned")
+                    return
+                }
+
+                let authenticatorDataStr = String(cString: authenticatorData)
+                let signatureDerStr = String(cString: signatureDer)
+
+                bittery_free_string(result.authenticator_data)
+                bittery_free_string(result.signature_der)
+
+                promise.resolve([
+                    "authenticatorData": authenticatorDataStr,
+                    "signatureDer": signatureDerStr
+                ])
+            }
+        }
+
+        // ============================================================================
+        // Key Rotation
+        // ============================================================================
+
+        AsyncFunction("encryptVaultKeyForMember") { (vaultKeyBase64: String, memberPublicKeyPem: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let result = bittery_encrypt_vault_key_for_member(vaultKeyBase64, memberPublicKeyPem) else {
+                    promise.reject("ENCRYPTION_FAILED", "Encryption returned null")
+                    return
+                }
+
+                let resultStr = String(cString: result)
+                bittery_free_string(result)
+
+                if resultStr.hasPrefix("ERROR:") {
+                    let errorMsg = String(resultStr.dropFirst(6))
+                    promise.reject("ENCRYPTION_FAILED", errorMsg)
+                } else {
+                    promise.resolve(resultStr)
+                }
+            }
+        }
+
+        AsyncFunction("encryptVaultKeyWithMuk") { (vaultKeyBase64: String, masterUnlockKeyBase64: String, vaultId: String, userId: String, keyVersion: Int64, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                guard let result = bittery_encrypt_vault_key_with_muk(vaultKeyBase64, masterUnlockKeyBase64, vaultId, userId, UInt64(keyVersion)) else {
+                    promise.reject("ENCRYPTION_FAILED", "Encryption returned null")
+                    return
+                }
+
+                let resultStr = String(cString: result)
+                bittery_free_string(result)
+
+                if resultStr.hasPrefix("ERROR:") {
+                    let errorMsg = String(resultStr.dropFirst(6))
+                    promise.reject("ENCRYPTION_FAILED", errorMsg)
+                } else {
+                    promise.resolve(resultStr)
+                }
+            }
+        }
+
+        AsyncFunction("reEncryptItem") { (itemId: String, encryptedData: String, encryptionIv: String, encryptionAlgorithm: String, oldVaultKeyBase64: String, newVaultKeyBase64: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = bittery_re_encrypt_item(itemId, encryptedData, encryptionIv, encryptionAlgorithm, oldVaultKeyBase64, newVaultKeyBase64)
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_re_encrypted_item_result(result)
+                    promise.reject("ENCRYPTION_FAILED", errorStr)
+                    return
+                }
+
+                guard let newItemId = result.item_id,
+                      let newEncryptedData = result.encrypted_data,
+                      let newEncryptionIv = result.encryption_iv else {
+                    bittery_free_re_encrypted_item_result(result)
+                    promise.reject("ENCRYPTION_FAILED", "No result returned")
+                    return
+                }
+
+                let itemIdStr = String(cString: newItemId)
+                let encryptedDataStr = String(cString: newEncryptedData)
+                let encryptionIvStr = String(cString: newEncryptionIv)
+
+                bittery_free_re_encrypted_item_result(result)
+
+                promise.resolve([
+                    "itemId": itemIdStr,
+                    "encryptedData": encryptedDataStr,
+                    "encryptionIv": encryptionIvStr
+                ])
+            }
+        }
+
+        AsyncFunction("performKeyRotation") { (oldVaultKeyBase64: String, membersJson: String, itemsJson: String, vaultId: String, keyVersion: Int64, currentUserId: String, masterUnlockKeyBase64: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = bittery_perform_key_rotation(oldVaultKeyBase64, membersJson, itemsJson, vaultId, UInt64(keyVersion), currentUserId, masterUnlockKeyBase64)
+
+                if let error = result.error {
+                    let errorStr = String(cString: error)
+                    bittery_free_key_rotation_result(result)
+                    promise.reject("ENCRYPTION_FAILED", errorStr)
+                    return
+                }
+
+                guard let memberKeysJson = result.member_encrypted_keys_json,
+                      let itemsJsonOut = result.re_encrypted_items_json else {
+                    bittery_free_key_rotation_result(result)
+                    promise.reject("ENCRYPTION_FAILED", "No result returned")
+                    return
+                }
+
+                let memberKeysJsonStr = String(cString: memberKeysJson)
+                let itemsJsonOutStr = String(cString: itemsJsonOut)
+
+                bittery_free_key_rotation_result(result)
+
+                promise.resolve([
+                    "memberEncryptedKeysJson": memberKeysJsonStr,
+                    "reEncryptedItemsJson": itemsJsonOutStr
+                ])
+            }
+        }
+
+        // Unlike every other struct-returning member in this file, `ValidationResultFFI`
+        // has no `error` field: malformed `membersJson` comes back as `valid: false`,
+        // not a thrown error, matching the core's own design.
+        AsyncFunction("validateRotationData") { (membersJson: String, promise: Promise) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let result = bittery_validate_rotation_data(membersJson)
+
+                guard let errorsJson = result.errors_json else {
+                    bittery_free_validation_result(result)
+                    promise.reject("ENCRYPTION_FAILED", "No result returned")
+                    return
+                }
+
+                let errorsJsonStr = String(cString: errorsJson)
+                let valid = result.valid == 1
+
+                bittery_free_validation_result(result)
+
+                promise.resolve([
+                    "valid": valid,
+                    "errorsJson": errorsJsonStr
                 ])
             }
         }

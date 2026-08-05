@@ -4,7 +4,7 @@ Bittery is a zero-knowledge, end-to-end-encrypted password manager that runs on 
 
 ## Language
 
-For storage *design* context — tiers, ports, and the invariants behind where a value lives — read `packages/storage/CONTEXT.md`. This file names things; that one explains the machinery.
+For storage *design* context — tiers, ports, and the invariants behind where a value lives — read `packages/storage/CONTEXT.md`. For the crypto seam, opaque key lifetime and adapter-conformance limits, read `packages/crypto/port/CONTEXT.md`. This file names things; those explain the machinery.
 
 ### Identity
 
@@ -50,7 +50,7 @@ _Avoid_: account key, device secret
 The first segment of a Secret Key, the only part the server holds, kept purely so a user can tell their accounts apart.
 
 **Master unlock key**:
-The key derived from master password plus Secret Key that unwraps this account's vault keys and RSA private key. It exists only in memory; the plaintext form is never persisted anywhere.
+The key derived from master password plus Secret Key that unwraps this account's vault keys and RSA private key. Its plaintext form exists only in memory and is never persisted. In normal web flows, main-thread JavaScript holds only an opaque identity while the material stays in the crypto worker; that is a convention, not a type-system guarantee, because the crypto seam can export any live key. Desktop, mobile and the extension use different in-memory representations. Mobile has one audited exception that exports a borrowed copy to Android's separate credential-provider process.
 _Avoid_: MUK in user-facing copy, master key, unlock key
 
 **Vault key**:

@@ -7,8 +7,11 @@ import { lockAccount } from "@bittery/core/services/account-lifecycle";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
+import type { KeyRef } from "@bittery/crypto-port";
+import { base64ToArrayBuffer } from "@bittery/shared/crypto";
+import { crypto } from "../lib/crypto";
 import { itemCache, storage } from "../lib/storage";
-import { decrypt } from "../lib/wasm-crypto";
+import type { BiometricAccountMaterial } from "./biometric-transfer";
 import {
 	requestAllBiometricTransfer,
 	requestSingleBiometricTransfer,
@@ -61,13 +64,20 @@ export { STALE_DESKTOP_UNLOCK_RESPONSE };
 /** Same contract as above: a code for the UI to translate, not a sentence. */
 export const TRAVEL_MODE_UNVERIFIED = "travel-mode-unverified";
 
-function decodeMasterUnlockKey(value: string): Uint8Array {
-	const binary = atob(value);
-	const key = new Uint8Array(binary.length);
-	for (let index = 0; index < binary.length; index += 1) {
-		key[index] = binary.charCodeAt(index);
+async function decryptTransferredMasterUnlockKey(
+	material: BiometricAccountMaterial,
+): Promise<KeyRef> {
+	const deviceKey = await crypto.importKey(material.deviceKey);
+	try {
+		const mukBase64 = await crypto.decrypt(
+			material.encryptedMuk,
+			deviceKey,
+			null,
+		);
+		return crypto.importKey(base64ToArrayBuffer(mukBase64));
+	} finally {
+		await crypto.destroyKey(deviceKey);
 	}
-	return key;
 }
 
 /**
@@ -91,38 +101,43 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 		const { material } = transfer;
 		await storage.setBiometricEnabled(activeAccount, true);
 
-		const mukBase64 = await decrypt(material.encryptedMuk, material.deviceKey);
-		const muk = decodeMasterUnlockKey(mukBase64);
+		let muk: KeyRef | null = await decryptTransferredMasterUnlockKey(material);
+		try {
+			if (material.authToken) {
+				await storage.storeAuthToken(material.authToken, activeAccount);
+			} else if (!(await storage.getAuthToken(activeAccount))) {
+				throw new Error("Missing auth token in response and storage");
+			}
 
-		if (material.authToken) {
-			await storage.storeAuthToken(material.authToken, activeAccount);
-		} else if (!(await storage.getAuthToken(activeAccount))) {
-			throw new Error("Missing auth token in response and storage");
-		}
-
-		const enforcer = getTravelModeEnforcer(storage, itemCache);
-		const client = await createStoredAccountRpcClient(
-			storage,
-			activeAccount,
-		).catch(() => null);
-		if (!(await enforcer.verifyOrClear(activeAccount, client))) {
-			throw new Error(TRAVEL_MODE_UNVERIFIED);
-		}
-
-		if (material.vaultKeys) {
-			await storage.storeVaultKeys(
-				enforcer.filterVaultKeys(activeAccount, material.vaultKeys),
+			const enforcer = getTravelModeEnforcer(storage, itemCache);
+			const client = await createStoredAccountRpcClient(
+				storage,
 				activeAccount,
-			);
-		} else {
-			const storedVaultKeys = await storage.getVaultKeys(activeAccount);
-			if (!storedVaultKeys || storedVaultKeys.length === 0) {
-				throw new Error("Missing vault keys in response and storage");
+			).catch(() => null);
+			if (!(await enforcer.verifyOrClear(activeAccount, client))) {
+				throw new Error(TRAVEL_MODE_UNVERIFIED);
+			}
+
+			if (material.vaultKeys) {
+				await storage.storeVaultKeys(
+					enforcer.filterVaultKeys(activeAccount, material.vaultKeys),
+					activeAccount,
+				);
+			} else {
+				const storedVaultKeys = await storage.getVaultKeys(activeAccount);
+				if (!storedVaultKeys || storedVaultKeys.length === 0) {
+					throw new Error("Missing vault keys in response and storage");
+				}
+			}
+
+			await storage.setMasterUnlockKey(muk, activeAccount);
+			setMasterUnlockKey(muk);
+			muk = null;
+		} finally {
+			if (muk) {
+				await crypto.destroyKey(muk);
 			}
 		}
-
-		setMasterUnlockKey(muk);
-		await storage.setMasterUnlockKey(muk, activeAccount);
 		await updateActivity();
 
 		return {
@@ -255,38 +270,42 @@ export async function handleNativeBiometricUnlockAll(options?: {
 			const { accountId, email } = material;
 
 			try {
-				const mukBase64 = await decrypt(
-					material.encryptedMuk,
-					material.deviceKey,
-				);
-				const muk = decodeMasterUnlockKey(mukBase64);
+				let muk: KeyRef | null =
+					await decryptTransferredMasterUnlockKey(material);
 
-				if (material.authToken) {
-					await storage.storeAuthToken(material.authToken, accountId);
-				}
+				try {
+					if (material.authToken) {
+						await storage.storeAuthToken(material.authToken, accountId);
+					}
 
-				const enforcer = getTravelModeEnforcer(storage, itemCache);
-				const client = await createStoredAccountRpcClient(
-					storage,
-					accountId,
-				).catch(() => null);
-				if (!(await enforcer.verifyOrClear(accountId, client))) {
-					failed.push({
+					const enforcer = getTravelModeEnforcer(storage, itemCache);
+					const client = await createStoredAccountRpcClient(
+						storage,
 						accountId,
-						email,
-						error: TRAVEL_MODE_UNVERIFIED,
-					});
-					continue;
-				}
+					).catch(() => null);
+					if (!(await enforcer.verifyOrClear(accountId, client))) {
+						failed.push({
+							accountId,
+							email,
+							error: TRAVEL_MODE_UNVERIFIED,
+						});
+						continue;
+					}
 
-				if (material.vaultKeys) {
-					await storage.storeVaultKeys(
-						enforcer.filterVaultKeys(accountId, material.vaultKeys),
-						accountId,
-					);
-				}
+					if (material.vaultKeys) {
+						await storage.storeVaultKeys(
+							enforcer.filterVaultKeys(accountId, material.vaultKeys),
+							accountId,
+						);
+					}
 
-				await storage.setMasterUnlockKey(muk, accountId);
+					await storage.setMasterUnlockKey(muk, accountId);
+					muk = null;
+				} finally {
+					if (muk) {
+						await crypto.destroyKey(muk);
+					}
+				}
 
 				unlocked.push(accountId);
 			} catch (error) {

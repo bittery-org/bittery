@@ -9,16 +9,19 @@ for you. Code comments elsewhere in the repo cite this file by section.
    +--------+---------+
    |                  |
 AccountStore      ItemCache          deep modules; ALL policy lives here
+   |   |              |
+   |  CryptoPort      |              a third seam, owned by @bittery/crypto-port
    |                  |
 PlatformPort      RecordPort         seams; dumb, total, zero optional members
    |                  |
 tauri rn chrome web                  pure mapping, no policy
 ```
 
-A port primitive takes a `string` and returns `string | null`. No JSON, no encryption, no
-accountId, no defaults, no expiry, and no optional members anywhere in either port or in
-`AccountStore` / `ItemCache`. Every method is total, so the compiler verifies that an
-adapter satisfies the contract — there is nothing to feature-detect at a call site.
+A `PlatformPort` / `RecordPort` primitive takes a `string` and returns `string | null`. No
+JSON, no encryption, no accountId, no defaults, no expiry, and no optional members anywhere
+in any of the three ports or in `AccountStore` / `ItemCache`. Every method is total, so the
+compiler verifies that an adapter satisfies the contract — there is nothing to feature-detect
+at a call site.
 
 ---
 
@@ -75,19 +78,50 @@ entries; it never falls back to plaintext SQLite.
 
 ### The plaintext master unlock key is never persisted
 
-On any platform. It lives only in `AccountStore`'s in-memory cache, and is therefore
-session-bound by construction. What *is* persisted is `session_data`, carrying the MUK
-**encrypted under `device_key`**. That pair is device-bound so desktop and mobile can
-quick-unlock after a restart.
+On any platform. In normal web flows it also stays out of main-thread JavaScript.
+`AccountStore` caches the MUK as an opaque `KeyRef`: the material behind it lives in the
+crypto adapter — a WASM key table inside web's worker thread or the extension's JavaScript
+context, and a boxed `Uint8Array` that `destroyKey` zeroizes on desktop and mobile — so what
+this package holds is an identity token with no readable members. The cache is session-bound
+by construction, which is why `STORAGE_TIERS` has no row for it. What *is* persisted is
+`session_data`, carrying the MUK **wrapped under `device_key`** (`wrapKey` in, `unwrapKey`
+out, so no plaintext appears on either side of the call). That pair is device-bound so
+desktop and mobile can quick-unlock after a restart.
+
+Locking **destroys** rather than forgets: `clearMasterUnlockKey`, `clearSession`,
+`lockAllAccounts` and `removeAccount` all call `destroyKey`, so the material is zeroized and
+every ref a caller still holds throws on use. The store owns the ref it hands back from
+`getMasterUnlockKey` for exactly as long as the account is unlocked; a caller must not
+destroy it. `decryptStoredMasterUnlockKey` is the one exception — it mints a fresh ref that
+belongs to the caller, because it deliberately does not unlock the account.
+
+### What "never reaches JS" actually rests on
+
+A convention, not a structural guarantee, and this document will not pretend otherwise.
+`CryptoPort.exportKey` is a total member that returns raw bytes for any live ref, so nothing
+in the type system stops someone calling it on a MUK. The web claim holds because no
+production web caller does. Mobile intentionally does so at one audited boundary:
+`apps/mobile/src/services/credential-provider-master-unlock-key.ts` borrows the store-owned
+MUK, immediately base64-encodes its exported bytes and hands them to Android's frozen
+credential-provider API in a separate process.
+
+`exportKey` exists for the **device key**, which is the asymmetry worth understanding: it has
+to be persisted, and nothing on the device can wrap it. `AccountStore` mints it with
+`generateEncryptionKey`, exports it once, base64s it into the secret tier and from then on
+only ever `importKey`s it back — the one and only `exportKey` call site in this package, and
+the reason the member is on the port at all. Storage touches exactly six of the port's 38
+members (`generateEncryptionKey`, `exportKey`, `importKey`, `wrapKey`, `unwrapKey`,
+`destroyKey`) and nothing else.
 
 `jwt_token`, `vault_keys` and `encrypted_private_key` are session-bound: gone after a
 browser or extension restart, retained on desktop and mobile.
 
 ---
 
-## 2. `PlatformPort` and `RecordPort`
+## 2. `PlatformPort`, `RecordPort` and `CryptoPort`
 
-Two seams, both dumb and total.
+Three seams, all dumb and total. `AccountStore` sits over two of them — one for where a
+value lives, one for the key material it is protected with — and `ItemCache` over the third.
 
 **`PlatformPort`** (`src/platform-port.ts`) — 8 primitives plus 5 readonly declarations
 (`platform`, `sessionSurvivesRestart`, `tiers`, `secretBacking`, `recordKeyPrefix`) and a
@@ -99,7 +133,19 @@ opaque `collection` string that ports must not parse. `recordPut` and `recordDel
 be O(1)** — no read-array, mutate, rewrite. Delta sync upserts one item at a time, and that
 is the whole reason this port is separate.
 
-Rules that hold for both:
+**`CryptoPort`** (`@bittery/crypto-port`) — the one seam this package does not own, injected
+as `AccountStoreOptions.crypto`. It is total in the same sense as the other two: 38 members,
+all required and all async. Symmetric keys are represented as opaque `KeyRef`s except at the
+explicit `exportKey` escape hatch described in §1. That is what lets `AccountStore` hold a
+single `Map<string, KeyRef>` for the MUK cache. The
+`CryptoProvider` this package used to declare had 3 required members and 7 optional ones, and
+the MUK cache was a `number | Uint8Array` union to straddle them — every `if (crypto.x)`
+capability check in this package existed for that reason, and all of them are gone. Storage
+uses six members (§1) and asks the port for nothing policy-shaped: the wrapped-vault-key
+envelope, wrap contexts and the account ceremonies all live **above** this package, and
+`getPinnedKdfProfile` enforces the shared KDF policy here without the port ever seeing it.
+
+Rules that hold for both storage ports:
 
 - A missing key returns `null`. Never throws, never returns `undefined`.
 - Deleting an absent key is a no-op, never throws.
@@ -163,7 +209,7 @@ Two rules keep it that way, and both are load-bearing:
 
 ### 4.2 Dropping a session must also drop the item cache
 
-`AccountStore` holds only a `PlatformPort` and cannot reach the cache (§3). So
+`AccountStore` holds no `RecordPort` and cannot reach the cache (§3). So
 `clearSession`, `forgetSession` and `removeAccount` do not touch it, and **the caller must
 sequence `itemCache.clearItemCache(accountId)` alongside them**. Leaving an encrypted cache
 on disk after its keys are gone is a real leak.
@@ -175,7 +221,7 @@ Note that lock is deliberately not sign-out:
 | `clearSession` | kept | yes |
 | `forgetSession` | deleted | no |
 
-### 4.3 `getUnlockedAccounts` means "MUK is in memory"
+### 4.3 `getUnlockedAccounts` means "this JS context holds a live MUK ref"
 
 Not "could be unlocked". It performs no I/O and restores nothing. After an extension
 service-worker restart it reports zero unlocked accounts until something calls

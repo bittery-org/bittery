@@ -33,18 +33,14 @@ import {
 	createChromePlatformPort,
 	createChromeRecordPort,
 } from "@bittery/storage/adapters/chrome";
-import { decrypt, encrypt, rsaDecrypt } from "./wasm-crypto";
-
-// The extension has no key-handle crypto backend, so the three required methods are the
-// whole provider. Everything else on `CryptoProvider` is genuinely absent here.
-const cryptoProvider = { encrypt, decrypt, rsaDecrypt };
+import { crypto } from "./crypto";
 
 const platformPort = createChromePlatformPort();
 const recordPort = createChromeRecordPort();
 
 export const storage: AccountStore = createAccountStore({
 	port: platformPort,
-	crypto: cryptoProvider,
+	crypto,
 });
 
 export const itemCache: ItemCache = createItemCache({ port: recordPort });

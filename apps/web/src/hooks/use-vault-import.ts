@@ -1,7 +1,10 @@
-import { useAllVaultKeys, useCoreContext } from "@bittery/core/hooks";
+import {
+	useAllVaultKeys,
+	useCoreContext,
+	usePlatformCrypto,
+} from "@bittery/core/hooks";
 import { getClientForAccount } from "@bittery/core/services/account-resolver";
 import {
-	getDecryptedVaultKey,
 	getImportProvider,
 	type ImportErrorCode,
 	type ImportMessageParams,
@@ -11,23 +14,16 @@ import {
 	type ImportSourceItem,
 	type ImportSourceVault,
 	type ImportSourceVaultNameCode,
-	type VaultKeyCryptoProvider,
 } from "@bittery/shared";
 import { useRPCClient } from "@bittery/shared/rpc";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { useCallback, useMemo, useState } from "react";
 import { itemCache, storage } from "@/lib/storage";
-import { decrypt, encrypt, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useClientId, useQueryInvalidator } from "@/providers/sync-provider";
 
 const IMPORT_BATCH_SIZE = 200;
 const DEFAULT_CREATED_VAULT_ICON = "lock";
-
-const vaultKeyCrypto: VaultKeyCryptoProvider = {
-	decrypt,
-	rsaDecrypt,
-};
 
 export type ImportMappingMode = "create" | "existing";
 
@@ -234,6 +230,7 @@ function normalizeImportError(
 export function useVaultImport() {
 	const { m } = useI18n();
 	const core = useCoreContext();
+	const crypto = usePlatformCrypto();
 	const rpcClient = useRPCClient();
 	const invalidator = useQueryInvalidator();
 	const clientId = useClientId();
@@ -619,11 +616,9 @@ export function useVaultImport() {
 							accountId,
 						);
 						const userId = await resolveUserIdForContext(accountId);
-						const vaultKey = await getDecryptedVaultKey({
+						const vaultKey = await core.vaultCrypto.getVaultKey({
 							vaultId: resolvedTarget.vaultId,
 							accountId,
-							storage,
-							crypto: vaultKeyCrypto,
 						});
 
 						if (!vaultKey) {
@@ -633,39 +628,43 @@ export function useVaultImport() {
 						}
 
 						const encryptedItems = [];
-						for (const sourceItem of sourceItems) {
-							const decryptedItem = provider.toDecryptedItemData(sourceItem);
-							const itemId = await core.items.generateItemId();
-							const encryptedData = await encrypt(
-								JSON.stringify(decryptedItem.data),
-								vaultKey,
-								{
-									vaultId: resolvedTarget.vaultId,
-									entityId: itemId,
-									entityType: "item",
-									version: 1,
-									userId,
-								},
-							);
+						try {
+							for (const sourceItem of sourceItems) {
+								const decryptedItem = provider.toDecryptedItemData(sourceItem);
+								const itemId = await core.items.generateItemId();
+								const encryptedData = await core.vaultCrypto.encryptItem(
+									JSON.stringify(decryptedItem.data),
+									vaultKey,
+									{
+										vaultId: resolvedTarget.vaultId,
+										itemId,
+										version: 1,
+										userId,
+									},
+								);
 
-							encryptedItems.push({
-								itemId,
-								category: decryptedItem.category,
-								favorite: decryptedItem.favorite,
-								encryptedData: encryptedData.ciphertext,
-								encryptionIv: encryptedData.iv,
-								encryptionAlgorithm: encryptedData.algorithm,
-							});
+								encryptedItems.push({
+									itemId,
+									category: decryptedItem.category,
+									favorite: decryptedItem.favorite,
+									encryptedData: encryptedData.ciphertext,
+									encryptionIv: encryptedData.iv,
+									encryptionAlgorithm: encryptedData.algorithm,
+								});
 
-							encryptedItemsInVault += 1;
-							processedItems += 1;
+								encryptedItemsInVault += 1;
+								processedItems += 1;
 
-							setProgress((current) => ({
-								...current,
-								stage: "encrypting",
-								currentVaultName: sourceVault.name,
-								processedItems,
-							}));
+								setProgress((current) => ({
+									...current,
+									stage: "encrypting",
+									currentVaultName: sourceVault.name,
+									processedItems,
+								}));
+							}
+						} finally {
+							// `getVaultKey` mints a fresh ref for this vault on every call.
+							await crypto.destroyKey(vaultKey);
 						}
 
 						setProgress((current) => ({
@@ -787,6 +786,8 @@ export function useVaultImport() {
 			core.vaults,
 			core.accounts,
 			core.vaultCoordinator,
+			core.vaultCrypto,
+			crypto,
 			rpcClient,
 			invalidator,
 			clientId,

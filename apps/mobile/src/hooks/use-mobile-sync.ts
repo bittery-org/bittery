@@ -3,30 +3,17 @@ import {
 	createStoredAccountRpcClient,
 } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
+import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
 import type { RpcVaultClient } from "@bittery/core/services/vault-service";
 import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
 import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
-import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetch as expoFetch } from "expo/fetch";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
-import {
-	base64ToArrayBuffer,
-	decrypt,
-	deriveClientSession,
-	deriveKeys,
-	encrypt,
-	generateClientEphemeral,
-	generateUuid,
-	generateEncryptionKey as nativeGenerateEncryptionKey,
-	rsaDecrypt,
-	validateKdfProfile,
-	validateSecretKey,
-	verifyServerSession,
-} from "../lib/crypto/native-crypto";
+import { crypto } from "../lib/crypto";
 import {
 	getMobileSyncDb,
 	getOrCreateMobileSyncClientId,
@@ -75,23 +62,6 @@ class ReactNativeSyncStorage implements SyncStorage {
 		await db.runAsync("DELETE FROM sync_storage WHERE key = ?", [key]);
 	}
 }
-
-const crypto: ICrypto = {
-	decrypt,
-	encrypt,
-	rsaDecrypt,
-	generateEncryptionKey: async () => {
-		const keyBase64 = nativeGenerateEncryptionKey();
-		return base64ToArrayBuffer(keyBase64);
-	},
-	generateUuid,
-	deriveKeys,
-	generateClientEphemeral,
-	deriveClientSession,
-	verifyServerSession,
-	validateSecretKey,
-	validateKdfProfile,
-};
 
 /**
  * Resolve the best available account-scoped sync context.
@@ -215,7 +185,13 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const vaultCoordinator = useMemo(
-		() => getOrCreateVaultRepositoryCoordinator(crypto, storage, itemCache),
+		() =>
+			getOrCreateVaultRepositoryCoordinator(
+				crypto,
+				createVaultCrypto({ crypto, storage }),
+				storage,
+				itemCache,
+			),
 		[],
 	);
 
@@ -268,10 +244,6 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		fetch: expoFetch,
 		onEventProcessed: onTravelModeEvent,
 	});
-
-	useEffect(() => {
-		// Intentionally no per-status logging here; this hook is always mounted.
-	}, []);
 
 	return {
 		...syncState,

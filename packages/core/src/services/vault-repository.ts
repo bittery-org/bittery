@@ -1,7 +1,4 @@
-import {
-	decryptVaultKey as decryptVaultKeyUtil,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
@@ -19,11 +16,10 @@ import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
 	EncryptedData,
-	ICrypto,
 } from "@bittery/types";
-import { buildItemEncryptionContext } from "./encryption-context";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import { isVaultHidden } from "./travel-mode-service";
+import type { VaultCrypto } from "./vault-crypto";
 
 export interface VaultView {
 	id: string;
@@ -97,7 +93,6 @@ export class VaultRepository {
 
 	private readonly items = new Map<string, VaultRepositoryItem>();
 	private readonly vaults = new Map<string, CachedVaultMetadata>();
-	private readonly vaultKeys = new Map<string, Uint8Array>();
 	private readonly vaultKeyEntries = new Map<string, VaultKeyData>();
 	private readonly listeners = new Set<() => void>();
 	private snapshot = 0;
@@ -111,7 +106,8 @@ export class VaultRepository {
 	 * RPC and crypto call below keys off this `accountId` rather than re-resolving.
 	 */
 	constructor(
-		private readonly crypto: ICrypto,
+		private readonly crypto: CryptoPort,
+		private readonly vaultCrypto: VaultCrypto,
 		private readonly storage: AccountStore,
 		private readonly itemCache: ItemCache,
 		private readonly accountId: string,
@@ -257,7 +253,6 @@ export class VaultRepository {
 		const hidden = new Set(hiddenVaultIds);
 		for (const vaultId of hidden) {
 			this.vaults.delete(vaultId);
-			this.vaultKeys.delete(vaultId);
 			this.vaultKeyEntries.delete(vaultId);
 		}
 		for (const [itemId, item] of this.items) {
@@ -304,27 +299,26 @@ export class VaultRepository {
 
 	private async decryptItemPayload(
 		item: CachedEncryptedItem,
-		vaultKey: Uint8Array,
+		vaultKey: KeyRef,
 		userId: string,
 	): Promise<string> {
 		let lastError: unknown = null;
 
 		for (const version of this.getVersionCandidates(item.version)) {
 			try {
-				const context = buildItemEncryptionContext({
-					vaultId: item.vaultId,
-					itemId: item.id,
-					version,
-					userId,
-				});
-				const decrypted = await this.crypto.decrypt(
+				const decrypted = await this.vaultCrypto.decryptItem(
 					{
 						ciphertext: item.encryptedData,
 						iv: item.encryptionIv,
 						algorithm: item.encryptionAlgorithm,
 					},
 					vaultKey,
-					context,
+					{
+						vaultId: item.vaultId,
+						itemId: item.id,
+						version,
+						userId,
+					},
 				);
 
 				if (version !== item.version) {
@@ -340,6 +334,132 @@ export class VaultRepository {
 		}
 
 		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
+	}
+
+	private async decryptItemBatch(
+		items: readonly CachedEncryptedItem[],
+	): Promise<
+		Array<
+			| { item: CachedEncryptedItem; decrypted: VaultRepositoryItem }
+			| { item: CachedEncryptedItem; error: unknown }
+		>
+	> {
+		if (items.length === 0) return [];
+		const defaultUserId = await this.resolveUserId();
+		const vaultKeys = new Map<string, KeyRef>();
+		const keyErrors = new Map<string, unknown>();
+
+		try {
+			for (const vaultId of new Set(items.map((item) => item.vaultId))) {
+				try {
+					vaultKeys.set(vaultId, await this.decryptVaultKey(vaultId));
+				} catch (error) {
+					keyErrors.set(vaultId, error);
+				}
+			}
+
+			const decryptable = items.flatMap((item) => {
+				const vaultKey = vaultKeys.get(item.vaultId);
+				return vaultKey ? [{ item, vaultKey }] : [];
+			});
+			const primary = await this.vaultCrypto.decryptItems(
+				decryptable.map(({ item, vaultKey }) => ({
+					id: item.id,
+					data: {
+						ciphertext: item.encryptedData,
+						iv: item.encryptionIv,
+						algorithm: item.encryptionAlgorithm,
+					},
+					vaultKey,
+					scope: {
+						vaultId: item.vaultId,
+						itemId: item.id,
+						version: item.version,
+						userId: item.lastModifiedBy ?? defaultUserId,
+					},
+				})),
+			);
+
+			const outcomeByItem = new Map<
+				CachedEncryptedItem,
+				| { ok: true; decrypted: VaultRepositoryItem }
+				| { ok: false; error: unknown }
+			>();
+			for (const [index, result] of primary.entries()) {
+				const entry = decryptable[index];
+				if (!entry) continue;
+				if (result.ok) {
+					outcomeByItem.set(entry.item, {
+						ok: true,
+						decrypted: this.buildItem(
+							entry.item,
+							JSON.parse(result.plaintext) as DecryptedItemData,
+						),
+					});
+					continue;
+				}
+
+				let fallbackError: unknown = new Error(result.error);
+				for (const version of this.getVersionCandidates(
+					entry.item.version,
+				).slice(1)) {
+					try {
+						const plaintext = await this.vaultCrypto.decryptItem(
+							{
+								ciphertext: entry.item.encryptedData,
+								iv: entry.item.encryptionIv,
+								algorithm: entry.item.encryptionAlgorithm,
+							},
+							entry.vaultKey,
+							{
+								vaultId: entry.item.vaultId,
+								itemId: entry.item.id,
+								version,
+								userId: entry.item.lastModifiedBy ?? defaultUserId,
+							},
+						);
+						console.warn(
+							`[VaultRepository] Recovered item ${entry.item.id} with fallback encryption version ${version} (stored version ${entry.item.version})`,
+						);
+						outcomeByItem.set(entry.item, {
+							ok: true,
+							decrypted: this.buildItem(
+								entry.item,
+								JSON.parse(plaintext) as DecryptedItemData,
+							),
+						});
+						fallbackError = null;
+						break;
+					} catch (error) {
+						fallbackError = error;
+					}
+				}
+				if (fallbackError) {
+					outcomeByItem.set(entry.item, {
+						ok: false,
+						error: fallbackError,
+					});
+				}
+			}
+
+			return items.map((item) => {
+				const outcome = outcomeByItem.get(item);
+				if (outcome?.ok) {
+					return { item, decrypted: outcome.decrypted };
+				}
+				return {
+					item,
+					error:
+						(outcome?.ok === false ? outcome.error : undefined) ??
+						keyErrors.get(item.vaultId) ??
+						new Error(`Failed to decrypt item ${item.id}`),
+				};
+			});
+		} finally {
+			await Promise.all(
+				Array.from(vaultKeys.values(), (key) => this.crypto.destroyKey(key)),
+			);
+		}
 	}
 
 	private toCachedItem(item: VaultRepositoryItem): CachedEncryptedItem {
@@ -452,12 +572,7 @@ export class VaultRepository {
 		};
 	}
 
-	async decryptVaultKey(vaultId: string): Promise<Uint8Array> {
-		const cached = this.vaultKeys.get(vaultId);
-		if (cached) {
-			return cached;
-		}
-
+	private async decryptVaultKey(vaultId: string): Promise<KeyRef> {
 		const vaultKeys = await this.storage.getVaultKeys(this.accountId);
 		if (!vaultKeys) {
 			throw new Error(`No vault key found for vault ${vaultId}.`);
@@ -470,25 +585,13 @@ export class VaultRepository {
 			throw new Error(`No vault key found for vault ${vaultId}.`);
 		}
 
-		const muk = await this.storage.getMasterUnlockKey(this.accountId);
-		if (!muk) {
-			throw new Error("Master Unlock Key not available. Please log in again.");
-		}
 		const userId = await this.resolveUserId();
-
-		const encryptedPrivateKey = await this.storage.getEncryptedPrivateKey(
-			this.accountId,
-		);
-
-		let decrypted: Uint8Array;
 		try {
-			decrypted = await decryptVaultKeyUtil({
+			return await this.vaultCrypto.unwrapStoredVaultKey({
 				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-				masterUnlockKey: muk,
-				encryptedPrivateKey,
-				expectedVaultId: vaultId,
-				expectedUserId: userId,
-				crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+				vaultId,
+				userId,
+				accountId: this.accountId,
 			});
 		} catch (error) {
 			const message =
@@ -500,23 +603,29 @@ export class VaultRepository {
 				throw error;
 			}
 
-			decrypted = await decryptVaultKeyUtil({
+			return this.vaultCrypto.unwrapStoredVaultKey({
 				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-				masterUnlockKey: muk,
-				encryptedPrivateKey,
-				crypto: this.crypto as unknown as VaultKeyCryptoProvider,
+				accountId: this.accountId,
 			});
 		}
-
-		this.vaultKeys.set(vaultId, decrypted);
-		return decrypted;
 	}
 
 	async decryptItem(item: CachedEncryptedItem): Promise<VaultRepositoryItem> {
 		const vaultKey = await this.decryptVaultKey(item.vaultId);
-		const userId = item.lastModifiedBy ?? (await this.resolveUserId());
-		const decryptedData = await this.decryptItemPayload(item, vaultKey, userId);
-		return this.buildItem(item, JSON.parse(decryptedData) as DecryptedItemData);
+		try {
+			const userId = item.lastModifiedBy ?? (await this.resolveUserId());
+			const decryptedData = await this.decryptItemPayload(
+				item,
+				vaultKey,
+				userId,
+			);
+			return this.buildItem(
+				item,
+				JSON.parse(decryptedData) as DecryptedItemData,
+			);
+		} finally {
+			await this.crypto.destroyKey(vaultKey);
+		}
 	}
 
 	async upsertEncrypted(
@@ -713,13 +822,14 @@ export class VaultRepository {
 				if (!this.serverUrl && cachedItem.serverUrl) {
 					this.serverUrl = cachedItem.serverUrl;
 				}
-				try {
-					const decrypted = await this.decryptItem(cachedItem);
-					this.items.set(cachedItem.id, decrypted);
-				} catch (error) {
+			}
+			for (const outcome of await this.decryptItemBatch(cachedItems ?? [])) {
+				if ("decrypted" in outcome) {
+					this.items.set(outcome.item.id, outcome.decrypted);
+				} else {
 					console.error(
-						`[VaultRepository] Failed to decrypt cached item ${cachedItem.id}:`,
-						error,
+						`[VaultRepository] Failed to decrypt cached item ${outcome.item.id}:`,
+						outcome.error,
 					);
 				}
 			}
@@ -801,14 +911,13 @@ export class VaultRepository {
 		this.mergeVaultKeyEntries(vaultKeys);
 
 		this.items.clear();
-		for (const cachedItem of cachedItems) {
-			try {
-				const decrypted = await this.decryptItem(cachedItem);
-				this.items.set(cachedItem.id, decrypted);
-			} catch (error) {
+		for (const outcome of await this.decryptItemBatch(cachedItems)) {
+			if ("decrypted" in outcome) {
+				this.items.set(outcome.item.id, outcome.decrypted);
+			} else {
 				console.error(
-					`[VaultRepository] Failed to decrypt bootstrap item ${cachedItem.id}:`,
-					error,
+					`[VaultRepository] Failed to decrypt bootstrap item ${outcome.item.id}:`,
+					outcome.error,
 				);
 			}
 		}
@@ -837,7 +946,6 @@ export class VaultRepository {
 	clear(): void {
 		this.items.clear();
 		this.vaults.clear();
-		this.vaultKeys.clear();
 		this.vaultKeyEntries.clear();
 		this.hydrated = false;
 		this.hydrating = false;
@@ -938,15 +1046,18 @@ export class VaultRepository {
 		},
 	): Promise<EncryptedData> {
 		const vaultKey = await this.decryptVaultKey(vaultId);
-		if (!options?.itemId) {
-			return this.crypto.encrypt(JSON.stringify(data), vaultKey);
+		try {
+			if (!options?.itemId) {
+				return this.crypto.encrypt(JSON.stringify(data), vaultKey, null);
+			}
+			return this.vaultCrypto.encryptItem(JSON.stringify(data), vaultKey, {
+				vaultId,
+				itemId: options.itemId,
+				version: options.version ?? 1,
+				userId: options.userId ?? (await this.resolveUserId()),
+			});
+		} finally {
+			await this.crypto.destroyKey(vaultKey);
 		}
-		const context = buildItemEncryptionContext({
-			vaultId,
-			itemId: options.itemId,
-			version: options.version ?? 1,
-			userId: options.userId ?? (await this.resolveUserId()),
-		});
-		return this.crypto.encrypt(JSON.stringify(data), vaultKey, context);
 	}
 }

@@ -2,24 +2,13 @@
  * Mobile Storage Service
  *
  * Two sibling singletons built over the two React Native ports:
- *   - `storage` (`AccountStore`) over the `PlatformPort` (expo-secure-store + sqlite `kv_store`)
+ *   - `storage` (`AccountStore`) over the `PlatformPort` and `CryptoPort`
  *   - `itemCache` (`ItemCache`) over the `RecordPort` (sqlite `records`, one row per record)
  *
- * They are siblings, not parent/child: `AccountStore` holds only a `PlatformPort` and can
- * never reach the cache, so every flow that has to drop both (sign-out, account removal)
+ * They are siblings, not parent/child: `AccountStore` can never reach the cache, so every
+ * flow that has to drop both (sign-out, account removal)
  * sequences them from the app.
  */
-
-// `AccountStore` mints the 32-byte `device_key` with `globalThis.crypto.getRandomValues`.
-// Hermes does not implement WebCrypto, React Native 0.81 installs no `crypto` global, and
-// Expo SDK 54's winter runtime (`expo/src/winter/runtime.native.ts`) installs `TextDecoder`,
-// `URL`, `structuredClone` and friends but **not** `crypto`. Without this polyfill the very
-// first session write on a real device throws
-// `TypeError: Cannot read property 'getRandomValues' of undefined`.
-//
-// The import must stay above the `@bittery/storage` import: it installs the global as a side
-// effect, and `createAccountStore` is called at module scope below.
-import "react-native-get-random-values";
 
 import {
 	type AccountStore,
@@ -31,18 +20,14 @@ import {
 	createReactNativePlatformPort,
 	createReactNativeRecordPort,
 } from "@bittery/storage/adapters/react-native";
-import { decrypt, encrypt, rsaDecrypt } from "../lib/crypto/native-crypto";
-
-// The mobile crypto backend has no key handles, so the three required methods are the whole
-// provider. Everything else on `CryptoProvider` is genuinely absent here.
-const cryptoProvider = { encrypt, decrypt, rsaDecrypt };
+import { crypto } from "../lib/crypto";
 
 const platformPort = createReactNativePlatformPort();
 const recordPort = createReactNativeRecordPort();
 
 export const storage: AccountStore = createAccountStore({
 	port: platformPort,
-	crypto: cryptoProvider,
+	crypto,
 });
 
 export const itemCache: ItemCache = createItemCache({ port: recordPort });

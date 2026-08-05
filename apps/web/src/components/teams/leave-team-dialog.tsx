@@ -1,7 +1,4 @@
-import {
-	getDecryptedVaultKey,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
@@ -20,7 +17,6 @@ import { IconLogOut as LogOut } from "@bittery/ui/icons";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { storage } from "@/lib/storage";
-import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 import { TeamRotationError } from "./team-rotation-error";
@@ -34,6 +30,8 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 	const [open, setOpen] = useState(false);
 	const [isLeaving, setIsLeaving] = useState(false);
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
+	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const navigate = useNavigate();
 	const { m } = useI18n();
@@ -83,13 +81,8 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 			}> = [];
 
 			for (const vaultData of leaveRotationData.vaults) {
-				const currentVaultKey = await getDecryptedVaultKey({
+				const currentVaultKey = await vaultCrypto.getVaultKey({
 					vaultId: vaultData.vaultId,
-					storage,
-					crypto: {
-						decrypt,
-						rsaDecrypt,
-					} as VaultKeyCryptoProvider,
 				});
 
 				if (!currentVaultKey) {
@@ -98,26 +91,32 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 					});
 				}
 
-				const rotationResult = await performKeyRotation(
-					currentVaultKey,
-					vaultData.members.map((m) => ({
-						userId: m.userId,
-						publicKey: m.publicKey,
-					})),
-					vaultData.items,
-					vaultData.vaultId,
-					vaultData.keyVersion + 1,
-					currentUserId,
-					masterUnlockKey,
-				);
+				try {
+					const rotationResult = await crypto.performKeyRotation(
+						currentVaultKey,
+						vaultData.members.map((m) => ({
+							userId: m.userId,
+							publicKey: m.publicKey,
+						})),
+						vaultData.items,
+						vaultData.vaultId,
+						vaultData.keyVersion + 1,
+						currentUserId,
+						masterUnlockKey,
+					);
 
-				vaultRotations.push({
-					vaultId: vaultData.vaultId,
-					keyRotation: {
-						memberKeys: rotationResult.memberEncryptedKeys,
-						reEncryptedItems: rotationResult.reEncryptedItems,
-					},
-				});
+					vaultRotations.push({
+						vaultId: vaultData.vaultId,
+						keyRotation: {
+							memberKeys: rotationResult.memberEncryptedKeys,
+							reEncryptedItems: rotationResult.reEncryptedItems,
+						},
+					});
+				} finally {
+					// `getVaultKey` mints a fresh ref per call; the store's master unlock key
+					// is not ours to touch.
+					await crypto.destroyKey(currentVaultKey);
+				}
 			}
 
 			await rpcClient.team.leave.mutate({

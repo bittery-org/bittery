@@ -5,6 +5,9 @@ import type {
 	Ephemeral,
 	HashAlgorithm,
 	KdfProfile,
+	NativePasskeyAssertion,
+	NativePasskeyAttestation,
+	PasskeyKeypair,
 	PrimeGroup,
 	RsaKeyPair,
 	Session,
@@ -52,6 +55,59 @@ export async function deriveKeys(
 			profile.iterations,
 		);
 		// Convert to Uint8Array to match DerivedKeys interface
+		return {
+			authKey: base64ToUint8Array(result.authKey),
+			masterUnlockKey: base64ToUint8Array(result.masterUnlockKey),
+		};
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.KeyDerivationFailed,
+			`Key derivation failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Derive the intermediate master key (PBKDF2 output) from password, secret key, and email.
+ * Uses the required, validated KDF profile exactly as supplied by the account.
+ * @returns Base64-encoded 32-byte master key
+ */
+export async function deriveMasterKey(
+	accountPassword: string,
+	secretKey: string,
+	email: string,
+	profile: KdfProfile,
+): Promise<string> {
+	try {
+		return await NativeModule.deriveMasterKey(
+			accountPassword,
+			secretKey,
+			email,
+			profile.schemaVersion,
+			profile.algorithm,
+			profile.iterations,
+		);
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.KeyDerivationFailed,
+			`Key derivation failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Split a raw master key into authentication and master unlock keys.
+ * @param masterKeyBase64 - Base64-encoded 32-byte master key
+ */
+export async function deriveKeysFromMasterKey(
+	masterKeyBase64: string,
+	email: string,
+): Promise<DerivedKeys> {
+	try {
+		const result = await NativeModule.deriveKeysFromMasterKey(
+			masterKeyBase64,
+			email,
+		);
 		return {
 			authKey: base64ToUint8Array(result.authKey),
 			masterUnlockKey: base64ToUint8Array(result.masterUnlockKey),
@@ -205,6 +261,13 @@ export function generateEncryptionKey(): string {
 	return NativeModule.generateEncryptionKey();
 }
 
+/**
+ * Generate a random UUID v4 string.
+ */
+export function generateUuid(): string {
+	return NativeModule.generateUuid();
+}
+
 // ============================================================================
 // RSA-4096
 // ============================================================================
@@ -290,6 +353,75 @@ export function validateSecretKey(secretKey: string): boolean {
  */
 export function getSecretKeyHint(secretKey: string): string {
 	return NativeModule.getSecretKeyHint(secretKey);
+}
+
+/**
+ * Generate a new recovery key in R1-XXXXXX format.
+ */
+export function generateRecoveryKey(): string {
+	return NativeModule.generateRecoveryKey();
+}
+
+/**
+ * Validate recovery key format.
+ */
+export function validateRecoveryKey(recoveryKey: string): boolean {
+	return NativeModule.validateRecoveryKey(recoveryKey);
+}
+
+/**
+ * Encrypt a raw master key using recovery key material.
+ * @param masterKeyBase64 - Base64-encoded 32-byte master key
+ */
+export async function encryptMasterKey(
+	masterKeyBase64: string,
+	recoveryKey: string,
+	email: string,
+): Promise<EncryptedData> {
+	try {
+		const result = await NativeModule.encryptMasterKey(
+			masterKeyBase64,
+			recoveryKey,
+			email,
+		);
+		return {
+			ciphertext: result.ciphertext,
+			iv: result.iv,
+			algorithm: result.algorithm,
+		};
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.EncryptionFailed,
+			`Encryption failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Decrypt an encrypted master key blob using the recovery key.
+ * @returns Base64-encoded 32-byte master key
+ */
+export async function decryptMasterKey(
+	ciphertext: string,
+	iv: string,
+	algorithm: string,
+	recoveryKey: string,
+	email: string,
+): Promise<string> {
+	try {
+		return await NativeModule.decryptMasterKey(
+			ciphertext,
+			iv,
+			algorithm,
+			recoveryKey,
+			email,
+		);
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.DecryptionFailed,
+			`Decryption failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 // ============================================================================
@@ -559,6 +691,98 @@ export function createSRPServer(
 }
 
 // ============================================================================
+// Passkey / WebAuthn
+// ============================================================================
+
+/**
+ * Generate a P-256 key pair for a new passkey (private key + COSE public key).
+ */
+export async function generatePasskeyKeypair(): Promise<PasskeyKeypair> {
+	try {
+		const result = await NativeModule.generatePasskeyKeypair();
+		return {
+			privateKey: result.privateKey,
+			publicKeyCose: result.publicKeyCose,
+		};
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.PasskeyOperationFailed,
+			`Passkey key generation failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Generate a random passkey credential ID.
+ * @returns Base64-encoded 32 random bytes
+ */
+export function generatePasskeyCredentialId(): string {
+	return NativeModule.generatePasskeyCredentialId();
+}
+
+/**
+ * Build a WebAuthn attestation object (authenticator data + attestation object)
+ * for passkey registration.
+ * @param credentialIdBase64 - Base64-encoded credential ID
+ * @param cosePublicKeyBase64 - Base64-encoded COSE public key
+ */
+export async function buildPasskeyAttestationObject(
+	rpId: string,
+	credentialIdBase64: string,
+	cosePublicKeyBase64: string,
+	signCount: number,
+): Promise<NativePasskeyAttestation> {
+	try {
+		const result = await NativeModule.buildPasskeyAttestationObject(
+			rpId,
+			credentialIdBase64,
+			cosePublicKeyBase64,
+			signCount,
+		);
+		return {
+			authenticatorData: result.authenticatorData,
+			attestationObject: result.attestationObject,
+		};
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.PasskeyOperationFailed,
+			`Passkey attestation failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Sign a WebAuthn assertion (authenticator data + signature) for passkey
+ * authentication.
+ * @param privateKeyBase64 - Base64-encoded P-256 private key
+ * @param clientDataHashBase64 - Base64-encoded SHA-256 hash of the client data
+ */
+export async function signPasskeyAssertion(
+	privateKeyBase64: string,
+	rpId: string,
+	clientDataHashBase64: string,
+	signCount: number,
+): Promise<NativePasskeyAssertion> {
+	try {
+		const result = await NativeModule.signPasskeyAssertion(
+			privateKeyBase64,
+			rpId,
+			clientDataHashBase64,
+			signCount,
+		);
+		return {
+			authenticatorData: result.authenticatorData,
+			signatureDer: result.signatureDer,
+		};
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.PasskeyOperationFailed,
+			`Passkey assertion failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+// ============================================================================
 // Key Rotation
 // ============================================================================
 
@@ -593,6 +817,88 @@ export interface KeyRotationResult {
 export interface ValidationResult {
 	valid: boolean;
 	errors: string[];
+}
+
+/**
+ * RSA-wrap a vault key for another member.
+ * @param vaultKeyBase64 - Vault key to wrap (base64)
+ * @param memberPublicKeyPem - PEM-encoded RSA public key of the recipient
+ * @returns Base64-encoded RSA ciphertext
+ */
+export async function encryptVaultKeyForMember(
+	vaultKeyBase64: string,
+	memberPublicKeyPem: string,
+): Promise<string> {
+	try {
+		return await NativeModule.encryptVaultKeyForMember(
+			vaultKeyBase64,
+			memberPublicKeyPem,
+		);
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.EncryptionFailed,
+			`Vault key encryption failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * AES-wrap a vault key for its owner using the Master Unlock Key.
+ * The returned JSON envelope (ciphertext plus wrap context) is built by the
+ * Rust core and is opaque here — this function passes it through verbatim.
+ */
+export async function encryptVaultKeyWithMuk(
+	vaultKeyBase64: string,
+	masterUnlockKeyBase64: string,
+	vaultId: string,
+	userId: string,
+	keyVersion: number,
+): Promise<string> {
+	try {
+		return await NativeModule.encryptVaultKeyWithMuk(
+			vaultKeyBase64,
+			masterUnlockKeyBase64,
+			vaultId,
+			userId,
+			keyVersion,
+		);
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.EncryptionFailed,
+			`Vault key encryption failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
+}
+
+/**
+ * Re-encrypt one item under a new vault key (decrypts with the old key,
+ * re-encrypts with the new one).
+ */
+export async function reEncryptItem(
+	item: ItemData,
+	oldVaultKeyBase64: string,
+	newVaultKeyBase64: string,
+): Promise<ReEncryptedItem> {
+	try {
+		const result = await NativeModule.reEncryptItem(
+			item.id,
+			item.encryptedData,
+			item.encryptionIv,
+			item.encryptionAlgorithm,
+			oldVaultKeyBase64,
+			newVaultKeyBase64,
+		);
+		return {
+			itemId: result.itemId,
+			encryptedData: result.encryptedData,
+			encryptionIv: result.encryptionIv,
+		};
+	} catch (error) {
+		throw new CryptoError(
+			ErrorCode.EncryptionFailed,
+			`Item re-encryption failed: ${error instanceof Error ? error.message : String(error)}`,
+		);
+	}
 }
 
 /**
@@ -686,8 +992,11 @@ export async function validateRotationData(
 		const result = await NativeModule.validateRotationData(membersJson);
 		const errors = JSON.parse(result.errorsJson) as string[];
 
+		// The native module resolves `valid` as a real boolean (Swift `Bool` /
+		// Kotlin `Boolean`), not the FFI's raw `i32` — matching every other
+		// boolean-returning member in this file (validateSecretKey, etc.).
 		return {
-			valid: result.valid === 1,
+			valid: result.valid,
 			errors,
 		};
 	} catch (error) {

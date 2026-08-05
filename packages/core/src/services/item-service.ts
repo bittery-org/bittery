@@ -1,7 +1,4 @@
-import {
-	getDecryptedVaultKey as getDecryptedVaultKeyUtil,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type {
 	DecryptedItem,
@@ -21,7 +18,6 @@ import type {
 	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
-	ICrypto,
 	RawEncryptedItem,
 	RawEncryptedItemWithVault,
 } from "@bittery/types";
@@ -36,8 +32,8 @@ import {
 	encryptAttachmentParts,
 	parseAttachmentBlobEnvelope,
 } from "./attachment-crypto";
-import { buildItemEncryptionContext } from "./encryption-context";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
+import type { ItemScope, VaultCrypto } from "./vault-crypto";
 
 export type { RawEncryptedItem, RawEncryptedItemWithVault };
 
@@ -176,32 +172,28 @@ interface ItemServiceDeps {
 	storage: AccountStore;
 	/** Sibling of `storage`, never reachable through it. See packages/storage/CONTEXT.md §3. */
 	itemCache: ItemCache;
-	crypto: ICrypto;
+	crypto: CryptoPort;
+	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
 }
 
 export class ItemService {
 	private readonly storage: AccountStore;
 	private readonly itemCache: ItemCache;
-	private readonly crypto: ICrypto;
+	private readonly crypto: CryptoPort;
+	private readonly vaultCrypto: VaultCrypto;
 	private readonly accounts: AccountResolver;
 
 	constructor(deps: ItemServiceDeps) {
 		this.storage = deps.storage;
 		this.itemCache = deps.itemCache;
 		this.crypto = deps.crypto;
+		this.vaultCrypto = deps.vaultCrypto;
 		this.accounts = deps.accounts;
 	}
 
 	async generateItemId(): Promise<string> {
-		if (this.crypto.generateUuid) {
-			return await this.crypto.generateUuid();
-		}
-		const random = globalThis?.crypto?.randomUUID?.();
-		if (random) {
-			return random;
-		}
-		return `item_${Date.now()}_${Math.random().toString(36).slice(2, 12)}`;
+		return this.crypto.generateUuid();
 	}
 
 	private async resolveUserId(scope?: string): Promise<string> {
@@ -210,10 +202,14 @@ export class ItemService {
 
 	async encryptItemData(
 		data: DecryptedItemData,
-		vaultKey: Uint8Array,
-		context?: Parameters<ICrypto["encrypt"]>[2],
+		vaultKey: KeyRef,
+		context: ItemScope,
 	): Promise<EncryptedPayload> {
-		return this.crypto.encrypt(JSON.stringify(data), vaultKey, context);
+		return this.vaultCrypto.encryptItem(
+			JSON.stringify(data),
+			vaultKey,
+			context,
+		);
 	}
 
 	mergeItemUpdate(
@@ -251,7 +247,7 @@ export class ItemService {
 
 	private async decryptItemPayload(
 		item: DecryptableItemRecord,
-		vaultKey: Uint8Array,
+		vaultKey: KeyRef,
 		fallbackUserId: string,
 	): Promise<string> {
 		const storedVersion =
@@ -263,21 +259,14 @@ export class ItemService {
 
 		for (const version of this.getVersionCandidates(storedVersion)) {
 			try {
-				const context = buildItemEncryptionContext({
-					vaultId: item.vaultId,
-					itemId: item.id,
-					version,
-					userId,
-				});
-
-				const decrypted = await this.crypto.decrypt(
+				const decrypted = await this.vaultCrypto.decryptItem(
 					{
 						ciphertext: item.encryptedData,
 						iv: item.encryptionIv,
 						algorithm: item.encryptionAlgorithm,
 					},
 					vaultKey,
-					context,
+					{ vaultId: item.vaultId, itemId: item.id, version, userId },
 				);
 
 				if (version !== storedVersion) {
@@ -295,24 +284,14 @@ export class ItemService {
 		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
 	}
 
-	async reEncryptForVault(
-		data: DecryptedItemData,
-		targetVaultKey: Uint8Array,
-		context?: Parameters<ICrypto["encrypt"]>[2],
-	): Promise<EncryptedPayload> {
-		return this.crypto.encrypt(JSON.stringify(data), targetVaultKey, context);
-	}
-
 	private async getVaultKey(
 		vaultId: string,
 		scope?: string,
-	): Promise<Uint8Array | null> {
+	): Promise<KeyRef | null> {
 		const accountId = await resolveAccountScopeId(this.storage, scope);
-		return getDecryptedVaultKeyUtil({
+		return this.vaultCrypto.getVaultKey({
 			vaultId,
 			accountId,
-			storage: this.storage,
-			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
 		});
 	}
 
@@ -486,69 +465,84 @@ export class ItemService {
 					enforcer.assertVerified(account.accountId);
 					rawItems = enforcer.filterItems(account.accountId, rawItems);
 
-					const vaultKeyCache = new Map<string, Uint8Array>();
-					const decrypted = await Promise.all(
-						rawItems.map(async (rawItem): Promise<MultiAccountItem | null> => {
+					const vaultKeyCache = new Map<string, KeyRef>();
+					try {
+						for (const vaultId of new Set(
+							rawItems.map((item) => item.vaultId),
+						)) {
 							try {
-								let vaultKey = vaultKeyCache.get(rawItem.vaultId);
-								if (!vaultKey) {
-									const fetchedKey = await this.getVaultKey(
-										rawItem.vaultId,
-										account.accountId,
-									);
-									if (fetchedKey) {
-										vaultKey = fetchedKey;
-										vaultKeyCache.set(rawItem.vaultId, fetchedKey);
-									}
-								}
-
-								if (!vaultKey) {
-									throw new Error(`No vault key for vault ${rawItem.vaultId}`);
-								}
-
-								const decryptedData = await this.decryptItemPayload(
-									rawItem,
-									vaultKey,
-									account.userId,
-								);
-
-								const parsedData = JSON.parse(
-									decryptedData,
-								) as DecryptedItemData;
-								return {
-									id: rawItem.id,
-									vaultId: rawItem.vaultId,
-									category: rawItem.category as ItemCategory,
-									favorite: rawItem.favorite,
-									createdAt: String(rawItem.createdAt),
-									updatedAt: String(rawItem.updatedAt),
-									...parsedData,
-									_encrypted: {
-										data: rawItem.encryptedData,
-										iv: rawItem.encryptionIv,
-										algorithm: rawItem.encryptionAlgorithm,
-									},
-									vault: {
-										id: rawItem.vault.id,
-										name: rawItem.vault.name,
-										type: rawItem.vault.type,
-										icon: rawItem.vault.icon,
-										imageUrl: rawItem.vault.imageUrl,
-									},
-								} as MultiAccountItem;
+								const key = await this.getVaultKey(vaultId, account.accountId);
+								if (key) vaultKeyCache.set(vaultId, key);
 							} catch (error) {
 								console.error(
-									`[ItemService] Failed to decrypt item ${rawItem.id} for ${account.email}:`,
+									`[ItemService] Failed to open vault key ${vaultId} for ${account.email}:`,
 									error,
 								);
-								return null;
 							}
-						}),
-					);
+						}
+						const decrypted = await Promise.all(
+							rawItems.map(
+								async (rawItem): Promise<MultiAccountItem | null> => {
+									try {
+										const vaultKey = vaultKeyCache.get(rawItem.vaultId);
 
-					return decrypted.filter(
-						(item): item is MultiAccountItem => item !== null,
-					);
+										if (!vaultKey) {
+											throw new Error(
+												`No vault key for vault ${rawItem.vaultId}`,
+											);
+										}
+
+										const decryptedData = await this.decryptItemPayload(
+											rawItem,
+											vaultKey,
+											account.userId,
+										);
+
+										const parsedData = JSON.parse(
+											decryptedData,
+										) as DecryptedItemData;
+										return {
+											id: rawItem.id,
+											vaultId: rawItem.vaultId,
+											category: rawItem.category as ItemCategory,
+											favorite: rawItem.favorite,
+											createdAt: String(rawItem.createdAt),
+											updatedAt: String(rawItem.updatedAt),
+											...parsedData,
+											_encrypted: {
+												data: rawItem.encryptedData,
+												iv: rawItem.encryptionIv,
+												algorithm: rawItem.encryptionAlgorithm,
+											},
+											vault: {
+												id: rawItem.vault.id,
+												name: rawItem.vault.name,
+												type: rawItem.vault.type,
+												icon: rawItem.vault.icon,
+												imageUrl: rawItem.vault.imageUrl,
+											},
+										} as MultiAccountItem;
+									} catch (error) {
+										console.error(
+											`[ItemService] Failed to decrypt item ${rawItem.id} for ${account.email}:`,
+											error,
+										);
+										return null;
+									}
+								},
+							),
+						);
+
+						return decrypted.filter(
+							(item): item is MultiAccountItem => item !== null,
+						);
+					} finally {
+						await Promise.all(
+							Array.from(vaultKeyCache.values(), (key) =>
+								this.crypto.destroyKey(key),
+							),
+						);
+					}
 				} catch (error) {
 					console.error(
 						`[ItemService] Failed to fetch items for ${account.email}:`,
@@ -631,45 +625,48 @@ export class ItemService {
 		if (!vaultKey) {
 			throw new Error(`No vault key found for vault ${vaultId}`);
 		}
+		try {
+			const decryptedItems = await Promise.all(
+				rawItems.map(async (item) => {
+					try {
+						const decryptedData = await this.decryptItemPayload(
+							item,
+							vaultKey,
+							ownerAccount.userId,
+						);
 
-		const decryptedItems = await Promise.all(
-			rawItems.map(async (item) => {
-				try {
-					const decryptedData = await this.decryptItemPayload(
-						item,
-						vaultKey,
-						ownerAccount.userId,
-					);
+						const parsedData = JSON.parse(decryptedData) as DecryptedItemData;
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							category: item.category as ItemCategory,
+							favorite: item.favorite,
+							createdAt: String(item.createdAt),
+							updatedAt: String(item.updatedAt),
+							...parsedData,
+						} satisfies DecryptedItem;
+					} catch (error) {
+						console.error(
+							`[ItemService] Failed to decrypt item ${item.id}:`,
+							error,
+						);
+						return {
+							id: item.id,
+							vaultId: item.vaultId,
+							category: item.category as ItemCategory,
+							favorite: item.favorite,
+							createdAt: String(item.createdAt),
+							updatedAt: String(item.updatedAt),
+							title: "[Decryption Failed]",
+						} satisfies DecryptedItem;
+					}
+				}),
+			);
 
-					const parsedData = JSON.parse(decryptedData) as DecryptedItemData;
-					return {
-						id: item.id,
-						vaultId: item.vaultId,
-						category: item.category as ItemCategory,
-						favorite: item.favorite,
-						createdAt: String(item.createdAt),
-						updatedAt: String(item.updatedAt),
-						...parsedData,
-					} satisfies DecryptedItem;
-				} catch (error) {
-					console.error(
-						`[ItemService] Failed to decrypt item ${item.id}:`,
-						error,
-					);
-					return {
-						id: item.id,
-						vaultId: item.vaultId,
-						category: item.category as ItemCategory,
-						favorite: item.favorite,
-						createdAt: String(item.createdAt),
-						updatedAt: String(item.updatedAt),
-						title: "[Decryption Failed]",
-					} satisfies DecryptedItem;
-				}
-			}),
-		);
-
-		return decryptedItems;
+			return decryptedItems;
+		} finally {
+			await this.crypto.destroyKey(vaultKey);
+		}
 	}
 
 	async fetchAndDecryptItem(
@@ -737,17 +734,20 @@ export class ItemService {
 				`No vault key found for decryption${accountEmail ? ` (account: ${accountEmail})` : ""}`,
 			);
 		}
+		try {
+			const decryptedJson = await this.decryptItemPayload(
+				rawItem,
+				vaultKey,
+				await this.resolveUserId(accountEmail),
+			);
 
-		const decryptedJson = await this.decryptItemPayload(
-			rawItem,
-			vaultKey,
-			await this.resolveUserId(accountEmail),
-		);
-
-		return {
-			rawItem,
-			decryptedData: JSON.parse(decryptedJson) as DecryptedItemData,
-		};
+			return {
+				rawItem,
+				decryptedData: JSON.parse(decryptedJson) as DecryptedItemData,
+			};
+		} finally {
+			await this.crypto.destroyKey(vaultKey);
+		}
 	}
 
 	async fetchDeletedItems(
@@ -792,74 +792,85 @@ export class ItemService {
 					enforcer.assertVerified(account.accountId);
 					rawItems = enforcer.filterItems(account.accountId, rawItems);
 
-					const vaultKeyCache = new Map<string, Uint8Array>();
-					const decrypted = await Promise.all(
-						rawItems.map(
-							async (rawItem): Promise<MultiAccountDeletedItem | null> => {
-								try {
-									let vaultKey = vaultKeyCache.get(rawItem.vaultId);
-									if (!vaultKey) {
-										const fetchedKey = await this.getVaultKey(
-											rawItem.vaultId,
-											account.accountId,
-										);
-										if (fetchedKey) {
-											vaultKey = fetchedKey;
-											vaultKeyCache.set(rawItem.vaultId, fetchedKey);
+					const vaultKeyCache = new Map<string, KeyRef>();
+					try {
+						for (const vaultId of new Set(
+							rawItems.map((item) => item.vaultId),
+						)) {
+							try {
+								const key = await this.getVaultKey(vaultId, account.accountId);
+								if (key) vaultKeyCache.set(vaultId, key);
+							} catch (error) {
+								console.error(
+									`[ItemService] Failed to open vault key ${vaultId} for ${account.email}:`,
+									error,
+								);
+							}
+						}
+						const decrypted = await Promise.all(
+							rawItems.map(
+								async (rawItem): Promise<MultiAccountDeletedItem | null> => {
+									try {
+										const vaultKey = vaultKeyCache.get(rawItem.vaultId);
+
+										if (!vaultKey) {
+											throw new Error(
+												`No vault key for vault ${rawItem.vaultId}`,
+											);
 										}
-									}
 
-									if (!vaultKey) {
-										throw new Error(
-											`No vault key for vault ${rawItem.vaultId}`,
+										const decryptedData = await this.decryptItemPayload(
+											rawItem,
+											vaultKey,
+											account.userId,
 										);
+
+										const parsedData = JSON.parse(decryptedData) as Record<
+											string,
+											unknown
+										>;
+										const deletedAt = rawItem.deletedAt
+											? rawItem.deletedAt
+											: new Date().toISOString();
+
+										return {
+											id: rawItem.id,
+											vaultId: rawItem.vaultId,
+											category: rawItem.category as ItemCategory,
+											favorite: rawItem.favorite,
+											createdAt: rawItem.createdAt,
+											updatedAt: rawItem.updatedAt,
+											deletedAt,
+											...parsedData,
+											vault: {
+												id: rawItem.vault.id,
+												name: rawItem.vault.name,
+												type: rawItem.vault.type,
+												icon: rawItem.vault.icon,
+												imageUrl: rawItem.vault.imageUrl,
+											},
+										} as MultiAccountDeletedItem;
+									} catch (error) {
+										console.error(
+											`[ItemService] Failed to decrypt deleted item ${rawItem.id} for ${account.email}:`,
+											error,
+										);
+										return null;
 									}
+								},
+							),
+						);
 
-									const decryptedData = await this.decryptItemPayload(
-										rawItem,
-										vaultKey,
-										account.userId,
-									);
-
-									const parsedData = JSON.parse(decryptedData) as Record<
-										string,
-										unknown
-									>;
-									const deletedAt = rawItem.deletedAt
-										? rawItem.deletedAt
-										: new Date().toISOString();
-
-									return {
-										id: rawItem.id,
-										vaultId: rawItem.vaultId,
-										category: rawItem.category as ItemCategory,
-										favorite: rawItem.favorite,
-										createdAt: rawItem.createdAt,
-										updatedAt: rawItem.updatedAt,
-										deletedAt,
-										...parsedData,
-										vault: {
-											id: rawItem.vault.id,
-											name: rawItem.vault.name,
-											type: rawItem.vault.type,
-											icon: rawItem.vault.icon,
-											imageUrl: rawItem.vault.imageUrl,
-										},
-									} as MultiAccountDeletedItem;
-								} catch (error) {
-									console.error(
-										`[ItemService] Failed to decrypt deleted item ${rawItem.id} for ${account.email}:`,
-										error,
-									);
-									return null;
-								}
-							},
-						),
-					);
-
-					return decrypted.filter(
-						(item): item is MultiAccountDeletedItem => item !== null,
-					);
+						return decrypted.filter(
+							(item): item is MultiAccountDeletedItem => item !== null,
+						);
+					} finally {
+						await Promise.all(
+							Array.from(vaultKeyCache.values(), (key) =>
+								this.crypto.destroyKey(key),
+							),
+						);
+					}
 				} catch (error) {
 					console.error(
 						`[ItemService] Failed to fetch deleted items for ${account.email}:`,
@@ -881,56 +892,59 @@ export class ItemService {
 		if (!vaultKey) {
 			throw new Error("No vault key found. Please sign in again.");
 		}
+		try {
+			const itemId = await this.generateItemId();
+			const userId = await this.resolveUserId(input.accountEmail);
+			const context: ItemScope = {
+				vaultId: input.vaultId,
+				itemId,
+				version: 1,
+				userId,
+			};
 
-		const itemId = await this.generateItemId();
-		const userId = await this.resolveUserId(input.accountEmail);
-		const context = buildItemEncryptionContext({
-			vaultId: input.vaultId,
-			itemId,
-			version: 1,
-			userId,
-		});
+			const encryptedData = await this.vaultCrypto.encryptItem(
+				JSON.stringify(input.data),
+				vaultKey,
+				context,
+			);
 
-		const encryptedData = await this.crypto.encrypt(
-			JSON.stringify(input.data),
-			vaultKey,
-			context,
-		);
+			const accountId = await resolveAccountScopeId(
+				this.storage,
+				input.accountEmail,
+			);
+			const client = await this.accounts.getClientForAccount(
+				defaultClient,
+				accountId,
+			);
 
-		const accountId = await resolveAccountScopeId(
-			this.storage,
-			input.accountEmail,
-		);
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
+			const result = (await client.vault.createItem.mutate({
+				itemId,
+				vaultId: input.vaultId,
+				category: input.category,
+				encryptedData: encryptedData.ciphertext,
+				encryptionIv: encryptedData.iv,
+				encryptionAlgorithm: encryptedData.algorithm,
+				clientId: null,
+			})) as { itemId?: string; id?: string };
 
-		const result = (await client.vault.createItem.mutate({
-			itemId,
-			vaultId: input.vaultId,
-			category: input.category,
-			encryptedData: encryptedData.ciphertext,
-			encryptionIv: encryptedData.iv,
-			encryptionAlgorithm: encryptedData.algorithm,
-			clientId: null,
-		})) as { itemId?: string; id?: string };
+			const fallbackId =
+				result.id && result.id !== input.vaultId ? result.id : undefined;
+			const createdItemId = result.itemId ?? fallbackId;
+			if (!createdItemId) {
+				throw new Error("Failed to create item");
+			}
+			if (createdItemId !== itemId) {
+				throw new Error("Server returned mismatched item ID");
+			}
 
-		const fallbackId =
-			result.id && result.id !== input.vaultId ? result.id : undefined;
-		const createdItemId = result.itemId ?? fallbackId;
-		if (!createdItemId) {
-			throw new Error("Failed to create item");
+			return {
+				itemId,
+				_encryptedData: encryptedData,
+				_accountEmail: input.accountEmail,
+			};
+		} finally {
+			await this.crypto.destroyKey(vaultKey);
 		}
-		if (createdItemId !== itemId) {
-			throw new Error("Server returned mismatched item ID");
-		}
-
-		return {
-			itemId,
-			_encryptedData: encryptedData,
-			_accountEmail: input.accountEmail,
-		};
 	}
 
 	async updateItem(
@@ -941,63 +955,69 @@ export class ItemService {
 		if (!vaultKey) {
 			throw new Error("No vault key found. Please sign in again.");
 		}
+		try {
+			let encryptedPayload: Partial<DecryptedItemData> = input.data;
+			const { rawItem, decryptedData } = await this.fetchAndDecryptItem(
+				input.itemId,
+				defaultClient,
+				input.accountEmail,
+			);
 
-		let encryptedPayload: Partial<DecryptedItemData> = input.data;
-		const { rawItem, decryptedData } = await this.fetchAndDecryptItem(
-			input.itemId,
-			defaultClient,
-			input.accountEmail,
-		);
+			if (rawItem?.category === "login" && decryptedData) {
+				const mergedLoginData: DecryptedItemData = {
+					...decryptedData,
+					...input.data,
+				};
 
-		if (rawItem?.category === "login" && decryptedData) {
-			const mergedLoginData: DecryptedItemData = {
-				...decryptedData,
-				...input.data,
+				mergedLoginData.passwordHistory = applyPasswordHistoryOnPasswordChange({
+					passwordHistory: mergedLoginData.passwordHistory,
+					previousPassword: decryptedData.password,
+					nextPassword: mergedLoginData.password,
+				});
+
+				encryptedPayload = mergedLoginData;
+			}
+
+			const userId = await this.resolveUserId(input.accountEmail);
+			const nextVersion = (rawItem?.version ?? 1) + 1;
+			const context: ItemScope = {
+				vaultId: input.vaultId,
+				itemId: input.itemId,
+				version: nextVersion,
+				userId,
 			};
 
-			mergedLoginData.passwordHistory = applyPasswordHistoryOnPasswordChange({
-				passwordHistory: mergedLoginData.passwordHistory,
-				previousPassword: decryptedData.password,
-				nextPassword: mergedLoginData.password,
+			const encryptedData = await this.vaultCrypto.encryptItem(
+				JSON.stringify(encryptedPayload),
+				vaultKey,
+				context,
+			);
+
+			const accountId = await resolveAccountScopeId(
+				this.storage,
+				input.accountEmail,
+			);
+			const client = await this.accounts.getClientForAccount(
+				defaultClient,
+				accountId,
+			);
+
+			await client.vault.updateItem.mutate({
+				itemId: input.itemId,
+				encryptedData: encryptedData.ciphertext,
+				encryptionIv: encryptedData.iv,
+				encryptionAlgorithm: encryptedData.algorithm,
+				expectedVersion: rawItem?.version ?? null,
+				clientId: null,
 			});
 
-			encryptedPayload = mergedLoginData;
+			return {
+				_encryptedData: encryptedData,
+				_accountEmail: input.accountEmail,
+			};
+		} finally {
+			await this.crypto.destroyKey(vaultKey);
 		}
-
-		const userId = await this.resolveUserId(input.accountEmail);
-		const nextVersion = (rawItem?.version ?? 1) + 1;
-		const context = buildItemEncryptionContext({
-			vaultId: input.vaultId,
-			itemId: input.itemId,
-			version: nextVersion,
-			userId,
-		});
-
-		const encryptedData = await this.crypto.encrypt(
-			JSON.stringify(encryptedPayload),
-			vaultKey,
-			context,
-		);
-
-		const accountId = await resolveAccountScopeId(
-			this.storage,
-			input.accountEmail,
-		);
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
-
-		await client.vault.updateItem.mutate({
-			itemId: input.itemId,
-			encryptedData: encryptedData.ciphertext,
-			encryptionIv: encryptedData.iv,
-			encryptionAlgorithm: encryptedData.algorithm,
-			expectedVersion: rawItem?.version ?? null,
-			clientId: null,
-		});
-
-		return { _encryptedData: encryptedData, _accountEmail: input.accountEmail };
 	}
 
 	/**
@@ -1014,7 +1034,7 @@ export class ItemService {
 		sourceVaultId: string;
 		targetVaultId: string;
 		sourceAccountEmail?: string;
-		targetVaultKey: Uint8Array;
+		targetVaultKey: KeyRef;
 		targetUserId: string;
 	}): Promise<void> {
 		const attachments = await params.sourceClient.vault.listAttachments.query({
@@ -1034,89 +1054,92 @@ export class ItemService {
 			);
 		}
 		const sourceUserId = await this.resolveUserId(params.sourceAccountEmail);
+		try {
+			for (const attachment of attachments) {
+				// Fetch the encrypted blob envelope from object storage.
+				const download =
+					await params.sourceClient.vault.getAttachmentDownloadUrl.mutate({
+						attachmentId: attachment.id,
+					});
+				const response = await fetch(download.downloadUrl);
+				if (!response.ok) {
+					throw new Error(
+						`Failed to download attachment ${attachment.id} during cross-account move.`,
+					);
+				}
+				const blobEnvelope = parseAttachmentBlobEnvelope(await response.text());
 
-		for (const attachment of attachments) {
-			// Fetch the encrypted blob envelope from object storage.
-			const download =
-				await params.sourceClient.vault.getAttachmentDownloadUrl.mutate({
-					attachmentId: attachment.id,
-				});
-			const response = await fetch(download.downloadUrl);
-			if (!response.ok) {
-				throw new Error(
-					`Failed to download attachment ${attachment.id} during cross-account move.`,
+				// Decrypt under the SOURCE scope (source vault key + source AAD). The
+				// attachment's own uploader is used for context binding when present,
+				// mirroring the read paths in useItemAttachments.
+				const decrypted = await decryptAttachmentParts(
+					this.vaultCrypto,
+					sourceVaultKey,
+					{
+						vaultId: params.sourceVaultId,
+						attachmentKey: attachment.storageKey,
+						userId: attachment.uploadedBy || sourceUserId,
+					},
+					{
+						blobEnvelope,
+						encryptedName: attachment.encryptedName,
+						encryptedContentType: attachment.encryptedContentType,
+						encryptionIv: attachment.encryptionIv,
+						encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+						encryptionAlgorithm: attachment.encryptionAlgorithm,
+					},
 				);
-			}
-			const blobEnvelope = parseAttachmentBlobEnvelope(await response.text());
 
-			// Decrypt under the SOURCE scope (source vault key + source AAD). The
-			// attachment's own uploader is used for context binding when present,
-			// mirroring the read paths in useItemAttachments.
-			const decrypted = await decryptAttachmentParts(
-				this.crypto,
-				sourceVaultKey,
-				{
-					vaultId: params.sourceVaultId,
-					attachmentKey: attachment.storageKey,
-					userId: attachment.uploadedBy || sourceUserId,
-				},
-				{
-					blobEnvelope,
-					encryptedName: attachment.encryptedName,
-					encryptedContentType: attachment.encryptedContentType,
-					encryptionIv: attachment.encryptionIv,
-					encryptedContentTypeIv: attachment.encryptedContentTypeIv,
-					encryptionAlgorithm: attachment.encryptionAlgorithm,
-				},
-			);
+				// Mint a NEW server-signed storage key on the target. Quota errors
+				// (file-too-large / storage-limit-reached) reject here and propagate,
+				// aborting the move with the source left intact. The name/content-type
+				// passed here are only used for the storage object itself, so we keep
+				// them opaque (like useItemAttachments) to avoid leaking plaintext.
+				const upload =
+					await params.targetClient.vault.createAttachmentUpload.mutate({
+						itemId: params.targetItemId,
+						fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
+						contentType: "application/octet-stream",
+						fileSize: attachment.fileSize,
+					});
 
-			// Mint a NEW server-signed storage key on the target. Quota errors
-			// (file-too-large / storage-limit-reached) reject here and propagate,
-			// aborting the move with the source left intact. The name/content-type
-			// passed here are only used for the storage object itself, so we keep
-			// them opaque (like useItemAttachments) to avoid leaking plaintext.
-			const upload =
-				await params.targetClient.vault.createAttachmentUpload.mutate({
+				// Re-encrypt under the TARGET scope (target vault key + target AAD bound
+				// to the freshly-minted storage key).
+				const reEncrypted = await encryptAttachmentParts(
+					this.vaultCrypto,
+					params.targetVaultKey,
+					{
+						vaultId: params.targetVaultId,
+						attachmentKey: upload.key,
+						userId: params.targetUserId,
+					},
+					decrypted,
+				);
+
+				const putResponse = await fetch(upload.uploadUrl, {
+					method: "PUT",
+					headers: { "Content-Type": "application/octet-stream" },
+					body: encodeAttachmentBlobEnvelope(reEncrypted.blobEnvelope),
+				});
+				if (!putResponse.ok) {
+					throw new Error(
+						`Failed to upload migrated attachment for item ${params.targetItemId}.`,
+					);
+				}
+
+				await params.targetClient.vault.createAttachment.mutate({
 					itemId: params.targetItemId,
-					fileName: `${globalThis.crypto?.randomUUID?.() ?? Date.now()}.enc`,
-					contentType: "application/octet-stream",
+					storageKey: upload.key,
+					encryptedName: reEncrypted.encryptedName,
+					encryptedContentType: reEncrypted.encryptedContentType,
+					encryptionIv: reEncrypted.encryptionIv,
+					encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
+					encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
 					fileSize: attachment.fileSize,
 				});
-
-			// Re-encrypt under the TARGET scope (target vault key + target AAD bound
-			// to the freshly-minted storage key).
-			const reEncrypted = await encryptAttachmentParts(
-				this.crypto,
-				params.targetVaultKey,
-				{
-					vaultId: params.targetVaultId,
-					attachmentKey: upload.key,
-					userId: params.targetUserId,
-				},
-				decrypted,
-			);
-
-			const putResponse = await fetch(upload.uploadUrl, {
-				method: "PUT",
-				headers: { "Content-Type": "application/octet-stream" },
-				body: encodeAttachmentBlobEnvelope(reEncrypted.blobEnvelope),
-			});
-			if (!putResponse.ok) {
-				throw new Error(
-					`Failed to upload migrated attachment for item ${params.targetItemId}.`,
-				);
 			}
-
-			await params.targetClient.vault.createAttachment.mutate({
-				itemId: params.targetItemId,
-				storageKey: upload.key,
-				encryptedName: reEncrypted.encryptedName,
-				encryptedContentType: reEncrypted.encryptedContentType,
-				encryptionIv: reEncrypted.encryptionIv,
-				encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
-				encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
-				fileSize: attachment.fileSize,
-			});
+		} finally {
+			await this.crypto.destroyKey(sourceVaultKey);
 		}
 	}
 
@@ -1203,149 +1226,152 @@ export class ItemService {
 				"Cannot access target vault key. Please unlock the target account.",
 			);
 		}
+		try {
+			const targetItemId = isCrossAccount
+				? await this.generateItemId()
+				: input.itemId;
+			let targetVersion = 1;
+			if (!isCrossAccount) {
+				const sourceItem = await this.fetchAndDecryptItem(
+					input.itemId,
+					defaultClient,
+					sourceAccountEmail,
+				);
+				targetVersion = (sourceItem.rawItem?.version ?? 1) + 1;
+			}
 
-		const targetItemId = isCrossAccount
-			? await this.generateItemId()
-			: input.itemId;
-		let targetVersion = 1;
-		if (!isCrossAccount) {
-			const sourceItem = await this.fetchAndDecryptItem(
-				input.itemId,
-				defaultClient,
-				sourceAccountEmail,
-			);
-			targetVersion = (sourceItem.rawItem?.version ?? 1) + 1;
-		}
-
-		const targetUserId = await this.resolveUserId(targetAccountEmail);
-		const context = buildItemEncryptionContext({
-			vaultId: input.targetVaultId,
-			itemId: targetItemId,
-			version: targetVersion,
-			userId: targetUserId,
-		});
-
-		const encryptedData = await this.crypto.encrypt(
-			JSON.stringify(input.decryptedData),
-			targetVaultKey,
-			context,
-		);
-
-		if (isCrossAccount) {
-			const targetClient = await this.accounts.getClientForAccount(
-				defaultClient,
-				targetAccountId,
-			);
-			const createResult = (await targetClient.vault.createItem.mutate({
-				itemId: targetItemId,
+			const targetUserId = await this.resolveUserId(targetAccountEmail);
+			const context: ItemScope = {
 				vaultId: input.targetVaultId,
-				category: input.category,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptionAlgorithm: encryptedData.algorithm,
-				clientId: null,
-			})) as {
-				itemId?: string;
-				id?: string;
+				itemId: targetItemId,
+				version: targetVersion,
+				userId: targetUserId,
 			};
 
-			const fallbackId =
-				createResult.id && createResult.id !== input.targetVaultId
-					? createResult.id
-					: undefined;
-			const newItemId = createResult.itemId ?? fallbackId;
-			if (!newItemId) {
-				throw new Error("Failed to create item in target account");
-			}
-			if (newItemId !== targetItemId) {
-				throw new Error("Server returned mismatched item ID");
+			const encryptedData = await this.vaultCrypto.encryptItem(
+				JSON.stringify(input.decryptedData),
+				targetVaultKey,
+				context,
+			);
+
+			if (isCrossAccount) {
+				const targetClient = await this.accounts.getClientForAccount(
+					defaultClient,
+					targetAccountId,
+				);
+				const createResult = (await targetClient.vault.createItem.mutate({
+					itemId: targetItemId,
+					vaultId: input.targetVaultId,
+					category: input.category,
+					encryptedData: encryptedData.ciphertext,
+					encryptionIv: encryptedData.iv,
+					encryptionAlgorithm: encryptedData.algorithm,
+					clientId: null,
+				})) as {
+					itemId?: string;
+					id?: string;
+				};
+
+				const fallbackId =
+					createResult.id && createResult.id !== input.targetVaultId
+						? createResult.id
+						: undefined;
+				const newItemId = createResult.itemId ?? fallbackId;
+				if (!newItemId) {
+					throw new Error("Failed to create item in target account");
+				}
+				if (newItemId !== targetItemId) {
+					throw new Error("Server returned mismatched item ID");
+				}
+
+				const sourceClient = await this.accounts.getClientForAccount(
+					defaultClient,
+					sourceAccountId,
+				);
+
+				// Migrate attachment blobs onto the newly-created target item BEFORE the
+				// source item is deleted. Attachment ciphertext cannot be copied as-is:
+				// the vault key, and the AAD's vaultId/userId/attachmentKey all differ on
+				// the target, so every attachment is downloaded, decrypted under the
+				// source scope and re-encrypted + re-uploaded under a fresh, server-minted
+				// target storage key.
+				//
+				// Partial-failure policy: the move is already non-atomic, so we optimise
+				// for NEVER losing data. If any attachment step throws (including target
+				// quota errors from createAttachmentUpload) we do NOT delete the source —
+				// its item and attachments stay intact for a retry — and we best-effort
+				// remove the partially-created target item so no orphan/duplicate lingers.
+				try {
+					await this.migrateAttachmentsForCrossAccountMove({
+						sourceClient,
+						targetClient,
+						sourceItemId: input.itemId,
+						targetItemId,
+						sourceVaultId: input.sourceVaultId,
+						targetVaultId: input.targetVaultId,
+						sourceAccountEmail,
+						targetVaultKey,
+						targetUserId,
+					});
+				} catch (error) {
+					await this.bestEffortDeleteTargetItem(targetClient, targetItemId);
+					throw error instanceof Error
+						? error
+						: new Error(
+								"Failed to migrate attachments during cross-account move. The original item was left intact.",
+							);
+				}
+
+				try {
+					await sourceClient.vault.deleteItem.mutate({
+						itemId: input.itemId,
+						clientId: null,
+					});
+					await sourceClient.vault.permanentlyDeleteItem.mutate({
+						itemId: input.itemId,
+						clientId: null,
+					});
+				} catch (error) {
+					console.error(
+						"[ItemService] Failed to delete source item after cross-account move:",
+						error,
+					);
+					throw new Error(
+						"Item created in target account but failed to delete from source. Please delete the original item manually.",
+					);
+				}
+
+				return {
+					crossAccount: true,
+					newItemId,
+					_encryptedData: encryptedData,
+					_sourceAccountEmail: sourceAccountEmail,
+					_targetAccountEmail: targetAccountEmail,
+				};
 			}
 
 			const sourceClient = await this.accounts.getClientForAccount(
 				defaultClient,
 				sourceAccountId,
 			);
-
-			// Migrate attachment blobs onto the newly-created target item BEFORE the
-			// source item is deleted. Attachment ciphertext cannot be copied as-is:
-			// the vault key, and the AAD's vaultId/userId/attachmentKey all differ on
-			// the target, so every attachment is downloaded, decrypted under the
-			// source scope and re-encrypted + re-uploaded under a fresh, server-minted
-			// target storage key.
-			//
-			// Partial-failure policy: the move is already non-atomic, so we optimise
-			// for NEVER losing data. If any attachment step throws (including target
-			// quota errors from createAttachmentUpload) we do NOT delete the source —
-			// its item and attachments stay intact for a retry — and we best-effort
-			// remove the partially-created target item so no orphan/duplicate lingers.
-			try {
-				await this.migrateAttachmentsForCrossAccountMove({
-					sourceClient,
-					targetClient,
-					sourceItemId: input.itemId,
-					targetItemId,
-					sourceVaultId: input.sourceVaultId,
-					targetVaultId: input.targetVaultId,
-					sourceAccountEmail,
-					targetVaultKey,
-					targetUserId,
-				});
-			} catch (error) {
-				await this.bestEffortDeleteTargetItem(targetClient, targetItemId);
-				throw error instanceof Error
-					? error
-					: new Error(
-							"Failed to migrate attachments during cross-account move. The original item was left intact.",
-						);
-			}
-
-			try {
-				await sourceClient.vault.deleteItem.mutate({
-					itemId: input.itemId,
-					clientId: null,
-				});
-				await sourceClient.vault.permanentlyDeleteItem.mutate({
-					itemId: input.itemId,
-					clientId: null,
-				});
-			} catch (error) {
-				console.error(
-					"[ItemService] Failed to delete source item after cross-account move:",
-					error,
-				);
-				throw new Error(
-					"Item created in target account but failed to delete from source. Please delete the original item manually.",
-				);
-			}
+			await sourceClient.vault.moveItem.mutate({
+				itemId: input.itemId,
+				sourceVaultId: input.sourceVaultId,
+				targetVaultId: input.targetVaultId,
+				encryptedData: encryptedData.ciphertext,
+				encryptionIv: encryptedData.iv,
+				encryptionAlgorithm: encryptedData.algorithm,
+				clientId: null,
+			});
 
 			return {
-				crossAccount: true,
-				newItemId,
+				crossAccount: false,
 				_encryptedData: encryptedData,
 				_sourceAccountEmail: sourceAccountEmail,
 				_targetAccountEmail: targetAccountEmail,
 			};
+		} finally {
+			await this.crypto.destroyKey(targetVaultKey);
 		}
-
-		const sourceClient = await this.accounts.getClientForAccount(
-			defaultClient,
-			sourceAccountId,
-		);
-		await sourceClient.vault.moveItem.mutate({
-			itemId: input.itemId,
-			sourceVaultId: input.sourceVaultId,
-			targetVaultId: input.targetVaultId,
-			encryptedData: encryptedData.ciphertext,
-			encryptionIv: encryptedData.iv,
-			encryptionAlgorithm: encryptedData.algorithm,
-			clientId: null,
-		});
-
-		return {
-			crossAccount: false,
-			_encryptedData: encryptedData,
-			_sourceAccountEmail: sourceAccountEmail,
-			_targetAccountEmail: targetAccountEmail,
-		};
 	}
 }

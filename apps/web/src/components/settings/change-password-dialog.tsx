@@ -1,9 +1,11 @@
+import { usePlatformCrypto } from "@bittery/core/hooks";
 import {
-	buildVaultKeyEncryptionContext,
-	isAesEncryptedVaultKey,
-} from "@bittery/shared";
-import { currentKdfProfile } from "@bittery/shared/kdf-policy";
+	changeAccountPassword,
+	InvalidAccountPasswordError,
+	LocalKeyAdoptionError,
+} from "@bittery/core/services/vault-crypto";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import {
 	Button,
 	Dialog,
@@ -22,16 +24,10 @@ import {
 	IconEyeOff as EyeOff,
 	IconKey as Key,
 } from "@bittery/ui/icons";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
-import { getActiveAccountKdfProfile, storage } from "@/lib/storage";
-import {
-	decrypt,
-	deriveKeys,
-	encrypt,
-	generateSRPRegistration,
-} from "@/lib/wasm-crypto";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
@@ -45,32 +41,11 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 	const [isProcessing, setIsProcessing] = useState(false);
 	const rpcClient = useRPCClient();
 	const rpc = useRPC();
+	const crypto = usePlatformCrypto();
 	const navigate = useNavigate();
 
 	const userQuery = useQuery(rpc.auth.me.queryOptions());
 	const vaultListQuery = useQuery(rpc.vault.list.queryOptions());
-
-	const changePasswordMutation = useMutation({
-		mutationFn: (input: {
-			srpSalt: string;
-			srpVerifier: string;
-			encryptedPrivateKey: string;
-			encryptedVaultKeys: Array<{
-				vaultId: string;
-				encryptedVaultKey: string;
-			}>;
-			kdfParams: ReturnType<typeof currentKdfProfile>;
-		}) => rpcClient.auth.changePassword.mutate(input),
-		onSuccess: () => {
-			toast.success(m.settings_change_password_dialog_toast_changed());
-			setOpen(false);
-			navigate({ to: "/login" });
-		},
-		onError: () => {
-			toast.error(m.settings_change_password_dialog_toast_change_failed());
-			setIsProcessing(false);
-		},
-	});
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -104,7 +79,8 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 			return;
 		}
 
-		if (!userQuery.data?.encryptedPrivateKey) {
+		const accountId = await storage.getActiveAccount();
+		if (!accountId || !userQuery.data?.encryptedPrivateKey) {
 			toast.error(m.settings_common_toast_user_data_load_failed());
 			return;
 		}
@@ -117,105 +93,41 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 		setIsProcessing(true);
 
 		try {
-			// 1. Derive old keys to decrypt private key using the params the
-			// existing account was keyed with (not the current default).
-			const { accountId, profile: oldProfile } =
-				await getActiveAccountKdfProfile();
-			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
-				currentPassword,
-				secretKey,
-				userEmail,
-				oldProfile,
-			);
-
-			// 2. Decrypt private key with old master unlock key
-			const encryptedPrivateKeyData = JSON.parse(
-				userQuery.data.encryptedPrivateKey,
-			);
-
-			const privateKey = await decrypt(
-				encryptedPrivateKeyData,
-				oldMasterUnlockKey,
-			);
-
-			// 3. Derive new keys from new password
-			const newProfile = currentKdfProfile();
-			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
-				await deriveKeys(newPassword, secretKey, userEmail, newProfile);
-
-			// 4. Generate new SRP credentials
-			const authKeyString = new TextDecoder().decode(newAuthKey);
-			const { salt: srpSalt, verifier: srpVerifier } =
-				await generateSRPRegistration(authKeyString);
-
-			// 5. Re-encrypt private key with new master unlock key
-			const newEncryptedPrivateKey = await encrypt(
-				privateKey,
-				newMasterUnlockKey,
-			);
-
-			// 6. Re-encrypt vault keys with new master unlock key
-			// Only re-encrypt vault keys for vaults the user created (MUK-encrypted)
-			// Shared vault keys are RSA-encrypted and don't need re-encryption
-			const serverVaultKeys = vaultListQuery.data;
-			const encryptedVaultKeys: Array<{
-				vaultId: string;
-				encryptedVaultKey: string;
-			}> = [];
-
-			for (const vk of serverVaultKeys) {
-				// Only re-encrypt AES(MUK)-wrapped keys.
-				// RSA-wrapped keys are not tied to the master unlock key.
-				if (!isAesEncryptedVaultKey(vk.encryptedVaultKey)) {
-					continue;
-				}
-
-				// Decrypt vault key with old MUK
-				const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey) as {
-					ciphertext: string;
-					iv: string;
-					algorithm: string;
-					context?: { keyVersion?: number };
-				};
-				const keyVersion = Number.isInteger(
-					encryptedVaultKeyData.context?.keyVersion,
-				)
-					? (encryptedVaultKeyData.context?.keyVersion as number)
-					: 1;
-				const vaultKeyContext = buildVaultKeyEncryptionContext({
-					vaultId: vk.id,
+			await changeAccountPassword(
+				{
+					accountId,
+					email: userEmail,
 					userId: userQuery.data.id,
-					keyVersion,
-				});
-				const decryptedVaultKeyBase64 = await decrypt(
-					encryptedVaultKeyData,
-					oldMasterUnlockKey,
-					vaultKeyContext,
-				);
+					currentPassword,
+					newPassword,
+					secretKey,
+					encryptedPrivateKey: userQuery.data.encryptedPrivateKey,
+					vaultKeys: vaultListQuery.data.map(toVaultKeyEntry),
+				},
+				{
+					crypto,
+					storage,
+					commit: (payload) => rpcClient.auth.changePassword.mutate(payload),
+				},
+			);
 
-				// Re-encrypt vault key with new MUK
-				const newEncryptedVaultKey = await encrypt(
-					decryptedVaultKeyBase64,
-					newMasterUnlockKey,
-					vaultKeyContext,
-				);
-
-				encryptedVaultKeys.push({
-					vaultId: vk.id,
-					encryptedVaultKey: JSON.stringify(newEncryptedVaultKey),
-				});
-			}
-
-			// 7. Send to server
-			await changePasswordMutation.mutateAsync({
-				srpSalt,
-				srpVerifier,
-				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
-				encryptedVaultKeys,
-				kdfParams: newProfile,
-			});
-			await storage.storePinnedKdfProfile(newProfile, accountId);
+			toast.success(m.settings_change_password_dialog_toast_changed());
+			setOpen(false);
+			navigate({ to: "/login" });
 		} catch (error) {
+			// The server has already accepted the new password, so telling the user to try
+			// again would send them back with credentials that no longer exist.
+			if (error instanceof LocalKeyAdoptionError) {
+				toast.warning(m.settings_common_toast_keys_changed_sign_in_again());
+				setOpen(false);
+				navigate({ to: "/login" });
+				return;
+			}
+			if (error instanceof InvalidAccountPasswordError) {
+				toast.error(m.settings_common_toast_current_password_invalid());
+				setIsProcessing(false);
+				return;
+			}
 			console.error("Password change error:", error);
 			toast.error(m.settings_change_password_dialog_toast_change_failed());
 			setIsProcessing(false);
@@ -324,11 +236,8 @@ export function ChangePasswordDialog({ userEmail }: { userEmail: string }) {
 						>
 							{m.settings_common_action_cancel()}
 						</Button>
-						<Button
-							type="submit"
-							disabled={isProcessing || changePasswordMutation.isPending}
-						>
-							{isProcessing || changePasswordMutation.isPending
+						<Button type="submit" disabled={isProcessing}>
+							{isProcessing
 								? m.settings_change_password_dialog_action_changing()
 								: m.settings_change_password_dialog_action_submit()}
 						</Button>

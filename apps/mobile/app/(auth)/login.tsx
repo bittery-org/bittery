@@ -42,11 +42,10 @@ import { DeviceSetupQrScanner } from "@/components/device-setup-qr-scanner";
 import { SafeAreaView } from "@/components/safe-area-view";
 import { defaultServerUrl } from "@/constants/server-url";
 import { useBiometricType } from "@/lib/biometric-type";
-import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
-import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/rpc";
 import { useI18n } from "../../src/providers/i18n-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../../src/services/credential-provider-master-unlock-key";
 import { storage } from "../../src/services/storage";
 
 // Create styled icon components
@@ -190,22 +189,8 @@ export default function LoginScreen() {
 
 			const accountId = await storage.getActiveAccount();
 
-			if (
-				Platform.OS === "android" &&
-				CredentialProvider.isAvailable() &&
-				accountId
-			) {
-				const muk = await storage.getMasterUnlockKey(accountId);
-				const sessionData = await storage.getStoredSessionData(accountId);
-				const autoLockTimeoutMs =
-					await storage.getAutoLockTimeoutOrDefault(accountId);
-				if (muk && sessionData?.userId) {
-					CredentialProvider.setMasterUnlockKey(
-						arrayBufferToBase64(muk),
-						sessionData.userId,
-						autoLockTimeoutMs,
-					);
-				}
+			if (accountId) {
+				await mirrorBorrowedMasterUnlockKeysToCredentialProvider([accountId]);
 			}
 
 			router.replace("/(vault)");

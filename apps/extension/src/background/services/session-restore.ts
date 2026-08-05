@@ -34,13 +34,14 @@ import {
 	getAccountSessionManager,
 	peekAccountSessionManager,
 } from "@bittery/core/services/account-session-manager";
+import type { KeyRef } from "@bittery/crypto-port";
 import { itemCache, storage } from "../../lib/storage";
 
 export interface RestoredSessions {
 	/** Restored accountIds; newest-first is not guaranteed. */
 	accountIds: string[];
 	/** The device-wide key seeded from the first restored account, if any. */
-	muk: Uint8Array | null;
+	muk: KeyRef | null;
 }
 
 /**
@@ -51,7 +52,7 @@ export interface RestoredSessions {
  */
 export async function restoreUnlockedSessions(): Promise<RestoredSessions> {
 	const restoredAccountIds: string[] = [];
-	let muk: Uint8Array | null = null;
+	let muk: KeyRef | null = null;
 
 	try {
 		const accounts = await storage.getAccountsList();

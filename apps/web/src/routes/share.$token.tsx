@@ -1,4 +1,6 @@
+import { usePlatformCrypto } from "@bittery/core/hooks";
 import { readShareKeyFromUrl } from "@bittery/core/services/share-service";
+import { base64ToArrayBuffer } from "@bittery/shared/crypto";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import type { SharedItemPayload } from "@bittery/shared/types";
 import {
@@ -38,7 +40,6 @@ import {
 	resolveShareAccessStage,
 	type ShareLinkInfoStatus,
 } from "@/lib/share-access-gate";
-import { base64ToArrayBuffer, decrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 
 const MISSING_SHARE_KEY_MESSAGE =
@@ -57,6 +58,7 @@ function ShareAccessPage() {
 	const { token } = Route.useParams();
 	const rpc = useRPC();
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
 	const { m } = useI18n();
 
 	const [email, setEmail] = useState("");
@@ -125,17 +127,21 @@ function ShareAccessPage() {
 			throw new Error(MISSING_SHARE_KEY_MESSAGE);
 		}
 
-		const shareKeyBytes = base64ToArrayBuffer(shareKey);
-		const decrypted = await decrypt(
-			{
-				ciphertext: data.encryptedItemData,
-				iv: data.encryptionIv,
-				algorithm: "AES-GCM-AAD-V1",
-			},
-			shareKeyBytes,
-		);
-
-		return JSON.parse(decrypted) as SharedItemPayload;
+		const shareKeyRef = await crypto.importKey(base64ToArrayBuffer(shareKey));
+		try {
+			const decrypted = await crypto.decrypt(
+				{
+					ciphertext: data.encryptedItemData,
+					iv: data.encryptionIv,
+					algorithm: "AES-GCM-AAD-V1",
+				},
+				shareKeyRef,
+				null,
+			);
+			return JSON.parse(decrypted) as SharedItemPayload;
+		} finally {
+			await crypto.destroyKey(shareKeyRef);
+		}
 	}
 	// Consuming the link is a deliberate user action, never a side effect of
 	// navigation: `share.accessPublic` increments `access_count` server-side, so

@@ -1,7 +1,4 @@
 import "../global.css";
-// Native crypto is provided by @bittery/crypto-nitro Expo module
-// No polyfill setup needed - all crypto operations use native Rust code
-// See apps/mobile/src/lib/crypto/ for the unified crypto API
 
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";

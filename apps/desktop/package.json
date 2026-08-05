@@ -17,6 +17,7 @@
 	},
 	"dependencies": {
 		"@bittery/core": "workspace:*",
+		"@bittery/crypto-port": "workspace:*",
 		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/storage": "workspace:*",

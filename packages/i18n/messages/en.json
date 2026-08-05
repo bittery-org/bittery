@@ -1599,6 +1599,8 @@
 	"settings_common_action_copy": "Copy",
 	"settings_common_action_download_kit": "Download Kit",
 	"settings_common_action_saving": "Saving...",
+	"settings_common_toast_keys_changed_sign_in_again": "Your account keys were changed, but this device could not be updated. Sign in again with your master password and Secret Key.",
+	"settings_common_toast_current_password_invalid": "The current master password is incorrect.",
 	"settings_common_toast_secret_key_not_found": "Secret key not found. Please log out and log in again with your full credentials.",
 	"settings_common_toast_secret_key_not_found_sign_out": "Secret key not found. Please sign out and sign in with full credentials.",
 	"settings_common_toast_user_data_load_failed": "Could not load user data. Please try again.",

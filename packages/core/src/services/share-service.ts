@@ -1,13 +1,10 @@
-import {
-	getDecryptedVaultKey as getDecryptedVaultKeyUtil,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import type { CryptoPort } from "@bittery/crypto-port";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import type { DecryptedItem, SharedItemPayload } from "@bittery/shared/types";
 import type { AccountStore } from "@bittery/storage";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
-import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
+import type { VaultCrypto } from "./vault-crypto";
 
 export const SHARE_EXPIRATION_OPTIONS = [
 	"1hour",
@@ -92,18 +89,21 @@ function buildSharedItemPayload(item: DecryptedItem): SharedItemPayload {
 
 interface ShareServiceDeps {
 	storage: AccountStore;
-	crypto: ICrypto;
+	crypto: CryptoPort;
+	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
 }
 
 export class ShareService {
 	private readonly storage: AccountStore;
-	private readonly crypto: ICrypto;
+	private readonly crypto: CryptoPort;
+	private readonly vaultCrypto: VaultCrypto;
 	private readonly accounts: AccountResolver;
 
 	constructor(deps: ShareServiceDeps) {
 		this.storage = deps.storage;
 		this.crypto = deps.crypto;
+		this.vaultCrypto = deps.vaultCrypto;
 		this.accounts = deps.accounts;
 	}
 
@@ -126,54 +126,61 @@ export class ShareService {
 
 		// `item` is already decrypted, so this decrypt is purely an unlock gate:
 		// sharing must be refused unless this account can still open the vault.
-		const vaultUnlockProof = await getDecryptedVaultKeyUtil({
+		const vaultUnlockProof = await this.vaultCrypto.getVaultKey({
 			vaultId: item.vaultId,
 			accountId,
-			storage: this.storage,
-			crypto: this.crypto as unknown as VaultKeyCryptoProvider,
 		});
 		if (!vaultUnlockProof) {
 			throw new Error("Could not decrypt vault key. Please log in again.");
 		}
 
-		const client = await this.accounts.getClientForAccount(
-			defaultClient,
-			accountId,
-		);
+		try {
+			const client = await this.accounts.getClientForAccount(
+				defaultClient,
+				accountId,
+			);
+			const shareKey = await this.crypto.generateEncryptionKey();
+			try {
+				const encryptedData = await this.crypto.encrypt(
+					JSON.stringify(buildSharedItemPayload(item)),
+					shareKey,
+					null,
+				);
+				const shareKeyBase64 = arrayBufferToBase64(
+					await this.crypto.exportKey(shareKey),
+				);
+				const shareKeyEncrypted = await this.crypto.encrypt(
+					shareKeyBase64,
+					shareKey,
+					null,
+				);
 
-		const shareKey = await this.crypto.generateEncryptionKey();
+				const result = await client.share.create.mutate({
+					itemId: item.id,
+					accessMode,
+					isOneTimeUse,
+					expiresIn,
+					allowedEmails:
+						accessMode === "email-restricted" ? (allowedEmails ?? null) : null,
+					encryptedItemData: encryptedData.ciphertext,
+					encryptionIv: encryptedData.iv,
+					encryptedShareKey: shareKeyEncrypted.ciphertext,
+					shareKeyIv: shareKeyEncrypted.iv,
+				});
 
-		const encryptedData = await this.crypto.encrypt(
-			JSON.stringify(buildSharedItemPayload(item)),
-			shareKey,
-		);
-
-		const shareKeyBase64 = arrayBufferToBase64(shareKey);
-		const shareKeyEncrypted = await this.crypto.encrypt(
-			shareKeyBase64,
-			shareKey,
-		);
-
-		const result = await client.share.create.mutate({
-			itemId: item.id,
-			accessMode,
-			isOneTimeUse,
-			expiresIn,
-			allowedEmails:
-				accessMode === "email-restricted" ? (allowedEmails ?? null) : null,
-			encryptedItemData: encryptedData.ciphertext,
-			encryptionIv: encryptedData.iv,
-			encryptedShareKey: shareKeyEncrypted.ciphertext,
-			shareKeyIv: shareKeyEncrypted.iv,
-		});
-
-		return {
-			shareUrl: buildShareUrl({
-				baseShareUrl: result.baseShareUrl,
-				token: result.token,
-				shareKeyBase64,
-			}),
-			expiresAt: result.expiresAt,
-		};
+				return {
+					shareUrl: buildShareUrl({
+						baseShareUrl: result.baseShareUrl,
+						token: result.token,
+						shareKeyBase64,
+					}),
+					expiresAt: result.expiresAt,
+				};
+			} finally {
+				await this.crypto.destroyKey(shareKey);
+			}
+		} finally {
+			await this.crypto.destroyKey(vaultUnlockProof);
+		}
 	}
 }

@@ -20,10 +20,14 @@ import {
 async function createStore(
 	opts: { unlockAcc2?: boolean } = {},
 ): Promise<AccountStore> {
-	const { store } = await createTestAccountStore();
-	await seedAccountWithSession(store, accountMetadata({ accountId: "acc-1" }));
+	const harness = await createTestAccountStore();
+	const { store } = harness;
 	await seedAccountWithSession(
-		store,
+		harness,
+		accountMetadata({ accountId: "acc-1" }),
+	);
+	await seedAccountWithSession(
+		harness,
 		accountMetadata({ accountId: "acc-2", addedAt: 2, lastActiveAt: 2 }),
 		{ unlocked: opts.unlockAcc2 ?? false },
 	);

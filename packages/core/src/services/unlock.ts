@@ -7,6 +7,7 @@
  * RN/desktop hooks run the identical flow.
  */
 
+import type { CryptoPort } from "@bittery/crypto-port";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type {
 	AccountStore,
@@ -15,7 +16,6 @@ import type {
 } from "@bittery/storage";
 import { findAccountById } from "@bittery/storage/account-id";
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
-import type { ICrypto } from "@bittery/types";
 import { performSRPUnlock, storeUnlockSession } from "./auth-service";
 import {
 	createStaticStoredAccountRpcClient,
@@ -70,9 +70,9 @@ export interface UnlockDeps {
 	itemCache: ItemCache;
 }
 
-/** Only the SRP (password) path derives keys, so only it takes an `ICrypto`. */
+/** Only the SRP (password) path derives keys, so only it takes a `CryptoPort`. */
 export interface PasswordUnlockDeps extends UnlockDeps {
-	crypto: ICrypto;
+	crypto: CryptoPort;
 }
 
 export interface UnlockOptions {

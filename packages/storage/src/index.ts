@@ -21,7 +21,6 @@ export type {
 	NativeKeyRef,
 } from "./account-store";
 export { createAccountStore, NATIVE_VIEW_VERSION } from "./account-store";
-export type { CryptoProvider } from "./crypto-provider";
 export type { ItemCache, ItemCacheOptions } from "./item-cache";
 export { createItemCache } from "./item-cache";
 // The key scheme. Canonical here so `AccountStore`, `ItemCache` and the Rust native host

@@ -75,13 +75,11 @@ export function useMoveItem() {
 				sourceContext.item.lastModifiedBy ??
 				"unknown-user";
 
-			const encryptedData = await core.items.reEncryptForVault(
+			const encryptedData = await sourceContext.repo.encryptWithVaultKey(
+				input.targetVaultId,
 				input.decryptedData,
-				await sourceContext.repo.decryptVaultKey(input.targetVaultId),
 				{
-					vaultId: input.targetVaultId,
-					entityId: input.itemId,
-					entityType: "item",
+					itemId: input.itemId,
 					version: sourceContext.item.version + 1,
 					userId: contextUserId,
 				},

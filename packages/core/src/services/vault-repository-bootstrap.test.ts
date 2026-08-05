@@ -1,15 +1,13 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import type { CryptoPort } from "@bittery/crypto-port";
+import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { createItemCache } from "@bittery/storage";
 import {
 	createInMemoryRecordPort,
 	type InMemoryRecordPort,
 } from "@bittery/storage/testing";
-import type {
-	CachedEncryptedItem,
-	EncryptionContext,
-	ICrypto,
-} from "@bittery/types";
+import type { CachedEncryptedItem } from "@bittery/types";
 import {
 	accountMetadata,
 	createTestAccountStore,
@@ -18,6 +16,7 @@ import {
 	getTravelModeEnforcer,
 	resetTravelModeEnforcerForTests,
 } from "./travel-mode-enforcer";
+import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
 import { type BootstrapItemsClient, VaultRepository } from "./vault-repository";
 
 const ACCOUNT_ID = "acc-1";
@@ -34,15 +33,29 @@ async function createLayers(): Promise<{
 	storage: AccountStore;
 	itemCache: ItemCache;
 	recordPort: InMemoryRecordPort;
+	crypto: InMemoryCryptoPort;
 }> {
-	const { store } = await createTestAccountStore();
+	const { store, crypto } = await createTestAccountStore();
 	const recordPort = createInMemoryRecordPort();
 	const itemCache = createItemCache({ port: recordPort });
 	await itemCache.initialize();
 
 	await store.addAccount(accountMetadata({ accountId: ACCOUNT_ID }));
 	await store.storeServerUrl("https://bittery.test", ACCOUNT_ID);
-	await store.setMasterUnlockKey(new Uint8Array(32), ACCOUNT_ID);
+	const masterUnlockKey = await crypto.importKey(new Uint8Array(32));
+	await store.setMasterUnlockKey(masterUnlockKey, ACCOUNT_ID);
+	const vaultCrypto = createVaultCrypto({ crypto, storage: store });
+	const vaultKey = await crypto.importKey(
+		new TextEncoder().encode("vault-key"),
+	);
+	const encryptedVaultKey = await vaultCrypto.wrapVaultKeyForOwner({
+		vaultKey,
+		masterUnlockKey,
+		vaultId: "vault_1",
+		userId: USER_ID,
+		keyVersion: 1,
+	});
+	await crypto.destroyKey(vaultKey);
 	await store.storeVaultKeys(
 		[
 			{
@@ -51,44 +64,15 @@ async function createLayers(): Promise<{
 				vaultType: "team",
 				vaultIcon: "lock",
 				vaultImageUrl: null,
-				encryptedVaultKey: JSON.stringify({
-					ciphertext: "wrapped",
-					iv: "vault-iv",
-					algorithm: "aes-256-gcm",
-					context: {
-						vaultId: "vault_1",
-						userId: USER_ID,
-						keyVersion: 1,
-						purpose: "vault-key-wrap",
-					},
-				}),
+				encryptedVaultKey,
 				role: "owner",
 			},
 		],
 		ACCOUNT_ID,
 	);
 
-	return { storage: store, itemCache, recordPort };
+	return { storage: store, itemCache, recordPort, crypto };
 }
-
-/**
- * Enough crypto to unwrap the seeded vault key and "decrypt" an item. The real
- * algorithms are `packages/shared`'s business; what matters here is that the
- * `VaultRepository` path runs end to end so the record-port call counts are the ones
- * the app would actually make.
- */
-const crypto = {
-	decrypt: async (
-		_data: unknown,
-		_key: Uint8Array,
-		context?: EncryptionContext,
-	) => {
-		if (context?.entityType === "vault_key") {
-			return Buffer.from("vault-key").toString("base64");
-		}
-		return JSON.stringify({ title: "Item" });
-	},
-} as unknown as ICrypto;
 
 /**
  * A bootstrap client shaped exactly like the server's camelCased responses:
@@ -145,7 +129,8 @@ function createClient(): BootstrapItemsClient {
 }
 
 async function setup() {
-	const { storage, itemCache, recordPort } = await createLayers();
+	const { storage, itemCache, recordPort, crypto } = await createLayers();
+	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	await getTravelModeEnforcer(storage, itemCache).applyConfig(ACCOUNT_ID, {
 		enabled: false,
 		hiddenVaultIds: [],
@@ -153,6 +138,7 @@ async function setup() {
 
 	const repo = new VaultRepository(
 		crypto,
+		vaultCrypto,
 		storage,
 		itemCache,
 		ACCOUNT_ID,
@@ -160,18 +146,34 @@ async function setup() {
 		"user@bittery.test",
 	);
 
-	return { repo, storage, itemCache, recordPort };
+	return { repo, storage, itemCache, recordPort, crypto, vaultCrypto };
 }
 
-function cachedItem(id: string): CachedEncryptedItem {
+async function cachedItem(
+	id: string,
+	crypto: CryptoPort,
+	vaultCrypto: VaultCrypto,
+): Promise<CachedEncryptedItem> {
+	const vaultKey = await vaultCrypto.getVaultKey({
+		vaultId: "vault_1",
+		accountId: ACCOUNT_ID,
+		userId: USER_ID,
+	});
+	if (!vaultKey) throw new Error("Missing test vault key");
+	const encrypted = await vaultCrypto.encryptItem(
+		JSON.stringify({ title: "Item" }),
+		vaultKey,
+		{ vaultId: "vault_1", itemId: id, version: 1, userId: USER_ID },
+	);
+	await crypto.destroyKey(vaultKey);
 	return {
 		id,
 		vaultId: "vault_1",
 		category: "login",
 		favorite: false,
-		encryptedData: "ZGF0YQ==",
-		encryptionIv: "aXY=",
-		encryptionAlgorithm: "AES-GCM",
+		encryptedData: encrypted.ciphertext,
+		encryptionIv: encrypted.iv,
+		encryptionAlgorithm: encrypted.algorithm,
 		version: 1,
 		lastModifiedBy: USER_ID,
 		createdAt: "2026-08-01T00:00:00.000Z",
@@ -226,24 +228,35 @@ describe("VaultRepository per-item persistence is O(1)", () => {
 	});
 
 	it("costs exactly one recordPut per delta-synced item", async () => {
-		const { repo, itemCache, recordPort } = await setup();
+		const { repo, itemCache, recordPort, crypto, vaultCrypto } = await setup();
 
 		await itemCache.setCachedItems(
-			Array.from({ length: 50 }, (_, i) => cachedItem(`seed_${i}`)),
+			await Promise.all(
+				Array.from({ length: 50 }, (_, i) =>
+					cachedItem(`seed_${i}`, crypto, vaultCrypto),
+				),
+			),
 			ACCOUNT_ID,
 		);
 		recordPort.resetCalls();
 
-		await repo.upsertCachedItem(cachedItem("item_new"), ACCOUNT_ID);
+		await repo.upsertCachedItem(
+			await cachedItem("item_new", crypto, vaultCrypto),
+			ACCOUNT_ID,
+		);
 
 		expect(recordPort.calls.recordPut).toBe(1);
 	});
 
 	it("costs exactly one recordDelete per removed item", async () => {
-		const { repo, itemCache, recordPort } = await setup();
+		const { repo, itemCache, recordPort, crypto, vaultCrypto } = await setup();
 
 		await itemCache.setCachedItems(
-			Array.from({ length: 10 }, (_, i) => cachedItem(`seed_${i}`)),
+			await Promise.all(
+				Array.from({ length: 10 }, (_, i) =>
+					cachedItem(`seed_${i}`, crypto, vaultCrypto),
+				),
+			),
 			ACCOUNT_ID,
 		);
 		recordPort.resetCalls();
@@ -255,9 +268,12 @@ describe("VaultRepository per-item persistence is O(1)", () => {
 	});
 
 	it("writes into its own account's collection and no other", async () => {
-		const { repo, recordPort } = await setup();
+		const { repo, recordPort, crypto, vaultCrypto } = await setup();
 
-		await repo.upsertCachedItem(cachedItem("item_new"), ACCOUNT_ID);
+		await repo.upsertCachedItem(
+			await cachedItem("item_new", crypto, vaultCrypto),
+			ACCOUNT_ID,
+		);
 
 		expect(recordPort.collections()).toEqual([`${ACCOUNT_ID}:items`]);
 	});

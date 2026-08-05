@@ -20,7 +20,7 @@ import {
 	type LoginResult,
 	performSRPLogin,
 	type SRPLoginInput,
-	storeLoginSession,
+	storeLoginSessionOwned,
 } from "../../services/auth-service";
 
 /**
@@ -115,11 +115,12 @@ export function useLogin(
 				input.enableBiometric ?? options.enableBiometric;
 
 			// Store session data
-			const accountId = await storeLoginSession(
+			const accountId = await storeLoginSessionOwned(
 				result,
 				input.secretKey,
 				storage,
 				itemCache,
+				crypto,
 				input.email,
 				{
 					serverUrl,

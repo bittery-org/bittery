@@ -1,3 +1,9 @@
+import { usePlatformCrypto } from "@bittery/core/hooks";
+import {
+	InvalidAccountPasswordError,
+	type PreparedRecoveryKey,
+	prepareRecoveryKey,
+} from "@bittery/core/services/vault-crypto";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Button,
@@ -23,14 +29,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { getActiveAccountKdfProfile, storage } from "@/lib/storage";
-import {
-	decrypt,
-	deriveKeysFromMasterKey,
-	deriveMasterKey,
-	encryptMasterKey,
-	generateRecoveryKey,
-} from "@/lib/wasm-crypto";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
@@ -39,15 +38,18 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 	const [step, setStep] = useState<"verify" | "display">("verify");
 	const [currentPassword, setCurrentPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
-	const [recoveryKey, setRecoveryKey] = useState("");
-	const [encryptedMasterKey, setEncryptedMasterKey] = useState("");
+	const [prepared, setPrepared] = useState<PreparedRecoveryKey | null>(null);
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
 
 	const rpc = useRPC();
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
 	const queryClient = useQueryClient();
 	const userQuery = useQuery(rpc.auth.me.queryOptions());
+
+	// Shown in the emergency kit and in the dialog; nothing else reads it.
+	const recoveryKey = prepared?.recoveryKey ?? "";
 
 	const storeRecoveryKeyMutation = useMutation({
 		mutationFn: (input: {
@@ -90,38 +92,31 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 
 		setIsProcessing(true);
 		try {
-			// Derive the existing account's master key using the params it was
-			// keyed with (not the current default).
-			const { profile: oldProfile } = await getActiveAccountKdfProfile();
-			const masterKey = await deriveMasterKey(
-				currentPassword,
-				secretKey,
-				userEmail,
-				oldProfile,
-			);
-			const { masterUnlockKey } = await deriveKeysFromMasterKey(
-				masterKey,
-				userEmail,
-			);
+			const accountId = await storage.getActiveAccount();
+			if (!accountId) {
+				toast.error(
+					m.settings_recovery_key_common_toast_account_metadata_failed(),
+				);
+				return;
+			}
 
-			// Validate password by attempting to decrypt the stored private key.
-			await decrypt(
-				JSON.parse(userQuery.data.encryptedPrivateKey),
-				masterUnlockKey,
+			setPrepared(
+				await prepareRecoveryKey(
+					{
+						accountId,
+						email: userEmail,
+						password: currentPassword,
+						secretKey,
+						encryptedPrivateKey: userQuery.data.encryptedPrivateKey,
+					},
+					{ crypto, storage },
+				),
 			);
-
-			const generatedRecoveryKey = generateRecoveryKey();
-			const encryptedMasterKeyData = await encryptMasterKey(
-				masterKey,
-				generatedRecoveryKey,
-				userEmail,
-			);
-
-			setRecoveryKey(generatedRecoveryKey);
-			setEncryptedMasterKey(JSON.stringify(encryptedMasterKeyData));
 			setStep("display");
 		} catch (error) {
-			console.error("Recovery setup failed:", error);
+			if (!(error instanceof InvalidAccountPasswordError)) {
+				console.error("Recovery key preparation failed:", error);
+			}
 			toast.error(
 				m.settings_recovery_key_common_toast_verify_password_failed(),
 			);
@@ -138,18 +133,15 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 			return;
 		}
 
-		if (!recoveryKey || !encryptedMasterKey) {
+		if (!prepared) {
 			toast.error(m.settings_recovery_key_common_toast_data_missing());
 			return;
 		}
 
 		setIsProcessing(true);
-		const recoveryKeyHint =
-			recoveryKey.split("-").slice(0, 2).join("-") || "R1";
-
 		storeRecoveryKeyMutation.mutate({
-			encryptedMasterKey,
-			recoveryKeyHint,
+			encryptedMasterKey: prepared.encryptedMasterKey,
+			recoveryKeyHint: prepared.recoveryKeyHint,
 		});
 	};
 
@@ -159,8 +151,7 @@ export function SetupRecoveryKeyDialog({ userEmail }: { userEmail: string }) {
 			setStep("verify");
 			setCurrentPassword("");
 			setShowPassword(false);
-			setRecoveryKey("");
-			setEncryptedMasterKey("");
+			setPrepared(null);
 			setHasAcknowledged(false);
 			setIsProcessing(false);
 		}

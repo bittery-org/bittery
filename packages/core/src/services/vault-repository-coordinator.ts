@@ -1,13 +1,11 @@
+import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { VaultKeyData } from "@bittery/storage/types";
-import type {
-	CachedEncryptedItem,
-	CachedVaultMetadata,
-	ICrypto,
-} from "@bittery/types";
+import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import type { AccountInfo } from "./account-resolver";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { TravelModeRpcClient } from "./travel-mode-service";
+import type { VaultCrypto } from "./vault-crypto";
 import {
 	type BootstrapItemsClient,
 	type VaultRepository,
@@ -47,7 +45,8 @@ export class VaultRepositoryCoordinator {
 	private snapshot = 0;
 
 	constructor(
-		private readonly crypto: ICrypto,
+		private readonly crypto: CryptoPort,
+		private readonly vaultCrypto: VaultCrypto,
 		private readonly storage: AccountStore,
 		private readonly itemCache: ItemCache,
 	) {}
@@ -81,6 +80,7 @@ export class VaultRepositoryCoordinator {
 
 		const repo = new VaultRepositoryImpl(
 			this.crypto,
+			this.vaultCrypto,
 			this.storage,
 			this.itemCache,
 			accountId,
@@ -519,7 +519,8 @@ const coordinatorRegistry = new WeakMap<
 >();
 
 export function getOrCreateVaultRepositoryCoordinator(
-	crypto: ICrypto,
+	crypto: CryptoPort,
+	vaultCrypto: VaultCrypto,
 	storage: AccountStore,
 	itemCache: ItemCache,
 ): VaultRepositoryCoordinator {
@@ -527,7 +528,12 @@ export function getOrCreateVaultRepositoryCoordinator(
 	if (existing) {
 		return existing;
 	}
-	const created = new VaultRepositoryCoordinator(crypto, storage, itemCache);
+	const created = new VaultRepositoryCoordinator(
+		crypto,
+		vaultCrypto,
+		storage,
+		itemCache,
+	);
 	coordinatorRegistry.set(storage, created);
 	return created;
 }

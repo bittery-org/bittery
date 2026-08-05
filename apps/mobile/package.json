@@ -19,6 +19,7 @@
 	},
 	"dependencies": {
 		"@bittery/core": "workspace:*",
+		"@bittery/crypto-port": "workspace:*",
 		"@bittery/crypto-nitro": "workspace:*",
 		"@bittery/i18n": "workspace:*",
 		"@bittery/shared": "workspace:*",
@@ -58,7 +59,6 @@
 		"react-dom": "catalog:",
 		"react-native": "~0.81.5",
 		"react-native-gesture-handler": "~2.28.0",
-		"react-native-get-random-values": "^1.11.0",
 		"react-native-reanimated": "~4.1.1",
 		"react-native-safe-area-context": "^5.0.0",
 		"react-native-screens": "~4.16.0",

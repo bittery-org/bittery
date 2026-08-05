@@ -25,40 +25,15 @@ import {
 	createWebPlatformPort,
 	createWebRecordPort,
 } from "@bittery/storage/adapters/web";
-import type { KdfProfile } from "@bittery/types";
+import { crypto } from "./crypto";
 import { lifecycleDeps } from "./lifecycle";
-import {
-	decrypt,
-	decryptKeyHandleWithWrappingKey,
-	decryptWithKeyHandle,
-	destroyKeyHandle,
-	encrypt,
-	encryptKeyHandleWithWrappingKey,
-	encryptWithKeyHandle,
-	exportKeyHandle,
-	rsaDecrypt,
-} from "./wasm-crypto";
-
-// Create crypto provider from WASM crypto wrapper. Web is the only platform that uses the
-// non-extractable key-handle path, so all nine methods are supplied here.
-const cryptoProvider = {
-	encrypt,
-	decrypt,
-	rsaDecrypt,
-	encryptWithKeyHandle,
-	decryptWithKeyHandle,
-	encryptKeyHandleWithWrappingKey,
-	decryptKeyHandleWithWrappingKey,
-	exportKeyHandle,
-	destroyKeyHandle,
-};
 
 const platformPort = createWebPlatformPort();
 const recordPort = createWebRecordPort();
 
 export const storage: AccountStore = createAccountStore({
 	port: platformPort,
-	crypto: cryptoProvider,
+	crypto,
 });
 
 export const itemCache: ItemCache = createItemCache({ port: recordPort });
@@ -187,29 +162,6 @@ export async function clearActiveAccountData(): Promise<void> {
 		await removeAccount(accountId, lifecycleDeps);
 	}
 	await refreshActiveAccountId();
-}
-
-/**
- * Resolves the KDF params pinned for the active account at login. Flows that
- * re-derive the *existing* account's keys (e.g. verifying the current password
- * before a change) must use these params rather than the current crypto-core
- * default, otherwise an account keyed at an older iteration count fails to
- * decrypt its own data (issue #32). Returns `undefined` when no pin exists so
- * callers fall back to the default.
- */
-export async function getActiveAccountKdfProfile(): Promise<{
-	accountId: string;
-	profile: KdfProfile;
-}> {
-	const active = await storage.getActiveAccount();
-	if (!active) {
-		throw new Error("No active account");
-	}
-	const profile = await storage.getPinnedKdfProfile(active);
-	if (!profile) {
-		throw new Error("Pinned KDF profile missing; sign in again");
-	}
-	return { accountId: active, profile };
 }
 
 // Re-export types for convenience

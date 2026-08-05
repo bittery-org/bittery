@@ -2,38 +2,21 @@
  * Desktop Platform Provider
  *
  * Configures the PlatformProvider for the desktop app with:
- * - Tauri storage adapter (injected with Tauri crypto)
- * - Tauri crypto module (decrypt, encrypt, generateEncryptionKey)
+ * - Tauri storage adapter and the shared Tauri CryptoPort
+ * - VaultCrypto over that same port and storage
  * - Sync context from DesktopSyncProvider
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ICrypto, ISyncContext } from "@bittery/types";
+import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
+import type { ISyncContext } from "@bittery/types";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
+import { crypto } from "@/lib/crypto";
 import { itemCache, storage } from "@/lib/storage";
-import * as tauriCrypto from "@/lib/tauri-crypto";
 import { useSyncContext } from "./sync-provider";
 
-/**
- * Crypto adapter that satisfies ICrypto interface
- * Tauri crypto module exports all required methods for encryption and SRP authentication
- */
-const crypto: ICrypto = {
-	// Core encryption methods
-	decrypt: tauriCrypto.decrypt,
-	encrypt: tauriCrypto.encrypt,
-	rsaDecrypt: tauriCrypto.rsaDecrypt,
-	generateEncryptionKey: tauriCrypto.generateEncryptionKey,
-	generateUuid: tauriCrypto.generateUuid,
-	// SRP authentication methods
-	deriveKeys: tauriCrypto.deriveKeys,
-	generateClientEphemeral: tauriCrypto.generateClientEphemeral,
-	deriveClientSession: tauriCrypto.deriveClientSession,
-	verifyServerSession: tauriCrypto.verifyServerSession,
-	validateSecretKey: tauriCrypto.validateSecretKey,
-	validateKdfProfile: tauriCrypto.validateKdfProfile,
-};
+const vaultCrypto = createVaultCrypto({ crypto, storage });
 
 /**
  * Props for DesktopPlatformProvider
@@ -79,6 +62,7 @@ export function DesktopPlatformProvider({
 			storage={storage}
 			itemCache={itemCache}
 			crypto={crypto}
+			vaultCrypto={vaultCrypto}
 			sync={sync}
 		>
 			{children}

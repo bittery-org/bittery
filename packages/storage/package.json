@@ -14,9 +14,6 @@
 		"./account-id": {
 			"default": "./src/account-id.ts"
 		},
-		"./crypto-provider": {
-			"default": "./src/crypto-provider.ts"
-		},
 		"./testing": {
 			"default": "./src/testing/in-memory-port.ts"
 		},
@@ -72,6 +69,7 @@
 		}
 	},
 	"dependencies": {
+		"@bittery/crypto-port": "workspace:*",
 		"@bittery/shared": "workspace:*",
 		"@bittery/types": "workspace:*"
 	}

@@ -1,10 +1,12 @@
 /**
  * Vault session vocabulary.
  *
- * This file must not import anything outside `vault-session/` — no chrome types,
- * no storage, no desktop protocol. That guardrail is what keeps `transitions.ts`
- * pure and its transition-table suite free of module mocks.
+ * This file has no platform imports — no chrome types, storage or desktop protocol.
+ * Its type-only KeyRef import preserves the opaque token without making the reducer depend on
+ * an adapter or a platform module.
  */
+
+import type { KeyRef } from "@bittery/crypto-port";
 
 export type VaultOwner = "none" | "local" | "desktop";
 
@@ -51,10 +53,10 @@ export type VaultSessionEvent =
 	| {
 			type: "STARTUP_RESTORED";
 			accountIds: string[];
-			muk: Uint8Array | null;
+			muk: KeyRef | null;
 			at: number;
 	  }
-	| { type: "LOCAL_UNLOCKED"; muk: Uint8Array; at: number }
+	| { type: "LOCAL_UNLOCKED"; muk: KeyRef; at: number }
 	| { type: "DESKTOP_OBSERVED"; status: DesktopSnapshot | null; at: number }
 	| { type: "DESKTOP_UNLOCK_PUSHED"; accountIds: string[]; at: number }
 	| { type: "DESKTOP_LOCK_PUSHED"; reason: string; at: number }
@@ -110,7 +112,7 @@ export interface VaultSessionState {
 	readonly lastActivityAt: number;
 	readonly lockReason: LockReason | null;
 	readonly revision: number;
-	readonly muk: Uint8Array | null;
+	readonly muk: KeyRef | null;
 	readonly settingsTimeoutMs: number;
 	readonly desktopTimeoutMs: number | null;
 	/** Suppresses a repeated revocation of the same server session. */

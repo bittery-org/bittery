@@ -1,8 +1,13 @@
 import { describe, expect, it, mock, spyOn } from "bun:test";
+import type { KeyRef } from "@bittery/crypto-port";
+import {
+	createInMemoryCryptoPort,
+	type InMemoryCryptoPort,
+} from "@bittery/crypto-port/testing";
 import type { AccountStore } from "@bittery/storage";
 import type { InMemoryPlatformPort } from "@bittery/storage/testing";
 import type { AccountMetadata } from "@bittery/storage/types";
-import type { ICrypto, KdfProfile } from "@bittery/types";
+import type { KdfProfile } from "@bittery/types";
 import {
 	createTestAccountStore,
 	createTestItemCache,
@@ -15,6 +20,7 @@ import {
 	performSRPLogin,
 	performSRPUnlock,
 	storeLoginSession,
+	storeLoginSessionOwned,
 	storeUnlockSession,
 	type UnlockResult,
 } from "./auth-service";
@@ -28,6 +34,51 @@ const kdfParams: KdfProfile = {
 };
 
 const MUK = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
+const SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+const SERVER_PROOF = "server-proof";
+
+/**
+ * One port for every store these tests build, because a `KeyRef` only means anything to the
+ * port that minted it.
+ */
+const cryptoPort = createInMemoryCryptoPort();
+
+async function mukRef(): Promise<KeyRef> {
+	return cryptoPort.importKey(MUK);
+}
+
+/**
+ * A real port that records what reached the account KDF. There is nothing left to stub:
+ * `CryptoPort` is total, so the fake answers every call the flow makes, and the only thing
+ * a test has to observe is which secret key, email and profile the derivation ran with.
+ */
+interface RecordedDerivation {
+	secretKey: string;
+	email: string;
+	profile: KdfProfile;
+}
+
+function createRecordingCryptoPort(): {
+	crypto: InMemoryCryptoPort;
+	derivations: RecordedDerivation[];
+} {
+	const crypto = createInMemoryCryptoPort();
+	const derivations: RecordedDerivation[] = [];
+	const deriveMasterKey = crypto.deriveMasterKey.bind(crypto);
+	crypto.deriveMasterKey = async (password, secretKey, email, profile) => {
+		derivations.push({ secretKey, email, profile });
+		return deriveMasterKey(password, secretKey, email, profile);
+	};
+	// The fake auth client never sees the client session key, so it cannot compute a real
+	// server proof. This stands in for the server half of the handshake — still a literal
+	// comparison, so a flow that forgets to verify at all is not what makes these pass.
+	crypto.verifyServerSession = async (_publicEphemeral, _session, proof) => {
+		if (proof !== SERVER_PROOF) {
+			throw new Error("Server session proof did not verify.");
+		}
+	};
+	return { crypto, derivations };
+}
 
 function account(
 	accountId: string,
@@ -53,32 +104,13 @@ function account(
  */
 async function makeStore(
 	accounts: AccountMetadata[] = [],
+	crypto: InMemoryCryptoPort = cryptoPort,
 ): Promise<{ storage: AccountStore; port: InMemoryPlatformPort }> {
-	const { store, port } = await createTestAccountStore();
+	const { store, port } = await createTestAccountStore({ crypto });
 	for (const metadata of accounts) {
 		await store.addAccount(metadata);
 	}
 	return { storage: store, port };
-}
-
-function createCrypto(secretReads: string[]): ICrypto {
-	return {
-		validateSecretKey: mock(async () => true),
-		deriveKeys: mock(async (_password, secretKey, email) => {
-			secretReads.push(`${secretKey}:${email}`);
-			return {
-				authKey: new TextEncoder().encode(`auth:${secretKey}`),
-				masterUnlockKey: new Uint8Array([1, 2, 3]),
-			};
-		}),
-		generateClientEphemeral: mock(async () => ({
-			publicKey: "client-public",
-			secret: "client-secret",
-		})),
-		deriveClientSession: mock(async () => ({ proof: "client-proof" })),
-		verifyServerSession: mock(async () => {}),
-		validateKdfProfile: mock(async () => {}),
-	} as unknown as ICrypto;
 }
 
 function createAuthClient(
@@ -137,7 +169,7 @@ describe("account-routed authentication", () => {
 				metadata.accountId,
 			);
 			await storage.storeSessionData(
-				MUK,
+				await cryptoPort.importKey(MUK),
 				metadata.accountId,
 				metadata.email,
 				metadata.userId,
@@ -176,11 +208,10 @@ describe("account-routed authentication", () => {
 			await storage.storePinnedKdfProfile(kdfParams, metadata.accountId);
 		}
 
-		const secretReads: string[] = [];
 		const clientAccountIds: string[] = [];
 		const startedEmails: string[] = [];
 		const getPinnedKdfProfile = spyOn(storage, "getPinnedKdfProfile");
-		const crypto = createCrypto(secretReads);
+		const { crypto, derivations } = createRecordingCryptoPort();
 
 		for (const accountId of ["account-a", "account-b"]) {
 			await deriveSrpLoginProof(
@@ -196,12 +227,16 @@ describe("account-routed authentication", () => {
 			);
 		}
 
-		expect(secretReads).toEqual([
+		expect(
+			derivations.map((entry) => `${entry.secretKey}:${entry.email}`),
+		).toEqual([
 			"secret-account-a:same@example.com",
 			"secret-account-b:same@example.com",
 		]);
 		expect(getPinnedKdfProfile.mock.calls).toEqual([
 			["account-a"],
+			["account-a"],
+			["account-b"],
 			["account-b"],
 		]);
 		expect(clientAccountIds).toEqual(["account-a", "account-b"]);
@@ -209,9 +244,11 @@ describe("account-routed authentication", () => {
 	});
 
 	it("does not mutate storage or the active account before login commit", async () => {
-		const { storage } = await makeStore([
-			account("cloud", "cloud-user", "https://cloud.example"),
-		]);
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("cloud", "cloud-user", "https://cloud.example")],
+			crypto,
+		);
 		await storage.setActiveAccount("cloud");
 
 		const writes = {
@@ -228,11 +265,11 @@ describe("account-routed authentication", () => {
 			{
 				email: "same@example.com",
 				password: "password",
-				secretKey: "secret",
+				secretKey: SECRET_KEY,
 				serverUrl: "https://self-hosted.example/",
 			},
 			{
-				crypto: createCrypto([]),
+				crypto,
 				authClient: handshakeClient,
 				storage,
 				createAuthenticatedClient: (token, serverUrl) => {
@@ -251,22 +288,28 @@ describe("account-routed authentication", () => {
 	});
 
 	it("validates full login against the pin selected by normalized server and email", async () => {
-		const { storage } = await makeStore([
-			account("account-a", "user-a", "https://a.example"),
-			account("account-b", "user-b", "https://b.example"),
-		]);
-		const profileA = { ...kdfParams, iterations: 700_000 };
-		const profileB = { ...kdfParams };
-		await storage.storePinnedKdfProfile(profileA, "account-a");
-		await storage.storePinnedKdfProfile(profileB, "account-b");
+		const { crypto, derivations } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[
+				account("account-a", "user-a", "https://a.example"),
+				account("account-b", "user-b", "https://b.example"),
+			],
+			crypto,
+		);
+		// account-a's pin would reject the server's profile as a downgrade; account-b's
+		// accepts it. Which one is consulted is therefore observable from the outcome.
+		await storage.storePinnedKdfProfile(
+			{ ...kdfParams, iterations: 700_000 },
+			"account-a",
+		);
+		await storage.storePinnedKdfProfile({ ...kdfParams }, "account-b");
 		const getPinnedKdfProfile = spyOn(storage, "getPinnedKdfProfile");
-		const crypto = createCrypto([]);
 
 		await performSRPLogin(
 			{
 				email: " SAME@example.com ",
 				password: "password",
-				secretKey: "secret",
+				secretKey: SECRET_KEY,
 				serverUrl: "https://B.example/",
 			},
 			{
@@ -278,16 +321,16 @@ describe("account-routed authentication", () => {
 		);
 
 		expect(getPinnedKdfProfile).toHaveBeenCalledWith("account-b");
-		expect(crypto.validateKdfProfile).toHaveBeenCalledWith(kdfParams, profileB);
+		expect(derivations).toHaveLength(1);
+		expect(derivations[0]?.profile.iterations).toBe(600_000);
 	});
 
 	it("rejects a full-login downgrade before deriving keys", async () => {
-		const crypto = createCrypto([]);
-		delete (crypto as Partial<ICrypto>).validateKdfProfile;
-		const deriveKeys = crypto.deriveKeys as ReturnType<typeof mock>;
-		const { storage } = await makeStore([
-			account("account-a", "user-a", "https://a.example"),
-		]);
+		const { crypto, derivations } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("account-a", "user-a", "https://a.example")],
+			crypto,
+		);
 		await storage.storePinnedKdfProfile(
 			{ ...kdfParams, iterations: 1_200_000 },
 			"account-a",
@@ -298,34 +341,37 @@ describe("account-routed authentication", () => {
 				{
 					email: "same@example.com",
 					password: "password",
-					secretKey: "secret",
+					secretKey: SECRET_KEY,
 					serverUrl: "https://a.example",
 				},
 				{ crypto, storage, authClient: createAuthClient([]) },
 			),
 		).rejects.toThrow("downgraded");
-		expect(deriveKeys).not.toHaveBeenCalled();
+		expect(derivations).toHaveLength(0);
 	});
 
 	it("rejects ambiguous full-login account matches before derivation", async () => {
-		const crypto = createCrypto([]);
-		const { storage } = await makeStore([
-			account("account-a", "user-a", "https://a.example"),
-			account("account-b", "user-b", "https://a.example/"),
-		]);
+		const { crypto, derivations } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[
+				account("account-a", "user-a", "https://a.example"),
+				account("account-b", "user-b", "https://a.example/"),
+			],
+			crypto,
+		);
 
 		expect(
 			performSRPLogin(
 				{
 					email: "same@example.com",
 					password: "password",
-					secretKey: "secret",
+					secretKey: SECRET_KEY,
 					serverUrl: "https://a.example",
 				},
 				{ crypto, storage, authClient: createAuthClient([]) },
 			),
 		).rejects.toThrow("Ambiguous account");
-		expect(crypto.deriveKeys).not.toHaveBeenCalled();
+		expect(derivations).toHaveLength(0);
 	});
 });
 
@@ -336,45 +382,22 @@ describe("KDF agility on unlock", () => {
 		iterations: 600_000,
 	};
 
-	function createCapturingCrypto(derivedParams: KdfProfile[]) {
-		return {
-			validateSecretKey: mock(async () => true),
-			deriveKeys: mock(
-				async (
-					_password: string,
-					secretKey: string,
-					_email: string,
-					profile: KdfProfile,
-				) => {
-					derivedParams.push(profile);
-					return {
-						authKey: new TextEncoder().encode(`auth:${secretKey}`),
-						masterUnlockKey: new Uint8Array([1, 2, 3]),
-					};
-				},
-			),
-			decrypt: mock(async () => "{}"),
-			generateClientEphemeral: mock(async () => ({
-				publicKey: "client-public",
-				secret: "client-secret",
-			})),
-			deriveClientSession: mock(async () => ({ proof: "client-proof" })),
-			verifyServerSession: mock(async () => {}),
-			validateKdfProfile: mock(async () => {}),
-		} as unknown as ICrypto;
-	}
-
 	it("derives unlock keys with the account's pinned KDF profile", async () => {
-		const derivedParams: KdfProfile[] = [];
-		const crypto = createCapturingCrypto(derivedParams);
-		const { storage } = await makeStore([
-			account("acct", "user", "https://acct.example"),
-		]);
+		const { crypto, derivations } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("acct", "user", "https://acct.example")],
+			crypto,
+		);
 		await storage.storeSecretKey("secret", "acct");
 		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 		await storage.storeAuthToken("token", "acct");
 		await storage.storeVaultKeys([], "acct");
-		await storage.storeSessionData(MUK, "acct", "same@example.com", "user");
+		await storage.storeSessionData(
+			await crypto.importKey(MUK),
+			"acct",
+			"same@example.com",
+			"user",
+		);
 
 		const result = await performSRPUnlock(
 			{ accountId: "acct", password: "password" },
@@ -386,15 +409,16 @@ describe("KDF agility on unlock", () => {
 		);
 
 		expect(result.mode).toBe("local");
-		expect(derivedParams).toHaveLength(1);
-		expect(derivedParams[0]?.iterations).toBe(600_000);
+		expect(derivations).toHaveLength(1);
+		expect(derivations[0]?.profile.iterations).toBe(600_000);
 	});
 
 	it("requires full sign-in when the offline-unlock pin is missing", async () => {
-		const crypto = createCapturingCrypto([]);
-		const { storage } = await makeStore([
-			account("acct", "user", "https://acct.example"),
-		]);
+		const { crypto, derivations } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("acct", "user", "https://acct.example")],
+			crypto,
+		);
 		await storage.storeSecretKey("secret", "acct");
 
 		expect(
@@ -407,15 +431,15 @@ describe("KDF agility on unlock", () => {
 				},
 			),
 		).rejects.toThrow("sign in again");
-		expect(crypto.deriveKeys).not.toHaveBeenCalled();
+		expect(derivations).toHaveLength(0);
 	});
 
 	it("derives SRP login proofs with the negotiated server KDF params, not the current default", async () => {
-		const derivedParams: KdfProfile[] = [];
-		const crypto = createCapturingCrypto(derivedParams);
-		const { storage } = await makeStore([
-			account("acct", "user", "https://acct.example"),
-		]);
+		const { crypto, derivations } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("acct", "user", "https://acct.example")],
+			crypto,
+		);
 		await storage.storeSecretKey("secret", "acct");
 		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 
@@ -442,20 +466,22 @@ describe("KDF agility on unlock", () => {
 			},
 		);
 
-		expect(derivedParams).toHaveLength(1);
-		expect(derivedParams[0]?.iterations).toBe(600_000);
+		expect(derivations).toHaveLength(1);
+		expect(derivations[0]?.profile.iterations).toBe(600_000);
 	});
 });
 
 describe("storeLoginSession travel mode verification", () => {
-	function loginResult(): LoginResult {
+	async function loginResult(
+		crypto: InMemoryCryptoPort = cryptoPort,
+	): Promise<LoginResult> {
 		return {
 			token: "fresh-login-token",
 			sessionId: "session",
 			expiresAt: new Date(Date.now() + 60_000),
 			user: { id: "user-1", email: "user@example.com" },
 			vaultKeys: [],
-			masterUnlockKey: MUK,
+			masterUnlockKey: await crypto.importKey(MUK),
 			kdfParams,
 			serverUrl: "https://cloud.example",
 		};
@@ -494,7 +520,7 @@ describe("storeLoginSession travel mode verification", () => {
 		const seenTokens: (string | null)[] = [];
 
 		await storeLoginSession(
-			loginResult(),
+			await loginResult(),
 			"secret",
 			storage,
 			(await createTestItemCache()).cache,
@@ -524,7 +550,7 @@ describe("storeLoginSession travel mode verification", () => {
 		const seenTokens: (string | null)[] = [];
 
 		const accountId = await storeLoginSession(
-			loginResult(),
+			await loginResult(),
 			"secret",
 			storage,
 			itemCache,
@@ -543,7 +569,7 @@ describe("storeLoginSession travel mode verification", () => {
 
 		resetTravelModeEnforcerForTests();
 		await storeLoginSession(
-			loginResult(),
+			await loginResult(),
 			"secret",
 			storage,
 			itemCache,
@@ -557,16 +583,96 @@ describe("storeLoginSession travel mode verification", () => {
 
 		expect(await itemCache.getCachedItems(accountId)).toBeNull();
 	});
+
+	it("destroys the caller-owned MUK exactly once when session storage fails before transfer", async () => {
+		resetTravelModeEnforcerForTests();
+		const crypto = createInMemoryCryptoPort();
+		const { storage } = await makeStore([], crypto);
+		const { cache: itemCache } = await createTestItemCache();
+		const destroyKey = spyOn(crypto, "destroyKey");
+		spyOn(storage, "storeAuthToken").mockImplementation(async () => {
+			throw new Error("auth token write failed");
+		});
+
+		await expect(
+			storeLoginSessionOwned(
+				await loginResult(crypto),
+				"secret",
+				storage,
+				itemCache,
+				crypto,
+				"user@example.com",
+				{
+					serverUrl: "https://cloud.example",
+					createTravelModeRpcClient: (token: string | null) =>
+						travelModeClientForToken(token, []),
+				},
+			),
+		).rejects.toThrow("auth token write failed");
+
+		expect(destroyKey).toHaveBeenCalledTimes(1);
+		expect(crypto.liveKeyCount).toBe(0);
+	});
+
+	it("leaves a live store-owned MUK cached when metadata fails after transfer", async () => {
+		resetTravelModeEnforcerForTests();
+		const crypto = createInMemoryCryptoPort();
+		const { storage } = await makeStore([], crypto);
+		const { cache: itemCache } = await createTestItemCache();
+		const destroyKey = spyOn(crypto, "destroyKey");
+		const setMasterUnlockKey = storage.setMasterUnlockKey.bind(storage);
+		let accountId = "";
+		spyOn(storage, "setMasterUnlockKey").mockImplementation(
+			async (key, resolvedAccountId) => {
+				accountId = resolvedAccountId ?? "";
+				await setMasterUnlockKey(key, resolvedAccountId);
+			},
+		);
+		spyOn(storage, "addAccount").mockImplementation(async () => {
+			throw new Error("account metadata write failed");
+		});
+
+		const result = await loginResult(crypto);
+		await expect(
+			storeLoginSessionOwned(
+				result,
+				"secret",
+				storage,
+				itemCache,
+				crypto,
+				"user@example.com",
+				{
+					serverUrl: "https://cloud.example",
+					createTravelModeRpcClient: (token: string | null) =>
+						travelModeClientForToken(token, []),
+				},
+			),
+		).rejects.toThrow("account metadata write failed");
+
+		const cached = await storage.getMasterUnlockKey(accountId);
+		expect(cached).toBe(result.masterUnlockKey);
+		if (!cached) {
+			throw new Error("transferred MUK was not cached");
+		}
+		expect(await crypto.exportKey(cached)).toEqual(MUK);
+		expect(destroyKey).not.toHaveBeenCalled();
+		expect(crypto.liveKeyCount).toBe(2);
+
+		await storage.clearMasterUnlockKey(accountId);
+		expect(crypto.liveKeyCount).toBe(1);
+		await storage.clearAllStoredData();
+		expect(crypto.liveKeyCount).toBe(0);
+	});
 });
 
 describe("storeUnlockSession active account", () => {
-	function unlockResult(): UnlockResult {
+	async function unlockResult(): Promise<UnlockResult> {
 		return {
 			mode: "local",
 			token: "unlock-token",
 			user: { id: "user-b", email: "same@example.com" },
 			vaultKeys: [],
-			masterUnlockKey: MUK,
+			masterUnlockKey: await mukRef(),
 		};
 	}
 
@@ -589,9 +695,15 @@ describe("storeUnlockSession active account", () => {
 	it("leaves the active account alone when the caller opts out", async () => {
 		const { storage, itemCache } = await seeded();
 
-		await storeUnlockSession(unlockResult(), storage, itemCache, "account-b", {
-			setActive: false,
-		});
+		await storeUnlockSession(
+			await unlockResult(),
+			storage,
+			itemCache,
+			"account-b",
+			{
+				setActive: false,
+			},
+		);
 
 		expect(await storage.getActiveAccount()).toEqual("account-a");
 	});
@@ -599,7 +711,12 @@ describe("storeUnlockSession active account", () => {
 	it("claims the active account when the caller says nothing", async () => {
 		const { storage, itemCache } = await seeded();
 
-		await storeUnlockSession(unlockResult(), storage, itemCache, "account-b");
+		await storeUnlockSession(
+			await unlockResult(),
+			storage,
+			itemCache,
+			"account-b",
+		);
 
 		expect(await storage.getActiveAccount()).toEqual("account-b");
 	});

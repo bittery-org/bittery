@@ -17,10 +17,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import type { CryptoPort } from "@bittery/crypto-port";
 import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
 import type { KdfProfile } from "@bittery/types";
 import { type AccountStore, createAccountStore } from "../account-store";
-import type { CryptoProvider } from "../crypto-provider";
 import { accountKey, globalKey } from "../keys";
 import {
 	createInMemoryPlatformPort,
@@ -28,20 +28,17 @@ import {
 } from "../testing/in-memory-port";
 
 /**
- * The pin is never encrypted — it is `plain` tier — so a provider that throws on every call
- * is exactly the right double here. Any call is a bug.
+ * The pin is never encrypted — it is `plain` tier — so a port that throws on every call is
+ * exactly the right double here: any crypto call at all is a bug. A proxy rather than 38
+ * hand-written throwing members, so it cannot go stale as `CryptoPort` grows.
  */
-const unusedCrypto: CryptoProvider = {
-	encrypt: () => {
-		throw new Error("pinned KDF profiles must never be encrypted");
+const unusedCrypto = new Proxy({} as CryptoPort, {
+	get: (_target, member) => () => {
+		throw new Error(
+			`pinned KDF profiles need no crypto; ${String(member)} was called`,
+		);
 	},
-	decrypt: () => {
-		throw new Error("pinned KDF profiles must never be decrypted");
-	},
-	rsaDecrypt: () => {
-		throw new Error("not used");
-	},
-};
+});
 
 const profile600k: KdfProfile = {
 	schemaVersion: 1,
