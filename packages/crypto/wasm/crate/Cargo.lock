@@ -101,6 +101,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-compat"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a1ba85bc55464dcbf728b56d97e119d673f4cf9062be330a9a26f3acf504a590"
+dependencies = [
+ "futures-core",
+ "futures-io",
+ "once_cell",
+ "pin-project-lite",
+ "tokio",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -199,7 +212,7 @@ dependencies = [
 
 [[package]]
 name = "bittery-crypto-wasm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "bittery-crypto-api",
  "uniffi-runtime-javascript",
@@ -554,6 +567,12 @@ name = "futures-core"
 version = "0.3.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2cd50c473c80f6d7c3670a752354b8e569b1a7cbfdc0419ec88e5edad85e0dc7"
+
+[[package]]
+name = "futures-io"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4577ecaa3c4f96589d473f679a71b596316f6641bc350038b962a5daf0085d7a"
 
 [[package]]
 name = "futures-task"
@@ -1603,6 +1622,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "eec017b112701681f6fbbe5d92014b5c468eb0b177a94389de03ceec40665095"
 dependencies = [
  "anyhow",
+ "async-compat",
  "bytes",
  "once_cell",
  "static_assertions",

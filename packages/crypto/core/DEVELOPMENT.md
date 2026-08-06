@@ -59,7 +59,9 @@ and review the resulting diff.
 
 Generator configuration lives in `ubrn.config.yaml`. Generator and runtime versions are pinned
 in the workspace manifests and `patches/uniffi-bindgen-react-native@0.31.0-3.patch`; update them
-together to avoid UniFFI metadata version skew.
+together to avoid UniFFI metadata version skew. The patch also makes the generated WASM
+entrypoint use a standard asset URL because Vite does not support raw WASM ES module imports.
+Remove that part once ubrn emits a bundler-compatible URL itself.
 
 Regenerate the affected targets after changing generator configuration, pins, platform
 scaffolding, or the patch. Run all three builds before merging a change shared by every target.

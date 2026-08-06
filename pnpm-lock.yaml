@@ -25,7 +25,7 @@ overrides:
 
 patchedDependencies:
   uniffi-bindgen-react-native@0.31.0-3:
-    hash: 461355f3a04ea33c1ff69db334b1c8fd3b70414776bcd3618630fe20f4312194
+    hash: c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516
     path: patches/uniffi-bindgen-react-native@0.31.0-3.patch
 
 importers:
@@ -754,28 +754,6 @@ importers:
 
   packages/crypto/core: {}
 
-  packages/crypto/react-native:
-    dependencies:
-      '@ubjs/core':
-        specifier: 0.31.0-3
-        version: 0.31.0-3
-      react:
-        specifier: 19.1.0
-        version: 19.1.0
-      react-native:
-        specifier: '*'
-        version: 0.81.5(@babel/core@7.28.6)(@types/react@19.2.14)(react@19.1.0)
-      uniffi-bindgen-react-native:
-        specifier: 0.31.0-3
-        version: 0.31.0-3(patch_hash=461355f3a04ea33c1ff69db334b1c8fd3b70414776bcd3618630fe20f4312194)
-    devDependencies:
-      '@bittery/config':
-        specifier: workspace:*
-        version: link:../../config
-      typescript:
-        specifier: ~5.9.3
-        version: 5.9.3
-
   packages/crypto/port:
     dependencies:
       '@bittery/types':
@@ -795,6 +773,28 @@ importers:
         specifier: workspace:*
         version: link:../wasm
 
+  packages/crypto/react-native:
+    dependencies:
+      '@ubjs/core':
+        specifier: 0.31.0-3
+        version: 0.31.0-3
+      react:
+        specifier: 19.1.0
+        version: 19.1.0
+      react-native:
+        specifier: '*'
+        version: 0.81.5(@babel/core@7.28.6)(@types/react@19.2.14)(react@19.1.0)
+      uniffi-bindgen-react-native:
+        specifier: 0.31.0-3
+        version: 0.31.0-3(patch_hash=c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516)
+    devDependencies:
+      '@bittery/config':
+        specifier: workspace:*
+        version: link:../../config
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+
   packages/crypto/wasm:
     dependencies:
       '@ubjs/core':
@@ -809,7 +809,7 @@ importers:
         version: 3.6.2
       uniffi-bindgen-react-native:
         specifier: 0.31.0-3
-        version: 0.31.0-3(patch_hash=461355f3a04ea33c1ff69db334b1c8fd3b70414776bcd3618630fe20f4312194)
+        version: 0.31.0-3(patch_hash=c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516)
 
   packages/device:
     devDependencies:
@@ -18257,7 +18257,7 @@ snapshots:
 
   unicode-property-aliases-ecmascript@2.2.0: {}
 
-  uniffi-bindgen-react-native@0.31.0-3(patch_hash=461355f3a04ea33c1ff69db334b1c8fd3b70414776bcd3618630fe20f4312194): {}
+  uniffi-bindgen-react-native@0.31.0-3(patch_hash=c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516): {}
 
   unified@11.0.5:
     dependencies:

@@ -8,7 +8,7 @@ export * from './generated/bittery_crypto_api';
 import * as bittery_crypto_api from './generated/bittery_crypto_api';
 
 import initAsync from './generated/wasm-bindgen/index.js';
-import wasmPath from './generated/wasm-bindgen/index_bg.wasm';
+const wasmPath = new URL('./generated/wasm-bindgen/index_bg.wasm', import.meta.url);
 
 export async function uniffiInitAsync() {
   await initAsync({ module_or_path: wasmPath })

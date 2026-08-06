@@ -1546,7 +1546,7 @@ function __wbg_get_imports() {
         __wbg___wbindgen_throw_344f42d3211c4765: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
-        __wbg_call_9fe4131791e0ff8c: function(arg0, arg1, arg2, arg3) {
+        __wbg_call_4a841e042b37beb3: function(arg0, arg1, arg2, arg3) {
             arg0.call(arg1, BigInt.asUintN(64, arg2), arg3);
         },
         __wbg_call_a6e5c5dce5018821: function() { return handleError(function (arg0, arg1, arg2) {

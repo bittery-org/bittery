@@ -3368,6 +3368,7 @@ const FfiConverterTypePasskeyAttestation = (() => {
 export type PasskeyKeypair = {
   privateKey: string;
   publicKeyCose: string;
+  publicKeySpki: string;
 };
 
 /**
@@ -3394,16 +3395,19 @@ const FfiConverterTypePasskeyKeypair = (() => {
       return {
         privateKey: FfiConverterString.read(from),
         publicKeyCose: FfiConverterString.read(from),
+        publicKeySpki: FfiConverterString.read(from),
       };
     }
     write(value: TypeName, into: RustBuffer): void {
       FfiConverterString.write(value.privateKey, into);
       FfiConverterString.write(value.publicKeyCose, into);
+      FfiConverterString.write(value.publicKeySpki, into);
     }
     allocationSize(value: TypeName): number {
       return (
         FfiConverterString.allocationSize(value.privateKey) +
-        FfiConverterString.allocationSize(value.publicKeyCose)
+        FfiConverterString.allocationSize(value.publicKeyCose) +
+        FfiConverterString.allocationSize(value.publicKeySpki)
       );
     }
   }
