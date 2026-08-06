@@ -1,7 +1,7 @@
-mod crypto_commands;
 mod desktop_ipc;
 mod ipc_security;
 mod keychain;
+mod native_host_crypto;
 mod native_messaging_installer;
 
 use base64::Engine;
@@ -420,7 +420,7 @@ fn decrypt_item_payload(item: &CachedItemRecord, vault_key_base64: &str) -> Resu
         let mut last_error: Option<String> = None;
 
         for version in (1..=stored_version).rev() {
-            match crypto_commands::crypto_decrypt_with_context(
+            match native_host_crypto::decrypt_with_context(
                 item.encrypted_data.clone(),
                 item.encryption_iv.clone(),
                 item.encryption_algorithm.clone(),
@@ -446,7 +446,7 @@ fn decrypt_item_payload(item: &CachedItemRecord, vault_key_base64: &str) -> Resu
             }
         }
 
-        let decrypted_data = crypto_commands::crypto_decrypt(
+        let decrypted_data = native_host_crypto::decrypt(
             item.encrypted_data.clone(),
             item.encryption_iv.clone(),
             item.encryption_algorithm.clone(),
@@ -465,7 +465,7 @@ fn decrypt_item_payload(item: &CachedItemRecord, vault_key_base64: &str) -> Resu
         return Ok(normalize_decrypted_item_payload(unwrapped));
     }
 
-    crypto_commands::crypto_decrypt(
+    native_host_crypto::decrypt(
         item.encrypted_data.clone(),
         item.encryption_iv.clone(),
         item.encryption_algorithm.clone(),
@@ -595,7 +595,7 @@ fn load_device_key_base64<R: Runtime>(
 ) -> Result<String, String> {
     let device_key_base64 = read_key_ref(store, &view.device_key).ok_or("No device key found")?;
     // Decoded only to reject a malformed value early; the base64 form is what
-    // both the crypto commands and the extension response want.
+    // both the internal native-host code and the extension response want.
     base64::engine::general_purpose::STANDARD
         .decode(&device_key_base64)
         .map_err(|e| format!("Failed to decode device key: {}", e))?;
@@ -642,7 +642,7 @@ fn load_muk_base64<R: Runtime>(
         .and_then(|v| v.as_str())
         .ok_or("Missing algorithm")?;
 
-    crypto_commands::crypto_decrypt(
+    native_host_crypto::decrypt(
         ciphertext.to_string(),
         iv.to_string(),
         algorithm.to_string(),
@@ -707,7 +707,7 @@ fn load_decrypted_vault_keys<R: Runtime>(
                     .and_then(|v| v.as_str())
                     .ok_or("Missing vault key context purpose")?;
 
-                crypto_commands::crypto_decrypt_with_context(
+                native_host_crypto::decrypt_with_context(
                     ciphertext.to_string(),
                     iv.to_string(),
                     algorithm.to_string(),
@@ -720,7 +720,7 @@ fn load_decrypted_vault_keys<R: Runtime>(
                 )
                 .map_err(|e| format!("Failed to decrypt vault key with context: {}", e))?
             } else {
-                crypto_commands::crypto_decrypt(
+                native_host_crypto::decrypt(
                     ciphertext.to_string(),
                     iv.to_string(),
                     algorithm.to_string(),
@@ -745,7 +745,7 @@ fn load_decrypted_vault_keys<R: Runtime>(
                 .get("algorithm")
                 .and_then(|v| v.as_str())
                 .ok_or("Missing private key algorithm")?;
-            let private_key_pem = crypto_commands::crypto_decrypt(
+            let private_key_pem = native_host_crypto::decrypt(
                 epk_ciphertext.to_string(),
                 epk_iv.to_string(),
                 epk_algorithm.to_string(),
@@ -753,7 +753,7 @@ fn load_decrypted_vault_keys<R: Runtime>(
             )
             .map_err(|e| format!("Failed to decrypt private key: {}", e))?;
 
-            crypto_commands::crypto_rsa_decrypt(encrypted_vault_key.to_string(), private_key_pem)
+            native_host_crypto::rsa_decrypt(encrypted_vault_key.to_string(), private_key_pem)
                 .map_err(|e| format!("Failed to RSA decrypt vault key: {}", e))?
         };
 
@@ -2037,44 +2037,6 @@ pub fn run() {
         .plugin(tauri_plugin_biometry::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
-            // Crypto commands
-            crypto_commands::crypto_derive_keys,
-            crypto_commands::crypto_derive_master_key,
-            crypto_commands::crypto_derive_keys_from_master_key,
-            crypto_commands::crypto_encrypt,
-            crypto_commands::crypto_encrypt_with_context,
-            crypto_commands::crypto_decrypt,
-            crypto_commands::crypto_decrypt_with_context,
-            crypto_commands::crypto_validate_kdf_profile,
-            crypto_commands::crypto_generate_encryption_key,
-            crypto_commands::crypto_generate_uuid,
-            crypto_commands::crypto_generate_rsa_key_pair,
-            crypto_commands::crypto_rsa_encrypt,
-            crypto_commands::crypto_rsa_decrypt,
-            crypto_commands::crypto_generate_secret_key,
-            crypto_commands::crypto_validate_secret_key,
-            crypto_commands::crypto_get_secret_key_hint,
-            crypto_commands::crypto_generate_recovery_key,
-            crypto_commands::crypto_validate_recovery_key,
-            crypto_commands::crypto_encrypt_master_key,
-            crypto_commands::crypto_decrypt_master_key,
-            crypto_commands::crypto_srp_generate_salt,
-            crypto_commands::crypto_srp_derive_safe_private_key,
-            crypto_commands::crypto_srp_derive_verifier,
-            crypto_commands::crypto_srp_generate_ephemeral,
-            crypto_commands::crypto_srp_derive_session,
-            crypto_commands::crypto_srp_verify_session,
-            // Passkey / WebAuthn commands
-            crypto_commands::crypto_passkey_generate_keypair,
-            crypto_commands::crypto_passkey_generate_credential_id,
-            crypto_commands::crypto_passkey_build_attestation_object,
-            crypto_commands::crypto_passkey_sign_assertion,
-            // Key rotation commands
-            crypto_commands::crypto_encrypt_vault_key_for_member,
-            crypto_commands::crypto_encrypt_vault_key_with_muk,
-            crypto_commands::crypto_re_encrypt_item,
-            crypto_commands::crypto_perform_key_rotation,
-            crypto_commands::crypto_validate_rotation_data,
             // Keychain commands (OS secure storage)
             keychain::keychain_set,
             keychain::keychain_get,

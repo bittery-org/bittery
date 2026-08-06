@@ -1,0 +1,20 @@
+diff --git a/crates/uniffi-runtime-javascript/Cargo.toml b/crates/uniffi-runtime-javascript/Cargo.toml
+index 9f83f9a..005a77e 100644
+--- a/crates/uniffi-runtime-javascript/Cargo.toml
++++ b/crates/uniffi-runtime-javascript/Cargo.toml
+@@ -14 +14 @@
+-uniffi_core = { version = "=0.31.0", default-features = false }
++uniffi_core = { version = "=0.31.2", default-features = false }
+diff --git a/Cargo.toml b/Cargo.toml
+index 5e66ba2..7a19b55 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -25,4 +25,4 @@ toml = "0.8.22"
+-uniffi = "=0.31.0"
+-uniffi_bindgen = "=0.31.0"
+-uniffi_core = { version = "=0.31.0", default-features = false }
+-uniffi_meta = "=0.31.0"
++uniffi = "=0.31.2"
++uniffi_bindgen = "=0.31.2"
++uniffi_core = { version = "=0.31.2", default-features = false }
++uniffi_meta = "=0.31.2"

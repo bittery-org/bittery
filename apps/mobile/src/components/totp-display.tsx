@@ -1,9 +1,10 @@
-import { generateTotp, type TotpResult } from "@bittery/crypto-nitro";
+import { generateTotp, type TotpResult } from "@bittery/crypto-react-native";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
+import { useFocusEffect } from "expo-router";
 import { useToast } from "heroui-native";
 import { Copy } from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Animated, Text, TouchableOpacity, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import { cn } from "@/lib/utils";
@@ -24,16 +25,6 @@ interface TotpDisplayProps {
 	onCopy?: () => void;
 }
 
-/**
- * TOTP Display Component
- *
- * Shows a live TOTP code with:
- * - Circular countdown timer with smooth animations
- * - Copy-to-clipboard functionality with haptic feedback
- * - Color-coded urgency (green → yellow → red)
- * - Inline mode for list views
- * - Automatic code refresh at configurable intervals
- */
 export function TotpDisplay({
 	totpSecret,
 	totpAlgorithm = "SHA1",
@@ -52,20 +43,50 @@ export function TotpDisplay({
 	const prevCodeRef = useRef<string | null>(null);
 	const fadeAnim = useRef(new Animated.Value(1)).current;
 	const pulseAnim = useRef(new Animated.Value(1)).current;
+	const pulseLoopRef = useRef<ReturnType<typeof Animated.loop> | null>(null);
 
-	const generateCode = useCallback(() => {
+	const stopPulse = useCallback(() => {
+		pulseLoopRef.current?.stop();
+		pulseLoopRef.current = null;
+		pulseAnim.setValue(1);
+	}, [pulseAnim]);
+
+	const startPulse = useCallback(() => {
+		if (pulseLoopRef.current !== null) {
+			return;
+		}
+		const loop = Animated.loop(
+			Animated.sequence([
+				Animated.timing(pulseAnim, {
+					toValue: 1.05,
+					duration: 300,
+					useNativeDriver: true,
+				}),
+				Animated.timing(pulseAnim, {
+					toValue: 1,
+					duration: 300,
+					useNativeDriver: true,
+				}),
+			]),
+		);
+		pulseLoopRef.current = loop;
+		loop.start();
+	}, [pulseAnim]);
+
+	const generateCode = useCallback(async () => {
 		if (!totpSecret) {
+			stopPulse();
 			setTotpResult(null);
 			return;
 		}
 
 		try {
-			const result = generateTotp({
-				secret: totpSecret,
-				algorithm: totpAlgorithm,
-				digits: totpDigits,
-				period: totpPeriod,
-			});
+			const result = await generateTotp(
+				totpSecret,
+				totpAlgorithm,
+				totpDigits,
+				BigInt(totpPeriod),
+			);
 
 			// Animate code change
 			if (prevCodeRef.current && prevCodeRef.current !== result.code) {
@@ -85,44 +106,41 @@ export function TotpDisplay({
 			}
 
 			prevCodeRef.current = result.code;
+			if (result.remainingSeconds <= 5n) {
+				startPulse();
+			} else {
+				stopPulse();
+			}
 			setTotpResult(result);
 		} catch (error) {
+			stopPulse();
 			console.error("Failed to generate TOTP code:", error);
 			setTotpResult(null);
 		}
-	}, [totpSecret, totpAlgorithm, totpDigits, totpPeriod, fadeAnim]);
+	}, [
+		totpSecret,
+		totpAlgorithm,
+		totpDigits,
+		totpPeriod,
+		fadeAnim,
+		startPulse,
+		stopPulse,
+	]);
 
-	// Pulse animation when time is running low
-	useEffect(() => {
-		if (totpResult && totpResult.remainingSeconds <= 5) {
-			Animated.loop(
-				Animated.sequence([
-					Animated.timing(pulseAnim, {
-						toValue: 1.05,
-						duration: 300,
-						useNativeDriver: true,
-					}),
-					Animated.timing(pulseAnim, {
-						toValue: 1,
-						duration: 300,
-						useNativeDriver: true,
-					}),
-				]),
-			).start();
-		} else {
-			pulseAnim.setValue(1);
-		}
-	}, [totpResult, pulseAnim]);
+	useFocusEffect(
+		useCallback(() => {
+			void generateCode();
 
-	useEffect(() => {
-		generateCode();
+			const interval = setInterval(() => {
+				void generateCode();
+			}, 1000);
 
-		const interval = setInterval(() => {
-			generateCode();
-		}, 1000);
-
-		return () => clearInterval(interval);
-	}, [generateCode]);
+			return () => {
+				clearInterval(interval);
+				stopPulse();
+			};
+		}, [generateCode, stopPulse]),
+	);
 
 	const handleCopy = async () => {
 		if (totpResult?.code) {

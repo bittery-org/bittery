@@ -32,10 +32,6 @@ if (useManagedAndroidSdkVersions) {
   }
 }
 
-// Find the crypto-nitro module's jniLibs directory
-// Path: apps/mobile/modules/credential-provider/android -> packages/crypto-nitro/android/src/main/jniLibs
-def cryptoNitroDir = new File(projectDir, "../../../../../packages/crypto-nitro/android/src/main/jniLibs")
-
 android {
   namespace "expo.modules.credentialprovider"
   defaultConfig {
@@ -50,17 +46,12 @@ android {
   lintOptions {
     abortOnError false
   }
-
-  // Include native libraries from crypto-nitro module
-  sourceSets {
-    main {
-      // Use jniLibs from crypto-nitro package
-      jniLibs.srcDirs = [cryptoNitroDir]
-    }
-  }
 }
 
 dependencies {
+  // Autolinking cleanses @bittery/crypto-react-native to this stable Gradle project name.
+  implementation project(':bittery_crypto-react-native')
+
   // Credential Manager
   implementation "androidx.credentials:credentials:1.6.0-rc01"
 

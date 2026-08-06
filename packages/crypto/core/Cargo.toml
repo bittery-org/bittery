@@ -1,9 +1,8 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/bittery-crypto-api",
     "crates/bittery-crypto-core",
-    "crates/bittery-crypto-wasm",
-    "crates/bittery-crypto-ffi",
 ]
 
 [workspace.package]
@@ -55,10 +54,6 @@ js-sys = "0.3"
 # wasm32-unknown-unknown; the feature was renamed `js` -> `wasm_js` in 0.3.
 getrandom = { version = "0.4", features = ["wasm_js"] }
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
-
-# NAPI bindings (for Bun/Node server)
-napi = { version = "2", default-features = false, features = ["napi4"] }
-napi-derive = "2"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

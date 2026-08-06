@@ -521,6 +521,18 @@ export function runCryptoPortConformance(
 			expect([...(await port.exportKey(legacyRestored))]).toEqual([
 				...AWKWARD_KEY_BYTES,
 			]);
+
+			await expectPortError(
+				() =>
+					port.unwrapKey(legacy, wrappingKey, {
+						context: null,
+						legacyEnvelope: {
+							marker: "wrong-marker",
+							context: "legacy-context",
+						},
+					}),
+				"invalid-input",
+			);
 		});
 
 		test("wrapping a destroyed key throws", async () => {

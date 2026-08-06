@@ -1,0 +1,3 @@
+# Native binaries are reproducibly rebuilt before app compilation.
+android/src/main/jniLibs/
+*.xcframework/

@@ -23,7 +23,6 @@
 			"!**/dist",
 			"!**/build",
 			"!packages/crypto/wasm",
-			"!packages/crypto/napi",
 			"!packages/ui/src/components",
 			"!docs/design-explorations",
 			"!**/target",

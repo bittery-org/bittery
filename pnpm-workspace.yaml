@@ -3,9 +3,8 @@ packages:
   - packages/*
   - packages/crypto/core
   - packages/crypto/wasm
-  - packages/crypto/napi
   - packages/crypto/port
-  - packages/crypto/expo-module
+  - packages/crypto/react-native
 
 catalog:
   '@qubit-rs/client': ^0.4.5

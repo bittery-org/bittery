@@ -178,14 +178,20 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.target }},wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: apps/desktop/src-tauri -> target
+          workspaces: |
+            apps/desktop/src-tauri -> target
+            packages/crypto/core
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build crypto WASM
+        shell: bash
+        run: bash packages/crypto/core/build-wasm.sh
 
       - name: Generate i18n
         run: pnpm run i18n:generate
@@ -265,9 +271,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Install wasm-pack
-        run: command -v wasm-pack || cargo install wasm-pack --version 0.13.1 --locked
 
       - name: Build crypto WASM
         run: pnpm run build:crypto-wasm

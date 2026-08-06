@@ -1,22 +1,3 @@
-/**
- * Extension adapter conformance.
- *
- * The behavioural contract comes from the shared suite; this file only has to hand it a
- * fresh port backed by a faked `@bittery/crypto-wasm`. The extra tests below pin what is
- * *specific* to running crypto on the same thread as the caller, which the platform-
- * agnostic suite cannot see: that a `KeyRef` really is backed by the WASM handle table
- * (not some parallel bookkeeping), that a foreign or destroyed ref is rejected without
- * ever touching the backend, that the backend loads once however many calls it serves,
- * and that a failed load is retried rather than poisoning the rest of the instance's life
- * — the property a service-worker restart depends on.
- *
- * Error-code classification itself is not re-pinned exhaustively here: `classify` is
- * imported unchanged from `../wasm-crypto-backend` and `wasm-worker.test.ts` already pins
- * its full mapping against the real `CryptoError` `Display` strings. A couple of
- * representative cases below are enough to prove this adapter surfaces what `classify`
- * says, nothing more.
- */
-
 import { describe, expect, test } from "bun:test";
 import { CryptoPortError } from "../errors";
 import { runCryptoPortConformance } from "./port-conformance";
@@ -72,17 +53,10 @@ describe("wasm adapter — KeyRef is the WASM handle table", () => {
 	test("destroying twice never asks the backend to destroy a handle twice", async () => {
 		const { port, doubles } = await makePort();
 		const key = await port.generateEncryptionKey();
-		let destroyCalls = 0;
-		const original = doubles.wasm.destroyKeyHandle.bind(doubles.wasm);
-		doubles.wasm.destroyKeyHandle = (handle: bigint) => {
-			destroyCalls += 1;
-			return original(handle);
-		};
-
 		await port.destroyKey(key);
 		await port.destroyKey(key);
 
-		expect(destroyCalls).toBe(1);
+		expect(doubles.wasm.destroyCalls).toBe(1);
 	});
 
 	test("a foreign KeyRef is rejected without ever touching the backend", async () => {
@@ -95,8 +69,6 @@ describe("wasm adapter — KeyRef is the WASM handle table", () => {
 			code: "invalid-key-ref",
 		});
 
-		// The foreign ref's own handle is untouched — the rejection never reached any
-		// backend, this port's or the other one's.
 		expect(otherDoubles.wasm.liveHandleCount).toBe(1);
 	});
 });
@@ -143,8 +115,6 @@ describe("wasm adapter — surviving a fresh instance (service-worker restart)",
 		const { port: beforeRestart } = await makePort();
 		const key = await beforeRestart.generateEncryptionKey();
 
-		// The service worker was torn down and rebuilt: a brand new closure, a brand new
-		// key table. Nothing carries over — there is no state to survive, by construction.
 		const { port: afterRestart } = await makePort();
 
 		await expect(
@@ -166,9 +136,6 @@ describe("wasm adapter — failure", () => {
 		);
 	});
 
-	// The full mapping is pinned once, in `wasm-worker.test.ts`, against the shared
-	// `classify` this adapter also calls. These few rows only confirm this adapter
-	// actually surfaces what `classify` says rather than swallowing or renaming it.
 	test.each([
 		["Invalid or expired key handle", "invalid-key-ref"],
 		["Decryption failed: aead::Error", "decryption-failed"],

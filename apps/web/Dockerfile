@@ -1,19 +1,28 @@
 # ============================================================
-# Stage 1: Rust WASM builder — compile crypto to WebAssembly
+# Stage 1: UniFFI WASM builder
 # ============================================================
-FROM rust:1-bookworm AS wasm-builder
+FROM node:24-bookworm AS wasm-builder
 
-RUN rustup target add wasm32-unknown-unknown \
- && cargo install wasm-pack --version 0.13.1 --locked
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends build-essential curl \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+RUN corepack enable && corepack prepare pnpm@10.18.3 --activate \
+ && rustup target add wasm32-unknown-unknown
 
 WORKDIR /build
 
-# Copy Rust workspace and build script
+# Copy the generator's locked dependency graph and Rust workspace.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY patches patches
+COPY packages/crypto/wasm/package.json packages/crypto/wasm/package.json
 COPY packages/crypto/core packages/crypto/core
 COPY packages/crypto/kdf-policy.json packages/crypto/kdf-policy.json
-RUN mkdir -p packages/crypto/wasm
+RUN pnpm install --frozen-lockfile --filter @bittery/crypto-wasm
 
-# Use the existing build script (installs wasm-pack + writes package.json)
 RUN packages/crypto/core/build-wasm.sh
 
 # ============================================================
@@ -28,9 +37,8 @@ WORKDIR /app
 # Copy entire repo (filtered by .dockerignore)
 COPY . .
 
-# Stub workspace packages whose package.json is generated (not in git)
-RUN mkdir -p packages/crypto/wasm && echo '{"name":"@bittery/crypto-wasm","version":"0.1.0","private":true}' > packages/crypto/wasm/package.json \
- && mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json
+# The crypto workspace manifests are tracked so pnpm can resolve them before generation.
+RUN mkdir -p packages/crypto/core && echo '{"name":"@bittery/crypto-core","version":"0.0.0","private":true}' > packages/crypto/core/package.json
 
 RUN pnpm install --frozen-lockfile --ignore-scripts
 

@@ -17,11 +17,8 @@
 		"./adapters/wasm": {
 			"default": "./src/adapters/wasm.ts"
 		},
-		"./adapters/tauri": {
-			"default": "./src/adapters/tauri.ts"
-		},
-		"./adapters/expo": {
-			"default": "./src/adapters/expo.ts"
+		"./adapters/react-native": {
+			"default": "./src/adapters/react-native.ts"
 		}
 	},
 	"scripts": {
@@ -30,24 +27,19 @@
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
-		"@bittery/crypto-nitro": "workspace:*",
-		"@bittery/crypto-wasm": "workspace:*",
-		"@tauri-apps/api": "^2.11.1"
+		"@bittery/crypto-react-native": "workspace:*",
+		"@bittery/crypto-wasm": "workspace:*"
 	},
 	"peerDependencies": {
 		"typescript": "^5",
 		"@bittery/crypto-wasm": "workspace:*",
-		"@bittery/crypto-nitro": "workspace:*",
-		"@tauri-apps/api": "^2.0.0"
+		"@bittery/crypto-react-native": "workspace:*"
 	},
 	"peerDependenciesMeta": {
 		"@bittery/crypto-wasm": {
 			"optional": true
 		},
-		"@bittery/crypto-nitro": {
-			"optional": true
-		},
-		"@tauri-apps/api": {
+		"@bittery/crypto-react-native": {
 			"optional": true
 		}
 	},

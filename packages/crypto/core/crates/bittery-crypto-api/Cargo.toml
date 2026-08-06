@@ -1,0 +1,29 @@
+[package]
+name = "bittery-crypto-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "UniFFI API for the Bittery cryptographic core"
+
+[lib]
+crate-type = ["cdylib", "rlib", "staticlib"]
+
+[dependencies]
+base64.workspace = true
+bittery-crypto-core.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uniffi = { version = "=0.31.2", features = ["tokio", "wasm-unstable-single-threaded"] }
+zeroize.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "=1.47.1", features = ["rt", "sync"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom.workspace = true
+getrandom_02.workspace = true
+
+[dev-dependencies]
+aes-gcm.workspace = true
+hex.workspace = true
+p256.workspace = true

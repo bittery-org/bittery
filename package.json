@@ -8,6 +8,9 @@
 		"overrides": {
 			"react": "19.1.0",
 			"react-dom": "19.1.0"
+		},
+		"patchedDependencies": {
+			"uniffi-bindgen-react-native@0.31.0-3": "patches/uniffi-bindgen-react-native@0.31.0-3.patch"
 		}
 	},
 	"scripts": {
@@ -38,10 +41,9 @@
 		"build:extension": "turbo -F extension build:release",
 		"build:mobile": "turbo -F mobile build",
 		"build:crypto-wasm": "cd packages/crypto/core && ./build-wasm.sh",
-		"build:crypto-napi": "cd packages/crypto/core && ./build-napi.sh",
-		"build:crypto-android": "pnpm --filter @bittery/crypto-nitro run build:android",
-		"build:crypto-ios": "pnpm --filter @bittery/crypto-nitro run build:ios",
-		"build:crypto": "pnpm run build:crypto-wasm && pnpm run build:crypto-napi && pnpm run build:crypto-android && pnpm run build:crypto-ios",
+		"build:crypto-android": "pnpm --filter @bittery/crypto-react-native run build:android",
+		"build:crypto-ios": "pnpm --filter @bittery/crypto-react-native run build:ios",
+		"build:crypto": "pnpm run build:crypto-wasm && pnpm run build:crypto-android && pnpm run build:crypto-ios",
 		"db:check": "node ./scripts/check-migrations.mjs",
 		"db:create": "node ./scripts/create-rust-migration.mjs",
 		"db:migrate": "cargo run --manifest-path apps/server/Cargo.toml --bin migrate",

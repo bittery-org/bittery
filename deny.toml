@@ -1,9 +1,9 @@
 # cargo-deny configuration — RustSec advisory gate.
 #
-# This repo has four independent Cargo lockfiles (apps/server,
-# apps/desktop/src-tauri, packages/crypto/core, packages/crypto/napi) and takes
+# This repo has three independent Cargo lockfiles (apps/server,
+# apps/desktop/src-tauri, packages/crypto/core) and takes
 # weekly automated Cargo bumps from Dependabot. One shared config keeps the gate
-# identical for all four; CI passes it explicitly with `--config deny.toml` so
+# identical for all three; CI passes it explicitly with `--config deny.toml` so
 # the per-workspace directories do not each need a copy.
 #
 # Run locally from the repo root:
@@ -15,7 +15,7 @@
 # entry instead of refreshing it.
 
 [graph]
-# Evaluate every target the four workspaces actually ship to. Leaving this
+# Evaluate every target the three workspaces actually ship to. Leaving this
 # unset would prune target-specific crates and hide, for example, the macOS-only
 # and Linux-only halves of the Tauri dependency graph.
 all-features = true
@@ -40,7 +40,7 @@ unmaintained = "workspace"
 yanked = "warn"
 
 # Each entry below applies to the lockfile(s) named in its comment. Because one
-# config is shared by four disjoint dependency graphs, cargo-deny reports
+# config is shared by three disjoint dependency graphs, cargo-deny reports
 # `advisory-not-detected` for every entry that does not apply to the lockfile
 # currently being checked; CI silences that one diagnostic with
 # `check --allow advisory-not-detected`. It is not a safety signal — an ignore
@@ -49,7 +49,7 @@ yanked = "warn"
 ignore = [
   # ---------------------------------------------------------------------------
   # RUSTSEC-2023-0071 — `rsa` 0.9.10 — Marvin Attack (CVSS 5.9)
-  # Reviewed 2026-07-30. Affects all four lockfiles.
+  # Reviewed 2026-07-30. Affects all three lockfiles.
   #
   # No fixed release exists: RustCrypto has not shipped a constant-time
   # implementation, and 0.10.0-rc does NOT fix it either, so there is nothing to

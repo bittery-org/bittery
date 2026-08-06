@@ -12,3 +12,7 @@ Add one only when all three are true: the decision is **hard to reverse**, it is
 Deeper design context that is not decision-shaped lives next to the code —
 `packages/storage/CONTEXT.md`, `SECURITY.md`, `docs/kdf-policy.md`. ADRs cross-reference
 those rather than restating them.
+
+## Records
+
+- [0010 — Desktop renderer crypto runs in a WASM worker](0010-desktop-renderer-crypto-runs-in-a-wasm-worker.md)
