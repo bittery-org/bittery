@@ -10,3 +10,4 @@
 - Strict i18n: never hardcode user-facing text. Add new keys to every `packages/i18n/messages/*.json`, then run `pnpm i18n:generate`.
 - For a critical bug, write a failing automated test first, then fix it.
 - Comments: explain **why**, never **what**. Max 1-2 lines, only for non-obvious constraints, workarounds, or security rules. If a comment restates the code, delete it and pick a better name. No comment blocks, no commented-out code, and no changelog ("was X, now Y") — describe the code as it stands. Constraints that still bind (back-compat shims, version pins, old data shapes) are a why, so keep those.
+- For crypto core, API, or binding changes, follow [`packages/crypto/core/DEVELOPMENT.md`](packages/crypto/core/DEVELOPMENT.md).

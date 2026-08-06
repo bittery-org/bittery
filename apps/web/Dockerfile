@@ -21,7 +21,7 @@ COPY patches patches
 COPY packages/crypto/wasm/package.json packages/crypto/wasm/package.json
 COPY packages/crypto/core packages/crypto/core
 COPY packages/crypto/kdf-policy.json packages/crypto/kdf-policy.json
-RUN pnpm install --frozen-lockfile --filter @bittery/crypto-wasm
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter @bittery/crypto-wasm
 
 RUN packages/crypto/core/build-wasm.sh
 
