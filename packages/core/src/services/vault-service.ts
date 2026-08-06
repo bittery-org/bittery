@@ -1,4 +1,4 @@
-import { buildVaultKeyEncryptionContext } from "@bittery/shared";
+import type { CryptoPort } from "@bittery/crypto-port";
 import {
 	decodeVaultType,
 	type ServerVaultListEntry,
@@ -6,8 +6,8 @@ import {
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore } from "@bittery/storage";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
-import type { ICrypto } from "@bittery/types";
 import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
+import type { VaultCrypto } from "./vault-crypto";
 
 /**
  * Image file input - supports File (browser) or Blob
@@ -76,18 +76,21 @@ export async function refreshVaultKeys(
 
 interface VaultServiceDeps {
 	storage: AccountStore;
-	crypto: ICrypto;
+	crypto: CryptoPort;
+	vaultCrypto: VaultCrypto;
 	accounts: AccountResolver;
 }
 
 export class VaultService {
 	private readonly storage: AccountStore;
-	private readonly crypto: ICrypto;
+	private readonly crypto: CryptoPort;
+	private readonly vaultCrypto: VaultCrypto;
 	private readonly accounts: AccountResolver;
 
 	constructor(deps: VaultServiceDeps) {
 		this.storage = deps.storage;
 		this.crypto = deps.crypto;
+		this.vaultCrypto = deps.vaultCrypto;
 		this.accounts = deps.accounts;
 	}
 
@@ -140,7 +143,6 @@ export class VaultService {
 			imageKey = upload.key;
 		}
 
-		const vaultKey = await this.crypto.generateEncryptionKey();
 		const masterUnlockKey = await this.storage.getMasterUnlockKey(accountId);
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
@@ -156,32 +158,31 @@ export class VaultService {
 			accountId,
 			{ errorMessage: "Session data missing. Please sign in again." },
 		);
-		const vaultId = this.crypto.generateUuid
-			? await this.crypto.generateUuid()
-			: (globalThis.crypto?.randomUUID?.() ?? `vault_${Date.now()}`);
-
-		const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
-		const encryptedVaultKeyData = await this.crypto.encrypt(
-			vaultKeyBase64,
-			masterUnlockKey,
-			buildVaultKeyEncryptionContext({
+		const vaultId = await this.crypto.generateUuid();
+		const vaultKey = await this.crypto.generateEncryptionKey();
+		try {
+			const encryptedVaultKey = await this.vaultCrypto.wrapVaultKeyForOwner({
+				vaultKey,
+				masterUnlockKey,
 				vaultId,
 				userId: currentUserId,
 				keyVersion: 1,
-			}),
-		);
+			});
 
-		const result = await client.vault.create.mutate({
-			vaultId,
-			name: trimmedName,
-			vaultType: input.type,
-			encryptedVaultKey: JSON.stringify(encryptedVaultKeyData),
-			icon: input.icon,
-			imageKey: imageKey ?? null,
-			clientId: null,
-		});
+			const result = await client.vault.create.mutate({
+				vaultId,
+				name: trimmedName,
+				vaultType: input.type,
+				encryptedVaultKey,
+				icon: input.icon,
+				imageKey: imageKey ?? null,
+				clientId: null,
+			});
 
-		return { vaultId: result.vaultId };
+			return { vaultId: result.vaultId };
+		} finally {
+			await this.crypto.destroyKey(vaultKey);
+		}
 	}
 
 	async updateVault(

@@ -101,8 +101,8 @@ mock.module("@bittery/core/services/unlock", () => ({
 	},
 }));
 
-mock.module(path.join(libDir, "crypto-adapter.ts"), () => ({
-	cryptoAdapter: {},
+mock.module(path.join(libDir, "crypto.ts"), () => ({
+	crypto: {},
 }));
 
 mock.module(path.join(bgDir, "rpc-client.ts"), () => ({
@@ -149,8 +149,9 @@ mock.module(path.join(bgDir, "session-manager.ts"), () => ({
 mock.module("@bittery/core/services/auth-service", () => ({
 	performSRPUnlock: async () => ({ masterUnlockKey: new Uint8Array([1]) }),
 	storeUnlockSession: async () => {},
+	storeUnlockSessionOwned: async () => {},
 	performSRPLogin: async () => ({}),
-	storeLoginSession: async () => {},
+	storeLoginSessionOwned: async () => {},
 }));
 
 mock.module("@bittery/core/services/account-session-manager", () => ({

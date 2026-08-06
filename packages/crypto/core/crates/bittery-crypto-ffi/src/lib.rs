@@ -6,15 +6,16 @@
 mod jni;
 
 use bittery_crypto_core::{
-    decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_credential_id,
-    generate_encryption_key, generate_passkey_keypair, generate_rsa_key_pair, generate_secret_key,
-    get_secret_key_hint,
+    decrypt, decrypt_master_key, decrypt_with_aad, derive_keys, derive_keys_from_master_key,
+    derive_master_key, encrypt, encrypt_master_key, encrypt_with_aad, generate_credential_id,
+    generate_encryption_key, generate_passkey_keypair, generate_recovery_key,
+    generate_rsa_key_pair, generate_secret_key, generate_uuid, get_secret_key_hint,
     kdf_policy::KdfProfile,
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
     passkey::{build_passkey_attestation_object, sign_passkey_assertion},
     rsa_decrypt, rsa_encrypt,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient, SrpServer},
-    validate_secret_key, AadContext, EncryptedData,
+    validate_recovery_key, validate_secret_key, AadContext, EncryptedData,
 };
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
@@ -202,6 +203,104 @@ pub extern "C" fn bittery_derive_keys(
                 error: ptr::null_mut(),
             }
         }
+        Err(e) => DerivedKeysResult {
+            auth_key: ptr::null_mut(),
+            master_unlock_key: ptr::null_mut(),
+            error: string_to_c_str(e.to_string()),
+        },
+    }
+}
+
+/// Derive the intermediate master key (PBKDF2 output) from password + secret key.
+///
+/// Returns the master key as base64, or an `"ERROR:"`-prefixed message.
+#[no_mangle]
+pub extern "C" fn bittery_derive_master_key(
+    account_password: *const c_char,
+    secret_key: *const c_char,
+    email: *const c_char,
+    schema_version: u32,
+    algorithm: *const c_char,
+    iterations: u32,
+) -> *mut c_char {
+    let password = match c_str_to_secret_string(account_password) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid password".to_string()),
+    };
+    let secret = match c_str_to_secret_string(secret_key) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid secret key".to_string()),
+    };
+    let email_str = match c_str_to_string(email) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid email".to_string()),
+    };
+    let algorithm_str = match c_str_to_string(algorithm) {
+        Some(value) => value,
+        None => return string_to_c_str("ERROR:Invalid KDF algorithm".to_string()),
+    };
+    let profile = KdfProfile {
+        schema_version,
+        algorithm: algorithm_str,
+        iterations,
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    match derive_master_key(&password, &secret, &email_str, &profile) {
+        Ok(mut master_key) => {
+            let encoded = secret_string_to_c_str(STANDARD.encode(master_key.as_slice()));
+            master_key.zeroize();
+            encoded
+        }
+        Err(e) => string_to_c_str(format!("ERROR:{}", e)),
+    }
+}
+
+/// Split a raw master key into auth key + master unlock key.
+#[no_mangle]
+pub extern "C" fn bittery_derive_keys_from_master_key(
+    master_key_base64: *const c_char,
+    email: *const c_char,
+) -> DerivedKeysResult {
+    let master_key_str = match c_str_to_secret_string(master_key_base64) {
+        Some(s) => s,
+        None => {
+            return DerivedKeysResult {
+                auth_key: ptr::null_mut(),
+                master_unlock_key: ptr::null_mut(),
+                error: string_to_c_str("Invalid master key".to_string()),
+            }
+        }
+    };
+    let email_str = match c_str_to_string(email) {
+        Some(s) => s,
+        None => {
+            return DerivedKeysResult {
+                auth_key: ptr::null_mut(),
+                master_unlock_key: ptr::null_mut(),
+                error: string_to_c_str("Invalid email".to_string()),
+            }
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let master_key = match STANDARD.decode(&master_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return DerivedKeysResult {
+                auth_key: ptr::null_mut(),
+                master_unlock_key: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid master key base64: {}", e)),
+            }
+        }
+    };
+
+    match derive_keys_from_master_key(&master_key, &email_str) {
+        Ok(keys) => DerivedKeysResult {
+            auth_key: secret_string_to_c_str(STANDARD.encode(&keys.auth_key)),
+            master_unlock_key: secret_string_to_c_str(STANDARD.encode(&keys.master_unlock_key)),
+            error: ptr::null_mut(),
+        },
         Err(e) => DerivedKeysResult {
             auth_key: ptr::null_mut(),
             master_unlock_key: ptr::null_mut(),
@@ -529,6 +628,12 @@ pub extern "C" fn bittery_generate_encryption_key() -> *mut c_char {
     encoded
 }
 
+/// Generate a random UUID v4 string.
+#[no_mangle]
+pub extern "C" fn bittery_generate_uuid() -> *mut c_char {
+    string_to_c_str(generate_uuid())
+}
+
 // ============================================================================
 // RSA-4096
 // ============================================================================
@@ -846,6 +951,145 @@ pub extern "C" fn bittery_get_secret_key_hint(secret_key: *const c_char) -> *mut
     };
     // The hint is the deliberately public prefix of the secret key.
     string_to_c_str(get_secret_key_hint(&key))
+}
+
+/// Generate a new recovery key
+#[no_mangle]
+pub extern "C" fn bittery_generate_recovery_key() -> *mut c_char {
+    secret_string_to_c_str(generate_recovery_key())
+}
+
+/// Validate recovery key format (returns 1 for valid, 0 for invalid)
+#[no_mangle]
+pub extern "C" fn bittery_validate_recovery_key(recovery_key: *const c_char) -> i32 {
+    let key = match c_str_to_secret_string(recovery_key) {
+        Some(s) => s,
+        None => return 0,
+    };
+    if validate_recovery_key(&key) {
+        1
+    } else {
+        0
+    }
+}
+
+/// Encrypt a raw 32-byte master key using recovery key material
+#[no_mangle]
+pub extern "C" fn bittery_encrypt_master_key(
+    master_key_base64: *const c_char,
+    recovery_key: *const c_char,
+    email: *const c_char,
+) -> EncryptResult {
+    let master_key_str = match c_str_to_secret_string(master_key_base64) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid master key".to_string()),
+            }
+        }
+    };
+    let recovery_key_str = match c_str_to_secret_string(recovery_key) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid recovery key".to_string()),
+            }
+        }
+    };
+    let email_str = match c_str_to_string(email) {
+        Some(s) => s,
+        None => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str("Invalid email".to_string()),
+            }
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let master_key = match STANDARD.decode(&master_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return EncryptResult {
+                ciphertext: ptr::null_mut(),
+                iv: ptr::null_mut(),
+                algorithm: ptr::null_mut(),
+                error: string_to_c_str(format!("Invalid master key base64: {}", e)),
+            }
+        }
+    };
+
+    match encrypt_master_key(&master_key, &recovery_key_str, &email_str) {
+        Ok(encrypted) => EncryptResult {
+            ciphertext: string_to_c_str(encrypted.ciphertext),
+            iv: string_to_c_str(encrypted.iv),
+            algorithm: string_to_c_str(encrypted.algorithm),
+            error: ptr::null_mut(),
+        },
+        Err(e) => EncryptResult {
+            ciphertext: ptr::null_mut(),
+            iv: ptr::null_mut(),
+            algorithm: ptr::null_mut(),
+            error: string_to_c_str(e.to_string()),
+        },
+    }
+}
+
+/// Decrypt an encrypted master key blob using the recovery key
+///
+/// Returns the master key as base64, or an `"ERROR:"`-prefixed message.
+#[no_mangle]
+pub extern "C" fn bittery_decrypt_master_key(
+    ciphertext: *const c_char,
+    iv: *const c_char,
+    algorithm: *const c_char,
+    recovery_key: *const c_char,
+    email: *const c_char,
+) -> *mut c_char {
+    let ciphertext_str = match c_str_to_string(ciphertext) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid ciphertext".to_string()),
+    };
+    let iv_str = match c_str_to_string(iv) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid IV".to_string()),
+    };
+    let algorithm_str = match c_str_to_string(algorithm) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid algorithm".to_string()),
+    };
+    let recovery_key_str = match c_str_to_secret_string(recovery_key) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid recovery key".to_string()),
+    };
+    let email_str = match c_str_to_string(email) {
+        Some(s) => s,
+        None => return string_to_c_str("ERROR:Invalid email".to_string()),
+    };
+
+    let data = EncryptedData {
+        ciphertext: ciphertext_str,
+        iv: iv_str,
+        algorithm: algorithm_str,
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    match decrypt_master_key(&data, &recovery_key_str, &email_str) {
+        Ok(mut master_key) => {
+            let encoded = secret_string_to_c_str(STANDARD.encode(master_key.as_slice()));
+            master_key.zeroize();
+            encoded
+        }
+        Err(e) => string_to_c_str(format!("ERROR:{}", e)),
+    }
 }
 
 // ============================================================================

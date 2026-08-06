@@ -88,7 +88,9 @@ export function BiometricAuthModal({
 		return <Fingerprint size={48} color="#3b82f6" />;
 	};
 
-	const getErrorIcon = (error?: BiometricErrorType) => {
+	const getErrorIcon = (
+		error?: BiometricErrorType | "travel_mode_unverified",
+	) => {
 		switch (error) {
 			case "lockout":
 				return <Lock size={48} color="#ef4444" />;

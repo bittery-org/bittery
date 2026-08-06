@@ -23,6 +23,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AuthDoorsLayout } from "@/components/auth/auth-doors-layout";
 import { triggerAuthRevealToVault } from "@/lib/auth-reveal-transition";
+import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -138,7 +139,11 @@ export function UnlockPage() {
 				// copy and has to be translated here — storage's default is an English fallback.
 				promptMessage: m.biometric_prompt_unlock_all_accounts(),
 			},
-			{ storage, itemCache },
+			{
+				storage,
+				itemCache,
+				credentialMirror: lifecycleDeps.credentialMirror,
+			},
 		);
 
 		if (unlocked.length === 0) {

@@ -1599,6 +1599,8 @@
 	"settings_common_action_copy": "Kopieren",
 	"settings_common_action_download_kit": "Kit herunterladen",
 	"settings_common_action_saving": "Wird gespeichert...",
+	"settings_common_toast_keys_changed_sign_in_again": "Deine Kontoschlüssel wurden geändert, konnten auf diesem Gerät aber nicht gespeichert werden. Melde dich erneut mit deinem Master-Passwort und deinem Secret Key an.",
+	"settings_common_toast_current_password_invalid": "Das aktuelle Master-Passwort ist falsch.",
 	"settings_common_toast_secret_key_not_found": "Secret Key nicht gefunden. Bitte melde dich ab und wieder mit deinen vollständigen Zugangsdaten an.",
 	"settings_common_toast_secret_key_not_found_sign_out": "Secret Key nicht gefunden. Bitte melde dich ab und wieder mit vollständigen Zugangsdaten an.",
 	"settings_common_toast_user_data_load_failed": "Benutzerdaten konnten nicht geladen werden. Bitte versuche es erneut.",

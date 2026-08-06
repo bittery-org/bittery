@@ -1,7 +1,4 @@
-import {
-	getDecryptedVaultKey,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Avatar,
@@ -32,13 +29,6 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { storage } from "@/lib/storage";
-import {
-	arrayBufferToBase64,
-	decrypt,
-	rsaDecrypt,
-	rsaEncrypt,
-} from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
@@ -58,6 +48,8 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 
 	const rpc = useRPC();
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
+	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 
@@ -104,25 +96,24 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 		setAddingUserId(member.userId);
 
 		try {
-			const vaultKey = await getDecryptedVaultKey({
-				vaultId,
-				storage,
-				crypto: {
-					decrypt,
-					rsaDecrypt,
-				} as VaultKeyCryptoProvider,
-			});
+			const vaultKey = await vaultCrypto.getVaultKey({ vaultId });
 			if (!vaultKey) {
 				toast.error(m.vaults_add_member_dialog_toast_decrypt_key_failed());
 				setAddingUserId(null);
 				return;
 			}
 
-			const vaultKeyBase64 = arrayBufferToBase64(vaultKey);
-			const encryptedVaultKey = await rsaEncrypt(
-				vaultKeyBase64,
-				member.publicKey,
-			);
+			// Sealing to the member's public key never exposes the key here — the ref goes
+			// in and a ciphertext comes back — but the ref itself is ours to retire.
+			let encryptedVaultKey: string;
+			try {
+				encryptedVaultKey = await crypto.encryptVaultKeyForMember(
+					vaultKey,
+					member.publicKey,
+				);
+			} finally {
+				await crypto.destroyKey(vaultKey);
+			}
 
 			const role = selectedRoles[member.userId] ?? "member";
 			addMemberMutation.mutate({

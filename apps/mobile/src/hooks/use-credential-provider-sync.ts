@@ -1,5 +1,4 @@
 import { useAccountsInfo, useItems } from "@bittery/core/hooks";
-import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, InteractionManager, Platform } from "react-native";
 import { storage } from "@/services/storage";
@@ -8,6 +7,7 @@ import type {
 	SaveCredentialParams,
 } from "../../modules/credential-provider";
 import CredentialProvider from "../../modules/credential-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../services/credential-provider-master-unlock-key";
 
 const MAX_PENDING_PASSKEY_ATTEMPTS = 5;
 const MAX_PENDING_PASSKEY_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -255,30 +255,7 @@ export function useCredentialProviderSync(
 				return;
 			}
 
-			for (const accountId of unlockedEmails) {
-				const muk = await storage.getMasterUnlockKey(accountId);
-				const sessionData = await storage.getStoredSessionData(accountId);
-				const autoLockTimeoutMs =
-					await storage.getAutoLockTimeoutOrDefault(accountId);
-				debugLog(
-					`[CredentialProviderSync] ensureNativeMukSet: accountId=${accountId}, hasMuk=${!!muk}, hasSessionData=${!!sessionData}, userId=${sessionData?.userId ?? "null"}`,
-				);
-				if (muk && sessionData?.userId) {
-					const mukBase64 = arrayBufferToBase64(muk);
-					CredentialProvider.setMasterUnlockKey(
-						mukBase64,
-						sessionData.userId,
-						autoLockTimeoutMs,
-					);
-					debugLog(
-						`[CredentialProviderSync] ensureNativeMukSet: Set native MUK for userId=${sessionData.userId}`,
-					);
-				} else {
-					console.warn(
-						`[CredentialProviderSync] ensureNativeMukSet: SKIPPING accountId=${accountId} (muk=${!!muk}, userId=${sessionData?.userId ?? "null"})`,
-					);
-				}
-			}
+			await mirrorBorrowedMasterUnlockKeysToCredentialProvider(unlockedEmails);
 
 			debugLog("[CredentialProviderSync] Native MUKs set from RN storage");
 		} catch (err) {

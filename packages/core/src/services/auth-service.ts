@@ -4,6 +4,7 @@
  * extensions, or any other runtime.
  */
 
+import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
 import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
 import {
@@ -21,7 +22,7 @@ import {
 	normalizeAccountServerUrl,
 	resolveOrCreateAccountId,
 } from "@bittery/storage/account-id";
-import type { EncryptedData, ICrypto, KdfProfile } from "@bittery/types";
+import type { EncryptedData, KdfProfile } from "@bittery/types";
 import { peekAccountSessionManager } from "./account-session-manager";
 import { createStoredAccountRpcClient } from "./rpc-client";
 import {
@@ -29,6 +30,7 @@ import {
 	TravelModeVerificationError,
 } from "./travel-mode-enforcer";
 import type { TravelModeRpcClient } from "./travel-mode-service";
+import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
 
 export interface StoreAuthSessionOptions {
 	travelModeRpcClient?: TravelModeRpcClient;
@@ -47,6 +49,8 @@ export interface StoreAuthSessionOptions {
 	 * overwrite the account the user was last using.
 	 */
 	setActive?: boolean;
+	/** Called at the exact point `AccountStore` takes ownership of the login MUK. */
+	onMasterUnlockKeyTransferred?: () => void;
 }
 
 async function resolveAccountIdForLogin(
@@ -144,8 +148,12 @@ export interface LoginResult {
 	expiresAt?: string | Date;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
-	masterUnlockKey?: Uint8Array;
-	masterUnlockKeyHandle?: number;
+	/**
+	 * Caller-owned until `storeLoginSession` takes it: that call transfers the ref to the
+	 * store, which destroys it on lock. A flow that abandons the result before storing it
+	 * must `destroyKey` this itself.
+	 */
+	masterUnlockKey: KeyRef;
 	kdfParams: KdfProfile;
 	serverUrl: string;
 }
@@ -160,8 +168,8 @@ export interface UnlockResult {
 	expiresAt?: string | Date;
 	user: LoginUserData;
 	vaultKeys: VaultKeyData[];
-	masterUnlockKey?: Uint8Array;
-	masterUnlockKeyHandle?: number;
+	/** Ownership transfers to the store on `storeUnlockSessionOwned`, as with {@link LoginResult}. */
+	masterUnlockKey: KeyRef;
 	kdfParams?: KdfProfile;
 }
 
@@ -264,7 +272,7 @@ export interface IAuthClient {
  * Dependencies required for SRP login.
  */
 export interface SRPLoginDeps {
-	crypto: ICrypto;
+	crypto: CryptoPort;
 	authClient?: IAuthClient;
 	rpcClient?: IAuthClient;
 	storage: AccountStore;
@@ -275,7 +283,7 @@ export interface SRPLoginDeps {
  * Dependencies required for SRP unlock.
  */
 export interface SRPUnlockDeps {
-	crypto: ICrypto;
+	crypto: CryptoPort;
 	authClient?: IAuthClient;
 	rpcClient?: IAuthClient;
 	storage: AccountStore;
@@ -305,30 +313,6 @@ function resolveAuthClient(deps: {
 	return client;
 }
 
-interface HandleCapableCrypto extends ICrypto {
-	deriveKeyHandles: (
-		password: string,
-		secretKey: string,
-		email: string,
-		profile: KdfProfile,
-	) => Promise<{ authKeyHandle: number; masterUnlockKeyHandle: number }>;
-	deriveSrpPasswordFromHandle: (authKeyHandle: number) => Promise<string>;
-	exportKeyHandle?: (keyHandle: number) => Promise<Uint8Array>;
-	// biome-ignore lint/suspicious/noConfusingVoidType: wasm needs this
-	destroyKeyHandle?: (keyHandle: number) => Promise<void | boolean>;
-}
-
-function asHandleCapableCrypto(crypto: ICrypto): HandleCapableCrypto | null {
-	const candidate = crypto as Partial<HandleCapableCrypto>;
-	if (
-		typeof candidate.deriveKeyHandles === "function" &&
-		typeof candidate.deriveSrpPasswordFromHandle === "function"
-	) {
-		return candidate as HandleCapableCrypto;
-	}
-	return null;
-}
-
 function parseEncryptedData(serialized: string | null): EncryptedData | null {
 	if (!serialized) {
 		return null;
@@ -348,53 +332,45 @@ async function fetchVaultKeys(
 	return vaults.map(toVaultKeyEntry);
 }
 
+/**
+ * Proves the derived key really is this account's, by opening the stored private key with
+ * it. An account with no stored private key has nothing to check against and passes.
+ */
 async function validateDerivedUnlockKey(input: {
-	crypto: ICrypto;
+	vaultCrypto: VaultCrypto;
 	storage: AccountStore;
 	accountId: string;
-	masterUnlockKey?: Uint8Array;
-	masterUnlockKeyHandle?: number;
-	handleCrypto: HandleCapableCrypto | null;
+	masterUnlockKey: KeyRef;
 }): Promise<void> {
 	const encryptedPrivateKey = await input.storage.getEncryptedPrivateKey(
 		input.accountId,
 	);
-	const parsedEncryptedPrivateKey = parseEncryptedData(encryptedPrivateKey);
-	if (!parsedEncryptedPrivateKey) {
+	if (!encryptedPrivateKey || !parseEncryptedData(encryptedPrivateKey)) {
 		return;
 	}
 
-	let validationKey = input.masterUnlockKey;
-	if (
-		!validationKey &&
-		input.masterUnlockKeyHandle &&
-		input.handleCrypto?.exportKeyHandle
-	) {
-		validationKey = await input.handleCrypto.exportKeyHandle(
-			input.masterUnlockKeyHandle,
-		);
-	}
-
-	if (!validationKey) {
-		return;
-	}
-
-	await input.crypto.decrypt(parsedEncryptedPrivateKey, validationKey);
+	await input.vaultCrypto.decryptPrivateKey(
+		encryptedPrivateKey,
+		input.masterUnlockKey,
+	);
 }
 
+/**
+ * Narrows the server's login params to a profile this client will key against.
+ *
+ * Kept here rather than delegated to `VaultCrypto.validateKdfProfile` because the wire
+ * shape is `{ schemaVersion: number; algorithm: string }` and it is this assertion that
+ * turns it into a `KdfProfile`.
+ */
 async function validateKdfProfileForAccount(
 	accountId: string | undefined,
 	serverProfile: StartLoginResponse["kdfParams"],
-	deps: SRPLoginDeps | SRPUnlockDeps,
+	storage: AccountStore,
 ): Promise<KdfProfile> {
 	const pinnedProfile = accountId
-		? await deps.storage.getPinnedKdfProfile(accountId)
+		? await storage.getPinnedKdfProfile(accountId)
 		: null;
 	validateKdfProfileOrThrow(serverProfile, pinnedProfile);
-
-	if (deps.crypto.validateKdfProfile) {
-		await deps.crypto.validateKdfProfile(serverProfile, pinnedProfile);
-	}
 	return serverProfile;
 }
 
@@ -424,16 +400,13 @@ export async function performSRPLogin(
 	const { email, password, secretKey } = input;
 	const serverUrl = normalizeAccountServerUrl(input.serverUrl);
 	const { crypto } = deps;
+	const vaultCrypto = createVaultCrypto({ crypto, storage: deps.storage });
 	const authClient = resolveAuthClient(deps);
 
 	const isValid = await crypto.validateSecretKey(secretKey);
 	if (!isValid) {
 		throw new Error("Invalid Secret Key format");
 	}
-
-	const handleCrypto = asHandleCapableCrypto(crypto);
-	let masterUnlockKey: Uint8Array | undefined;
-	let masterUnlockKeyHandle: number | undefined;
 
 	const clientEphemeral = await crypto.generateClientEphemeral();
 
@@ -453,38 +426,16 @@ export async function performSRPLogin(
 	const validatedProfile = await validateKdfProfileForAccount(
 		matchingAccount?.accountId,
 		startResult.kdfParams,
-		deps,
+		deps.storage,
 	);
 
-	let srpPassword: string;
-
-	if (handleCrypto) {
-		const handles = await handleCrypto.deriveKeyHandles(
-			password,
-			secretKey,
-			email,
-			validatedProfile,
-		);
-		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
-		try {
-			srpPassword = await handleCrypto.deriveSrpPasswordFromHandle(
-				handles.authKeyHandle,
-			);
-		} finally {
-			if (handleCrypto.destroyKeyHandle) {
-				await handleCrypto.destroyKeyHandle(handles.authKeyHandle);
-			}
-		}
-	} else {
-		const derived = await crypto.deriveKeys(
-			password,
-			secretKey,
-			email,
-			validatedProfile,
-		);
-		masterUnlockKey = derived.masterUnlockKey;
-		srpPassword = new TextDecoder().decode(derived.authKey);
-	}
+	const { srpPassword, masterUnlockKey } = await vaultCrypto.deriveAccountKeys({
+		accountPassword: password,
+		secretKey,
+		email,
+		profile: validatedProfile,
+		accountId: matchingAccount?.accountId,
+	});
 
 	try {
 		const clientSession = await crypto.deriveClientSession(
@@ -524,14 +475,11 @@ export async function performSRPLogin(
 			user: finishResult.user,
 			vaultKeys,
 			masterUnlockKey,
-			masterUnlockKeyHandle,
 			kdfParams: validatedProfile,
 			serverUrl,
 		};
 	} catch (error) {
-		if (masterUnlockKeyHandle && handleCrypto?.destroyKeyHandle) {
-			await handleCrypto.destroyKeyHandle(masterUnlockKeyHandle);
-		}
+		await crypto.destroyKey(masterUnlockKey);
 		throw error;
 	}
 }
@@ -592,36 +540,16 @@ export async function storeLoginSession(
 
 	await storage.storeSecretKey(secretKey, accountId);
 
-	if (result.masterUnlockKeyHandle) {
-		await storage.storeSessionDataWithMasterUnlockKeyHandle(
-			result.masterUnlockKeyHandle,
-			accountId,
-			resolvedEmail,
-			result.user.id,
-			result.expiresAt,
-			result.sessionId,
-		);
-		await storage.setMasterUnlockKeyHandle(
-			result.masterUnlockKeyHandle,
-			accountId,
-		);
-	} else if (result.masterUnlockKey) {
-		await storage.storeSessionData(
-			result.masterUnlockKey,
-			accountId,
-			resolvedEmail,
-			result.user.id,
-			result.expiresAt,
-			result.sessionId,
-		);
-
-		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
-	} else {
-		throw new Error(
-			"Master Unlock Key unavailable for session storage on this platform.",
-		);
-	}
-
+	// `storeSessionData` borrows the ref; ownership transfers only after every other
+	// fallible local write succeeds.
+	await storage.storeSessionData(
+		result.masterUnlockKey,
+		accountId,
+		resolvedEmail,
+		result.user.id,
+		result.expiresAt,
+		result.sessionId,
+	);
 	await storage.addAccount({
 		accountId,
 		email: resolvedEmail,
@@ -637,9 +565,57 @@ export async function storeLoginSession(
 	});
 
 	await storage.setActiveAccount(accountId);
+	await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
+	options?.onMasterUnlockKeyTransferred?.();
 
-	await peekAccountSessionManager()?.refresh();
+	try {
+		await peekAccountSessionManager()?.refresh();
+	} catch (error) {
+		console.error("[auth-service] session manager refresh failed:", error);
+	}
 	return accountId;
+}
+
+/**
+ * Stores a login while taking responsibility for the caller-owned MUK immediately.
+ * Before the store accepts it, a failure destroys it. Ownership transfer is the final
+ * state-changing step, so a successful transfer is never reported as a failed login.
+ */
+export async function storeLoginSessionOwned(
+	result: LoginResult,
+	secretKey: string,
+	storage: AccountStore,
+	itemCache: ItemCache,
+	crypto: CryptoPort,
+	email?: string,
+	options?: StoreAuthSessionOptions,
+): Promise<string> {
+	let owner: "caller" | "storage" = "caller";
+	try {
+		return await storeLoginSession(
+			result,
+			secretKey,
+			storage,
+			itemCache,
+			email,
+			{
+				...options,
+				onMasterUnlockKeyTransferred: () => {
+					owner = "storage";
+					try {
+						options?.onMasterUnlockKeyTransferred?.();
+					} catch (error) {
+						console.error("[auth-service] transfer observer failed:", error);
+					}
+				},
+			},
+		);
+	} catch (error) {
+		if (owner === "caller") {
+			await crypto.destroyKey(result.masterUnlockKey);
+		}
+		throw error;
+	}
 }
 
 async function resolveUnlockAccount(
@@ -653,11 +629,13 @@ async function resolveUnlockAccount(
 	return { accountId, email: account.email };
 }
 
+/** Proves the password to the server without unlocking, so the derived MUK is discarded. */
 async function deriveSrpPasswordForAccount(
 	accountId: string,
 	email: string,
 	password: string,
-	crypto: ICrypto,
+	crypto: CryptoPort,
+	vaultCrypto: VaultCrypto,
 	storage: AccountStore,
 	profile: KdfProfile,
 ): Promise<string> {
@@ -666,32 +644,15 @@ async function deriveSrpPasswordForAccount(
 		throw new Error(m.auth_error_no_stored_secret_key());
 	}
 
-	const handleCrypto = asHandleCapableCrypto(crypto);
-	if (handleCrypto) {
-		const handles = await handleCrypto.deriveKeyHandles(
-			password,
-			storedSecretKey,
-			email,
-			profile,
-		);
-		try {
-			return await handleCrypto.deriveSrpPasswordFromHandle(
-				handles.authKeyHandle,
-			);
-		} finally {
-			if (handleCrypto.destroyKeyHandle) {
-				await handleCrypto.destroyKeyHandle(handles.authKeyHandle);
-			}
-		}
-	}
-
-	const derived = await crypto.deriveKeys(
-		password,
-		storedSecretKey,
+	const { srpPassword, masterUnlockKey } = await vaultCrypto.deriveAccountKeys({
+		accountPassword: password,
+		secretKey: storedSecretKey,
 		email,
 		profile,
-	);
-	return new TextDecoder().decode(derived.authKey);
+		accountId,
+	});
+	await crypto.destroyKey(masterUnlockKey);
+	return srpPassword;
 }
 
 /**
@@ -704,6 +665,7 @@ export async function deriveSrpLoginProof(
 ): Promise<SrpLoginProof> {
 	const { accountId, password } = input;
 	const { crypto, storage } = deps;
+	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	const { email } = await resolveUnlockAccount(accountId, storage);
 	const authClient = await resolveAccountAuthClient(accountId, deps);
 	const clientEphemeral = await crypto.generateClientEphemeral();
@@ -717,13 +679,14 @@ export async function deriveSrpLoginProof(
 	const validatedProfile = await validateKdfProfileForAccount(
 		accountId,
 		startResult.kdfParams,
-		deps,
+		storage,
 	);
 	const srpPassword = await deriveSrpPasswordForAccount(
 		accountId,
 		email,
 		password,
 		crypto,
+		vaultCrypto,
 		storage,
 		validatedProfile,
 	);
@@ -753,6 +716,7 @@ export async function performSRPUnlock(
 ): Promise<UnlockResult> {
 	const { accountId, password } = input;
 	const { crypto, storage } = deps;
+	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	const { email } = await resolveUnlockAccount(accountId, storage);
 	const authClient = await resolveAccountAuthClient(accountId, deps);
 
@@ -773,47 +737,20 @@ export async function performSRPUnlock(
 	}
 	validateKdfProfileOrThrow(pinnedKdfProfile);
 
-	const handleCrypto = asHandleCapableCrypto(crypto);
-	let masterUnlockKey: Uint8Array | undefined;
-	let masterUnlockKeyHandle: number | undefined;
-	let srpPassword: string;
-
-	if (handleCrypto) {
-		const handles = await handleCrypto.deriveKeyHandles(
-			password,
-			storedSecretKey,
-			email,
-			pinnedKdfProfile,
-		);
-		masterUnlockKeyHandle = handles.masterUnlockKeyHandle;
-		try {
-			srpPassword = await handleCrypto.deriveSrpPasswordFromHandle(
-				handles.authKeyHandle,
-			);
-		} finally {
-			if (handleCrypto.destroyKeyHandle) {
-				await handleCrypto.destroyKeyHandle(handles.authKeyHandle);
-			}
-		}
-	} else {
-		const derived = await crypto.deriveKeys(
-			password,
-			storedSecretKey,
-			email,
-			pinnedKdfProfile,
-		);
-		masterUnlockKey = derived.masterUnlockKey;
-		srpPassword = new TextDecoder().decode(derived.authKey);
-	}
+	const { srpPassword, masterUnlockKey } = await vaultCrypto.deriveAccountKeys({
+		accountPassword: password,
+		secretKey: storedSecretKey,
+		email,
+		profile: pinnedKdfProfile,
+		accountId,
+	});
 
 	try {
 		await validateDerivedUnlockKey({
-			crypto,
+			vaultCrypto,
 			storage,
 			accountId,
 			masterUnlockKey,
-			masterUnlockKeyHandle,
-			handleCrypto,
 		});
 
 		const [storedSessionData, storedToken, storedVaultKeys, storedPrivateKey] =
@@ -846,7 +783,6 @@ export async function performSRPUnlock(
 				},
 				vaultKeys: storedVaultKeys ?? [],
 				masterUnlockKey,
-				masterUnlockKeyHandle,
 			};
 		}
 
@@ -860,7 +796,7 @@ export async function performSRPUnlock(
 		const validatedProfile = await validateKdfProfileForAccount(
 			accountId,
 			startResult.kdfParams,
-			deps,
+			storage,
 		);
 
 		const clientSession = await crypto.deriveClientSession(
@@ -903,13 +839,10 @@ export async function performSRPUnlock(
 			user: finishResult.user,
 			vaultKeys,
 			masterUnlockKey,
-			masterUnlockKeyHandle,
 			kdfParams: validatedProfile,
 		};
 	} catch (error) {
-		if (masterUnlockKeyHandle && handleCrypto?.destroyKeyHandle) {
-			await handleCrypto.destroyKeyHandle(masterUnlockKeyHandle);
-		}
+		await crypto.destroyKey(masterUnlockKey);
 		throw error;
 	}
 }
@@ -962,45 +895,14 @@ export async function storeUnlockSession(
 			);
 		}
 
-		if (result.masterUnlockKeyHandle) {
-			await storage.storeSessionDataWithMasterUnlockKeyHandle(
-				result.masterUnlockKeyHandle,
-				accountId,
-				resolvedEmail,
-				result.user.id,
-				result.expiresAt,
-				result.sessionId,
-			);
-			await storage.setMasterUnlockKeyHandle(
-				result.masterUnlockKeyHandle,
-				accountId,
-			);
-		} else if (result.masterUnlockKey) {
-			await storage.storeSessionData(
-				result.masterUnlockKey,
-				accountId,
-				resolvedEmail,
-				result.user.id,
-				result.expiresAt,
-				result.sessionId,
-			);
-
-			await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
-		} else {
-			throw new Error(
-				"Master Unlock Key unavailable for session storage on this platform.",
-			);
-		}
-	} else if (result.masterUnlockKeyHandle) {
-		await storage.setMasterUnlockKeyHandle(
-			result.masterUnlockKeyHandle,
+		// Borrowed by `storeSessionData`; ownership transfers after the remaining writes.
+		await storage.storeSessionData(
+			result.masterUnlockKey,
 			accountId,
-		);
-	} else if (result.masterUnlockKey) {
-		await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
-	} else {
-		throw new Error(
-			"Master Unlock Key unavailable for session storage on this platform.",
+			resolvedEmail,
+			result.user.id,
+			result.expiresAt,
+			result.sessionId,
 		);
 	}
 
@@ -1029,6 +931,38 @@ export async function storeUnlockSession(
 	}
 
 	await storage.updateLastMasterPasswordEntry(accountId);
+	await storage.setMasterUnlockKey(result.masterUnlockKey, accountId);
+	options?.onMasterUnlockKeyTransferred?.();
+}
+
+/** Stores an unlock while retaining responsibility for its MUK until the store accepts it. */
+export async function storeUnlockSessionOwned(
+	result: UnlockResult,
+	storage: AccountStore,
+	itemCache: ItemCache,
+	crypto: CryptoPort,
+	accountId: string,
+	options?: StoreAuthSessionOptions,
+): Promise<void> {
+	let owner: "caller" | "storage" = "caller";
+	try {
+		await storeUnlockSession(result, storage, itemCache, accountId, {
+			...options,
+			onMasterUnlockKeyTransferred: () => {
+				owner = "storage";
+				try {
+					options?.onMasterUnlockKeyTransferred?.();
+				} catch (error) {
+					console.error("[auth-service] transfer observer failed:", error);
+				}
+			},
+		});
+	} catch (error) {
+		if (owner === "caller") {
+			await crypto.destroyKey(result.masterUnlockKey);
+		}
+		throw error;
+	}
 }
 
 /**

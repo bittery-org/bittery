@@ -1,5 +1,4 @@
 export * from "./credit-card";
-export * from "./crypto-context-envelope";
 export * from "./device-setup";
 export * from "./export-types";
 export * from "./favicon";
@@ -20,5 +19,4 @@ export * from "./server-url";
 export * from "./session-refresh";
 export * from "./session-refresh-fetch";
 export * from "./types";
-export * from "./vault-key-crypto";
 export * from "./vault-mapping";

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
+import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import {
 	createTestAccountStore,
@@ -9,6 +10,7 @@ import {
 	getTravelModeEnforcer,
 	resetTravelModeEnforcerForTests,
 } from "./travel-mode-enforcer";
+import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
 import { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 
 /**
@@ -19,10 +21,17 @@ import { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 async function createLayers(): Promise<{
 	storage: AccountStore;
 	itemCache: ItemCache;
+	crypto: InMemoryCryptoPort;
+	vaultCrypto: VaultCrypto;
 }> {
-	const { store } = await createTestAccountStore();
+	const { store, crypto } = await createTestAccountStore();
 	const { cache } = await createTestItemCache();
-	return { storage: store, itemCache: cache };
+	return {
+		storage: store,
+		itemCache: cache,
+		crypto,
+		vaultCrypto: createVaultCrypto({ crypto, storage: store }),
+	};
 }
 
 function makeTravelModeClient(hiddenVaultIds: string[] = []) {
@@ -66,8 +75,6 @@ function makeAccountInfo(
 	} as unknown as AccountInfo;
 }
 
-const crypto = {} as never;
-
 describe("VaultRepositoryCoordinator", () => {
 	beforeEach(() => {
 		resetTravelModeEnforcerForTests();
@@ -75,7 +82,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 	describe("M5 — findAccount resolution with shared email across servers", () => {
 		it("findAccountForVault returns the repo that actually holds the vault, not the first email match", async () => {
-			const { storage, itemCache } = await createLayers();
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			const enforcer = getTravelModeEnforcer(storage, itemCache);
 			// Both accounts verified with travel mode disabled so reads are visible.
 			await enforcer.applyConfig("acc-a", {
@@ -89,6 +96,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 			const coordinator = new VaultRepositoryCoordinator(
 				crypto,
+				vaultCrypto,
 				storage,
 				itemCache,
 			);
@@ -123,7 +131,7 @@ describe("VaultRepositoryCoordinator", () => {
 		});
 
 		it("findAccountForItem returns the repo that actually holds the item, not the first email match", async () => {
-			const { storage, itemCache } = await createLayers();
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			const enforcer = getTravelModeEnforcer(storage, itemCache);
 			await enforcer.applyConfig("acc-a", {
 				enabled: false,
@@ -136,6 +144,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 			const coordinator = new VaultRepositoryCoordinator(
 				crypto,
+				vaultCrypto,
 				storage,
 				itemCache,
 			);
@@ -177,7 +186,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 	describe("M4 — hydrate isolates per-account failures", () => {
 		it("one unverified account does not abort hydration of the others", async () => {
-			const { storage, itemCache } = await createLayers();
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			const enforcer = getTravelModeEnforcer(storage, itemCache);
 			// Only acc-verified has a verified policy; acc-unverified will throw
 			// from assertVerified inside repo.hydrate().
@@ -188,6 +197,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 			const coordinator = new VaultRepositoryCoordinator(
 				crypto,
+				vaultCrypto,
 				storage,
 				itemCache,
 			);
@@ -219,10 +229,11 @@ describe("VaultRepositoryCoordinator", () => {
 			// storage, but the enforcer's in-memory verification is gone because
 			// nothing re-ran the unlock flow. Hydrate must re-verify rather than
 			// fail closed on a perfectly valid session.
-			const { storage, itemCache } = await createLayers();
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			const travelMode = makeTravelModeClient();
 			const coordinator = new VaultRepositoryCoordinator(
 				crypto,
+				vaultCrypto,
 				storage,
 				itemCache,
 			);
@@ -245,10 +256,11 @@ describe("VaultRepositoryCoordinator", () => {
 		});
 
 		it("verifies each account only once across concurrent hydrate calls", async () => {
-			const { storage, itemCache } = await createLayers();
+			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
 			const travelMode = makeTravelModeClient();
 			const coordinator = new VaultRepositoryCoordinator(
 				crypto,
+				vaultCrypto,
 				storage,
 				itemCache,
 			);

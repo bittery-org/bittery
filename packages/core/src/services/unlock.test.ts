@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import {
+	createInMemoryCryptoPort,
+	type InMemoryCryptoPort,
+} from "@bittery/crypto-port/testing";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { InMemoryPlatformPort } from "@bittery/storage/testing";
-import type { ICrypto, KdfProfile } from "@bittery/types";
+import type { KdfProfile } from "@bittery/types";
 import {
 	accountMetadata,
 	createTestAccountStore,
 	createTestItemCache,
-	mukFor,
+	mukRefFor,
 } from "../testing/account-store-harness";
+import { NO_CREDENTIAL_MIRROR } from "./account-lifecycle";
 import { storeUnlockSession } from "./auth-service";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
 import {
@@ -35,19 +40,10 @@ const KDF_PROFILE: KdfProfile = {
  */
 const OFFLINE_SERVER_URL = "http://127.0.0.1:1";
 
-/** Enough of `ICrypto` for the local (no re-auth) unlock path. */
-function createCrypto(): ICrypto {
-	return {
-		validateSecretKey: mock(async () => true),
-		deriveKeys: mock(async (_password: string, secretKey: string) => ({
-			authKey: new TextEncoder().encode(`auth:${secretKey}`),
-			masterUnlockKey: mukFor(secretKey),
-		})),
-	} as unknown as ICrypto;
-}
-
-let crypto: ICrypto;
+let cryptoPort: InMemoryCryptoPort;
+let crypto: InMemoryCryptoPort;
 let itemCache: ItemCache;
+const credentialMirror = NO_CREDENTIAL_MIRROR;
 
 interface SeedOptions {
 	/** Overrides the seeded `[accountId, email]` pairs; every other list defaults to all of them. */
@@ -79,7 +75,7 @@ async function createStorage(
 		biometric = false,
 	} = options;
 
-	const { store, port } = await createTestAccountStore();
+	const { store, port } = await createTestAccountStore({ crypto: cryptoPort });
 	if (biometric) {
 		port.biometricState.hasHardware = true;
 		port.biometricState.isEnrolled = true;
@@ -89,12 +85,9 @@ async function createStorage(
 	for (const [accountId, email] of seeded) {
 		await store.addAccount(accountMetadata({ accountId, email }));
 		await store.storeServerUrl(OFFLINE_SERVER_URL, accountId);
-		await store.storeSessionData(
-			mukFor(accountId),
-			accountId,
-			email,
-			accountId,
-		);
+		const sessionKey = await mukRefFor(cryptoPort, accountId);
+		await store.storeSessionData(sessionKey, accountId, email, accountId);
+		await cryptoPort.destroyKey(sessionKey);
 		if (withAuthToken.includes(accountId)) {
 			await store.storeAuthToken(`token-${accountId}`, accountId);
 		}
@@ -129,7 +122,8 @@ const tick = (): Promise<void> =>
 describe("unlock all accounts", () => {
 	beforeEach(async () => {
 		resetTravelModeEnforcerForTests();
-		crypto = createCrypto();
+		cryptoPort = createInMemoryCryptoPort();
+		crypto = cryptoPort;
 		itemCache = (await createTestItemCache()).cache;
 	});
 
@@ -139,7 +133,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
@@ -160,7 +154,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -180,7 +174,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.failed).toEqual([
@@ -193,7 +187,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -211,7 +205,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 			{ setActive: false },
 		);
 
@@ -226,7 +220,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw", emails: ["b@test.com"] },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -239,7 +233,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual([]);
@@ -252,7 +246,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithBiometric(
 			{ promptMessage: PROMPT },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
@@ -266,7 +260,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithBiometric(
 			{ promptMessage: PROMPT, emails: ["b@test.com"] },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -284,7 +278,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithBiometric(
 			{ promptMessage: PROMPT },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -304,7 +298,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -328,7 +322,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-1", "acc-2"]);
@@ -344,7 +338,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.activeAccountId).toBe("acc-1");
@@ -373,7 +367,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithBiometric(
 			{ promptMessage: PROMPT, emails: ["c@test.com"] },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-3"]);
@@ -399,7 +393,7 @@ describe("unlock all accounts", () => {
 
 		const outcome = await unlockAllWithPassword(
 			{ password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		// A cleanup that throws must neither escape the batch nor cost the
@@ -419,13 +413,17 @@ describe("unlock all accounts", () => {
 			biometric: true,
 			verifiable: ["acc-2"],
 		});
+		const purge = mock(async () => {});
 
 		await unlockAllWithBiometric(
 			{ promptMessage: PROMPT },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror: { purge } },
 		);
 
 		// Fail closed: the rejected account must not stay unlocked.
+		expect(purge).toHaveBeenCalledWith([
+			expect.objectContaining({ accountId: "acc-1" }),
+		]);
 		expect(await storage.getUnlockedAccounts()).toEqual(["acc-2"]);
 		expect(await storage.getAuthToken("acc-1")).toBeNull();
 	});
@@ -434,7 +432,8 @@ describe("unlock all accounts", () => {
 describe("unlock one account", () => {
 	beforeEach(async () => {
 		resetTravelModeEnforcerForTests();
-		crypto = createCrypto();
+		cryptoPort = createInMemoryCryptoPort();
+		crypto = cryptoPort;
 		itemCache = (await createTestItemCache()).cache;
 	});
 
@@ -443,7 +442,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithPassword(
 			{ accountId: "acc-2", password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -456,7 +455,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithPassword(
 			{ accountId: "acc-2", password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 			{ setActive: false },
 		);
 
@@ -476,7 +475,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithBiometric(
 			{ accountId: "acc-2", promptMessage: PROMPT },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual(["acc-2"]);
@@ -491,7 +490,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithBiometric(
 			{ accountId: "acc-2", promptMessage: PROMPT },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual([]);
@@ -507,7 +506,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithBiometric(
 			{ accountId: "acc-1", promptMessage: PROMPT },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual([]);
@@ -530,7 +529,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithBiometric(
 			{ accountId: "acc-2", promptMessage: PROMPT },
-			{ storage, itemCache },
+			{ storage, itemCache, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual([]);
@@ -546,7 +545,7 @@ describe("unlock one account", () => {
 
 		const outcome = await unlockAccountWithPassword(
 			{ accountId: "acc-404", password: "pw" },
-			{ storage, itemCache, crypto },
+			{ storage, itemCache, crypto, credentialMirror },
 		);
 
 		expect(outcome.unlocked).toEqual([]);
@@ -563,6 +562,7 @@ describe("unlock one account", () => {
 describe("stored account refresh", () => {
 	beforeEach(async () => {
 		resetTravelModeEnforcerForTests();
+		cryptoPort = createInMemoryCryptoPort();
 		itemCache = (await createTestItemCache()).cache;
 	});
 
@@ -590,7 +590,7 @@ describe("stored account refresh", () => {
 					teamAvatarUrl: "https://avatars.test/new.png",
 				},
 				vaultKeys: [],
-				masterUnlockKey: mukFor("acc-2"),
+				masterUnlockKey: await mukRefFor(cryptoPort, "acc-2"),
 			},
 			storage,
 			itemCache,

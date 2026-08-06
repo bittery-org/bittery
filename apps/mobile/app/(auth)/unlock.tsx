@@ -61,9 +61,9 @@ const StyledUsers = withUniwind(Users);
 import CredentialProvider from "../../modules/credential-provider";
 import { useAccount } from "../../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../../src/lib/biometric-error-message";
-import { arrayBufferToBase64 } from "../../src/lib/crypto";
 import { useServerUrl } from "../../src/lib/rpc";
 import { useI18n } from "../../src/providers/i18n-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../../src/services/credential-provider-master-unlock-key";
 import { lifecycleDeps } from "../../src/services/lifecycle";
 import {
 	type AccountMetadata,
@@ -169,29 +169,6 @@ export default function UnlockScreen() {
 		isLoading: allAccountsStatusQuery.isLoading,
 	};
 
-	const setNativeMuksForAccountIds = useCallback(
-		async (accountIds: string[]) => {
-			if (Platform.OS !== "android" || !CredentialProvider.isAvailable())
-				return;
-
-			for (const accountId of accountIds) {
-				const muk = await storage.getMasterUnlockKey(accountId);
-				const sessionData = await storage.getStoredSessionData(accountId);
-				const autoLockTimeoutMs =
-					await storage.getAutoLockTimeoutOrDefault(accountId);
-				if (muk && sessionData?.userId) {
-					const mukBase64 = arrayBufferToBase64(muk);
-					CredentialProvider.setMasterUnlockKey(
-						mukBase64,
-						sessionData.userId,
-						autoLockTimeoutMs,
-					);
-				}
-			}
-		},
-		[],
-	);
-
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
 		// The OS renders this string, so it is user-facing copy and has to be
@@ -205,7 +182,9 @@ export default function UnlockScreen() {
 			const vaultKeys = await storage.getVaultKeys(targetAccount.accountId);
 
 			if (token && vaultKeys) {
-				await setNativeMuksForAccountIds([targetAccount.accountId]);
+				await mirrorBorrowedMasterUnlockKeysToCredentialProvider([
+					targetAccount.accountId,
+				]);
 
 				// Load server URL for this account
 				const serverUrl = await storage.getServerUrl(targetAccount.accountId);
@@ -266,7 +245,9 @@ export default function UnlockScreen() {
 
 			// Set MUK in native CredentialProvider for autofill decryption
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForAccountIds([targetAccount.accountId]);
+				await mirrorBorrowedMasterUnlockKeysToCredentialProvider([
+					targetAccount.accountId,
+				]);
 
 				// Update 30-day master password entry timestamp in native
 				CredentialProvider.updateLastMasterPasswordEntry();
@@ -315,7 +296,7 @@ export default function UnlockScreen() {
 	const finalizeAllAccountsUnlock = useCallback(
 		async ({ unlocked, failed }: UnlockOutcome) => {
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForAccountIds(unlocked);
+				await mirrorBorrowedMasterUnlockKeysToCredentialProvider(unlocked);
 			}
 
 			await refreshAccounts();
@@ -337,7 +318,6 @@ export default function UnlockScreen() {
 			allAccounts.length,
 			refreshAccounts,
 			router,
-			setNativeMuksForAccountIds,
 			toast,
 			m.mob_unlock_partial_toast,
 		],
@@ -371,7 +351,11 @@ export default function UnlockScreen() {
 						// here rather than defaulted to English inside `AccountStore`.
 						promptMessage: m.biometric_prompt_unlock_all_accounts(),
 					},
-					{ storage, itemCache },
+					{
+						storage,
+						itemCache,
+						credentialMirror: lifecycleDeps.credentialMirror,
+					},
 				);
 				if (outcome.unlocked.length === 0) {
 					setBiometricError(m.mob_unlock_biometric_failed());

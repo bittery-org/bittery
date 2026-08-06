@@ -3,6 +3,7 @@
  * every event carries its own `at`, so the transition table is testable without mocks.
  */
 
+import type { KeyRef } from "@bittery/crypto-port";
 import type {
 	LockReason,
 	VaultSessionBroadcast,
@@ -175,7 +176,7 @@ function lockTransition(
 
 function unlockLocally(
 	state: VaultSessionState,
-	muk: Uint8Array,
+	muk: KeyRef,
 	at: number,
 ): ReduceResult {
 	// A reachable but locked desktop outranks local state in either mode.

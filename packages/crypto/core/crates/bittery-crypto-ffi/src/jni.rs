@@ -239,6 +239,109 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     }
 }
 
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeDeriveMasterKey<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    account_password: JString<'a>,
+    secret_key: JString<'a>,
+    email: JString<'a>,
+    schema_version: jint,
+    algorithm: JString<'a>,
+    iterations: jint,
+) -> JString<'a> {
+    let password_str = match get_secret_string(&mut env, account_password) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid password"),
+    };
+    let secret_str = match get_secret_string(&mut env, secret_key) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid secret key"),
+    };
+    let email_str = match get_string(&mut env, email) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid email"),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{derive_master_key, KdfProfile};
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(value) => value,
+        None => return new_string(&mut env, "ERROR:Invalid KDF algorithm"),
+    };
+    if schema_version != 1 || !(600_000..=1_200_000).contains(&iterations) {
+        return new_string(&mut env, "ERROR:Invalid KDF profile");
+    }
+    let schema_version = schema_version as u32;
+    let iterations = iterations as u32;
+    let profile = KdfProfile {
+        schema_version,
+        algorithm: algorithm_str,
+        iterations,
+    };
+
+    match derive_master_key(&password_str, &secret_str, &email_str, &profile) {
+        Ok(mut master_key) => {
+            let mut encoded = STANDARD.encode(master_key.as_slice());
+            master_key.zeroize();
+            let result = new_string(&mut env, &encoded);
+            encoded.zeroize();
+            result
+        }
+        Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeDeriveKeysFromMasterKey<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    master_key_base64: JString<'a>,
+    email: JString<'a>,
+) -> JObject<'a> {
+    let master_key_str = match get_secret_string(&mut env, master_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_derived_keys_result(&mut env, None, None, Some("Invalid master key"))
+        }
+    };
+    let email_str = match get_string(&mut env, email) {
+        Some(s) => s,
+        None => return create_derived_keys_result(&mut env, None, None, Some("Invalid email")),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::derive_keys_from_master_key;
+
+    let master_key = match STANDARD.decode(&master_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return create_derived_keys_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid master key base64: {}", e)),
+            )
+        }
+    };
+
+    match derive_keys_from_master_key(&master_key, &email_str) {
+        Ok(keys) => {
+            let mut auth_key = STANDARD.encode(&keys.auth_key);
+            let mut muk = STANDARD.encode(&keys.master_unlock_key);
+            let result = create_derived_keys_result(&mut env, Some(&auth_key), Some(&muk), None);
+            auth_key.zeroize();
+            muk.zeroize();
+            result
+        }
+        Err(e) => create_derived_keys_result(&mut env, None, None, Some(&e.to_string())),
+    }
+}
+
 // ============================================================================
 // AES-256-GCM Encryption
 // ============================================================================
@@ -524,6 +627,17 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     result
 }
 
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeGenerateUuid<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JString<'a> {
+    use bittery_crypto_core::generate_uuid;
+    new_string(&mut env, &generate_uuid())
+}
+
 // ============================================================================
 // RSA-4096
 // ============================================================================
@@ -658,6 +772,151 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
     // The hint is the deliberately public prefix of the secret key.
     use bittery_crypto_core::get_secret_key_hint;
     new_string(&mut env, &get_secret_key_hint(&key))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeGenerateRecoveryKey<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JString<'a> {
+    use bittery_crypto_core::generate_recovery_key;
+    let mut key = generate_recovery_key();
+    let result = new_string(&mut env, &key);
+    key.zeroize();
+    result
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeValidateRecoveryKey<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    recovery_key: JString<'a>,
+) -> jboolean {
+    let key = match get_secret_string(&mut env, recovery_key) {
+        Some(s) => s,
+        None => return JNI_FALSE,
+    };
+
+    use bittery_crypto_core::validate_recovery_key;
+
+    if validate_recovery_key(&key) {
+        JNI_TRUE
+    } else {
+        JNI_FALSE
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeEncryptMasterKey<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    master_key_base64: JString<'a>,
+    recovery_key: JString<'a>,
+    email: JString<'a>,
+) -> JObject<'a> {
+    let master_key_str = match get_secret_string(&mut env, master_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_encrypt_result(&mut env, None, None, None, Some("Invalid master key"))
+        }
+    };
+    let recovery_key_str = match get_secret_string(&mut env, recovery_key) {
+        Some(s) => s,
+        None => {
+            return create_encrypt_result(&mut env, None, None, None, Some("Invalid recovery key"))
+        }
+    };
+    let email_str = match get_string(&mut env, email) {
+        Some(s) => s,
+        None => return create_encrypt_result(&mut env, None, None, None, Some("Invalid email")),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::encrypt_master_key;
+
+    let master_key = match STANDARD.decode(&master_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return create_encrypt_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some(&format!("Invalid master key base64: {}", e)),
+            )
+        }
+    };
+
+    match encrypt_master_key(&master_key, &recovery_key_str, &email_str) {
+        Ok(encrypted) => create_encrypt_result(
+            &mut env,
+            Some(&encrypted.ciphertext),
+            Some(&encrypted.iv),
+            Some(&encrypted.algorithm),
+            None,
+        ),
+        Err(e) => create_encrypt_result(&mut env, None, None, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeDecryptMasterKey<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    ciphertext: JString<'a>,
+    iv: JString<'a>,
+    algorithm: JString<'a>,
+    recovery_key: JString<'a>,
+    email: JString<'a>,
+) -> JString<'a> {
+    let ciphertext_str = match get_string(&mut env, ciphertext) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid ciphertext"),
+    };
+    let iv_str = match get_string(&mut env, iv) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid IV"),
+    };
+    let algorithm_str = match get_string(&mut env, algorithm) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid algorithm"),
+    };
+    let recovery_key_str = match get_secret_string(&mut env, recovery_key) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid recovery key"),
+    };
+    let email_str = match get_string(&mut env, email) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid email"),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{decrypt_master_key, EncryptedData};
+
+    let data = EncryptedData {
+        ciphertext: ciphertext_str,
+        iv: iv_str,
+        algorithm: algorithm_str,
+    };
+
+    match decrypt_master_key(&data, &recovery_key_str, &email_str) {
+        Ok(mut master_key) => {
+            let mut encoded = STANDARD.encode(master_key.as_slice());
+            master_key.zeroize();
+            let result = new_string(&mut env, &encoded);
+            encoded.zeroize();
+            result
+        }
+        Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
+    }
 }
 
 // ============================================================================
@@ -1082,6 +1341,775 @@ pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativ
         }
         Err(e) => create_session_result(&mut env, None, None, Some(&e.to_string())),
     }
+}
+
+// ============================================================================
+// Passkey / WebAuthn
+// ============================================================================
+
+fn create_passkey_keypair_result<'a>(
+    env: &mut JNIEnv<'a>,
+    private_key: Option<&str>,
+    public_key_cose: Option<&str>,
+    error: Option<&str>,
+) -> JObject<'a> {
+    let class = env
+        .find_class("expo/modules/bitterycrypto/BitteryCryptoModule$PasskeyKeypairResult")
+        .unwrap();
+
+    let private_key_str = private_key.map(|s| new_string(env, s)).unwrap_or_default();
+    let public_key_cose_str = public_key_cose
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let error_str = error.map(|s| new_string(env, s)).unwrap_or_default();
+
+    env.new_object(
+        class,
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        &[
+            JValue::Object(&private_key_str),
+            JValue::Object(&public_key_cose_str),
+            JValue::Object(&error_str),
+        ],
+    )
+    .unwrap()
+}
+
+fn create_passkey_attestation_result<'a>(
+    env: &mut JNIEnv<'a>,
+    authenticator_data: Option<&str>,
+    attestation_object: Option<&str>,
+    error: Option<&str>,
+) -> JObject<'a> {
+    let class = env
+        .find_class("expo/modules/bitterycrypto/BitteryCryptoModule$PasskeyAttestationResult")
+        .unwrap();
+
+    let authenticator_data_str = authenticator_data
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let attestation_object_str = attestation_object
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let error_str = error.map(|s| new_string(env, s)).unwrap_or_default();
+
+    env.new_object(
+        class,
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        &[
+            JValue::Object(&authenticator_data_str),
+            JValue::Object(&attestation_object_str),
+            JValue::Object(&error_str),
+        ],
+    )
+    .unwrap()
+}
+
+fn create_passkey_assertion_result<'a>(
+    env: &mut JNIEnv<'a>,
+    authenticator_data: Option<&str>,
+    signature_der: Option<&str>,
+    error: Option<&str>,
+) -> JObject<'a> {
+    let class = env
+        .find_class("expo/modules/bitterycrypto/BitteryCryptoModule$PasskeyAssertionResult")
+        .unwrap();
+
+    let authenticator_data_str = authenticator_data
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let signature_der_str = signature_der
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let error_str = error.map(|s| new_string(env, s)).unwrap_or_default();
+
+    env.new_object(
+        class,
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        &[
+            JValue::Object(&authenticator_data_str),
+            JValue::Object(&signature_der_str),
+            JValue::Object(&error_str),
+        ],
+    )
+    .unwrap()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativePasskeyGenerateKeypair<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JObject<'a> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::generate_passkey_keypair;
+
+    // Only `private_key` + `public_key_cose` cross this boundary, matching
+    // `bittery_passkey_generate_keypair`'s C ABI shape: `public_key_spki` has no
+    // consumer on any adapter today.
+    match generate_passkey_keypair() {
+        Ok(mut result) => {
+            let mut private_key = STANDARD.encode(result.private_key.as_slice());
+            result.private_key.zeroize();
+            let public_key_cose = STANDARD.encode(&result.public_key_cose);
+            let keypair = create_passkey_keypair_result(
+                &mut env,
+                Some(&private_key),
+                Some(&public_key_cose),
+                None,
+            );
+            private_key.zeroize();
+            keypair
+        }
+        Err(e) => create_passkey_keypair_result(&mut env, None, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativePasskeyGenerateCredentialId<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+) -> JString<'a> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::generate_credential_id;
+    new_string(&mut env, &STANDARD.encode(generate_credential_id()))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativePasskeyBuildAttestationObject<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    rp_id: JString<'a>,
+    credential_id_base64: JString<'a>,
+    cose_public_key_base64: JString<'a>,
+    sign_count: jint,
+) -> JObject<'a> {
+    let rp_id_str = match get_string(&mut env, rp_id) {
+        Some(s) => s,
+        None => {
+            return create_passkey_attestation_result(&mut env, None, None, Some("Invalid rpId"))
+        }
+    };
+    let credential_id_str = match get_string(&mut env, credential_id_base64) {
+        Some(s) => s,
+        None => {
+            return create_passkey_attestation_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid credentialId"),
+            )
+        }
+    };
+    let cose_public_key_str = match get_string(&mut env, cose_public_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_passkey_attestation_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid COSE public key"),
+            )
+        }
+    };
+    // `jint` is signed: a negative `sign_count` would reinterpret as a huge `u32`
+    // if cast blindly, so reject it up front (matches `nativeGenerateTotp`'s
+    // `digits`/`period` guards).
+    let sign_count = match u32::try_from(sign_count) {
+        Ok(v) => v,
+        Err(_) => {
+            return create_passkey_attestation_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid signCount"),
+            )
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::build_passkey_attestation_object;
+
+    let credential_id = match STANDARD.decode(&credential_id_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return create_passkey_attestation_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid credentialId base64: {}", error)),
+            )
+        }
+    };
+    let cose_public_key = match STANDARD.decode(&cose_public_key_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return create_passkey_attestation_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid COSE key base64: {}", error)),
+            )
+        }
+    };
+
+    match build_passkey_attestation_object(&rp_id_str, &credential_id, &cose_public_key, sign_count)
+    {
+        Ok(result) => create_passkey_attestation_result(
+            &mut env,
+            Some(&STANDARD.encode(result.authenticator_data)),
+            Some(&STANDARD.encode(result.attestation_object)),
+            None,
+        ),
+        Err(e) => create_passkey_attestation_result(&mut env, None, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativePasskeySignAssertion<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    private_key_base64: JString<'a>,
+    rp_id: JString<'a>,
+    client_data_hash_base64: JString<'a>,
+    sign_count: jint,
+) -> JObject<'a> {
+    let private_key_str = match get_secret_string(&mut env, private_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_passkey_assertion_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid private key"),
+            )
+        }
+    };
+    let rp_id_str = match get_string(&mut env, rp_id) {
+        Some(s) => s,
+        None => return create_passkey_assertion_result(&mut env, None, None, Some("Invalid rpId")),
+    };
+    let client_data_hash_str = match get_string(&mut env, client_data_hash_base64) {
+        Some(s) => s,
+        None => {
+            return create_passkey_assertion_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid clientDataHash"),
+            )
+        }
+    };
+    let sign_count = match u32::try_from(sign_count) {
+        Ok(v) => v,
+        Err(_) => {
+            return create_passkey_assertion_result(&mut env, None, None, Some("Invalid signCount"))
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::sign_passkey_assertion;
+
+    let private_key = match STANDARD.decode(&private_key_str) {
+        Ok(value) => Zeroizing::new(value),
+        Err(error) => {
+            return create_passkey_assertion_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid private key base64: {}", error)),
+            )
+        }
+    };
+    let client_data_hash = match STANDARD.decode(&client_data_hash_str) {
+        Ok(value) => value,
+        Err(error) => {
+            return create_passkey_assertion_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid clientDataHash base64: {}", error)),
+            )
+        }
+    };
+
+    match sign_passkey_assertion(&private_key, &rp_id_str, &client_data_hash, sign_count) {
+        Ok(result) => create_passkey_assertion_result(
+            &mut env,
+            Some(&STANDARD.encode(result.authenticator_data)),
+            Some(&STANDARD.encode(result.signature_der)),
+            None,
+        ),
+        Err(e) => create_passkey_assertion_result(&mut env, None, None, Some(&e.to_string())),
+    }
+}
+
+// ============================================================================
+// Key Rotation
+// ============================================================================
+
+fn create_re_encrypted_item_result<'a>(
+    env: &mut JNIEnv<'a>,
+    item_id: Option<&str>,
+    encrypted_data: Option<&str>,
+    encryption_iv: Option<&str>,
+    error: Option<&str>,
+) -> JObject<'a> {
+    let class = env
+        .find_class("expo/modules/bitterycrypto/BitteryCryptoModule$ReEncryptedItemResult")
+        .unwrap();
+
+    let item_id_str = item_id.map(|s| new_string(env, s)).unwrap_or_default();
+    let encrypted_data_str = encrypted_data
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let encryption_iv_str = encryption_iv
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let error_str = error.map(|s| new_string(env, s)).unwrap_or_default();
+
+    env.new_object(
+        class,
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        &[
+            JValue::Object(&item_id_str),
+            JValue::Object(&encrypted_data_str),
+            JValue::Object(&encryption_iv_str),
+            JValue::Object(&error_str),
+        ],
+    )
+    .unwrap()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeEncryptVaultKeyForMember<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    vault_key_base64: JString<'a>,
+    member_public_key_pem: JString<'a>,
+) -> JString<'a> {
+    let vault_key_str = match get_secret_string(&mut env, vault_key_base64) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid vault key"),
+    };
+    let public_key_str = match get_string(&mut env, member_public_key_pem) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid public key"),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::encrypt_vault_key_for_member;
+
+    let vault_key = match STANDARD.decode(&vault_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => return new_string(&mut env, &format!("ERROR:Invalid vault key base64: {}", e)),
+    };
+
+    match encrypt_vault_key_for_member(&vault_key, &public_key_str) {
+        Ok(encrypted) => new_string(&mut env, &encrypted),
+        Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeEncryptVaultKeyWithMuk<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    vault_key_base64: JString<'a>,
+    master_unlock_key_base64: JString<'a>,
+    vault_id: JString<'a>,
+    user_id: JString<'a>,
+    key_version: jlong,
+) -> JString<'a> {
+    let vault_key_str = match get_secret_string(&mut env, vault_key_base64) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid vault key"),
+    };
+    let muk_str = match get_secret_string(&mut env, master_unlock_key_base64) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid master unlock key"),
+    };
+    let vault_id_str = match get_string(&mut env, vault_id) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid vault ID"),
+    };
+    let user_id_str = match get_string(&mut env, user_id) {
+        Some(s) => s,
+        None => return new_string(&mut env, "ERROR:Invalid user ID"),
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{encrypt_vault_key_with_muk, VaultKeyWrapContext};
+
+    let vault_key = match STANDARD.decode(&vault_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => return new_string(&mut env, &format!("ERROR:Invalid vault key base64: {}", e)),
+    };
+    let muk = match STANDARD.decode(&muk_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => return new_string(&mut env, &format!("ERROR:Invalid MUK base64: {}", e)),
+    };
+
+    let context = VaultKeyWrapContext::new(&vault_id_str, &user_id_str, key_version as u64);
+    match encrypt_vault_key_with_muk(&vault_key, &muk, &context) {
+        Ok(encrypted) => new_string(&mut env, &encrypted),
+        Err(e) => new_string(&mut env, &format!("ERROR:{}", e)),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeReEncryptItem<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    item_id: JString<'a>,
+    encrypted_data: JString<'a>,
+    encryption_iv: JString<'a>,
+    encryption_algorithm: JString<'a>,
+    old_vault_key_base64: JString<'a>,
+    new_vault_key_base64: JString<'a>,
+) -> JObject<'a> {
+    let id = match get_string(&mut env, item_id) {
+        Some(s) => s,
+        None => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some("Invalid item ID"),
+            )
+        }
+    };
+    let enc_data = match get_string(&mut env, encrypted_data) {
+        Some(s) => s,
+        None => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some("Invalid encrypted data"),
+            )
+        }
+    };
+    let enc_iv = match get_string(&mut env, encryption_iv) {
+        Some(s) => s,
+        None => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some("Invalid encryption IV"),
+            )
+        }
+    };
+    let enc_algo = match get_string(&mut env, encryption_algorithm) {
+        Some(s) => s,
+        None => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some("Invalid encryption algorithm"),
+            )
+        }
+    };
+    let old_key_str = match get_secret_string(&mut env, old_vault_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some("Invalid old vault key"),
+            )
+        }
+    };
+    let new_key_str = match get_secret_string(&mut env, new_vault_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some("Invalid new vault key"),
+            )
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{re_encrypt_item, ItemData};
+
+    let old_key = match STANDARD.decode(&old_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some(&format!("Invalid old key base64: {}", e)),
+            )
+        }
+    };
+    let new_key = match STANDARD.decode(&new_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return create_re_encrypted_item_result(
+                &mut env,
+                None,
+                None,
+                None,
+                Some(&format!("Invalid new key base64: {}", e)),
+            )
+        }
+    };
+
+    let item = ItemData {
+        id,
+        encrypted_data: enc_data,
+        encryption_iv: enc_iv,
+        encryption_algorithm: enc_algo,
+    };
+
+    match re_encrypt_item(&item, &old_key, &new_key) {
+        Ok(result) => create_re_encrypted_item_result(
+            &mut env,
+            Some(&result.item_id),
+            Some(&result.encrypted_data),
+            Some(&result.encryption_iv),
+            None,
+        ),
+        Err(e) => create_re_encrypted_item_result(&mut env, None, None, None, Some(&e.to_string())),
+    }
+}
+
+fn create_key_rotation_result<'a>(
+    env: &mut JNIEnv<'a>,
+    member_encrypted_keys_json: Option<&str>,
+    re_encrypted_items_json: Option<&str>,
+    error: Option<&str>,
+) -> JObject<'a> {
+    let class = env
+        .find_class("expo/modules/bitterycrypto/BitteryCryptoModule$KeyRotationResult")
+        .unwrap();
+
+    let member_keys_str = member_encrypted_keys_json
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let items_str = re_encrypted_items_json
+        .map(|s| new_string(env, s))
+        .unwrap_or_default();
+    let error_str = error.map(|s| new_string(env, s)).unwrap_or_default();
+
+    env.new_object(
+        class,
+        "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V",
+        &[
+            JValue::Object(&member_keys_str),
+            JValue::Object(&items_str),
+            JValue::Object(&error_str),
+        ],
+    )
+    .unwrap()
+}
+
+/// Unlike every other result struct in this file, `ValidationResultFFI` has no
+/// `error` field: malformed `members_json` is reported as `{valid: false,
+/// errors: [...]}`, not a hard failure, matching the core's own design.
+fn create_validation_result<'a>(
+    env: &mut JNIEnv<'a>,
+    valid: bool,
+    errors_json: &str,
+) -> JObject<'a> {
+    let class = env
+        .find_class("expo/modules/bitterycrypto/BitteryCryptoModule$ValidationResult")
+        .unwrap();
+
+    let errors_str = new_string(env, errors_json);
+    let valid_flag: jboolean = if valid { JNI_TRUE } else { JNI_FALSE };
+
+    env.new_object(
+        class,
+        "(ZLjava/lang/String;)V",
+        &[JValue::Bool(valid_flag), JValue::Object(&errors_str)],
+    )
+    .unwrap()
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativePerformKeyRotation<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    old_vault_key_base64: JString<'a>,
+    members_json: JString<'a>,
+    items_json: JString<'a>,
+    vault_id: JString<'a>,
+    key_version: jlong,
+    current_user_id: JString<'a>,
+    master_unlock_key_base64: JString<'a>,
+) -> JObject<'a> {
+    let old_key_str = match get_secret_string(&mut env, old_vault_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_key_rotation_result(&mut env, None, None, Some("Invalid old vault key"))
+        }
+    };
+    let members_str = match get_string(&mut env, members_json) {
+        Some(s) => s,
+        None => {
+            return create_key_rotation_result(&mut env, None, None, Some("Invalid members JSON"))
+        }
+    };
+    let items_str = match get_string(&mut env, items_json) {
+        Some(s) => s,
+        None => {
+            return create_key_rotation_result(&mut env, None, None, Some("Invalid items JSON"))
+        }
+    };
+    let vault_id_str = match get_string(&mut env, vault_id) {
+        Some(s) => s,
+        None => return create_key_rotation_result(&mut env, None, None, Some("Invalid vault ID")),
+    };
+    let user_id_str = match get_string(&mut env, current_user_id) {
+        Some(s) => s,
+        None => {
+            return create_key_rotation_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid current user ID"),
+            )
+        }
+    };
+    let muk_str = match get_secret_string(&mut env, master_unlock_key_base64) {
+        Some(s) => s,
+        None => {
+            return create_key_rotation_result(
+                &mut env,
+                None,
+                None,
+                Some("Invalid master unlock key"),
+            )
+        }
+    };
+
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    use bittery_crypto_core::{perform_key_rotation, ItemData, MemberKeyData};
+
+    let old_key = match STANDARD.decode(&old_key_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return create_key_rotation_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid old key base64: {}", e)),
+            )
+        }
+    };
+    let muk = match STANDARD.decode(&muk_str) {
+        Ok(k) => Zeroizing::new(k),
+        Err(e) => {
+            return create_key_rotation_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid MUK base64: {}", e)),
+            )
+        }
+    };
+
+    let members: Vec<MemberKeyData> = match serde_json::from_str(&members_str) {
+        Ok(m) => m,
+        Err(e) => {
+            return create_key_rotation_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid members JSON: {}", e)),
+            )
+        }
+    };
+    let items: Vec<ItemData> = match serde_json::from_str(&items_str) {
+        Ok(i) => i,
+        Err(e) => {
+            return create_key_rotation_result(
+                &mut env,
+                None,
+                None,
+                Some(&format!("Invalid items JSON: {}", e)),
+            )
+        }
+    };
+
+    match perform_key_rotation(
+        &old_key,
+        &members,
+        &items,
+        &vault_id_str,
+        key_version as u64,
+        &user_id_str,
+        &muk,
+    ) {
+        Ok(result) => {
+            let member_keys_json = serde_json::to_string(&result.member_encrypted_keys)
+                .unwrap_or_else(|_| "[]".to_string());
+            let items_json_out = serde_json::to_string(&result.re_encrypted_items)
+                .unwrap_or_else(|_| "[]".to_string());
+            create_key_rotation_result(
+                &mut env,
+                Some(&member_keys_json),
+                Some(&items_json_out),
+                None,
+            )
+        }
+        Err(e) => create_key_rotation_result(&mut env, None, None, Some(&e.to_string())),
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_expo_modules_bitterycrypto_BitteryCryptoModule_nativeValidateRotationData<
+    'a,
+>(
+    mut env: JNIEnv<'a>,
+    _class: JClass<'a>,
+    members_json: JString<'a>,
+) -> JObject<'a> {
+    let members_str = match get_string(&mut env, members_json) {
+        Some(s) => s,
+        None => return create_validation_result(&mut env, false, "[\"Invalid members JSON\"]"),
+    };
+
+    use bittery_crypto_core::{validate_rotation_data, MemberKeyData};
+
+    let members: Vec<MemberKeyData> = match serde_json::from_str(&members_str) {
+        Ok(m) => m,
+        Err(e) => return create_validation_result(&mut env, false, &format!("[\"{}\"]", e)),
+    };
+
+    let result = validate_rotation_data(&members);
+    let errors_json = serde_json::to_string(&result.errors).unwrap_or_else(|_| "[]".to_string());
+    create_validation_result(&mut env, result.valid, &errors_json)
 }
 
 // ============================================================================

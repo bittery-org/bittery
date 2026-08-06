@@ -42,6 +42,37 @@ export interface Session {
 }
 
 /**
+ * Passkey key pair (base64-encoded private key + COSE public key).
+ * Matches @bittery/crypto-port's `PasskeyKeypair` shape exactly — the FFI's C ABI
+ * already drops the core's third `public_key_spki` field, which has no consumer
+ * on any adapter today.
+ */
+export interface PasskeyKeypair {
+	privateKey: string;
+	publicKeyCose: string;
+}
+
+/**
+ * Result from building a passkey attestation object (native module returns base64
+ * strings). Note: differs from @bittery/crypto-port's `PasskeyAttestation`, which
+ * uses `Uint8Array` for direct use in a `PublicKeyCredential` response.
+ */
+export interface NativePasskeyAttestation {
+	authenticatorData: string;
+	attestationObject: string;
+}
+
+/**
+ * Result from signing a passkey assertion (native module returns base64 strings).
+ * Note: differs from @bittery/crypto-port's `PasskeyAssertion`, which uses
+ * `Uint8Array` for direct use in a `PublicKeyCredential` response.
+ */
+export interface NativePasskeyAssertion {
+	authenticatorData: string;
+	signatureDer: string;
+}
+
+/**
  * Hash algorithm for SRP
  */
 export type HashAlgorithm = "SHA-256";
@@ -63,6 +94,7 @@ export enum ErrorCode {
 	SrpOperationFailed = "SRP_OPERATION_FAILED",
 	InvalidSecretKey = "INVALID_SECRET_KEY",
 	NativeError = "NATIVE_ERROR",
+	PasskeyOperationFailed = "PASSKEY_OPERATION_FAILED",
 }
 
 /**

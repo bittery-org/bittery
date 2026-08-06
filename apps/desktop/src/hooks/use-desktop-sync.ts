@@ -7,6 +7,7 @@ import {
 	createStoredAccountRpcClient,
 } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
+import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
 import type { RpcVaultClient } from "@bittery/core/services/vault-service";
 import { isUnauthorizedRpcError } from "@bittery/shared/rpc-client";
@@ -17,16 +18,15 @@ import type {
 	SyncStorage,
 } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
-import type { ICrypto } from "@bittery/types";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { crypto } from "@/lib/crypto";
 import { lifecycleDeps } from "@/lib/lifecycle";
 import { itemCache, storage } from "@/lib/storage";
 import {
 	getDesktopSyncStore,
 	getOrCreateDesktopSyncClientId,
 } from "@/lib/sync-client-id";
-import * as tauriCrypto from "@/lib/tauri-crypto";
 
 /**
  * `accountId` is deliberately non-nullable: it becomes `SyncSource.itemCacheAccountId`, which
@@ -131,20 +131,6 @@ class TauriSyncStorage implements SyncStorage {
 		await store.save();
 	}
 }
-
-const crypto: ICrypto = {
-	decrypt: tauriCrypto.decrypt,
-	encrypt: tauriCrypto.encrypt,
-	rsaDecrypt: tauriCrypto.rsaDecrypt,
-	generateEncryptionKey: tauriCrypto.generateEncryptionKey,
-	generateUuid: tauriCrypto.generateUuid,
-	deriveKeys: tauriCrypto.deriveKeys,
-	generateClientEphemeral: tauriCrypto.generateClientEphemeral,
-	deriveClientSession: tauriCrypto.deriveClientSession,
-	verifyServerSession: tauriCrypto.verifyServerSession,
-	validateSecretKey: tauriCrypto.validateSecretKey,
-	validateKdfProfile: tauriCrypto.validateKdfProfile,
-};
 
 const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -343,7 +329,13 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 
 	const syncStorage = useMemo(() => new TauriSyncStorage(), []);
 	const vaultCoordinator = useMemo(
-		() => getOrCreateVaultRepositoryCoordinator(crypto, storage, itemCache),
+		() =>
+			getOrCreateVaultRepositoryCoordinator(
+				crypto,
+				createVaultCrypto({ crypto, storage }),
+				storage,
+				itemCache,
+			),
 		[],
 	);
 

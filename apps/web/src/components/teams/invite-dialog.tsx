@@ -1,7 +1,4 @@
-import {
-	decryptStoredVaultKey,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Badge,
@@ -38,8 +35,6 @@ import {
 	formatDate,
 	formatCurrency as formatLocalizedCurrency,
 } from "@/lib/i18n-format";
-import { storage } from "@/lib/storage";
-import { decrypt, rsaDecrypt, rsaEncrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 
@@ -93,6 +88,8 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 	const [inviteLink, setInviteLink] = useState<string | null>(null);
 	const rpc = useRPC();
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
+	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 
@@ -141,31 +138,24 @@ export function InviteDialog({ teamId }: InviteDialogProps) {
 				for (const vault of teamVaultsQuery.data) {
 					if (vault.encryptedVaultKey) {
 						try {
-							// Decrypt vault key with our MUK
-							const vaultKey = await decryptStoredVaultKey({
+							const vaultKey = await vaultCrypto.unwrapStoredVaultKey({
 								encryptedVaultKey: vault.encryptedVaultKey,
-								storage,
-								crypto: {
-									decrypt,
-									rsaDecrypt,
-								} as VaultKeyCryptoProvider,
-							});
-
-							// Convert vault key to base64 string for RSA encryption
-							const vaultKeyBase64 = btoa(
-								String.fromCharCode(...new Uint8Array(vaultKey)),
-							);
-
-							// Encrypt with invitee's RSA public key
-							const encryptedForInvitee = await rsaEncrypt(
-								vaultKeyBase64,
-								result.existingUserPublicKey,
-							);
-
-							pendingVaultKeys.push({
 								vaultId: vault.id,
-								encryptedVaultKey: encryptedForInvitee,
 							});
+
+							// Sealed to the invitee's public key without the key material
+							// leaving the backend; the ref is still ours to retire.
+							try {
+								pendingVaultKeys.push({
+									vaultId: vault.id,
+									encryptedVaultKey: await crypto.encryptVaultKeyForMember(
+										vaultKey,
+										result.existingUserPublicKey,
+									),
+								});
+							} finally {
+								await crypto.destroyKey(vaultKey);
+							}
 						} catch (err) {
 							console.error(
 								`Failed to provision vault key for vault ${vault.id}:`,

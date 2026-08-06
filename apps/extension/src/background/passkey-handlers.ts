@@ -5,14 +5,9 @@ import type {
 	Passkey,
 } from "@bittery/shared/types";
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
+import { crypto } from "../lib/crypto";
 import { getBaseDomain, normalizeHost, parseHostname } from "../lib/hostname";
 import { storage } from "../lib/storage";
-import {
-	buildPasskeyAttestationObject,
-	generatePasskeyCredentialId,
-	generatePasskeyKeypair,
-	signPasskeyAssertion,
-} from "../lib/wasm-crypto";
 import {
 	base64ToBytes,
 	base64UrlToBytes,
@@ -944,16 +939,16 @@ export async function handlePasskeyCreate(
 		}
 
 		stage = "crypto";
-		const keypair = await generatePasskeyKeypair();
-		const credentialIdBase64 = await generatePasskeyCredentialId();
+		const keypair = await crypto.generatePasskeyKeypair();
+		const credentialIdBase64 = await crypto.generatePasskeyCredentialId();
 		const credentialId = bytesToBase64Url(base64ToBytes(credentialIdBase64));
 
-		const attestation = await buildPasskeyAttestationObject({
+		const attestation = await crypto.buildPasskeyAttestationObject(
 			rpId,
 			credentialIdBase64,
-			cosePublicKeyBase64: keypair.publicKeyCose,
-			signCount: 0,
-		});
+			keypair.publicKeyCose,
+			0,
+		);
 
 		const passkey = toPasskeyModel({
 			credentialId,
@@ -1138,14 +1133,12 @@ export async function handlePasskeyGet(
 			match.passkey.signCount ?? 0,
 		);
 		stage = "signing";
-		const assertion = await signPasskeyAssertion({
-			privateKeyBase64: match.passkey.privateKey,
+		const assertion = await crypto.signPasskeyAssertion(
+			match.passkey.privateKey,
 			rpId,
-			clientDataHashBase64: bytesToBase64(
-				base64UrlToBytes(payload.clientDataHash),
-			),
-			signCount: nextSignCount,
-		});
+			bytesToBase64(base64UrlToBytes(payload.clientDataHash)),
+			nextSignCount,
+		);
 
 		stage = "persist";
 		try {

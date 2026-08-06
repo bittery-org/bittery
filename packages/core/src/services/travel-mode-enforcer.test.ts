@@ -6,6 +6,7 @@ import {
 	createTestAccountStore,
 	createTestItemCache,
 } from "../testing/account-store-harness";
+import { NO_CREDENTIAL_MIRROR } from "./account-lifecycle";
 import {
 	resetTravelModeEnforcerForTests,
 	TravelModeEnforcer,
@@ -167,17 +168,35 @@ describe("TravelModeEnforcer", () => {
 		const clearSession = spyOn(storage, "clearSession");
 		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 
-		expect(await enforcer.verifyOrClear(ACCOUNT_ID)).toBe(true);
+		expect(
+			await enforcer.verifyOrClear(ACCOUNT_ID, undefined, NO_CREDENTIAL_MIRROR),
+		).toBe(true);
 		expect(clearSession).not.toHaveBeenCalled();
 		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(true);
 	});
 
 	it("verifyOrClear fails closed by clearing the session", async () => {
 		const { storage, itemCache } = await createLayers();
-		const clearSession = spyOn(storage, "clearSession");
+		const events: string[] = [];
+		const originalClearSession = storage.clearSession.bind(storage);
+		const clearSession = spyOn(storage, "clearSession").mockImplementation(
+			async (accountId) => {
+				events.push("clear-session");
+				await originalClearSession(accountId);
+			},
+		);
+		const purge = mock(async () => {
+			events.push("purge-mirror");
+		});
 		const enforcer = new TravelModeEnforcer({ storage, itemCache });
 
-		expect(await enforcer.verifyOrClear(ACCOUNT_ID)).toBe(false);
+		expect(await enforcer.verifyOrClear(ACCOUNT_ID, undefined, { purge })).toBe(
+			false,
+		);
+		expect(purge).toHaveBeenCalledWith([
+			expect.objectContaining({ accountId: ACCOUNT_ID }),
+		]);
+		expect(events).toEqual(["purge-mirror", "clear-session"]);
 		expect(clearSession).toHaveBeenCalledWith(ACCOUNT_ID);
 		expect(enforcer.isVerified(ACCOUNT_ID)).toBe(false);
 	});

@@ -5,8 +5,8 @@
  * a thin bootstrap entrypoint.
  */
 
+import { crypto } from "../../lib/crypto";
 import { initializeStorage } from "../../lib/storage";
-import { initWasmCrypto } from "../../lib/wasm-crypto";
 import { desktopSync } from "../desktop-sync";
 import {
 	handleAutoLockAlarm,
@@ -21,7 +21,7 @@ let bootstrapPromise: Promise<void> | null = null;
 async function bootstrap(): Promise<void> {
 	await vaultSession.dispatch({ type: "BOOT" });
 
-	await initWasmCrypto().catch((error) => {
+	await crypto.initialize().catch((error) => {
 		console.error(
 			"[Background lifecycle] Failed to initialize WASM crypto:",
 			error,

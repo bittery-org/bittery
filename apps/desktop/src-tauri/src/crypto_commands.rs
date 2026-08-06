@@ -4,12 +4,16 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use bittery_crypto_core::{
-    decrypt, decrypt_with_aad, derive_keys, encrypt, encrypt_with_aad, generate_encryption_key,
-    generate_rsa_key_pair, generate_secret_key, generate_uuid, get_secret_key_hint,
+    build_passkey_attestation_object, decrypt, decrypt_master_key, decrypt_with_aad, derive_keys,
+    derive_keys_from_master_key, derive_master_key, encrypt, encrypt_master_key, encrypt_with_aad,
+    generate_credential_id, generate_encryption_key, generate_passkey_keypair,
+    generate_recovery_key, generate_rsa_key_pair, generate_secret_key, generate_uuid,
+    get_secret_key_hint,
     key_rotation::{self, ItemData, MemberKeyData, VaultKeyWrapContext},
-    rsa_decrypt, rsa_encrypt,
+    rsa_decrypt, rsa_encrypt, sign_passkey_assertion,
     srp6a::{HashAlgorithm, PrimeGroup, SrpClient},
-    validate_kdf_profile, validate_secret_key, AadContext, EncryptedData, KdfProfile,
+    validate_kdf_profile, validate_recovery_key, validate_secret_key, AadContext, EncryptedData,
+    KdfProfile,
 };
 use serde::{Deserialize, Serialize};
 
@@ -48,6 +52,24 @@ pub struct SessionResponse {
     pub proof: String,
 }
 
+#[derive(Serialize)]
+pub struct PasskeyKeypairResponse {
+    pub private_key: String,
+    pub public_key_cose: String,
+}
+
+#[derive(Serialize)]
+pub struct PasskeyAttestationResponse {
+    pub authenticator_data: String,
+    pub attestation_object: String,
+}
+
+#[derive(Serialize)]
+pub struct PasskeyAssertionResponse {
+    pub authenticator_data: String,
+    pub signature_der: String,
+}
+
 // ============================================================================
 // Key Derivation Commands
 // ============================================================================
@@ -68,6 +90,45 @@ pub fn crypto_derive_keys(
         iterations,
     };
     let keys = derive_keys(&password, &secret_key, &email, &profile).map_err(|e| e.to_string())?;
+
+    Ok(DerivedKeysResponse {
+        auth_key: STANDARD.encode(&keys.auth_key),
+        master_unlock_key: STANDARD.encode(&keys.master_unlock_key),
+    })
+}
+
+/// Derive the intermediate master key (PBKDF2 output) from password + secret key
+#[tauri::command]
+pub fn crypto_derive_master_key(
+    account_password: String,
+    secret_key: String,
+    email: String,
+    schema_version: u32,
+    algorithm: String,
+    iterations: u32,
+) -> Result<String, String> {
+    let profile = KdfProfile {
+        schema_version,
+        algorithm,
+        iterations,
+    };
+    let master_key = derive_master_key(&account_password, &secret_key, &email, &profile)
+        .map_err(|e| e.to_string())?;
+
+    Ok(STANDARD.encode(master_key))
+}
+
+/// Split a raw master key into auth key + master unlock key
+#[tauri::command]
+pub fn crypto_derive_keys_from_master_key(
+    master_key_base64: String,
+    email: String,
+) -> Result<DerivedKeysResponse, String> {
+    let master_key = STANDARD
+        .decode(&master_key_base64)
+        .map_err(|e| format!("Invalid master key base64: {}", e))?;
+
+    let keys = derive_keys_from_master_key(&master_key, &email).map_err(|e| e.to_string())?;
 
     Ok(DerivedKeysResponse {
         auth_key: STANDARD.encode(&keys.auth_key),
@@ -267,6 +328,59 @@ pub fn crypto_get_secret_key_hint(secret_key: String) -> String {
     get_secret_key_hint(&secret_key)
 }
 
+/// Generate a new recovery key in R1-XXXXXX format
+#[tauri::command]
+pub fn crypto_generate_recovery_key() -> String {
+    generate_recovery_key()
+}
+
+/// Validate recovery key format
+#[tauri::command]
+pub fn crypto_validate_recovery_key(recovery_key: String) -> bool {
+    validate_recovery_key(&recovery_key)
+}
+
+/// Encrypt a raw 32-byte master key using recovery key material
+#[tauri::command]
+pub fn crypto_encrypt_master_key(
+    master_key_base64: String,
+    recovery_key: String,
+    email: String,
+) -> Result<EncryptResponse, String> {
+    let master_key = STANDARD
+        .decode(&master_key_base64)
+        .map_err(|e| format!("Invalid master key base64: {}", e))?;
+
+    let encrypted =
+        encrypt_master_key(&master_key, &recovery_key, &email).map_err(|e| e.to_string())?;
+
+    Ok(EncryptResponse {
+        ciphertext: encrypted.ciphertext,
+        iv: encrypted.iv,
+        algorithm: encrypted.algorithm,
+    })
+}
+
+/// Decrypt an encrypted master key blob using the recovery key
+#[tauri::command]
+pub fn crypto_decrypt_master_key(
+    ciphertext: String,
+    iv: String,
+    algorithm: String,
+    recovery_key: String,
+    email: String,
+) -> Result<String, String> {
+    let data = EncryptedData {
+        ciphertext,
+        iv,
+        algorithm,
+    };
+
+    let master_key = decrypt_master_key(&data, &recovery_key, &email).map_err(|e| e.to_string())?;
+
+    Ok(STANDARD.encode(master_key))
+}
+
 // ============================================================================
 // SRP-6a Client Commands
 // ============================================================================
@@ -359,6 +473,80 @@ pub fn crypto_srp_verify_session(
     get_srp_client()
         .verify_session(&client_public_ephemeral, &session, &server_session_proof)
         .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Passkey / WebAuthn Commands
+// ============================================================================
+
+/// Generate a P-256 keypair for WebAuthn (private key + COSE public key)
+#[tauri::command]
+pub fn crypto_passkey_generate_keypair() -> Result<PasskeyKeypairResponse, String> {
+    let keypair = generate_passkey_keypair().map_err(|e| e.to_string())?;
+
+    Ok(PasskeyKeypairResponse {
+        private_key: STANDARD.encode(keypair.private_key),
+        public_key_cose: STANDARD.encode(&keypair.public_key_cose),
+    })
+}
+
+/// Generate a random 32-byte passkey credential ID
+#[tauri::command]
+pub fn crypto_passkey_generate_credential_id() -> String {
+    STANDARD.encode(generate_credential_id())
+}
+
+/// Build authenticator data + attestation object for `navigator.credentials.create()`
+#[tauri::command]
+pub fn crypto_passkey_build_attestation_object(
+    rp_id: String,
+    credential_id_base64: String,
+    cose_public_key_base64: String,
+    sign_count: Option<u32>,
+) -> Result<PasskeyAttestationResponse, String> {
+    let credential_id = STANDARD
+        .decode(&credential_id_base64)
+        .map_err(|e| format!("Invalid credential id base64: {}", e))?;
+    let cose_public_key = STANDARD
+        .decode(&cose_public_key_base64)
+        .map_err(|e| format!("Invalid public key base64: {}", e))?;
+
+    let result = build_passkey_attestation_object(
+        &rp_id,
+        &credential_id,
+        &cose_public_key,
+        sign_count.unwrap_or(0),
+    )
+    .map_err(|e| e.to_string())?;
+
+    Ok(PasskeyAttestationResponse {
+        authenticator_data: STANDARD.encode(&result.authenticator_data),
+        attestation_object: STANDARD.encode(&result.attestation_object),
+    })
+}
+
+/// Build assertion authenticator data and sign it for `navigator.credentials.get()`
+#[tauri::command]
+pub fn crypto_passkey_sign_assertion(
+    private_key_base64: String,
+    rp_id: String,
+    client_data_hash_base64: String,
+    sign_count: u32,
+) -> Result<PasskeyAssertionResponse, String> {
+    let private_key = STANDARD
+        .decode(&private_key_base64)
+        .map_err(|e| format!("Invalid private key base64: {}", e))?;
+    let client_data_hash = STANDARD
+        .decode(&client_data_hash_base64)
+        .map_err(|e| format!("Invalid client data hash base64: {}", e))?;
+
+    let result = sign_passkey_assertion(&private_key, &rp_id, &client_data_hash, sign_count)
+        .map_err(|e| e.to_string())?;
+
+    Ok(PasskeyAssertionResponse {
+        authenticator_data: STANDARD.encode(&result.authenticator_data),
+        signature_der: STANDARD.encode(&result.signature_der),
+    })
 }
 
 // ============================================================================

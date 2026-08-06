@@ -1,16 +1,16 @@
 import { describe, expect, it } from "bun:test";
+import type { KeyRef } from "@bittery/crypto-port";
 import {
-	arrayBufferToBase64,
-	base64ToArrayBuffer,
-} from "@bittery/shared/crypto";
-import type { EncryptedData } from "@bittery/types";
+	createInMemoryCryptoPort,
+	type InMemoryCryptoPort,
+} from "@bittery/crypto-port/testing";
+import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import {
 	type AccountStore,
 	createAccountStore,
 	NATIVE_VIEW_VERSION,
 	type NativeHostView,
 } from "./account-store";
-import type { CryptoProvider } from "./crypto-provider";
 import { accountKey, itemsCollection, vaultsCollection } from "./keys";
 import {
 	createInMemoryPlatformPort,
@@ -25,113 +25,38 @@ import {
 } from "./types";
 
 // ============================================================================
-// Fakes
-// ============================================================================
-
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-const encodeUtf8Base64 = (value: string): string =>
-	arrayBufferToBase64(textEncoder.encode(value));
-const decodeUtf8Base64 = (value: string): string =>
-	textDecoder.decode(base64ToArrayBuffer(value));
-
-/** Identifies which key a ciphertext was produced under, so decrypt can reject others. */
-const keyId = (key: Uint8Array): string => arrayBufferToBase64(key);
-
-/**
- * Reversible, deliberately not-real crypto. `ciphertext` is a double-base64 of the
- * plaintext, so a plaintext that leaked into storage would still not appear verbatim —
- * the "MUK is never persisted" assertions test the store, not the fake.
- */
-function createFakeCrypto(): CryptoProvider {
-	return {
-		encrypt: async (plaintext, key) => ({
-			ciphertext: encodeUtf8Base64(plaintext),
-			iv: keyId(key),
-			algorithm: "fake",
-		}),
-		decrypt: async (data, key) => {
-			if (data.algorithm !== "fake") {
-				throw new Error(`unsupported algorithm ${data.algorithm}`);
-			}
-			if (data.iv !== keyId(key)) {
-				throw new Error("wrong key");
-			}
-			return decodeUtf8Base64(data.ciphertext);
-		},
-		rsaDecrypt: async () => {
-			throw new Error("not used");
-		},
-	};
-}
-
-interface HandleCrypto extends CryptoProvider {
-	/** Register key material behind an opaque handle, as a real backend would. */
-	registerHandle(bytes: Uint8Array): number;
-}
-
-const HANDLE_PREFIX = "handle:";
-
-function createHandleCrypto(): HandleCrypto {
-	const base = createFakeCrypto();
-	const handles = new Map<number, Uint8Array>();
-	let nextHandle = 1;
-
-	return {
-		...base,
-		registerHandle(bytes: Uint8Array): number {
-			const handle = nextHandle;
-			nextHandle += 1;
-			handles.set(handle, bytes);
-			return handle;
-		},
-		encryptKeyHandleWithWrappingKey: async (
-			handle,
-			wrappingKey,
-		): Promise<EncryptedData> => ({
-			ciphertext: `${HANDLE_PREFIX}${handle}`,
-			iv: keyId(wrappingKey),
-			algorithm: "fake-handle",
-		}),
-		decryptKeyHandleWithWrappingKey: async (data, wrappingKey) => {
-			if (data.algorithm !== "fake-handle") {
-				throw new Error("not a key-handle payload");
-			}
-			if (data.iv !== keyId(wrappingKey)) {
-				throw new Error("wrong key");
-			}
-			return Number.parseInt(data.ciphertext.slice(HANDLE_PREFIX.length), 10);
-		},
-		exportKeyHandle: async (handle) => handles.get(handle) ?? new Uint8Array(0),
-		destroyKeyHandle: async (handle) => {
-			handles.delete(handle);
-		},
-	};
-}
-
-// ============================================================================
 // Harness
 // ============================================================================
 
 interface Harness {
 	port: InMemoryPlatformPort;
+	crypto: InMemoryCryptoPort;
 	store: AccountStore;
+	/**
+	 * Live refs over the two fixed key values, minted by the same crypto port the store
+	 * holds — a ref from anywhere else would be rejected, which is the point of `KeyRef`.
+	 */
+	muk: KeyRef;
+	otherMuk: KeyRef;
 }
 
 async function makeStore(opts?: {
 	sessionSurvivesRestart?: boolean;
-	crypto?: CryptoProvider;
+	crypto?: InMemoryCryptoPort;
 }): Promise<Harness> {
 	const port = createInMemoryPlatformPort({
 		sessionSurvivesRestart: opts?.sessionSurvivesRestart ?? false,
 	});
-	const store = createAccountStore({
-		port,
-		crypto: opts?.crypto ?? createFakeCrypto(),
-	});
+	const crypto = opts?.crypto ?? createInMemoryCryptoPort();
+	const store = createAccountStore({ port, crypto });
 	await store.initialize();
-	return { port, store };
+	return {
+		port,
+		crypto,
+		store,
+		muk: await crypto.importKey(MUK_BYTES),
+		otherMuk: await crypto.importKey(OTHER_MUK_BYTES),
+	};
 }
 
 function metadataFor(accountId: string): AccountMetadata {
@@ -167,15 +92,27 @@ function nativeView(port: InMemoryPlatformPort): NativeHostView {
 	return JSON.parse(raw) as NativeHostView;
 }
 
-const MUK = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
-const OTHER_MUK = new Uint8Array(Array.from({ length: 32 }, (_, i) => 200 - i));
+const MUK_BYTES = new Uint8Array(Array.from({ length: 32 }, (_, i) => i + 1));
+const OTHER_MUK_BYTES = new Uint8Array(
+	Array.from({ length: 32 }, (_, i) => 200 - i),
+);
 
 /** Advance the wall clock far enough that a zero-length period has provably elapsed. */
 const tick = (): Promise<void> =>
 	new Promise((resolve) => setTimeout(resolve, 5));
 
-const bytes = (value: Uint8Array | null): number[] =>
-	value === null ? [] : Array.from(value);
+/**
+ * The store speaks `KeyRef`, so a test that wants to compare key *material* has to ask the
+ * crypto port to export it. This is the only place these tests look behind a ref.
+ */
+async function bytesOf(
+	crypto: InMemoryCryptoPort,
+	key: KeyRef | null,
+): Promise<number[]> {
+	return key === null ? [] : Array.from(await crypto.exportKey(key));
+}
+
+const bytes = (key: Uint8Array): number[] => Array.from(key);
 
 // ============================================================================
 // accountId namespacing
@@ -224,7 +161,7 @@ describe("AccountStore — accountId namespacing", () => {
 	});
 
 	it("throws a clear error when a write needs an account and there is none", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 
 		expect(store.storeServerUrl("https://nobody.example.com")).rejects.toThrow(
 			/No account specified/,
@@ -232,7 +169,7 @@ describe("AccountStore — accountId namespacing", () => {
 		expect(store.storeSecretKey("secret")).rejects.toThrow(
 			/No account specified/,
 		);
-		expect(store.setMasterUnlockKey(MUK)).rejects.toThrow(
+		expect(store.setMasterUnlockKey(muk)).rejects.toThrow(
 			/No account specified/,
 		);
 	});
@@ -337,7 +274,7 @@ describe("AccountStore — session expiry", () => {
 		await seedAccount(harness.store, "a", { active: true });
 		await harness.store.storeAuthToken("jwt-value");
 		await harness.store.storeSessionData(
-			MUK,
+			harness.muk,
 			"a",
 			"A@Example.com",
 			"user-a",
@@ -410,9 +347,9 @@ describe("AccountStore — session expiry", () => {
 	});
 
 	it("is invalid without an auth token even when unexpired", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a");
+		await store.storeSessionData(muk, "a", "a@example.com", "user-a");
 
 		expect(await store.isSessionValid()).toBe(false);
 		expect(await store.isAuthenticated()).toBe(false);
@@ -432,11 +369,13 @@ describe("AccountStore — session expiry", () => {
 	});
 
 	it("restores a session into the MUK cache", async () => {
-		const { store } = await withSession(60_000);
+		const { crypto, store } = await withSession(60_000);
 		await store.clearMasterUnlockKey("a");
 
 		expect(await store.tryRestoreSession(false, "a")).toBe(true);
-		expect(bytes(await store.getMasterUnlockKey("a"))).toEqual(bytes(MUK));
+		expect(await bytesOf(crypto, await store.getMasterUnlockKey("a"))).toEqual(
+			bytes(MUK_BYTES),
+		);
 		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
 	});
 
@@ -453,16 +392,18 @@ describe("AccountStore — session expiry", () => {
 
 describe("AccountStore — master unlock key cache", () => {
 	it("sets, gets and clears per account", async () => {
-		const { store } = await makeStore();
+		const { crypto, store, muk, otherMuk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await seedAccount(store, "b");
 
-		await store.setMasterUnlockKey(MUK);
-		await store.setMasterUnlockKey(OTHER_MUK, "b");
+		await store.setMasterUnlockKey(muk);
+		await store.setMasterUnlockKey(otherMuk, "b");
 
-		expect(bytes(await store.getMasterUnlockKey())).toEqual(bytes(MUK));
-		expect(bytes(await store.getMasterUnlockKey("b"))).toEqual(
-			bytes(OTHER_MUK),
+		expect(await bytesOf(crypto, await store.getMasterUnlockKey())).toEqual(
+			bytes(MUK_BYTES),
+		);
+		expect(await bytesOf(crypto, await store.getMasterUnlockKey("b"))).toEqual(
+			bytes(OTHER_MUK_BYTES),
 		);
 		expect((await store.getUnlockedAccounts()).sort()).toEqual(["a", "b"]);
 
@@ -473,43 +414,134 @@ describe("AccountStore — master unlock key cache", () => {
 	});
 
 	it("never persists the plaintext master unlock key", async () => {
-		const { port, store } = await makeStore();
+		const { port, store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 
-		await store.setMasterUnlockKey(MUK);
+		await store.setMasterUnlockKey(muk);
 
 		const dumped = JSON.stringify(port.snapshot());
-		expect(dumped).not.toContain(arrayBufferToBase64(MUK));
+		expect(dumped).not.toContain(arrayBufferToBase64(MUK_BYTES));
 		expect(dumped).not.toContain("master_unlock");
 		expect(Object.keys(port.snapshot().secrets)).not.toContain(
 			accountKey("a", "master_unlock_key"),
 		);
 	});
 
+	/**
+	 * Dropping the map entry is not enough now that the entry is a handle: the material
+	 * behind it lives in the crypto backend, so a lock that forgot to destroy the ref would
+	 * leave the vault openable by anything still holding it.
+	 */
+	it("destroys the key material on clear, not just the cache entry", async () => {
+		const { crypto, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		await store.setMasterUnlockKey(muk);
+		const live = crypto.liveKeyCount;
+
+		await store.clearMasterUnlockKey("a");
+
+		expect(crypto.liveKeyCount).toBe(live - 1);
+		await expect(crypto.exportKey(muk)).rejects.toThrow(/destroyed/);
+	});
+
 	it("locks every account at once", async () => {
-		const { store } = await makeStore();
+		const { crypto, store, muk, otherMuk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await seedAccount(store, "b");
-		await store.setMasterUnlockKey(MUK, "a");
-		await store.setMasterUnlockKey(OTHER_MUK, "b");
+		await store.setMasterUnlockKey(muk, "a");
+		await store.setMasterUnlockKey(otherMuk, "b");
 
 		await store.lockAllAccounts();
 
 		expect(await store.getUnlockedAccounts()).toEqual([]);
 		expect(await store.getMasterUnlockKey("a")).toBeNull();
 		expect(await store.getMasterUnlockKey("b")).toBeNull();
+		await expect(crypto.exportKey(muk)).rejects.toThrow(/destroyed/);
+		await expect(crypto.exportKey(otherMuk)).rejects.toThrow(/destroyed/);
 	});
 
 	it("drops the unlocked account when it is removed", async () => {
-		const { store } = await makeStore();
+		const { crypto, store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
-		await store.setMasterUnlockKey(MUK);
+		await store.setMasterUnlockKey(muk);
 
 		await store.removeAccount("a");
 
 		expect(await store.getUnlockedAccounts()).toEqual([]);
 		expect(await store.getAccountsList()).toEqual([]);
 		expect(await store.getActiveAccount()).toBeNull();
+		await expect(crypto.exportKey(muk)).rejects.toThrow(/destroyed/);
+	});
+
+	/**
+	 * `setUnlockEntry` destroys whatever it is replacing. Re-setting the identical ref must
+	 * not destroy the key it is about to cache.
+	 */
+	it("survives being handed the same key twice", async () => {
+		const { crypto, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+
+		await store.setMasterUnlockKey(muk);
+		await store.setMasterUnlockKey(muk);
+
+		expect(await bytesOf(crypto, await store.getMasterUnlockKey())).toEqual(
+			bytes(MUK_BYTES),
+		);
+	});
+
+	it("does not take ownership when publishing the unlocked view fails", async () => {
+		const { crypto, port, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		const kvSet = port.kvSet.bind(port);
+		port.kvSet = async (key, value, scope) => {
+			if (key === "bittery_native_view") {
+				throw new Error("native view write failed");
+			}
+			await kvSet(key, value, scope);
+		};
+
+		await expect(store.setMasterUnlockKey(muk, "a")).rejects.toThrow(
+			"native view write failed",
+		);
+
+		expect(await store.getUnlockedAccounts()).toEqual([]);
+		expect(await crypto.exportKey(muk)).toEqual(MUK_BYTES);
+	});
+});
+
+describe("AccountStore — device key failure cleanup", () => {
+	it("destroys a generated device key when export fails", async () => {
+		const { crypto, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		const before = crypto.liveKeyCount;
+		crypto.exportKey = async () => {
+			throw new Error("device key export failed");
+		};
+
+		await expect(
+			store.storeSessionData(muk, "a", "a@example.com", "user-a"),
+		).rejects.toThrow("device key export failed");
+
+		expect(crypto.liveKeyCount).toBe(before);
+	});
+
+	it("destroys a generated device key when persistence fails", async () => {
+		const { crypto, port, store, muk } = await makeStore();
+		await seedAccount(store, "a", { active: true });
+		const before = crypto.liveKeyCount;
+		const secretSet = port.secretSet.bind(port);
+		port.secretSet = async (key, value) => {
+			if (key === "bittery_device_key") {
+				throw new Error("device key persistence failed");
+			}
+			await secretSet(key, value);
+		};
+
+		await expect(
+			store.storeSessionData(muk, "a", "a@example.com", "user-a"),
+		).rejects.toThrow("device key persistence failed");
+
+		expect(crypto.liveKeyCount).toBe(before);
 	});
 });
 
@@ -529,7 +561,7 @@ describe("AccountStore — biometric", () => {
 		await harness.store.setBiometricEnabled("a", true);
 		await harness.store.storeAuthToken("jwt-value");
 		await harness.store.storeSessionData(
-			MUK,
+			harness.muk,
 			"a",
 			"a@example.com",
 			"user-a",
@@ -593,17 +625,17 @@ describe("AccountStore — biometric", () => {
 	});
 
 	it("honours the grace period against BIOMETRIC_GRACE_PERIOD_MS", async () => {
-		const { port, store } = await biometricHarness();
+		const { crypto, port, store } = await biometricHarness();
 
-		expect(bytes(await store.decryptStoredMasterUnlockKey("a"))).toEqual(
-			bytes(MUK),
-		);
+		expect(
+			await bytesOf(crypto, await store.decryptStoredMasterUnlockKey("a")),
+		).toEqual(bytes(MUK_BYTES));
 		expect(port.calls.biometricAuthenticate).toBe(1);
 
 		// Inside the grace period: no second prompt.
-		expect(bytes(await store.decryptStoredMasterUnlockKey("a"))).toEqual(
-			bytes(MUK),
-		);
+		expect(
+			await bytesOf(crypto, await store.decryptStoredMasterUnlockKey("a")),
+		).toEqual(bytes(MUK_BYTES));
 		expect(port.calls.biometricAuthenticate).toBe(1);
 
 		// Push the last authentication just outside the grace period.
@@ -613,9 +645,9 @@ describe("AccountStore — biometric", () => {
 			"device",
 		);
 
-		expect(bytes(await store.decryptStoredMasterUnlockKey("a"))).toEqual(
-			bytes(MUK),
-		);
+		expect(
+			await bytesOf(crypto, await store.decryptStoredMasterUnlockKey("a")),
+		).toEqual(bytes(MUK_BYTES));
 		expect(port.calls.biometricAuthenticate).toBe(2);
 	});
 
@@ -631,11 +663,14 @@ describe("AccountStore — biometric", () => {
 	});
 
 	it("skips the prompt when skipBiometric is set", async () => {
-		const { port, store } = await biometricHarness();
+		const { crypto, port, store } = await biometricHarness();
 
-		expect(bytes(await store.decryptStoredMasterUnlockKey("a", true))).toEqual(
-			bytes(MUK),
-		);
+		expect(
+			await bytesOf(
+				crypto,
+				await store.decryptStoredMasterUnlockKey("a", true),
+			),
+		).toEqual(bytes(MUK_BYTES));
 		expect(port.calls.biometricAuthenticate).toBe(0);
 	});
 
@@ -655,12 +690,12 @@ describe("AccountStore — biometric", () => {
 	});
 
 	it("unlocks every account behind one prompt", async () => {
-		const { port, store } = await biometricHarness();
+		const { port, store, otherMuk } = await biometricHarness();
 		await seedAccount(store, "b");
 		await store.setBiometricEnabled("b", true);
 		await store.storeAuthToken("jwt-b", "b");
 		await store.storeSessionData(
-			OTHER_MUK,
+			otherMuk,
 			"b",
 			"b@example.com",
 			"user-b",
@@ -859,7 +894,7 @@ describe("AccountStore — master password re-entry", () => {
 		await harness.store.setBiometricEnabled("a", true);
 		await harness.store.storeAuthToken("jwt-value");
 		await harness.store.storeSessionData(
-			MUK,
+			harness.muk,
 			"a",
 			"a@example.com",
 			"user-a",
@@ -953,10 +988,10 @@ describe("AccountStore — master password re-entry", () => {
 	});
 
 	it("is never required without biometric, matching web", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a", 60_000);
+		await store.storeSessionData(muk, "a", "a@example.com", "user-a", 60_000);
 		await store.storeMasterPasswordReentryPeriodMs(0);
 
 		expect(await store.isMasterPasswordReentryRequired("a")).toBe(false);
@@ -969,15 +1004,15 @@ describe("AccountStore — master password re-entry", () => {
 
 describe("AccountStore — onUnlockStateChanged", () => {
 	it("fires on set, clear and lockAll", async () => {
-		const { store } = await makeStore();
+		const { store, muk, otherMuk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await seedAccount(store, "b");
 
 		const seen: string[][] = [];
 		store.onUnlockStateChanged((accounts) => seen.push(accounts));
 
-		await store.setMasterUnlockKey(MUK, "a");
-		await store.setMasterUnlockKey(OTHER_MUK, "b");
+		await store.setMasterUnlockKey(muk, "a");
+		await store.setMasterUnlockKey(otherMuk, "b");
 		await store.clearMasterUnlockKey("a");
 		await store.lockAllAccounts();
 
@@ -985,13 +1020,13 @@ describe("AccountStore — onUnlockStateChanged", () => {
 	});
 
 	it("stops firing after unsubscribe", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 
 		const seen: string[][] = [];
 		const unsubscribe = store.onUnlockStateChanged((a) => seen.push(a));
 
-		await store.setMasterUnlockKey(MUK);
+		await store.setMasterUnlockKey(muk);
 		unsubscribe();
 		await store.clearMasterUnlockKey();
 
@@ -999,7 +1034,7 @@ describe("AccountStore — onUnlockStateChanged", () => {
 	});
 
 	it("does not let a throwing listener break the operation", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 
 		const seen: string[][] = [];
@@ -1008,14 +1043,14 @@ describe("AccountStore — onUnlockStateChanged", () => {
 		});
 		store.onUnlockStateChanged((a) => seen.push(a));
 
-		await store.setMasterUnlockKey(MUK);
+		await store.setMasterUnlockKey(muk);
 
 		expect(seen).toEqual([["a"]]);
 		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
 	});
 
 	it("hands each listener its own array", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 
 		let captured: string[] = [];
@@ -1023,7 +1058,7 @@ describe("AccountStore — onUnlockStateChanged", () => {
 			captured = accounts;
 		});
 
-		await store.setMasterUnlockKey(MUK);
+		await store.setMasterUnlockKey(muk);
 		captured.push("mutated-by-listener");
 
 		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
@@ -1118,10 +1153,10 @@ describe("AccountStore — native host projection", () => {
 	});
 
 	it("refreshes when the unlocked set changes", async () => {
-		const { port, store } = await makeStore();
+		const { port, store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 
-		await store.setMasterUnlockKey(MUK);
+		await store.setMasterUnlockKey(muk);
 		expect(nativeView(port).unlockedAccountIds).toEqual(["a"]);
 
 		await store.lockAllAccounts();
@@ -1172,7 +1207,7 @@ describe("AccountStore — native host projection", () => {
 		};
 		const prefixedStore = createAccountStore({
 			port: prefixed,
-			crypto: createFakeCrypto(),
+			crypto: createInMemoryCryptoPort(),
 		});
 		await prefixedStore.initialize();
 		await seedAccount(prefixedStore, "a", { active: true });
@@ -1187,78 +1222,6 @@ describe("AccountStore — native host projection", () => {
 		// Session-bound values land in the ephemeral kv store on web/extension.
 		expect(ephemeralAccount?.token.store).toBe("plain");
 		expect(ephemeralAccount?.sessionData.store).toBe("secret");
-	});
-});
-
-// ============================================================================
-// Key handles
-// ============================================================================
-
-describe("AccountStore — master unlock key handles", () => {
-	it("stores and restores a session through the key-handle path", async () => {
-		const crypto = createHandleCrypto();
-		const { store } = await makeStore({ crypto });
-		await seedAccount(store, "a", { active: true });
-
-		const handle = crypto.registerHandle(MUK);
-		await store.storeAuthToken("jwt-value");
-		await store.storeSessionDataWithMasterUnlockKeyHandle(
-			handle,
-			"a",
-			"a@example.com",
-			"user-a",
-			60_000,
-		);
-
-		expect(await store.getMasterUnlockKeyHandle()).toBe(handle);
-		expect(bytes(await store.getMasterUnlockKey())).toEqual(bytes(MUK));
-		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
-	});
-
-	it("caches a handle set directly and reports the account unlocked", async () => {
-		const crypto = createHandleCrypto();
-		const { store } = await makeStore({ crypto });
-		await seedAccount(store, "a", { active: true });
-		const handle = crypto.registerHandle(MUK);
-
-		await store.setMasterUnlockKeyHandle(handle);
-
-		expect(await store.getMasterUnlockKeyHandle()).toBe(handle);
-		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
-	});
-
-	it("still falls back to the byte path on a handle-capable provider", async () => {
-		const crypto = createHandleCrypto();
-		const { store } = await makeStore({ crypto });
-		await seedAccount(store, "a", { active: true });
-		await store.storeAuthToken("jwt-value");
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a", 60_000);
-
-		expect(await store.getMasterUnlockKeyHandle()).toBeNull();
-		expect(bytes(await store.getMasterUnlockKey())).toEqual(bytes(MUK));
-	});
-
-	it("fails clearly on a provider without handle support", async () => {
-		const { store } = await makeStore();
-		await seedAccount(store, "a", { active: true });
-
-		expect(
-			store.storeSessionDataWithMasterUnlockKeyHandle(
-				1,
-				"a",
-				"a@example.com",
-				"user-a",
-			),
-		).rejects.toThrow(/does not support key-handle session storage/);
-	});
-
-	it("returns null for a handle on a provider without handle support", async () => {
-		const { store } = await makeStore();
-		await seedAccount(store, "a", { active: true });
-		await store.storeAuthToken("jwt-value");
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a", 60_000);
-
-		expect(await store.getMasterUnlockKeyHandle()).toBeNull();
 	});
 });
 
@@ -1365,10 +1328,10 @@ describe("AccountStore — accounts and settings", () => {
 	});
 
 	it("reports quick unlock only with a secret key and an unexpired session", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a", 60_000);
+		await store.storeSessionData(muk, "a", "a@example.com", "user-a", 60_000);
 
 		expect(await store.canQuickUnlock()).toBe(false);
 
@@ -1379,11 +1342,13 @@ describe("AccountStore — accounts and settings", () => {
 	});
 
 	it("keeps offering quick unlock after a restart drops the auth token", async () => {
-		const { port, store } = await makeStore({ sessionSurvivesRestart: false });
+		const { port, store, muk } = await makeStore({
+			sessionSurvivesRestart: false,
+		});
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
 		await store.storeSecretKey("secret-a");
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a", 60_000);
+		await store.storeSessionData(muk, "a", "a@example.com", "user-a", 60_000);
 
 		port.simulateRestart();
 
@@ -1394,11 +1359,11 @@ describe("AccountStore — accounts and settings", () => {
 	});
 
 	it("stops offering quick unlock once the stored session has expired", async () => {
-		const { store } = await makeStore();
+		const { store, muk } = await makeStore();
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
 		await store.storeSecretKey("secret-a");
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a", -1);
+		await store.storeSessionData(muk, "a", "a@example.com", "user-a", -1);
 
 		expect(await store.canQuickUnlock()).toBe(false);
 	});
@@ -1411,13 +1376,13 @@ describe("AccountStore — accounts and settings", () => {
 		await harness.store.storeVaultKeys([]);
 		await harness.store.storeEncryptedPrivateKey("pk");
 		await harness.store.storeSessionData(
-			MUK,
+			harness.muk,
 			"a",
 			"a@example.com",
 			"user-a",
 			60_000,
 		);
-		await harness.store.setMasterUnlockKey(MUK);
+		await harness.store.setMasterUnlockKey(harness.muk);
 		return harness;
 	}
 
@@ -1434,16 +1399,16 @@ describe("AccountStore — accounts and settings", () => {
 	});
 
 	it("clearSession leaves quick-unlock working", async () => {
-		const { store } = await signedInHarness();
+		const { crypto, store } = await signedInHarness();
 
 		await store.clearSession();
 
 		// The quick-unlock material — session_data, which carries the MUK encrypted under
 		// the device key — deliberately survives a lock.
 		expect(await store.getStoredSessionData("a")).not.toBeNull();
-		expect(bytes(await store.decryptStoredMasterUnlockKey("a"))).toEqual(
-			bytes(MUK),
-		);
+		expect(
+			await bytesOf(crypto, await store.decryptStoredMasterUnlockKey("a")),
+		).toEqual(bytes(MUK_BYTES));
 
 		expect(await store.canQuickUnlock()).toBe(true);
 
@@ -1483,10 +1448,12 @@ describe("AccountStore — accounts and settings", () => {
 	});
 
 	it("clearAllStoredData wipes the account and the device key once nothing is left", async () => {
-		const { port, store } = await makeStore({ sessionSurvivesRestart: true });
+		const { port, store, muk } = await makeStore({
+			sessionSurvivesRestart: true,
+		});
 		await seedAccount(store, "a", { active: true });
 		await store.storeAuthToken("jwt-value");
-		await store.storeSessionData(MUK, "a", "a@example.com", "user-a", 60_000);
+		await store.storeSessionData(muk, "a", "a@example.com", "user-a", 60_000);
 
 		await store.clearAllStoredData();
 

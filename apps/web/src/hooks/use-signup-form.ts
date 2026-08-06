@@ -1,6 +1,7 @@
+import { usePlatformCrypto } from "@bittery/core/hooks";
+import { storeLoginSessionOwned } from "@bittery/core/services/auth-service";
+import { createAccountKeys } from "@bittery/core/services/vault-crypto";
 import { m } from "@bittery/i18n/paraglide/messages";
-import { buildVaultKeyEncryptionContext } from "@bittery/shared";
-import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
@@ -12,12 +13,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { storage } from "@/lib/storage";
-import {
-	generateRecoveryKeyAsync,
-	generateSecretKeyAsync,
-} from "@/lib/wasm-crypto";
-import { WorkerCrypto } from "@/lib/worker-crypto";
+import { itemCache, refreshActiveAccountId, storage } from "@/lib/storage";
 
 export type { CloudPlanId } from "@bittery/shared/pricing";
 
@@ -67,13 +63,14 @@ export function useSignupForm({
 	const navigate = useNavigate();
 	const rpc = useRPC();
 	const rpcClient = useRPCClient();
-	const [keyMaterialQueryId] = useState(() => crypto.randomUUID());
+	const crypto = usePlatformCrypto();
+	const [keyMaterialQueryId] = useState(() => globalThis.crypto.randomUUID());
 	const keyMaterialQuery = useQuery({
 		queryKey: ["signup-key-material", keyMaterialQueryId],
 		queryFn: async () => {
 			const [secretKey, recoveryKey] = await Promise.all([
-				generateSecretKeyAsync(),
-				generateRecoveryKeyAsync(),
+				crypto.generateSecretKey(),
+				crypto.generateRecoveryKey(),
 			]);
 			return { secretKey, recoveryKey };
 		},
@@ -120,14 +117,12 @@ export function useSignupForm({
 	const requiresEmailVerification =
 		registrationStatus?.requiresEmailVerification ?? true;
 
-	const normalizeSignupEmail = (email: string) => email.trim().toLowerCase();
-
 	const getSignupEmail = (value: SignupFormValues) => {
 		if (isInvitationSignup) {
-			return invitation?.email ?? "";
+			return invitation?.email.trim().toLowerCase() ?? "";
 		}
 
-		return value.email;
+		return value.email.trim().toLowerCase();
 	};
 
 	const resetVerifiedSignup = () => {
@@ -200,192 +195,135 @@ export function useSignupForm({
 				kdfParams: input.kdfProfile,
 			});
 		},
-		onSuccess: async (data, variables) => {
-			// Store auth token and vault keys
-			await storage.storeAuthToken(data.token);
-			await storage.storeVaultKeys(data.vaultKeys.map(toAuthVaultKeyEntry));
-
-			toast.success(m.auth_signup_toast_account_created());
-
-			if (
-				isCloudSelfServeSignup &&
-				!isInvitationSignup &&
-				isCloudBillingEnabled &&
-				variables.plan &&
-				variables.plan !== "free"
-			) {
-				try {
-					const checkout = await rpcClient.billing.createCheckoutSession.mutate(
-						{
-							plan: variables.plan,
-						},
-					);
-
-					if (checkout.url) {
-						window.location.href = checkout.url;
-						return;
-					}
-				} catch (error: any) {
-					toast.error(
-						error?.message ||
-							"Account created, but checkout could not be started. Open billing to continue.",
-					);
-					navigate({ to: "/billing" });
-					return;
-				}
-			}
-
-			// Invitation signup is accepted server-side.
-			if (isInvitationSignup) {
-				navigate({ to: "/team" });
-			} else if (redirectTo) {
-				// Navigate to redirect URL (invitation page) if provided, otherwise go to home
-				navigate({ to: redirectTo });
-			} else {
-				navigate({ to: "/home" });
-			}
-		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to create account");
 		},
 	});
+
+	/** Where a finished signup lands. Billing takes over when a paid plan was chosen. */
+	const goAfterSignup = async (value: SignupFormValues) => {
+		if (
+			isCloudSelfServeSignup &&
+			!isInvitationSignup &&
+			isCloudBillingEnabled &&
+			value.plan &&
+			value.plan !== "free"
+		) {
+			try {
+				const checkout = await rpcClient.billing.createCheckoutSession.mutate({
+					plan: value.plan,
+				});
+				if (checkout.url) {
+					window.location.href = checkout.url;
+					return;
+				}
+			} catch (error: any) {
+				toast.error(
+					error?.message ||
+						"Account created, but checkout could not be started. Open billing to continue.",
+				);
+				navigate({ to: "/billing" });
+				return;
+			}
+		}
+
+		// Invitation signup is accepted server-side.
+		if (isInvitationSignup) {
+			navigate({ to: "/team" });
+		} else if (redirectTo) {
+			navigate({ to: redirectTo });
+		} else {
+			navigate({ to: "/home" });
+		}
+	};
 
 	const completeSignupSubmission = async (
 		value: SignupFormValues,
 		verificationToken: string,
 	) => {
 		const teamName = value.organizationName.trim();
+		const email = getSignupEmail(value);
+		if (!email) {
+			toast.error("Unable to determine the signup email.");
+			return;
+		}
 
 		setIsEncrypting(true);
-		const workerCrypto = new WorkerCrypto();
+		const serverUrl = getDefaultServerUrl();
 		try {
-			const email = getSignupEmail(value);
-			if (!email) {
-				toast.error("Unable to determine the signup email.");
-				return;
-			}
+			const { keys, result } = await createAccountKeys(
+				{ email, password: value.password, secretKey, recoveryKey },
+				{
+					crypto,
+					commit: (payload) =>
+						signupMutation.mutateAsync({
+							userId: payload.userId,
+							vaultId: payload.vaultId,
+							email,
+							name: value.name,
+							plan: isCloudBillingEnabled ? value.plan : "free",
+							signupVerificationToken: verificationToken,
+							...(isCloudSelfServeSignup && value.plan === "team" && teamName
+								? { organizationName: teamName }
+								: {}),
+							...(isInvitationSignup ? { token: invitationToken } : {}),
+							secretKeyHint: payload.secretKeyHint,
+							srpSalt: payload.srpSalt,
+							srpVerifier: payload.srpVerifier,
+							publicKey: payload.publicKey,
+							encryptedPrivateKey: payload.encryptedPrivateKey,
+							encryptedMasterKey: payload.encryptedMasterKey,
+							recoveryKeyHint: payload.recoveryKeyHint,
+							encryptedVaultKey: payload.encryptedVaultKey,
+							kdfProfile: payload.kdfProfile,
+						}),
+				},
+			);
 
-			const kdfProfile = currentKdfProfile();
-			const masterKey = await workerCrypto.deriveMasterKey(
-				value.password,
+			// The same path a sign-in takes: it registers the account, points the active
+			// account at it and clears any cache left under a reused id — none of which a
+			// hand-rolled sequence of writes here ever did.
+			await storeLoginSessionOwned(
+				{
+					token: result.token,
+					sessionId: result.sessionId,
+					expiresAt: result.expiresAt,
+					user: {
+						id: result.user.id,
+						email: result.user.email,
+						name: result.user.name,
+						teamName: result.user.teamName ?? undefined,
+						teamAvatarUrl: result.user.teamAvatarUrl,
+						encryptedPrivateKey: keys.encryptedPrivateKey,
+					},
+					vaultKeys: result.vaultKeys.map(toAuthVaultKeyEntry),
+					masterUnlockKey: keys.masterUnlockKey,
+					kdfParams: keys.kdfProfile,
+					serverUrl,
+				},
 				secretKey,
+				storage,
+				itemCache,
+				crypto,
 				email,
-				kdfProfile,
+				{ serverUrl },
 			);
-			const { authKey, masterUnlockKey } =
-				await workerCrypto.deriveKeysFromMasterKey(masterKey, email);
+			await refreshActiveAccountId();
 
-			const srpPassword = new TextDecoder().decode(authKey);
-			const { salt, verifier } =
-				await workerCrypto.generateSRPRegistration(srpPassword);
-
-			const { publicKey, privateKey } = await workerCrypto.generateRSAKeyPair();
-
-			const encryptedPrivateKey = await workerCrypto.encrypt(
-				privateKey,
-				masterUnlockKey,
-			);
-
-			const vaultKey = await workerCrypto.generateEncryptionKey();
-			const vaultKeyBase64 = btoa(String.fromCharCode(...vaultKey));
-			const signupUserId = crypto.randomUUID();
-			const signupVaultId = crypto.randomUUID();
-			const encryptedVaultKey = await workerCrypto.encrypt(
-				vaultKeyBase64,
-				masterUnlockKey,
-				buildVaultKeyEncryptionContext({
-					vaultId: signupVaultId,
-					userId: signupUserId,
-					keyVersion: 1,
+			toast.success(m.auth_signup_toast_account_created());
+			toast.success(
+				m.auth_signup_toast_quick_unlock_days({
+					daysUntil: String(
+						Math.floor(DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24)),
+					),
 				}),
 			);
 
-			const secretKeyHint = await workerCrypto.getSecretKeyHint(secretKey);
-			const encryptedMasterKey = await workerCrypto.encryptMasterKey(
-				masterKey,
-				recoveryKey,
-				email,
-			);
-			const recoveryKeyHint =
-				recoveryKey.split("-").slice(0, 2).join("-") || "R1";
-
-			const result = await signupMutation.mutateAsync({
-				userId: signupUserId,
-				vaultId: signupVaultId,
-				email,
-				name: value.name,
-				plan: isCloudBillingEnabled ? value.plan : "free",
-				signupVerificationToken: verificationToken,
-				...(isCloudSelfServeSignup && value.plan === "team" && teamName
-					? { organizationName: teamName }
-					: {}),
-				...(isInvitationSignup ? { token: invitationToken } : {}),
-				secretKeyHint,
-				srpSalt: salt,
-				srpVerifier: verifier,
-				publicKey,
-				encryptedPrivateKey: JSON.stringify(encryptedPrivateKey),
-				encryptedMasterKey: JSON.stringify(encryptedMasterKey),
-				recoveryKeyHint,
-				encryptedVaultKey: JSON.stringify(encryptedVaultKey),
-				kdfProfile,
-			});
-
-			// The token and vault keys stored in `signupMutation.onSuccess` resolve
-			// through the active account, so the key material has to land on that
-			// same id. A fresh id splits the account in two - vault keys under one,
-			// the master unlock key under the other - and nothing decrypts.
-			const accountId = await storage.getActiveAccount();
-			if (!accountId) {
-				// The server already holds the account, so this is recoverable by
-				// signing in - never the generic "could not create it" failure.
-				toast.error(m.auth_signup_toast_created_sign_in_again());
-				return;
-			}
-			await storage.storePinnedKdfProfile(kdfProfile, accountId);
-			await storage.setMasterUnlockKey(masterUnlockKey, accountId);
-			await storage.storeEncryptedPrivateKey(
-				JSON.stringify(encryptedPrivateKey),
-				accountId,
-			);
-			await storage.storeSecretKey(secretKey, accountId);
-			await storage.storeSessionData(
-				masterUnlockKey,
-				accountId,
-				email,
-				result.userId,
-				result.expiresAt,
-				result.sessionId,
-			);
-			// Without a row in the accounts list the account resolver cannot build an
-			// `AccountInfo`, so every vault, item and sync query comes back empty
-			// until the user signs out and in again.
-			const serverUrl = getDefaultServerUrl();
-			await storage.storeServerUrl(serverUrl, accountId);
-			await storage.addAccount({
-				accountId,
-				email,
-				userId: result.userId,
-				name: value.name || email.split("@")[0] || "User",
-				serverUrl,
-				secretKeyHint,
-				addedAt: Date.now(),
-				lastActiveAt: Date.now(),
-				biometricEnabled: await storage.isBiometricEnabled(accountId),
-			});
-
-			const daysUntil = Math.floor(
-				DEFAULT_SESSION_EXPIRY_MS / (1000 * 60 * 60 * 24),
-			);
-
-			toast.success(
-				m.auth_signup_toast_quick_unlock_days({ daysUntil: String(daysUntil) }),
-			);
+			await goAfterSignup(value);
 		} catch (error: any) {
 			console.error("Signup error:", error);
 			toast.error(error.message || "Failed to create account");
 		} finally {
-			workerCrypto.terminate();
 			setIsEncrypting(false);
 		}
 	};
@@ -415,7 +353,7 @@ export function useSignupForm({
 
 	const submitSignupVerificationCode = async () => {
 		const currentValues = form.state.values;
-		const currentEmail = normalizeSignupEmail(getSignupEmail(currentValues));
+		const currentEmail = getSignupEmail(currentValues);
 		const hasMatchingVerification =
 			signupVerificationToken &&
 			verifiedEmail === currentEmail &&
@@ -448,7 +386,7 @@ export function useSignupForm({
 			}
 
 			setSignupVerificationToken(result.signupVerificationToken);
-			setVerifiedEmail(normalizeSignupEmail(verificationEmail));
+			setVerifiedEmail(verificationEmail.trim().toLowerCase());
 			setVerifiedInvitationToken(invitationToken ?? null);
 			if (verificationMode === "dialog") {
 				setVerificationDialogOpen(false);
@@ -499,13 +437,13 @@ export function useSignupForm({
 				toast.error("Please enter a team or business name to continue");
 				return;
 			}
-			const email = normalizeSignupEmail(getSignupEmail(value));
+			const email = getSignupEmail(value);
 			const hasMatchingVerification =
 				signupVerificationToken &&
 				verifiedEmail === email &&
 				verifiedInvitationToken === (invitationToken ?? null);
 			const hasMatchingPendingVerification =
-				pendingSubmission && normalizeSignupEmail(verificationEmail) === email;
+				pendingSubmission && verificationEmail.trim().toLowerCase() === email;
 
 			if (!requiresEmailVerification) {
 				await completeSignupSubmission(value, "");
@@ -528,9 +466,7 @@ export function useSignupForm({
 	});
 
 	const hasPendingVerification = Boolean(pendingSubmission);
-	const currentSignupEmail = normalizeSignupEmail(
-		getSignupEmail(form.state.values),
-	);
+	const currentSignupEmail = getSignupEmail(form.state.values);
 	const hasVerifiedSignup =
 		Boolean(signupVerificationToken) &&
 		verifiedEmail === currentSignupEmail &&

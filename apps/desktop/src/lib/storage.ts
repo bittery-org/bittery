@@ -1,13 +1,12 @@
 /**
  * Desktop App Storage Module
  *
- * Two sibling singletons built over the two Tauri ports:
+ * Two sibling singletons built over the Tauri storage ports and one shared CryptoPort:
  *   - `storage` (`AccountStore`) over the `PlatformPort` (OS keychain + `store.json`)
  *   - `itemCache` (`ItemCache`) over the `RecordPort` (`store.json` `record:` keys)
  *
- * They are siblings, not parent/child: `AccountStore` holds only a `PlatformPort` and can
- * never reach the cache, so every flow that has to drop both (sign-out, account removal,
- * reset) sequences them from the app.
+ * They are siblings, not parent/child: `AccountStore` cannot reach the cache, so every flow
+ * that has to drop both (sign-out, account removal, reset) sequences them from the app.
  *
  * This module also owns the **unlock broadcast**. `AccountStore` performs no IPC: it emits
  * `onUnlockStateChanged` and the desktop app does the `invoke("broadcast_unlock_event")`
@@ -27,18 +26,14 @@ import {
 } from "@bittery/storage/adapters/tauri";
 import { toast } from "@bittery/ui";
 import { invoke } from "@tauri-apps/api/core";
-import { decrypt, encrypt, rsaDecrypt } from "./tauri-crypto";
-
-// The desktop crypto backend has no key handles, so the three required methods are the
-// whole provider. Everything else on `CryptoProvider` is genuinely absent here.
-const cryptoProvider = { encrypt, decrypt, rsaDecrypt };
+import { crypto } from "./crypto";
 
 const platformPort = createTauriPlatformPort();
 const recordPort = createTauriRecordPort();
 
 export const storage: AccountStore = createAccountStore({
 	port: platformPort,
-	crypto: cryptoProvider,
+	crypto,
 });
 
 export const itemCache: ItemCache = createItemCache({ port: recordPort });

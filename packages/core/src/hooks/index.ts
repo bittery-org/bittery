@@ -47,7 +47,6 @@ export {
 	usePlatformAutolock,
 	usePlatformCrypto,
 	usePlatformItemCache,
-	usePlatformItemDecrypt,
 	usePlatformStorage,
 	usePlatformSync,
 	useQueryInvalidator,

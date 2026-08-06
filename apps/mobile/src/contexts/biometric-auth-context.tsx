@@ -10,7 +10,6 @@ import {
 } from "@bittery/core/services/account-lifecycle";
 import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
-import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import { useRouter } from "expo-router";
 import {
 	createContext,
@@ -22,9 +21,10 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { AppState, type AppStateStatus, Platform } from "react-native";
-import CredentialProvider from "../../modules/credential-provider";
+import { AppState, type AppStateStatus } from "react-native";
+import { crypto } from "../lib/crypto";
 import { useI18n } from "../providers/i18n-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../services/credential-provider-master-unlock-key";
 import { lifecycleDeps } from "../services/lifecycle";
 import {
 	type BiometricAuthResult,
@@ -33,15 +33,19 @@ import {
 } from "../services/storage";
 import { useAccount } from "./account-context";
 
+type MobileBiometricAuthResult = Omit<BiometricAuthResult, "error"> & {
+	error?: BiometricAuthResult["error"] | "travel_mode_unverified";
+};
+
 interface BiometricAuthContextValue {
 	// Whether biometric re-auth is required
 	requiresReauth: boolean;
 	// Whether the auth modal is visible
 	showAuthModal: boolean;
 	// Last authentication result
-	lastAuthResult: BiometricAuthResult | null;
+	lastAuthResult: MobileBiometricAuthResult | null;
 	// Trigger biometric authentication
-	triggerBiometricAuth: () => Promise<BiometricAuthResult>;
+	triggerBiometricAuth: () => Promise<MobileBiometricAuthResult>;
 	// Check and potentially require re-auth
 	checkAndRequireAuth: () => Promise<boolean>;
 	// Dismiss the auth requirement (for navigation to unlock screen)
@@ -63,7 +67,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 	const [requiresReauth, setRequiresReauth] = useState(false);
 	const [showAuthModal, setShowAuthModal] = useState(false);
 	const [lastAuthResult, setLastAuthResult] =
-		useState<BiometricAuthResult | null>(null);
+		useState<MobileBiometricAuthResult | null>(null);
 	const [requiresMasterPassword, setRequiresMasterPassword] = useState(false);
 
 	// Deciding whether time spent in the background has exceeded the auto-lock timeout is
@@ -85,33 +89,6 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 			}),
 		[],
 	);
-
-	const setNativeMuksForAccounts = useCallback(async (accountIds: string[]) => {
-		if (Platform.OS !== "android" || !CredentialProvider.isAvailable()) {
-			return;
-		}
-
-		for (const accountId of accountIds) {
-			const muk = await storage.getMasterUnlockKey(accountId);
-			const sessionData = await storage.getStoredSessionData(accountId);
-			const autoLockTimeoutMs =
-				await storage.getAutoLockTimeoutOrDefault(accountId);
-			if (muk && sessionData?.userId) {
-				const mukBase64 = arrayBufferToBase64(muk);
-				CredentialProvider.setMasterUnlockKey(
-					mukBase64,
-					sessionData.userId,
-					autoLockTimeoutMs,
-				);
-			} else {
-				if (__DEV__) {
-					console.warn(
-						`[BiometricAuth] setNativeMuksForAccounts skipped for ${accountId} (no muk or no userId)`,
-					);
-				}
-			}
-		}
-	}, []);
 
 	// Track background timestamp when app goes to background
 	const handleAppStateChange = useCallback(
@@ -205,7 +182,7 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 
 	// Trigger biometric authentication
 	const triggerBiometricAuth =
-		useCallback(async (): Promise<BiometricAuthResult> => {
+		useCallback(async (): Promise<MobileBiometricAuthResult> => {
 			if (!activeAccount) {
 				const result: BiometricAuthResult = {
 					success: false,
@@ -223,36 +200,53 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 				activeAccount.accountId,
 			);
 
-			setLastAuthResult(result);
-
 			if (result.success) {
 				const accountId = activeAccount.accountId;
-				// Restore MUK to memory after successful biometric auth
-				// This ensures decryption queries can run immediately without polling
 				try {
 					const client = await createStoredAccountRpcClient(
 						storage,
 						accountId,
 					).catch(() => null);
-					const verified = await getTravelModeEnforcer(
-						storage,
-						itemCache,
-					).verifyOrClear(accountId, client);
-					if (verified) {
-						const muk = await storage.decryptStoredMasterUnlockKey(
+					try {
+						await getTravelModeEnforcer(storage, itemCache).verifyForUnlock(
 							accountId,
-							true, // Skip biometric since we just authenticated
+							client,
 						);
-						if (muk) {
-							// Store in React Native memory cache
-							await storage.setMasterUnlockKey(muk, accountId);
-							await setNativeMuksForAccounts([accountId]);
-						} else {
-							if (__DEV__) {
-								console.warn(
-									"[BiometricAuth] decryptStoredMasterUnlockKey returned null MUK",
-								);
-							}
+					} catch (error) {
+						const outcome = await lockAccount(accountId, lifecycleDeps);
+						console.error(
+							"[BiometricAuth] Travel mode verification failed:",
+							error,
+							outcome.failures,
+						);
+						const failure: MobileBiometricAuthResult = {
+							success: false,
+							error: "travel_mode_unverified",
+							message: "Travel mode policy could not be verified",
+						};
+						setLastAuthResult(failure);
+						setRequiresReauth(true);
+						setShowAuthModal(true);
+						return failure;
+					}
+
+					const muk = await storage.decryptStoredMasterUnlockKey(
+						accountId,
+						true, // Skip biometric since we just authenticated
+					);
+					if (!muk) {
+						throw new Error("Stored master unlock key is unavailable");
+					}
+					let owner: "caller" | "storage" = "caller";
+					try {
+						await storage.setMasterUnlockKey(muk, accountId);
+						owner = "storage";
+						await mirrorBorrowedMasterUnlockKeysToCredentialProvider([
+							accountId,
+						]);
+					} finally {
+						if (owner === "caller") {
+							await crypto.destroyKey(muk);
 						}
 					}
 				} catch (error) {
@@ -263,21 +257,30 @@ export function BiometricAuthProvider({ children }: { children: ReactNode }) {
 						"[BiometricAuth] Failed to restore MUK after biometric auth:",
 						error,
 					);
+					const failure: MobileBiometricAuthResult = {
+						success: false,
+						error: "unknown",
+						message: String(error),
+					};
+					setLastAuthResult(failure);
+					setRequiresReauth(true);
+					setShowAuthModal(true);
+					return failure;
 				}
 
+				setLastAuthResult(result);
 				setRequiresReauth(false);
 				setShowAuthModal(false);
 				setRequiresMasterPassword(false);
 			} else if (result.error === "master_password_required") {
+				setLastAuthResult(result);
 				setRequiresMasterPassword(true);
+			} else {
+				setLastAuthResult(result);
 			}
 
 			return result;
-		}, [
-			activeAccount,
-			m.biometric_prompt_unlock_bittery,
-			setNativeMuksForAccounts,
-		]);
+		}, [activeAccount, m.biometric_prompt_unlock_bittery]);
 
 	// Check if re-auth is needed
 	const checkAndRequireAuth = useCallback(async (): Promise<boolean> => {

@@ -5,13 +5,13 @@
  * co-located `*.test.ts` files only.
  */
 
+import type { KeyRef } from "@bittery/crypto-port";
 import {
-	arrayBufferToBase64,
-	base64ToArrayBuffer,
-} from "@bittery/shared/crypto";
+	createInMemoryCryptoPort,
+	type InMemoryCryptoPort,
+} from "@bittery/crypto-port/testing";
 import {
 	type AccountStore,
-	type CryptoProvider,
 	createAccountStore,
 	createItemCache,
 	type ItemCache,
@@ -24,57 +24,27 @@ import {
 } from "@bittery/storage/testing";
 import type { AccountMetadata } from "@bittery/storage/types";
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-/** Identifies which key a ciphertext was produced under, so decrypt can reject others. */
-const keyId = (key: Uint8Array): string => arrayBufferToBase64(key);
-
-/**
- * Reversible, deliberately not-real crypto. Mirrors the fake in
- * `packages/storage/src/account-store.test.ts` so both packages exercise the store the
- * same way.
- */
-export function createTestCryptoProvider(): CryptoProvider {
-	return {
-		encrypt: async (plaintext, key) => ({
-			ciphertext: arrayBufferToBase64(textEncoder.encode(plaintext)),
-			iv: keyId(key),
-			algorithm: "fake",
-		}),
-		decrypt: async (data, key) => {
-			if (data.algorithm !== "fake") {
-				throw new Error(`unsupported algorithm ${data.algorithm}`);
-			}
-			if (data.iv !== keyId(key)) {
-				throw new Error("wrong key");
-			}
-			return textDecoder.decode(base64ToArrayBuffer(data.ciphertext));
-		},
-		rsaDecrypt: async () => {
-			throw new Error("not used in core tests");
-		},
-	};
-}
-
 export interface TestAccountStore {
 	store: AccountStore;
 	port: InMemoryPlatformPort;
+	/**
+	 * The store's own crypto port. Every `KeyRef` a test hands to the store has to come from
+	 * here — a ref minted anywhere else is rejected, which is the whole point of the type.
+	 */
+	crypto: InMemoryCryptoPort;
 }
 
 export async function createTestAccountStore(opts?: {
 	sessionSurvivesRestart?: boolean;
-	crypto?: CryptoProvider;
+	crypto?: InMemoryCryptoPort;
 }): Promise<TestAccountStore> {
 	const port = createInMemoryPlatformPort({
 		sessionSurvivesRestart: opts?.sessionSurvivesRestart ?? true,
 	});
-	const store = createAccountStore({
-		port,
-		crypto: opts?.crypto ?? createTestCryptoProvider(),
-	});
+	const crypto = opts?.crypto ?? createInMemoryCryptoPort();
+	const store = createAccountStore({ port, crypto });
 	await store.initialize();
-	return { store, port };
+	return { store, port, crypto };
 }
 
 export interface TestItemCache {
@@ -120,15 +90,26 @@ export function mukFor(accountId: string): Uint8Array {
 	return bytes;
 }
 
+/** The same key behind a `KeyRef`, which is the only form the store now accepts. */
+export function mukRefFor(
+	crypto: InMemoryCryptoPort,
+	accountId: string,
+): Promise<KeyRef> {
+	return crypto.importKey(mukFor(accountId));
+}
+
 /**
  * Seed an account that has a valid, restorable session: metadata in the list, a stored
  * secret key and `session_data` carrying the MUK encrypted under the device key.
  *
  * `unlocked: false` then drops the in-memory MUK, which is exactly the "locked but
  * quick-unlockable" state — `tryRestoreSession` will bring it back.
+ *
+ * Takes the whole harness rather than just the store: the MUK is a `KeyRef` now, and only
+ * the store's own crypto port can mint one it will accept.
  */
 export async function seedAccountWithSession(
-	store: AccountStore,
+	{ store, crypto }: Pick<TestAccountStore, "store" | "crypto">,
 	metadata: AccountMetadata,
 	{ unlocked = true }: { unlocked?: boolean } = {},
 ): Promise<void> {
@@ -138,17 +119,20 @@ export async function seedAccountWithSession(
 		metadata.accountId,
 	);
 	await store.storeAuthToken(`token-${metadata.accountId}`, metadata.accountId);
+
+	const sessionKey = await mukRefFor(crypto, metadata.accountId);
 	await store.storeSessionData(
-		mukFor(metadata.accountId),
+		sessionKey,
 		metadata.accountId,
 		metadata.email,
 		metadata.userId,
 	);
-	await store.setMasterUnlockKey(
-		mukFor(metadata.accountId),
-		metadata.accountId,
-	);
-	if (!unlocked) {
-		await store.clearMasterUnlockKey(metadata.accountId);
+	await crypto.destroyKey(sessionKey);
+
+	if (unlocked) {
+		await store.setMasterUnlockKey(
+			await mukRefFor(crypto, metadata.accountId),
+			metadata.accountId,
+		);
 	}
 }

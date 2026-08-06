@@ -1,9 +1,11 @@
+import { usePlatformCrypto } from "@bittery/core/hooks";
 import {
-	buildVaultKeyEncryptionContext,
-	isAesEncryptedVaultKey,
-} from "@bittery/shared";
-import { currentKdfProfile } from "@bittery/shared/kdf-policy";
+	InvalidAccountPasswordError,
+	LocalKeyAdoptionError,
+	regenerateAccountSecretKey,
+} from "@bittery/core/services/vault-crypto";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import {
 	Button,
 	copyWithToast,
@@ -28,15 +30,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
-import { getActiveAccountKdfProfile, storage } from "@/lib/storage";
-import {
-	decrypt,
-	deriveKeys,
-	encrypt,
-	generateSecretKey,
-	generateSRPRegistration,
-	getSecretKeyHint,
-} from "@/lib/wasm-crypto";
+import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
 export function RegenerateSecretKeyDialog({
@@ -54,6 +48,7 @@ export function RegenerateSecretKeyDialog({
 	const [isProcessing, setIsProcessing] = useState(false);
 	const rpcClient = useRPCClient();
 	const rpc = useRPC();
+	const crypto = usePlatformCrypto();
 
 	const userQuery = useQuery(rpc.auth.me.queryOptions());
 	const vaultListQuery = useQuery(rpc.vault.list.queryOptions());
@@ -82,32 +77,12 @@ export function RegenerateSecretKeyDialog({
 		setIsProcessing(true);
 
 		try {
-			// 1. Derive old keys to decrypt private key using the params the
-			// existing account was keyed with (not the current default).
-			const { profile: oldProfile } = await getActiveAccountKdfProfile();
-			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
-				currentPassword,
-				oldSecretKey,
-				userEmail,
-				oldProfile,
-			);
-
-			// 2. Decrypt private key with old master unlock key to verify password is correct
-			const encryptedPrivateKeyData = JSON.parse(
-				userQuery.data.encryptedPrivateKey,
-			);
-			await decrypt(encryptedPrivateKeyData, oldMasterUnlockKey);
-
-			// 3. Generate new secret key
-			const generatedSecretKey = generateSecretKey();
-			setNewSecretKey(generatedSecretKey);
+			setNewSecretKey(await crypto.generateSecretKey());
 			setStep("display");
 			setIsProcessing(false);
 		} catch (error) {
 			console.error("Secret key regeneration error:", error);
-			toast.error(
-				m.settings_secret_key_regenerate_toast_verify_password_failed(),
-			);
+			toast.error(m.settings_secret_key_regenerate_toast_regenerate_failed());
 			setIsProcessing(false);
 		}
 	};
@@ -128,7 +103,8 @@ export function RegenerateSecretKeyDialog({
 			return;
 		}
 
-		if (!userQuery.data?.encryptedPrivateKey) {
+		const accountId = await storage.getActiveAccount();
+		if (!accountId || !userQuery.data?.encryptedPrivateKey) {
 			toast.error(
 				m.settings_secret_key_regenerate_toast_user_data_load_failed(),
 			);
@@ -143,122 +119,42 @@ export function RegenerateSecretKeyDialog({
 		setIsProcessing(true);
 
 		try {
-			// 1. Derive old keys to decrypt private key using the params the
-			// existing account was keyed with (not the current default).
-			const { accountId, profile: oldProfile } =
-				await getActiveAccountKdfProfile();
-			const { masterUnlockKey: oldMasterUnlockKey } = await deriveKeys(
-				currentPassword,
-				oldSecretKey,
-				userEmail,
-				oldProfile,
-			);
-
-			// 2. Decrypt private key with old master unlock key
-			const encryptedPrivateKeyData = JSON.parse(
-				userQuery.data.encryptedPrivateKey,
-			);
-			const privateKey = await decrypt(
-				encryptedPrivateKeyData,
-				oldMasterUnlockKey,
-			);
-
-			// 3. Derive new keys with new secret key
-			const newProfile = currentKdfProfile();
-			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
-				await deriveKeys(currentPassword, newSecretKey, userEmail, newProfile);
-
-			// 4. Generate new SRP credentials
-			const authKeyString = new TextDecoder().decode(newAuthKey);
-			const { salt: srpSalt, verifier: srpVerifier } =
-				await generateSRPRegistration(authKeyString);
-
-			// 5. Re-encrypt private key with new master unlock key
-			const newEncryptedPrivateKey = await encrypt(
-				privateKey,
-				newMasterUnlockKey,
-			);
-
-			// 6. Re-encrypt vault keys with new master unlock key
-			// Only re-encrypt vault keys for vaults the user created (MUK-encrypted)
-			// Shared vault keys are RSA-encrypted and don't need re-encryption
-			const serverVaultKeys = vaultListQuery.data;
-			const currentUserId = userQuery.data.id;
-			const encryptedVaultKeys: Array<{
-				vaultId: string;
-				encryptedVaultKey: string;
-			}> = [];
-
-			for (const vk of serverVaultKeys) {
-				// Only re-encrypt AES(MUK)-wrapped keys.
-				// RSA-wrapped keys are not tied to the master unlock key.
-				if (!isAesEncryptedVaultKey(vk.encryptedVaultKey)) {
-					continue;
-				}
-
-				// Decrypt vault key with old MUK
-				const encryptedVaultKeyData = JSON.parse(vk.encryptedVaultKey) as {
-					ciphertext: string;
-					iv: string;
-					algorithm: string;
-					context?: { keyVersion?: number };
-				};
-				const keyVersion = Number.isInteger(
-					encryptedVaultKeyData.context?.keyVersion,
-				)
-					? (encryptedVaultKeyData.context?.keyVersion as number)
-					: 1;
-				const vaultKeyContext = buildVaultKeyEncryptionContext({
-					vaultId: vk.id,
-					userId: currentUserId,
-					keyVersion,
-				});
-				const decryptedVaultKeyBase64 = await decrypt(
-					encryptedVaultKeyData,
-					oldMasterUnlockKey,
-					vaultKeyContext,
-				);
-
-				// Re-encrypt vault key with new MUK
-				const newEncryptedVaultKey = await encrypt(
-					decryptedVaultKeyBase64,
-					newMasterUnlockKey,
-					vaultKeyContext,
-				);
-
-				encryptedVaultKeys.push({
-					vaultId: vk.id,
-					encryptedVaultKey: JSON.stringify(newEncryptedVaultKey),
-				});
-			}
-
-			// 7. Send to server (other sessions are invalidated, current one is kept)
-			await rpcClient.auth.regenerateSecretKey.mutate({
-				secretKeyHint: getSecretKeyHint(newSecretKey),
-				srpSalt,
-				srpVerifier,
-				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
-				encryptedVaultKeys,
-				kdfParams: newProfile,
-			});
-			await storage.storePinnedKdfProfile(newProfile, accountId);
-
-			// 8. Update local state — store new secret key and new MUK
-			await storage.storeSecretKey(newSecretKey, accountId);
-			await storage.setMasterUnlockKey(newMasterUnlockKey, accountId);
-			const existingSession = await storage.getStoredSessionData(accountId);
-			await storage.storeSessionData(
-				newMasterUnlockKey,
-				accountId,
-				userEmail,
-				currentUserId,
-				existingSession?.expiresAt,
-				existingSession?.sessionId,
+			await regenerateAccountSecretKey(
+				{
+					accountId,
+					email: userEmail,
+					userId: userQuery.data.id,
+					currentPassword,
+					currentSecretKey: oldSecretKey,
+					newSecretKey,
+					encryptedPrivateKey: userQuery.data.encryptedPrivateKey,
+					vaultKeys: vaultListQuery.data.map(toVaultKeyEntry),
+				},
+				{
+					crypto,
+					storage,
+					commit: (payload) =>
+						rpcClient.auth.regenerateSecretKey.mutate(payload),
+				},
 			);
 
 			toast.success(m.settings_secret_key_regenerate_toast_regenerated());
 			setOpen(false);
 		} catch (error) {
+			// The account is already keyed to the new Secret Key on the server; this device
+			// is the stale copy, so the fix is a fresh sign-in and not another attempt.
+			if (error instanceof LocalKeyAdoptionError) {
+				toast.warning(m.settings_common_toast_keys_changed_sign_in_again());
+				setOpen(false);
+				return;
+			}
+			if (error instanceof InvalidAccountPasswordError) {
+				toast.error(
+					m.settings_secret_key_regenerate_toast_verify_password_failed(),
+				);
+				setIsProcessing(false);
+				return;
+			}
 			console.error("Secret key regeneration error:", error);
 			toast.error(m.settings_secret_key_regenerate_toast_regenerate_failed());
 			setIsProcessing(false);

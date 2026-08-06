@@ -25,7 +25,6 @@
 		"./rpc-client-factory": "./src/rpc-client-factory.ts",
 		"./rpc-session-refresh": "./src/rpc-session-refresh.ts",
 		"./crypto": "./src/crypto.ts",
-		"./crypto-context-envelope": "./src/crypto-context-envelope.ts",
 		"./kdf-policy": "./src/kdf-policy.ts",
 		"./server-url": "./src/server-url.ts",
 		"./session-refresh": "./src/session-refresh.ts",
@@ -34,7 +33,6 @@
 		"./pricing": "./src/pricing.ts",
 		"./releases": "./src/releases.ts",
 		"./rust-rpc-client": "./src/rust-rpc-client.ts",
-		"./vault-key-crypto": "./src/vault-key-crypto.ts",
 		"./vault-mapping": "./src/vault-mapping.ts"
 	},
 	"dependencies": {

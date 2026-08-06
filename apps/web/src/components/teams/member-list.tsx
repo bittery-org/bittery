@@ -1,7 +1,4 @@
-import {
-	getDecryptedVaultKey,
-	type VaultKeyCryptoProvider,
-} from "@bittery/shared";
+import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
@@ -23,7 +20,6 @@ import { IconUser as UserMinus } from "@bittery/ui/icons";
 import { useState } from "react";
 import { formatDate } from "@/lib/i18n-format";
 import { storage } from "@/lib/storage";
-import { decrypt, performKeyRotation, rsaDecrypt } from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 import { useQueryInvalidator } from "../../providers/sync-provider";
 import { TeamRotationError } from "./team-rotation-error";
@@ -52,6 +48,8 @@ export function MemberList({
 	isSelfHostedMode = false,
 }: MemberListProps) {
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
+	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
 	const [removingUserId, setRemovingUserId] = useState<string | null>(null);
 	const [isRotating, setIsRotating] = useState(false);
@@ -107,14 +105,8 @@ export function MemberList({
 			}> = [];
 
 			for (const vaultData of teamRotationData.vaults) {
-				// Decrypt the current vault key for this vault
-				const currentVaultKey = await getDecryptedVaultKey({
+				const currentVaultKey = await vaultCrypto.getVaultKey({
 					vaultId: vaultData.vaultId,
-					storage,
-					crypto: {
-						decrypt,
-						rsaDecrypt,
-					} as VaultKeyCryptoProvider,
 				});
 
 				if (!currentVaultKey) {
@@ -123,27 +115,32 @@ export function MemberList({
 					});
 				}
 
-				// Perform key rotation on client side
-				const rotationResult = await performKeyRotation(
-					currentVaultKey,
-					vaultData.members.map((m) => ({
-						userId: m.userId,
-						publicKey: m.publicKey,
-					})),
-					vaultData.items,
-					vaultData.vaultId,
-					vaultData.keyVersion + 1,
-					currentUserId,
-					masterUnlockKey,
-				);
+				try {
+					const rotationResult = await crypto.performKeyRotation(
+						currentVaultKey,
+						vaultData.members.map((m) => ({
+							userId: m.userId,
+							publicKey: m.publicKey,
+						})),
+						vaultData.items,
+						vaultData.vaultId,
+						vaultData.keyVersion + 1,
+						currentUserId,
+						masterUnlockKey,
+					);
 
-				vaultRotations.push({
-					vaultId: vaultData.vaultId,
-					keyRotation: {
-						memberKeys: rotationResult.memberEncryptedKeys,
-						reEncryptedItems: rotationResult.reEncryptedItems,
-					},
-				});
+					vaultRotations.push({
+						vaultId: vaultData.vaultId,
+						keyRotation: {
+							memberKeys: rotationResult.memberEncryptedKeys,
+							reEncryptedItems: rotationResult.reEncryptedItems,
+						},
+					});
+				} finally {
+					// `getVaultKey` mints a fresh ref per call; the store's master unlock key
+					// is not ours to touch.
+					await crypto.destroyKey(currentVaultKey);
+				}
 			}
 
 			// Step 4: Submit to server

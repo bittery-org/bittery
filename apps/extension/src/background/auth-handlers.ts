@@ -9,11 +9,11 @@ import { invalidateAccountSession } from "@bittery/core/services/account-lifecyc
 import {
 	performSRPLogin,
 	performSRPUnlock,
-	storeLoginSession,
-	storeUnlockSession,
+	storeLoginSessionOwned,
+	storeUnlockSessionOwned,
 } from "@bittery/core/services/auth-service";
 import { unlockAllWithPassword } from "@bittery/core/services/unlock";
-import { cryptoAdapter } from "../lib/crypto-adapter";
+import { crypto } from "../lib/crypto";
 import { itemCache, storage } from "../lib/storage";
 import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { isDesktopUnlockedNow } from "./desktop-status";
@@ -46,18 +46,24 @@ export async function handleLogin(payload: {
 	// Perform SRP login using shared utility
 	const result = await performSRPLogin(
 		{ email, password, secretKey, serverUrl: DEFAULT_SERVER_URL },
-		{ crypto: cryptoAdapter, rpcClient, storage },
+		{ crypto, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
-	await storeLoginSession(result, secretKey, storage, itemCache, email, {
-		serverUrl: DEFAULT_SERVER_URL,
-	});
-
-	// Set MUK in extension's in-memory session manager (for auto-lock)
-	if (result.masterUnlockKey) {
-		setMasterUnlockKey(result.masterUnlockKey);
-	}
+	await storeLoginSessionOwned(
+		result,
+		secretKey,
+		storage,
+		itemCache,
+		crypto,
+		email,
+		{
+			serverUrl: DEFAULT_SERVER_URL,
+			onMasterUnlockKeyTransferred: () => {
+				setMasterUnlockKey(result.masterUnlockKey);
+			},
+		},
+	);
 
 	// Start activity tracking
 	updateActivity();
@@ -94,14 +100,21 @@ export async function handleQuickUnlock(payload: {
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
 		{ accountId: activeAccount, password },
-		{ crypto: cryptoAdapter, rpcClient, storage },
+		{ crypto, rpcClient, storage },
 	);
 
 	// Store session data using shared utility
-	await storeUnlockSession(result, storage, itemCache, activeAccount, {
-		travelModeRpcClient: rpcClient,
-		setActive: true,
-	});
+	await storeUnlockSessionOwned(
+		result,
+		storage,
+		itemCache,
+		crypto,
+		activeAccount,
+		{
+			travelModeRpcClient: rpcClient,
+			setActive: true,
+		},
+	);
 
 	// Set MUK in extension's in-memory session manager (for auto-lock)
 	if (result.masterUnlockKey) {
@@ -328,7 +341,12 @@ export async function handleQuickUnlockAll(payload: {
 
 	const { activeAccountId, unlocked, failed } = await unlockAllWithPassword(
 		{ password },
-		{ storage, itemCache, crypto: cryptoAdapter },
+		{
+			storage,
+			itemCache,
+			crypto,
+			credentialMirror: lifecycleDeps.credentialMirror,
+		},
 	);
 
 	if (!activeAccountId) {

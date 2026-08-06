@@ -1,0 +1,57 @@
+{
+	"name": "@bittery/crypto-port",
+	"type": "module",
+	"exports": {
+		".": {
+			"default": "./src/index.ts"
+		},
+		"./key-ref": {
+			"default": "./src/key-ref.ts"
+		},
+		"./testing": {
+			"default": "./src/testing/in-memory-crypto.ts"
+		},
+		"./adapters/wasm-worker": {
+			"default": "./src/adapters/wasm-worker.ts"
+		},
+		"./adapters/wasm": {
+			"default": "./src/adapters/wasm.ts"
+		},
+		"./adapters/tauri": {
+			"default": "./src/adapters/tauri.ts"
+		},
+		"./adapters/expo": {
+			"default": "./src/adapters/expo.ts"
+		}
+	},
+	"scripts": {
+		"check-types": "tsc --noEmit",
+		"test": "bun test src"
+	},
+	"devDependencies": {
+		"@bittery/config": "workspace:*",
+		"@bittery/crypto-nitro": "workspace:*",
+		"@bittery/crypto-wasm": "workspace:*",
+		"@tauri-apps/api": "^2.11.1"
+	},
+	"peerDependencies": {
+		"typescript": "^5",
+		"@bittery/crypto-wasm": "workspace:*",
+		"@bittery/crypto-nitro": "workspace:*",
+		"@tauri-apps/api": "^2.0.0"
+	},
+	"peerDependenciesMeta": {
+		"@bittery/crypto-wasm": {
+			"optional": true
+		},
+		"@bittery/crypto-nitro": {
+			"optional": true
+		},
+		"@tauri-apps/api": {
+			"optional": true
+		}
+	},
+	"dependencies": {
+		"@bittery/types": "workspace:*"
+	}
+}

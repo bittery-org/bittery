@@ -2039,6 +2039,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Crypto commands
             crypto_commands::crypto_derive_keys,
+            crypto_commands::crypto_derive_master_key,
+            crypto_commands::crypto_derive_keys_from_master_key,
             crypto_commands::crypto_encrypt,
             crypto_commands::crypto_encrypt_with_context,
             crypto_commands::crypto_decrypt,
@@ -2052,12 +2054,21 @@ pub fn run() {
             crypto_commands::crypto_generate_secret_key,
             crypto_commands::crypto_validate_secret_key,
             crypto_commands::crypto_get_secret_key_hint,
+            crypto_commands::crypto_generate_recovery_key,
+            crypto_commands::crypto_validate_recovery_key,
+            crypto_commands::crypto_encrypt_master_key,
+            crypto_commands::crypto_decrypt_master_key,
             crypto_commands::crypto_srp_generate_salt,
             crypto_commands::crypto_srp_derive_safe_private_key,
             crypto_commands::crypto_srp_derive_verifier,
             crypto_commands::crypto_srp_generate_ephemeral,
             crypto_commands::crypto_srp_derive_session,
             crypto_commands::crypto_srp_verify_session,
+            // Passkey / WebAuthn commands
+            crypto_commands::crypto_passkey_generate_keypair,
+            crypto_commands::crypto_passkey_generate_credential_id,
+            crypto_commands::crypto_passkey_build_attestation_object,
+            crypto_commands::crypto_passkey_sign_assertion,
             // Key rotation commands
             crypto_commands::crypto_encrypt_vault_key_for_member,
             crypto_commands::crypto_encrypt_vault_key_with_muk,

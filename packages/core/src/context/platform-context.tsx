@@ -5,16 +5,17 @@
  * Each app wraps its root with PlatformProvider, injecting platform-specific implementations.
  */
 
+import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type {
 	IAutolockService,
-	ICrypto,
-	IItemDecrypt,
 	IQueryInvalidator,
 	ISyncContext,
 } from "@bittery/types";
 import { createContext, type ReactNode, useContext, useMemo } from "react";
 import { type CoreContext, createCoreContext } from "../core-context";
+import type { CredentialMirror } from "../services/account-lifecycle";
+import type { VaultCrypto } from "../services/vault-crypto";
 
 /**
  * Platform context value containing all platform-specific dependencies
@@ -35,17 +36,14 @@ export interface PlatformContextValue {
 	 */
 	itemCache: ItemCache;
 
-	/** Platform crypto module - all platforms have identical API */
-	crypto: ICrypto;
+	/** The platform's crypto backend. Every key it hands out is an opaque `KeyRef`. */
+	crypto: CryptoPort;
+
+	/** Copies of session credentials held outside AccountStore, if any. */
+	credentialMirror: CredentialMirror;
 
 	/** Shared framework-agnostic business logic services */
 	core: CoreContext;
-
-	/**
-	 * Item decryption service using platform crypto
-	 * @deprecated Use crypto.decrypt instead
-	 */
-	itemDecrypt: IItemDecrypt;
 
 	/** Autolock service (optional - may not be available on all platforms) */
 	autolock?: IAutolockService;
@@ -67,16 +65,16 @@ export interface PlatformProviderProps {
 	itemCache: ItemCache;
 
 	/**
-	 * Platform crypto module - pass your crypto module directly (e.g., import * as crypto from "@/lib/wasm-crypto")
-	 * Must implement ICrypto interface (decrypt, encrypt, generateEncryptionKey)
+	 * The platform's crypto backend — one `createXCryptoPort()` per app, built once so
+	 * every `KeyRef` in the process comes from the same key table.
 	 */
-	crypto: ICrypto;
+	crypto: CryptoPort;
 
-	/**
-	 * Item decryption service
-	 * @deprecated Use crypto prop instead. This prop will be removed in a future version.
-	 */
-	itemDecrypt?: IItemDecrypt;
+	/** Platform-owned credential copies that must be purged before a failed unlock locks. */
+	credentialMirror: CredentialMirror;
+
+	/** The ceremonies over {@link crypto}, built against the same `storage`. */
+	vaultCrypto: VaultCrypto;
 
 	/** Autolock service (optional) */
 	autolock?: IAutolockService;
@@ -94,7 +92,7 @@ export interface PlatformProviderProps {
  * Usage:
  * ```tsx
  * // In app's root component
- * import * as crypto from "@/lib/wasm-crypto";
+ * import { crypto } from "@/lib/crypto";
  * import { storage } from "@/lib/storage";
  * import { useSyncContext } from "@/providers/sync-provider";
  *
@@ -124,29 +122,21 @@ export function PlatformProvider({
 	storage,
 	itemCache,
 	crypto,
-	itemDecrypt,
+	credentialMirror,
+	vaultCrypto,
 	autolock,
 	sync,
 	children,
 }: PlatformProviderProps) {
-	// Create itemDecrypt from crypto if not provided (backward compatibility)
-	const effectiveItemDecrypt: IItemDecrypt = useMemo(
-		() =>
-			itemDecrypt ?? {
-				decrypt: (encryptedData, vaultKey) =>
-					crypto.decrypt(encryptedData, vaultKey),
-			},
-		[itemDecrypt, crypto],
-	);
-
 	const core = useMemo(
 		() =>
 			createCoreContext({
 				storage,
 				itemCache,
 				crypto,
+				vaultCrypto,
 			}),
-		[storage, itemCache, crypto],
+		[storage, itemCache, crypto, vaultCrypto],
 	);
 
 	const value = useMemo(
@@ -154,12 +144,12 @@ export function PlatformProvider({
 			storage,
 			itemCache,
 			crypto,
+			credentialMirror,
 			core,
-			itemDecrypt: effectiveItemDecrypt,
 			autolock,
 			sync,
 		}),
-		[storage, itemCache, crypto, core, effectiveItemDecrypt, autolock, sync],
+		[storage, itemCache, crypto, credentialMirror, core, autolock, sync],
 	);
 
 	return (
@@ -173,7 +163,7 @@ export function PlatformProvider({
  * Hook to access the platform context.
  * Must be used within a PlatformProvider.
  *
- * @returns Platform context value containing storage, crypto, itemDecrypt, autolock, and sync
+ * @returns Platform context value containing storage, crypto, core, autolock, and sync
  * @throws Error if used outside PlatformProvider
  */
 export function usePlatform(): PlatformContextValue {
@@ -213,17 +203,13 @@ export function useCoreContext(): CoreContext {
  * Hook to access the crypto module from platform context.
  * Convenience wrapper around usePlatform().
  */
-export function usePlatformCrypto(): ICrypto {
+export function usePlatformCrypto(): CryptoPort {
 	return usePlatform().crypto;
 }
 
-/**
- * Hook to access just the item decrypt service from platform context.
- * @deprecated Use usePlatformCrypto().decrypt instead
- * Convenience wrapper around usePlatform().
- */
-export function usePlatformItemDecrypt(): IItemDecrypt {
-	return usePlatform().itemDecrypt;
+/** Credential copies that must be purged before AccountStore is locked. */
+export function usePlatformCredentialMirror(): CredentialMirror {
+	return usePlatform().credentialMirror;
 }
 
 /**

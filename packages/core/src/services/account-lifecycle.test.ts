@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type {
@@ -12,6 +13,7 @@ import {
 	createTestAccountStore,
 	createTestItemCache,
 	mukFor,
+	mukRefFor,
 	seedAccountWithSession,
 } from "../testing/account-store-harness";
 import {
@@ -101,6 +103,7 @@ function createRecordingMirror(
 interface Fixture {
 	storage: AccountStore;
 	itemCache: ItemCache;
+	crypto: InMemoryCryptoPort;
 	port: InMemoryPlatformPort;
 	cachePort: InMemoryRecordPort;
 	mirror: RecordingMirror;
@@ -111,14 +114,15 @@ interface Fixture {
 async function createFixture(
 	options: { mirrorThrows?: boolean } = {},
 ): Promise<Fixture> {
-	const { store, port } = await createTestAccountStore();
+	const harness = await createTestAccountStore();
+	const { store, port, crypto } = harness;
 	// Pre-seeded instead of randomly generated, so two fixtures are comparable byte for byte.
 	await port.secretSet(DEVICE_KEY, arrayBufferToBase64(mukFor("device")));
 	const { cache, port: cachePort } = await createTestItemCache();
 
 	for (const accountId of ["acc-1", "acc-2"]) {
 		await seedAccountWithSession(
-			store,
+			harness,
 			accountMetadata({ accountId, biometricEnabled: true }),
 			{ unlocked: accountId === "acc-1" },
 		);
@@ -138,6 +142,7 @@ async function createFixture(
 	return {
 		storage: store,
 		itemCache: cache,
+		crypto,
 		port,
 		cachePort,
 		mirror,
@@ -145,12 +150,40 @@ async function createFixture(
 	};
 }
 
-/** Everything both ports hold — the comparison unit for "changes nothing". */
+/**
+ * Everything both ports hold — the comparison unit for "changes nothing".
+ *
+ * The wrapped master unlock key inside `session_data` is replaced by a marker: it is sealed
+ * with a fresh IV on every write, so its bytes differ between two fixtures built from the
+ * same inputs. Whether the field is there at all is the property under test.
+ */
 function fullState(fixture: Fixture): unknown {
+	const normalizeStore = (store: Record<string, string>) =>
+		Object.fromEntries(
+			Object.entries(store).map(([key, value]) => [
+				key,
+				key.endsWith("_session_data") ? maskWrappedKey(value) : value,
+			]),
+		);
+	const snapshot = fixture.port.snapshot();
 	return {
-		...fixture.port.snapshot(),
+		secrets: normalizeStore(snapshot.secrets),
+		device: normalizeStore(snapshot.device),
+		session: normalizeStore(snapshot.session),
 		collections: fixture.cachePort.collections(),
 	};
+}
+
+function maskWrappedKey(sessionData: string): string {
+	const parsed = JSON.parse(sessionData) as {
+		encryptedMasterUnlockKey?: unknown;
+	};
+	return JSON.stringify({
+		...parsed,
+		encryptedMasterUnlockKey: parsed.encryptedMasterUnlockKey
+			? "<wrapped>"
+			: parsed.encryptedMasterUnlockKey,
+	});
 }
 
 /** Every port key belonging to one account, across all three stores. */
@@ -266,7 +299,10 @@ describe("lockAccount", () => {
 describe("lockAllAccounts", () => {
 	it("pins the known asymmetry: drops every master unlock key but keeps every JWT", async () => {
 		const fixture = await createFixture();
-		await fixture.storage.setMasterUnlockKey(mukFor("acc-2"), "acc-2");
+		await fixture.storage.setMasterUnlockKey(
+			await mukRefFor(fixture.crypto, "acc-2"),
+			"acc-2",
+		);
 
 		const outcome = await lockAllAccounts(fixture.deps);
 

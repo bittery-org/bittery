@@ -1,7 +1,11 @@
-import { useCheckEmail, useSessionState } from "@bittery/core/hooks";
+import {
+	useCheckEmail,
+	usePlatformCrypto,
+	useSessionState,
+} from "@bittery/core/hooks";
 import {
 	performSRPLogin,
-	storeLoginSession,
+	storeLoginSessionOwned,
 } from "@bittery/core/services/auth-service";
 import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
@@ -23,7 +27,6 @@ import {
 	refreshActiveAccountId,
 	storage,
 } from "@/lib/storage";
-import * as wasmCrypto from "@/lib/wasm-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 
 export default function SignInForm({
@@ -139,6 +142,7 @@ function SignInFormContent({
 	const { m } = useI18n();
 	const navigate = useNavigate();
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
@@ -150,21 +154,19 @@ function SignInFormContent({
 			password: string;
 			secretKey: string;
 		}) => {
+			const normalizedEmail = input.email.trim().toLowerCase();
 			const serverUrl = getDefaultServerUrl();
 			const result = await performSRPLogin(
-				{ ...input, serverUrl },
-				{
-					crypto: wasmCrypto,
-					rpcClient,
-					storage,
-				},
+				{ ...input, email: normalizedEmail, serverUrl },
+				{ crypto, rpcClient, storage },
 			);
-			await storeLoginSession(
+			await storeLoginSessionOwned(
 				result,
 				input.secretKey,
 				storage,
 				itemCache,
-				input.email,
+				crypto,
+				normalizedEmail,
 				{ serverUrl },
 			);
 			// `storeLoginSession` sets the master unlock key before it moves the
@@ -202,7 +204,7 @@ function SignInFormContent({
 
 	const handleEmailBlur = (newEmail: string) => {
 		if (newEmail?.includes("@")) {
-			setEmail(newEmail);
+			setEmail(newEmail.trim().toLowerCase());
 		}
 	};
 

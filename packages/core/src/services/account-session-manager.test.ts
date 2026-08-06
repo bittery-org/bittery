@@ -20,10 +20,14 @@ import {
 async function createStore(
 	opts: { unlockAcc2?: boolean } = {},
 ): Promise<AccountStore> {
-	const { store } = await createTestAccountStore();
-	await seedAccountWithSession(store, accountMetadata({ accountId: "acc-1" }));
+	const harness = await createTestAccountStore();
+	const { store } = harness;
 	await seedAccountWithSession(
-		store,
+		harness,
+		accountMetadata({ accountId: "acc-1" }),
+	);
+	await seedAccountWithSession(
+		harness,
 		accountMetadata({ accountId: "acc-2", addedAt: 2, lastActiveAt: 2 }),
 		{ unlocked: opts.unlockAcc2 ?? false },
 	);
@@ -330,9 +334,11 @@ describe("AccountSessionManager", () => {
 	it("clears a restored session when travel mode cannot be verified", async () => {
 		const storage = await createStore();
 		const clearSession = spyOn(storage, "clearSession");
+		const purge = mock(async () => {});
 		const manager = new AccountSessionManager({
 			storage,
 			itemCache,
+			credentialMirror: { purge },
 			verifyUnlockPolicy: async () => {
 				throw new Error("policy unavailable");
 			},
@@ -342,6 +348,9 @@ describe("AccountSessionManager", () => {
 		const restored = await manager.unlockAccount("acc-2", true);
 
 		expect(restored).toBe(false);
+		expect(purge).toHaveBeenCalledWith([
+			expect.objectContaining({ accountId: "acc-2" }),
+		]);
 		expect(clearSession).toHaveBeenCalledWith("acc-2");
 		expect(manager.isUnlocked("acc-2")).toBe(false);
 	});

@@ -1,7 +1,10 @@
-import { storeLoginSession } from "@bittery/core/services/auth-service";
+import { usePlatformCrypto } from "@bittery/core/hooks";
+import { storeLoginSessionOwned } from "@bittery/core/services/auth-service";
+import {
+	InvalidRecoveryKeyError,
+	recoverAccount,
+} from "@bittery/core/services/vault-crypto";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { buildVaultKeyEncryptionContext } from "@bittery/shared";
-import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import { useRPCClient } from "@bittery/shared/rpc";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
@@ -19,8 +22,6 @@ import { type FormEvent, Fragment, useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { loadRecoveredAccountBootstrap } from "@/lib/recovery-session";
 import { itemCache, refreshActiveAccountId, storage } from "@/lib/storage";
-import { generateSecretKeyAsync } from "@/lib/wasm-crypto";
-import { WorkerCrypto } from "@/lib/worker-crypto";
 import { useI18n } from "@/providers/i18n-provider";
 
 type RecoveryStep =
@@ -67,11 +68,8 @@ function getRecoveryStepNumber(step: RecoveryStep): number {
 	return 5;
 }
 
-function parseEncryptedData(value: string): {
-	ciphertext: string;
-	iv: string;
-	algorithm: string;
-} {
+/** A server payload that is not an envelope at all fails here, with its own message. */
+function assertEncryptedData(value: string): string {
 	const parsed = JSON.parse(value);
 	if (
 		!parsed ||
@@ -82,12 +80,7 @@ function parseEncryptedData(value: string): {
 	) {
 		throw new RecoveryFlowError("invalid_encrypted_data_payload");
 	}
-
-	return {
-		ciphertext: parsed.ciphertext,
-		iv: parsed.iv,
-		algorithm: parsed.algorithm,
-	};
+	return value;
 }
 
 export const Route = createFileRoute("/_auth/recover")({
@@ -100,6 +93,7 @@ export const Route = createFileRoute("/_auth/recover")({
 function RecoverRouteComponent() {
 	const navigate = useNavigate();
 	const rpcClient = useRPCClient();
+	const crypto = usePlatformCrypto();
 	const { m } = useI18n();
 
 	const [step, setStep] = useState<RecoveryStep>("email");
@@ -195,13 +189,8 @@ function RecoverRouteComponent() {
 	const handleValidateRecoveryKey = async (e: FormEvent) => {
 		e.preventDefault();
 
-		const workerCrypto = new WorkerCrypto();
 		try {
-			const isRecoveryKeyValid = await workerCrypto.validateRecoveryKey(
-				recoveryKey.trim(),
-			);
-
-			if (!isRecoveryKeyValid) {
+			if (!(await crypto.validateRecoveryKey(recoveryKey.trim()))) {
 				toast.error(m.auth_recover_toast_recovery_key_invalid());
 				return;
 			}
@@ -215,8 +204,6 @@ function RecoverRouteComponent() {
 					m.auth_recover_toast_validate_key_failed(),
 				),
 			);
-		} finally {
-			workerCrypto.terminate();
 		}
 	};
 
@@ -240,182 +227,87 @@ function RecoverRouteComponent() {
 		}
 
 		setIsSubmitting(true);
-		const workerCrypto = new WorkerCrypto();
+		const serverUrl = getDefaultServerUrl();
 
 		try {
-			const recoveryData = await rpcClient.auth.getRecoveryData.query({
-				recoveryToken,
-			});
-
-			const encryptedMasterKeyData = parseEncryptedData(
-				recoveryData.encryptedMasterKey,
-			);
-			const oldMasterKey = await workerCrypto.decryptMasterKey(
-				encryptedMasterKeyData,
-				recoveryKey,
-				email,
-			);
-
-			const { masterUnlockKey: oldMasterUnlockKey } =
-				await workerCrypto.deriveKeysFromMasterKey(oldMasterKey, email);
-
-			const encryptedPrivateKeyData = parseEncryptedData(
-				recoveryData.encryptedPrivateKey,
-			);
-			const privateKey = await workerCrypto.decrypt(
-				encryptedPrivateKeyData,
-				oldMasterUnlockKey,
+			const recovered = await recoverAccount(
+				{ email, recoveryKey, newPassword },
+				{
+					crypto,
+					loadRecoveryData: async () => {
+						const data = await rpcClient.auth.getRecoveryData.query({
+							recoveryToken,
+						});
+						return {
+							userId: data.userId,
+							encryptedMasterKey: assertEncryptedData(data.encryptedMasterKey),
+							encryptedPrivateKey: assertEncryptedData(
+								data.encryptedPrivateKey,
+							),
+							vaultKeys: data.vaultKeys,
+						};
+					},
+					commit: (payload) =>
+						rpcClient.auth.resetPassword.mutate({ recoveryToken, ...payload }),
+				},
 			);
 
-			const decryptedPersonalVaultKeys: Array<{
-				vaultId: string;
-				vaultKeyBase64: string;
-				keyVersion: number;
-			}> = [];
-
-			for (const vaultKeyEntry of recoveryData.vaultKeys) {
-				if (vaultKeyEntry.createdById !== recoveryData.userId) {
-					continue;
-				}
-
-				const parsedVaultKey = parseEncryptedData(
-					vaultKeyEntry.encryptedVaultKey,
-				) as {
-					ciphertext: string;
-					iv: string;
-					algorithm: string;
-					context?: { keyVersion?: number };
-				};
-				const keyVersion = Number.isInteger(parsedVaultKey.context?.keyVersion)
-					? (parsedVaultKey.context?.keyVersion as number)
-					: 1;
-				const decryptedVaultKeyBase64 = await workerCrypto.decrypt(
-					parsedVaultKey,
-					oldMasterUnlockKey,
-					buildVaultKeyEncryptionContext({
-						vaultId: vaultKeyEntry.vaultId,
-						userId: recoveryData.userId,
-						keyVersion,
-					}),
-				);
-
-				decryptedPersonalVaultKeys.push({
-					vaultId: vaultKeyEntry.vaultId,
-					vaultKeyBase64: decryptedVaultKeyBase64,
-					keyVersion,
-				});
-			}
-
-			const newSecretKey = await generateSecretKeyAsync();
-
-			const newProfile = currentKdfProfile();
-			const newMasterKey = await workerCrypto.deriveMasterKey(
-				newPassword,
-				newSecretKey,
-				email,
-				newProfile,
-			);
-			const { authKey: newAuthKey, masterUnlockKey: newMasterUnlockKey } =
-				await workerCrypto.deriveKeysFromMasterKey(newMasterKey, email);
-
-			const authKeyString = new TextDecoder().decode(newAuthKey);
-			const { salt: srpSalt, verifier: srpVerifier } =
-				await workerCrypto.generateSRPRegistration(authKeyString);
-
-			const newEncryptedPrivateKey = await workerCrypto.encrypt(
-				privateKey,
-				newMasterUnlockKey,
-			);
-
-			const encryptedVaultKeys: Array<{
-				vaultId: string;
-				encryptedVaultKey: string;
-			}> = [];
-
-			for (const vaultKeyEntry of decryptedPersonalVaultKeys) {
-				const reEncryptedVaultKey = await workerCrypto.encrypt(
-					vaultKeyEntry.vaultKeyBase64,
-					newMasterUnlockKey,
-					buildVaultKeyEncryptionContext({
-						vaultId: vaultKeyEntry.vaultId,
-						userId: recoveryData.userId,
-						keyVersion: vaultKeyEntry.keyVersion,
-					}),
-				);
-
-				encryptedVaultKeys.push({
-					vaultId: vaultKeyEntry.vaultId,
-					encryptedVaultKey: JSON.stringify(reEncryptedVaultKey),
-				});
-			}
-
-			const newEncryptedMasterKey = await workerCrypto.encryptMasterKey(
-				newMasterKey,
-				recoveryKey,
-				email,
-			);
-			const recoveryKeyHint =
-				recoveryKey.split("-").slice(0, 2).join("-") || "R1";
-			const secretKeyHint = await workerCrypto.getSecretKeyHint(newSecretKey);
-
-			const resetResult = await rpcClient.auth.resetPassword.mutate({
-				recoveryToken,
-				srpSalt,
-				srpVerifier,
-				encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
-				encryptedMasterKey: JSON.stringify(newEncryptedMasterKey),
-				recoveryKeyHint,
-				secretKeyHint,
-				encryptedVaultKeys,
-				kdfParams: newProfile,
-			});
-
-			const serverUrl = getDefaultServerUrl();
-			setGeneratedSecretKey(newSecretKey);
+			setGeneratedSecretKey(recovered.secretKey);
 			setStep("newSecretKey");
 			toast.success(m.auth_recover_toast_reset_success());
 
+			let sessionAdoptionStarted = false;
 			try {
 				const bootstrap = await loadRecoveredAccountBootstrap({
-					token: resetResult.token,
+					token: recovered.result.token,
 					serverUrl,
 				});
-				await storeLoginSession(
+				sessionAdoptionStarted = true;
+				await storeLoginSessionOwned(
 					{
-						token: resetResult.token,
-						sessionId: resetResult.sessionId,
-						expiresAt: resetResult.expiresAt,
+						token: recovered.result.token,
+						sessionId: recovered.result.sessionId,
+						expiresAt: recovered.result.expiresAt,
 						user: {
 							id: bootstrap.user.id,
 							email: bootstrap.user.email,
 							name: bootstrap.user.name,
 							teamName: bootstrap.user.teamName ?? undefined,
 							teamAvatarUrl: bootstrap.user.teamAvatarUrl,
-							encryptedPrivateKey: JSON.stringify(newEncryptedPrivateKey),
+							encryptedPrivateKey: recovered.encryptedPrivateKey,
 						},
 						vaultKeys: bootstrap.vaults.map(toVaultKeyEntry),
-						masterUnlockKey: newMasterUnlockKey,
-						kdfParams: newProfile,
+						masterUnlockKey: recovered.masterUnlockKey,
+						kdfParams: recovered.kdfProfile,
 						serverUrl,
 					},
-					newSecretKey,
+					recovered.secretKey,
 					storage,
 					itemCache,
+					crypto,
 					bootstrap.user.email,
 					{ serverUrl },
 				);
 				await refreshActiveAccountId();
 			} catch (bootstrapError) {
 				console.error("Recovery session bootstrap failed:", bootstrapError);
+				// Bootstrap precedes local adoption, so only that failure still leaves the
+				// returned MUK with this caller; the ownership-aware store handles the rest.
+				if (!sessionAdoptionStarted) {
+					await crypto.destroyKey(recovered.masterUnlockKey);
+				}
 				toast.warning(m.auth_recover_toast_session_setup_failed());
 			}
 		} catch (error: unknown) {
+			if (error instanceof InvalidRecoveryKeyError) {
+				toast.error(m.auth_recover_toast_recovery_key_invalid());
+				return;
+			}
 			console.error("Recovery flow failed:", error);
 			toast.error(
 				getLocalizedErrorMessage(error, m.auth_recover_toast_reset_failed()),
 			);
 		} finally {
-			workerCrypto.terminate();
 			setIsSubmitting(false);
 		}
 	};

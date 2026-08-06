@@ -64,8 +64,12 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 	},
 }));
 
-mock.module(path.join(libDir, "wasm-crypto.ts"), () => ({
-	decrypt: async () => btoa("muk"),
+mock.module(path.join(libDir, "crypto.ts"), () => ({
+	crypto: {
+		importKey: async (key: Uint8Array) => key,
+		decrypt: async () => btoa("muk"),
+		destroyKey: async () => {},
+	},
 }));
 
 mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({

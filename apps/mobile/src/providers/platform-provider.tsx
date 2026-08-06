@@ -3,55 +3,22 @@
  *
  * Configures the PlatformProvider for the mobile app with:
  * - `AccountStore` + `ItemCache` over the two React Native ports
- * - Native FFI crypto module (decrypt, encrypt, generateEncryptionKey)
+ * - Expo CryptoPort and VaultCrypto over the native FFI module
  * - Real-time sync using WebSocket connection to server
  */
 
 import { PlatformProvider } from "@bittery/core/hooks";
-import type { ICrypto, ISyncContext } from "@bittery/types";
+import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
+import type { ISyncContext } from "@bittery/types";
 import { useQueryClient } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { useMobileSync } from "../hooks/use-mobile-sync";
-import {
-	base64ToArrayBuffer,
-	decrypt,
-	deriveClientSession,
-	deriveKeys,
-	encrypt,
-	generateClientEphemeral,
-	generateUuid,
-	generateEncryptionKey as nativeGenerateEncryptionKey,
-	rsaDecrypt,
-	validateKdfProfile,
-	validateSecretKey,
-	verifyServerSession,
-} from "../lib/crypto/native-crypto";
+import { crypto } from "../lib/crypto";
+import { lifecycleDeps } from "../services/lifecycle";
 import { itemCache, storage } from "../services/storage";
 
-/**
- * Crypto adapter that satisfies ICrypto interface
- * Native crypto module has slightly different signatures that we adapt here
- */
-const crypto: ICrypto = {
-	// Core encryption methods
-	decrypt,
-	encrypt,
-	rsaDecrypt,
-	// Native generateEncryptionKey returns base64 string, so we need to convert
-	generateEncryptionKey: async () => {
-		const keyBase64 = nativeGenerateEncryptionKey();
-		return base64ToArrayBuffer(keyBase64);
-	},
-	generateUuid,
-	// SRP authentication methods
-	deriveKeys,
-	generateClientEphemeral,
-	deriveClientSession,
-	verifyServerSession,
-	validateSecretKey,
-	validateKdfProfile,
-};
+const vaultCrypto = createVaultCrypto({ crypto, storage });
 
 /**
  * Props for MobilePlatformProvider
@@ -99,6 +66,8 @@ export function MobilePlatformProvider({
 			storage={storage}
 			itemCache={itemCache}
 			crypto={crypto}
+			credentialMirror={lifecycleDeps.credentialMirror}
+			vaultCrypto={vaultCrypto}
 			sync={sync}
 		>
 			{children}

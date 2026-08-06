@@ -1,12 +1,9 @@
 import { beforeEach, describe, expect, it } from "bun:test";
+import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { createItemCache } from "@bittery/storage";
 import { createInMemoryRecordPort } from "@bittery/storage/testing";
-import type {
-	CachedEncryptedItem,
-	EncryptionContext,
-	ICrypto,
-} from "@bittery/types";
+import type { CachedEncryptedItem } from "@bittery/types";
 import {
 	accountMetadata,
 	createTestAccountStore,
@@ -15,6 +12,7 @@ import {
 	getTravelModeEnforcer,
 	resetTravelModeEnforcerForTests,
 } from "./travel-mode-enforcer";
+import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
 import { VaultRepository } from "./vault-repository";
 
 const ACCOUNT_ID = "acc-1";
@@ -27,71 +25,50 @@ function vaultKey(vaultId: string, vaultName: string) {
 		vaultType: "team" as const,
 		vaultIcon: "lock",
 		vaultImageUrl: null,
-		encryptedVaultKey: JSON.stringify({
-			ciphertext: "wrapped",
-			iv: "vault-iv",
-			algorithm: "aes-256-gcm",
-			context: {
-				vaultId,
-				userId: USER_ID,
-				keyVersion: 1,
-				purpose: "vault-key-wrap",
-			},
-		}),
+		encryptedVaultKey: "",
 		role: "owner" as const,
 	};
 }
-
-/**
- * Ciphertext carries the context it was sealed with, so `decrypt` fails on any
- * AAD drift exactly like AES-GCM does. That is the property under test.
- */
-function seal(payload: unknown, context: EncryptionContext): string {
-	return JSON.stringify({ context, payload });
-}
-
-const crypto = {
-	decrypt: async (
-		data: { ciphertext: string },
-		_key: Uint8Array,
-		context?: EncryptionContext,
-	) => {
-		if (context?.entityType === "vault_key") {
-			return Buffer.from("vault-key").toString("base64");
-		}
-		const sealed = JSON.parse(data.ciphertext) as {
-			context: EncryptionContext;
-			payload: unknown;
-		};
-		if (
-			sealed.context.vaultId !== context?.vaultId ||
-			sealed.context.entityId !== context?.entityId ||
-			sealed.context.version !== context?.version ||
-			sealed.context.userId !== context?.userId
-		) {
-			throw new Error("Decryption failed: authentication tag mismatch");
-		}
-		return JSON.stringify(sealed.payload);
-	},
-} as unknown as ICrypto;
 
 async function setup(): Promise<{
 	repo: VaultRepository;
 	storage: AccountStore;
 	itemCache: ItemCache;
+	crypto: CryptoPort;
+	vaultCrypto: VaultCrypto;
 }> {
-	const { store } = await createTestAccountStore();
+	const { store, crypto } = await createTestAccountStore();
 	const recordPort = createInMemoryRecordPort();
 	const itemCache = createItemCache({ port: recordPort });
 	await itemCache.initialize();
 
 	await store.addAccount(accountMetadata({ accountId: ACCOUNT_ID }));
 	await store.storeServerUrl("https://bittery.test", ACCOUNT_ID);
-	await store.setMasterUnlockKey(new Uint8Array(32), ACCOUNT_ID);
-	await store.storeVaultKeys(
-		[vaultKey("vault_1", "Source Vault"), vaultKey("vault_2", "Target Vault")],
-		ACCOUNT_ID,
-	);
+	const masterUnlockKey = await crypto.importKey(new Uint8Array(32));
+	await store.setMasterUnlockKey(masterUnlockKey, ACCOUNT_ID);
+	const vaultCrypto = createVaultCrypto({ crypto, storage: store });
+	const entries = [];
+	for (const [vaultId, name] of [
+		["vault_1", "Source Vault"],
+		["vault_2", "Target Vault"],
+	] as const) {
+		const key = await crypto.importKey(new TextEncoder().encode("vault-key"));
+		try {
+			entries.push({
+				...vaultKey(vaultId, name),
+				encryptedVaultKey: await vaultCrypto.wrapVaultKeyForOwner({
+					vaultKey: key,
+					masterUnlockKey,
+					vaultId,
+					userId: USER_ID,
+					keyVersion: 1,
+				}),
+			});
+		} finally {
+			await crypto.destroyKey(key);
+		}
+	}
+	await store.storeVaultKeys(entries, ACCOUNT_ID);
 
 	await getTravelModeEnforcer(store, itemCache).applyConfig(ACCOUNT_ID, {
 		enabled: false,
@@ -100,6 +77,7 @@ async function setup(): Promise<{
 
 	const repo = new VaultRepository(
 		crypto,
+		vaultCrypto,
 		store,
 		itemCache,
 		ACCOUNT_ID,
@@ -107,24 +85,35 @@ async function setup(): Promise<{
 		"user@bittery.test",
 	);
 
-	return { repo, storage: store, itemCache };
+	return { repo, storage: store, itemCache, crypto, vaultCrypto };
 }
 
-function cachedItem(vaultId: string, version: number): CachedEncryptedItem {
+async function cachedItem(
+	vaultCrypto: VaultCrypto,
+	crypto: CryptoPort,
+	vaultId: string,
+	version: number,
+): Promise<CachedEncryptedItem> {
+	const key = await vaultCrypto.getVaultKey({
+		vaultId,
+		accountId: ACCOUNT_ID,
+		userId: USER_ID,
+	});
+	if (!key) throw new Error("Missing test vault key");
+	const encrypted = await vaultCrypto.encryptItem(
+		JSON.stringify({ title: "Item" }),
+		key,
+		{ vaultId, itemId: "item_1", version, userId: USER_ID },
+	);
+	await crypto.destroyKey(key);
 	return {
 		id: "item_1",
 		vaultId,
 		category: "login",
 		favorite: false,
-		encryptedData: seal({ title: "Item" }, {
-			vaultId,
-			entityId: "item_1",
-			entityType: "item",
-			version,
-			userId: USER_ID,
-		} as EncryptionContext),
-		encryptionIv: "aXY=",
-		encryptionAlgorithm: "AES-GCM",
+		encryptedData: encrypted.ciphertext,
+		encryptionIv: encrypted.iv,
+		encryptionAlgorithm: encrypted.algorithm,
 		version,
 		lastModifiedBy: USER_ID,
 		createdAt: "2026-08-01T00:00:00.000Z",
@@ -139,17 +128,14 @@ describe("VaultRepository.moveItem", () => {
 	});
 
 	it("moves the item into the target vault", async () => {
-		const { repo } = await setup();
-		await repo.upsertEncrypted(cachedItem("vault_1", 1), ACCOUNT_ID);
+		const { repo, vaultCrypto, crypto } = await setup();
+		await repo.upsertEncrypted(
+			await cachedItem(vaultCrypto, crypto, "vault_1", 1),
+			ACCOUNT_ID,
+		);
 
 		const payload = {
-			ciphertext: seal({ title: "Item" }, {
-				vaultId: "vault_2",
-				entityId: "item_1",
-				entityType: "item",
-				version: 2,
-				userId: USER_ID,
-			} as EncryptionContext),
+			ciphertext: "not-read-by-moveItem",
 			iv: "aXY=",
 			algorithm: "AES-GCM",
 		};
@@ -167,22 +153,22 @@ describe("VaultRepository.moveItem", () => {
 	// vault it just came from is the common way to hit this: the first move's
 	// server echo arrives while the second move is still in flight.
 	it("survives a concurrent version bump between sealing and writing", async () => {
-		const { repo } = await setup();
-		await repo.upsertEncrypted(cachedItem("vault_1", 1), ACCOUNT_ID);
+		const { repo, vaultCrypto, crypto } = await setup();
+		await repo.upsertEncrypted(
+			await cachedItem(vaultCrypto, crypto, "vault_1", 1),
+			ACCOUNT_ID,
+		);
 
 		const payload = {
-			ciphertext: seal({ title: "Item" }, {
-				vaultId: "vault_2",
-				entityId: "item_1",
-				entityType: "item",
-				version: 2,
-				userId: USER_ID,
-			} as EncryptionContext),
+			ciphertext: "not-read-by-moveItem",
 			iv: "aXY=",
 			algorithm: "AES-GCM",
 		};
 
-		await repo.upsertEncrypted(cachedItem("vault_1", 2), ACCOUNT_ID);
+		await repo.upsertEncrypted(
+			await cachedItem(vaultCrypto, crypto, "vault_1", 2),
+			ACCOUNT_ID,
+		);
 
 		await repo.moveItem("item_1", "vault_2", payload, { title: "Item" });
 

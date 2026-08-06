@@ -2,7 +2,7 @@
  * `AccountStore` — the deep module above the platform seam.
  *
  * Everything lives here exactly once: accountId namespacing, tier routing, JSON, encryption
- * via `CryptoProvider`, session expiry, the in-memory master-unlock-key cache, biometric
+ * via `CryptoPort`, session expiry, the in-memory master-unlock-key cache, biometric
  * grace, master-password re-entry, the unlock-state broadcast and the native-host projection.
  *
  * Two rules make this reviewable:
@@ -18,6 +18,7 @@
  * `onUnlockStateChanged` once at startup and does its own `broadcast_unlock_event`.
  */
 
+import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import {
 	arrayBufferToBase64,
 	base64ToArrayBuffer,
@@ -28,7 +29,6 @@ import {
 	findAccountByServerUser,
 	generateAccountId,
 } from "./account-id";
-import type { CryptoProvider } from "./crypto-provider";
 import { parseStoredKdfProfile } from "./kdf-profile";
 import {
 	ACCOUNT_VALUES,
@@ -74,6 +74,8 @@ export const NATIVE_VIEW_VERSION = 2 as const;
 /**
  * A key plus which store it lives in, so the native host never has to know the tier table.
  * `"secret"` means the OS keychain on desktop; `"plain"` means `store.json`.
+ *
+ * Unrelated to `CryptoPort`'s `KeyRef`: this names a *storage* key, never key material.
  */
 export interface NativeKeyRef {
 	key: string;
@@ -147,7 +149,7 @@ export interface NativeHostView {
 
 export interface AccountStoreOptions {
 	port: PlatformPort;
-	crypto: CryptoProvider;
+	crypto: CryptoPort;
 }
 
 export interface AccountStore {
@@ -165,16 +167,9 @@ export interface AccountStore {
 	removeAccount(accountId: string): Promise<void>;
 
 	// --- session ---
+	/** `muk` stays the caller's to destroy; the store wraps it and keeps no reference. */
 	storeSessionData(
-		muk: Uint8Array,
-		accountId: string,
-		email: string,
-		userId: string,
-		expiresAt?: SessionExpiryInput,
-		sessionId?: string,
-	): Promise<void>;
-	storeSessionDataWithMasterUnlockKeyHandle(
-		keyHandle: number,
+		muk: KeyRef,
 		accountId: string,
 		email: string,
 		userId: string,
@@ -207,15 +202,22 @@ export interface AccountStore {
 	clearAllStoredData(accountId?: string): Promise<void>;
 
 	// --- master unlock key ---
-	getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null>;
-	setMasterUnlockKey(key: Uint8Array, accountId?: string): Promise<void>;
-	clearMasterUnlockKey(accountId?: string): Promise<void>;
-	getMasterUnlockKeyHandle(accountId?: string): Promise<number | null>;
-	setMasterUnlockKeyHandle(
-		keyHandle: number,
-		accountId?: string,
-	): Promise<void>;
 	/**
+	 * The cached key, restored from `session_data` if the session is still valid.
+	 *
+	 * The store owns the returned ref for as long as the account stays unlocked, so a caller
+	 * must never destroy it — `clearMasterUnlockKey`, `clearSession`, `lockAllAccounts` and
+	 * `removeAccount` are what end its life, and every one of them destroys it for real.
+	 */
+	getMasterUnlockKey(accountId?: string): Promise<KeyRef | null>;
+	/** Hands the store ownership of `key`: it is destroyed when the account locks. */
+	setMasterUnlockKey(key: KeyRef, accountId?: string): Promise<void>;
+	clearMasterUnlockKey(accountId?: string): Promise<void>;
+	/**
+	 * Unwrap the stored MUK **without** unlocking the account. The fresh ref belongs to the
+	 * caller, who must destroy it; this is the one MUK getter that does not hand back the
+	 * store's own cached key.
+	 *
 	 * `reason` is the already-translated prompt shown by the OS if this call has to fall
 	 * through to a biometric prompt. See {@link AccountStore.unlockAllAccountsWithBiometric}
 	 * for why every prompting method takes one.
@@ -224,7 +226,7 @@ export interface AccountStore {
 		accountId?: string,
 		skipBiometric?: boolean,
 		reason?: string,
-	): Promise<Uint8Array | null>;
+	): Promise<KeyRef | null>;
 	lockAllAccounts(): Promise<void>;
 	getUnlockedAccounts(): Promise<string[]>;
 	/** Fires on every change to the unlocked-account set. Returns an unsubscribe fn. */
@@ -418,19 +420,20 @@ function toBiometricAuthResult(
 
 export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	const { port } = options;
-	const cryptoProvider = options.crypto;
+	const cryptoPort = options.crypto;
 
 	/**
 	 * The in-memory master-unlock-key cache. **Never persisted on any platform** — that is
-	 * why `STORAGE_TIERS` has no row for it. A `Uint8Array` entry is raw key material; a
-	 * `number` entry is an opaque key handle owned by the crypto backend.
+	 * why `STORAGE_TIERS` has no row for it. Entries are opaque `KeyRef`s: the key material
+	 * itself stays behind the crypto port, so this map holds nothing readable and the store
+	 * owns each ref's lifetime.
 	 */
-	const mukCache = new Map<string, Uint8Array | number>();
+	const mukCache = new Map<string, KeyRef>();
 
 	const unlockListeners = new Set<(unlockedAccountIds: string[]) => void>();
 
-	let deviceKeyCache: Uint8Array | null = null;
-	let deviceKeyPromise: Promise<Uint8Array> | null = null;
+	let deviceKeyCache: KeyRef | null = null;
+	let deviceKeyPromise: Promise<KeyRef> | null = null;
 
 	// ------------------------------------------------------------------
 	// THE routing triple — the only code in this package that touches the port
@@ -579,17 +582,32 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	// Device key — global, secret-tier, generated on first use
 	// ------------------------------------------------------------------
 
-	async function loadDeviceKey(): Promise<Uint8Array> {
+	/**
+	 * The device key is the one key this package persists in the clear, because nothing on
+	 * the device can wrap it — which is why `CryptoPort.exportKey` exists at all. It crosses
+	 * that boundary exactly once per device, when it is first minted; from then on it is
+	 * imported straight back behind a `KeyRef` and its bytes never reappear in JS.
+	 */
+	async function loadDeviceKey(): Promise<KeyRef> {
 		const stored = await readGlobal("device_key");
 		if (stored) {
-			return base64ToArrayBuffer(stored);
+			return cryptoPort.importKey(base64ToArrayBuffer(stored));
 		}
-		const generated = globalThis.crypto.getRandomValues(new Uint8Array(32));
-		await writeGlobal("device_key", arrayBufferToBase64(generated));
-		return generated;
+		const generated = await cryptoPort.generateEncryptionKey();
+		let exported: Uint8Array | undefined;
+		try {
+			exported = await cryptoPort.exportKey(generated);
+			await writeGlobal("device_key", arrayBufferToBase64(exported));
+			return generated;
+		} catch (error) {
+			await destroyKey(generated);
+			throw error;
+		} finally {
+			exported?.fill(0);
+		}
 	}
 
-	async function getDeviceKey(): Promise<Uint8Array> {
+	async function getDeviceKey(): Promise<KeyRef> {
 		if (deviceKeyCache) {
 			return deviceKeyCache;
 		}
@@ -616,7 +634,9 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	 * account, biometric-enabled, the unlocked set and the auto-lock timeout. It is one
 	 * function rather than five hand-written call sites precisely so those cannot drift.
 	 */
-	async function refreshNativeView(): Promise<void> {
+	async function refreshNativeView(
+		unlockedAccountIds: string[] = [...mukCache.keys()],
+	): Promise<void> {
 		const accounts = await readAccountsList();
 		const active = await getActiveAccount();
 		const autoLockTimeoutMs = await getAutoLockTimeoutOrDefault(
@@ -665,7 +685,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		const view: NativeHostView = {
 			v: NATIVE_VIEW_VERSION,
 			activeAccountId: active,
-			unlockedAccountIds: [...mukCache.keys()],
+			unlockedAccountIds,
 			autoLockTimeoutMs,
 			deviceKey: keyRefFor("device_key", globalKey("device_key")),
 			accounts: projected,
@@ -686,33 +706,39 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		}
 	}
 
-	async function destroyHandle(
-		entry: Uint8Array | number | undefined,
-	): Promise<void> {
-		if (typeof entry === "number" && cryptoProvider.destroyKeyHandle) {
-			try {
-				await cryptoProvider.destroyKeyHandle(entry);
-			} catch (error) {
-				console.error("[account-store] failed to destroy key handle:", error);
-			}
+	/** Zeroizing a key must never be able to break the lock that requested it. */
+	async function destroyKey(key: KeyRef | undefined): Promise<void> {
+		if (!key) {
+			return;
+		}
+		try {
+			await cryptoPort.destroyKey(key);
+		} catch (error) {
+			console.error("[account-store] failed to destroy key:", error);
 		}
 	}
 
 	/**
-	 * The single mutation point for the unlocked set: cache -> projection -> listeners.
+	 * The single mutation point for the unlocked set: projection -> cache -> listeners.
 	 * No IPC happens here; the desktop app owns `broadcast_unlock_event`.
 	 */
 	async function setUnlockEntry(
 		accountId: string,
-		entry: Uint8Array | number | null,
+		entry: KeyRef | null,
 	): Promise<void> {
-		await destroyHandle(mukCache.get(accountId));
-		if (entry === null) {
-			mukCache.delete(accountId);
-		} else {
-			mukCache.set(accountId, entry);
-		}
-		await refreshNativeView();
+		const previous = mukCache.get(accountId);
+		const nextUnlocked = new Set(mukCache.keys());
+		if (entry === null) nextUnlocked.delete(accountId);
+		else nextUnlocked.add(accountId);
+
+		// Publish before taking ownership so a failed native-view write cannot leave the
+		// caller's ref cached and then destroyed by its ownership wrapper.
+		await refreshNativeView([...nextUnlocked]);
+		// Destruction is best-effort and cannot reject, leaving no fallible work after the
+		// cache accepts the incoming ref.
+		if (previous !== entry) await destroyKey(previous);
+		if (entry === null) mukCache.delete(accountId);
+		else mukCache.set(accountId, entry);
 		notifyUnlockListeners();
 	}
 
@@ -977,7 +1003,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		accountId?: string,
 		skipBiometric = false,
 		reason = "Unlock your vault",
-	): Promise<Uint8Array | null> {
+	): Promise<KeyRef | null> {
 		const resolved = await resolveAccountId(accountId);
 		if (!resolved) {
 			return null;
@@ -1003,40 +1029,15 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 
 		try {
 			const deviceKey = await getDeviceKey();
-			const mukBase64 = await cryptoProvider.decrypt(
+			return await cryptoPort.unwrapKey(
 				session.encryptedMasterUnlockKey,
 				deviceKey,
 			);
-			return base64ToArrayBuffer(mukBase64);
 		} catch (error) {
 			console.error(
 				"[account-store] failed to decrypt master unlock key:",
 				error,
 			);
-			return null;
-		}
-	}
-
-	/** The key-handle twin of the above; `null` when the crypto backend has no handles. */
-	async function decryptStoredMasterUnlockKeyHandle(
-		accountId: string,
-	): Promise<number | null> {
-		if (!cryptoProvider.decryptKeyHandleWithWrappingKey) {
-			return null;
-		}
-
-		const session = await getStoredSessionData(accountId);
-		if (!session) {
-			return null;
-		}
-
-		try {
-			const deviceKey = await getDeviceKey();
-			return await cryptoProvider.decryptKeyHandleWithWrappingKey(
-				session.encryptedMasterUnlockKey,
-				deviceKey,
-			);
-		} catch {
 			return null;
 		}
 	}
@@ -1052,7 +1053,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		}
 
 		const wasUnlocked = mukCache.has(accountId);
-		await destroyHandle(mukCache.get(accountId));
+		await destroyKey(mukCache.get(accountId));
 		mukCache.delete(accountId);
 
 		const accounts = (await readAccountsList()).filter(
@@ -1164,7 +1165,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		// --- session ---
 
 		async storeSessionData(
-			muk: Uint8Array,
+			muk: KeyRef,
 			accountId: string,
 			email: string,
 			userId: string,
@@ -1175,10 +1176,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			const deviceKey = await getDeviceKey();
 			const now = Date.now();
 
-			const encryptedMasterUnlockKey = await cryptoProvider.encrypt(
-				arrayBufferToBase64(muk),
-				deviceKey,
-			);
+			const encryptedMasterUnlockKey = await cryptoPort.wrapKey(muk, deviceKey);
 
 			await writeSessionData(resolved, {
 				encryptedMasterUnlockKey,
@@ -1187,43 +1185,6 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				sessionId,
 				// Two expiries, one rule: the device-local lifetime and the server's opinion.
 				// `effectiveSessionExpiry` prefers the latter.
-				expiresAt: now + DEFAULT_SESSION_EXPIRY_MS,
-				serverExpiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
-				createdAt: now,
-				biometricEnabled: await isBiometricEnabled(resolved),
-				lastMasterPasswordEntry: now,
-			});
-		},
-
-		async storeSessionDataWithMasterUnlockKeyHandle(
-			keyHandle: number,
-			accountId: string,
-			email: string,
-			userId: string,
-			expiresAt?: SessionExpiryInput,
-			sessionId?: string,
-		): Promise<void> {
-			if (!cryptoProvider.encryptKeyHandleWithWrappingKey) {
-				throw new Error(
-					"Crypto provider does not support key-handle session storage",
-				);
-			}
-
-			const resolved = await requireAccountId(accountId);
-			const deviceKey = await getDeviceKey();
-			const now = Date.now();
-
-			const encryptedMasterUnlockKey =
-				await cryptoProvider.encryptKeyHandleWithWrappingKey(
-					keyHandle,
-					deviceKey,
-				);
-
-			await writeSessionData(resolved, {
-				encryptedMasterUnlockKey,
-				email: email.toLowerCase(),
-				userId,
-				sessionId,
 				expiresAt: now + DEFAULT_SESSION_EXPIRY_MS,
 				serverExpiresAt: resolveStoredSessionExpiryTimestamp(expiresAt, now),
 				createdAt: now,
@@ -1267,12 +1228,6 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				return false;
 			}
 			if (mukCache.has(resolved)) {
-				return true;
-			}
-
-			const handle = await decryptStoredMasterUnlockKeyHandle(resolved);
-			if (handle !== null) {
-				await setUnlockEntry(resolved, handle);
 				return true;
 			}
 
@@ -1347,6 +1302,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			// once no account is left to unwrap.
 			if ((await readAccountsList()).length === 0) {
 				await deleteGlobal("device_key");
+				await destroyKey(deviceKeyCache ?? undefined);
 				deviceKeyCache = null;
 				await writeActiveAccount(null);
 			}
@@ -1354,32 +1310,19 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 
 		// --- master unlock key ---
 
-		async getMasterUnlockKey(accountId?: string): Promise<Uint8Array | null> {
+		async getMasterUnlockKey(accountId?: string): Promise<KeyRef | null> {
 			const resolved = await resolveAccountId(accountId);
 			if (!resolved) {
 				return null;
 			}
 
 			const cached = mukCache.get(resolved);
-			if (cached instanceof Uint8Array) {
+			if (cached) {
 				return cached;
-			}
-			if (typeof cached === "number") {
-				return cryptoProvider.exportKeyHandle
-					? cryptoProvider.exportKeyHandle(cached)
-					: null;
 			}
 
 			if (!(await isSessionValid(resolved))) {
 				return null;
-			}
-
-			const handle = await decryptStoredMasterUnlockKeyHandle(resolved);
-			if (handle !== null) {
-				await setUnlockEntry(resolved, handle);
-				if (cryptoProvider.exportKeyHandle) {
-					return cryptoProvider.exportKeyHandle(handle);
-				}
 			}
 
 			const restored = await decryptStoredMasterUnlockKey(resolved, false);
@@ -1390,10 +1333,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			return null;
 		},
 
-		async setMasterUnlockKey(
-			key: Uint8Array,
-			accountId?: string,
-		): Promise<void> {
+		async setMasterUnlockKey(key: KeyRef, accountId?: string): Promise<void> {
 			const resolved = await requireAccountId(accountId);
 			await setUnlockEntry(resolved, key);
 		},
@@ -1406,41 +1346,11 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			await setUnlockEntry(resolved, null);
 		},
 
-		async getMasterUnlockKeyHandle(accountId?: string): Promise<number | null> {
-			const resolved = await resolveAccountId(accountId);
-			if (!resolved) {
-				return null;
-			}
-
-			const cached = mukCache.get(resolved);
-			if (typeof cached === "number") {
-				return cached;
-			}
-			if (!(await isSessionValid(resolved))) {
-				return null;
-			}
-
-			const handle = await decryptStoredMasterUnlockKeyHandle(resolved);
-			if (handle === null) {
-				return null;
-			}
-			await setUnlockEntry(resolved, handle);
-			return handle;
-		},
-
-		async setMasterUnlockKeyHandle(
-			keyHandle: number,
-			accountId?: string,
-		): Promise<void> {
-			const resolved = await requireAccountId(accountId);
-			await setUnlockEntry(resolved, keyHandle);
-		},
-
 		decryptStoredMasterUnlockKey,
 
 		async lockAllAccounts(): Promise<void> {
 			for (const entry of mukCache.values()) {
-				await destroyHandle(entry);
+				await destroyKey(entry);
 			}
 			mukCache.clear();
 

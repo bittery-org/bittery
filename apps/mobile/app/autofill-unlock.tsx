@@ -16,7 +16,7 @@ import {
 	ScanFace,
 	ShieldCheck,
 } from "lucide-react-native";
-import { useCallback, useState } from "react";
+import { useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
@@ -43,9 +43,9 @@ const StyledShieldCheck = withUniwind(ShieldCheck);
 import CredentialProvider from "../modules/credential-provider";
 import { useAccount } from "../src/contexts/account-context";
 import { resolveBiometricErrorMessage } from "../src/lib/biometric-error-message";
-import { arrayBufferToBase64 } from "../src/lib/crypto";
 import { useServerUrl } from "../src/lib/rpc";
 import { useI18n } from "../src/providers/i18n-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../src/services/credential-provider-master-unlock-key";
 import { lifecycleDeps } from "../src/services/lifecycle";
 import { storage } from "../src/services/storage";
 
@@ -83,29 +83,6 @@ export default function AutofillUnlockScreen() {
 	const { label: biometricTypeLabel, token: biometricTypeToken } =
 		useBiometricType({ enabled: !!activeAccount });
 
-	const setNativeMuksForAccountIds = useCallback(
-		async (accountIds: string[]) => {
-			if (Platform.OS !== "android" || !CredentialProvider.isAvailable())
-				return;
-
-			for (const accountId of accountIds) {
-				const muk = await storage.getMasterUnlockKey(accountId);
-				const sessionData = await storage.getStoredSessionData(accountId);
-				const autoLockTimeoutMs =
-					await storage.getAutoLockTimeoutOrDefault(accountId);
-				if (muk && sessionData?.userId) {
-					const mukBase64 = arrayBufferToBase64(muk);
-					CredentialProvider.setMasterUnlockKey(
-						mukBase64,
-						sessionData.userId,
-						autoLockTimeoutMs,
-					);
-				}
-			}
-		},
-		[],
-	);
-
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
 		// The OS renders this string, so it is user-facing copy and has to be
@@ -119,7 +96,9 @@ export default function AutofillUnlockScreen() {
 			const vaultKeys = await storage.getVaultKeys(activeAccount.accountId);
 
 			if (token && vaultKeys) {
-				await setNativeMuksForAccountIds([activeAccount.accountId]);
+				await mirrorBorrowedMasterUnlockKeysToCredentialProvider([
+					activeAccount.accountId,
+				]);
 
 				// Load server URL for this account
 				const serverUrl = await storage.getServerUrl(activeAccount.accountId);
@@ -197,7 +176,9 @@ export default function AutofillUnlockScreen() {
 
 			// Set MUK in native CredentialProvider for autofill decryption
 			if (Platform.OS === "android" && CredentialProvider.isAvailable()) {
-				await setNativeMuksForAccountIds([activeAccount.accountId]);
+				await mirrorBorrowedMasterUnlockKeysToCredentialProvider([
+					activeAccount.accountId,
+				]);
 
 				// Update 30-day master password entry timestamp in native
 				CredentialProvider.updateLastMasterPasswordEntry();

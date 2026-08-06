@@ -98,25 +98,31 @@ export class AccountSessionManager {
 	}
 
 	private async verifyUnlockPolicy(accountId: string): Promise<boolean> {
-		if (this.options.verifyUnlockPolicy) {
-			try {
+		try {
+			if (this.options.verifyUnlockPolicy) {
 				await this.options.verifyUnlockPolicy(accountId);
 				return true;
-			} catch {
-				await this.storage.clearSession(accountId);
-				return false;
 			}
-		}
 
-		const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
-		if (enforcer.isVerified(accountId)) {
+			const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
+			if (!enforcer.isVerified(accountId)) {
+				const client = await createStoredAccountRpcClient(
+					this.storage,
+					accountId,
+				).catch(() => null);
+				await enforcer.verifyForUnlock(accountId, client);
+			}
 			return true;
+		} catch (error) {
+			const outcome = await lifecycleLockAccount(accountId, this.lifecycle);
+			console.error(
+				"[AccountSessionManager] Unlock policy verification failed:",
+				accountId,
+				error,
+				outcome.failures,
+			);
+			return false;
 		}
-		const client = await createStoredAccountRpcClient(
-			this.storage,
-			accountId,
-		).catch(() => null);
-		return enforcer.verifyOrClear(accountId, client);
 	}
 
 	async initialize(): Promise<void> {

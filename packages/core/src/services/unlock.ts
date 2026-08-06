@@ -7,6 +7,7 @@
  * RN/desktop hooks run the identical flow.
  */
 
+import type { CryptoPort } from "@bittery/crypto-port";
 import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
 import type {
 	AccountStore,
@@ -15,8 +16,8 @@ import type {
 } from "@bittery/storage";
 import { findAccountById } from "@bittery/storage/account-id";
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
-import type { ICrypto } from "@bittery/types";
-import { performSRPUnlock, storeUnlockSession } from "./auth-service";
+import { type CredentialMirror, lockAccount } from "./account-lifecycle";
+import { performSRPUnlock, storeUnlockSessionOwned } from "./auth-service";
 import {
 	createStaticStoredAccountRpcClient,
 	createStoredAccountRpcClient,
@@ -68,11 +69,12 @@ export interface UnlockOutcome {
 export interface UnlockDeps {
 	storage: AccountStore;
 	itemCache: ItemCache;
+	credentialMirror: CredentialMirror;
 }
 
-/** Only the SRP (password) path derives keys, so only it takes an `ICrypto`. */
+/** Only the SRP (password) path derives keys, so only it takes a `CryptoPort`. */
 export interface PasswordUnlockDeps extends UnlockDeps {
-	crypto: ICrypto;
+	crypto: CryptoPort;
 }
 
 export interface UnlockOptions {
@@ -156,7 +158,7 @@ function unknownAccountOutcome(accountId: string): UnlockOutcome {
 async function acquireWithPassword(
 	targets: AccountMetadata[],
 	password: string,
-	{ storage, itemCache, crypto }: PasswordUnlockDeps,
+	{ storage, itemCache, crypto, credentialMirror }: PasswordUnlockDeps,
 ): Promise<AcquireResult> {
 	const candidates: UnlockCandidate[] = [];
 	const failed: UnlockFailure[] = [];
@@ -186,28 +188,34 @@ async function acquireWithPassword(
 				{ accountId, password },
 				{ crypto, rpcClient, storage },
 			);
-			await storeUnlockSession(result, storage, itemCache, accountId, {
-				travelModeRpcClient: rpcClient,
-				serverUrl,
-				setActive: false,
-			});
+			await storeUnlockSessionOwned(
+				result,
+				storage,
+				itemCache,
+				crypto,
+				accountId,
+				{
+					travelModeRpcClient: rpcClient,
+					serverUrl,
+					setActive: false,
+				},
+			);
 
 			candidates.push({ account, rpcClient, verified: true });
 		} catch (error) {
 			// The credential was accepted before travel mode is verified, so a
 			// verification failure must not be reported as a rejected password.
 			if (error instanceof TravelModeVerificationError) {
-				try {
-					// Fail closed: a `local`-mode unlock writes nothing before verifying,
-					// so any session already on disk would survive unverified.
-					await storage.clearSession(accountId);
-				} catch (clearError) {
-					// Best-effort: the remaining accounts in the batch still owe the
-					// caller an outcome rather than a rejection.
+				const outcome = await lockAccount(accountId, {
+					storage,
+					itemCache,
+					credentialMirror,
+				});
+				if (outcome.failures.length > 0) {
 					console.error(
-						"[Unlock] Failed to clear an unverified session:",
+						"[Unlock] Failed to fully lock an unverified session:",
 						accountId,
-						clearError,
+						outcome.failures,
 					);
 				}
 				failed.push({ accountId, email, reason: "travel_mode_unverified" });
@@ -330,7 +338,7 @@ async function acquireWithBiometric(
 async function runUnlock(
 	{ candidates, failed }: AcquireResult,
 	{ accounts, previousActive }: UnlockPlan,
-	{ storage, itemCache }: UnlockDeps,
+	{ storage, itemCache, credentialMirror }: UnlockDeps,
 	opts?: UnlockOptions,
 ): Promise<UnlockOutcome> {
 	const enforcer = getTravelModeEnforcer(storage, itemCache);
@@ -338,7 +346,11 @@ async function runUnlock(
 	for (const { account, rpcClient, verified } of candidates) {
 		if (
 			verified ||
-			(await enforcer.verifyOrClear(account.accountId, rpcClient))
+			(await enforcer.verifyOrClear(
+				account.accountId,
+				rpcClient,
+				credentialMirror,
+			))
 		) {
 			unlocked.push(account.accountId);
 			continue;
