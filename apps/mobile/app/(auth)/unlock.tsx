@@ -25,10 +25,10 @@ import {
 	AccountAvatar,
 	AuthDivider,
 	BiometricGlyph,
+	BrandLockup,
 	getAccountLabel,
 	InlineNotice,
 	PasswordField,
-	UnlockLockup,
 } from "@/components/auth-kit";
 import {
 	BrandButton,
@@ -457,15 +457,15 @@ export default function UnlockScreen() {
 					showsVerticalScrollIndicator={false}
 					contentContainerStyle={{
 						flexGrow: 1,
-						justifyContent: "center",
 						paddingHorizontal: layout.screenPadding,
 						paddingTop: layout.gap.lg,
 						paddingBottom: bottomInset,
 					}}
 				>
-					<UnlockLockup icon={IconLock} title={m.mob_unlock_title()} />
+					<BrandLockup />
 
-					<View className="mt-8 gap-4">
+					{/* The form centres itself in whatever the wordmark leaves. */}
+					<View className="mt-10 flex-1 justify-center gap-4">
 						{allAccounts.length > 1 ? (
 							<Select
 								value={selectedAccountValue}
@@ -565,14 +565,21 @@ export default function UnlockScreen() {
 								</Select.Portal>
 							</Select>
 						) : targetAccount ? (
-							<View className="items-center gap-2.5">
-								<AccountAvatar account={targetAccount} size={44} radius={16} />
-								<Text
-									numberOfLines={1}
-									className="font-medium text-base text-foreground"
-								>
-									{targetAccount.email}
-								</Text>
+							// Same card as the multi-account picker, minus the affordance,
+							// so the screen does not change shape with the account count.
+							<View className="flex-row items-center gap-3 rounded-2xl border border-border bg-surface px-3.5 py-3 shadow-surface">
+								<AccountAvatar account={targetAccount} />
+								<View className="min-w-0 flex-1">
+									<Text
+										numberOfLines={1}
+										className="font-medium text-base text-foreground"
+									>
+										{getAccountLabel(targetAccount, accountFallback)}
+									</Text>
+									<Text numberOfLines={1} className="text-muted text-sm">
+										{targetAccount.email}
+									</Text>
+								</View>
 							</View>
 						) : null}
 
@@ -609,7 +616,7 @@ export default function UnlockScreen() {
 									leading={
 										<BiometricGlyph
 											token={biometricTypeToken}
-											size={iconSize.header}
+											size={iconSize.bar}
 											className="text-accent-foreground"
 										/>
 									}
