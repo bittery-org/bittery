@@ -231,7 +231,7 @@ export default function BrowseScreen() {
 				}
 			/>
 
-			<View className="px-4 pb-3">
+			<View className="px-4 pb-2.5">
 				<Segmented options={segments} value={segment} onChange={setSegment} />
 			</View>
 

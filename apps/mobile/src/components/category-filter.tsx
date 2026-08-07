@@ -64,7 +64,7 @@ export function CategoryFilter({
 	// The wrapper pins the rail to its content height; a bare horizontal
 	// ScrollView would otherwise stretch into the list below it.
 	return (
-		<View className={cn("pb-3", className)}>
+		<View className={cn("pb-2.5", className)}>
 			<ChipRail
 				chips={chips}
 				value={selectedCategory}

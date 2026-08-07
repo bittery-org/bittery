@@ -64,7 +64,9 @@ comes free from `global.css` — do not add per-component light/dark branches fo
 - Screen horizontal padding: **16**. Grouped card inner padding: **14**.
 - List row min height **56** (two-line) / **48** (single-line); icon tile **40** in rows,
   **56** in headers.
-- App bar: compact row **44** tall, large title block **48** below it.
+- App bar: one row. A compact title sits in a **44**-tall row; a large title
+  instead shares that row with the back affordance, `leading` and `actions`, so a
+  screen never spends a whole band on an avatar alone.
 - Tab bar: **hairline top border + blur**, content height **52** plus safe-area bottom
   inset. It is not a floating pill.
 - Gap rhythm: 8 / 12 / 16 / 24. Sections separated by 24.

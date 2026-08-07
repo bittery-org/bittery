@@ -66,7 +66,7 @@ export default function AllItemsScreen() {
 				leading={<AccountSwitcher />}
 			/>
 
-			<View className="px-4 pb-3">
+			<View className="px-4 pb-2.5">
 				<SearchField value={searchQuery} onChange={setSearchQuery}>
 					<SearchField.Group>
 						<SearchField.SearchIcon />

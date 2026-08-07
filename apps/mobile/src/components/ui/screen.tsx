@@ -57,7 +57,11 @@ export function Screen({
 
 interface AppBarProps {
 	title?: string;
-	/** Rendered below the compact row as the screen's large title. */
+	/**
+	 * The screen's large title. It shares its row with the back affordance,
+	 * `leading` and `actions` rather than stacking below them — a phone has no
+	 * vertical space to spend on a header band that only holds an avatar.
+	 */
 	largeTitle?: string;
 	subtitle?: string;
 	leading?: React.ReactNode;
@@ -86,12 +90,16 @@ export function AppBar({
 	className,
 }: AppBarProps) {
 	const router = useRouter();
+	const isLarge = Boolean(largeTitle) && !title;
 
 	return (
 		<View className={cn(bordered ? "border-border border-b" : "", className)}>
 			<View
-				className="flex-row items-center gap-2 px-4"
-				style={{ height: layout.appBarHeight }}
+				className={cn(
+					"flex-row items-center gap-2 px-4",
+					isLarge ? "py-1.5" : "",
+				)}
+				style={isLarge ? undefined : { height: layout.appBarHeight }}
 			>
 				{showBack ? (
 					<PressableFeedback
@@ -103,13 +111,23 @@ export function AppBar({
 					</PressableFeedback>
 				) : null}
 				{leading}
-				{title ? (
-					<Text
-						numberOfLines={1}
-						className="min-w-0 flex-1 font-semibold text-foreground text-lg"
-					>
-						{title}
-					</Text>
+				{isLarge || title ? (
+					<View className="min-w-0 flex-1">
+						<Text
+							numberOfLines={1}
+							className={cn(
+								"font-semibold text-foreground",
+								isLarge ? "text-3xl tracking-tight" : "text-lg",
+							)}
+						>
+							{largeTitle ?? title}
+						</Text>
+						{subtitle ? (
+							<Text numberOfLines={1} className="text-muted text-sm">
+								{subtitle}
+							</Text>
+						) : null}
+					</View>
 				) : (
 					<View className="flex-1" />
 				)}
@@ -117,21 +135,6 @@ export function AppBar({
 					<View className="flex-row items-center gap-1.5">{actions}</View>
 				) : null}
 			</View>
-			{largeTitle ? (
-				<View className="px-4 pt-1 pb-3">
-					<Text
-						numberOfLines={1}
-						className="font-semibold text-3xl text-foreground tracking-tight"
-					>
-						{largeTitle}
-					</Text>
-					{subtitle ? (
-						<Text numberOfLines={1} className="mt-1 text-muted text-sm">
-							{subtitle}
-						</Text>
-					) : null}
-				</View>
-			) : null}
 		</View>
 	);
 }
