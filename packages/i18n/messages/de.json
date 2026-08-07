@@ -438,6 +438,7 @@
 	"vaults_member_list_error_vault_key_decrypt_failed": "Tresorschlüssel konnte nicht entschlüsselt werden. Bitte melde dich erneut an.",
 	"vaults_member_list_error_master_unlock_key_missing": "Master Unlock Key ist nicht verfügbar. Bitte melde dich erneut an.",
 	"vaults_member_list_error_session_data_missing": "Sitzungsdaten sind nicht verfügbar. Bitte melde dich erneut an.",
+	"vaults_member_list_error_rotated_key_missing": "Das Mitglied wurde entfernt und der Tresorschlüssel rotiert, aber dein neuer Schlüssel konnte nicht gespeichert werden. Bitte melde dich erneut an, um wieder Zugriff auf diesen Tresor zu erhalten.",
 	"vaults_member_list_remove_dialog_title": "Mitglied entfernen",
 	"vaults_member_list_remove_dialog_description": "Möchtest du {name} wirklich aus diesem Tresor entfernen? Die Person verliert den Zugriff auf alle Einträge.",
 	"vaults_member_list_remove_dialog_rotation_notice": "Der Tresor-Verschlüsselungsschlüssel wird rotiert und alle Einträge zur Sicherheit neu verschlüsselt.",

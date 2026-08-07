@@ -2585,6 +2585,8 @@ data class ItemData (
     var `encryptionIv`: kotlin.String
     , 
     var `encryptionAlgorithm`: kotlin.String
+    , 
+    var `context`: EncryptionContext
     
 ){
     
@@ -2605,6 +2607,7 @@ public object FfiConverterTypeItemData: FfiConverterRustBuffer<ItemData> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterTypeEncryptionContext.read(buf),
         )
     }
 
@@ -2612,7 +2615,8 @@ public object FfiConverterTypeItemData: FfiConverterRustBuffer<ItemData> {
             FfiConverterString.allocationSize(value.`id`) +
             FfiConverterString.allocationSize(value.`encryptedData`) +
             FfiConverterString.allocationSize(value.`encryptionIv`) +
-            FfiConverterString.allocationSize(value.`encryptionAlgorithm`)
+            FfiConverterString.allocationSize(value.`encryptionAlgorithm`) +
+            FfiConverterTypeEncryptionContext.allocationSize(value.`context`)
     )
 
     override fun write(value: ItemData, buf: ByteBuffer) {
@@ -2620,6 +2624,7 @@ public object FfiConverterTypeItemData: FfiConverterRustBuffer<ItemData> {
             FfiConverterString.write(value.`encryptedData`, buf)
             FfiConverterString.write(value.`encryptionIv`, buf)
             FfiConverterString.write(value.`encryptionAlgorithm`, buf)
+            FfiConverterTypeEncryptionContext.write(value.`context`, buf)
     }
 }
 

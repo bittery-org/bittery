@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { CryptoError } from "@bittery/crypto-wasm";
 import type { KdfProfile } from "@bittery/types";
 import { CryptoPortError } from "../errors";
 import { runCryptoPortConformance } from "./port-conformance";
@@ -376,5 +377,41 @@ describe("wasm-worker adapter — failure", () => {
 		doubles.wasm.nextUuidFailure = new Error(message);
 
 		await expect(port.generateUuid()).rejects.toMatchObject({ code, message });
+	});
+
+	// The worker classifies before postMessage, so the tag has to survive as code and text.
+	test.each([
+		[
+			"Decryption",
+			() => new CryptoError.Decryption("decryption failed: aead::Error"),
+			"decryption-failed",
+			"CryptoError.Decryption: decryption failed: aead::Error",
+		],
+		[
+			"KeyDestroyed",
+			() => new CryptoError.KeyDestroyed(),
+			"key-destroyed",
+			"CryptoError.KeyDestroyed",
+		],
+		[
+			"InvalidIvLength",
+			() => new CryptoError.InvalidIvLength({ expected: 12n, actual: 16n }),
+			"invalid-input",
+			"CryptoError.InvalidIvLength: expected=12, actual=16",
+		],
+		[
+			"BackgroundTaskFailed",
+			() => new CryptoError.BackgroundTaskFailed(),
+			"backend-failure",
+			"CryptoError.BackgroundTaskFailed",
+		],
+	])("generated %s error becomes %s", async (_variant, build, code, message) => {
+		const { port, doubles } = await makePort();
+		doubles.wasm.nextUuidFailure = build();
+
+		await expect(port.generateUuid()).rejects.toMatchObject({
+			code,
+			message,
+		});
 	});
 });

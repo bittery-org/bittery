@@ -6,8 +6,9 @@
 	"type": "module",
 	"pnpm": {
 		"overrides": {
-			"react": "19.1.0",
-			"react-dom": "19.1.0"
+			"react": "19.2.3",
+			"react-dom": "19.2.3",
+			"react-native": "0.86.2"
 		},
 		"patchedDependencies": {
 			"uniffi-bindgen-react-native@0.31.0-3": "patches/uniffi-bindgen-react-native@0.31.0-3.patch"

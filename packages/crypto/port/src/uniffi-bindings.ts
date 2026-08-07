@@ -38,6 +38,67 @@ export class BackendFailure extends Error {
 	}
 }
 
+/**
+ * `CryptoError_Tags` from the generated bindings. Both the WASM and React Native generators
+ * emit these same strings, and the table is duplicated here because this file must not import
+ * either generated module at runtime — the React Native adapter shares it.
+ */
+const UNIFFI_ERROR_CODES = new Map<string, CryptoPortErrorCode>([
+	["Decryption", "decryption-failed"],
+	["KeyDestroyed", "key-destroyed"],
+	["KeyHandleUnavailable", "invalid-key-ref"],
+	["InvalidSessionProof", "verification-failed"],
+	["InvalidPublicEphemeral", "verification-failed"],
+	["InvalidInput", "invalid-input"],
+	["InvalidKeyLength", "invalid-input"],
+	["InvalidIvLength", "invalid-input"],
+	["InvalidPem", "invalid-input"],
+	["InvalidSecretKey", "invalid-input"],
+	["Base64Decode", "invalid-input"],
+	["HexDecode", "invalid-input"],
+	["Utf8", "invalid-input"],
+	["KeyDerivation", "backend-failure"],
+	["Encryption", "backend-failure"],
+	["Rsa", "backend-failure"],
+	["Srp", "backend-failure"],
+	["BackgroundTaskFailed", "backend-failure"],
+]);
+
+/** Single-string variants arrive as a frozen tuple, struct variants as a record, unit as nothing. */
+function detail(inner: unknown): string {
+	if (Array.isArray(inner)) {
+		return inner.map((value) => String(value)).join(", ");
+	}
+	if (typeof inner === "object" && inner !== null) {
+		return Object.entries(inner)
+			.map(([field, value]) => `${field}=${String(value)}`)
+			.join(", ");
+	}
+	return inner === undefined || inner === null ? "" : String(inner);
+}
+
+function classifyUniffi(
+	error: unknown,
+): { code: CryptoPortErrorCode; message: string } | null {
+	if (!(error instanceof Error)) {
+		return null;
+	}
+	const { tag, inner } = error as { tag?: unknown; inner?: unknown };
+	if (typeof tag !== "string") {
+		return null;
+	}
+	const code = UNIFFI_ERROR_CODES.get(tag);
+	if (code === undefined) {
+		return null;
+	}
+	const text = detail(inner);
+	return {
+		code,
+		message:
+			text.length > 0 ? `CryptoError.${tag}: ${text}` : `CryptoError.${tag}`,
+	};
+}
+
 const INVALID_INPUT_MARKERS = [
 	"base64",
 	"invalid input",
@@ -57,6 +118,11 @@ export function classify(error: unknown): {
 } {
 	if (error instanceof BackendFailure) {
 		return { code: error.code, message: error.message };
+	}
+
+	const uniffi = classifyUniffi(error);
+	if (uniffi !== null) {
+		return uniffi;
 	}
 
 	const message = error instanceof Error ? error.message : String(error);
@@ -82,12 +148,22 @@ export function classify(error: unknown): {
 	return { code: "backend-failure", message };
 }
 
+function encryptionContext(
+	value: NonNullable<Parameters<CryptoPort["encrypt"]>[2]>,
+): UniffiEncryptionContext {
+	return { ...value, version: BigInt(value.version) };
+}
+
 function context(
 	value: Parameters<CryptoPort["encrypt"]>[2],
 ): UniffiEncryptionContext | undefined {
-	return value === null
-		? undefined
-		: { ...value, version: BigInt(value.version) };
+	return value === null ? undefined : encryptionContext(value);
+}
+
+function item(
+	value: Parameters<CryptoPort["reEncryptItem"]>[0],
+): UniffiItemData {
+	return { ...value, context: encryptionContext(value.context) };
 }
 
 function bytes(value: ArrayBuffer): Uint8Array {
@@ -100,6 +176,14 @@ type UniffiEncryptionContext = {
 	entityType: string;
 	version: bigint;
 	userId: string;
+};
+
+type UniffiItemData = {
+	id: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	context: UniffiEncryptionContext;
 };
 
 export function createCryptoUniffiBackend(
@@ -191,8 +275,8 @@ export function createCryptoUniffiBackend(
 				userId,
 				BigInt(keyVersion),
 			),
-		reEncryptItem: (item, oldVaultKey, newVaultKey) =>
-			wasm.reEncryptItem(item, oldVaultKey, newVaultKey),
+		reEncryptItem: (itemData, oldVaultKey, newVaultKey) =>
+			wasm.reEncryptItem(item(itemData), oldVaultKey, newVaultKey),
 		performKeyRotation: (
 			oldVaultKey,
 			members,
@@ -205,7 +289,7 @@ export function createCryptoUniffiBackend(
 			wasm.performKeyRotation(
 				oldVaultKey,
 				[...members],
-				[...items],
+				items.map(item),
 				vaultId,
 				BigInt(keyVersion),
 				currentUserId,

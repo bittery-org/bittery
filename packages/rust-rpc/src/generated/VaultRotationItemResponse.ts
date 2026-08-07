@@ -5,4 +5,9 @@ export type VaultRotationItemResponse = {
 	encryptedData: string;
 	encryptionIv: string;
 	encryptionAlgorithm: string;
+	/**
+	 * The client rebuilds this item's AAD from these; rotation does not change either.
+	 */
+	version: number;
+	lastModifiedBy: string | null;
 };

@@ -214,6 +214,97 @@ fn recovery_and_vault_key_wrapping_interoperate_with_core() {
 }
 
 #[test]
+fn key_rotation_preserves_each_item_binding_style() {
+    let old_vault_key = [0x11; 32];
+    let master_unlock_key = [0x22; 32];
+
+    let bound = block_on(api::encrypt(
+        "bound payload".into(),
+        block_on(api::import_key(old_vault_key.to_vec())).unwrap(),
+        Some(context()),
+    ))
+    .unwrap();
+    // Written before AAD binding existed: its context lives inside the plaintext envelope.
+    let unbound = block_on(api::encrypt(
+        "legacy payload".into(),
+        block_on(api::import_key(old_vault_key.to_vec())).unwrap(),
+        None,
+    ))
+    .unwrap();
+
+    let result = block_on(api::perform_key_rotation(
+        block_on(api::import_key(old_vault_key.to_vec())).unwrap(),
+        vec![api::MemberKeyData {
+            user_id: "user-9".into(),
+            public_key: String::new(),
+        }],
+        vec![
+            api::ItemData {
+                id: "item-7".into(),
+                encrypted_data: bound.ciphertext,
+                encryption_iv: bound.iv,
+                encryption_algorithm: bound.algorithm,
+                context: context(),
+            },
+            api::ItemData {
+                id: "item-8".into(),
+                encrypted_data: unbound.ciphertext,
+                encryption_iv: unbound.iv,
+                encryption_algorithm: unbound.algorithm,
+                context: api::EncryptionContext {
+                    entity_id: "item-8".into(),
+                    ..context()
+                },
+            },
+        ],
+        "vault-1".into(),
+        4,
+        "user-9".into(),
+        block_on(api::import_key(master_unlock_key.to_vec())).unwrap(),
+    ))
+    .unwrap();
+
+    let new_vault_key = core::decrypt_vault_key_with_muk(
+        &result.member_encrypted_keys[0].encrypted_vault_key,
+        &master_unlock_key,
+        &core::VaultKeyWrapContext::new("vault-1", "user-9", 4),
+    )
+    .unwrap();
+
+    let rotated = |index: usize| core::EncryptedData {
+        ciphertext: result.re_encrypted_items[index].encrypted_data.clone(),
+        iv: result.re_encrypted_items[index].encryption_iv.clone(),
+        algorithm: "AES-GCM-AAD-V1".into(),
+    };
+    let core_context = core::AadContext {
+        vault_id: "vault-1".into(),
+        entity_id: "item-7".into(),
+        entity_type: "item".into(),
+        version: 3,
+        user_id: "user-9".into(),
+    };
+
+    assert_eq!(
+        core::decrypt_with_aad(&rotated(0), &new_vault_key, &core_context).unwrap(),
+        "bound payload"
+    );
+    assert!(core::decrypt(&rotated(0), &new_vault_key).is_err());
+    assert_eq!(
+        core::decrypt(&rotated(1), &new_vault_key).unwrap(),
+        "legacy payload"
+    );
+    assert!(core::decrypt_with_aad(
+        &rotated(1),
+        &new_vault_key,
+        &core::AadContext {
+            entity_id: "item-8".into(),
+            ..core_context
+        }
+    )
+    .is_err());
+}
+
+#[test]
 fn key_handle_destroy_is_idempotent_and_blocks_later_use() {
     let handle = block_on(api::import_key(vec![7; 32])).unwrap();
     block_on(api::destroy_key(handle.clone())).unwrap();

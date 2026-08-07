@@ -2655,7 +2655,8 @@ export type ItemData = {
     id: string,
     encryptedData: string,
     encryptionIv: string,
-    encryptionAlgorithm: string
+    encryptionAlgorithm: string,
+    context: EncryptionContext
 }
 
 /**
@@ -2682,7 +2683,8 @@ const FfiConverterTypeItemData = (() => {
                 id: FfiConverterString.read(from), 
                 encryptedData: FfiConverterString.read(from), 
                 encryptionIv: FfiConverterString.read(from), 
-                encryptionAlgorithm: FfiConverterString.read(from)
+                encryptionAlgorithm: FfiConverterString.read(from), 
+                context: FfiConverterTypeEncryptionContext.read(from)
             };
         }
         write(value: TypeName, into: RustBuffer): void {
@@ -2690,12 +2692,14 @@ const FfiConverterTypeItemData = (() => {
             FfiConverterString.write(value.encryptedData, into);
             FfiConverterString.write(value.encryptionIv, into);
             FfiConverterString.write(value.encryptionAlgorithm, into);
+            FfiConverterTypeEncryptionContext.write(value.context, into);
         }
         allocationSize(value: TypeName): number {
             return FfiConverterString.allocationSize(value.id) +
              FfiConverterString.allocationSize(value.encryptedData) +
              FfiConverterString.allocationSize(value.encryptionIv) +
-             FfiConverterString.allocationSize(value.encryptionAlgorithm);
+             FfiConverterString.allocationSize(value.encryptionAlgorithm) +
+             FfiConverterTypeEncryptionContext.allocationSize(value.context);
             
         }
     };

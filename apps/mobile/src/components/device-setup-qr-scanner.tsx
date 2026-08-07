@@ -177,7 +177,7 @@ export function DeviceSetupQrScanner({
 		>
 			<View className="flex-1 bg-black">
 				<CameraView
-					style={StyleSheet.absoluteFillObject}
+					style={StyleSheet.absoluteFill}
 					facing="back"
 					enableTorch={torchEnabled}
 					barcodeScannerSettings={{ barcodeTypes: ["qr"] }}

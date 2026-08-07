@@ -438,6 +438,7 @@
 	"vaults_member_list_error_vault_key_decrypt_failed": "Could not decrypt vault key. Please log in again.",
 	"vaults_member_list_error_master_unlock_key_missing": "Master Unlock Key not available. Please log in again.",
 	"vaults_member_list_error_session_data_missing": "Session data not available. Please log in again.",
+	"vaults_member_list_error_rotated_key_missing": "The member was removed and the vault key was rotated, but your new key could not be stored. Please log in again to regain access to this vault.",
 	"vaults_member_list_remove_dialog_title": "Remove Member",
 	"vaults_member_list_remove_dialog_description": "Are you sure you want to remove {name} from this vault? They will lose access to all items.",
 	"vaults_member_list_remove_dialog_rotation_notice": "The vault encryption key will be rotated and all items re-encrypted for security.",

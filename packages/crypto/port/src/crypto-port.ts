@@ -248,6 +248,12 @@ export interface CryptoPort {
 		keyVersion: number,
 	): Promise<string>;
 
+	/**
+	 * Moves one item's ciphertext onto a new vault key without changing what it is bound to:
+	 * `item.context` is both the AAD the stored ciphertext is opened with and the AAD the
+	 * replacement is sealed under. An item written before AAD binding existed opens with no
+	 * context and is re-sealed with none, because re-binding it is a persisted-format change.
+	 */
 	reEncryptItem(
 		item: ItemData,
 		oldVaultKey: KeyRef,
@@ -256,7 +262,8 @@ export interface CryptoPort {
 
 	/**
 	 * A whole rotation in one backend call: the new vault key is generated, wrapped and
-	 * discarded below the seam, so it never reaches JS on any platform.
+	 * discarded below the seam, so it never reaches JS on any platform. Each item keeps the
+	 * binding {@link reEncryptItem} describes.
 	 */
 	performKeyRotation(
 		oldVaultKey: KeyRef,

@@ -362,6 +362,67 @@ jobs:
           elapsed="$(( $(date +%s) - start ))"
           echo "package tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
+  # `expo-doctor` — config schema, duplicate native modules, SDK version drift —
+  # has no equivalent anywhere else in CI, and the mobile typecheck only reaches
+  # a runner today buried inside the js-types turbo graph, where a mobile-only
+  # break is indistinguishable from a web one.
+  #
+  # No crypto artifact download: the UniFFI React Native bindings under
+  # packages/crypto/react-native/src/generated are committed, and mobile never
+  # touches the WASM adapter (only its .wasm binary is gitignored anyway).
+  mobile:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm install --frozen-lockfile
+          elapsed="$(( $(date +%s) - start ))"
+          echo "pnpm install: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # packages/i18n/src/paraglide is generated, and mobile imports it.
+      - name: Generate i18n
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm run i18n:generate
+          elapsed="$(( $(date +%s) - start ))"
+          echo "i18n generate: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Mobile typecheck
+        shell: bash
+        run: |
+          set -euo pipefail
+          start="$(date +%s)"
+          pnpm --filter mobile run check-types
+          elapsed="$(( $(date +%s) - start ))"
+          echo "mobile typecheck: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # Advisory: the duplicate-dependency check always fails under pnpm here.
+      # apps/mobile pins TypeScript 6 while the other workspaces are on 5.x, so
+      # pnpm resolves two peer-variants of expo@57.0.11 that differ only in
+      # JS tooling. `expo-modules-autolinking resolve` emits a single copy on
+      # both platforms, so the native build is unaffected.
+      - name: Expo doctor
+        continue-on-error: true
+        working-directory: apps/mobile
+        run: npx expo-doctor
+
   server:
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest

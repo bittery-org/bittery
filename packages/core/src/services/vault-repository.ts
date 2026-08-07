@@ -336,6 +336,52 @@ export class VaultRepository {
 		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
 	}
 
+	/**
+	 * Which of this account's vault keys, if any, opens a payload its own vault key
+	 * could not. Decrypts without AAD on purpose: that isolates "wrong key" from
+	 * "wrong encryption context", which is the only distinction worth making here.
+	 */
+	private async findVaultKeyThatOpens(
+		item: CachedEncryptedItem,
+	): Promise<string | null> {
+		for (const vaultId of this.vaultKeyEntries.keys()) {
+			let vaultKey: KeyRef;
+			try {
+				vaultKey = await this.decryptVaultKey(vaultId);
+			} catch {
+				continue;
+			}
+			try {
+				await this.crypto.decrypt(
+					{
+						ciphertext: item.encryptedData,
+						iv: item.encryptionIv,
+						algorithm: item.encryptionAlgorithm,
+					},
+					vaultKey,
+					null,
+				);
+				return vaultId;
+			} catch {
+				// Not this key.
+			} finally {
+				await this.crypto.destroyKey(vaultKey);
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Ids, a version and a length only. This is a password manager: no ciphertext,
+	 * no plaintext, no key material may reach a log sink.
+	 */
+	private async describeUndecryptableItem(
+		item: CachedEncryptedItem,
+	): Promise<string> {
+		const openedBy = await this.findVaultKeyThatOpens(item);
+		return `item ${item.id} vault=${item.vaultId} version=${item.version} lastModifiedBy=${item.lastModifiedBy ?? "null"} encryptedDataLength=${item.encryptedData.length} openedByVaultKey=${openedBy ?? "none"}`;
+	}
+
 	private async decryptItemBatch(
 		items: readonly CachedEncryptedItem[],
 	): Promise<
@@ -628,6 +674,10 @@ export class VaultRepository {
 		}
 	}
 
+	/**
+	 * Never throws on a bad payload: sync catch-up applies events one at a time and a
+	 * throw here would stop the cursor advancing, wedging sync on the same event forever.
+	 */
 	async upsertEncrypted(
 		item: CachedEncryptedItem,
 		accountId: string,
@@ -635,8 +685,18 @@ export class VaultRepository {
 		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
-		const decrypted = await this.decryptItem(item);
-		this.items.set(item.id, decrypted);
+
+		try {
+			this.items.set(item.id, await this.decryptItem(item));
+		} catch (error) {
+			// Dropping the stale plaintext also drops its superseded `_encrypted` blob,
+			// which a later favorite/delete write would otherwise persist over this ciphertext.
+			this.items.delete(item.id);
+			console.error(
+				`[VaultRepository] Failed to decrypt synced ${await this.describeUndecryptableItem(item)}:`,
+				error,
+			);
+		}
 		await this.persistItem(item);
 		this.emit();
 	}
@@ -828,7 +888,7 @@ export class VaultRepository {
 					this.items.set(outcome.item.id, outcome.decrypted);
 				} else {
 					console.error(
-						`[VaultRepository] Failed to decrypt cached item ${outcome.item.id}:`,
+						`[VaultRepository] Failed to decrypt cached ${await this.describeUndecryptableItem(outcome.item)}:`,
 						outcome.error,
 					);
 				}
@@ -916,7 +976,7 @@ export class VaultRepository {
 				this.items.set(outcome.item.id, outcome.decrypted);
 			} else {
 				console.error(
-					`[VaultRepository] Failed to decrypt bootstrap item ${outcome.item.id}:`,
+					`[VaultRepository] Failed to decrypt bootstrap ${await this.describeUndecryptableItem(outcome.item)}:`,
 					outcome.error,
 				);
 			}

@@ -25,6 +25,8 @@ pub struct ItemData {
     pub encryption_iv: String,
     /// Encryption algorithm (should be "AES-GCM")
     pub encryption_algorithm: String,
+    /// The context this item's ciphertext is bound to, and that its replacement is re-bound to
+    pub context: AadContext,
 }
 
 /// Re-encrypted item result
@@ -201,12 +203,15 @@ pub fn decrypt_vault_key_with_muk(
     Ok(decrypted)
 }
 
-/// Re-encrypt an item with a new vault key
+/// Re-encrypt an item with a new vault key, preserving how it is bound to its context
 ///
-/// Decrypts the item with the old key and re-encrypts with the new key.
+/// An item written since AAD binding exists is re-encrypted under the same `AadContext`. An
+/// item written before it decrypts with no AAD and carries its context inside the plaintext
+/// envelope instead; that one is re-encrypted with no AAD, because binding it here would
+/// rewrite a persisted format that only a migration may change.
 ///
 /// # Arguments
-/// * `item` - Item data to re-encrypt
+/// * `item` - Item data to re-encrypt, including the context its ciphertext is bound to
 /// * `old_vault_key` - 32-byte old vault encryption key
 /// * `new_vault_key` - 32-byte new vault encryption key
 ///
@@ -217,17 +222,27 @@ pub fn re_encrypt_item(
     old_vault_key: &[u8],
     new_vault_key: &[u8],
 ) -> Result<ReEncryptedItem, CryptoError> {
-    // Decrypt with old key
     let old_encrypted_data = EncryptedData {
         ciphertext: item.encrypted_data.clone(),
         iv: item.encryption_iv.clone(),
         algorithm: item.encryption_algorithm.clone(),
     };
 
-    let mut decrypted_data = decrypt(&old_encrypted_data, old_vault_key)?;
+    let (mut decrypted_data, was_aad_bound) =
+        match decrypt_with_aad(&old_encrypted_data, old_vault_key, &item.context) {
+            Ok(plaintext) => (plaintext, true),
+            Err(aad_error) => match decrypt(&old_encrypted_data, old_vault_key) {
+                Ok(plaintext) => (plaintext, false),
+                Err(_) => return Err(aad_error),
+            },
+        };
 
-    // Re-encrypt with new key
-    let new_encrypted_data = match encrypt(&decrypted_data, new_vault_key) {
+    let re_encrypted = if was_aad_bound {
+        encrypt_with_aad(&decrypted_data, new_vault_key, &item.context)
+    } else {
+        encrypt(&decrypted_data, new_vault_key)
+    };
+    let new_encrypted_data = match re_encrypted {
         Ok(value) => value,
         Err(e) => {
             decrypted_data.zeroize();
@@ -391,12 +406,21 @@ mod tests {
         assert!(decrypt_vault_key_with_muk(&encrypted_json, &muk, &wrong_context).is_err());
     }
 
+    fn item_context(item_id: &str) -> AadContext {
+        AadContext {
+            vault_id: "vault-1".to_string(),
+            entity_id: item_id.to_string(),
+            entity_type: "item".to_string(),
+            version: 4,
+            user_id: "user-1".to_string(),
+        }
+    }
+
     #[test]
-    fn test_re_encrypt_item() {
+    fn test_re_encrypt_item_keeps_a_legacy_item_unbound() {
         let old_key = generate_new_vault_key();
         let new_key = generate_new_vault_key();
 
-        // Create original encrypted item
         let original_data = "Secret item data";
         let encrypted = encrypt(original_data, &old_key).unwrap();
 
@@ -405,12 +429,11 @@ mod tests {
             encrypted_data: encrypted.ciphertext,
             encryption_iv: encrypted.iv,
             encryption_algorithm: encrypted.algorithm,
+            context: item_context("test-item-1"),
         };
 
-        // Re-encrypt
         let re_encrypted = re_encrypt_item(&item, &old_key, &new_key).unwrap();
 
-        // Should be able to decrypt with new key
         let new_encrypted = EncryptedData {
             ciphertext: re_encrypted.encrypted_data,
             iv: re_encrypted.encryption_iv,
@@ -426,6 +449,57 @@ mod tests {
     }
 
     #[test]
+    fn test_re_encrypt_item_keeps_an_aad_bound_item_bound() {
+        let old_key = generate_new_vault_key();
+        let new_key = generate_new_vault_key();
+        let context = item_context("test-item-1");
+
+        let original_data = "Secret item data";
+        let encrypted = encrypt_with_aad(original_data, &old_key, &context).unwrap();
+
+        let item = ItemData {
+            id: "test-item-1".to_string(),
+            encrypted_data: encrypted.ciphertext,
+            encryption_iv: encrypted.iv,
+            encryption_algorithm: encrypted.algorithm,
+            context: context.clone(),
+        };
+
+        let re_encrypted = re_encrypt_item(&item, &old_key, &new_key).unwrap();
+
+        let new_encrypted = EncryptedData {
+            ciphertext: re_encrypted.encrypted_data,
+            iv: re_encrypted.encryption_iv,
+            algorithm: "AES-GCM-AAD-V1".to_string(),
+        };
+        assert_eq!(
+            decrypt_with_aad(&new_encrypted, &new_key, &context).unwrap(),
+            original_data
+        );
+        // The binding survived: without it, and under a different context, it stays shut.
+        assert!(decrypt(&new_encrypted, &new_key).is_err());
+        assert!(decrypt_with_aad(&new_encrypted, &new_key, &item_context("other-item")).is_err());
+    }
+
+    #[test]
+    fn test_re_encrypt_item_rejects_a_mismatched_context() {
+        let old_key = generate_new_vault_key();
+        let new_key = generate_new_vault_key();
+
+        let encrypted =
+            encrypt_with_aad("Secret item data", &old_key, &item_context("item-1")).unwrap();
+        let item = ItemData {
+            id: "item-1".to_string(),
+            encrypted_data: encrypted.ciphertext,
+            encryption_iv: encrypted.iv,
+            encryption_algorithm: encrypted.algorithm,
+            context: item_context("item-2"),
+        };
+
+        assert!(re_encrypt_item(&item, &old_key, &new_key).is_err());
+    }
+
+    #[test]
     fn test_perform_key_rotation() {
         let owner_keys = generate_rsa_key_pair().unwrap();
         let member_keys = generate_rsa_key_pair().unwrap();
@@ -433,8 +507,9 @@ mod tests {
         let old_vault_key = generate_new_vault_key();
         let muk = generate_new_vault_key();
 
-        // Create test items
-        let item1 = encrypt("Item 1 data", &old_vault_key).unwrap();
+        // One item bound to its context, one written before AAD binding existed.
+        let item1 =
+            encrypt_with_aad("Item 1 data", &old_vault_key, &item_context("item-1")).unwrap();
         let item2 = encrypt("Item 2 data", &old_vault_key).unwrap();
 
         let items = vec![
@@ -443,12 +518,14 @@ mod tests {
                 encrypted_data: item1.ciphertext,
                 encryption_iv: item1.iv,
                 encryption_algorithm: item1.algorithm,
+                context: item_context("item-1"),
             },
             ItemData {
                 id: "item-2".to_string(),
                 encrypted_data: item2.ciphertext,
                 encryption_iv: item2.iv,
                 encryption_algorithm: item2.algorithm,
+                context: item_context("item-2"),
             },
         ];
 
@@ -506,6 +583,26 @@ mod tests {
         .unwrap();
         let member_key_bytes = BASE64.decode(member_decrypted.as_bytes()).unwrap();
         assert_eq!(member_key_bytes, owner_decrypted);
+
+        // Each item keeps the binding style it arrived with.
+        let rotated_1 = EncryptedData {
+            ciphertext: result.re_encrypted_items[0].encrypted_data.clone(),
+            iv: result.re_encrypted_items[0].encryption_iv.clone(),
+            algorithm: "AES-GCM-AAD-V1".to_string(),
+        };
+        let rotated_2 = EncryptedData {
+            ciphertext: result.re_encrypted_items[1].encrypted_data.clone(),
+            iv: result.re_encrypted_items[1].encryption_iv.clone(),
+            algorithm: "AES-GCM-AAD-V1".to_string(),
+        };
+        assert_eq!(
+            decrypt_with_aad(&rotated_1, &member_key_bytes, &item_context("item-1")).unwrap(),
+            "Item 1 data"
+        );
+        assert_eq!(
+            decrypt(&rotated_2, &member_key_bytes).unwrap(),
+            "Item 2 data"
+        );
     }
 
     #[test]

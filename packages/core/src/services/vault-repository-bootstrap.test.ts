@@ -278,3 +278,49 @@ describe("VaultRepository per-item persistence is O(1)", () => {
 		expect(recordPort.collections()).toEqual([`${ACCOUNT_ID}:items`]);
 	});
 });
+
+/**
+ * Sync applies one event at a time and only stores the cursor once the write returns,
+ * so a throw here replayed the same undecryptable item on every reconnect forever.
+ */
+describe("VaultRepository absorbs an undecryptable sync write", () => {
+	const UNOPENABLE = "bm90LWNpcGhlcnRleHQ=";
+
+	beforeEach(() => {
+		resetTravelModeEnforcerForTests();
+	});
+
+	it("caches the ciphertext and leaves the item unlisted", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+
+		await repo.upsertCachedItem(
+			{
+				...(await cachedItem("item_poison", crypto, vaultCrypto)),
+				encryptedData: UNOPENABLE,
+			},
+			ACCOUNT_ID,
+		);
+
+		const cached = (await itemCache.getCachedItems(ACCOUNT_ID)) ?? [];
+		expect(cached.map((item) => item.id)).toEqual(["item_poison"]);
+		expect(cached[0]?.encryptedData).toBe(UNOPENABLE);
+		expect(repo.getById("item_poison")).toBeUndefined();
+	});
+
+	// Stale plaintext carries a superseded `_encrypted` blob that a later favorite or
+	// delete write would persist back over the ciphertext sync just delivered.
+	it("evicts the previously decrypted copy of the item", async () => {
+		const { repo, crypto, vaultCrypto } = await setup();
+		const good = await cachedItem("item_1", crypto, vaultCrypto);
+
+		await repo.upsertCachedItem(good, ACCOUNT_ID);
+		expect(repo.getById("item_1")).toBeDefined();
+
+		await repo.upsertCachedItem(
+			{ ...good, version: 2, encryptedData: UNOPENABLE },
+			ACCOUNT_ID,
+		);
+
+		expect(repo.getById("item_1")).toBeUndefined();
+	});
+});

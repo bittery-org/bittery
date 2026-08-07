@@ -1,4 +1,5 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
+import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
 import { useRPCClient } from "@bittery/shared/rpc";
 import type { KeyRotationResult } from "@bittery/types";
 import {
@@ -126,7 +127,18 @@ export function VaultMemberList({
 						userId: m.userId,
 						publicKey: m.publicKey,
 					})),
-					rotationData.items,
+					rotationData.items.map((item) => ({
+						id: item.id,
+						encryptedData: item.encryptedData,
+						encryptionIv: item.encryptionIv,
+						encryptionAlgorithm: item.encryptionAlgorithm,
+						context: buildItemEncryptionContext({
+							vaultId,
+							itemId: item.id,
+							version: item.version,
+							userId: item.lastModifiedBy ?? currentUserId,
+						}),
+					})),
 					vaultId,
 					rotationData.keyVersion + 1,
 					currentUserId,
@@ -150,25 +162,21 @@ export function VaultMemberList({
 			});
 
 			// Step 5: Update local session storage with new vault key
-			// Find and update the vault key in session storage
 			const vaultKeys = await storage.getVaultKeys();
 			if (vaultKeys) {
-				const updatedVaultKeys = vaultKeys.map((vk) => {
-					if (vk.vaultId === vaultId) {
-						// Find the current user's new encrypted key from the rotation result
-						const myNewKey = rotationResult.memberEncryptedKeys.find((mk) => {
-							// We need to find our own key - get current user from members list
-							const currentMember = rotationData.members.find(
-								(m) => m.userId === mk.userId,
-							);
-							return currentMember !== undefined;
-						});
-						if (myNewKey) {
-							return { ...vk, encryptedVaultKey: myNewKey.encryptedVaultKey };
-						}
-					}
-					return vk;
-				});
+				const myNewKey = rotationResult.memberEncryptedKeys.find(
+					(mk) => mk.userId === currentUserId,
+				);
+				// The server already committed the rotation, so a missing copy for us cannot be
+				// rolled back: keeping the stale key would lock us out on the next unlock silently.
+				if (!myNewKey) {
+					throw new Error("rotated_key_missing");
+				}
+				const updatedVaultKeys = vaultKeys.map((vk) =>
+					vk.vaultId === vaultId
+						? { ...vk, encryptedVaultKey: myNewKey.encryptedVaultKey }
+						: vk,
+				);
 				await storage.storeVaultKeys(updatedVaultKeys);
 			}
 
@@ -190,6 +198,9 @@ export function VaultMemberList({
 						break;
 					case "session_data_missing":
 						toast.error(m.vaults_member_list_error_session_data_missing());
+						break;
+					case "rotated_key_missing":
+						toast.error(m.vaults_member_list_error_rotated_key_missing());
 						break;
 					default:
 						toast.error(m.vaults_member_list_toast_remove_failed());

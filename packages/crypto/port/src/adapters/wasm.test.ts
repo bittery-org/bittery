@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { CryptoError } from "@bittery/crypto-wasm";
 import { CryptoPortError } from "../errors";
 import { runCryptoPortConformance } from "./port-conformance";
 import { createWasmCryptoPort } from "./wasm";
@@ -147,5 +148,60 @@ describe("wasm adapter — failure", () => {
 		doubles.wasm.nextUuidFailure = new Error(message);
 
 		await expect(port.generateUuid()).rejects.toMatchObject({ code, message });
+	});
+
+	// The generated bindings put "CryptoError.<Variant>" in `message` and the Rust detail in
+	// `inner`, so classification reads the tag rather than the text.
+	test.each([
+		[
+			"Decryption",
+			() => new CryptoError.Decryption("decryption failed: aead::Error"),
+			"decryption-failed",
+			"CryptoError.Decryption: decryption failed: aead::Error",
+		],
+		[
+			"KeyDestroyed",
+			() => new CryptoError.KeyDestroyed(),
+			"key-destroyed",
+			"CryptoError.KeyDestroyed",
+		],
+		[
+			"KeyHandleUnavailable",
+			() => new CryptoError.KeyHandleUnavailable(),
+			"invalid-key-ref",
+			"CryptoError.KeyHandleUnavailable",
+		],
+		[
+			"InvalidSessionProof",
+			() => new CryptoError.InvalidSessionProof(),
+			"verification-failed",
+			"CryptoError.InvalidSessionProof",
+		],
+		[
+			"InvalidKeyLength",
+			() => new CryptoError.InvalidKeyLength({ expected: 32n, actual: 16n }),
+			"invalid-input",
+			"CryptoError.InvalidKeyLength: expected=32, actual=16",
+		],
+		[
+			"Base64Decode",
+			() => new CryptoError.Base64Decode("Invalid symbol 33"),
+			"invalid-input",
+			"CryptoError.Base64Decode: Invalid symbol 33",
+		],
+		[
+			"Srp",
+			() => new CryptoError.Srp("unsupported prime group"),
+			"backend-failure",
+			"CryptoError.Srp: unsupported prime group",
+		],
+	])("generated %s error becomes %s", async (_variant, build, code, message) => {
+		const { port, doubles } = await makePort();
+		doubles.wasm.nextUuidFailure = build();
+
+		await expect(port.generateUuid()).rejects.toMatchObject({
+			code,
+			message,
+		});
 	});
 });

@@ -229,7 +229,7 @@ export function QrCodeScanner({
 			<View className="flex-1 bg-black">
 				{/* Camera View */}
 				<CameraView
-					style={StyleSheet.absoluteFillObject}
+					style={StyleSheet.absoluteFill}
 					facing="back"
 					enableTorch={torchEnabled}
 					barcodeScannerSettings={{

@@ -226,6 +226,7 @@ pub struct ItemData {
     pub encrypted_data: String,
     pub encryption_iv: String,
     pub encryption_algorithm: String,
+    pub context: EncryptionContext,
 }
 
 impl From<ItemData> for core::ItemData {
@@ -235,6 +236,7 @@ impl From<ItemData> for core::ItemData {
             encrypted_data: value.encrypted_data,
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
+            context: value.context.into(),
         }
     }
 }

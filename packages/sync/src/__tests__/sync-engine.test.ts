@@ -60,6 +60,55 @@ function buildEvent(partial: Partial<SyncEvent> = {}): SyncEvent {
 	};
 }
 
+/** A catch-up page whose first item is the one that will not decrypt locally. */
+function poisonItemClient() {
+	return {
+		sync: {
+			getEventsSince: {
+				query: async () => ({
+					events: [
+						buildEvent({ id: "evt_11", entityId: "item_poison" }),
+						buildEvent({ id: "evt_12", entityId: "item_ok" }),
+					],
+					hasMore: false,
+					requiresFullRefresh: false,
+					cursor: { id: "evt_12" },
+				}),
+			},
+		},
+		vault: {
+			getItem: {
+				query: async ({ itemId }: { itemId: string }) => ({
+					id: itemId,
+					vaultId: "vault_1",
+					category: "login",
+					favorite: false,
+					encryptedData: "ciphertext",
+					encryptionIv: "iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+					version: 1,
+					lastModifiedBy: "user_1",
+					createdAt: "2026-03-13T00:00:00.000Z",
+					updatedAt: "2026-03-13T00:00:00.000Z",
+					deletedAt: null,
+					attachments: [],
+				}),
+			},
+			get: {
+				query: async () => ({
+					id: "vault_1",
+					name: "Vault",
+					vaultType: "personal",
+					icon: null,
+					imageUrl: null,
+				}),
+			},
+			listItems: { query: async () => [] },
+			list: { query: async () => [] },
+		},
+	};
+}
+
 describe("sync engine regressions", () => {
 	test("does not advance cursor when live delta application fails", async () => {
 		const storage = new MemoryStorage();
@@ -276,6 +325,78 @@ describe("sync engine regressions", () => {
 		}
 
 		expect(upsertScopes).not.toContain("alice@example.com");
+
+		orchestrator.dispose();
+	});
+
+	// One item nobody can decrypt used to wedge sync forever: the throw aborted
+	// catch-up before the cursor was stored, so every reconnect replayed it.
+	test("advances past an item the cache cannot decrypt", async () => {
+		const storage = new MemoryStorage();
+		await storage.set("lastSyncCursor", { id: "evt_10" });
+		const outboundQueue = new OutboundQueue(storage, "self_client");
+		const upsertedIds: string[] = [];
+
+		const orchestrator = new SyncOrchestrator({
+			syncManager: {
+				serverUrl: "http://localhost:3000",
+				getAuthToken: async () => "token",
+				clientId: "self_client",
+				storage,
+			},
+			rpcClient: poisonItemClient(),
+			// `VaultRepository.upsertEncrypted` swallows a decryption failure and still
+			// caches the ciphertext, so the sync layer sees a plain successful write.
+			itemCache: stubItemCache({
+				upsertCachedItem: async (item) => {
+					upsertedIds.push(item.id);
+				},
+			}),
+			itemCacheAccountId: "acc_alice",
+			outboundQueue,
+		});
+
+		await (orchestrator as any).runCatchUp();
+
+		expect(upsertedIds).toEqual(["item_poison", "item_ok"]);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_12",
+		);
+
+		orchestrator.dispose();
+	});
+
+	// Guards the placement of the fix above: tolerating the failure anywhere in the
+	// sync layer would also skip events that failed for transient reasons.
+	test("keeps the cursor when an item cache write throws", async () => {
+		const storage = new MemoryStorage();
+		await storage.set("lastSyncCursor", { id: "evt_10" });
+		const outboundQueue = new OutboundQueue(storage, "self_client");
+
+		const orchestrator = new SyncOrchestrator({
+			syncManager: {
+				serverUrl: "http://localhost:3000",
+				getAuthToken: async () => "token",
+				clientId: "self_client",
+				storage,
+			},
+			rpcClient: poisonItemClient(),
+			itemCache: stubItemCache({
+				upsertCachedItem: async () => {
+					throw new Error("cache write failed");
+				},
+			}),
+			itemCacheAccountId: "acc_alice",
+			outboundQueue,
+		});
+
+		await expect((orchestrator as any).runCatchUp()).rejects.toThrow(
+			"cache write failed",
+		);
+
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_10",
+		);
 
 		orchestrator.dispose();
 	});
