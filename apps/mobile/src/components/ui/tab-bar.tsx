@@ -20,10 +20,7 @@ interface TabBarProps {
 		index: number;
 		routes: Array<{ key: string; name: string }>;
 	};
-	descriptors: Record<
-		string,
-		{ options: { title?: string; href?: string | null } }
-	>;
+	descriptors: Record<string, { options: { title?: string } }>;
 	navigation: {
 		emit: (event: {
 			type: "tabPress";
@@ -37,14 +34,22 @@ interface TabBarProps {
 /**
  * Flush bottom bar — hairline top border over a blurred canvas, not a floating
  * pill. Active state is accent icon + label with a short accent underline.
+ *
+ * `icons` is the allow-list: it decides which routes get a tab and in what
+ * order. A `Tabs.Screen` left out of it stays routable but never appears here.
+ * Filtering on the descriptor's `href` instead does not work — expo-router
+ * consumes `href: null` before the options reach a custom `tabBar`, so hidden
+ * routes arrive indistinguishable from real tabs.
  */
 export function createTabBar(icons: TabBarIcons) {
+	const tabOrder = Object.keys(icons);
+
 	return function TabBar({ state, descriptors, navigation }: TabBarProps) {
 		const insets = useSafeAreaInsets();
 		const { theme } = useUniwind();
 
-		const visibleRoutes = state.routes.filter(
-			(route) => descriptors[route.key]?.options.href !== null,
+		const visibleRoutes = tabOrder.flatMap((name) =>
+			state.routes.filter((route) => route.name === name),
 		);
 
 		return (
