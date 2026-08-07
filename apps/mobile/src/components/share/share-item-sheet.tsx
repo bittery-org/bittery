@@ -10,36 +10,28 @@ import {
 } from "@bittery/core/services/share-service";
 import type { DecryptedItem } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
-import { Button, ControlField, Label, Switch, useToast } from "heroui-native";
 import {
-	Check,
-	Copy,
-	Link,
-	Loader2,
-	Share2,
-	TriangleAlert,
-	X,
-} from "lucide-react-native";
+	ControlField,
+	PressableFeedback,
+	Switch,
+	useToast,
+} from "heroui-native";
 import { useState } from "react";
+import { ScrollView, Share, Text, View } from "react-native";
 import {
-	Modal,
-	Pressable,
-	Share,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
-import { withUniwind } from "uniwind";
-
+	BrandButton,
+	ChipRail,
+	IconCheck,
+	IconCopy,
+	IconLink,
+	IconShare,
+	IconTriangleAlert,
+	iconSize,
+	ListCard,
+	SectionLabel,
+} from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
-
-const StyledCheck = withUniwind(Check);
-const StyledCopy = withUniwind(Copy);
-const StyledLink = withUniwind(Link);
-const StyledLoader2 = withUniwind(Loader2);
-const StyledShare2 = withUniwind(Share2);
-const StyledTriangleAlert = withUniwind(TriangleAlert);
-const StyledX = withUniwind(X);
+import { SheetModal } from "../sheet-modal";
 
 interface ShareItemSheetProps {
 	item: DecryptedItem;
@@ -116,7 +108,8 @@ export function ShareItemSheet({
 			toast.show({
 				variant: "danger",
 				label: m.mob_share_toast_failed(),
-				description: error instanceof Error ? error.message : "Unknown error",
+				description:
+					error instanceof Error ? error.message : m.mob_detail_error_unknown(),
 				placement: "bottom",
 			});
 			return;
@@ -158,195 +151,194 @@ export function ShareItemSheet({
 		closeAndReset();
 	};
 
+	if (showCloseConfirm) {
+		return (
+			<SheetModal
+				visible={visible}
+				onClose={() => setShowCloseConfirm(false)}
+				icon={IconTriangleAlert}
+				title={m.mob_share_close_confirm_title()}
+				description={m.mob_share_close_confirm_description()}
+			>
+				<View className="flex-row gap-3 px-4 pt-2">
+					<PressableFeedback
+						onPress={() => setShowCloseConfirm(false)}
+						accessibilityRole="button"
+						accessibilityLabel={m.mob_share_close_confirm_cancel()}
+						className="h-11 flex-1 items-center justify-center rounded-xl border border-border bg-surface"
+					>
+						<PressableFeedback.Highlight />
+						<Text className="font-medium text-base text-foreground">
+							{m.mob_share_close_confirm_cancel()}
+						</Text>
+					</PressableFeedback>
+					<PressableFeedback
+						onPress={closeAndReset}
+						accessibilityRole="button"
+						accessibilityLabel={m.mob_share_close_confirm_confirm()}
+						className="h-11 flex-1 items-center justify-center rounded-xl bg-danger-soft"
+					>
+						<PressableFeedback.Highlight />
+						<Text className="font-medium text-base text-danger">
+							{m.mob_share_close_confirm_confirm()}
+						</Text>
+					</PressableFeedback>
+				</View>
+			</SheetModal>
+		);
+	}
+
 	return (
-		<Modal
+		<SheetModal
 			visible={visible}
-			transparent
-			animationType="slide"
-			onRequestClose={handleClose}
+			onClose={handleClose}
+			isBusy={createShare.isPending}
+			icon={IconShare}
+			title={m.mob_share_title()}
+			description={m.mob_share_description({ title: item.title })}
 		>
-			<View className="flex-1 justify-end bg-black/50">
-				<Pressable className="flex-1" onPress={handleClose} />
-				<View className="rounded-t-2xl bg-background px-4 pt-4 pb-8">
-					{showCloseConfirm ? (
-						<View>
-							<View className="mb-2 flex-row items-center gap-2">
-								<StyledTriangleAlert size={20} className="text-warning" />
-								<Text className="font-semibold text-foreground text-lg">
-									{m.mob_share_close_confirm_title()}
+			<ScrollView
+				contentContainerClassName="gap-5 pb-4"
+				keyboardShouldPersistTaps="handled"
+			>
+				{shareUrl ? (
+					<View className="px-4">
+						<View className="rounded-2xl border border-success/25 bg-success-soft p-4">
+							<View className="flex-row items-center gap-2">
+								<IconLink size={iconSize.chip} className="text-success" />
+								<Text className="font-medium text-sm text-success-soft-foreground">
+									{m.mob_share_link_ready_label()}
 								</Text>
 							</View>
-							<Text className="mb-4 text-muted text-sm">
-								{m.mob_share_close_confirm_description()}
+							<Text
+								className="mt-2 font-mono text-muted text-xs"
+								numberOfLines={2}
+								selectable
+							>
+								{shareUrl}
 							</Text>
-							<View className="flex-row gap-3">
-								<Button
-									variant="secondary"
-									className="flex-1"
-									onPress={() => setShowCloseConfirm(false)}
+							<View className="mt-3 flex-row gap-2">
+								<PressableFeedback
+									onPress={handleCopyLink}
+									accessibilityRole="button"
+									accessibilityLabel={m.mob_share_copy_link()}
+									className="h-11 flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-border bg-surface"
 								>
-									<Button.Label>
-										{m.mob_share_close_confirm_cancel()}
-									</Button.Label>
-								</Button>
-								<Button
-									variant="danger"
-									className="flex-1"
-									onPress={closeAndReset}
+									<PressableFeedback.Highlight />
+									{hasCopiedLink ? (
+										<IconCheck size={iconSize.chip} className="text-success" />
+									) : (
+										<IconCopy
+											size={iconSize.chip}
+											className="text-foreground"
+										/>
+									)}
+									<Text className="font-medium text-foreground text-sm">
+										{m.mob_share_copy_link()}
+									</Text>
+								</PressableFeedback>
+								<PressableFeedback
+									onPress={() => openNativeShare(shareUrl)}
+									accessibilityRole="button"
+									accessibilityLabel={m.mob_share_share_again()}
+									className="h-11 flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-border bg-surface"
 								>
-									<Button.Label>
-										{m.mob_share_close_confirm_confirm()}
-									</Button.Label>
-								</Button>
+									<PressableFeedback.Highlight />
+									<IconShare size={iconSize.chip} className="text-foreground" />
+									<Text className="font-medium text-foreground text-sm">
+										{m.mob_share_share_again()}
+									</Text>
+								</PressableFeedback>
 							</View>
 						</View>
-					) : (
-						<>
-							{/* Header */}
-							<View className="mb-4 flex-row items-center justify-between">
-								<Text className="font-semibold text-foreground text-lg">
-									{m.mob_share_title()}
-								</Text>
-								<TouchableOpacity
-									onPress={handleClose}
-									disabled={createShare.isPending}
-								>
-									<StyledX size={24} className="text-muted" />
-								</TouchableOpacity>
-							</View>
+					</View>
+				) : null}
 
-							<Text className="mb-4 text-muted text-sm">
-								{m.mob_share_description({ title: item.title })}
-							</Text>
-
-							{shareUrl && (
-								<View className="mb-4 rounded-xl border border-border bg-surface-secondary p-3">
-									<View className="mb-2 flex-row items-center gap-2">
-										<StyledLink size={16} className="text-success" />
-										<Text className="font-medium text-foreground text-sm">
-											{m.mob_share_link_ready_label()}
-										</Text>
-									</View>
-									<Text
-										className="font-mono text-muted text-xs"
-										numberOfLines={2}
-										selectable
-									>
-										{shareUrl}
-									</Text>
-									<View className="mt-3 flex-row gap-2">
-										<Button
-											variant="secondary"
-											className="flex-1"
-											onPress={handleCopyLink}
-										>
-											{hasCopiedLink ? (
-												<StyledCheck size={16} className="text-success" />
-											) : (
-												<StyledCopy size={16} className="text-foreground" />
-											)}
-											<Button.Label>{m.mob_share_copy_link()}</Button.Label>
-										</Button>
-										<Button
-											variant="secondary"
-											className="flex-1"
-											onPress={() => openNativeShare(shareUrl)}
-										>
-											<StyledShare2 size={16} className="text-foreground" />
-											<Button.Label>{m.mob_share_share_again()}</Button.Label>
-										</Button>
-									</View>
-								</View>
-							)}
-
-							{/* Expiration Selection */}
-							<View className="mb-4">
-								<Text className="mb-2 font-medium text-foreground text-sm">
-									{m.mob_share_expires_label()}
-								</Text>
-								<View className="flex-row flex-wrap gap-2">
-									{SHARE_EXPIRATION_OPTIONS.map((option) => (
-										<Button
-											key={option}
-											variant={expiresIn === option ? "primary" : "secondary"}
-											size="sm"
-											onPress={() => setExpiresIn(option)}
-										>
-											<Button.Label>{expirationLabels[option]}</Button.Label>
-										</Button>
-									))}
-								</View>
-							</View>
-
-							{/* One-time use toggle */}
-							<ControlField
-								isSelected={isOneTimeUse}
-								onSelectedChange={setIsOneTimeUse}
-								className="mb-4 rounded-lg bg-card py-3"
-							>
-								<View className="flex-1">
-									<Label>{m.mob_share_one_time_use()}</Label>
-									<Text className="text-muted text-xs">
-										{m.mob_share_one_time_use_description()}
-									</Text>
-								</View>
-								<ControlField.Indicator>
-									<Switch />
-								</ControlField.Indicator>
-							</ControlField>
-
-							{/* Security notice */}
-							<View className="mb-4 flex-row items-start rounded-lg bg-warning-soft p-3">
-								<StyledLink size={16} className="mt-0.5 mr-2 text-warning" />
-								<View className="flex-1">
-									<Text className="text-warning-soft-foreground text-xs">
-										{m.mob_share_security_notice()}
-									</Text>
-									<Text className="mt-1 text-warning-soft-foreground text-xs">
-										{m.mob_share_copy_once_notice()}
-									</Text>
-								</View>
-							</View>
-
-							{/* Actions */}
-							<View className="flex-row gap-3">
-								<Button
-									variant="secondary"
-									className="flex-1"
-									onPress={handleClose}
-									isDisabled={createShare.isPending}
-								>
-									<Button.Label>{m.mob_share_cancel()}</Button.Label>
-								</Button>
-								<Button
-									variant="primary"
-									className="flex-1"
-									onPress={handleCreateAndShare}
-									isDisabled={createShare.isPending}
-								>
-									{createShare.isPending ? (
-										<>
-											<StyledLoader2
-												size={18}
-												className="animate-spin text-primary-foreground"
-											/>
-											<Button.Label>{m.mob_share_creating()}</Button.Label>
-										</>
-									) : (
-										<>
-											<StyledShare2
-												size={18}
-												className="text-primary-foreground"
-											/>
-											<Button.Label>{m.mob_share_create_button()}</Button.Label>
-										</>
-									)}
-								</Button>
-							</View>
-						</>
-					)}
+				<View>
+					<View className="px-4">
+						<SectionLabel>{m.mob_share_expires_label()}</SectionLabel>
+					</View>
+					<ChipRail
+						chips={SHARE_EXPIRATION_OPTIONS.map((option) => ({
+							value: option,
+							label: expirationLabels[option],
+						}))}
+						value={expiresIn}
+						onChange={setExpiresIn}
+					/>
 				</View>
-			</View>
-		</Modal>
+
+				<View className="px-4">
+					<ListCard>
+						<ControlField
+							isSelected={isOneTimeUse}
+							onSelectedChange={setIsOneTimeUse}
+							className="px-4 py-3"
+						>
+							<View className="min-w-0 flex-1">
+								<Text className="font-medium text-base text-foreground">
+									{m.mob_share_one_time_use()}
+								</Text>
+								<Text className="mt-0.5 text-muted text-sm">
+									{m.mob_share_one_time_use_description()}
+								</Text>
+							</View>
+							<ControlField.Indicator>
+								<Switch />
+							</ControlField.Indicator>
+						</ControlField>
+					</ListCard>
+				</View>
+
+				<View className="px-4">
+					<View className="flex-row items-start gap-2.5 rounded-2xl bg-warning-soft p-3.5">
+						<IconTriangleAlert
+							size={iconSize.chip}
+							className="mt-0.5 text-warning"
+						/>
+						<View className="min-w-0 flex-1">
+							<Text className="text-warning-soft-foreground text-xs">
+								{m.mob_share_security_notice()}
+							</Text>
+							<Text className="mt-1.5 text-warning-soft-foreground text-xs">
+								{m.mob_share_copy_once_notice()}
+							</Text>
+						</View>
+					</View>
+				</View>
+
+				<View className="flex-row gap-3 px-4">
+					<PressableFeedback
+						onPress={handleClose}
+						isDisabled={createShare.isPending}
+						accessibilityRole="button"
+						accessibilityLabel={m.mob_share_cancel()}
+						className="h-11 flex-1 items-center justify-center rounded-xl border border-border bg-surface"
+					>
+						<PressableFeedback.Highlight />
+						<Text className="font-medium text-base text-foreground">
+							{m.mob_share_cancel()}
+						</Text>
+					</PressableFeedback>
+					<BrandButton
+						label={
+							createShare.isPending
+								? m.mob_share_creating()
+								: m.mob_share_create_button()
+						}
+						onPress={handleCreateAndShare}
+						isLoading={createShare.isPending}
+						fullWidth={false}
+						leading={
+							<IconShare
+								size={iconSize.chip}
+								className="text-accent-foreground"
+							/>
+						}
+						className="h-11 flex-1"
+					/>
+				</View>
+			</ScrollView>
+		</SheetModal>
 	);
 }

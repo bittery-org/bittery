@@ -4,33 +4,34 @@ import {
 	usePermanentDeleteItem,
 	useRestoreItem,
 } from "@bittery/core/hooks";
-import { Button, Card, Skeleton, useToast } from "heroui-native";
-import {
-	ArchiveRestore,
-	ChevronLeft,
-	ChevronRight,
-	Trash2,
-} from "lucide-react-native";
+import { useThemeColor, useToast } from "heroui-native";
 import { useMemo, useState } from "react";
 import {
 	ActivityIndicator,
 	Alert,
 	FlatList,
+	Pressable,
 	RefreshControl,
 	Text,
 	View,
 } from "react-native";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
-import { withUniwind } from "uniwind";
-import { SafeAreaView } from "@/components/safe-area-view";
+import { ItemListItem } from "@/components/item-list-item";
+import { ItemsSkeletonList } from "@/components/items-skeleton-list";
+import {
+	AppBar,
+	EmptyState,
+	ErrorState,
+	IconAlertCircle,
+	IconArchiveRestore,
+	IconTrash,
+	iconSize,
+	layout,
+	Screen,
+	useBottomInset,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
-import { ItemListItem } from "../../src/components/item-list-item";
-
-// Create styled icon components
-const StyledTrash = withUniwind(Trash2);
-const StyledArchiveRestore = withUniwind(ArchiveRestore);
-const StyledChevronLeft = withUniwind(ChevronLeft);
-const StyledChevronRight = withUniwind(ChevronRight);
 
 type MessageFunctions = ReturnType<typeof useI18n>["m"];
 
@@ -56,23 +57,24 @@ function formatDeletedAt(dateString: string, m: MessageFunctions): string {
 export default function TrashScreen() {
 	const { m } = useI18n();
 	const { toast } = useToast();
+	const [success, danger] = useThemeColor(["success", "danger"]);
 	const [refreshing, setRefreshing] = useState(false);
 	const [actionInProgress, setActionInProgress] = useState<string | null>(null);
+	const bottomInset = useBottomInset({ tabBar: true });
 
 	const { items, isLoading, error, refetch } = useDeletedItems();
-
-	// Shared hooks for item operations
 	const restoreItem = useRestoreItem();
 	const permanentDeleteItem = usePermanentDeleteItem();
 
-	// Sort by deletion date (most recent first)
-	const sortedItems = useMemo(() => {
-		return [...items].sort((a, b) => {
-			const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
-			const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
-			return dateB - dateA;
-		});
-	}, [items]);
+	const sortedItems = useMemo(
+		() =>
+			[...items].sort((a, b) => {
+				const dateA = a.deletedAt ? new Date(a.deletedAt).getTime() : 0;
+				const dateB = b.deletedAt ? new Date(b.deletedAt).getTime() : 0;
+				return dateB - dateA;
+			}),
+		[items],
+	);
 
 	const handleRefresh = async () => {
 		setRefreshing(true);
@@ -93,8 +95,8 @@ export default function TrashScreen() {
 				label: m.mob_trash_toast_restored(),
 				placement: "bottom",
 			});
-		} catch (error) {
-			console.error("Failed to restore item:", error);
+		} catch (restoreError) {
+			console.error("Failed to restore item:", restoreError);
 			toast.show({
 				variant: "danger",
 				label: m.mob_trash_toast_restore_failed(),
@@ -127,8 +129,8 @@ export default function TrashScreen() {
 								label: m.mob_trash_toast_deleted(),
 								placement: "bottom",
 							});
-						} catch (error) {
-							console.error("Failed to delete item:", error);
+						} catch (deleteError) {
+							console.error("Failed to delete item:", deleteError);
 							toast.show({
 								variant: "danger",
 								label: m.mob_trash_toast_delete_failed(),
@@ -143,131 +145,116 @@ export default function TrashScreen() {
 		);
 	};
 
-	const renderRightActions = (item: DeletedItem) => (
-		<View className="items-center justify-center bg-danger px-6">
-			{actionInProgress === item.id ? (
-				<ActivityIndicator size="small" color="#fff" />
-			) : (
-				<Button
-					isIconOnly
-					variant="ghost"
-					onPress={() => handlePermanentDelete(item)}
-					isDisabled={actionInProgress === item.id}
-				>
-					<StyledTrash size={20} className="text-white" />
-				</Button>
-			)}
-		</View>
-	);
+	const renderAction = (
+		item: DeletedItem,
+		tone: "restore" | "delete",
+		onPress: () => void,
+	) => {
+		const isRestore = tone === "restore";
+		const Icon = isRestore ? IconArchiveRestore : IconTrash;
+		const label = isRestore
+			? m.mob_trash_action_restore()
+			: m.mob_trash_action_delete_forever();
 
-	const renderLeftActions = (item: DeletedItem) => (
-		<View className="items-center justify-center bg-success px-6">
-			{actionInProgress === item.id ? (
-				<ActivityIndicator size="small" color="#fff" />
-			) : (
-				<Button
-					isIconOnly
-					variant="ghost"
-					onPress={() => handleRestore(item)}
-					isDisabled={actionInProgress === item.id}
-				>
-					<StyledArchiveRestore size={20} className="text-white" />
-				</Button>
-			)}
-		</View>
-	);
-
-	const renderItem = ({ item }: { item: DeletedItem }) => (
-		<Swipeable
-			renderRightActions={() => renderRightActions(item)}
-			renderLeftActions={() => renderLeftActions(item)}
-			overshootRight={false}
-			overshootLeft={false}
-		>
-			<ItemListItem
-				item={item}
-				vault={item.vault}
-				showVaultBadge
-				onPress={() => {}}
-				rightContent={
-					<Text className="text-muted text-xs">
-						{formatDeletedAt(item.deletedAt ?? "", m)}
-					</Text>
-				}
-			/>
-		</Swipeable>
-	);
-
-	if (isLoading) {
 		return (
-			<SafeAreaView className="flex-1 bg-background" edges={[]}>
-				{/* Info banner skeleton */}
-				<View className="px-4 py-3">
-					<Skeleton className="h-4 w-3/4 rounded" />
-				</View>
-
-				{/* Skeleton items */}
-				<View className="gap-2 p-4">
-					{[1, 2, 3, 4, 5].map((i) => (
-						<Card key={i} variant="secondary" className="p-4">
-							<View className="flex-row items-center gap-3">
-								<Skeleton className="h-10 w-10 rounded-full" />
-								<View className="flex-1 gap-2">
-									<Skeleton className="h-4 w-3/4 rounded" />
-									<Skeleton className="h-3 w-1/2 rounded" />
-								</View>
-							</View>
-						</Card>
-					))}
-				</View>
-			</SafeAreaView>
-		);
-	}
-
-	if (error) {
-		return (
-			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background p-8"
-				edges={[]}
+			<Pressable
+				onPress={onPress}
+				disabled={actionInProgress === item.id}
+				accessibilityRole="button"
+				accessibilityLabel={label}
+				className={cn(
+					"w-24 items-center justify-center gap-1",
+					isRestore ? "bg-success-soft" : "bg-danger-soft",
+				)}
 			>
-				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
-					<Card.Title className="mb-4 text-center text-danger text-lg">
-						{m.mob_trash_error_loading()}
-					</Card.Title>
-					<Button onPress={handleRefresh} variant="primary">
-						{m.mob_items_button_retry()}
-					</Button>
-				</Card>
-			</SafeAreaView>
+				{actionInProgress === item.id ? (
+					<ActivityIndicator
+						size="small"
+						color={isRestore ? success : danger}
+					/>
+				) : (
+					<>
+						<Icon
+							size={iconSize.bar}
+							className={isRestore ? "text-success" : "text-danger"}
+						/>
+						<Text
+							numberOfLines={1}
+							className={cn(
+								"font-medium text-2xs",
+								isRestore ? "text-success" : "text-danger",
+							)}
+						>
+							{label}
+						</Text>
+					</>
+				)}
+			</Pressable>
 		);
-	}
+	};
 
-	return (
-		<SafeAreaView className="flex-1 bg-background" edges={[]}>
-			{/* Swipe hint */}
-			<View className="flex-row items-center justify-center gap-8 bg-surface/50 py-3">
-				<View className="flex-row items-center gap-1.5">
-					<StyledChevronRight size={18} className="text-success" />
-					<StyledArchiveRestore size={18} className="text-success" />
-				</View>
-				<View className="h-4 w-px bg-border" />
-				<View className="flex-row items-center gap-1.5">
-					<StyledTrash size={18} className="text-danger" />
-					<StyledChevronLeft size={18} className="text-danger" />
+	const renderItem = ({
+		item,
+		index,
+	}: {
+		item: DeletedItem;
+		index: number;
+	}) => {
+		const isFirst = index === 0;
+		const isLast = index === sortedItems.length - 1;
+
+		return (
+			<View className="px-4">
+				<View
+					className={cn(
+						"overflow-hidden border-border border-x bg-surface",
+						isFirst ? "rounded-t-2xl border-t" : "",
+						isLast ? "rounded-b-2xl border-b" : "",
+					)}
+				>
+					{isFirst ? null : <View className="ml-14 h-px bg-border" />}
+					<Swipeable
+						renderLeftActions={() =>
+							renderAction(item, "restore", () => handleRestore(item))
+						}
+						renderRightActions={() =>
+							renderAction(item, "delete", () => handlePermanentDelete(item))
+						}
+						overshootLeft={false}
+						overshootRight={false}
+					>
+						<ItemListItem
+							item={item}
+							vault={item.vault}
+							showVaultBadge
+							variant="plain"
+							// Trashed items have no detail route; restore/delete live in the swipe actions.
+							onPress={() => {}}
+							rightContent={
+								<Text className="text-2xs text-muted">
+									{formatDeletedAt(item.deletedAt ?? "", m)}
+								</Text>
+							}
+						/>
+					</Swipeable>
 				</View>
 			</View>
+		);
+	};
 
-			{/* Trash list */}
-			{sortedItems.length === 0 ? (
-				<View className="flex-1 items-center justify-center p-8">
-					<StyledTrash size={48} className="mb-4 text-muted" />
-					<Text className="text-center font-semibold text-foreground text-lg">
-						{m.mob_trash_empty_title()}
-					</Text>
-					<Text className="mt-2 text-center text-muted">
-						{m.mob_trash_empty_description()}
-					</Text>
-				</View>
+	return (
+		<Screen>
+			<AppBar showBack title={m.mob_tab_trash()} />
+
+			{isLoading ? (
+				<ItemsSkeletonList />
+			) : error ? (
+				<ErrorState
+					icon={IconAlertCircle}
+					title={m.mob_trash_error_loading()}
+					actionLabel={m.mob_items_button_retry()}
+					onAction={handleRefresh}
+				/>
 			) : (
 				<FlatList
 					data={sortedItems}
@@ -276,8 +263,27 @@ export default function TrashScreen() {
 					refreshControl={
 						<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
 					}
+					contentContainerStyle={{
+						paddingTop: layout.gap.md,
+						paddingBottom: bottomInset,
+						flexGrow: 1,
+					}}
+					ListHeaderComponent={
+						sortedItems.length === 0 ? null : (
+							<Text className="px-5 pb-3 text-muted text-xs">
+								{m.mob_trash_swipe_hint()}
+							</Text>
+						)
+					}
+					ListEmptyComponent={
+						<EmptyState
+							icon={IconTrash}
+							title={m.mob_trash_empty_title()}
+							description={m.mob_trash_empty_description()}
+						/>
+					}
 				/>
 			)}
-		</SafeAreaView>
+		</Screen>
 	);
 }

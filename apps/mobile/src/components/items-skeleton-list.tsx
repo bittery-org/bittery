@@ -1,27 +1,33 @@
-import { Card, Skeleton } from "heroui-native";
+import { Skeleton } from "heroui-native";
+import { Fragment } from "react";
 import { View } from "react-native";
+import { layout } from "@/components/ui";
 
 export interface ItemsSkeletonListProps {
 	count?: number;
 }
 
-/**
- * Skeleton loading state for item lists.
- */
+/** Placeholder that matches the grouped item card while items decrypt. */
 export function ItemsSkeletonList({ count = 6 }: ItemsSkeletonListProps) {
 	return (
-		<View className="flex-1 py-2">
-			{Array.from({ length: count }).map((_, index) => (
-				<Card key={index} className="mx-4 mb-2">
-					<Card.Body className="flex-row items-center py-3">
-						<Skeleton className="mr-3 h-10 w-10 rounded-lg" />
-						<View className="flex-1">
-							<Skeleton className="mb-2 h-4 w-32 rounded" />
-							<Skeleton className="h-3 w-24 rounded" />
+		<View className="px-4 pt-6">
+			<View className="overflow-hidden rounded-2xl border border-border bg-surface">
+				{Array.from({ length: count }, (_, index) => index).map((index) => (
+					<Fragment key={index}>
+						{index > 0 ? <View className="ml-14 h-px bg-border" /> : null}
+						<View
+							className="flex-row items-center px-3.5"
+							style={{ minHeight: layout.rowHeight }}
+						>
+							<Skeleton className="mr-3 h-10 w-10 rounded-xl" />
+							<View className="flex-1 gap-2">
+								<Skeleton className="h-3.5 w-32 rounded-full" />
+								<Skeleton className="h-3 w-20 rounded-full" />
+							</View>
 						</View>
-					</Card.Body>
-				</Card>
-			))}
+					</Fragment>
+				))}
+			</View>
 		</View>
 	);
 }

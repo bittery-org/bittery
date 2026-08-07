@@ -8,31 +8,43 @@ import * as Clipboard from "expo-clipboard";
 import { getRandomValues } from "expo-crypto";
 import {
 	BottomSheet,
-	Button,
 	ControlField,
 	Input,
 	Label,
+	PressableFeedback,
 	Switch,
 	TextField,
+	useThemeColor,
 	useToast,
 } from "heroui-native";
-import { Check, Copy, RefreshCw, Sparkles } from "lucide-react-native";
 import { useCallback, useState } from "react";
 import { Text, View } from "react-native";
-import { withUniwind } from "uniwind";
+import {
+	BrandButton,
+	IconCheck,
+	IconCopy,
+	IconRefresh,
+	IconSparkles,
+	iconSize,
+	ListCard,
+	SectionLabel,
+	Segmented,
+	SheetBrandAccent,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
-
-// Create styled icon components
-const StyledCheck = withUniwind(Check);
-const StyledCopy = withUniwind(Copy);
-const StyledRefreshCw = withUniwind(RefreshCw);
-const StyledSparkles = withUniwind(Sparkles);
 
 interface PasswordGeneratorProps {
 	children: React.ReactNode;
 	onPasswordGenerated: (password: string) => void;
 	defaultOptions?: PasswordOptions;
 }
+
+const MIN_LENGTH = 8;
+const MAX_LENGTH = 64;
+const COPY_FEEDBACK_MS = 2000;
+/** A generated password sitting in the clipboard is a liability past this. */
+const CLIPBOARD_CLEAR_MS = 30000;
 
 // Word lists for memorable passwords
 const adjectives = [
@@ -125,6 +137,57 @@ function generateMemorablePassword(
 	return capitalizedWords.join("-");
 }
 
+type StrengthTone = "none" | "weak" | "fair" | "good" | "strong";
+
+const STRENGTH_CLASSES: Record<StrengthTone, { text: string; bar: string }> = {
+	none: { text: "text-muted", bar: "bg-border" },
+	weak: { text: "text-danger", bar: "bg-danger" },
+	fair: { text: "text-warning", bar: "bg-warning" },
+	good: { text: "text-info", bar: "bg-info" },
+	strong: { text: "text-success", bar: "bg-success" },
+};
+
+/** Character-class breadth plus length, scored out of 8 and read as a percentage. */
+function scorePassword(password: string): number {
+	let score = 0;
+	if (password.length >= 8) score += 1;
+	if (password.length >= 12) score += 1;
+	if (password.length >= 16) score += 1;
+	if (password.length >= 20) score += 1;
+	if (/[a-z]/.test(password)) score += 1;
+	if (/[A-Z]/.test(password)) score += 1;
+	if (/[0-9]/.test(password)) score += 1;
+	if (/[^a-zA-Z0-9]/.test(password)) score += 1;
+	return (score / 8) * 100;
+}
+
+function IconAction({
+	icon: Icon,
+	accessibilityLabel,
+	onPress,
+	tone = "default",
+}: {
+	icon: typeof IconCopy;
+	accessibilityLabel: string;
+	onPress: () => void;
+	tone?: "default" | "success";
+}) {
+	return (
+		<PressableFeedback
+			onPress={onPress}
+			accessibilityRole="button"
+			accessibilityLabel={accessibilityLabel}
+			className="h-12 w-12 items-center justify-center rounded-xl border border-border bg-surface"
+		>
+			<PressableFeedback.Highlight />
+			<Icon
+				size={iconSize.bar}
+				className={tone === "success" ? "text-success" : "text-foreground"}
+			/>
+		</PressableFeedback>
+	);
+}
+
 export function PasswordGenerator({
 	children,
 	onPasswordGenerated,
@@ -132,9 +195,10 @@ export function PasswordGenerator({
 }: PasswordGeneratorProps) {
 	const { toast } = useToast();
 	const { m } = useI18n();
+	const [accent, border] = useThemeColor(["accent", "border"]);
 	const [isOpen, setIsOpen] = useState(false);
 	const [password, setPassword] = useState("");
-	const [copied, setCopied] = useState(false);
+	const [hasCopied, setHasCopied] = useState(false);
 	const [passwordType, setPasswordType] = useState<"random" | "memorable">(
 		"random",
 	);
@@ -152,36 +216,33 @@ export function PasswordGenerator({
 	const [includeNumber, setIncludeNumber] = useState(true);
 
 	const handleGenerate = useCallback(() => {
-		if (passwordType === "memorable") {
-			const newPassword = generateMemorablePassword(wordCount, includeNumber);
-			setPassword(newPassword);
-		} else {
-			const newPassword = generatePassword(options);
-			setPassword(newPassword);
-		}
+		setPassword(
+			passwordType === "memorable"
+				? generateMemorablePassword(wordCount, includeNumber)
+				: generatePassword(options),
+		);
 	}, [options, passwordType, wordCount, includeNumber]);
 
 	const handleCopy = async () => {
-		if (password) {
-			await Clipboard.setStringAsync(password);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+		if (!password) return;
 
-			toast.show({
-				variant: "success",
-				label: m.mob_password_gen_toast_copied(),
-				placement: "bottom",
-			});
+		await Clipboard.setStringAsync(password);
+		setHasCopied(true);
+		setTimeout(() => setHasCopied(false), COPY_FEEDBACK_MS);
 
-			// Auto-clear clipboard after 30 seconds for security
-			setTimeout(async () => {
-				try {
-					await Clipboard.setStringAsync("");
-				} catch {
-					// Ignore errors when clearing
-				}
-			}, 30000);
-		}
+		toast.show({
+			variant: "success",
+			label: m.mob_password_gen_toast_copied(),
+			placement: "bottom",
+		});
+
+		setTimeout(async () => {
+			try {
+				await Clipboard.setStringAsync("");
+			} catch {
+				// Ignore errors when clearing
+			}
+		}, CLIPBOARD_CLEAR_MS);
 	};
 
 	const handleUse = () => {
@@ -202,60 +263,25 @@ export function PasswordGenerator({
 		}
 	};
 
-	// Calculate password strength
-	const getPasswordStrength = () => {
-		if (!password)
-			return {
-				score: 0,
-				label: m.mob_password_gen_strength_none(),
-				color: "#d1d5db",
-			};
+	const score = password ? scorePassword(password) : 0;
+	const tone: StrengthTone = !password
+		? "none"
+		: score < 40
+			? "weak"
+			: score < 60
+				? "fair"
+				: score < 80
+					? "good"
+					: "strong";
+	const strengthLabel = {
+		none: m.mob_password_gen_strength_none(),
+		weak: m.mob_password_gen_strength_weak(),
+		fair: m.mob_password_gen_strength_fair(),
+		good: m.mob_password_gen_strength_good(),
+		strong: m.mob_password_gen_strength_strong(),
+	}[tone];
 
-		let score = 0;
-		const length = password.length;
-
-		// Length scoring
-		if (length >= 8) score += 1;
-		if (length >= 12) score += 1;
-		if (length >= 16) score += 1;
-		if (length >= 20) score += 1;
-
-		// Character variety scoring
-		if (/[a-z]/.test(password)) score += 1;
-		if (/[A-Z]/.test(password)) score += 1;
-		if (/[0-9]/.test(password)) score += 1;
-		if (/[^a-zA-Z0-9]/.test(password)) score += 1;
-
-		const percentage = (score / 8) * 100;
-
-		if (percentage < 40)
-			return {
-				score: percentage,
-				label: m.mob_password_gen_strength_weak(),
-				color: "#ef4444",
-			};
-		if (percentage < 60)
-			return {
-				score: percentage,
-				label: m.mob_password_gen_strength_fair(),
-				color: "#f97316",
-			};
-		if (percentage < 80)
-			return {
-				score: percentage,
-				label: m.mob_password_gen_strength_good(),
-				color: "#eab308",
-			};
-		return {
-			score: percentage,
-			label: m.mob_password_gen_strength_strong(),
-			color: "#22c55e",
-		};
-	};
-
-	const strength = getPasswordStrength();
-
-	// At least one option must be enabled
+	// At least one character class must stay on, or generation has nothing to draw from.
 	const canToggleOption =
 		[
 			options.lowercase,
@@ -263,6 +289,13 @@ export function PasswordGenerator({
 			options.numbers,
 			options.symbols,
 		].filter(Boolean).length > 1;
+
+	const characterClasses = [
+		{ key: "lowercase" as const, label: m.mob_password_gen_lowercase() },
+		{ key: "uppercase" as const, label: m.mob_password_gen_uppercase() },
+		{ key: "numbers" as const, label: m.mob_password_gen_numbers() },
+		{ key: "symbols" as const, label: m.mob_password_gen_symbols() },
+	];
 
 	return (
 		<BottomSheet
@@ -274,270 +307,218 @@ export function PasswordGenerator({
 					return;
 				}
 				setPassword("");
-				setCopied(false);
+				setHasCopied(false);
 			}}
 		>
 			<BottomSheet.Trigger asChild>{children}</BottomSheet.Trigger>
 			<BottomSheet.Portal>
 				<BottomSheet.Overlay />
 				<BottomSheet.Content snapPoints={["90%"]}>
-					{/* Header */}
-					<View className="mb-4 flex-row items-center justify-center gap-2">
-						<StyledSparkles size={24} className="text-accent" />
-						<BottomSheet.Title className="text-xl">
-							Password Generator
+					<SheetBrandAccent />
+					<View className="mb-3 flex-row items-center justify-center gap-2">
+						<IconSparkles size={iconSize.bar} className="text-accent" />
+						<BottomSheet.Title className="font-semibold text-foreground text-lg">
+							{m.mob_password_gen_title()}
 						</BottomSheet.Title>
 					</View>
 
-					<BottomSheetScrollView className="flex-1 px-4">
-						{/* Password Type Selector */}
-						<View className="mb-4">
-							<Text className="mb-2 font-medium text-foreground text-sm">
-								{m.mob_password_gen_type_label()}
-							</Text>
-							<View className="flex-row gap-2">
-								<Button
-									variant={passwordType === "random" ? "primary" : "secondary"}
-									onPress={() => {
-										setPasswordType("random");
-										if (isOpen) {
-											setPassword(generatePassword(options));
-										}
-									}}
-									className="flex-1"
-								>
-									{m.mob_password_gen_type_random()}
-								</Button>
-								<Button
-									variant={
-										passwordType === "memorable" ? "primary" : "secondary"
-									}
-									onPress={() => {
-										setPasswordType("memorable");
-										if (isOpen) {
-											setPassword(
-												generateMemorablePassword(wordCount, includeNumber),
-											);
-										}
-									}}
-									className="flex-1"
-								>
-									{m.mob_password_gen_type_memorable()}
-								</Button>
-							</View>
-						</View>
+					<BottomSheetScrollView
+						className="flex-1"
+						contentContainerClassName="gap-5 px-4 pb-6"
+					>
+						<Segmented
+							options={[
+								{
+									value: "random",
+									label: m.mob_password_gen_type_random(),
+								},
+								{
+									value: "memorable",
+									label: m.mob_password_gen_type_memorable(),
+								},
+							]}
+							value={passwordType}
+							onChange={(value) => {
+								const nextType = value as "random" | "memorable";
+								setPasswordType(nextType);
+								if (!isOpen) return;
+								setPassword(
+									nextType === "memorable"
+										? generateMemorablePassword(wordCount, includeNumber)
+										: generatePassword(options),
+								);
+							}}
+						/>
 
-						{/* Generated Password Display */}
-						<View className="mb-4">
-							<Text className="mb-2 font-medium text-foreground text-sm">
+						<View>
+							<SectionLabel>
 								{m.mob_password_gen_generated_label()}
-							</Text>
+							</SectionLabel>
 							<View className="flex-row items-center gap-2">
-								<View className="flex-1 rounded-xl border border-border bg-surface-secondary px-4 py-3">
+								<View className="min-h-12 flex-1 justify-center rounded-xl border border-border bg-field px-4 py-3">
 									<Text
-										className="font-mono text-foreground text-sm"
+										className="font-mono text-base text-foreground"
 										selectable
-										numberOfLines={2}
+										numberOfLines={3}
 									>
 										{password}
 									</Text>
 								</View>
-								<Button isIconOnly variant="secondary" onPress={handleGenerate}>
-									<StyledRefreshCw size={20} className="text-foreground" />
-								</Button>
-								<Button isIconOnly variant="secondary" onPress={handleCopy}>
-									{copied ? (
-										<StyledCheck size={20} className="text-success" />
-									) : (
-										<StyledCopy size={20} className="text-foreground" />
-									)}
-								</Button>
-							</View>
-						</View>
-
-						{/* Password Strength Indicator */}
-						<View className="mb-4 rounded-xl border border-border bg-surface-secondary p-3">
-							<View className="flex-row items-center justify-between">
-								<Text className="text-muted text-sm">
-									{m.mob_password_gen_strength_label()}
-								</Text>
-								<Text
-									className="font-semibold text-sm"
-									style={{ color: strength.color }}
-								>
-									{strength.label}
-								</Text>
-							</View>
-							<View className="mt-2 h-2 overflow-hidden rounded-full bg-surface">
-								<View
-									className="h-full rounded-full"
-									style={{
-										width: `${strength.score}%`,
-										backgroundColor: strength.color,
-									}}
+								<IconAction
+									icon={IconRefresh}
+									accessibilityLabel={m.mob_password_gen_title()}
+									onPress={handleGenerate}
+								/>
+								<IconAction
+									icon={hasCopied ? IconCheck : IconCopy}
+									tone={hasCopied ? "success" : "default"}
+									accessibilityLabel={
+										hasCopied
+											? m.mob_a11y_copied()
+											: m.mob_a11y_copy_value({
+													label: m.mob_form_login_password_label(),
+												})
+									}
+									onPress={handleCopy}
 								/>
 							</View>
-						</View>
 
-						{/* Random Password Options */}
-						{passwordType === "random" && (
-							<View className="mb-4 gap-4">
-								{/* Length Slider */}
-								<View>
-									<View className="mb-2 flex-row items-center justify-between">
-										<Text className="font-medium text-foreground text-sm">
-											{m.mob_password_gen_length_label()}
-										</Text>
-										<TextField className="w-16">
-											<Input
-												className="px-2 py-1 text-center"
-												value={options.length.toString()}
-												onChangeText={(text) => {
-													const num = Number.parseInt(text, 10);
-													if (!Number.isNaN(num) && num >= 8 && num <= 64) {
-														updateOption("length", num);
-													}
-												}}
-												keyboardType="numeric"
-												selectTextOnFocus
-											/>
-										</TextField>
-									</View>
-									<View className="flex-row items-center gap-2">
-										<Text className="text-muted text-xs">8</Text>
-										<Slider
-											style={{ flex: 1, height: 40 }}
-											minimumValue={8}
-											maximumValue={64}
-											step={1}
-											value={options.length}
-											onValueChange={(value) => {
-												updateOption("length", Math.round(value));
-											}}
-											minimumTrackTintColor="#6366f1"
-											maximumTrackTintColor="#e5e7eb"
-											thumbTintColor="#6366f1"
-										/>
-										<Text className="text-muted text-xs">64</Text>
-									</View>
-								</View>
-
-								{/* Character Type Options */}
-								<View>
-									<Text className="mb-2 font-medium text-foreground text-sm">
-										{m.mob_password_gen_include_label()}
+							<View className="mt-3 rounded-xl border border-border bg-surface p-3">
+								<View className="flex-row items-center justify-between">
+									<Text className="text-muted text-sm">
+										{m.mob_password_gen_strength_label()}
 									</Text>
-									<View className="gap-0 overflow-hidden rounded-xl border border-border">
-										<ControlField
-											isSelected={options.lowercase}
-											onSelectedChange={(value) => {
-												if (canToggleOption || value) {
-													updateOption("lowercase", value);
-												}
-											}}
-											isDisabled={!canToggleOption && options.lowercase}
-											className="px-4 py-3"
-										>
-											<Label className="flex-1">
-												{m.mob_password_gen_lowercase()}
-											</Label>
-											<ControlField.Indicator>
-												<Switch />
-											</ControlField.Indicator>
-										</ControlField>
-
-										<ControlField
-											isSelected={options.uppercase}
-											onSelectedChange={(value) => {
-												if (canToggleOption || value) {
-													updateOption("uppercase", value);
-												}
-											}}
-											isDisabled={!canToggleOption && options.uppercase}
-											className="px-4 py-3"
-										>
-											<Label className="flex-1">
-												{m.mob_password_gen_uppercase()}
-											</Label>
-											<ControlField.Indicator>
-												<Switch />
-											</ControlField.Indicator>
-										</ControlField>
-
-										<ControlField
-											isSelected={options.numbers}
-											onSelectedChange={(value) => {
-												if (canToggleOption || value) {
-													updateOption("numbers", value);
-												}
-											}}
-											isDisabled={!canToggleOption && options.numbers}
-											className="px-4 py-3"
-										>
-											<Label className="flex-1">
-												{m.mob_password_gen_numbers()}
-											</Label>
-											<ControlField.Indicator>
-												<Switch />
-											</ControlField.Indicator>
-										</ControlField>
-
-										<ControlField
-											isSelected={options.symbols}
-											onSelectedChange={(value) => {
-												if (canToggleOption || value) {
-													updateOption("symbols", value);
-												}
-											}}
-											isDisabled={!canToggleOption && options.symbols}
-											className="px-4 py-3"
-										>
-											<Label className="flex-1">
-												{m.mob_password_gen_symbols()}
-											</Label>
-											<ControlField.Indicator>
-												<Switch />
-											</ControlField.Indicator>
-										</ControlField>
-									</View>
+									<Text
+										className={cn(
+											"font-semibold text-sm",
+											STRENGTH_CLASSES[tone].text,
+										)}
+									>
+										{strengthLabel}
+									</Text>
+								</View>
+								<View className="mt-2 h-1.5 overflow-hidden rounded-full bg-default">
+									<View
+										className={cn(
+											"h-full rounded-full",
+											STRENGTH_CLASSES[tone].bar,
+										)}
+										style={{ width: `${Math.max(score, 2)}%` }}
+									/>
 								</View>
 							</View>
-						)}
+						</View>
 
-						{/* Memorable Password Options */}
-						{passwordType === "memorable" && (
-							<View className="mb-4 gap-4">
+						{passwordType === "random" ? (
+							<>
 								<View>
-									<Text className="mb-2 font-medium text-foreground text-sm">
-										{m.mob_password_gen_word_count_label()}
-									</Text>
-									<View className="flex-row gap-2">
-										{[3, 4, 5, 6].map((count) => (
-											<Button
-												key={count}
-												variant={wordCount === count ? "primary" : "secondary"}
-												onPress={() => {
-													setWordCount(count);
-													if (isOpen && passwordType === "memorable") {
-														setPassword(
-															generateMemorablePassword(count, includeNumber),
-														);
-													}
-												}}
-												className="flex-1"
-											>
-												{count}
-											</Button>
-										))}
+									<SectionLabel>
+										{m.mob_password_gen_length_label()}
+									</SectionLabel>
+									<View className="rounded-2xl border border-border bg-surface p-4">
+										<View className="flex-row items-center justify-between">
+											<Text className="font-medium text-base text-foreground">
+												{m.mob_password_gen_length_label()}
+											</Text>
+											<TextField className="w-16">
+												<Input
+													className="px-2 py-1 text-center font-mono"
+													value={String(options.length)}
+													onChangeText={(text) => {
+														const next = Number.parseInt(text, 10);
+														if (
+															!Number.isNaN(next) &&
+															next >= MIN_LENGTH &&
+															next <= MAX_LENGTH
+														) {
+															updateOption("length", next);
+														}
+													}}
+													keyboardType="numeric"
+													selectTextOnFocus
+												/>
+											</TextField>
+										</View>
+										<View className="mt-1 flex-row items-center gap-2">
+											<Text className="font-mono text-muted text-xs">
+												{MIN_LENGTH}
+											</Text>
+											<Slider
+												style={{ flex: 1, height: 40 }}
+												minimumValue={MIN_LENGTH}
+												maximumValue={MAX_LENGTH}
+												step={1}
+												value={options.length}
+												onValueChange={(value) =>
+													updateOption("length", Math.round(value))
+												}
+												minimumTrackTintColor={accent}
+												maximumTrackTintColor={border}
+												thumbTintColor={accent}
+											/>
+											<Text className="font-mono text-muted text-xs">
+												{MAX_LENGTH}
+											</Text>
+										</View>
 									</View>
 								</View>
 
-								<View className="overflow-hidden rounded-xl border border-border">
+								<View>
+									<SectionLabel>
+										{m.mob_password_gen_include_label()}
+									</SectionLabel>
+									<ListCard>
+										{characterClasses.map(({ key, label }) => (
+											<ControlField
+												key={key}
+												isSelected={options[key]}
+												onSelectedChange={(value) => {
+													if (canToggleOption || value) {
+														updateOption(key, value);
+													}
+												}}
+												isDisabled={!canToggleOption && options[key]}
+												className="px-4 py-3"
+											>
+												<Label className="flex-1">{label}</Label>
+												<ControlField.Indicator>
+													<Switch />
+												</ControlField.Indicator>
+											</ControlField>
+										))}
+									</ListCard>
+								</View>
+							</>
+						) : (
+							<>
+								<View>
+									<SectionLabel>
+										{m.mob_password_gen_word_count_label()}
+									</SectionLabel>
+									<Segmented
+										options={[3, 4, 5, 6].map((count) => ({
+											value: String(count),
+											label: String(count),
+										}))}
+										value={String(wordCount)}
+										onChange={(value) => {
+											const nextCount = Number(value);
+											setWordCount(nextCount);
+											if (isOpen) {
+												setPassword(
+													generateMemorablePassword(nextCount, includeNumber),
+												);
+											}
+										}}
+									/>
+								</View>
+
+								<ListCard>
 									<ControlField
 										isSelected={includeNumber}
 										onSelectedChange={(value) => {
 											setIncludeNumber(value);
-											if (isOpen && passwordType === "memorable") {
+											if (isOpen) {
 												setPassword(
 													generateMemorablePassword(wordCount, value),
 												);
@@ -552,31 +533,24 @@ export function PasswordGenerator({
 											<Switch />
 										</ControlField.Indicator>
 									</ControlField>
-								</View>
+								</ListCard>
 
-								<View className="rounded-xl bg-surface-secondary p-4">
-									<Text className="text-muted text-sm">
+								<View className="rounded-2xl bg-accent-soft p-4">
+									<Text className="text-accent-soft-foreground text-sm">
 										{m.mob_password_gen_memorable_hint()}
 									</Text>
 								</View>
-							</View>
+							</>
 						)}
-
-						{/* Bottom padding */}
-						<View className="h-4" />
 					</BottomSheetScrollView>
 
-					{/* Bottom Action Button */}
-					<View className="border-border border-t px-4 py-4">
-						<Button
-							variant="primary"
+					<View className="border-border border-t px-4 pt-3 pb-2">
+						<BrandButton
+							label={m.mob_password_gen_use_button()}
 							onPress={handleUse}
 							isDisabled={!password}
 							size="lg"
-							className="w-full"
-						>
-							{m.mob_password_gen_use_button()}
-						</Button>
+						/>
 					</View>
 				</BottomSheet.Content>
 			</BottomSheet.Portal>

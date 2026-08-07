@@ -1,24 +1,16 @@
 import { useAllVaultKeys, useCreateItem } from "@bittery/core/hooks";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-	Button,
-	Input,
-	Label,
-	Select,
-	TextField,
-	useToast,
-} from "heroui-native";
-import { ArrowLeft, ChevronDown, Vault } from "lucide-react-native";
+import { Input, Select, useToast } from "heroui-native";
 import { useRef, useState } from "react";
 import {
 	KeyboardAvoidingView,
 	Platform,
+	Pressable,
 	ScrollView,
 	Text,
 	View,
 } from "react-native";
-import { withUniwind } from "uniwind";
 import {
 	CreditCardForm,
 	type CreditCardFormRef,
@@ -31,53 +23,73 @@ import {
 	TotpForm,
 	type TotpFormRef,
 } from "@/components/item-forms";
-import { SafeAreaView } from "@/components/safe-area-view";
+import { FieldShell, FormField } from "@/components/item-forms/form-field";
 import { TagInput } from "@/components/tag-input";
+import {
+	AppBar,
+	BrandButton,
+	IconChevronDown,
+	IconVault,
+	iconSize,
+	layout,
+	Screen,
+	useBottomInset,
+} from "@/components/ui";
 import { VaultAvatar } from "@/components/vault-avatar";
 import { getCategoryOptions } from "@/constants/item-categories";
 import { useI18n } from "@/providers/i18n-provider";
 
-// Create styled icon components
-const StyledArrowLeft = withUniwind(ArrowLeft);
-const StyledVault = withUniwind(Vault);
-const StyledChevronDown = withUniwind(ChevronDown);
-
 export default function CreateItemScreen() {
 	const { m } = useI18n();
-
-	// Filter out "all" option for item creation
-	const categoryOptions = getCategoryOptions(m).filter(
-		(opt) => opt.value !== "all",
-	);
 	const router = useRouter();
 	const { toast } = useToast();
+	const bottomInset = useBottomInset({ extra: 0 });
 	const { vaultId: vaultIdParam } = useLocalSearchParams<{
 		vaultId?: string;
 	}>();
 	const createItem = useCreateItem();
 	const { vaultKeys = [], isLoading: isLoadingVaults } = useAllVaultKeys();
 
-	// Vault selection state
+	// "All categories" is a filter, never a shape an item can have.
+	const categoryOptions = getCategoryOptions(m).filter(
+		(option) => option.value !== "all",
+	);
+
 	const [selectedVaultId, setSelectedVaultId] = useState<string | undefined>(
 		vaultIdParam,
 	);
-
-	const [category, setCategory] = useState<
-		{ value: ItemCategory; label: string } | undefined
-	>({ value: "login", label: m.mob_category_login() });
+	const [category, setCategory] = useState<{
+		value: ItemCategory;
+		label: string;
+	}>({ value: "login", label: m.mob_category_login() });
 	const [title, setTitle] = useState("");
 	const [notes, setNotes] = useState("");
 	const [tags, setTags] = useState<string[]>([]);
 	const [saving, setSaving] = useState(false);
+	const [hasSubmitted, setHasSubmitted] = useState(false);
 
-	// Form refs
 	const loginFormRef = useRef<LoginFormRef>(null);
 	const creditCardFormRef = useRef<CreditCardFormRef>(null);
 	const identityFormRef = useRef<IdentityFormRef>(null);
 	const secureNoteFormRef = useRef<SecureNoteFormRef>(null);
 	const totpFormRef = useRef<TotpFormRef>(null);
 
+	const selectedVault = vaultKeys.find((v) => v.vaultId === selectedVaultId);
+	const selectedCategoryOption = categoryOptions.find(
+		(option) => option.value === category.value,
+	);
+	const titleError =
+		hasSubmitted && !title.trim()
+			? m.mob_create_item_toast_title_required()
+			: null;
+	const vaultError =
+		hasSubmitted && !selectedVaultId
+			? m.mob_create_item_toast_vault_required()
+			: null;
+
 	const handleSave = async () => {
+		setHasSubmitted(true);
+
 		if (!title.trim()) {
 			toast.show({
 				variant: "danger",
@@ -96,9 +108,8 @@ export default function CreateItemScreen() {
 			return;
 		}
 
-		const categoryValue = category?.value || "login";
+		const categoryValue = category.value;
 
-		// Validate category-specific forms
 		let isValid = true;
 		switch (categoryValue) {
 			case "login":
@@ -133,7 +144,6 @@ export default function CreateItemScreen() {
 		setSaving(true);
 
 		try {
-			// Build the data object based on category
 			let itemData: DecryptedItemData = { title };
 
 			switch (categoryValue) {
@@ -154,17 +164,15 @@ export default function CreateItemScreen() {
 					break;
 			}
 
-			// Add notes if present
 			if (notes.trim()) {
 				itemData.notes = notes;
 			}
 
-			// Add tags if present
 			if (tags.length > 0) {
 				itemData.tags = tags;
 			}
 
-			// Create the item using shared hook (handles encryption internally)
+			// Encryption happens inside the hook — nothing plaintext leaves this screen.
 			await createItem.mutateAsync({
 				vaultId: selectedVaultId,
 				category: categoryValue,
@@ -193,68 +201,44 @@ export default function CreateItemScreen() {
 		}
 	};
 
-	const selectedVault = vaultKeys.find((v) => v.vaultId === selectedVaultId);
-	const selectedCategoryOption = categoryOptions.find(
-		(opt) => opt.value === category?.value,
-	);
-	const getVaultLabel = (vault?: (typeof vaultKeys)[number]) => {
-		if (!vault) return "";
-		return vault.vaultName;
-	};
-
 	return (
-		<SafeAreaView className="flex-1 bg-background">
+		<Screen>
+			<AppBar showBack title={m.mob_create_item_header()} bordered />
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
 				className="flex-1"
 			>
-				{/* Header */}
-				<View className="flex-row items-center px-4 py-4">
-					<Button
-						isIconOnly
-						onPress={() => router.back()}
-						variant="secondary"
-						size="sm"
-						className="mr-3"
+				<ScrollView
+					className="flex-1"
+					keyboardShouldPersistTaps="handled"
+					contentContainerStyle={{
+						paddingHorizontal: layout.screenPadding,
+						paddingTop: layout.gap.md,
+						paddingBottom: layout.gap.lg,
+						gap: layout.gap.md,
+					}}
+				>
+					<FieldShell
+						label={m.mob_create_item_vault_label()}
+						error={vaultError}
 					>
-						<StyledArrowLeft size={20} className="text-foreground" />
-					</Button>
-					<Text className="flex-1 font-bold text-foreground text-xl">
-						{m.mob_create_item_header()}
-					</Text>
-					<Button
-						onPress={handleSave}
-						isDisabled={saving}
-						variant="primary"
-						size="sm"
-					>
-						{saving ? m.mob_create_item_saving() : m.mob_create_item_save()}
-					</Button>
-				</View>
-
-				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
-					{/* Vault Selector */}
-					<View className="my-4">
-						<Label className="mb-2">{m.mob_create_item_vault_label()}</Label>
 						<Select
 							value={
 								selectedVaultId
 									? {
 											value: selectedVaultId,
-											label: getVaultLabel(selectedVault),
+											label: selectedVault?.vaultName ?? "",
 										}
 									: undefined
 							}
-							onValueChange={(option) => {
-								setSelectedVaultId(option?.value);
-							}}
+							onValueChange={(option) => setSelectedVaultId(option?.value)}
 							isDisabled={isLoadingVaults || !!vaultIdParam}
 						>
 							<Select.Trigger asChild>
-								<Button
-									variant="secondary"
-									size="md"
-									className="w-full justify-start"
+								<Pressable
+									accessibilityRole="button"
+									accessibilityLabel={m.mob_create_item_vault_label()}
+									className="h-12 w-full flex-row items-center gap-3 rounded-xl border border-border bg-surface px-3"
 								>
 									{selectedVault ? (
 										<VaultAvatar
@@ -264,22 +248,27 @@ export default function CreateItemScreen() {
 											size="sm"
 										/>
 									) : (
-										<StyledVault size={20} className="text-muted" />
+										<IconVault size={iconSize.bar} className="text-muted" />
 									)}
-									<Button.Label className="flex-1 text-left">
-										{selectedVault
-											? getVaultLabel(selectedVault)
-											: m.mob_create_item_vault_placeholder()}
-									</Button.Label>
-									<StyledChevronDown size={16} className="text-muted" />
-								</Button>
+									<Text
+										numberOfLines={1}
+										className="min-w-0 flex-1 text-base text-foreground"
+									>
+										{selectedVault?.vaultName ??
+											m.mob_create_item_vault_placeholder()}
+									</Text>
+									<IconChevronDown
+										size={iconSize.chip}
+										className="text-muted"
+									/>
+								</Pressable>
 							</Select.Trigger>
 							<Select.Portal>
 								<Select.Overlay />
 								<Select.Content
 									presentation="popover"
 									width="trigger"
-									className="h-62.5 rounded-2xl"
+									className="h-62.5 rounded-2xl bg-surface-secondary"
 									placement="bottom"
 								>
 									<ScrollView>
@@ -296,11 +285,12 @@ export default function CreateItemScreen() {
 														imageUrl={vault.vaultImageUrl}
 														size="sm"
 													/>
-													<View className="flex-1">
-														<Text className="text-base text-foreground">
-															{vault.vaultName}
-														</Text>
-													</View>
+													<Text
+														numberOfLines={1}
+														className="min-w-0 flex-1 text-base text-foreground"
+													>
+														{vault.vaultName}
+													</Text>
 												</View>
 												<Select.ItemIndicator />
 											</Select.Item>
@@ -309,11 +299,9 @@ export default function CreateItemScreen() {
 								</Select.Content>
 							</Select.Portal>
 						</Select>
-					</View>
+					</FieldShell>
 
-					{/* Category Selector */}
-					<View className="my-4">
-						<Label className="mb-2">{m.mob_create_item_category_label()}</Label>
+					<FieldShell label={m.mob_create_item_category_label()}>
 						<Select
 							value={category}
 							onValueChange={(option) => {
@@ -326,35 +314,36 @@ export default function CreateItemScreen() {
 							}}
 						>
 							<Select.Trigger asChild>
-								<Button
-									variant="tertiary"
-									size="md"
-									className="w-full justify-start"
+								<Pressable
+									accessibilityRole="button"
+									accessibilityLabel={m.mob_create_item_category_label()}
+									className="h-12 w-full flex-row items-center gap-3 rounded-xl border border-border bg-surface px-3"
 								>
 									{selectedCategoryOption ? (
-										<>
-											<selectedCategoryOption.icon
-												size={20}
-												className="text-muted"
-											/>
-											<Button.Label className="flex-1 text-left">
-												{selectedCategoryOption.label}
-											</Button.Label>
-										</>
-									) : (
-										<Button.Label className="flex-1 text-left">
-											{m.mob_create_item_category_placeholder()}
-										</Button.Label>
-									)}
-									<StyledChevronDown size={16} className="text-muted" />
-								</Button>
+										<selectedCategoryOption.icon
+											size={iconSize.bar}
+											className="text-muted"
+										/>
+									) : null}
+									<Text
+										numberOfLines={1}
+										className="min-w-0 flex-1 text-base text-foreground"
+									>
+										{selectedCategoryOption?.label ??
+											m.mob_create_item_category_placeholder()}
+									</Text>
+									<IconChevronDown
+										size={iconSize.chip}
+										className="text-muted"
+									/>
+								</Pressable>
 							</Select.Trigger>
 							<Select.Portal>
 								<Select.Overlay />
 								<Select.Content
 									presentation="popover"
 									width="trigger"
-									className="h-70 rounded-2xl"
+									className="h-70 rounded-2xl bg-surface-secondary"
 									placement="bottom"
 								>
 									<ScrollView>
@@ -367,7 +356,7 @@ export default function CreateItemScreen() {
 													label={option.label}
 												>
 													<View className="flex-1 flex-row items-center gap-3">
-														<Icon size={18} className="text-muted" />
+														<Icon size={iconSize.row} className="text-muted" />
 														<Text className="flex-1 text-base text-foreground">
 															{option.label}
 														</Text>
@@ -380,61 +369,68 @@ export default function CreateItemScreen() {
 								</Select.Content>
 							</Select.Portal>
 						</Select>
-					</View>
+					</FieldShell>
 
-					{/* Title */}
-					<TextField className="mb-4" isRequired>
-						<Label>{m.mob_create_item_title_label()}</Label>
+					<FormField
+						label={m.mob_create_item_title_label()}
+						isRequired
+						error={titleError}
+					>
 						<Input
 							placeholder={m.mob_create_item_title_placeholder()}
 							value={title}
 							onChangeText={setTitle}
 						/>
-					</TextField>
+					</FormField>
 
-					{/* Category-specific forms */}
-					{category?.value === "login" && <LoginForm ref={loginFormRef} />}
-					{category?.value === "credit-card" && (
+					{category.value === "login" ? <LoginForm ref={loginFormRef} /> : null}
+					{category.value === "credit-card" ? (
 						<CreditCardForm ref={creditCardFormRef} />
-					)}
-					{category?.value === "identity" && (
+					) : null}
+					{category.value === "identity" ? (
 						<IdentityForm ref={identityFormRef} />
-					)}
-					{category?.value === "secure-note" && (
+					) : null}
+					{category.value === "secure-note" ? (
 						<SecureNoteForm ref={secureNoteFormRef} />
-					)}
-					{category?.value === "totp" && (
+					) : null}
+					{category.value === "totp" ? (
 						<TotpForm ref={totpFormRef} onTitleAutoFill={setTitle} />
-					)}
+					) : null}
 
-					{/* Tags */}
 					<TagInput
 						tags={tags}
 						onTagsChange={setTags}
 						placeholder={m.mob_create_item_tags_placeholder()}
-						label="Tags (optional)"
 					/>
 
-					{/* Notes (for non-secure-note items) */}
-					{category?.value !== "secure-note" && (
-						<TextField className="mb-4">
-							<Label>{m.mob_create_item_notes_label()}</Label>
+					{category.value !== "secure-note" ? (
+						<FormField label={m.mob_create_item_notes_label()}>
 							<Input
 								placeholder={m.mob_create_item_notes_placeholder()}
 								value={notes}
 								onChangeText={setNotes}
 								multiline
-								numberOfLines={3}
+								numberOfLines={4}
 								textAlignVertical="top"
-								style={{ minHeight: 80 }}
+								style={{ minHeight: 96 }}
 							/>
-						</TextField>
-					)}
-
-					{/* Bottom padding */}
-					<View className="h-8" />
+						</FormField>
+					) : null}
 				</ScrollView>
+
+				<View
+					className="border-border border-t bg-background px-4 pt-3"
+					style={{ paddingBottom: bottomInset + layout.gap.sm }}
+				>
+					<BrandButton
+						label={
+							saving ? m.mob_create_item_saving() : m.mob_create_item_save()
+						}
+						onPress={handleSave}
+						isLoading={saving}
+					/>
+				</View>
 			</KeyboardAvoidingView>
-		</SafeAreaView>
+		</Screen>
 	);
 }

@@ -1,33 +1,29 @@
 import { type UnifiedItem, useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
-import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
-import { Button, Card, Chip, Skeleton } from "heroui-native";
-import { ArrowLeft, Tag } from "lucide-react-native";
-import { useLayoutEffect, useMemo, useState } from "react";
-import { FlatList, RefreshControl, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useMemo, useState } from "react";
+import { View } from "react-native";
 import { CategoryFilter } from "@/components/category-filter";
-import { SafeAreaView } from "@/components/safe-area-view";
+import { EmptyItemsState } from "@/components/empty-items-state";
+import { ItemSectionsList } from "@/components/item-sections-list";
+import { ItemsSkeletonList } from "@/components/items-skeleton-list";
+import {
+	AppBar,
+	ErrorState,
+	IconAlertCircle,
+	IconTag,
+	Screen,
+	useBottomInset,
+} from "@/components/ui";
+import { getTagColorFromName } from "@/lib/tag-color";
 import { useI18n } from "@/providers/i18n-provider";
-import { ItemListItem } from "../../../src/components/item-list-item";
-
-// Create styled icon components
-const StyledTag = withUniwind(Tag);
-const StyledArrowLeft = withUniwind(ArrowLeft);
 
 export default function TagFilterScreen() {
 	const { m } = useI18n();
 	const router = useRouter();
-	const navigation = useNavigation();
 	const { tagName } = useLocalSearchParams<{ tagName: string }>();
 	const decodedTagName = decodeURIComponent(tagName || "");
-
-	// Set the header title dynamically
-	useLayoutEffect(() => {
-		navigation.setOptions({
-			title: decodedTagName || m.mob_tag_filter_fallback_title(),
-		});
-	}, [navigation, decodedTagName, m.mob_tag_filter_fallback_title]);
+	const bottomInset = useBottomInset({ tabBar: true });
 
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
@@ -36,25 +32,22 @@ export default function TagFilterScreen() {
 
 	const { items, isLoading, error, refetch } = useItems();
 
-	// Filter items by tag and category
-	const filteredItems = useMemo(() => {
-		let filtered = items.filter((item) =>
-			item.tags?.some(
-				(tag) => tag.toLowerCase() === decodedTagName.toLowerCase(),
-			),
+	const { favorites, regularItems } = useMemo(() => {
+		const needle = decodedTagName.toLowerCase();
+		const tagged = items.filter((item) =>
+			item.tags?.some((tag) => tag.toLowerCase() === needle),
 		);
+		const scoped =
+			selectedCategory === "all"
+				? tagged
+				: tagged.filter((item) => item.category === selectedCategory);
+		const byTitle = (a: UnifiedItem, b: UnifiedItem) =>
+			(a.title || "").localeCompare(b.title || "");
 
-		// Apply category filter
-		if (selectedCategory !== "all") {
-			filtered = filtered.filter((item) => item.category === selectedCategory);
-		}
-
-		// Sort: favorites first, then alphabetically
-		return filtered.sort((a, b) => {
-			if (a.favorite && !b.favorite) return -1;
-			if (!a.favorite && b.favorite) return 1;
-			return (a.title || "").localeCompare(b.title || "");
-		});
+		return {
+			favorites: scoped.filter((item) => item.favorite).sort(byTitle),
+			regularItems: scoped.filter((item) => !item.favorite).sort(byTitle),
+		};
 	}, [items, decodedTagName, selectedCategory]);
 
 	const handleRefresh = async () => {
@@ -66,127 +59,62 @@ export default function TagFilterScreen() {
 		}
 	};
 
-	const handleItemPress = (item: UnifiedItem) => {
-		router.push(`/${item.vaultId}/${item.id}`);
-	};
-
-	const renderItem = ({ item }: { item: UnifiedItem }) => (
-		<ItemListItem
-			item={item}
-			vault={item.vault}
-			showVaultBadge
-			onPress={() => handleItemPress(item)}
-		/>
-	);
-
-	if (isLoading) {
-		return (
-			<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
-				{/* Tag header skeleton */}
-				<View className="flex-row items-center px-4 py-3">
-					<Skeleton className="mr-3 h-9 w-9 rounded-full" />
-					<Skeleton className="h-8 w-24 rounded-full" />
-				</View>
-
-				{/* Category filter skeleton */}
-				<View className="flex-row items-center justify-between px-4 py-2">
-					<Skeleton className="h-4 w-20 rounded" />
-					<Skeleton className="h-9 w-20 rounded-lg" />
-				</View>
-
-				{/* Skeleton items */}
-				<View className="flex-1 p-4">
-					{[1, 2, 3, 4, 5, 6].map((i) => (
-						<Card key={i} className="mb-2">
-							<Card.Body className="flex-row items-center py-3">
-								<Skeleton className="mr-3 h-10 w-10 rounded-lg" />
-								<View className="flex-1">
-									<Skeleton className="mb-2 h-4 w-32 rounded" />
-									<Skeleton className="h-3 w-24 rounded" />
-								</View>
-							</Card.Body>
-						</Card>
-					))}
-				</View>
-			</SafeAreaView>
-		);
-	}
-
-	if (error) {
-		return (
-			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background p-8"
-				edges={["bottom"]}
-			>
-				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
-					<Card.Title className="mb-4 text-center text-danger text-lg">
-						{m.mob_tag_filter_error_loading()}
-					</Card.Title>
-					<Button onPress={handleRefresh} variant="primary">
-						Retry
-					</Button>
-				</Card>
-			</SafeAreaView>
-		);
-	}
-
 	return (
-		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
-			{/* Tag header */}
-			<View className="flex-row items-center justify-between px-4 py-3">
-				<View className="flex-row items-center">
-					<Button
-						isIconOnly
-						variant="secondary"
-						size="sm"
-						onPress={() => router.back()}
-						className="mr-3"
-					>
-						<StyledArrowLeft size={20} className="text-foreground" />
-					</Button>
-					<View className="flex-row items-center">
-						<Chip variant="soft" color="default" size="md" className="pr-2">
-							<StyledTag size={14} className="text-foreground" />
-							<Chip.Label className="mx-0.5 font-medium">
-								{decodedTagName}
-							</Chip.Label>
-						</Chip>
-					</View>
-				</View>
-				<CategoryFilter
-					selectedCategory={selectedCategory}
-					onCategoryChange={setSelectedCategory}
-				/>
-			</View>
+		<Screen>
+			<AppBar
+				showBack
+				title={decodedTagName || m.mob_tag_filter_fallback_title()}
+				leading={
+					<View
+						aria-hidden
+						className="h-[7px] w-[7px] rounded-full"
+						style={{
+							backgroundColor: getTagColorFromName(
+								decodedTagName || m.mob_tag_filter_fallback_title(),
+							),
+						}}
+					/>
+				}
+			/>
 
-			{/* Items list */}
-			{filteredItems.length === 0 ? (
-				<View className="flex-1 items-center justify-center p-8">
-					<Card
-						variant="secondary"
-						className="w-full max-w-sm items-center p-8"
-					>
-						<StyledTag size={48} className="mb-4 text-muted" />
-						<Card.Title className="mb-2 text-center text-lg">
-							{m.mob_tag_filter_empty_title()}
-						</Card.Title>
-						<Card.Description className="text-center">
-							{selectedCategory !== "all"
-								? m.mob_tag_filter_empty_category_description()
-								: m.mob_tag_filter_empty_no_items_description()}
-						</Card.Description>
-					</Card>
-				</View>
+			<CategoryFilter
+				selectedCategory={selectedCategory}
+				onCategoryChange={setSelectedCategory}
+			/>
+
+			{isLoading ? (
+				<ItemsSkeletonList />
+			) : error ? (
+				<ErrorState
+					icon={IconAlertCircle}
+					title={m.mob_tag_filter_error_loading()}
+					actionLabel={m.mob_items_button_retry()}
+					onAction={handleRefresh}
+				/>
 			) : (
-				<FlatList
-					data={filteredItems}
-					renderItem={renderItem}
-					keyExtractor={(item) => item.id}
-					refreshControl={
-						<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+				<ItemSectionsList
+					favorites={favorites}
+					regularItems={regularItems}
+					onItemPress={(item) =>
+						router.push(`/(vault)/${item.vaultId}/${item.id}`)
+					}
+					refreshing={refreshing}
+					onRefresh={handleRefresh}
+					showVaultBadge
+					bottomInset={bottomInset}
+					ListEmptyComponent={
+						<EmptyItemsState
+							icon={IconTag}
+							title={m.mob_tag_filter_empty_title()}
+							description={
+								selectedCategory === "all"
+									? m.mob_tag_filter_empty_no_items_description()
+									: m.mob_tag_filter_empty_category_description()
+							}
+						/>
 					}
 				/>
 			)}
-		</SafeAreaView>
+		</Screen>
 	);
 }

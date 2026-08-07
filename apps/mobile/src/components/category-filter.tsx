@@ -1,85 +1,75 @@
 import type { ItemCategory } from "@bittery/shared/types";
-import { Button, Select } from "heroui-native";
-import { ChevronDown } from "lucide-react-native";
-import { ScrollView, Text, View } from "react-native";
-import { withUniwind } from "uniwind";
-import { getCategoryOptions } from "../constants/item-categories";
-import { useI18n } from "../providers/i18n-provider";
+import { useMemo } from "react";
+import { View } from "react-native";
+import {
+	type AppIcon,
+	ChipRail,
+	type FilterChip,
+	IconCreditCard,
+	IconFileText,
+	IconGrid,
+	IconKey,
+	IconTimer,
+	IconUser,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
 
-const StyledChevronDown = withUniwind(ChevronDown);
+type CategoryValue = ItemCategory | "all";
+
+const CATEGORY_ICONS: Record<CategoryValue, AppIcon> = {
+	all: IconGrid,
+	login: IconKey,
+	"credit-card": IconCreditCard,
+	identity: IconUser,
+	"secure-note": IconFileText,
+	totp: IconTimer,
+};
 
 export interface CategoryFilterProps {
-	selectedCategory: ItemCategory | "all";
-	onCategoryChange: (category: ItemCategory | "all") => void;
+	selectedCategory: CategoryValue;
+	onCategoryChange: (category: CategoryValue) => void;
+	/** Row counts keyed by category, rendered on the chips when supplied. */
+	counts?: Partial<Record<CategoryValue, number>>;
+	className?: string;
 }
 
+/** Horizontal item-category rail. Replaces the old dropdown filter. */
 export function CategoryFilter({
 	selectedCategory,
 	onCategoryChange,
+	counts,
+	className,
 }: CategoryFilterProps) {
 	const { m } = useI18n();
-	const categoryOptions = getCategoryOptions(m);
-	const selectedOption = categoryOptions.find(
-		(opt) => opt.value === selectedCategory,
-	);
 
+	const chips = useMemo<FilterChip<CategoryValue>[]>(() => {
+		const labels: Array<[CategoryValue, string]> = [
+			["all", m.mob_category_chip_all()],
+			["login", m.mob_category_login()],
+			["credit-card", m.mob_category_credit_card()],
+			["identity", m.mob_category_identity()],
+			["secure-note", m.mob_category_secure_note()],
+			["totp", m.mob_category_totp()],
+		];
+
+		return labels.map(([value, label]) => ({
+			value,
+			label,
+			icon: CATEGORY_ICONS[value],
+			count: counts?.[value],
+		}));
+	}, [m, counts]);
+
+	// The wrapper pins the rail to its content height; a bare horizontal
+	// ScrollView would otherwise stretch into the list below it.
 	return (
-		<View className="pl-0.5">
-			<Select
-				value={
-					selectedOption
-						? { value: selectedOption.value, label: selectedOption.label }
-						: undefined
-				}
-				onValueChange={(option) => {
-					if (option) {
-						onCategoryChange(option.value as ItemCategory | "all");
-					}
-				}}
-			>
-				<Select.Trigger variant="unstyled" asChild>
-					<Button variant="ghost" size="sm" className="self-start">
-						{selectedOption && (
-							<selectedOption.icon
-								size={16}
-								className="text-surface-foreground"
-							/>
-						)}
-						<Button.Label>{selectedOption?.label}</Button.Label>
-						<StyledChevronDown size={16} className="text-surface-foreground" />
-					</Button>
-				</Select.Trigger>
-				<Select.Portal>
-					<Select.Overlay />
-					<Select.Content
-						presentation="popover"
-						placement="bottom"
-						align="start"
-						width={220}
-					>
-						<ScrollView className="max-h-72">
-							{categoryOptions.map((option) => {
-								const Icon = option.icon;
-								return (
-									<Select.Item
-										key={option.value}
-										value={option.value}
-										label={option.label}
-									>
-										<View className="flex-1 flex-row items-center gap-3">
-											<Icon size={18} className="text-muted" />
-											<Text className="flex-1 text-base text-foreground">
-												{option.label}
-											</Text>
-										</View>
-										<Select.ItemIndicator />
-									</Select.Item>
-								);
-							})}
-						</ScrollView>
-					</Select.Content>
-				</Select.Portal>
-			</Select>
+		<View className={cn("pb-3", className)}>
+			<ChipRail
+				chips={chips}
+				value={selectedCategory}
+				onChange={onCategoryChange}
+			/>
 		</View>
 	);
 }

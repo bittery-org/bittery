@@ -1,17 +1,17 @@
-import { Card } from "heroui-native";
-import {
-	Briefcase,
-	FolderClosed,
-	Heart,
-	Key,
-	Lock,
-	Shield,
-	Star,
-	Users,
-} from "lucide-react-native";
 import { useState } from "react";
-import { Image, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { Image, Text, View } from "react-native";
+import {
+	type AppIcon,
+	GradientTile,
+	IconBriefcase,
+	IconFolderClosed,
+	IconHeart,
+	IconKey,
+	IconLock,
+	IconShield,
+	IconStar,
+	IconUsers,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
 
 type VaultIconName =
@@ -24,24 +24,15 @@ type VaultIconName =
 	| "star"
 	| "heart";
 
-const StyledLock = withUniwind(Lock);
-const StyledShield = withUniwind(Shield);
-const StyledUsers = withUniwind(Users);
-const StyledBriefcase = withUniwind(Briefcase);
-const StyledKey = withUniwind(Key);
-const StyledFolderClosed = withUniwind(FolderClosed);
-const StyledStar = withUniwind(Star);
-const StyledHeart = withUniwind(Heart);
-
-const vaultIconMap: Record<VaultIconName, typeof StyledLock> = {
-	lock: StyledLock,
-	shield: StyledShield,
-	users: StyledUsers,
-	briefcase: StyledBriefcase,
-	key: StyledKey,
-	folder: StyledFolderClosed,
-	star: StyledStar,
-	heart: StyledHeart,
+const vaultIconMap: Record<VaultIconName, AppIcon> = {
+	lock: IconLock,
+	shield: IconShield,
+	users: IconUsers,
+	briefcase: IconBriefcase,
+	key: IconKey,
+	folder: IconFolderClosed,
+	star: IconStar,
+	heart: IconHeart,
 };
 
 interface VaultAvatarProps {
@@ -52,8 +43,15 @@ interface VaultAvatarProps {
 	className?: string;
 }
 
+const sizeMap = {
+	xs: { tile: 24, radius: 7, glyph: 13, text: "text-2xs" },
+	sm: { tile: 32, radius: 9, glyph: 16, text: "text-xs" },
+	md: { tile: 40, radius: 12, glyph: 20, text: "text-sm" },
+	lg: { tile: 48, radius: 14, glyph: 24, text: "text-base" },
+} as const;
+
 function getInitials(name: string): string {
-	if (!name) return "??";
+	if (!name) return "?";
 	const parts = name.trim().split(/\s+/);
 	if (parts.length >= 2) {
 		return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
@@ -61,35 +59,7 @@ function getInitials(name: string): string {
 	return name.slice(0, 2).toUpperCase();
 }
 
-function getAvatarColor(name: string): string {
-	const colors = [
-		"bg-red-500",
-		"bg-orange-500",
-		"bg-amber-500",
-		"bg-yellow-500",
-		"bg-lime-500",
-		"bg-green-500",
-		"bg-emerald-500",
-		"bg-teal-500",
-		"bg-cyan-500",
-		"bg-sky-500",
-		"bg-blue-500",
-		"bg-indigo-500",
-		"bg-violet-500",
-		"bg-purple-500",
-		"bg-fuchsia-500",
-		"bg-pink-500",
-		"bg-rose-500",
-	];
-
-	let hash = 0;
-	for (let i = 0; i < name.length; i++) {
-		hash = name.charCodeAt(i) + ((hash << 5) - hash);
-	}
-
-	return colors[Math.abs(hash) % colors.length] ?? "bg-gray-500";
-}
-
+/** Vault identity tile: uploaded image, chosen glyph, or hashed-gradient initials. */
 export function VaultAvatar({
 	name,
 	icon,
@@ -98,69 +68,42 @@ export function VaultAvatar({
 	className,
 }: VaultAvatarProps) {
 	const [imageError, setImageError] = useState(false);
-
-	const sizeClasses = {
-		xs: "h-6 w-6",
-		sm: "h-8 w-8",
-		md: "h-10 w-10",
-		lg: "h-12 w-12",
-	};
-
-	const iconSizes = {
-		xs: 13,
-		sm: 16,
-		md: 20,
-		lg: 24,
-	};
-
-	const textSizes = {
-		xs: "text-[10px]",
-		sm: "text-xs",
-		md: "text-sm",
-		lg: "text-base",
-	};
-
+	const { tile, radius, glyph, text } = sizeMap[size];
 	const Icon = icon ? vaultIconMap[icon as VaultIconName] : undefined;
-	const showImage = Boolean(imageUrl && !imageError);
-	const showIcon = Boolean(!showImage && Icon);
-	const initials = getInitials(name);
-	const avatarColor = getAvatarColor(name || "Vault");
 
-	return (
-		<View
-			className={cn(
-				"flex",
-				"shrink-0",
-				"items-center",
-				"justify-center",
-				"overflow-hidden",
-				"rounded-lg",
-				sizeClasses[size],
-				showImage || showIcon ? "bg-surface-secondary" : avatarColor,
-				className || "",
-			)}
-		>
-			{showImage ? (
+	if (imageUrl && !imageError) {
+		return (
+			<View
+				className={cn(
+					"shrink-0 items-center justify-center overflow-hidden border border-border bg-surface-secondary",
+					className,
+				)}
+				style={{ width: tile, height: tile, borderRadius: radius }}
+			>
 				<Image
-					source={{ uri: imageUrl ?? "" }}
-					className="h-full w-full"
+					source={{ uri: imageUrl }}
+					style={{ width: tile, height: tile }}
 					resizeMode="cover"
 					onError={() => setImageError(true)}
 				/>
-			) : showIcon && Icon ? (
-				<Icon size={iconSizes[size]} className="text-muted" />
+			</View>
+		);
+	}
+
+	return (
+		<GradientTile
+			name={name || "Vault"}
+			size={tile}
+			radius={radius}
+			className={cn("shrink-0", className)}
+		>
+			{Icon ? (
+				<Icon size={glyph} className="text-white" />
 			) : (
-				<Card.Title
-					className={cn(
-						"select-none",
-						"font-semibold",
-						"text-white",
-						textSizes[size],
-					)}
-				>
-					{initials}
-				</Card.Title>
+				<Text className={cn("font-semibold text-white", text)}>
+					{getInitials(name)}
+				</Text>
 			)}
-		</View>
+		</GradientTile>
 	);
 }

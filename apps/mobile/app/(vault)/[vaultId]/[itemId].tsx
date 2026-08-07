@@ -23,13 +23,14 @@ import {
 	TagsSection,
 } from "@/components/item-details";
 import { PasswordHistorySheet } from "@/components/password-history-sheet";
-import { SafeAreaView } from "@/components/safe-area-view";
 import { ShareItemSheet } from "@/components/share/share-item-sheet";
+import { layout, Screen, useBottomInset } from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
 
 export default function ItemDetailScreen() {
 	const { m } = useI18n();
 	const router = useRouter();
+	const bottomInset = useBottomInset();
 	const { vaultId, itemId } = useLocalSearchParams<{
 		vaultId: string;
 		itemId: string;
@@ -70,7 +71,8 @@ export default function ItemDetailScreen() {
 			toast.show({
 				variant: "danger",
 				label: m.mob_item_detail_toast_delete_failed(),
-				description: error instanceof Error ? error.message : "Unknown error",
+				description:
+					error instanceof Error ? error.message : m.mob_detail_error_unknown(),
 				placement: "bottom",
 			});
 		}
@@ -78,14 +80,6 @@ export default function ItemDetailScreen() {
 
 	const handleEdit = () => {
 		router.push(`/(vault)/${vaultId}/edit/${itemId}`);
-	};
-
-	const handleShare = () => {
-		setShareSheetVisible(true);
-	};
-
-	const handlePasswordHistory = () => {
-		setPasswordHistoryVisible(true);
 	};
 
 	const handleRestorePassword = async (password: string) => {
@@ -106,70 +100,69 @@ export default function ItemDetailScreen() {
 			toast.show({
 				variant: "danger",
 				label: m.mob_item_detail_toast_password_restore_failed(),
-				description: error instanceof Error ? error.message : "Unknown error",
+				description:
+					error instanceof Error ? error.message : m.mob_detail_error_unknown(),
 				placement: "bottom",
 			});
 		}
 	};
 
-	// Loading state
 	if (isLoading) {
 		return <LoadingState />;
 	}
 
-	// Error state
 	if (error) {
 		return <ErrorState error={error} onBack={() => router.back()} />;
 	}
 
-	// Not found state
 	if (!item) {
 		return <NotFoundState onBack={() => router.back()} />;
 	}
 
 	return (
-		<SafeAreaView className="flex-1 bg-background">
+		<Screen>
 			<ItemHeader
 				item={item}
 				vaultId={vaultId}
 				onBack={() => router.back()}
 				onEdit={handleEdit}
 				onDelete={handleDelete}
-				onShare={handleShare}
-				onPasswordHistory={handlePasswordHistory}
+				onShare={() => setShareSheetVisible(true)}
+				onPasswordHistory={() => setPasswordHistoryVisible(true)}
 				isDeleting={deleteItem.isPending}
 				isSharing={createShare.isPending}
 				popoverRef={popoverRef}
 			/>
 
-			<ScrollView className="flex-1 px-4 pt-4">
-				{/* Category-specific fields */}
+			<ScrollView
+				className="flex-1"
+				contentContainerStyle={{
+					paddingHorizontal: layout.screenPadding,
+					paddingBottom: bottomInset,
+					gap: layout.gap.lg,
+				}}
+			>
 				<CategoryFields
 					category={item.category}
 					item={item}
 					onCopy={handleCopy}
 				/>
 
-				{/* Notes (for non-secure-note items) */}
 				<NotesSection
 					notes={item.notes || item.note}
 					showForSecureNote={item.category === "secure-note"}
+					onCopy={handleCopy}
 				/>
 
-				{/* Tags */}
 				<TagsSection tags={item.tags} />
 
-				{/* Custom Fields */}
 				<CustomFields fields={item.customFields} onCopy={handleCopy} />
 
-				{/* Attachments */}
 				<ItemAttachments itemId={itemId} vaultId={vaultId} canEdit />
 
-				{/* Metadata */}
 				<ItemMetadata createdAt={item.createdAt} updatedAt={item.updatedAt} />
 			</ScrollView>
 
-			{/* Share Sheet */}
 			<ShareItemSheet
 				item={item}
 				visible={shareSheetVisible}
@@ -181,10 +174,12 @@ export default function ItemDetailScreen() {
 				onClose={() => setPasswordHistoryVisible(false)}
 				passwordHistory={item.passwordHistory}
 				currentPassword={item.password}
-				onCopyPassword={(password) => handleCopy(password, "Password")}
+				onCopyPassword={(password) =>
+					handleCopy(password, m.mob_detail_field_password())
+				}
 				onRestorePassword={handleRestorePassword}
 				isRestoring={updateItem.isPending}
 			/>
-		</SafeAreaView>
+		</Screen>
 	);
 }

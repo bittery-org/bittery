@@ -3,18 +3,9 @@ import type {
 	CustomField,
 	DecryptedItem,
 	DecryptedItemData,
-	ItemCategory,
 } from "@bittery/shared/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, Input, Label, TextField, useToast } from "heroui-native";
-import {
-	ArrowLeft,
-	CreditCard,
-	FileText,
-	Key,
-	Timer,
-	User,
-} from "lucide-react-native";
+import { Input, useToast } from "heroui-native";
 import { useRef, useState } from "react";
 import {
 	ActivityIndicator,
@@ -24,7 +15,6 @@ import {
 	Text,
 	View,
 } from "react-native";
-import { withUniwind } from "uniwind";
 import {
 	CreditCardForm,
 	type CreditCardFormRef,
@@ -37,30 +27,19 @@ import {
 	TotpForm,
 	type TotpFormRef,
 } from "@/components/item-forms";
-import { ItemIcon } from "@/components/item-icon";
-import { SafeAreaView } from "@/components/safe-area-view";
+import { FormField } from "@/components/item-forms/form-field";
 import { TagInput } from "@/components/tag-input";
+import {
+	AppBar,
+	BrandButton,
+	EmptyState,
+	IconSearch,
+	layout,
+	Screen,
+	useBottomInset,
+} from "@/components/ui";
+import { getCategoryLabels } from "@/constants/item-categories";
 import { useI18n } from "@/providers/i18n-provider";
-
-// Create styled icon components
-const StyledKey = withUniwind(Key);
-const StyledCreditCard = withUniwind(CreditCard);
-const StyledUser = withUniwind(User);
-const StyledFileText = withUniwind(FileText);
-const StyledTimer = withUniwind(Timer);
-const StyledArrowLeft = withUniwind(ArrowLeft);
-
-const categoryOptions: {
-	value: ItemCategory;
-	label: string;
-	icon: typeof StyledKey;
-}[] = [
-	{ value: "login", label: "Login", icon: StyledKey },
-	{ value: "credit-card", label: "Credit Card", icon: StyledCreditCard },
-	{ value: "identity", label: "Identity", icon: StyledUser },
-	{ value: "secure-note", label: "Secure Note", icon: StyledFileText },
-	{ value: "totp", label: "TOTP", icon: StyledTimer },
-];
 
 export default function EditItemScreen() {
 	const { m } = useI18n();
@@ -74,33 +53,30 @@ export default function EditItemScreen() {
 	const { items, isLoading } = useVaultItems(vaultId);
 	const item = items.find((i) => i.id === itemId);
 
-	// Render loading state
 	if (isLoading) {
 		return (
-			<SafeAreaView className="flex-1 items-center justify-center bg-background">
-				<ActivityIndicator size="large" color="#000" />
-			</SafeAreaView>
+			<Screen>
+				<AppBar showBack />
+				<View className="flex-1 items-center justify-center">
+					<ActivityIndicator size="large" />
+				</View>
+			</Screen>
 		);
 	}
 
-	// Render error state
 	if (!item) {
 		return (
-			<SafeAreaView className="flex-1 items-center justify-center bg-background">
-				<Text className="text-foreground">{m.mob_edit_item_not_found()}</Text>
-				<Button
-					onPress={() => router.back()}
-					variant="primary"
-					className="mt-4"
-				>
-					{m.mob_edit_item_go_back()}
-				</Button>
-			</SafeAreaView>
+			<Screen>
+				<AppBar showBack />
+				<EmptyState
+					icon={IconSearch}
+					title={m.mob_edit_item_not_found()}
+					actionLabel={m.mob_edit_item_go_back()}
+					onAction={() => router.back()}
+				/>
+			</Screen>
 		);
 	}
-
-	const categoryLabel =
-		categoryOptions.find((c) => c.value === item.category)?.label || "Unknown";
 
 	return (
 		<EditItemForm
@@ -108,7 +84,7 @@ export default function EditItemScreen() {
 			item={item}
 			itemId={itemId}
 			vaultId={vaultId}
-			categoryLabel={categoryLabel}
+			categoryLabel={getCategoryLabels(m)[item.category]}
 			onBack={() => router.back()}
 			onSaved={() => router.back()}
 			updateItem={updateItem}
@@ -135,18 +111,27 @@ function EditItemForm({
 }) {
 	const { m } = useI18n();
 	const { toast } = useToast();
+	const bottomInset = useBottomInset({ extra: 0 });
 	const [saving, setSaving] = useState(false);
 	const [title, setTitle] = useState(item.title || "");
 	const [notes, setNotes] = useState(item.notes || "");
 	const [tags, setTags] = useState<string[]>(item.tags || []);
 	const [customFields] = useState<CustomField[]>(item.customFields || []);
+	const [hasSubmitted, setHasSubmitted] = useState(false);
 	const loginFormRef = useRef<LoginFormRef>(null);
 	const creditCardFormRef = useRef<CreditCardFormRef>(null);
 	const identityFormRef = useRef<IdentityFormRef>(null);
 	const secureNoteFormRef = useRef<SecureNoteFormRef>(null);
 	const totpFormRef = useRef<TotpFormRef>(null);
 
+	const titleError =
+		hasSubmitted && !title.trim()
+			? m.mob_edit_item_toast_title_required()
+			: null;
+
 	const handleSave = async () => {
+		setHasSubmitted(true);
+
 		if (!title.trim()) {
 			toast.show({
 				variant: "danger",
@@ -247,61 +232,47 @@ function EditItemForm({
 	};
 
 	return (
-		<SafeAreaView className="flex-1 bg-background">
+		<Screen>
+			<AppBar
+				showBack
+				onBack={onBack}
+				title={item.title || m.mob_edit_item_untitled()}
+				bordered
+			/>
 			<KeyboardAvoidingView
 				behavior={Platform.OS === "ios" ? "padding" : "height"}
 				className="flex-1"
 			>
-				{/* Header */}
-				<View className="flex-row items-center px-4 py-4">
-					<Button
-						isIconOnly
-						onPress={onBack}
-						variant="secondary"
-						size="sm"
-						className="mr-3"
+				<ScrollView
+					className="flex-1"
+					keyboardShouldPersistTaps="handled"
+					contentContainerStyle={{
+						paddingHorizontal: layout.screenPadding,
+						paddingTop: layout.gap.md,
+						paddingBottom: layout.gap.lg,
+						gap: layout.gap.md,
+					}}
+				>
+					<FormField
+						label={m.mob_edit_item_title_label()}
+						isRequired
+						error={titleError}
+						labelAccessory={
+							<View className="rounded-lg bg-default px-2 py-0.5">
+								<Text className="font-medium text-2xs text-muted">
+									{categoryLabel}
+								</Text>
+							</View>
+						}
 					>
-						<StyledArrowLeft size={20} className="text-foreground" />
-					</Button>
-					<ItemIcon
-						category={item.category}
-						url={item.category === "login" ? item.url : undefined}
-						size="md"
-						className="mr-3"
-					/>
-					<View className="flex-1">
-						<Text
-							className="font-bold text-foreground text-xl"
-							numberOfLines={1}
-							ellipsizeMode="tail"
-						>
-							{item.title || m.mob_edit_item_untitled()}
-						</Text>
-						<Text className="text-muted text-sm">{categoryLabel}</Text>
-					</View>
-					<Button
-						onPress={handleSave}
-						isDisabled={saving}
-						variant="primary"
-						size="sm"
-					>
-						{saving ? m.mob_edit_item_saving() : m.mob_edit_item_save()}
-					</Button>
-				</View>
-
-				<ScrollView className="flex-1 px-4" keyboardShouldPersistTaps="handled">
-					{/* Title */}
-					<TextField className="my-4" isRequired>
-						<Label>{m.mob_edit_item_title_label()}</Label>
 						<Input
 							placeholder={m.mob_edit_item_title_placeholder()}
 							value={title}
 							onChangeText={setTitle}
 						/>
-					</TextField>
+					</FormField>
 
-					{/* Category-specific forms */}
-					{item.category === "login" && (
+					{item.category === "login" ? (
 						<LoginForm
 							ref={loginFormRef}
 							initialData={{
@@ -311,8 +282,8 @@ function EditItemForm({
 								urls: item.urls,
 							}}
 						/>
-					)}
-					{item.category === "credit-card" && (
+					) : null}
+					{item.category === "credit-card" ? (
 						<CreditCardForm
 							ref={creditCardFormRef}
 							initialData={{
@@ -323,8 +294,8 @@ function EditItemForm({
 								billingAddress: item.billingAddress,
 							}}
 						/>
-					)}
-					{item.category === "identity" && (
+					) : null}
+					{item.category === "identity" ? (
 						<IdentityForm
 							ref={identityFormRef}
 							initialData={{
@@ -333,16 +304,14 @@ function EditItemForm({
 								email: item.email,
 							}}
 						/>
-					)}
-					{item.category === "secure-note" && (
+					) : null}
+					{item.category === "secure-note" ? (
 						<SecureNoteForm
 							ref={secureNoteFormRef}
-							initialData={{
-								note: item.note || item.notes,
-							}}
+							initialData={{ note: item.note || item.notes }}
 						/>
-					)}
-					{item.category === "totp" && (
+					) : null}
+					{item.category === "totp" ? (
 						<TotpForm
 							ref={totpFormRef}
 							initialData={{
@@ -354,36 +323,40 @@ function EditItemForm({
 								totpPeriod: item.totpPeriod,
 							}}
 						/>
-					)}
+					) : null}
 
-					{/* Tags */}
 					<TagInput
 						tags={tags}
 						onTagsChange={setTags}
 						placeholder={m.mob_edit_item_tags_placeholder()}
-						label="Tags (optional)"
 					/>
 
-					{/* Notes (for non-secure-note items) */}
-					{item.category !== "secure-note" && (
-						<TextField className="mb-4">
-							<Label>{m.mob_edit_item_notes_label()}</Label>
+					{item.category !== "secure-note" ? (
+						<FormField label={m.mob_edit_item_notes_label()}>
 							<Input
 								placeholder={m.mob_edit_item_notes_placeholder()}
 								value={notes}
 								onChangeText={setNotes}
 								multiline
-								numberOfLines={3}
+								numberOfLines={4}
 								textAlignVertical="top"
-								style={{ minHeight: 80 }}
+								style={{ minHeight: 96 }}
 							/>
-						</TextField>
-					)}
-
-					{/* Bottom padding */}
-					<View className="h-8" />
+						</FormField>
+					) : null}
 				</ScrollView>
+
+				<View
+					className="border-border border-t bg-background px-4 pt-3"
+					style={{ paddingBottom: bottomInset + layout.gap.sm }}
+				>
+					<BrandButton
+						label={saving ? m.mob_edit_item_saving() : m.mob_edit_item_save()}
+						onPress={handleSave}
+						isLoading={saving}
+					/>
+				</View>
 			</KeyboardAvoidingView>
-		</SafeAreaView>
+		</Screen>
 	);
 }

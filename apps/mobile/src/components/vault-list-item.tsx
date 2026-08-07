@@ -1,13 +1,10 @@
-import { Card, Chip, PressableFeedback } from "heroui-native";
-import { ChevronRight } from "lucide-react-native";
+import { PressableFeedback } from "heroui-native";
 import { memo } from "react";
-import { View } from "react-native";
-import { withUniwind } from "uniwind";
-
+import { Text, View } from "react-native";
+import { IconChevronRight, IconUsers, iconSize, layout } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 import { VaultAvatar } from "./vault-avatar";
-
-const StyledChevronRight = withUniwind(ChevronRight);
 
 interface VaultListItemProps {
 	id: string;
@@ -37,73 +34,72 @@ export const VaultListItem = memo(function VaultListItem({
 	isLastInSection = false,
 }: VaultListItemProps) {
 	const { m } = useI18n();
-	// Get subtitle based on vault info
-	const subtitleParts = [
-		accountLabel,
-		type === "team"
-			? m.mob_vault_item_type_team()
-			: m.mob_vault_item_type_personal(),
-		role,
-		itemCount !== undefined
-			? `${itemCount} item${itemCount !== 1 ? "s" : ""}`
-			: null,
-	].filter(Boolean);
-	const subtitle = subtitleParts.join(" • ");
+	const isShared = type === "team";
 
-	// Determine rounded corners based on position
-	const getCardRounding = () => {
-		if (isFirstInSection && isLastInSection) {
-			return "rounded-2xl"; // Single item
-		}
-		if (isFirstInSection) {
-			return "rounded-t-2xl rounded-b-md"; // First item
-		}
-		if (isLastInSection) {
-			return "rounded-t-md rounded-b-2xl"; // Last item
-		}
-		return "rounded-md"; // Middle item
-	};
+	const subtitle = [
+		accountLabel,
+		role,
+		itemCount === undefined
+			? null
+			: itemCount === 1
+				? m.mob_item_count_singular({ count: String(itemCount) })
+				: m.mob_item_count_plural({ count: String(itemCount) }),
+	]
+		.filter(Boolean)
+		.join(" · ");
 
 	return (
-		<PressableFeedback onPress={onPress} className="mx-4 mb-1">
-			<Card className={getCardRounding()}>
-				<PressableFeedback.Ripple />
-				<Card.Body className="flex-row items-center py-1 pr-3 pl-1.5">
-					{/* Vault Avatar */}
-					<View className="mr-3.5">
-						<VaultAvatar
-							name={name}
-							icon={icon}
-							imageUrl={imageUrl}
-							size="sm"
-						/>
-					</View>
-
-					{/* Content */}
+		<View className="px-4">
+			<View
+				className={cn(
+					"overflow-hidden border-border border-x bg-surface",
+					isFirstInSection ? "rounded-t-2xl border-t" : "",
+					isLastInSection ? "rounded-b-2xl border-b" : "",
+				)}
+			>
+				{isFirstInSection ? null : <View className="ml-14 h-px bg-border" />}
+				<PressableFeedback
+					onPress={onPress}
+					className="flex-row items-center px-3.5"
+					style={{ minHeight: layout.rowHeight }}
+				>
+					<PressableFeedback.Highlight />
+					<VaultAvatar
+						name={name}
+						icon={icon}
+						imageUrl={imageUrl}
+						size="md"
+						className="mr-3"
+					/>
 					<View className="min-w-0 flex-1">
-						<View className="flex-row items-center">
-							<Card.Title className="shrink text-base" numberOfLines={1}>
+						<View className="flex-row items-center gap-1.5">
+							<Text
+								numberOfLines={1}
+								className="shrink font-medium text-base text-foreground"
+							>
 								{name}
-							</Card.Title>
-							{type === "team" && (
-								<View className="ml-2">
-									<Chip variant="secondary" size="sm">
-										<Chip.Label className="text-[10px]">
-											{m.mob_vault_item_team_badge()}
-										</Chip.Label>
-									</Chip>
+							</Text>
+							{isShared ? (
+								<View className="shrink-0 flex-row items-center gap-1 rounded-full border border-border bg-surface-secondary px-1.5 py-0.5">
+									<IconUsers size={10} className="text-muted" />
+									<Text className="text-2xs text-muted">
+										{m.mob_vault_item_type_team()}
+									</Text>
 								</View>
-							)}
+							) : null}
 						</View>
-						<Card.Description className="text-xs" numberOfLines={1}>
-							{subtitle}
-						</Card.Description>
+						{subtitle ? (
+							<Text numberOfLines={1} className="mt-0.5 text-muted text-sm">
+								{subtitle}
+							</Text>
+						) : null}
 					</View>
-
-					{/* Chevron */}
-					<StyledChevronRight size={18} className="ml-2 text-muted" />
-				</Card.Body>
-			</Card>
-		</PressableFeedback>
+					<IconChevronRight
+						size={iconSize.row}
+						className="ml-2 shrink-0 text-muted opacity-60"
+					/>
+				</PressableFeedback>
+			</View>
+		</View>
 	);
 });

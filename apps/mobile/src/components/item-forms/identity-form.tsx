@@ -1,7 +1,8 @@
-import { Input, Label, TextField } from "heroui-native";
+import { Input } from "heroui-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { View } from "react-native";
 import { useI18n } from "@/providers/i18n-provider";
+import { FormField } from "./form-field";
 
 export interface IdentityFormData {
 	firstName: string;
@@ -36,30 +37,33 @@ export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
 
 		return (
 			<>
-				<View className="mb-4 flex-row gap-2">
-					<TextField className="flex-1">
-						<Label>{m.mob_form_identity_first_name_label()}</Label>
+				<View className="flex-row gap-3">
+					<FormField
+						label={m.mob_form_identity_first_name_label()}
+						className="flex-1"
+					>
 						<Input
 							placeholder={m.mob_form_identity_first_name_placeholder()}
 							value={firstName}
 							onChangeText={setFirstName}
 							autoCapitalize="words"
 						/>
-					</TextField>
+					</FormField>
 
-					<TextField className="flex-1">
-						<Label>{m.mob_form_identity_last_name_label()}</Label>
+					<FormField
+						label={m.mob_form_identity_last_name_label()}
+						className="flex-1"
+					>
 						<Input
 							placeholder={m.mob_form_identity_last_name_placeholder()}
 							value={lastName}
 							onChangeText={setLastName}
 							autoCapitalize="words"
 						/>
-					</TextField>
+					</FormField>
 				</View>
 
-				<TextField className="mb-4">
-					<Label>{m.mob_form_identity_email_label()}</Label>
+				<FormField label={m.mob_form_identity_email_label()}>
 					<Input
 						placeholder={m.mob_form_identity_email_placeholder()}
 						value={email}
@@ -67,7 +71,7 @@ export const IdentityForm = forwardRef<IdentityFormRef, IdentityFormProps>(
 						autoCapitalize="none"
 						keyboardType="email-address"
 					/>
-				</TextField>
+				</FormField>
 			</>
 		);
 	},
