@@ -41,6 +41,7 @@ import {
 	Key,
 	KeyRound,
 	Languages,
+	Library,
 	Link,
 	ListFilter,
 	Loader2,
@@ -115,6 +116,8 @@ export const IconInfo = withUniwind(Info);
 export const IconKey = withUniwind(Key);
 export const IconKeyRound = withUniwind(KeyRound);
 export const IconLanguages = withUniwind(Languages);
+/** Browse — deliberately not IconVault, which means "a vault" everywhere else. */
+export const IconLibrary = withUniwind(Library);
 export const IconLink = withUniwind(Link);
 export const IconListFilter = withUniwind(ListFilter);
 export const IconLoader = withUniwind(Loader2);

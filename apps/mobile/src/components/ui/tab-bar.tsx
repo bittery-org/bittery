@@ -54,13 +54,15 @@ export function createTabBar(icons: TabBarIcons) {
 
 		return (
 			<View className="absolute right-0 bottom-0 left-0">
+				{/* The blur is texture, not transparency — the bar stays a legible
+				    surface, so the scrim below it does most of the work. */}
 				<BlurView
-					intensity={theme === "dark" ? 40 : 60}
+					intensity={theme === "dark" ? 24 : 40}
 					tint={theme === "dark" ? "dark" : "light"}
 					className="border-border border-t"
 				>
 					<View
-						className="flex-row bg-background/70"
+						className="flex-row bg-background/95"
 						style={{
 							height: layout.tabBarHeight + insets.bottom,
 							paddingBottom: insets.bottom,

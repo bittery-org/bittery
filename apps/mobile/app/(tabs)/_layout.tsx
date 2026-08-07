@@ -2,16 +2,16 @@ import { Tabs } from "expo-router";
 import {
 	createTabBar,
 	IconHome,
+	IconLibrary,
 	IconSearch,
 	IconSettings,
-	IconVault,
 } from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
 
 const TabBar = createTabBar({
 	index: IconHome,
 	search: IconSearch,
-	vaults: IconVault,
+	vaults: IconLibrary,
 	settings: IconSettings,
 });
 
