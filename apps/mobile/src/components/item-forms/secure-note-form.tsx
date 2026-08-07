@@ -1,6 +1,7 @@
-import { Input, Label, TextField } from "heroui-native";
+import { Input } from "heroui-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { useI18n } from "@/providers/i18n-provider";
+import { FormField } from "./form-field";
 
 export interface SecureNoteFormData {
 	note: string;
@@ -30,18 +31,17 @@ export const SecureNoteForm = forwardRef<
 	}));
 
 	return (
-		<TextField className="mb-4">
-			<Label>{m.mob_form_note_label()}</Label>
+		<FormField label={m.mob_form_note_label()}>
 			<Input
 				placeholder={m.mob_form_note_placeholder()}
 				value={note}
 				onChangeText={setNote}
 				multiline
-				numberOfLines={6}
+				numberOfLines={8}
 				textAlignVertical="top"
-				style={{ minHeight: 120 }}
+				style={{ minHeight: 160 }}
 			/>
-		</TextField>
+		</FormField>
 	);
 });
 

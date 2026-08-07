@@ -1,18 +1,14 @@
 import {
-	Button,
-	Chip,
 	Description,
 	Input,
 	Label,
+	PressableFeedback,
 	TextField,
 } from "heroui-native";
-import { X } from "lucide-react-native";
 import { useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
-import { withUniwind } from "uniwind";
-
-const StyledX = withUniwind(X);
-
+import { Text, View } from "react-native";
+import { IconPlus, IconX, iconSize } from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface TagInputProps {
@@ -35,21 +31,21 @@ export function TagInput({
 	const placeholder = placeholderProp ?? m.mob_tag_input_default_placeholder();
 	const [inputValue, setInputValue] = useState("");
 
+	const isFull = tags.length >= maxTags;
+	const canAdd = Boolean(inputValue.trim()) && !isFull;
+
 	const handleAddTag = () => {
 		const trimmedValue = inputValue.trim();
 
 		if (!trimmedValue) return;
 
-		// Check if tag already exists (case-insensitive)
+		// Case-insensitive: the same label twice is one tag, not two.
 		if (tags.some((tag) => tag.toLowerCase() === trimmedValue.toLowerCase())) {
 			setInputValue("");
 			return;
 		}
 
-		// Check max tags limit
-		if (tags.length >= maxTags) {
-			return;
-		}
+		if (isFull) return;
 
 		onTagsChange([...tags, trimmedValue]);
 		setInputValue("");
@@ -59,67 +55,74 @@ export function TagInput({
 		onTagsChange(tags.filter((tag) => tag !== tagToRemove));
 	};
 
-	const handleKeyPress = (e: any) => {
-		// Handle Enter or comma to add tag
-		if (e.nativeEvent.key === "Enter" || e.nativeEvent.key === ",") {
-			e.preventDefault();
-			handleAddTag();
-		}
-	};
-
 	return (
-		<View className="mb-4">
+		<View>
 			<Label className="mb-2">{label}</Label>
 
-			{/* Tag Display Area */}
-			{tags.length > 0 && (
-				<ScrollView
-					horizontal
-					showsHorizontalScrollIndicator={false}
-					className="mb-2"
-					contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
-				>
+			{tags.length > 0 ? (
+				<View className="mb-2 flex-row flex-wrap gap-2">
 					{tags.map((tag) => (
-						<Chip key={tag} size="sm" variant="secondary">
-							<Chip.Label>{tag}</Chip.Label>
-							<Pressable
+						<View
+							key={tag}
+							className="h-8 flex-row items-center gap-1.5 rounded-full border border-border bg-surface pr-1.5 pl-3"
+						>
+							<Text className="font-medium text-foreground text-sm">{tag}</Text>
+							<PressableFeedback
 								onPress={() => handleRemoveTag(tag)}
-								hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+								accessibilityRole="button"
+								accessibilityLabel={m.mob_tag_input_default_label()}
+								hitSlop={8}
+								className="h-5 w-5 items-center justify-center rounded-full"
 							>
-								<StyledX size={14} className="ml-1 text-muted" />
-							</Pressable>
-						</Chip>
+								<PressableFeedback.Highlight />
+								<IconX size={12} className="text-muted" />
+							</PressableFeedback>
+						</View>
 					))}
-				</ScrollView>
-			)}
+				</View>
+			) : null}
 
-			{/* Tag Input Field */}
 			<View className="flex-row items-start gap-2">
 				<TextField className="flex-1">
 					<Input
 						placeholder={placeholder}
 						value={inputValue}
 						onChangeText={setInputValue}
-						onKeyPress={handleKeyPress}
+						onKeyPress={(event) => {
+							const key = event.nativeEvent.key;
+							if (key === "Enter" || key === ",") {
+								handleAddTag();
+							}
+						}}
 						onSubmitEditing={handleAddTag}
 						returnKeyType="done"
+						submitBehavior="submit"
 						autoCapitalize="none"
 						autoCorrect={false}
+						editable={!isFull}
 					/>
-					{tags.length >= maxTags && (
+					{isFull ? (
 						<Description>
 							{m.mob_tag_input_max_reached({ count: String(maxTags) })}
 						</Description>
-					)}
+					) : null}
 				</TextField>
-				<Button
+				<PressableFeedback
 					onPress={handleAddTag}
-					variant="secondary"
-					size="md"
-					isDisabled={!inputValue.trim() || tags.length >= maxTags}
+					isDisabled={!canAdd}
+					accessibilityRole="button"
+					accessibilityLabel={m.mob_tag_input_add_button()}
+					className={cn(
+						"h-12 flex-row items-center gap-1.5 rounded-xl border border-border bg-surface px-4",
+						canAdd ? "" : "opacity-50",
+					)}
 				>
-					{m.mob_tag_input_add_button()}
-				</Button>
+					<PressableFeedback.Highlight />
+					<IconPlus size={iconSize.chip} className="text-accent" />
+					<Text className="font-medium text-base text-foreground">
+						{m.mob_tag_input_add_button()}
+					</Text>
+				</PressableFeedback>
 			</View>
 		</View>
 	);

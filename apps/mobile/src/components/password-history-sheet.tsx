@@ -1,23 +1,17 @@
 import type { PasswordHistoryEntry } from "@bittery/shared/types";
-import { Button } from "heroui-native";
-import { Copy, History, RotateCcw, X } from "lucide-react-native";
+import { PressableFeedback } from "heroui-native";
 import { useMemo } from "react";
+import { Alert, ScrollView, Text, View } from "react-native";
 import {
-	Alert,
-	Modal,
-	Pressable,
-	ScrollView,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
-import { withUniwind } from "uniwind";
+	BrandButton,
+	IconCopy,
+	IconHistory,
+	IconRotateCcw,
+	iconSize,
+	ListCard,
+} from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
-
-const StyledCopy = withUniwind(Copy);
-const StyledHistory = withUniwind(History);
-const StyledRotateCcw = withUniwind(RotateCcw);
-const StyledX = withUniwind(X);
+import { SheetModal } from "./sheet-modal";
 
 interface PasswordHistorySheetProps {
 	visible: boolean;
@@ -39,7 +33,7 @@ function formatChangedAt(value: string): string {
 }
 
 function maskPassword(password: string): string {
-	return "\u2022".repeat(Math.max(8, Math.min(16, password.length)));
+	return "•".repeat(Math.max(8, Math.min(16, password.length)));
 }
 
 export function PasswordHistorySheet({
@@ -71,12 +65,6 @@ export function PasswordHistorySheet({
 		});
 	}, [passwordHistory]);
 
-	const handleClose = () => {
-		if (!isRestoring) {
-			onClose();
-		}
-	};
-
 	const handleRestorePress = (password: string) => {
 		Alert.alert(
 			m.mob_password_history_restore_dialog_title(),
@@ -98,104 +86,92 @@ export function PasswordHistorySheet({
 	};
 
 	return (
-		<Modal
+		<SheetModal
 			visible={visible}
-			transparent
-			animationType="slide"
-			onRequestClose={handleClose}
+			onClose={onClose}
+			isBusy={isRestoring}
+			icon={IconHistory}
+			title={m.mob_password_history_title()}
+			description={m.mob_password_history_description()}
 		>
-			<View className="flex-1 justify-end bg-black/50">
-				<Pressable className="flex-1" onPress={handleClose} />
-				<View className="max-h-[85%] rounded-t-2xl bg-background px-4 pt-4 pb-8">
-					<View className="mb-4 flex-row items-center justify-between">
-						<View className="flex-row items-center gap-2">
-							<StyledHistory size={20} className="text-foreground" />
-							<Text className="font-semibold text-foreground text-lg">
-								Password History
-							</Text>
-						</View>
-						<TouchableOpacity onPress={handleClose} disabled={isRestoring}>
-							<StyledX size={24} className="text-muted" />
-						</TouchableOpacity>
-					</View>
-
-					<Text className="mb-4 text-muted text-sm">
-						{m.mob_password_history_description()}
-					</Text>
-
-					{sortedHistory.length === 0 ? (
-						<View className="rounded-lg bg-card p-4">
+			{sortedHistory.length === 0 ? (
+				<View className="px-4 pb-4">
+					<ListCard>
+						<View className="px-4 py-6">
 							<Text className="text-center text-muted text-sm">
 								{m.mob_password_history_empty()}
 							</Text>
 						</View>
-					) : (
-						<ScrollView
-							className="max-h-[60%]"
-							showsVerticalScrollIndicator={false}
-						>
-							<View className="gap-2">
-								{sortedHistory.map((historyEntry) => {
-									const isCurrent = historyEntry.password === currentPassword;
-									return (
-										<View
-											key={`${historyEntry.password}-${historyEntry.changedAt}`}
-											className="rounded-lg border border-border bg-card p-3"
-										>
-											<Text className="font-medium text-foreground text-sm">
-												{formatChangedAt(historyEntry.changedAt)}
-											</Text>
-											<Text className="mb-3 font-mono text-muted text-xs">
-												{maskPassword(historyEntry.password)}
-											</Text>
-											<View className="flex-row gap-2">
-												<Button
-													variant="ghost"
-													size="sm"
-													className="flex-1"
-													onPress={() => {
-														void onCopyPassword(historyEntry.password);
-													}}
-												>
-													<StyledCopy size={16} className="text-current" />
-													<Button.Label>
-														{m.mob_password_history_copy()}
-													</Button.Label>
-												</Button>
-												<Button
-													variant={isCurrent ? "secondary" : "primary"}
-													size="sm"
-													className="flex-1"
-													onPress={() =>
-														handleRestorePress(historyEntry.password)
-													}
-													isDisabled={isCurrent || isRestoring}
-												>
-													<StyledRotateCcw
-														size={16}
-														className={
-															isCurrent
-																? "text-muted"
-																: "text-primary-foreground"
-														}
-													/>
-													<Button.Label>
-														{isCurrent
-															? m.mob_password_history_current()
-															: isRestoring
-																? m.mob_password_history_restoring()
-																: m.mob_password_history_restore()}
-													</Button.Label>
-												</Button>
-											</View>
-										</View>
-									);
-								})}
-							</View>
-						</ScrollView>
-					)}
+					</ListCard>
 				</View>
-			</View>
-		</Modal>
+			) : (
+				<ScrollView
+					className="max-h-[60%]"
+					contentContainerClassName="gap-3 px-4 pb-4"
+					showsVerticalScrollIndicator={false}
+				>
+					{sortedHistory.map((historyEntry) => {
+						const isCurrent = historyEntry.password === currentPassword;
+						return (
+							<View
+								key={`${historyEntry.password}-${historyEntry.changedAt}`}
+								className="rounded-2xl border border-border bg-surface p-4"
+							>
+								<Text className="font-medium text-base text-foreground">
+									{formatChangedAt(historyEntry.changedAt)}
+								</Text>
+								<Text className="mt-1 font-mono text-muted text-sm">
+									{maskPassword(historyEntry.password)}
+								</Text>
+								<View className="mt-3 flex-row gap-2">
+									<PressableFeedback
+										onPress={() => {
+											void onCopyPassword(historyEntry.password);
+										}}
+										accessibilityRole="button"
+										accessibilityLabel={m.mob_password_history_copy()}
+										className="h-11 flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-border bg-surface-tertiary"
+									>
+										<PressableFeedback.Highlight />
+										<IconCopy
+											size={iconSize.chip}
+											className="text-foreground"
+										/>
+										<Text className="font-medium text-foreground text-sm">
+											{m.mob_password_history_copy()}
+										</Text>
+									</PressableFeedback>
+									{isCurrent ? (
+										<View className="h-11 flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-accent/15 bg-selected">
+											<Text className="font-medium text-accent text-sm">
+												{m.mob_password_history_current()}
+											</Text>
+										</View>
+									) : (
+										<BrandButton
+											label={
+												isRestoring
+													? m.mob_password_history_restoring()
+													: m.mob_password_history_restore()
+											}
+											onPress={() => handleRestorePress(historyEntry.password)}
+											isDisabled={isRestoring}
+											fullWidth={false}
+											leading={
+												<IconRotateCcw
+													size={iconSize.chip}
+													className="text-accent-foreground"
+												/>
+											}
+											className="h-11 flex-1"
+										/>
+									)}
+								</View>
+							</View>
+						);
+					})}
+				</ScrollView>
+			)}
+		</SheetModal>
 	);
 }

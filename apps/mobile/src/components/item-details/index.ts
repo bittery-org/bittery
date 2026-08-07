@@ -1,8 +1,9 @@
 export { CategoryFields } from "./category-fields";
 export { CreditCardFields } from "./credit-card-fields";
 export { CustomFields } from "./custom-fields";
+export { DetailSection } from "./detail-section";
 export { ErrorState } from "./error-state";
-export { FieldRow } from "./field-row";
+export { FieldGroup, FieldRow, RowAction } from "./field-row";
 export { IdentityFields } from "./identity-fields";
 export { ItemAttachments } from "./item-attachments";
 export { ItemHeader } from "./item-header";
@@ -14,4 +15,4 @@ export { NotesSection } from "./notes-section";
 export { SecureNoteFields } from "./secure-note-fields";
 export { TagsSection } from "./tags-section";
 export { TotpFields } from "./totp-fields";
-export type { FieldRowOptions, ItemDetailProps } from "./types";
+export type { FieldDefinition, ItemDetailProps } from "./types";

@@ -3,25 +3,29 @@ import type { ItemCategory } from "@bittery/shared/types";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
 import * as SecureStore from "expo-secure-store";
-import { Input, TextField } from "heroui-native";
-import { Clock, Search as SearchIcon, X } from "lucide-react-native";
+import { PressableFeedback, SearchField } from "heroui-native";
 import { useDeferredValue, useState } from "react";
-import { FlatList, Text, TouchableOpacity, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { FlatList, ScrollView, Text, View } from "react-native";
 import { CategoryFilter } from "@/components/category-filter";
 import { EmptyItemsState } from "@/components/empty-items-state";
 import { ItemListItem } from "@/components/item-list-item";
-import { SafeAreaView } from "@/components/safe-area-view";
+import {
+	AppBar,
+	IconClock,
+	IconSearch,
+	IconX,
+	iconSize,
+	layout,
+	Screen,
+	SectionLabel,
+	useBottomInset,
+} from "@/components/ui";
 import { useFilteredItems } from "@/hooks/use-filtered-items";
 import { useI18n } from "@/providers/i18n-provider";
 
-// Create styled icon components
-const StyledSearch = withUniwind(SearchIcon);
-const StyledClock = withUniwind(Clock);
-const StyledX = withUniwind(X);
-
 const RECENT_SEARCHES_KEY = "bittery_recent_searches";
 const MAX_RECENT_SEARCHES = 10;
+const RECENT_SEARCHES_QUERY_KEY = ["mobile", "recent-searches"] as const;
 
 export default function SearchScreen() {
 	const { m } = useI18n();
@@ -31,11 +35,12 @@ export default function SearchScreen() {
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
 	>("all");
-	const debouncedQuery = useDeferredValue(searchQuery);
+	const deferredQuery = useDeferredValue(searchQuery);
+	const bottomInset = useBottomInset({ tabBar: true });
 
 	const { items } = useItems();
 	const recentSearchesQuery = useQuery({
-		queryKey: ["mobile", "recent-searches"],
+		queryKey: RECENT_SEARCHES_QUERY_KEY,
 		queryFn: async () => {
 			try {
 				const stored = await SecureStore.getItemAsync(RECENT_SEARCHES_KEY);
@@ -48,56 +53,38 @@ export default function SearchScreen() {
 	});
 	const recentSearches = recentSearchesQuery.data ?? [];
 
-	// Filter items based on debounced search query
 	const { filteredItems } = useFilteredItems({
 		items,
-		searchQuery: debouncedQuery,
+		searchQuery: deferredQuery,
 		selectedCategory,
 	});
 
-	const saveRecentSearch = async (query: string) => {
+	const persistRecentSearches = async (next: string[]) => {
+		queryClient.setQueryData(RECENT_SEARCHES_QUERY_KEY, next);
+		try {
+			if (next.length === 0) {
+				await SecureStore.deleteItemAsync(RECENT_SEARCHES_KEY);
+				return;
+			}
+			await SecureStore.setItemAsync(RECENT_SEARCHES_KEY, JSON.stringify(next));
+		} catch (error) {
+			console.error("Failed to persist recent searches:", error);
+		}
+	};
+
+	const saveRecentSearch = (query: string) => {
 		if (!query.trim()) return;
-
-		try {
-			const updated = [
-				query,
-				...recentSearches.filter(
-					(s) => s.toLowerCase() !== query.toLowerCase(),
-				),
-			].slice(0, MAX_RECENT_SEARCHES);
-
-			queryClient.setQueryData(["mobile", "recent-searches"], updated);
-			await SecureStore.setItemAsync(
-				RECENT_SEARCHES_KEY,
-				JSON.stringify(updated),
-			);
-		} catch (error) {
-			console.error("Failed to save recent search:", error);
-		}
+		const next = [
+			query,
+			...recentSearches.filter((s) => s.toLowerCase() !== query.toLowerCase()),
+		].slice(0, MAX_RECENT_SEARCHES);
+		void persistRecentSearches(next);
 	};
 
-	const removeRecentSearch = async (query: string) => {
-		try {
-			const updated = recentSearches.filter(
-				(s) => s.toLowerCase() !== query.toLowerCase(),
-			);
-			queryClient.setQueryData(["mobile", "recent-searches"], updated);
-			await SecureStore.setItemAsync(
-				RECENT_SEARCHES_KEY,
-				JSON.stringify(updated),
-			);
-		} catch (error) {
-			console.error("Failed to remove recent search:", error);
-		}
-	};
-
-	const clearRecentSearches = async () => {
-		try {
-			queryClient.setQueryData(["mobile", "recent-searches"], []);
-			await SecureStore.deleteItemAsync(RECENT_SEARCHES_KEY);
-		} catch (error) {
-			console.error("Failed to clear recent searches:", error);
-		}
+	const removeRecentSearch = (query: string) => {
+		void persistRecentSearches(
+			recentSearches.filter((s) => s.toLowerCase() !== query.toLowerCase()),
+		);
 	};
 
 	const handleItemPress = (item: (typeof filteredItems)[number]) => {
@@ -105,144 +92,135 @@ export default function SearchScreen() {
 		router.push(`/(vault)/${item.vaultId}/${item.id}`);
 	};
 
-	const handleRecentSearchPress = (query: string) => {
-		setSearchQuery(query);
-	};
-
-	const renderRecentSearches = () => {
-		if (recentSearches.length === 0) {
-			return (
-				<EmptyItemsState
-					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
-					title={m.mob_search_empty_title()}
-					description={m.mob_search_empty_description()}
-				/>
-			);
-		}
-
-		return (
-			<View className="flex-1">
-				<View className="flex-row items-center justify-between px-4 py-3">
-					<Text className="font-semibold text-muted text-sm uppercase tracking-wide">
-						{m.mob_search_recent_title()}
-					</Text>
-					<TouchableOpacity onPress={clearRecentSearches}>
-						<Text className="text-accent text-sm">
-							{m.mob_search_recent_clear_all()}
-						</Text>
-					</TouchableOpacity>
-				</View>
-				{recentSearches.map((query) => (
-					<TouchableOpacity
-						key={query}
-						onPress={() => handleRecentSearchPress(query)}
-						className="flex-row items-center px-4 py-3"
-						activeOpacity={0.7}
-					>
-						<StyledClock size={18} className="text-muted" />
-						<Text className="ml-3 flex-1 text-foreground">{query}</Text>
-						<TouchableOpacity
-							onPress={() => removeRecentSearch(query)}
-							className="p-1"
-							hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-						>
-							<StyledX size={16} className="text-muted" />
-						</TouchableOpacity>
-					</TouchableOpacity>
-				))}
-			</View>
-		);
-	};
-
-	const renderSearchResults = () => {
-		if (filteredItems.length === 0) {
-			return (
-				<EmptyItemsState
-					icon={<StyledSearch size={48} className="mb-4 text-muted" />}
-					title={m.mob_search_no_results()}
-					description={m.mob_search_no_results_description()}
-				/>
-			);
-		}
-
-		return (
-			<FlatList
-				data={filteredItems}
-				renderItem={({ item }) => (
-					<ItemListItem
-						item={item}
-						vault={"vault" in item ? item.vault : undefined}
-						showVaultBadge
-						onPress={() => handleItemPress(item)}
-					/>
-				)}
-				keyExtractor={(item) => item.id}
-				ListHeaderComponent={
-					<View className="px-4 py-2">
-						<Text className="text-muted text-sm">
-							{filteredItems.length !== 1
-								? m.mob_search_result_count_plural({
-										count: String(filteredItems.length),
-									})
-								: m.mob_search_result_count_singular({
-										count: String(filteredItems.length),
-									})}
-						</Text>
-					</View>
-				}
-				keyboardShouldPersistTaps="handled"
-			/>
-		);
-	};
-
-	const hasQuery = debouncedQuery.trim().length > 0;
+	const hasQuery = deferredQuery.trim().length > 0;
+	const resultCount = filteredItems.length;
 
 	return (
-		<SafeAreaView className="flex-1 bg-background" edges={["bottom"]}>
-			{/* Search Input */}
-			<View className="px-4 py-3">
-				<TextField>
-					<View className="w-full flex-row items-center">
-						<Input
+		<Screen>
+			<AppBar title={m.mob_tab_search()} />
+
+			<View className="px-4 pb-3">
+				<SearchField value={searchQuery} onChange={setSearchQuery}>
+					<SearchField.Group>
+						<SearchField.SearchIcon />
+						<SearchField.Input
 							placeholder={m.mob_search_placeholder()}
-							value={searchQuery}
-							onChangeText={setSearchQuery}
-							returnKeyType="search"
 							autoCapitalize="none"
 							autoCorrect={false}
 							autoFocus
-							className="flex-1 pr-12 pl-12"
+							returnKeyType="search"
 						/>
-						<StyledSearch
-							size={18}
-							className="absolute left-3.5 text-muted"
-							pointerEvents="none"
+						<SearchField.ClearButton
+							accessibilityLabel={m.mob_search_clear()}
 						/>
-						{searchQuery.length > 0 && (
-							<TouchableOpacity
-								onPress={() => {
-									setSearchQuery("");
-								}}
-								className="absolute right-3.5 p-1"
-								hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-							>
-								<StyledX size={18} className="text-muted" />
-							</TouchableOpacity>
-						)}
-					</View>
-				</TextField>
+					</SearchField.Group>
+				</SearchField>
 			</View>
 
-			{/* Category Filter (only show when searching) */}
-			{hasQuery && (
-				<CategoryFilter
-					selectedCategory={selectedCategory}
-					onCategoryChange={setSelectedCategory}
+			{hasQuery ? (
+				<>
+					<CategoryFilter
+						selectedCategory={selectedCategory}
+						onCategoryChange={setSelectedCategory}
+					/>
+					{resultCount === 0 ? (
+						<EmptyItemsState
+							icon={IconSearch}
+							title={m.mob_search_no_results()}
+							description={m.mob_search_no_results_description()}
+						/>
+					) : (
+						<FlatList
+							data={filteredItems}
+							keyExtractor={(item) => item.id}
+							keyboardShouldPersistTaps="handled"
+							contentContainerStyle={{ paddingBottom: bottomInset }}
+							ListHeaderComponent={
+								<View className="px-4 pt-6 pb-2">
+									<SectionLabel className="px-0 pb-0">
+										{resultCount === 1
+											? m.mob_search_result_count_singular({
+													count: String(resultCount),
+												})
+											: m.mob_search_result_count_plural({
+													count: String(resultCount),
+												})}
+									</SectionLabel>
+								</View>
+							}
+							renderItem={({ item, index }) => (
+								<ItemListItem
+									item={item}
+									vault={"vault" in item ? item.vault : undefined}
+									showVaultBadge
+									onPress={() => handleItemPress(item)}
+									isFirstInSection={index === 0}
+									isLastInSection={index === filteredItems.length - 1}
+								/>
+							)}
+						/>
+					)}
+				</>
+			) : recentSearches.length === 0 ? (
+				<EmptyItemsState
+					icon={IconSearch}
+					title={m.mob_search_empty_title()}
+					description={m.mob_search_empty_description()}
 				/>
+			) : (
+				<ScrollView
+					keyboardShouldPersistTaps="handled"
+					contentContainerStyle={{ paddingBottom: bottomInset }}
+				>
+					<View className="px-4 pt-6">
+						<SectionLabel
+							trailing={
+								<PressableFeedback
+									onPress={() => void persistRecentSearches([])}
+									className="rounded-full px-2 py-1"
+								>
+									<PressableFeedback.Highlight />
+									<Text className="font-medium text-accent text-xs">
+										{m.mob_search_recent_clear_all()}
+									</Text>
+								</PressableFeedback>
+							}
+						>
+							{m.mob_search_recent_title()}
+						</SectionLabel>
+						<View className="overflow-hidden rounded-2xl border border-border bg-surface">
+							{recentSearches.map((query, index) => (
+								<View key={query}>
+									{index > 0 ? <View className="ml-4 h-px bg-border" /> : null}
+									<PressableFeedback
+										onPress={() => setSearchQuery(query)}
+										className="flex-row items-center px-4"
+										style={{ minHeight: layout.rowHeightCompact }}
+									>
+										<PressableFeedback.Highlight />
+										<IconClock size={iconSize.row} className="text-muted" />
+										<Text
+											numberOfLines={1}
+											className="ml-3 flex-1 text-base text-foreground"
+										>
+											{query}
+										</Text>
+										<PressableFeedback
+											onPress={() => removeRecentSearch(query)}
+											accessibilityLabel={m.mob_search_recent_remove()}
+											className="-mr-1 h-8 w-8 items-center justify-center rounded-full"
+											hitSlop={8}
+										>
+											<PressableFeedback.Highlight />
+											<IconX size={iconSize.chip} className="text-muted" />
+										</PressableFeedback>
+									</PressableFeedback>
+								</View>
+							))}
+						</View>
+					</View>
+				</ScrollView>
 			)}
-
-			{/* Content */}
-			{hasQuery ? renderSearchResults() : renderRecentSearches()}
-		</SafeAreaView>
+		</Screen>
 	);
 }

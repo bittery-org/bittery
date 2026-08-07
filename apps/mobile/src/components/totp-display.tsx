@@ -2,11 +2,11 @@ import { generateTotp, type TotpResult } from "@bittery/crypto-react-native";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
 import { useFocusEffect } from "expo-router";
-import { useToast } from "heroui-native";
-import { Copy } from "lucide-react-native";
+import { PressableFeedback, useThemeColor, useToast } from "heroui-native";
 import { useCallback, useRef, useState } from "react";
-import { Animated, Text, TouchableOpacity, View } from "react-native";
+import { Animated, Pressable, Text, View } from "react-native";
 import Svg, { Circle } from "react-native-svg";
+import { IconCheck, IconCopy, iconSize } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -25,6 +25,85 @@ interface TotpDisplayProps {
 	onCopy?: () => void;
 }
 
+/** Seconds left at which the ring escalates from accent to warning, then danger. */
+const WARNING_THRESHOLD_SECONDS = 10n;
+const DANGER_THRESHOLD_SECONDS = 5n;
+const COPY_FEEDBACK_MS = 2000;
+/** A one-time code is worthless after its window; the clipboard should be too. */
+const CLIPBOARD_CLEAR_MS = 30000;
+
+const RING = {
+	inline: { size: 22, stroke: 2 },
+	compact: { size: 32, stroke: 2.5 },
+	default: { size: 40, stroke: 3 },
+} as const;
+
+function CountdownRing({
+	progress,
+	remainingSeconds,
+	color,
+	trackColor,
+	variant,
+}: {
+	progress: number;
+	remainingSeconds: bigint | null;
+	color: string;
+	trackColor: string;
+	variant: keyof typeof RING;
+}) {
+	const { size, stroke } = RING[variant];
+	const center = size / 2;
+	const radius = center - stroke;
+	const circumference = 2 * Math.PI * radius;
+
+	return (
+		<View
+			className="items-center justify-center"
+			style={{ width: size, height: size }}
+		>
+			<Svg
+				width={size}
+				height={size}
+				style={{ transform: [{ rotate: "-90deg" }] }}
+			>
+				<Circle
+					cx={center}
+					cy={center}
+					r={radius}
+					fill="none"
+					stroke={trackColor}
+					strokeWidth={stroke}
+				/>
+				<Circle
+					cx={center}
+					cy={center}
+					r={radius}
+					fill="none"
+					stroke={color}
+					strokeWidth={stroke}
+					strokeLinecap="round"
+					strokeDasharray={circumference}
+					strokeDashoffset={circumference - (progress / 100) * circumference}
+				/>
+			</Svg>
+			{variant === "default" && remainingSeconds !== null ? (
+				<Text
+					className="absolute font-medium font-mono text-2xs"
+					style={{ color }}
+				>
+					{String(remainingSeconds)}
+				</Text>
+			) : null}
+		</View>
+	);
+}
+
+/**
+ * A live one-time code with its countdown ring. The 1s interval is the one
+ * sanctioned timer effect in this app — the code is a function of wall-clock
+ * time, so nothing but a timer can derive it. `useFocusEffect` keeps it from
+ * running while the screen is off-screen.
+ */
 export function TotpDisplay({
 	totpSecret,
 	totpAlgorithm = "SHA1",
@@ -38,44 +117,20 @@ export function TotpDisplay({
 	const { m } = useI18n();
 	const resolvedLabel = label ?? m.mob_totp_display_label();
 	const { toast } = useToast();
+	const [accent, warning, danger, muted, border] = useThemeColor([
+		"accent",
+		"warning",
+		"danger",
+		"muted",
+		"border",
+	]);
 	const [totpResult, setTotpResult] = useState<TotpResult | null>(null);
-	const [copied, setCopied] = useState(false);
-	const prevCodeRef = useRef<string | null>(null);
+	const [hasCopied, setHasCopied] = useState(false);
+	const previousCodeRef = useRef<string | null>(null);
 	const fadeAnim = useRef(new Animated.Value(1)).current;
-	const pulseAnim = useRef(new Animated.Value(1)).current;
-	const pulseLoopRef = useRef<ReturnType<typeof Animated.loop> | null>(null);
-
-	const stopPulse = useCallback(() => {
-		pulseLoopRef.current?.stop();
-		pulseLoopRef.current = null;
-		pulseAnim.setValue(1);
-	}, [pulseAnim]);
-
-	const startPulse = useCallback(() => {
-		if (pulseLoopRef.current !== null) {
-			return;
-		}
-		const loop = Animated.loop(
-			Animated.sequence([
-				Animated.timing(pulseAnim, {
-					toValue: 1.05,
-					duration: 300,
-					useNativeDriver: true,
-				}),
-				Animated.timing(pulseAnim, {
-					toValue: 1,
-					duration: 300,
-					useNativeDriver: true,
-				}),
-			]),
-		);
-		pulseLoopRef.current = loop;
-		loop.start();
-	}, [pulseAnim]);
 
 	const generateCode = useCallback(async () => {
 		if (!totpSecret) {
-			stopPulse();
 			setTotpResult(null);
 			return;
 		}
@@ -88,114 +143,76 @@ export function TotpDisplay({
 				BigInt(totpPeriod),
 			);
 
-			// Animate code change
-			if (prevCodeRef.current && prevCodeRef.current !== result.code) {
-				// Fade out and in when code changes
+			if (previousCodeRef.current && previousCodeRef.current !== result.code) {
 				Animated.sequence([
 					Animated.timing(fadeAnim, {
 						toValue: 0.3,
-						duration: 150,
+						duration: 120,
 						useNativeDriver: true,
 					}),
 					Animated.timing(fadeAnim, {
 						toValue: 1,
-						duration: 150,
+						duration: 160,
 						useNativeDriver: true,
 					}),
 				]).start();
 			}
 
-			prevCodeRef.current = result.code;
-			if (result.remainingSeconds <= 5n) {
-				startPulse();
-			} else {
-				stopPulse();
-			}
+			previousCodeRef.current = result.code;
 			setTotpResult(result);
 		} catch (error) {
-			stopPulse();
 			console.error("Failed to generate TOTP code:", error);
 			setTotpResult(null);
 		}
-	}, [
-		totpSecret,
-		totpAlgorithm,
-		totpDigits,
-		totpPeriod,
-		fadeAnim,
-		startPulse,
-		stopPulse,
-	]);
+	}, [totpSecret, totpAlgorithm, totpDigits, totpPeriod, fadeAnim]);
 
 	useFocusEffect(
 		useCallback(() => {
 			void generateCode();
-
 			const interval = setInterval(() => {
 				void generateCode();
 			}, 1000);
-
-			return () => {
-				clearInterval(interval);
-				stopPulse();
-			};
-		}, [generateCode, stopPulse]),
+			return () => clearInterval(interval);
+		}, [generateCode]),
 	);
 
 	const handleCopy = async () => {
-		if (totpResult?.code) {
-			await Clipboard.setStringAsync(totpResult.code);
-			setCopied(true);
+		if (!totpResult?.code) return;
 
-			// Call optional callback
-			onCopy?.();
+		await Clipboard.setStringAsync(totpResult.code);
+		setHasCopied(true);
+		onCopy?.();
 
-			// Only show toast in non-inline mode
-			if (!inline) {
-				toast.show({
-					variant: "success",
-					label: m.mob_totp_display_toast_copied(),
-					placement: "bottom",
-				});
+		if (!inline) {
+			toast.show({
+				variant: "success",
+				label: m.mob_totp_display_toast_copied(),
+				placement: "bottom",
+			});
+		}
+
+		setTimeout(() => setHasCopied(false), COPY_FEEDBACK_MS);
+		setTimeout(async () => {
+			try {
+				await Clipboard.setStringAsync("");
+			} catch {
+				// Ignore errors when clearing
 			}
-
-			// Reset copied state after 2 seconds
-			setTimeout(() => setCopied(false), 2000);
-
-			// Auto-clear clipboard after 30 seconds for security
-			setTimeout(async () => {
-				try {
-					await Clipboard.setStringAsync("");
-				} catch {
-					// Ignore errors when clearing
-				}
-			}, 30000);
-		}
+		}, CLIPBOARD_CLEAR_MS);
 	};
 
-	// Calculate progress for the circular indicator
-	const progress = totpResult?.progress || 0;
-	const radius = inline ? 8 : compact ? 12 : 14;
-	const strokeWidth = inline ? 1.5 : compact ? 2 : 2.5;
-	const circumference = 2 * Math.PI * radius;
-	const strokeDashoffset = circumference - (progress / 100) * circumference;
-	const svgSize = inline ? 20 : compact ? 28 : 36;
-	const center = svgSize / 2;
+	const remainingSeconds = totpResult?.remainingSeconds ?? null;
+	const ringColor =
+		remainingSeconds === null
+			? muted
+			: remainingSeconds <= DANGER_THRESHOLD_SECONDS
+				? danger
+				: remainingSeconds <= WARNING_THRESHOLD_SECONDS
+					? warning
+					: accent;
 
-	// Color based on remaining time
-	const getProgressColor = () => {
-		if (!totpResult) return "#9ca3af"; // muted gray
-		if (totpResult.remainingSeconds <= 5) return "#ef4444"; // red (destructive)
-		if (totpResult.remainingSeconds <= 10) return "#eab308"; // yellow
-		return "#6366f1"; // primary (indigo)
-	};
-
-	// Format code with spacing (e.g., "123 456")
-	const formatCode = (code: string) => {
-		if (!code) {
-			if (inline) return "------";
-			return compact ? "------" : "--- ---";
-		}
+	const formatCode = (code: string | undefined) => {
+		if (!code) return inline || compact ? "------" : "--- ---";
 		const midpoint = Math.floor(code.length / 2);
 		return `${code.slice(0, midpoint)} ${code.slice(midpoint)}`;
 	};
@@ -204,174 +221,73 @@ export function TotpDisplay({
 		return null;
 	}
 
-	// Inline mode for list items - minimal display with one-tap copy
 	if (inline) {
 		return (
-			<TouchableOpacity
+			<Pressable
 				onPress={handleCopy}
-				className="flex-row items-center gap-1.5"
-				accessibilityLabel={`TOTP code: ${totpResult?.code || "loading"}. Tap to copy`}
+				className="flex-row items-center gap-2"
+				accessibilityLabel={m.mob_totp_a11y_copy_code()}
 				accessibilityRole="button"
 			>
-				{/* Mini circular countdown */}
-				<View
-					className="relative items-center justify-center"
-					style={{ width: svgSize, height: svgSize }}
-				>
-					<Svg
-						width={svgSize}
-						height={svgSize}
-						style={{ transform: [{ rotate: "-90deg" }] }}
-					>
-						{/* Background circle */}
-						<Circle
-							cx={center}
-							cy={center}
-							r={radius}
-							fill="none"
-							stroke="#e5e7eb"
-							strokeWidth={strokeWidth}
-						/>
-						{/* Progress circle */}
-						<Circle
-							cx={center}
-							cy={center}
-							r={radius}
-							fill="none"
-							stroke={getProgressColor()}
-							strokeWidth={strokeWidth}
-							strokeLinecap="round"
-							strokeDasharray={circumference}
-							strokeDashoffset={strokeDashoffset}
-						/>
-					</Svg>
-				</View>
-
-				{/* Inline code display with animation */}
+				<CountdownRing
+					variant="inline"
+					progress={totpResult?.progress ?? 0}
+					remainingSeconds={remainingSeconds}
+					color={ringColor}
+					trackColor={border}
+				/>
 				<Animated.Text
-					className="font-bold font-mono text-foreground text-sm tracking-wide"
-					style={{
-						opacity: fadeAnim,
-						transform: [{ scale: pulseAnim }],
-						color: getProgressColor(),
-					}}
+					className="font-medium font-mono text-foreground text-sm tracking-wide"
+					style={{ opacity: fadeAnim }}
 				>
-					{formatCode(totpResult?.code || "")}
+					{formatCode(totpResult?.code)}
 				</Animated.Text>
-
-				{/* Copy indicator */}
-				{copied && (
-					<Text className="font-medium text-green-500 text-xs">✓</Text>
-				)}
-			</TouchableOpacity>
+			</Pressable>
 		);
 	}
 
 	return (
-		<View
-			className={cn(
-				"flex-row",
-				"items-center",
-				"justify-between",
-				"rounded-lg",
-				"border",
-				"border-border",
-				"bg-muted/30",
-				compact ? "p-2" : "p-3",
-			)}
-		>
-			<TouchableOpacity
-				onPress={handleCopy}
-				className="flex-row items-center gap-3"
-				accessibilityLabel={`TOTP code: ${totpResult?.code || "loading"}. Tap to copy`}
-				accessibilityRole="button"
-			>
-				{/* Circular countdown timer with animation */}
-				<Animated.View
-					className="relative items-center justify-center"
-					style={{
-						width: svgSize,
-						height: svgSize,
-						transform: [{ scale: pulseAnim }],
-					}}
-				>
-					<Svg
-						width={svgSize}
-						height={svgSize}
-						style={{ transform: [{ rotate: "-90deg" }] }}
-					>
-						{/* Background circle */}
-						<Circle
-							cx={center}
-							cy={center}
-							r={radius}
-							fill="none"
-							stroke="#e5e7eb"
-							strokeWidth={strokeWidth}
-						/>
-						{/* Progress circle */}
-						<Circle
-							cx={center}
-							cy={center}
-							r={radius}
-							fill="none"
-							stroke={getProgressColor()}
-							strokeWidth={strokeWidth}
-							strokeLinecap="round"
-							strokeDasharray={circumference}
-							strokeDashoffset={strokeDashoffset}
-						/>
-					</Svg>
-					{/* Seconds remaining text */}
-					<Text
-						className={cn(
-							"absolute",
-							"font-medium",
-							"font-mono",
-							compact ? "text-xs" : "text-xs",
-						)}
-						style={{ color: getProgressColor() }}
-					>
-						{totpResult?.remainingSeconds ?? "--"}
-					</Text>
-				</Animated.View>
-
-				{/* Code display with fade animation */}
-				<View className="flex-col">
-					<Animated.Text
-						className={cn(
-							"font-bold",
-							"font-mono",
-							"text-foreground",
-							"tracking-widest",
-							compact ? "text-lg" : "text-2xl",
-						)}
-						style={{ opacity: fadeAnim }}
-					>
-						{formatCode(totpResult?.code || "")}
-					</Animated.Text>
-					{!compact && (
-						<Text className="text-muted text-xs">{resolvedLabel}</Text>
+		<View className="flex-row items-center gap-3">
+			<CountdownRing
+				variant={compact ? "compact" : "default"}
+				progress={totpResult?.progress ?? 0}
+				remainingSeconds={remainingSeconds}
+				color={ringColor}
+				trackColor={border}
+			/>
+			<View className="min-w-0 flex-1">
+				<Animated.Text
+					className={cn(
+						"font-mono text-foreground tracking-widest",
+						compact ? "text-lg" : "text-2xl",
 					)}
-				</View>
-			</TouchableOpacity>
-
-			{/* Copy button */}
-			<TouchableOpacity
-				onPress={handleCopy}
-				disabled={!totpResult?.code}
-				className={cn(
-					"rounded-lg",
-					"border",
-					"border-input",
-					"bg-background",
-					compact ? "p-2" : "p-2.5",
+					style={{ opacity: fadeAnim }}
+					selectable
+				>
+					{formatCode(totpResult?.code)}
+				</Animated.Text>
+				{compact ? null : (
+					<Text numberOfLines={1} className="mt-0.5 text-muted text-xs">
+						{resolvedLabel}
+					</Text>
 				)}
-				accessibilityLabel="Copy code to clipboard"
+			</View>
+			<PressableFeedback
+				onPress={handleCopy}
+				isDisabled={!totpResult?.code}
 				accessibilityRole="button"
+				accessibilityLabel={
+					hasCopied ? m.mob_a11y_copied() : m.mob_totp_a11y_copy_code()
+				}
+				className="h-10 w-10 items-center justify-center rounded-full"
 			>
-				<Copy size={compact ? 16 : 18} color={copied ? "#22c55e" : "#6b7280"} />
-			</TouchableOpacity>
+				<PressableFeedback.Highlight />
+				{hasCopied ? (
+					<IconCheck size={iconSize.row} className="text-success" />
+				) : (
+					<IconCopy size={iconSize.row} className="text-muted" />
+				)}
+			</PressableFeedback>
 		</View>
 	);
 }

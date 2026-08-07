@@ -1,103 +1,106 @@
+import { useQuery } from "@tanstack/react-query";
 import { Redirect } from "expo-router";
-import { useEffect, useState } from "react";
+import { useThemeColor } from "heroui-native";
 import { ActivityIndicator, Text, View } from "react-native";
+import { BrandLockup } from "@/components/auth-kit";
+import { Screen } from "@/components/ui";
+import { useAccount } from "@/contexts/account-context";
+import { useBiometricAuth } from "@/contexts/biometric-auth-context";
 import { useI18n } from "@/providers/i18n-provider";
+import { storage } from "@/services/storage";
 
-import { useAccount } from "../src/contexts/account-context";
-import { useBiometricAuth } from "../src/contexts/biometric-auth-context";
-import { storage } from "../src/services/storage";
+const NO_SESSION = { hasValidSession: false, isUnlockKeyAvailable: false };
 
+/** Branded hold while the gate resolves — never a bare spinner on a blank canvas. */
+function LaunchSplash({ caption }: { caption?: string }) {
+	const [accent] = useThemeColor(["accent"]);
+
+	return (
+		<Screen aurora>
+			<View className="flex-1 items-center justify-center px-8">
+				<BrandLockup />
+				<ActivityIndicator
+					size="small"
+					color={accent}
+					style={{ marginTop: 32 }}
+				/>
+				{caption ? (
+					<Text className="mt-4 text-center text-muted text-sm">{caption}</Text>
+				) : null}
+			</View>
+		</Screen>
+	);
+}
+
+/**
+ * The launch gate: decides between full sign-in, quick unlock and the vault.
+ * Biometric unlock restores the master unlock key asynchronously, so the gate
+ * waits for it rather than letting the item list try to decrypt without it.
+ */
 export default function Index() {
 	const { m } = useI18n();
 	const { activeAccount, activeAccountConfig, allAccounts, isLoading } =
 		useAccount();
 	const { requiresReauth, showAuthModal } = useBiometricAuth();
-	const [checkingSession, setCheckingSession] = useState(true);
-	const [hasValidSession, setHasValidSession] = useState(false);
-	const [mukAvailable, setMukAvailable] = useState(false);
 
-	useEffect(() => {
-		// Don't check session until account loading is complete
-		if (isLoading) {
-			return;
-		}
-
-		async function checkSession() {
-			if (!activeAccountConfig) {
-				setCheckingSession(false);
-				return;
+	// `requiresReauth` is part of the key so that finishing the biometric prompt
+	// re-reads the master unlock key instead of stranding the gate on the splash.
+	const gate = useQuery({
+		queryKey: [
+			"mobile",
+			"launch-gate",
+			activeAccountConfig,
+			activeAccount?.accountId ?? null,
+			requiresReauth,
+		],
+		queryFn: async () => {
+			if (!activeAccountConfig || !activeAccount) {
+				return NO_SESSION;
 			}
 
-			try {
-				if (activeAccount) {
-					const isValid = await storage.isSessionValid(activeAccount.accountId);
-					setHasValidSession(isValid);
-
-					if (isValid) {
-						const muk = await storage.getMasterUnlockKey(
-							activeAccount.accountId,
-						);
-						setMukAvailable(muk !== null);
-					}
-				}
-			} catch (error) {
-				console.error("Error checking session:", error);
-				setHasValidSession(false);
-			} finally {
-				setCheckingSession(false);
+			const hasValidSession = await storage.isSessionValid(
+				activeAccount.accountId,
+			);
+			if (!hasValidSession) {
+				return NO_SESSION;
 			}
-		}
 
-		checkSession();
-	}, [activeAccount, activeAccountConfig, isLoading]);
+			const masterUnlockKey = await storage.getMasterUnlockKey(
+				activeAccount.accountId,
+			);
+			return {
+				hasValidSession: true,
+				isUnlockKeyAvailable: masterUnlockKey !== null,
+			};
+		},
+		enabled: !isLoading,
+		retry: false,
+		gcTime: 0,
+	});
 
-	// Re-check MUK availability when biometric auth completes
-	useEffect(() => {
-		if (!requiresReauth && hasValidSession) {
-			if (activeAccount) {
-				// Biometric auth just completed, check if MUK is now available
-				storage
-					.getMasterUnlockKey(activeAccount.accountId)
-					.then((muk) => setMukAvailable(muk !== null));
-			}
-		}
-	}, [requiresReauth, hasValidSession, activeAccount]);
-
-	// Only show loading while account context is loading
-	// Once that's done, checkingSession should resolve quickly
-	if (isLoading || checkingSession) {
-		return (
-			<View className="flex-1 items-center justify-center bg-background">
-				<ActivityIndicator size="large" color="#000" />
-			</View>
-		);
+	if (isLoading || gate.isPending) {
+		return <LaunchSplash />;
 	}
 
-	// No accounts - go to login
+	// A failed read is indistinguishable from an unusable session: send the user
+	// to quick unlock rather than into a vault that cannot decrypt.
+	const { hasValidSession, isUnlockKeyAvailable } = gate.data ?? NO_SESSION;
+
 	if (!activeAccountConfig && allAccounts.length === 0) {
 		return <Redirect href="/(auth)/login" />;
 	}
 
-	// Has account but no valid session - go to unlock
 	if (!hasValidSession) {
 		return <Redirect href="/(auth)/unlock" />;
 	}
 
-	// Wait for biometric auth to complete before navigating to tabs
-	// This prevents race conditions where items try to decrypt before MUK is restored
-	if (requiresReauth || showAuthModal || !mukAvailable) {
+	if (requiresReauth || showAuthModal || !isUnlockKeyAvailable) {
 		return (
-			<View className="flex-1 items-center justify-center bg-background">
-				<ActivityIndicator size="large" color="#000" />
-				{showAuthModal && (
-					<Text className="mt-4 text-muted text-sm">
-						{m.mob_index_authenticating()}
-					</Text>
-				)}
-			</View>
+			<LaunchSplash
+				caption={showAuthModal ? m.mob_index_authenticating() : undefined}
+			/>
 		);
 	}
 
-	// Has valid session and MUK is available - go to tabs
 	return <Redirect href="/(tabs)" />;
 }

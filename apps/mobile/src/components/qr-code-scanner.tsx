@@ -4,16 +4,13 @@ import {
 	parseOtpAuthUri,
 } from "@bittery/shared/totp";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import { Camera, Flashlight, FlashlightOff, X } from "lucide-react-native";
 import { useCallback, useState } from "react";
+import { Alert, Modal, StyleSheet, View } from "react-native";
 import {
-	Alert,
-	Modal,
-	StyleSheet,
-	Text,
-	TouchableOpacity,
-	View,
-} from "react-native";
+	ScannerLoading,
+	ScannerOverlay,
+	ScannerPermission,
+} from "@/components/scanner-shell";
 import { useI18n } from "@/providers/i18n-provider";
 
 interface QrCodeScannerProps {
@@ -23,14 +20,8 @@ interface QrCodeScannerProps {
 }
 
 /**
- * QR Code Scanner Component
- *
- * Scans QR codes containing otpauth:// URIs for TOTP setup.
- * Supports:
- * - Camera permission handling
- * - Torch/flashlight toggle
- * - otpauth:// URI parsing
- * - Validation of scanned data
+ * Scans QR codes containing `otpauth://` URIs for TOTP setup: camera permission,
+ * torch toggle, URI parsing and base32 validation of the scanned secret.
  */
 export function QrCodeScanner({
 	visible,
@@ -39,7 +30,7 @@ export function QrCodeScanner({
 }: QrCodeScannerProps) {
 	const { m } = useI18n();
 	const [permission, requestPermission] = useCameraPermissions();
-	const [torchEnabled, setTorchEnabled] = useState(false);
+	const [isTorchEnabled, setIsTorchEnabled] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
 
 	const handleBarcodeScanned = useCallback(
@@ -48,26 +39,28 @@ export function QrCodeScanner({
 			if (isProcessing) return;
 			setIsProcessing(true);
 
+			const retryActions = [
+				{
+					text: m.mob_qr_scanner_try_again(),
+					onPress: () => setIsProcessing(false),
+				},
+				{
+					text: m.mob_qr_scanner_cancel(),
+					style: "cancel" as const,
+					onPress: () => {
+						setIsProcessing(false);
+						onClose();
+					},
+				},
+			];
+
 			try {
 				// Check if this is an otpauth:// URI
 				if (!data.startsWith("otpauth://")) {
 					Alert.alert(
 						m.mob_qr_scanner_invalid_qr_title(),
 						m.mob_qr_scanner_invalid_qr_message(),
-						[
-							{
-								text: m.mob_qr_scanner_try_again(),
-								onPress: () => setIsProcessing(false),
-							},
-							{
-								text: m.mob_qr_scanner_cancel(),
-								style: "cancel",
-								onPress: () => {
-									setIsProcessing(false);
-									onClose();
-								},
-							},
-						],
+						retryActions,
 					);
 					return;
 				}
@@ -80,20 +73,7 @@ export function QrCodeScanner({
 					Alert.alert(
 						m.mob_qr_scanner_invalid_secret_title(),
 						m.mob_qr_scanner_invalid_secret_message(),
-						[
-							{
-								text: m.mob_qr_scanner_try_again(),
-								onPress: () => setIsProcessing(false),
-							},
-							{
-								text: m.mob_qr_scanner_cancel(),
-								style: "cancel",
-								onPress: () => {
-									setIsProcessing(false);
-									onClose();
-								},
-							},
-						],
+						retryActions,
 					);
 					return;
 				}
@@ -105,22 +85,9 @@ export function QrCodeScanner({
 			} catch (error) {
 				console.error("Error parsing QR code:", error);
 				Alert.alert(
-					"Scan Error",
-					"Could not read the QR code. Please make sure you're scanning a valid TOTP QR code.",
-					[
-						{
-							text: "Try Again",
-							onPress: () => setIsProcessing(false),
-						},
-						{
-							text: "Cancel",
-							style: "cancel",
-							onPress: () => {
-								setIsProcessing(false);
-								onClose();
-							},
-						},
-					],
+					m.mob_qr_scanner_error_title(),
+					m.mob_qr_scanner_error_message(),
+					retryActions,
 				);
 			}
 		},
@@ -129,6 +96,8 @@ export function QrCodeScanner({
 			onClose,
 			onScanSuccess,
 			m.mob_qr_scanner_cancel,
+			m.mob_qr_scanner_error_message,
+			m.mob_qr_scanner_error_title,
 			m.mob_qr_scanner_invalid_qr_message,
 			m.mob_qr_scanner_invalid_qr_title,
 			m.mob_qr_scanner_invalid_secret_message,
@@ -137,84 +106,45 @@ export function QrCodeScanner({
 		],
 	);
 
-	// Reset processing state when modal becomes visible
 	const handleRequestClose = () => {
 		setIsProcessing(false);
 		onClose();
 	};
 
-	// Handle permission states
 	if (!permission) {
-		// Permissions are still loading
 		return (
 			<Modal
 				visible={visible}
 				animationType="slide"
-				presentationStyle="pageSheet"
+				presentationStyle="fullScreen"
 				onRequestClose={handleRequestClose}
 			>
-				<View className="flex-1 items-center justify-center bg-background">
-					<Text className="text-foreground">Loading camera...</Text>
-				</View>
+				<ScannerLoading
+					title={m.ext_qr_scan_title()}
+					label={m.mob_qr_scanner_loading_camera()}
+					onClose={handleRequestClose}
+				/>
 			</Modal>
 		);
 	}
 
 	if (!permission.granted) {
-		// Permission not granted yet
 		return (
 			<Modal
 				visible={visible}
 				animationType="slide"
-				presentationStyle="pageSheet"
+				presentationStyle="fullScreen"
 				onRequestClose={handleRequestClose}
 			>
-				<View className="flex-1 bg-background">
-					{/* Header */}
-					<View className="flex-row items-center justify-between px-4 py-4">
-						<View className="flex-row items-center">
-							<Camera size={24} color="#6b7280" />
-							<Text className="ml-2 font-bold text-foreground text-xl">
-								Scan QR Code
-							</Text>
-						</View>
-						<TouchableOpacity
-							onPress={handleRequestClose}
-							className="rounded-full bg-secondary p-2"
-						>
-							<X size={20} color="#6b7280" />
-						</TouchableOpacity>
-					</View>
-
-					<View className="flex-1 items-center justify-center px-8">
-						<View className="mb-6 h-20 w-20 items-center justify-center rounded-full bg-secondary">
-							<Camera size={40} color="#6b7280" />
-						</View>
-						<Text className="mb-4 text-center font-semibold text-foreground text-lg">
-							Camera Permission Required
-						</Text>
-						<Text className="mb-6 text-center text-muted">
-							To scan TOTP QR codes, Bittery needs access to your camera. Your
-							camera is only used for scanning and is not recorded.
-						</Text>
-						<TouchableOpacity
-							onPress={requestPermission}
-							className="w-full rounded-lg bg-primary py-4"
-						>
-							<Text className="text-center font-semibold text-primary-foreground">
-								Allow Camera Access
-							</Text>
-						</TouchableOpacity>
-						<TouchableOpacity
-							onPress={handleRequestClose}
-							className="mt-4 w-full rounded-lg border border-border py-4"
-						>
-							<Text className="text-center font-semibold text-foreground">
-								Cancel
-							</Text>
-						</TouchableOpacity>
-					</View>
-				</View>
+				<ScannerPermission
+					title={m.ext_qr_scan_title()}
+					heading={m.mob_qr_scanner_permission_title()}
+					description={m.mob_qr_scanner_permission_description()}
+					allowLabel={m.mob_qr_scanner_permission_allow()}
+					cancelLabel={m.mob_qr_scanner_permission_cancel()}
+					onAllow={requestPermission}
+					onClose={handleRequestClose}
+				/>
 			</Modal>
 		);
 	}
@@ -227,66 +157,23 @@ export function QrCodeScanner({
 			onRequestClose={handleRequestClose}
 		>
 			<View className="flex-1 bg-black">
-				{/* Camera View */}
 				<CameraView
 					style={StyleSheet.absoluteFill}
 					facing="back"
-					enableTorch={torchEnabled}
+					enableTorch={isTorchEnabled}
 					barcodeScannerSettings={{
 						barcodeTypes: ["qr"],
 					}}
 					onBarcodeScanned={isProcessing ? undefined : handleBarcodeScanned}
 				/>
-
-				{/* Overlay */}
-				<View className="flex-1">
-					{/* Top overlay with controls */}
-					<View className="flex-row items-center justify-between bg-black/50 px-4 py-4 pt-12">
-						<TouchableOpacity
-							onPress={handleRequestClose}
-							className="rounded-full bg-black/50 p-2"
-						>
-							<X size={24} color="#fff" />
-						</TouchableOpacity>
-						<Text className="font-bold text-lg text-white">
-							Scan TOTP QR Code
-						</Text>
-						<TouchableOpacity
-							onPress={() => setTorchEnabled(!torchEnabled)}
-							className="rounded-full bg-black/50 p-2"
-						>
-							{torchEnabled ? (
-								<FlashlightOff size={24} color="#fff" />
-							) : (
-								<Flashlight size={24} color="#fff" />
-							)}
-						</TouchableOpacity>
-					</View>
-
-					{/* Center scanning area */}
-					<View className="flex-1 items-center justify-center">
-						{/* Scanning frame */}
-						<View className="relative h-64 w-64">
-							{/* Corner decorations */}
-							<View className="absolute top-0 left-0 h-8 w-8 rounded-tl-lg border-white border-t-4 border-l-4" />
-							<View className="absolute top-0 right-0 h-8 w-8 rounded-tr-lg border-white border-t-4 border-r-4" />
-							<View className="absolute bottom-0 left-0 h-8 w-8 rounded-bl-lg border-white border-b-4 border-l-4" />
-							<View className="absolute right-0 bottom-0 h-8 w-8 rounded-br-lg border-white border-r-4 border-b-4" />
-						</View>
-					</View>
-
-					{/* Bottom instruction */}
-					<View className="bg-black/50 px-4 py-6 pb-12">
-						<Text className="text-center text-sm text-white">
-							Position the QR code within the frame to scan
-						</Text>
-						{isProcessing && (
-							<Text className="mt-2 text-center text-white/70 text-xs">
-								Processing...
-							</Text>
-						)}
-					</View>
-				</View>
+				<ScannerOverlay
+					title={m.ext_qr_scan_title()}
+					instruction={m.mob_qr_scanner_instruction()}
+					statusLabel={isProcessing ? m.mob_qr_scanner_processing() : null}
+					isTorchEnabled={isTorchEnabled}
+					onToggleTorch={() => setIsTorchEnabled((enabled) => !enabled)}
+					onClose={handleRequestClose}
+				/>
 			</View>
 		</Modal>
 	);

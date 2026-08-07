@@ -1,27 +1,70 @@
 import { lockAllAccounts } from "@bittery/core/services/account-lifecycle";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "expo-router";
-import {
-	Avatar,
-	BottomSheet,
-	PressableFeedback,
-	useToast,
-} from "heroui-native";
-import { Check, Lock, Plus, Settings, Trash2 } from "lucide-react-native";
+import { BottomSheet, PressableFeedback, useToast } from "heroui-native";
 import { useState } from "react";
 import { Alert, Text, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { AccountAvatar, getAccountLabel } from "@/components/auth-kit";
+import {
+	GlowBar,
+	IconCheck,
+	IconLock,
+	IconPlus,
+	IconSettings,
+	IconTrash,
+	iconSize,
+	SectionLabel,
+	SheetBrandAccent,
+} from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 import { useAccount } from "../contexts/account-context";
 import { lifecycleDeps } from "../services/lifecycle";
 import { type AccountMetadata, storage } from "../services/storage";
 
-const StyledCheck = withUniwind(Check);
-const StyledPlus = withUniwind(Plus);
-const StyledSettings = withUniwind(Settings);
-const StyledTrash2 = withUniwind(Trash2);
-const StyledLock = withUniwind(Lock);
+/** One of the four verbs the sheet offers below the account list. */
+function SheetAction({
+	label,
+	icon: Icon,
+	onPress,
+	tone = "default",
+}: {
+	label: string;
+	icon: typeof IconPlus;
+	onPress: () => void;
+	tone?: "default" | "danger";
+}) {
+	const isDanger = tone === "danger";
+
+	return (
+		<PressableFeedback
+			onPress={onPress}
+			accessibilityRole="button"
+			className="h-14 flex-row items-center gap-3 rounded-xl px-2"
+		>
+			<PressableFeedback.Highlight />
+			<View
+				className={cn(
+					"h-10 w-10 items-center justify-center rounded-xl",
+					isDanger ? "bg-danger-soft" : "bg-surface-tertiary",
+				)}
+			>
+				<Icon
+					size={iconSize.bar}
+					className={isDanger ? "text-danger" : "text-foreground"}
+				/>
+			</View>
+			<Text
+				className={cn(
+					"font-medium text-base",
+					isDanger ? "text-danger" : "text-foreground",
+				)}
+			>
+				{label}
+			</Text>
+		</PressableFeedback>
+	);
+}
 
 export function AccountSwitcher() {
 	const router = useRouter();
@@ -32,6 +75,7 @@ export function AccountSwitcher() {
 		useAccount();
 	const [switching, setSwitching] = useState(false);
 	const [isOpen, setIsOpen] = useState(false);
+
 	const handleAccountSwitch = async (account: AccountMetadata) => {
 		if (activeAccountConfig && account.accountId === activeAccountConfig) {
 			setIsOpen(false);
@@ -108,155 +152,91 @@ export function AccountSwitcher() {
 		);
 	};
 
-	// Get initials from email or name
-	const getInitials = (account?: AccountMetadata | null) => {
-		if (!account) return "?";
-		if (account.name) {
-			const parts = account.name.split(" ");
-			if (parts.length >= 2) {
-				return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-			}
-			return account.name.substring(0, 2).toUpperCase();
-		}
-		return account.email.substring(0, 2).toUpperCase();
-	};
+	const accountFallback = m.mob_settings_account_fallback();
 
 	return (
 		<BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
 			<BottomSheet.Trigger>
-				<View className="rounded-full">
-					<Avatar
-						size="sm"
-						alt={activeAccount?.name || activeAccount?.email || "Account"}
-					>
-						{activeAccount?.teamAvatarUrl && (
-							<Avatar.Image source={{ uri: activeAccount.teamAvatarUrl }} />
-						)}
-						<Avatar.Fallback>{getInitials(activeAccount)}</Avatar.Fallback>
-					</Avatar>
+				<View
+					accessibilityRole="button"
+					accessibilityLabel={m.mob_account_switcher_title()}
+				>
+					<AccountAvatar account={activeAccount} size={32} radius={10} />
 				</View>
 			</BottomSheet.Trigger>
 			<BottomSheet.Portal>
 				<BottomSheet.Overlay />
 				<BottomSheet.Content>
-					<View className="items-center py-3">
+					<SheetBrandAccent />
+					<View className="items-center pt-1 pb-4">
 						<BottomSheet.Title>
 							{m.mob_account_switcher_title()}
 						</BottomSheet.Title>
 					</View>
 
-					{/* Account list */}
-					<View className="pb-4">
-						{allAccounts.map((account) => {
-							const isActive =
-								activeAccountConfig &&
-								account.accountId === activeAccountConfig;
-							return (
-								<PressableFeedback
-									key={account.accountId}
-									onPress={() => handleAccountSwitch(account)}
-									isDisabled={switching}
-									className={cn(
-										"flex-row",
-										"items-center",
-										"rounded-2xl",
-										"px-4",
-										"py-3",
-										isActive ? "bg-surface-tertiary" : "",
-									)}
-								>
-									<PressableFeedback.Highlight />
-									{/* Avatar with team image support */}
-									<View className="mr-3">
-										<Avatar size="md" alt={account.name || account.email}>
-											{account.teamAvatarUrl && (
-												<Avatar.Image source={{ uri: account.teamAvatarUrl }} />
-											)}
-											<Avatar.Fallback>{getInitials(account)}</Avatar.Fallback>
-										</Avatar>
-									</View>
-
-									{/* Info */}
-									<View className="flex-1">
-										{account.name && (
-											<Text className="font-medium text-foreground">
-												{account.name}
-											</Text>
+					<View className="px-4 pb-2">
+						<SectionLabel>{m.mob_settings_section_account()}</SectionLabel>
+						<View className="gap-1">
+							{allAccounts.map((account) => {
+								const isActive = account.accountId === activeAccountConfig;
+								return (
+									<PressableFeedback
+										key={account.accountId}
+										onPress={() => handleAccountSwitch(account)}
+										isDisabled={switching}
+										accessibilityRole="button"
+										className={cn(
+											"h-16 flex-row items-center gap-3 rounded-xl px-2",
+											isActive ? "border border-accent/15 bg-selected" : "",
 										)}
-										<Text className="text-muted text-sm">{account.email}</Text>
-										{account.teamName && (
-											<Text className="text-muted text-xs">
-												{account.teamName}
+									>
+										<PressableFeedback.Highlight />
+										{isActive ? <GlowBar /> : null}
+										<AccountAvatar account={account} />
+										<View className="min-w-0 flex-1">
+											<Text
+												numberOfLines={1}
+												className="font-medium text-base text-foreground"
+											>
+												{getAccountLabel(account, accountFallback)}
 											</Text>
-										)}
-									</View>
-
-									{/* Checkmark for active */}
-									{isActive && (
-										<StyledCheck size={20} className="text-success" />
-									)}
-								</PressableFeedback>
-							);
-						})}
+											<Text numberOfLines={1} className="text-muted text-sm">
+												{account.email}
+											</Text>
+										</View>
+										{isActive ? (
+											<IconCheck size={iconSize.row} className="text-accent" />
+										) : null}
+									</PressableFeedback>
+								);
+							})}
+						</View>
 					</View>
 
-					{/* Actions */}
-					<View className="px-4 pt-2 pb-4">
-						{/* Add Account */}
-						<PressableFeedback
+					<View className="h-px bg-separator" />
+
+					<View className="px-4 pt-2 pb-6">
+						<SheetAction
+							label={m.mob_account_switcher_add_account()}
+							icon={IconPlus}
 							onPress={handleAddAccount}
-							className="flex-row items-center rounded-lg py-3"
-						>
-							<PressableFeedback.Highlight />
-							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
-								<StyledPlus size={20} className="text-muted" />
-							</View>
-							<Text className="font-medium text-foreground">
-								{m.mob_account_switcher_add_account()}
-							</Text>
-						</PressableFeedback>
-
-						{/* Settings */}
-						<PressableFeedback
+						/>
+						<SheetAction
+							label={m.mob_account_switcher_settings()}
+							icon={IconSettings}
 							onPress={handleSettings}
-							className="flex-row items-center rounded-lg py-3"
-						>
-							<PressableFeedback.Highlight />
-							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
-								<StyledSettings size={20} className="text-muted" />
-							</View>
-							<Text className="font-medium text-foreground">
-								{m.mob_account_switcher_settings()}
-							</Text>
-						</PressableFeedback>
-
-						{/* Trash */}
-						<PressableFeedback
+						/>
+						<SheetAction
+							label={m.mob_account_switcher_trash()}
+							icon={IconTrash}
 							onPress={handleTrash}
-							className="flex-row items-center rounded-lg py-3"
-						>
-							<PressableFeedback.Highlight />
-							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-surface-tertiary">
-								<StyledTrash2 size={20} className="text-muted" />
-							</View>
-							<Text className="font-medium text-foreground">
-								{m.mob_account_switcher_trash()}
-							</Text>
-						</PressableFeedback>
-
-						{/* Lock Vault */}
-						<PressableFeedback
+						/>
+						<SheetAction
+							label={m.mob_account_switcher_lock_vault()}
+							icon={IconLock}
 							onPress={handleLockVault}
-							className="flex-row items-center rounded-lg py-3"
-						>
-							<PressableFeedback.Highlight />
-							<View className="mr-3 h-10 w-10 items-center justify-center rounded-full bg-danger/10">
-								<StyledLock size={20} className="text-danger" />
-							</View>
-							<Text className="font-medium text-danger">
-								{m.mob_account_switcher_lock_vault()}
-							</Text>
-						</PressableFeedback>
+							tone="danger"
+						/>
 					</View>
 				</BottomSheet.Content>
 			</BottomSheet.Portal>

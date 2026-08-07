@@ -5,49 +5,45 @@ import {
 } from "@bittery/core/hooks";
 import { removeAccount } from "@bittery/core/services/account-lifecycle";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Button, Input, Label, TextField } from "heroui-native";
-import {
-	AlertCircle,
-	Eye,
-	EyeOff,
-	Fingerprint,
-	KeyRound,
-	Lock,
-	ScanFace,
-	ShieldCheck,
-} from "lucide-react-native";
+import { Button, PressableFeedback } from "heroui-native";
 import { useState } from "react";
 import {
 	Alert,
 	KeyboardAvoidingView,
 	Platform,
-	Pressable,
 	ScrollView,
-	Text,
 	View,
 } from "react-native";
-import { withUniwind } from "uniwind";
-import { SafeAreaView } from "@/components/safe-area-view";
+import {
+	AuthDivider,
+	BiometricGlyph,
+	InlineNotice,
+	PasswordField,
+	UnlockLockup,
+} from "@/components/auth-kit";
+import {
+	AppBar,
+	BrandButton,
+	IconAlertCircle,
+	IconKeyRound,
+	IconLock,
+	IconShieldCheck,
+	IconX,
+	iconSize,
+	layout,
+	Screen,
+	SheetBrandAccent,
+	useBottomInset,
+} from "@/components/ui";
+import { useAccount } from "@/contexts/account-context";
+import { resolveBiometricErrorMessage } from "@/lib/biometric-error-message";
 import { useBiometricType } from "@/lib/biometric-type";
-
-// Create styled icon components
-const StyledLock = withUniwind(Lock);
-const StyledEye = withUniwind(Eye);
-const StyledEyeOff = withUniwind(EyeOff);
-const StyledFingerprint = withUniwind(Fingerprint);
-const StyledScanFace = withUniwind(ScanFace);
-const StyledKeyRound = withUniwind(KeyRound);
-const StyledAlertCircle = withUniwind(AlertCircle);
-const StyledShieldCheck = withUniwind(ShieldCheck);
-
+import { useServerUrl } from "@/lib/rpc";
+import { useI18n } from "@/providers/i18n-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/services/credential-provider-master-unlock-key";
+import { lifecycleDeps } from "@/services/lifecycle";
+import { storage } from "@/services/storage";
 import CredentialProvider from "../modules/credential-provider";
-import { useAccount } from "../src/contexts/account-context";
-import { resolveBiometricErrorMessage } from "../src/lib/biometric-error-message";
-import { useServerUrl } from "../src/lib/rpc";
-import { useI18n } from "../src/providers/i18n-provider";
-import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../src/services/credential-provider-master-unlock-key";
-import { lifecycleDeps } from "../src/services/lifecycle";
-import { storage } from "../src/services/storage";
 
 /**
  * Autofill Unlock Screen
@@ -67,9 +63,9 @@ export default function AutofillUnlockScreen() {
 	}>();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { activeAccount, allAccounts, refreshAccounts } = useAccount();
+	const bottomInset = useBottomInset();
 
 	const [password, setPassword] = useState("");
-	const [showPassword, setShowPassword] = useState(false);
 	const [biometricError, setBiometricError] = useState<string | null>(null);
 
 	// Parse password required flag from deep link
@@ -82,6 +78,23 @@ export default function AutofillUnlockScreen() {
 	);
 	const { label: biometricTypeLabel, token: biometricTypeToken } =
 		useBiometricType({ enabled: !!activeAccount });
+
+	const closeScreen = () => {
+		// Close this screen - user can now use autofill
+		if (router.canGoBack()) {
+			router.back();
+		} else {
+			router.replace("/(vault)");
+		}
+	};
+
+	const announceUnlocked = () => {
+		Alert.alert(
+			m.mob_autofill_unlock_alert_unlocked_title(),
+			m.mob_autofill_unlock_alert_unlocked_message(),
+			[{ text: m.mob_autofill_unlock_alert_ok(), onPress: closeScreen }],
+		);
+	};
 
 	// Biometric unlock hook
 	const biometricUnlock = useBiometricUnlock({
@@ -108,24 +121,7 @@ export default function AutofillUnlockScreen() {
 
 				await refreshAccounts();
 
-				// Show success message and close (user returns to autofill)
-				Alert.alert(
-					m.mob_autofill_unlock_alert_unlocked_title(),
-					m.mob_autofill_unlock_alert_unlocked_message(),
-					[
-						{
-							text: m.mob_autofill_unlock_alert_ok(),
-							onPress: () => {
-								// Close this screen - user can now use autofill
-								if (router.canGoBack()) {
-									router.back();
-								} else {
-									router.replace("/(vault)");
-								}
-							},
-						},
-					],
-				);
+				announceUnlocked();
 			} else {
 				Alert.alert(
 					m.mob_unlock_alert_session_expired_title(),
@@ -211,24 +207,7 @@ export default function AutofillUnlockScreen() {
 			// Refresh account context
 			await refreshAccounts();
 
-			// Show success message and close (user returns to autofill)
-			Alert.alert(
-				m.mob_autofill_unlock_alert_unlocked_title(),
-				m.mob_autofill_unlock_alert_unlocked_message(),
-				[
-					{
-						text: m.mob_autofill_unlock_alert_ok(),
-						onPress: () => {
-							// Close this screen - user can now use autofill
-							if (router.canGoBack()) {
-								router.back();
-							} else {
-								router.replace("/(vault)");
-							}
-						},
-					},
-				],
-			);
+			announceUnlocked();
 		},
 		onError: (error) => {
 			console.error("Unlock error:", error);
@@ -290,156 +269,123 @@ export default function AutofillUnlockScreen() {
 		sessionState?.canBiometricUnlock && !requiresPasswordReentry;
 
 	return (
-		<SafeAreaView className="flex-1 bg-background">
+		<Screen surface="overlay">
+			<SheetBrandAccent />
+			<AppBar
+				actions={
+					<PressableFeedback
+						onPress={closeScreen}
+						accessibilityRole="button"
+						accessibilityLabel={m.mob_settings_cancel()}
+						className="-mr-2 h-9 w-9 items-center justify-center rounded-full"
+					>
+						<PressableFeedback.Highlight />
+						<IconX size={iconSize.bar} className="text-muted" />
+					</PressableFeedback>
+				}
+			/>
 			<KeyboardAvoidingView
-				behavior={Platform.OS === "ios" ? "padding" : "height"}
-				contentContainerClassName="flex-1"
 				className="flex-1"
+				behavior={Platform.OS === "ios" ? "padding" : "height"}
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerClassName="flex-1"
 					keyboardShouldPersistTaps="handled"
+					keyboardDismissMode="interactive"
+					showsVerticalScrollIndicator={false}
+					contentContainerStyle={{
+						flexGrow: 1,
+						justifyContent: "center",
+						paddingHorizontal: layout.screenPadding,
+						paddingBottom: bottomInset,
+					}}
 				>
-					<View className="flex-1 justify-center px-6 py-8">
-						{/* Header - Autofill Unlock */}
-						<View className="mb-8 items-center">
-							<Button
-								isIconOnly
-								variant="primary"
-								size="lg"
-								className="mb-4 h-20 w-20 rounded-2xl"
-								isDisabled
-							>
-								<StyledShieldCheck size={40} className="text-white" />
-							</Button>
-							<Text className="font-bold text-2xl text-foreground">
-								{m.mob_autofill_unlock_title()}
-							</Text>
-							<Text className="mt-2 text-center text-muted">
-								{activeAccount?.email}
-							</Text>
-						</View>
+					<UnlockLockup
+						compact
+						icon={IconShieldCheck}
+						title={m.mob_autofill_unlock_title()}
+						subtitle={activeAccount.email}
+					/>
 
-						{/* Master Password Required Notice */}
-						{requiresPasswordReentry && (
-							<View className="mb-4 flex-row items-start rounded-lg bg-amber-50 p-4">
-								<StyledKeyRound size={20} className="text-amber-600" />
-								<View className="ml-3 flex-1">
-									<Text className="font-medium text-amber-800">
-										{m.mob_unlock_password_required_title()}
-									</Text>
-									<Text className="text-amber-700 text-sm">
-										{m.mob_unlock_password_required_description()}
-									</Text>
-								</View>
-							</View>
-						)}
+					<View className="mt-7 gap-4">
+						{requiresPasswordReentry ? (
+							<InlineNotice
+								tone="warning"
+								icon={IconKeyRound}
+								title={m.mob_unlock_password_required_title()}
+								description={m.mob_unlock_password_required_description()}
+							/>
+						) : null}
 
-						{/* Biometric Error Message */}
-						{biometricError && !requiresPasswordReentry && (
-							<View className="mb-4 flex-row items-start rounded-lg bg-red-50 p-4">
-								<StyledAlertCircle size={20} className="text-red-500" />
-								<Text className="ml-3 flex-1 text-red-700 text-sm">
-									{biometricError}
-								</Text>
-							</View>
-						)}
+						{biometricError && !requiresPasswordReentry ? (
+							<InlineNotice
+								tone="danger"
+								icon={IconAlertCircle}
+								description={biometricError}
+							/>
+						) : null}
 
-						{/* Biometric Unlock */}
-						{canUseBiometric && (
-							<View className="mb-4">
-								<Button
+						{canUseBiometric ? (
+							<>
+								<BrandButton
+									label={
+										loading
+											? m.mob_unlock_authenticating()
+											: m.mob_unlock_biometric_label({
+													biometricType: biometricTypeLabel,
+												})
+									}
 									onPress={handleBiometricUnlock}
 									isDisabled={loading}
-									variant="secondary"
 									size="lg"
-								>
-									<View className="flex-row items-center">
-										{biometricTypeToken === "face" ? (
-											<StyledScanFace size={24} className="text-muted" />
-										) : (
-											<StyledFingerprint size={24} className="text-muted" />
-										)}
-										<Text className="ml-3 font-medium text-foreground">
-											{loading
-												? m.mob_unlock_authenticating()
-												: m.mob_unlock_biometric_label({
-														biometricType: biometricTypeLabel,
-													})}
-										</Text>
-									</View>
-								</Button>
-								<View className="my-4 flex-row items-center">
-									<View className="h-px flex-1 bg-border" />
-									<Text className="mx-4 text-muted">
-										{m.mob_unlock_or_divider()}
-									</Text>
-									<View className="h-px flex-1 bg-border" />
-								</View>
-							</View>
-						)}
+									leading={
+										<BiometricGlyph
+											token={biometricTypeToken}
+											size={iconSize.header}
+											className="text-accent-foreground"
+										/>
+									}
+								/>
+								<AuthDivider label={m.mob_unlock_or_divider()} />
+							</>
+						) : null}
 
-						{/* Password Form */}
-						<View className="gap-4">
-							<TextField>
-								<Label>{m.mob_unlock_password_label()}</Label>
-								<View className="w-full flex-row items-center">
-									<Input
-										placeholder={m.mob_unlock_password_placeholder()}
-										value={password}
-										onChangeText={setPassword}
-										secureTextEntry={!showPassword}
-										textContentType="password"
-										autoFocus={requiresPasswordReentry}
-										className="flex-1 pr-12 pl-12"
-									/>
-									<StyledLock
-										size={20}
-										className="absolute left-3.5 text-muted"
-										pointerEvents="none"
-									/>
-									<Pressable
-										onPress={() => setShowPassword(!showPassword)}
-										className="absolute right-4"
-									>
-										{showPassword ? (
-											<StyledEyeOff size={20} className="text-muted" />
-										) : (
-											<StyledEye size={20} className="text-muted" />
-										)}
-									</Pressable>
-								</View>
-							</TextField>
+						<PasswordField
+							label={m.mob_unlock_password_label()}
+							placeholder={m.mob_unlock_password_placeholder()}
+							value={password}
+							onChangeText={setPassword}
+							icon={IconLock}
+							autoFocus={requiresPasswordReentry}
+							onSubmit={handlePasswordUnlock}
+						/>
 
+						{canUseBiometric ? (
 							<Button
 								onPress={handlePasswordUnlock}
 								isDisabled={loading}
-								variant="primary"
+								variant="secondary"
 								size="lg"
 							>
 								{loading
 									? m.mob_unlock_button_unlocking()
 									: m.mob_unlock_button_unlock()}
 							</Button>
-
-							<Button
-								onPress={() => {
-									if (router.canGoBack()) {
-										router.back();
-									} else {
-										router.replace("/(vault)");
-									}
-								}}
-								variant="ghost"
-								className="mt-2"
-							>
-								{m.mob_settings_cancel()}
-							</Button>
-						</View>
+						) : (
+							<BrandButton
+								label={
+									loading
+										? m.mob_unlock_button_unlocking()
+										: m.mob_unlock_button_unlock()
+								}
+								onPress={handlePasswordUnlock}
+								isLoading={loading}
+								size="lg"
+							/>
+						)}
 					</View>
 				</ScrollView>
 			</KeyboardAvoidingView>
-		</SafeAreaView>
+		</Screen>
 	);
 }

@@ -1,22 +1,29 @@
 import { useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
-import { Tabs, useRouter } from "expo-router";
-import { Button, Card, Skeleton } from "heroui-native";
-import { Key, Plus } from "lucide-react-native";
-import { useState } from "react";
-import { RefreshControl, ScrollView, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { useRouter } from "expo-router";
+import { SearchField } from "heroui-native";
+import { useDeferredValue, useState } from "react";
+import { View } from "react-native";
+import { AccountSwitcher } from "@/components/account-switcher";
 import { CategoryFilter } from "@/components/category-filter";
 import { EmptyItemsState } from "@/components/empty-items-state";
 import { ItemSectionsList } from "@/components/item-sections-list";
 import { ItemsSkeletonList } from "@/components/items-skeleton-list";
-import { SafeAreaView } from "@/components/safe-area-view";
+import {
+	AppBar,
+	ErrorState,
+	Fab,
+	IconAlertCircle,
+	IconKey,
+	IconSearch,
+	layout,
+	Screen,
+	useBottomInset,
+} from "@/components/ui";
 import { useFilteredItems } from "@/hooks/use-filtered-items";
 import { useI18n } from "@/providers/i18n-provider";
 
-// Create styled icon components
-const StyledKey = withUniwind(Key);
-const StyledPlus = withUniwind(Plus);
+const FAB_CLEARANCE = layout.gap.lg + 56;
 
 export default function AllItemsScreen() {
 	const { m } = useI18n();
@@ -24,20 +31,18 @@ export default function AllItemsScreen() {
 	const [selectedCategory, setSelectedCategory] = useState<
 		ItemCategory | "all"
 	>("all");
+	const [searchQuery, setSearchQuery] = useState("");
 	const [refreshing, setRefreshing] = useState(false);
+	const deferredQuery = useDeferredValue(searchQuery);
+	const bottomInset = useBottomInset({ tabBar: true, extra: FAB_CLEARANCE });
 
 	const { items, isLoading, error, refetch } = useItems();
 
-	// Filter and sort items
 	const { favorites, regularItems } = useFilteredItems({
 		items,
-		searchQuery: "",
+		searchQuery: deferredQuery,
 		selectedCategory,
 	});
-
-	const handleCreateItem = () => {
-		router.push("/(vault)/create");
-	};
 
 	const handleRefresh = async () => {
 		setRefreshing(true);
@@ -48,104 +53,87 @@ export default function AllItemsScreen() {
 		}
 	};
 
-	const hasNoItems = favorites.length === 0 && regularItems.length === 0;
-	const hasFilter = selectedCategory !== "all";
+	const handleCreateItem = () => {
+		router.push("/(vault)/create");
+	};
 
-	if (isLoading) {
-		return (
-			<SafeAreaView className="flex-1 bg-background" edges={[]}>
-				{/* Category filter skeleton */}
-				<View className="px-3 py-2">
-					<Skeleton className="h-8 w-20 rounded-lg" />
-				</View>
-
-				{/* Skeleton items */}
-				<ItemsSkeletonList />
-			</SafeAreaView>
-		);
-	}
-
-	if (error) {
-		return (
-			<SafeAreaView
-				className="flex-1 items-center justify-center bg-background p-8"
-				edges={[]}
-			>
-				<Card variant="secondary" className="w-full max-w-sm items-center p-8">
-					<Card.Title className="mb-4 text-center text-danger text-lg">
-						{m.mob_items_error_loading()}
-					</Card.Title>
-					<Button onPress={handleRefresh} variant="primary">
-						{m.mob_items_button_retry()}
-					</Button>
-				</Card>
-			</SafeAreaView>
-		);
-	}
+	const isFiltered = selectedCategory !== "all" || deferredQuery.trim() !== "";
 
 	return (
-		<>
-			<Tabs.Screen
-				options={{
-					headerRight: () => (
-						<Button
-							isIconOnly
-							variant="primary"
-							size="sm"
-							onPress={handleCreateItem}
-						>
-							<StyledPlus size={18} className="text-accent-foreground" />
-						</Button>
-					),
-				}}
+		<Screen aurora>
+			<AppBar
+				largeTitle={m.mob_tab_all_items()}
+				leading={<AccountSwitcher />}
 			/>
-			<SafeAreaView className="flex-1 bg-background" edges={[]}>
-				{/* Category Filter */}
-				<View className="pt-2">
-					<CategoryFilter
-						selectedCategory={selectedCategory}
-						onCategoryChange={setSelectedCategory}
-					/>
-				</View>
 
-				{/* Items List */}
-				{hasNoItems ? (
-					<ScrollView
-						contentContainerStyle={{ flexGrow: 1 }}
-						refreshControl={
-							<RefreshControl
-								refreshing={refreshing}
-								onRefresh={handleRefresh}
-							/>
-						}
-					>
+			<View className="px-4 pb-3">
+				<SearchField value={searchQuery} onChange={setSearchQuery}>
+					<SearchField.Group>
+						<SearchField.SearchIcon />
+						<SearchField.Input
+							placeholder={m.mob_search_placeholder()}
+							autoCapitalize="none"
+							autoCorrect={false}
+							returnKeyType="search"
+						/>
+						<SearchField.ClearButton
+							accessibilityLabel={m.mob_search_clear()}
+						/>
+					</SearchField.Group>
+				</SearchField>
+			</View>
+
+			<CategoryFilter
+				selectedCategory={selectedCategory}
+				onCategoryChange={setSelectedCategory}
+			/>
+
+			{isLoading ? (
+				<ItemsSkeletonList />
+			) : error ? (
+				<ErrorState
+					icon={IconAlertCircle}
+					title={m.mob_items_error_loading()}
+					actionLabel={m.mob_items_button_retry()}
+					onAction={handleRefresh}
+				/>
+			) : (
+				<ItemSectionsList
+					favorites={favorites}
+					regularItems={regularItems}
+					onItemPress={(item) =>
+						router.push(`/(vault)/${item.vaultId}/${item.id}`)
+					}
+					refreshing={refreshing}
+					onRefresh={handleRefresh}
+					showVaultBadge
+					bottomInset={bottomInset}
+					ListEmptyComponent={
 						<EmptyItemsState
-							icon={<StyledKey size={48} className="mb-4 text-muted" />}
+							icon={isFiltered ? IconSearch : IconKey}
 							title={
-								hasFilter
+								isFiltered
 									? m.mob_items_empty_no_items_filtered()
 									: m.mob_items_empty_no_items()
 							}
 							description={
-								hasFilter
+								isFiltered
 									? m.mob_items_empty_try_filter()
 									: m.mob_items_empty_add_items_description()
 							}
+							actionLabel={
+								isFiltered ? undefined : m.mob_vault_items_empty_add_item()
+							}
+							onAction={isFiltered ? undefined : handleCreateItem}
 						/>
-					</ScrollView>
-				) : (
-					<ItemSectionsList
-						favorites={favorites}
-						regularItems={regularItems}
-						onItemPress={(item) =>
-							router.push(`/(vault)/${item.vaultId}/${item.id}`)
-						}
-						refreshing={refreshing}
-						onRefresh={handleRefresh}
-						showVaultBadge
-					/>
-				)}
-			</SafeAreaView>
-		</>
+					}
+				/>
+			)}
+
+			<Fab
+				onPress={handleCreateItem}
+				accessibilityLabel={m.mob_create_item_header()}
+			/>
+		</Screen>
 	);
 }

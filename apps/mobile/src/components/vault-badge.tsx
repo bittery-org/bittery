@@ -1,6 +1,5 @@
-import { Shield, Users } from "lucide-react-native";
 import { Text, View } from "react-native";
-import { cn } from "@/lib/utils";
+import { IconUsers, IconVault } from "@/components/ui";
 
 interface VaultBadgeProps {
 	name: string;
@@ -8,34 +7,18 @@ interface VaultBadgeProps {
 	size?: "sm" | "md";
 }
 
+/** Neutral chip naming the vault an item lives in. Never status-coloured. */
 export function VaultBadge({ name, type, size = "sm" }: VaultBadgeProps) {
-	const isTeam = type === "team";
-	const iconSize = size === "sm" ? 10 : 12;
-	const textSize = size === "sm" ? "text-xs" : "text-sm";
+	const isShared = type === "team";
+	const glyph = size === "sm" ? 10 : 12;
+	const Icon = isShared ? IconUsers : IconVault;
 
 	return (
-		<View
-			className={cn(
-				"flex-row",
-				"items-center",
-				"rounded-full",
-				"px-2",
-				"py-0.5",
-				isTeam ? "bg-blue-100" : "bg-gray-100",
-			)}
-		>
-			{isTeam ? (
-				<Users size={iconSize} color="#3b82f6" />
-			) : (
-				<Shield size={iconSize} color="#6b7280" />
-			)}
+		<View className="max-w-[45%] shrink-0 flex-row items-center gap-1 rounded-full border border-border bg-surface-secondary px-1.5 py-0.5">
+			<Icon size={glyph} className="text-muted" />
 			<Text
-				className={cn(
-					"ml-1",
-					textSize,
-					isTeam ? "text-blue-600" : "text-gray-600",
-				)}
 				numberOfLines={1}
+				className={size === "sm" ? "text-2xs text-muted" : "text-muted text-xs"}
 			>
 				{name}
 			</Text>

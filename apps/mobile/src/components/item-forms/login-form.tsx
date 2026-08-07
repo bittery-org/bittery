@@ -1,14 +1,10 @@
-import { Button, Input, Label, TextField } from "heroui-native";
-import { Eye, EyeOff, Sparkles } from "lucide-react-native";
+import { Input } from "heroui-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
 import { Pressable, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { IconSparkles, iconSize } from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
 import { PasswordGenerator } from "../password-generator";
-
-const StyledEye = withUniwind(Eye);
-const StyledEyeOff = withUniwind(EyeOff);
-const StyledSparkles = withUniwind(Sparkles);
+import { FormField, SecretInput } from "./form-field";
 
 export interface LoginFormData {
 	username: string;
@@ -34,7 +30,7 @@ export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
 		const [url, setUrl] = useState(
 			initialData?.url || initialData?.urls?.[0] || "",
 		);
-		const [showPassword, setShowPassword] = useState(false);
+		const [isPasswordRevealed, setIsPasswordRevealed] = useState(false);
 
 		useImperativeHandle(ref, () => ({
 			getData: () => ({
@@ -48,8 +44,7 @@ export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
 
 		return (
 			<>
-				<TextField className="mb-4">
-					<Label>{m.mob_form_login_username_label()}</Label>
+				<FormField label={m.mob_form_login_username_label()}>
 					<Input
 						placeholder={m.mob_form_login_username_placeholder()}
 						value={username}
@@ -57,44 +52,36 @@ export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
 						autoCapitalize="none"
 						autoCorrect={false}
 					/>
-				</TextField>
+				</FormField>
 
-				<TextField className="mb-4">
-					<Label>{m.mob_form_login_password_label()}</Label>
+				<FormField label={m.mob_form_login_password_label()}>
 					<View className="w-full flex-row items-center gap-2">
-						<View className="flex-1 flex-row items-center">
-							<Input
+						<View className="flex-1">
+							<SecretInput
 								placeholder={m.mob_form_login_password_placeholder()}
 								value={password}
 								onChangeText={setPassword}
-								secureTextEntry={!showPassword}
-								className="flex-1 pr-12"
+								isRevealed={isPasswordRevealed}
+								onToggleReveal={() =>
+									setIsPasswordRevealed(!isPasswordRevealed)
+								}
+								revealLabel={m.mob_form_login_password_label()}
+								className="font-mono"
 							/>
-							<Pressable
-								onPress={() => setShowPassword(!showPassword)}
-								className="absolute right-4"
-							>
-								{showPassword ? (
-									<StyledEyeOff size={20} className="text-muted" />
-								) : (
-									<StyledEye size={20} className="text-muted" />
-								)}
-							</Pressable>
 						</View>
-						<PasswordGenerator
-							onPasswordGenerated={(generatedPassword) => {
-								setPassword(generatedPassword);
-							}}
-						>
-							<Button isIconOnly variant="primary">
-								<StyledSparkles size={20} className="text-accent-foreground" />
-							</Button>
+						<PasswordGenerator onPasswordGenerated={setPassword}>
+							<Pressable
+								accessibilityRole="button"
+								accessibilityLabel={m.mob_password_gen_title()}
+								className="h-12 w-12 items-center justify-center rounded-xl border border-accent/25 bg-selected"
+							>
+								<IconSparkles size={iconSize.bar} className="text-accent" />
+							</Pressable>
 						</PasswordGenerator>
 					</View>
-				</TextField>
+				</FormField>
 
-				<TextField className="mb-4">
-					<Label>{m.mob_form_login_url_label()}</Label>
+				<FormField label={m.mob_form_login_url_label()}>
 					<Input
 						placeholder={m.mob_form_login_url_placeholder()}
 						value={url}
@@ -103,7 +90,7 @@ export const LoginForm = forwardRef<LoginFormRef, LoginFormProps>(
 						autoCorrect={false}
 						keyboardType="url"
 					/>
-				</TextField>
+				</FormField>
 			</>
 		);
 	},

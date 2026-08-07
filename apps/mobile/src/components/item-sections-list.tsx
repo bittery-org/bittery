@@ -2,10 +2,11 @@ import type { UnifiedItem } from "@bittery/core/hooks";
 import type { DecryptedItem } from "@bittery/shared/types";
 import { memo, useCallback, useMemo } from "react";
 import { FlatList, RefreshControl } from "react-native";
+import { layout } from "@/components/ui";
 import {
 	buildItemSections,
 	type ItemSection,
-} from "../utils/build-item-sections";
+} from "@/utils/build-item-sections";
 import { ItemListItem } from "./item-list-item";
 import { ItemSectionHeader } from "./item-section-header";
 
@@ -18,6 +19,11 @@ export interface ItemSectionsListProps {
 	refreshing?: boolean;
 	onRefresh?: () => void;
 	showVaultBadge?: boolean;
+	/** Padding that clears the tab bar — pass `useBottomInset(...)`. */
+	bottomInset?: number;
+	ListEmptyComponent?: React.ComponentProps<
+		typeof FlatList
+	>["ListEmptyComponent"];
 }
 
 interface ItemSectionRowProps {
@@ -32,7 +38,7 @@ const ItemSectionRow = memo(function ItemSectionRow({
 	showVaultBadge,
 }: ItemSectionRowProps) {
 	if (section.type === "header") {
-		return <ItemSectionHeader title={section.title} count={section.count} />;
+		return <ItemSectionHeader kind={section.kind} count={section.count} />;
 	}
 
 	const item = section.item;
@@ -43,7 +49,6 @@ const ItemSectionRow = memo(function ItemSectionRow({
 			vault={"vault" in item ? item.vault : undefined}
 			showVaultBadge={showVaultBadge}
 			onPress={() => onItemPress(item)}
-			// Position in section for rounded corners
 			isFirstInSection={section.isFirst}
 			isLastInSection={section.isLast}
 		/>
@@ -51,8 +56,8 @@ const ItemSectionRow = memo(function ItemSectionRow({
 });
 
 /**
- * Renders a sectioned list of items with favorites and regular items separated.
- * Handles section headers, item rendering with TOTP support, and pull-to-refresh.
+ * The app's main item surface: favorites first, then everything else, each
+ * group painted as one grouped card and virtualised as a flat row list.
  */
 export function ItemSectionsList({
 	favorites,
@@ -61,6 +66,8 @@ export function ItemSectionsList({
 	refreshing = false,
 	onRefresh,
 	showVaultBadge = false,
+	bottomInset = layout.gap.lg,
+	ListEmptyComponent,
 }: ItemSectionsListProps) {
 	const sections = useMemo(
 		() => buildItemSections({ favorites, regularItems }),
@@ -80,7 +87,7 @@ export function ItemSectionsList({
 
 	const keyExtractor = useCallback(
 		(item: ItemSection) =>
-			item.type === "header" ? `header-${item.title}` : item.item.id,
+			item.type === "header" ? `header-${item.kind}` : item.item.id,
 		[],
 	);
 
@@ -94,9 +101,10 @@ export function ItemSectionsList({
 					<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
 				) : undefined
 			}
+			ListEmptyComponent={ListEmptyComponent}
 			keyboardShouldPersistTaps="handled"
 			style={{ flex: 1 }}
-			contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, flexGrow: 1 }}
+			contentContainerStyle={{ paddingBottom: bottomInset, flexGrow: 1 }}
 		/>
 	);
 }
