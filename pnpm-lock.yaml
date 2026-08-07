@@ -26,7 +26,7 @@ overrides:
 
 patchedDependencies:
   uniffi-bindgen-react-native@0.31.0-3:
-    hash: c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516
+    hash: 3314dbf8c2f9719ff8cddf62dd60e3bdf63df32bd3a69c78b4cfc94027e7e11a
     path: patches/uniffi-bindgen-react-native@0.31.0-3.patch
 
 importers:
@@ -784,7 +784,7 @@ importers:
         version: 0.86.2(@babel/core@7.29.7)(@react-native/metro-config@0.86.2(@babel/core@7.29.7))(@types/react@19.2.18)(react@19.2.3)
       uniffi-bindgen-react-native:
         specifier: 0.31.0-3
-        version: 0.31.0-3(patch_hash=c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516)
+        version: 0.31.0-3(patch_hash=3314dbf8c2f9719ff8cddf62dd60e3bdf63df32bd3a69c78b4cfc94027e7e11a)
     devDependencies:
       '@bittery/config':
         specifier: workspace:*
@@ -807,7 +807,7 @@ importers:
         version: 3.6.2
       uniffi-bindgen-react-native:
         specifier: 0.31.0-3
-        version: 0.31.0-3(patch_hash=c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516)
+        version: 0.31.0-3(patch_hash=3314dbf8c2f9719ff8cddf62dd60e3bdf63df32bd3a69c78b4cfc94027e7e11a)
 
   packages/device:
     devDependencies:
@@ -16743,7 +16743,7 @@ snapshots:
 
   unicode-property-aliases-ecmascript@2.2.0: {}
 
-  uniffi-bindgen-react-native@0.31.0-3(patch_hash=c9ee8085aac792b54259c488862e92108ae5a2aca21d326b3bc642999276a516): {}
+  uniffi-bindgen-react-native@0.31.0-3(patch_hash=3314dbf8c2f9719ff8cddf62dd60e3bdf63df32bd3a69c78b4cfc94027e7e11a): {}
 
   unified@11.0.5:
     dependencies:

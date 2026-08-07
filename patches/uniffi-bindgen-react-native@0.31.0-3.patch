@@ -1,3 +1,10 @@
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -18,2 +18,3 @@
+   "exports": {
++    "./package.json": "./package.json",
+     ".": {
 diff --git a/crates/uniffi-runtime-javascript/Cargo.toml b/crates/uniffi-runtime-javascript/Cargo.toml
 index 9f83f9a..005a77e 100644
 --- a/crates/uniffi-runtime-javascript/Cargo.toml

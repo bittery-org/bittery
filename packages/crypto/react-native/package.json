@@ -9,8 +9,7 @@
 		"android",
 		"cpp",
 		"ios",
-		"src",
-		"react-native.config.js"
+		"src"
 	],
 	"scripts": {
 		"build:ios": "cd ../core && ../wasm/node_modules/.bin/ubrn build ios --config ubrn.config.yaml --release --and-generate",
@@ -54,10 +53,6 @@
 		"jsSrcsDir": "src",
 		"android": {
 			"javaPackageName": "com.bittery.crypto"
-		},
-		"outputDir": {
-			"android": "android/generated",
-			"ios": "ios/generated"
 		}
 	}
 }
