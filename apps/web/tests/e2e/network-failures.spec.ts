@@ -209,7 +209,11 @@ test("an intermittent drop is reported but does not cost the route its data, and
 	// contents even though the requests behind it were dropped.
 	await expect(itemRow(page, seedTitle)).toBeVisible();
 	// Without this the test would pass just as well with no failure injected.
-	expect(abortedRequests).toBe(DROPPED_REQUEST_BURST);
+	// Polled, not read once: the cached items render long before the 1s/2s/4s
+	// retry backoff has spent the burst, so the count is still climbing here.
+	await expect
+		.poll(() => abortedRequests, { timeout: ERROR_SURFACE_TIMEOUT_MS })
+		.toBe(DROPPED_REQUEST_BURST);
 
 	// The drop is not swallowed either: the query cache reports it.
 	const toast = await pinnedErrorToast();
