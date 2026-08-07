@@ -15,6 +15,7 @@ import {
 	IconKey,
 	IconPlus,
 	IconSearch,
+	IconX,
 	iconSize,
 	Screen,
 	useBottomInset,
@@ -31,6 +32,9 @@ export default function VaultItemsScreen() {
 		ItemCategory | "all"
 	>("all");
 	const [searchQuery, setSearchQuery] = useState("");
+	// Search unfolds from the app bar rather than holding a band open — same
+	// recipe as the Items tab.
+	const [isSearching, setIsSearching] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const deferredQuery = useDeferredValue(searchQuery);
 	const bottomInset = useBottomInset();
@@ -58,6 +62,11 @@ export default function VaultItemsScreen() {
 		router.push(`/(vault)/create?vaultId=${vaultId}`);
 	};
 
+	const closeSearch = () => {
+		setIsSearching(false);
+		setSearchQuery("");
+	};
+
 	const isFiltered = selectedCategory !== "all" || deferredQuery.trim() !== "";
 
 	return (
@@ -81,33 +90,56 @@ export default function VaultItemsScreen() {
 					) : null
 				}
 				actions={
-					<PressableFeedback
-						onPress={handleCreateItem}
-						accessibilityLabel={m.mob_create_item_header()}
-						className="h-9 w-9 items-center justify-center rounded-full"
-					>
-						<PressableFeedback.Highlight />
-						<IconPlus size={iconSize.bar} className="text-foreground" />
-					</PressableFeedback>
+					<>
+						<PressableFeedback
+							onPress={() => setIsSearching(true)}
+							accessibilityLabel={m.mob_tab_search()}
+							className="h-9 w-9 items-center justify-center rounded-full"
+						>
+							<PressableFeedback.Highlight />
+							<IconSearch size={iconSize.bar} className="text-foreground" />
+						</PressableFeedback>
+						<PressableFeedback
+							onPress={handleCreateItem}
+							accessibilityLabel={m.mob_create_item_header()}
+							className="h-9 w-9 items-center justify-center rounded-full"
+						>
+							<PressableFeedback.Highlight />
+							<IconPlus size={iconSize.bar} className="text-foreground" />
+						</PressableFeedback>
+					</>
 				}
 			/>
 
-			<View className="px-4 pb-3">
-				<SearchField value={searchQuery} onChange={setSearchQuery}>
-					<SearchField.Group>
-						<SearchField.SearchIcon />
-						<SearchField.Input
-							placeholder={m.mob_vault_items_search_placeholder()}
-							autoCapitalize="none"
-							autoCorrect={false}
-							returnKeyType="search"
-						/>
-						<SearchField.ClearButton
-							accessibilityLabel={m.mob_search_clear()}
-						/>
-					</SearchField.Group>
-				</SearchField>
-			</View>
+			{isSearching ? (
+				<View className="flex-row items-center gap-2 px-4 pb-2.5">
+					<View className="min-w-0 flex-1">
+						<SearchField value={searchQuery} onChange={setSearchQuery}>
+							<SearchField.Group>
+								<SearchField.SearchIcon />
+								<SearchField.Input
+									placeholder={m.mob_vault_items_search_placeholder()}
+									autoCapitalize="none"
+									autoCorrect={false}
+									autoFocus
+									returnKeyType="search"
+								/>
+								<SearchField.ClearButton
+									accessibilityLabel={m.mob_search_clear()}
+								/>
+							</SearchField.Group>
+						</SearchField>
+					</View>
+					<PressableFeedback
+						onPress={closeSearch}
+						accessibilityLabel={m.mob_common_close()}
+						className="h-9 w-9 items-center justify-center rounded-full"
+					>
+						<PressableFeedback.Highlight />
+						<IconX size={iconSize.bar} className="text-foreground" />
+					</PressableFeedback>
+				</View>
+			) : null}
 
 			<CategoryFilter
 				selectedCategory={selectedCategory}

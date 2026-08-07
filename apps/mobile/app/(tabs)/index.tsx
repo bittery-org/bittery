@@ -1,7 +1,7 @@
 import { useItems } from "@bittery/core/hooks";
 import type { ItemCategory } from "@bittery/shared/types";
 import { useRouter } from "expo-router";
-import { SearchField } from "heroui-native";
+import { PressableFeedback, SearchField } from "heroui-native";
 import { useDeferredValue, useState } from "react";
 import { View } from "react-native";
 import { AccountSwitcher } from "@/components/account-switcher";
@@ -16,6 +16,8 @@ import {
 	IconAlertCircle,
 	IconKey,
 	IconSearch,
+	IconX,
+	iconSize,
 	layout,
 	Screen,
 	useBottomInset,
@@ -32,6 +34,9 @@ export default function AllItemsScreen() {
 		ItemCategory | "all"
 	>("all");
 	const [searchQuery, setSearchQuery] = useState("");
+	// Search takes over the title row rather than sitting under it — a field the
+	// user is not typing in does not earn a permanent band on a phone.
+	const [isSearching, setIsSearching] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const deferredQuery = useDeferredValue(searchQuery);
 	const bottomInset = useBottomInset({ tabBar: true, extra: FAB_CLEARANCE });
@@ -57,31 +62,59 @@ export default function AllItemsScreen() {
 		router.push("/(vault)/create");
 	};
 
+	const closeSearch = () => {
+		setIsSearching(false);
+		setSearchQuery("");
+	};
+
 	const isFiltered = selectedCategory !== "all" || deferredQuery.trim() !== "";
 
 	return (
 		<Screen aurora>
-			<AppBar
-				largeTitle={m.mob_tab_all_items()}
-				leading={<AccountSwitcher />}
-			/>
-
-			<View className="px-4 pb-2.5">
-				<SearchField value={searchQuery} onChange={setSearchQuery}>
-					<SearchField.Group>
-						<SearchField.SearchIcon />
-						<SearchField.Input
-							placeholder={m.mob_search_placeholder()}
-							autoCapitalize="none"
-							autoCorrect={false}
-							returnKeyType="search"
-						/>
-						<SearchField.ClearButton
-							accessibilityLabel={m.mob_search_clear()}
-						/>
-					</SearchField.Group>
-				</SearchField>
-			</View>
+			{isSearching ? (
+				<View className="flex-row items-center gap-2 px-4 py-1.5">
+					<View className="min-w-0 flex-1">
+						<SearchField value={searchQuery} onChange={setSearchQuery}>
+							<SearchField.Group>
+								<SearchField.SearchIcon />
+								<SearchField.Input
+									placeholder={m.mob_search_placeholder()}
+									autoCapitalize="none"
+									autoCorrect={false}
+									autoFocus
+									returnKeyType="search"
+								/>
+								<SearchField.ClearButton
+									accessibilityLabel={m.mob_search_clear()}
+								/>
+							</SearchField.Group>
+						</SearchField>
+					</View>
+					<PressableFeedback
+						onPress={closeSearch}
+						accessibilityLabel={m.mob_common_close()}
+						className="h-9 w-9 items-center justify-center rounded-full"
+					>
+						<PressableFeedback.Highlight />
+						<IconX size={iconSize.bar} className="text-foreground" />
+					</PressableFeedback>
+				</View>
+			) : (
+				<AppBar
+					largeTitle={m.mob_tab_all_items()}
+					leading={<AccountSwitcher />}
+					actions={
+						<PressableFeedback
+							onPress={() => setIsSearching(true)}
+							accessibilityLabel={m.mob_tab_search()}
+							className="h-9 w-9 items-center justify-center rounded-full"
+						>
+							<PressableFeedback.Highlight />
+							<IconSearch size={iconSize.bar} className="text-foreground" />
+						</PressableFeedback>
+					}
+				/>
+			)}
 
 			<CategoryFilter
 				selectedCategory={selectedCategory}
