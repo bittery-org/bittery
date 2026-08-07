@@ -10,7 +10,6 @@ extern "C" {
         handle: u64,
         status_: &mut u::RustCallStatus,
     );
-    fn uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(ptr: u64) -> u64;
     fn uniffi_bittery_crypto_api_fn_clone_srpclient(
         handle: u64,
         status_: &mut u::RustCallStatus,
@@ -365,7 +364,6 @@ extern "C" {
     fn uniffi_bittery_crypto_api_checksum_func_validate_secret_key() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_verify_server_session() -> u16;
     fn uniffi_bittery_crypto_api_checksum_func_wrap_key() -> u16;
-    fn uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy() -> u16;
     fn uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key() -> u16;
     fn uniffi_bittery_crypto_api_checksum_method_srpclient_derive_verifier() -> u16;
     fn uniffi_bittery_crypto_api_checksum_method_srpclient_generate_salt() -> u16;
@@ -402,12 +400,6 @@ pub fn ubrn_uniffi_bittery_crypto_api_fn_free_keyhandle(
         )
     };
     f_status_.copy_from(u_status_);
-}
-#[wasm_bindgen]
-pub unsafe fn ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(
-    ptr: js::Handle,
-) -> js::Handle {
-    uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(u64::into_rust(ptr)).into_js()
 }
 #[wasm_bindgen]
 pub fn ubrn_uniffi_bittery_crypto_api_fn_clone_srpclient(
@@ -1535,10 +1527,6 @@ pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_verify_server_session
 #[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_func_wrap_key() -> js::UInt16 {
     uniffi_bittery_crypto_api_checksum_func_wrap_key().into_js()
-}
-#[wasm_bindgen]
-pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy() -> js::UInt16 {
-    uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy().into_js()
 }
 #[wasm_bindgen]
 pub unsafe fn ubrn_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key() -> js::UInt16 {

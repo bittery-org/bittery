@@ -111,12 +111,10 @@ impl KeyHandle {
             .map(|material| Zeroizing::new(material.to_vec()))
             .ok_or(CryptoError::KeyDestroyed)
     }
-}
 
-#[cfg_attr(target_arch = "wasm32", uniffi::export)]
-#[cfg_attr(not(target_arch = "wasm32"), uniffi::export(async_runtime = "tokio"))]
-impl KeyHandle {
-    pub async fn destroy(&self) -> Result<(), CryptoError> {
+    // Not a UniFFI export: the Kotlin backend already generates `destroy()` on every exported
+    // object, and a second one fails to compile. Clients go through `destroy_key` instead.
+    async fn destroy(&self) -> Result<(), CryptoError> {
         let mut material = self
             .material
             .lock()

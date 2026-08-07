@@ -137,9 +137,6 @@ extern "C" {
         /*handle*/ uint64_t handle, 
         RustCallStatus *uniffi_out_err
     );
-    /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(
-        /*handle*/ uint64_t ptr
-    );
     /*handle*/ uint64_t uniffi_bittery_crypto_api_fn_clone_srpclient(
         /*handle*/ uint64_t handle, 
         RustCallStatus *uniffi_out_err
@@ -623,8 +620,6 @@ extern "C" {
     uint16_t uniffi_bittery_crypto_api_checksum_func_verify_server_session(
     );
     uint16_t uniffi_bittery_crypto_api_checksum_func_wrap_key(
-    );
-    uint16_t uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy(
     );
     uint16_t uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key(
     );
@@ -2114,14 +2109,6 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
             return this->cpp_uniffi_bittery_crypto_api_fn_free_keyhandle(rt, thisVal, args, count);
         }
     );
-    props["ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy"] = jsi::Function::createFromHostFunction(
-        rt,
-        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy"),
-        1,
-        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
-            return this->cpp_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(rt, thisVal, args, count);
-        }
-    );
     props["ubrn_uniffi_bittery_crypto_api_fn_clone_srpclient"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_fn_clone_srpclient"),
@@ -3242,14 +3229,6 @@ NativeBitteryCryptoApi::NativeBitteryCryptoApi(
             return this->cpp_uniffi_bittery_crypto_api_checksum_func_wrap_key(rt, thisVal, args, count);
         }
     );
-    props["ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy"] = jsi::Function::createFromHostFunction(
-        rt,
-        jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy"),
-        0,
-        [this](jsi::Runtime &rt, const jsi::Value &thisVal, const jsi::Value *args, size_t count) -> jsi::Value {
-            return this->cpp_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy(rt, thisVal, args, count);
-        }
-    );
     props["ubrn_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key"] = jsi::Function::createFromHostFunction(
         rt,
         jsi::PropNameID::forAscii(rt, "ubrn_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key"),
@@ -3516,13 +3495,6 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_free_keyhand
 
         
         return jsi::Value::undefined();
-}
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(uniffi_jsi::Bridging</*handle*/ uint64_t>::fromJs(rt, callInvoker, args[0])
-        );
-
-        
-        return uniffi_jsi::Bridging</*handle*/ uint64_t>::toJs(rt, callInvoker, value);
 }
 jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_fn_clone_srpclient(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         RustCallStatus status = uniffi::bittery_crypto_api::Bridging<RustCallStatus>::rustSuccess(rt);
@@ -4551,13 +4523,6 @@ jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_v
 }
 jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_func_wrap_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
         auto value = uniffi_bittery_crypto_api_checksum_func_wrap_key(
-        );
-
-        
-        return uniffi_jsi::Bridging<uint16_t>::toJs(rt, callInvoker, value);
-}
-jsi::Value NativeBitteryCryptoApi::cpp_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count) {
-        auto value = uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy(
         );
 
         

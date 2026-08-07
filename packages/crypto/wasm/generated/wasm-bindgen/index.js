@@ -817,14 +817,6 @@ export function ubrn_uniffi_bittery_crypto_api_checksum_func_wrap_key() {
 /**
  * @returns {number}
  */
-export function ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy() {
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy();
-    return ret;
-}
-
-/**
- * @returns {number}
- */
 export function ubrn_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key() {
     const ret = wasm.ubrn_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key();
     return ret;
@@ -1464,15 +1456,6 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_verify_server_session(cli
  */
 export function ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key, wrapping_key) {
     const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key, wrapping_key);
-    return BigInt.asUintN(64, ret);
-}
-
-/**
- * @param {bigint} ptr
- * @returns {bigint}
- */
-export function ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(ptr) {
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(ptr);
     return BigInt.asUintN(64, ret);
 }
 

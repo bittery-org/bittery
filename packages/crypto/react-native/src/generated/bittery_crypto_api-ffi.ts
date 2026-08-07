@@ -114,7 +114,6 @@ interface NativeModuleInterface {
     ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key(secretKey: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_func_verify_server_session(clientPublicEphemeral: Uint8Array, session: Uint8Array, serverSessionProof: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key: bigint, wrappingKey: bigint): bigint;
-    ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(uniffiSelf: bigint): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_constructor_srpclient_new(uniffi_out_err: UniffiRustCallStatus): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_method_srpclient_derive_safe_private_key(uniffiSelf: bigint, salt: Uint8Array, password: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_method_srpclient_derive_verifier(uniffiSelf: bigint, privateKey: Uint8Array): bigint;
@@ -163,7 +162,6 @@ interface NativeModuleInterface {
     ubrn_uniffi_bittery_crypto_api_checksum_func_validate_secret_key(): number;
     ubrn_uniffi_bittery_crypto_api_checksum_func_verify_server_session(): number;
     ubrn_uniffi_bittery_crypto_api_checksum_func_wrap_key(): number;
-    ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy(): number;
     ubrn_uniffi_bittery_crypto_api_checksum_constructor_srpclient_new(): number;
     ubrn_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key(): number;
     ubrn_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_verifier(): number;

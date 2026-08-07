@@ -1421,6 +1421,969 @@ const FfiConverterTypeEncryptedData = (() => {
     return new FFIConverter();
 })();
 
+export interface KeyHandleLike {
+    
+}
+/**
+ * @deprecated Use `KeyHandleLike` instead.
+ */
+export type KeyHandleInterface = KeyHandleLike;
+
+
+export class KeyHandle extends UniffiAbstractObject implements KeyHandleLike {
+
+    readonly [uniffiTypeNameSymbol] = "KeyHandle";
+    readonly [destructorGuardSymbol]: UniffiGcObject;
+    readonly [pointerLiteralSymbol]: UniffiHandle;
+    // No primary constructor declared for this class.
+private constructor(pointer: UniffiHandle) {
+    super();
+    this[pointerLiteralSymbol] = pointer;
+    this[destructorGuardSymbol] = uniffiTypeKeyHandleObjectFactory.bless(pointer);
+}
+
+    
+
+    
+
+    uniffiDestroy(): void {
+        const ptr = (this as any)[destructorGuardSymbol];
+        if (ptr !== undefined) {
+            const pointer = uniffiTypeKeyHandleObjectFactory.pointer(this);
+            uniffiTypeKeyHandleObjectFactory.freePointer(pointer);
+            uniffiTypeKeyHandleObjectFactory.unbless(ptr);
+            delete (this as any)[destructorGuardSymbol];
+        }
+    }
+
+    static instanceOf(obj_: any): obj_ is KeyHandle {
+        return uniffiTypeKeyHandleObjectFactory.isConcreteType(obj_);
+    }
+
+    
+}
+
+const uniffiTypeKeyHandleObjectFactory: UniffiObjectFactory<KeyHandleLike> = (() => {
+    
+    return {
+    create(pointer: UniffiHandle): KeyHandleLike {
+        const instance = Object.create(KeyHandle.prototype);
+        instance[pointerLiteralSymbol] = pointer;
+        instance[destructorGuardSymbol] = this.bless(pointer);
+        instance[uniffiTypeNameSymbol] = "KeyHandle";
+        return instance;
+    },
+
+    
+    bless(p: UniffiHandle): UniffiGcObject {
+        return uniffiCaller.rustCall(
+            /*caller:*/ (status) =>
+                nativeModule().ubrn_uniffi_internal_fn_method_keyhandle_ffi__bless_pointer(p, status),
+            /*liftString:*/ FfiConverterString.lift
+        );
+    },
+
+    unbless(ptr_: UniffiGcObject) {
+        ptr_.markDestroyed();
+    },
+
+    pointer(obj_: KeyHandleLike): UniffiHandle {
+        if ((obj_ as any)[destructorGuardSymbol] === undefined) {
+            throw new UniffiInternalError.UnexpectedNullPointer();
+        }
+        return (obj_ as any)[pointerLiteralSymbol];
+    },
+
+    clonePointer(obj_: KeyHandleLike): UniffiHandle {
+        const pointer = this.pointer(obj_);
+        return uniffiCaller.rustCall(
+            /*caller:*/ (callStatus) => nativeModule().ubrn_uniffi_bittery_crypto_api_fn_clone_keyhandle(pointer, callStatus),
+            /*liftString:*/ FfiConverterString.lift
+        );
+    },
+
+    freePointer(pointer: UniffiHandle): void {
+        uniffiCaller.rustCall(
+            /*caller:*/ (callStatus) => nativeModule().ubrn_uniffi_bittery_crypto_api_fn_free_keyhandle(pointer, callStatus),
+            /*liftString:*/ FfiConverterString.lift
+        );
+    },
+
+    isConcreteType(obj_: any): obj_ is KeyHandleLike {
+        return obj_[destructorGuardSymbol] && obj_[uniffiTypeNameSymbol] === "KeyHandle";
+    },
+}})();
+const FfiConverterTypeKeyHandle = new FfiConverterObject(uniffiTypeKeyHandleObjectFactory);
+
+export type EncryptionContext = {
+    vaultId: string,
+    entityId: string,
+    entityType: string,
+    version: bigint,
+    userId: string
+}
+
+/**
+ * Generated factory for {@link EncryptionContext} record objects.
+ */
+export const EncryptionContext = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<EncryptionContext, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<EncryptionContext>,
+    });
+})();
+
+const FfiConverterTypeEncryptionContext = (() => {
+    type TypeName = EncryptionContext;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                vaultId: FfiConverterString.read(from), 
+                entityId: FfiConverterString.read(from), 
+                entityType: FfiConverterString.read(from), 
+                version: FfiConverterUInt64.read(from), 
+                userId: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.vaultId, into);
+            FfiConverterString.write(value.entityId, into);
+            FfiConverterString.write(value.entityType, into);
+            FfiConverterUInt64.write(value.version, into);
+            FfiConverterString.write(value.userId, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.vaultId) +
+             FfiConverterString.allocationSize(value.entityId) +
+             FfiConverterString.allocationSize(value.entityType) +
+             FfiConverterUInt64.allocationSize(value.version) +
+             FfiConverterString.allocationSize(value.userId);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type DecryptRequest = {
+    id: string,
+    data: EncryptedData,
+    key: KeyHandleLike,
+    context?: EncryptionContext
+}
+
+/**
+ * Generated factory for {@link DecryptRequest} record objects.
+ */
+export const DecryptRequest = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<DecryptRequest, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<DecryptRequest>,
+    });
+})();
+
+const FfiConverterTypeDecryptRequest = (() => {
+    type TypeName = DecryptRequest;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                id: FfiConverterString.read(from), 
+                data: FfiConverterTypeEncryptedData.read(from), 
+                key: FfiConverterTypeKeyHandle.read(from), 
+                context: FfiConverterOptionalTypeEncryptionContext.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.id, into);
+            FfiConverterTypeEncryptedData.write(value.data, into);
+            FfiConverterTypeKeyHandle.write(value.key, into);
+            FfiConverterOptionalTypeEncryptionContext.write(value.context, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.id) +
+             FfiConverterTypeEncryptedData.allocationSize(value.data) +
+             FfiConverterTypeKeyHandle.allocationSize(value.key) +
+             FfiConverterOptionalTypeEncryptionContext.allocationSize(value.context);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type DerivedKeyHandles = {
+    authKey: KeyHandleLike,
+    masterUnlockKey: KeyHandleLike
+}
+
+/**
+ * Generated factory for {@link DerivedKeyHandles} record objects.
+ */
+export const DerivedKeyHandles = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<DerivedKeyHandles, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<DerivedKeyHandles>,
+    });
+})();
+
+const FfiConverterTypeDerivedKeyHandles = (() => {
+    type TypeName = DerivedKeyHandles;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                authKey: FfiConverterTypeKeyHandle.read(from), 
+                masterUnlockKey: FfiConverterTypeKeyHandle.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterTypeKeyHandle.write(value.authKey, into);
+            FfiConverterTypeKeyHandle.write(value.masterUnlockKey, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterTypeKeyHandle.allocationSize(value.authKey) +
+             FfiConverterTypeKeyHandle.allocationSize(value.masterUnlockKey);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type ItemData = {
+    id: string,
+    encryptedData: string,
+    encryptionIv: string,
+    encryptionAlgorithm: string,
+    context: EncryptionContext
+}
+
+/**
+ * Generated factory for {@link ItemData} record objects.
+ */
+export const ItemData = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<ItemData, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<ItemData>,
+    });
+})();
+
+const FfiConverterTypeItemData = (() => {
+    type TypeName = ItemData;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                id: FfiConverterString.read(from), 
+                encryptedData: FfiConverterString.read(from), 
+                encryptionIv: FfiConverterString.read(from), 
+                encryptionAlgorithm: FfiConverterString.read(from), 
+                context: FfiConverterTypeEncryptionContext.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.id, into);
+            FfiConverterString.write(value.encryptedData, into);
+            FfiConverterString.write(value.encryptionIv, into);
+            FfiConverterString.write(value.encryptionAlgorithm, into);
+            FfiConverterTypeEncryptionContext.write(value.context, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.id) +
+             FfiConverterString.allocationSize(value.encryptedData) +
+             FfiConverterString.allocationSize(value.encryptionIv) +
+             FfiConverterString.allocationSize(value.encryptionAlgorithm) +
+             FfiConverterTypeEncryptionContext.allocationSize(value.context);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type KdfProfile = {
+    schemaVersion: number,
+    algorithm: string,
+    iterations: number
+}
+
+/**
+ * Generated factory for {@link KdfProfile} record objects.
+ */
+export const KdfProfile = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<KdfProfile, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<KdfProfile>,
+    });
+})();
+
+const FfiConverterTypeKdfProfile = (() => {
+    type TypeName = KdfProfile;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                schemaVersion: FfiConverterUInt32.read(from), 
+                algorithm: FfiConverterString.read(from), 
+                iterations: FfiConverterUInt32.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterUInt32.write(value.schemaVersion, into);
+            FfiConverterString.write(value.algorithm, into);
+            FfiConverterUInt32.write(value.iterations, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterUInt32.allocationSize(value.schemaVersion) +
+             FfiConverterString.allocationSize(value.algorithm) +
+             FfiConverterUInt32.allocationSize(value.iterations);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type MemberEncryptedKey = {
+    userId: string,
+    encryptedVaultKey: string
+}
+
+/**
+ * Generated factory for {@link MemberEncryptedKey} record objects.
+ */
+export const MemberEncryptedKey = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<MemberEncryptedKey, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<MemberEncryptedKey>,
+    });
+})();
+
+const FfiConverterTypeMemberEncryptedKey = (() => {
+    type TypeName = MemberEncryptedKey;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                userId: FfiConverterString.read(from), 
+                encryptedVaultKey: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.userId, into);
+            FfiConverterString.write(value.encryptedVaultKey, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.userId) +
+             FfiConverterString.allocationSize(value.encryptedVaultKey);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type ReEncryptedItem = {
+    itemId: string,
+    encryptedData: string,
+    encryptionIv: string
+}
+
+/**
+ * Generated factory for {@link ReEncryptedItem} record objects.
+ */
+export const ReEncryptedItem = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<ReEncryptedItem, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<ReEncryptedItem>,
+    });
+})();
+
+const FfiConverterTypeReEncryptedItem = (() => {
+    type TypeName = ReEncryptedItem;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                itemId: FfiConverterString.read(from), 
+                encryptedData: FfiConverterString.read(from), 
+                encryptionIv: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.itemId, into);
+            FfiConverterString.write(value.encryptedData, into);
+            FfiConverterString.write(value.encryptionIv, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.itemId) +
+             FfiConverterString.allocationSize(value.encryptedData) +
+             FfiConverterString.allocationSize(value.encryptionIv);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type KeyRotationResult = {
+    memberEncryptedKeys: Array<MemberEncryptedKey>,
+    reEncryptedItems: Array<ReEncryptedItem>
+}
+
+/**
+ * Generated factory for {@link KeyRotationResult} record objects.
+ */
+export const KeyRotationResult = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<KeyRotationResult, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<KeyRotationResult>,
+    });
+})();
+
+const FfiConverterTypeKeyRotationResult = (() => {
+    type TypeName = KeyRotationResult;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                memberEncryptedKeys: FfiConverterSequenceTypeMemberEncryptedKey.read(from), 
+                reEncryptedItems: FfiConverterSequenceTypeReEncryptedItem.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterSequenceTypeMemberEncryptedKey.write(value.memberEncryptedKeys, into);
+            FfiConverterSequenceTypeReEncryptedItem.write(value.reEncryptedItems, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterSequenceTypeMemberEncryptedKey.allocationSize(value.memberEncryptedKeys) +
+             FfiConverterSequenceTypeReEncryptedItem.allocationSize(value.reEncryptedItems);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type MemberKeyData = {
+    userId: string,
+    publicKey: string
+}
+
+/**
+ * Generated factory for {@link MemberKeyData} record objects.
+ */
+export const MemberKeyData = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<MemberKeyData, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<MemberKeyData>,
+    });
+})();
+
+const FfiConverterTypeMemberKeyData = (() => {
+    type TypeName = MemberKeyData;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                userId: FfiConverterString.read(from), 
+                publicKey: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.userId, into);
+            FfiConverterString.write(value.publicKey, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.userId) +
+             FfiConverterString.allocationSize(value.publicKey);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type PasskeyAssertion = {
+    authenticatorData: ArrayBuffer,
+    signatureDer: ArrayBuffer
+}
+
+/**
+ * Generated factory for {@link PasskeyAssertion} record objects.
+ */
+export const PasskeyAssertion = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<PasskeyAssertion, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<PasskeyAssertion>,
+    });
+})();
+
+const FfiConverterTypePasskeyAssertion = (() => {
+    type TypeName = PasskeyAssertion;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                authenticatorData: FfiConverterArrayBuffer.read(from), 
+                signatureDer: FfiConverterArrayBuffer.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterArrayBuffer.write(value.authenticatorData, into);
+            FfiConverterArrayBuffer.write(value.signatureDer, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterArrayBuffer.allocationSize(value.authenticatorData) +
+             FfiConverterArrayBuffer.allocationSize(value.signatureDer);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type PasskeyAttestation = {
+    authenticatorData: ArrayBuffer,
+    attestationObject: ArrayBuffer
+}
+
+/**
+ * Generated factory for {@link PasskeyAttestation} record objects.
+ */
+export const PasskeyAttestation = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<PasskeyAttestation, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<PasskeyAttestation>,
+    });
+})();
+
+const FfiConverterTypePasskeyAttestation = (() => {
+    type TypeName = PasskeyAttestation;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                authenticatorData: FfiConverterArrayBuffer.read(from), 
+                attestationObject: FfiConverterArrayBuffer.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterArrayBuffer.write(value.authenticatorData, into);
+            FfiConverterArrayBuffer.write(value.attestationObject, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterArrayBuffer.allocationSize(value.authenticatorData) +
+             FfiConverterArrayBuffer.allocationSize(value.attestationObject);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type PasskeyKeypair = {
+    privateKey: string,
+    publicKeyCose: string,
+    publicKeySpki: string
+}
+
+/**
+ * Generated factory for {@link PasskeyKeypair} record objects.
+ */
+export const PasskeyKeypair = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<PasskeyKeypair, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<PasskeyKeypair>,
+    });
+})();
+
+const FfiConverterTypePasskeyKeypair = (() => {
+    type TypeName = PasskeyKeypair;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                privateKey: FfiConverterString.read(from), 
+                publicKeyCose: FfiConverterString.read(from), 
+                publicKeySpki: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.privateKey, into);
+            FfiConverterString.write(value.publicKeyCose, into);
+            FfiConverterString.write(value.publicKeySpki, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.privateKey) +
+             FfiConverterString.allocationSize(value.publicKeyCose) +
+             FfiConverterString.allocationSize(value.publicKeySpki);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type RsaKeyPair = {
+    publicKey: string,
+    privateKey: string
+}
+
+/**
+ * Generated factory for {@link RsaKeyPair} record objects.
+ */
+export const RsaKeyPair = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<RsaKeyPair, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<RsaKeyPair>,
+    });
+})();
+
+const FfiConverterTypeRsaKeyPair = (() => {
+    type TypeName = RsaKeyPair;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                publicKey: FfiConverterString.read(from), 
+                privateKey: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.publicKey, into);
+            FfiConverterString.write(value.privateKey, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.publicKey) +
+             FfiConverterString.allocationSize(value.privateKey);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type SrpClientEphemeral = {
+    publicKey: string,
+    secret: string
+}
+
+/**
+ * Generated factory for {@link SrpClientEphemeral} record objects.
+ */
+export const SrpClientEphemeral = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<SrpClientEphemeral, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<SrpClientEphemeral>,
+    });
+})();
+
+const FfiConverterTypeSrpClientEphemeral = (() => {
+    type TypeName = SrpClientEphemeral;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                publicKey: FfiConverterString.read(from), 
+                secret: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.publicKey, into);
+            FfiConverterString.write(value.secret, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.publicKey) +
+             FfiConverterString.allocationSize(value.secret);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type SrpClientSession = {
+    key: string,
+    proof: string
+}
+
+/**
+ * Generated factory for {@link SrpClientSession} record objects.
+ */
+export const SrpClientSession = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<SrpClientSession, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<SrpClientSession>,
+    });
+})();
+
+const FfiConverterTypeSrpClientSession = (() => {
+    type TypeName = SrpClientSession;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                key: FfiConverterString.read(from), 
+                proof: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.key, into);
+            FfiConverterString.write(value.proof, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.key) +
+             FfiConverterString.allocationSize(value.proof);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type SrpRegistration = {
+    salt: string,
+    verifier: string
+}
+
+/**
+ * Generated factory for {@link SrpRegistration} record objects.
+ */
+export const SrpRegistration = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<SrpRegistration, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<SrpRegistration>,
+    });
+})();
+
+const FfiConverterTypeSrpRegistration = (() => {
+    type TypeName = SrpRegistration;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                salt: FfiConverterString.read(from), 
+                verifier: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.salt, into);
+            FfiConverterString.write(value.verifier, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.salt) +
+             FfiConverterString.allocationSize(value.verifier);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type SrpServerChallenge = {
+    salt: string,
+    serverPublicKey: string
+}
+
+/**
+ * Generated factory for {@link SrpServerChallenge} record objects.
+ */
+export const SrpServerChallenge = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<SrpServerChallenge, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<SrpServerChallenge>,
+    });
+})();
+
+const FfiConverterTypeSrpServerChallenge = (() => {
+    type TypeName = SrpServerChallenge;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                salt: FfiConverterString.read(from), 
+                serverPublicKey: FfiConverterString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.salt, into);
+            FfiConverterString.write(value.serverPublicKey, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.salt) +
+             FfiConverterString.allocationSize(value.serverPublicKey);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type TotpResult = {
+    code: string,
+    remainingSeconds: bigint,
+    period: bigint,
+    progress: number
+}
+
+/**
+ * Generated factory for {@link TotpResult} record objects.
+ */
+export const TotpResult = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<TotpResult, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<TotpResult>,
+    });
+})();
+
+const FfiConverterTypeTotpResult = (() => {
+    type TypeName = TotpResult;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                code: FfiConverterString.read(from), 
+                remainingSeconds: FfiConverterUInt64.read(from), 
+                period: FfiConverterUInt64.read(from), 
+                progress: FfiConverterFloat64.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterString.write(value.code, into);
+            FfiConverterUInt64.write(value.remainingSeconds, into);
+            FfiConverterUInt64.write(value.period, into);
+            FfiConverterFloat64.write(value.progress, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterString.allocationSize(value.code) +
+             FfiConverterUInt64.allocationSize(value.remainingSeconds) +
+             FfiConverterUInt64.allocationSize(value.period) +
+             FfiConverterFloat64.allocationSize(value.progress);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
+export type ValidationResult = {
+    valid: boolean,
+    errors: Array<string>
+}
+
+/**
+ * Generated factory for {@link ValidationResult} record objects.
+ */
+export const ValidationResult = (() => {
+    const defaults = () => ({
+    });
+    const create = (() => {
+        return uniffiCreateRecord<ValidationResult, ReturnType<typeof defaults>>(defaults);
+    })();
+    return Object.freeze({
+        create,
+        new: create,
+        defaults: () => Object.freeze(defaults()) as Partial<ValidationResult>,
+    });
+})();
+
+const FfiConverterTypeValidationResult = (() => {
+    type TypeName = ValidationResult;
+    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+        read(from: RustBuffer): TypeName {
+            return {
+                valid: FfiConverterBool.read(from), 
+                errors: FfiConverterSequenceString.read(from)
+            };
+        }
+        write(value: TypeName, into: RustBuffer): void {
+            FfiConverterBool.write(value.valid, into);
+            FfiConverterSequenceString.write(value.errors, into);
+        }
+        allocationSize(value: TypeName): number {
+            return FfiConverterBool.allocationSize(value.valid) +
+             FfiConverterSequenceString.allocationSize(value.errors);
+            
+        }
+    };
+    return new FFIConverter();
+})();
+
 
 // Error type: CryptoError
 export enum CryptoError_Tags {
@@ -2380,997 +3343,6 @@ const FfiConverterTypeCryptoError = (() => {
     return new FFIConverter();
 })();
 
-export interface KeyHandleLike {
-    
-    destroy(asyncOpts_?: { signal: AbortSignal }) /*throws*/: Promise<void>;
-}
-/**
- * @deprecated Use `KeyHandleLike` instead.
- */
-export type KeyHandleInterface = KeyHandleLike;
-
-
-export class KeyHandle extends UniffiAbstractObject implements KeyHandleLike {
-
-    readonly [uniffiTypeNameSymbol] = "KeyHandle";
-    readonly [destructorGuardSymbol]: UniffiGcObject;
-    readonly [pointerLiteralSymbol]: UniffiHandle;
-    // No primary constructor declared for this class.
-private constructor(pointer: UniffiHandle) {
-    super();
-    this[pointerLiteralSymbol] = pointer;
-    this[destructorGuardSymbol] = uniffiTypeKeyHandleObjectFactory.bless(pointer);
-}
-
-    
-
-    
-    async destroy(asyncOpts_?: { signal: AbortSignal }): Promise<void> /*throws*/ {
-    const __stack = uniffiIsDebug ? new Error().stack : undefined;
-    try {
-        return await uniffiRustCallAsync(
-            /*rustCaller:*/ uniffiCaller,
-            /*rustFutureFunc:*/ () => {
-                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(
-                    uniffiTypeKeyHandleObjectFactory.clonePointer(this)
-                );
-            },
-            /*pollFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_poll_void,
-            /*cancelFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_cancel_void,
-            /*completeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_complete_void,
-            /*freeFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_free_void,
-            /*liftFunc:*/ (_v) => {},
-            /*liftString:*/ FfiConverterString.lift.bind(FfiConverterString),
-            /*asyncOpts:*/ asyncOpts_,
-            /*errorHandler:*/ FfiConverterTypeCryptoError.lift.bind(FfiConverterTypeCryptoError)
-        );
-    } catch (__error: any) {
-        if (uniffiIsDebug && __error instanceof Error) {
-            __error.stack = __stack;
-        }
-        throw __error;
-    }
-    }
-    
-
-    uniffiDestroy(): void {
-        const ptr = (this as any)[destructorGuardSymbol];
-        if (ptr !== undefined) {
-            const pointer = uniffiTypeKeyHandleObjectFactory.pointer(this);
-            uniffiTypeKeyHandleObjectFactory.freePointer(pointer);
-            uniffiTypeKeyHandleObjectFactory.unbless(ptr);
-            delete (this as any)[destructorGuardSymbol];
-        }
-    }
-
-    static instanceOf(obj_: any): obj_ is KeyHandle {
-        return uniffiTypeKeyHandleObjectFactory.isConcreteType(obj_);
-    }
-
-    
-}
-
-const uniffiTypeKeyHandleObjectFactory: UniffiObjectFactory<KeyHandleLike> = (() => {
-    
-    return {
-    create(pointer: UniffiHandle): KeyHandleLike {
-        const instance = Object.create(KeyHandle.prototype);
-        instance[pointerLiteralSymbol] = pointer;
-        instance[destructorGuardSymbol] = this.bless(pointer);
-        instance[uniffiTypeNameSymbol] = "KeyHandle";
-        return instance;
-    },
-
-    
-    bless(p: UniffiHandle): UniffiGcObject {
-        return uniffiCaller.rustCall(
-            /*caller:*/ (status) =>
-                nativeModule().ubrn_uniffi_internal_fn_method_keyhandle_ffi__bless_pointer(p, status),
-            /*liftString:*/ FfiConverterString.lift
-        );
-    },
-
-    unbless(ptr_: UniffiGcObject) {
-        ptr_.markDestroyed();
-    },
-
-    pointer(obj_: KeyHandleLike): UniffiHandle {
-        if ((obj_ as any)[destructorGuardSymbol] === undefined) {
-            throw new UniffiInternalError.UnexpectedNullPointer();
-        }
-        return (obj_ as any)[pointerLiteralSymbol];
-    },
-
-    clonePointer(obj_: KeyHandleLike): UniffiHandle {
-        const pointer = this.pointer(obj_);
-        return uniffiCaller.rustCall(
-            /*caller:*/ (callStatus) => nativeModule().ubrn_uniffi_bittery_crypto_api_fn_clone_keyhandle(pointer, callStatus),
-            /*liftString:*/ FfiConverterString.lift
-        );
-    },
-
-    freePointer(pointer: UniffiHandle): void {
-        uniffiCaller.rustCall(
-            /*caller:*/ (callStatus) => nativeModule().ubrn_uniffi_bittery_crypto_api_fn_free_keyhandle(pointer, callStatus),
-            /*liftString:*/ FfiConverterString.lift
-        );
-    },
-
-    isConcreteType(obj_: any): obj_ is KeyHandleLike {
-        return obj_[destructorGuardSymbol] && obj_[uniffiTypeNameSymbol] === "KeyHandle";
-    },
-}})();
-const FfiConverterTypeKeyHandle = new FfiConverterObject(uniffiTypeKeyHandleObjectFactory);
-
-export type EncryptionContext = {
-    vaultId: string,
-    entityId: string,
-    entityType: string,
-    version: bigint,
-    userId: string
-}
-
-/**
- * Generated factory for {@link EncryptionContext} record objects.
- */
-export const EncryptionContext = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<EncryptionContext, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<EncryptionContext>,
-    });
-})();
-
-const FfiConverterTypeEncryptionContext = (() => {
-    type TypeName = EncryptionContext;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                vaultId: FfiConverterString.read(from), 
-                entityId: FfiConverterString.read(from), 
-                entityType: FfiConverterString.read(from), 
-                version: FfiConverterUInt64.read(from), 
-                userId: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.vaultId, into);
-            FfiConverterString.write(value.entityId, into);
-            FfiConverterString.write(value.entityType, into);
-            FfiConverterUInt64.write(value.version, into);
-            FfiConverterString.write(value.userId, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.vaultId) +
-             FfiConverterString.allocationSize(value.entityId) +
-             FfiConverterString.allocationSize(value.entityType) +
-             FfiConverterUInt64.allocationSize(value.version) +
-             FfiConverterString.allocationSize(value.userId);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type DecryptRequest = {
-    id: string,
-    data: EncryptedData,
-    key: KeyHandleLike,
-    context?: EncryptionContext
-}
-
-/**
- * Generated factory for {@link DecryptRequest} record objects.
- */
-export const DecryptRequest = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<DecryptRequest, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<DecryptRequest>,
-    });
-})();
-
-const FfiConverterTypeDecryptRequest = (() => {
-    type TypeName = DecryptRequest;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                id: FfiConverterString.read(from), 
-                data: FfiConverterTypeEncryptedData.read(from), 
-                key: FfiConverterTypeKeyHandle.read(from), 
-                context: FfiConverterOptionalTypeEncryptionContext.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.id, into);
-            FfiConverterTypeEncryptedData.write(value.data, into);
-            FfiConverterTypeKeyHandle.write(value.key, into);
-            FfiConverterOptionalTypeEncryptionContext.write(value.context, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.id) +
-             FfiConverterTypeEncryptedData.allocationSize(value.data) +
-             FfiConverterTypeKeyHandle.allocationSize(value.key) +
-             FfiConverterOptionalTypeEncryptionContext.allocationSize(value.context);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type DerivedKeyHandles = {
-    authKey: KeyHandleLike,
-    masterUnlockKey: KeyHandleLike
-}
-
-/**
- * Generated factory for {@link DerivedKeyHandles} record objects.
- */
-export const DerivedKeyHandles = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<DerivedKeyHandles, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<DerivedKeyHandles>,
-    });
-})();
-
-const FfiConverterTypeDerivedKeyHandles = (() => {
-    type TypeName = DerivedKeyHandles;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                authKey: FfiConverterTypeKeyHandle.read(from), 
-                masterUnlockKey: FfiConverterTypeKeyHandle.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterTypeKeyHandle.write(value.authKey, into);
-            FfiConverterTypeKeyHandle.write(value.masterUnlockKey, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterTypeKeyHandle.allocationSize(value.authKey) +
-             FfiConverterTypeKeyHandle.allocationSize(value.masterUnlockKey);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type ItemData = {
-    id: string,
-    encryptedData: string,
-    encryptionIv: string,
-    encryptionAlgorithm: string,
-    context: EncryptionContext
-}
-
-/**
- * Generated factory for {@link ItemData} record objects.
- */
-export const ItemData = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<ItemData, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<ItemData>,
-    });
-})();
-
-const FfiConverterTypeItemData = (() => {
-    type TypeName = ItemData;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                id: FfiConverterString.read(from), 
-                encryptedData: FfiConverterString.read(from), 
-                encryptionIv: FfiConverterString.read(from), 
-                encryptionAlgorithm: FfiConverterString.read(from), 
-                context: FfiConverterTypeEncryptionContext.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.id, into);
-            FfiConverterString.write(value.encryptedData, into);
-            FfiConverterString.write(value.encryptionIv, into);
-            FfiConverterString.write(value.encryptionAlgorithm, into);
-            FfiConverterTypeEncryptionContext.write(value.context, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.id) +
-             FfiConverterString.allocationSize(value.encryptedData) +
-             FfiConverterString.allocationSize(value.encryptionIv) +
-             FfiConverterString.allocationSize(value.encryptionAlgorithm) +
-             FfiConverterTypeEncryptionContext.allocationSize(value.context);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type KdfProfile = {
-    schemaVersion: number,
-    algorithm: string,
-    iterations: number
-}
-
-/**
- * Generated factory for {@link KdfProfile} record objects.
- */
-export const KdfProfile = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<KdfProfile, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<KdfProfile>,
-    });
-})();
-
-const FfiConverterTypeKdfProfile = (() => {
-    type TypeName = KdfProfile;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                schemaVersion: FfiConverterUInt32.read(from), 
-                algorithm: FfiConverterString.read(from), 
-                iterations: FfiConverterUInt32.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterUInt32.write(value.schemaVersion, into);
-            FfiConverterString.write(value.algorithm, into);
-            FfiConverterUInt32.write(value.iterations, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterUInt32.allocationSize(value.schemaVersion) +
-             FfiConverterString.allocationSize(value.algorithm) +
-             FfiConverterUInt32.allocationSize(value.iterations);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type MemberEncryptedKey = {
-    userId: string,
-    encryptedVaultKey: string
-}
-
-/**
- * Generated factory for {@link MemberEncryptedKey} record objects.
- */
-export const MemberEncryptedKey = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<MemberEncryptedKey, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<MemberEncryptedKey>,
-    });
-})();
-
-const FfiConverterTypeMemberEncryptedKey = (() => {
-    type TypeName = MemberEncryptedKey;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                userId: FfiConverterString.read(from), 
-                encryptedVaultKey: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.userId, into);
-            FfiConverterString.write(value.encryptedVaultKey, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.userId) +
-             FfiConverterString.allocationSize(value.encryptedVaultKey);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type ReEncryptedItem = {
-    itemId: string,
-    encryptedData: string,
-    encryptionIv: string
-}
-
-/**
- * Generated factory for {@link ReEncryptedItem} record objects.
- */
-export const ReEncryptedItem = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<ReEncryptedItem, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<ReEncryptedItem>,
-    });
-})();
-
-const FfiConverterTypeReEncryptedItem = (() => {
-    type TypeName = ReEncryptedItem;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                itemId: FfiConverterString.read(from), 
-                encryptedData: FfiConverterString.read(from), 
-                encryptionIv: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.itemId, into);
-            FfiConverterString.write(value.encryptedData, into);
-            FfiConverterString.write(value.encryptionIv, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.itemId) +
-             FfiConverterString.allocationSize(value.encryptedData) +
-             FfiConverterString.allocationSize(value.encryptionIv);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type KeyRotationResult = {
-    memberEncryptedKeys: Array<MemberEncryptedKey>,
-    reEncryptedItems: Array<ReEncryptedItem>
-}
-
-/**
- * Generated factory for {@link KeyRotationResult} record objects.
- */
-export const KeyRotationResult = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<KeyRotationResult, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<KeyRotationResult>,
-    });
-})();
-
-const FfiConverterTypeKeyRotationResult = (() => {
-    type TypeName = KeyRotationResult;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                memberEncryptedKeys: FfiConverterSequenceTypeMemberEncryptedKey.read(from), 
-                reEncryptedItems: FfiConverterSequenceTypeReEncryptedItem.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterSequenceTypeMemberEncryptedKey.write(value.memberEncryptedKeys, into);
-            FfiConverterSequenceTypeReEncryptedItem.write(value.reEncryptedItems, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterSequenceTypeMemberEncryptedKey.allocationSize(value.memberEncryptedKeys) +
-             FfiConverterSequenceTypeReEncryptedItem.allocationSize(value.reEncryptedItems);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type MemberKeyData = {
-    userId: string,
-    publicKey: string
-}
-
-/**
- * Generated factory for {@link MemberKeyData} record objects.
- */
-export const MemberKeyData = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<MemberKeyData, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<MemberKeyData>,
-    });
-})();
-
-const FfiConverterTypeMemberKeyData = (() => {
-    type TypeName = MemberKeyData;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                userId: FfiConverterString.read(from), 
-                publicKey: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.userId, into);
-            FfiConverterString.write(value.publicKey, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.userId) +
-             FfiConverterString.allocationSize(value.publicKey);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type PasskeyAssertion = {
-    authenticatorData: ArrayBuffer,
-    signatureDer: ArrayBuffer
-}
-
-/**
- * Generated factory for {@link PasskeyAssertion} record objects.
- */
-export const PasskeyAssertion = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<PasskeyAssertion, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<PasskeyAssertion>,
-    });
-})();
-
-const FfiConverterTypePasskeyAssertion = (() => {
-    type TypeName = PasskeyAssertion;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                authenticatorData: FfiConverterArrayBuffer.read(from), 
-                signatureDer: FfiConverterArrayBuffer.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterArrayBuffer.write(value.authenticatorData, into);
-            FfiConverterArrayBuffer.write(value.signatureDer, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterArrayBuffer.allocationSize(value.authenticatorData) +
-             FfiConverterArrayBuffer.allocationSize(value.signatureDer);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type PasskeyAttestation = {
-    authenticatorData: ArrayBuffer,
-    attestationObject: ArrayBuffer
-}
-
-/**
- * Generated factory for {@link PasskeyAttestation} record objects.
- */
-export const PasskeyAttestation = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<PasskeyAttestation, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<PasskeyAttestation>,
-    });
-})();
-
-const FfiConverterTypePasskeyAttestation = (() => {
-    type TypeName = PasskeyAttestation;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                authenticatorData: FfiConverterArrayBuffer.read(from), 
-                attestationObject: FfiConverterArrayBuffer.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterArrayBuffer.write(value.authenticatorData, into);
-            FfiConverterArrayBuffer.write(value.attestationObject, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterArrayBuffer.allocationSize(value.authenticatorData) +
-             FfiConverterArrayBuffer.allocationSize(value.attestationObject);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type PasskeyKeypair = {
-    privateKey: string,
-    publicKeyCose: string,
-    publicKeySpki: string
-}
-
-/**
- * Generated factory for {@link PasskeyKeypair} record objects.
- */
-export const PasskeyKeypair = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<PasskeyKeypair, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<PasskeyKeypair>,
-    });
-})();
-
-const FfiConverterTypePasskeyKeypair = (() => {
-    type TypeName = PasskeyKeypair;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                privateKey: FfiConverterString.read(from), 
-                publicKeyCose: FfiConverterString.read(from), 
-                publicKeySpki: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.privateKey, into);
-            FfiConverterString.write(value.publicKeyCose, into);
-            FfiConverterString.write(value.publicKeySpki, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.privateKey) +
-             FfiConverterString.allocationSize(value.publicKeyCose) +
-             FfiConverterString.allocationSize(value.publicKeySpki);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type RsaKeyPair = {
-    publicKey: string,
-    privateKey: string
-}
-
-/**
- * Generated factory for {@link RsaKeyPair} record objects.
- */
-export const RsaKeyPair = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<RsaKeyPair, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<RsaKeyPair>,
-    });
-})();
-
-const FfiConverterTypeRsaKeyPair = (() => {
-    type TypeName = RsaKeyPair;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                publicKey: FfiConverterString.read(from), 
-                privateKey: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.publicKey, into);
-            FfiConverterString.write(value.privateKey, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.publicKey) +
-             FfiConverterString.allocationSize(value.privateKey);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type SrpClientEphemeral = {
-    publicKey: string,
-    secret: string
-}
-
-/**
- * Generated factory for {@link SrpClientEphemeral} record objects.
- */
-export const SrpClientEphemeral = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<SrpClientEphemeral, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<SrpClientEphemeral>,
-    });
-})();
-
-const FfiConverterTypeSrpClientEphemeral = (() => {
-    type TypeName = SrpClientEphemeral;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                publicKey: FfiConverterString.read(from), 
-                secret: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.publicKey, into);
-            FfiConverterString.write(value.secret, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.publicKey) +
-             FfiConverterString.allocationSize(value.secret);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type SrpClientSession = {
-    key: string,
-    proof: string
-}
-
-/**
- * Generated factory for {@link SrpClientSession} record objects.
- */
-export const SrpClientSession = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<SrpClientSession, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<SrpClientSession>,
-    });
-})();
-
-const FfiConverterTypeSrpClientSession = (() => {
-    type TypeName = SrpClientSession;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                key: FfiConverterString.read(from), 
-                proof: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.key, into);
-            FfiConverterString.write(value.proof, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.key) +
-             FfiConverterString.allocationSize(value.proof);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type SrpRegistration = {
-    salt: string,
-    verifier: string
-}
-
-/**
- * Generated factory for {@link SrpRegistration} record objects.
- */
-export const SrpRegistration = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<SrpRegistration, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<SrpRegistration>,
-    });
-})();
-
-const FfiConverterTypeSrpRegistration = (() => {
-    type TypeName = SrpRegistration;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                salt: FfiConverterString.read(from), 
-                verifier: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.salt, into);
-            FfiConverterString.write(value.verifier, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.salt) +
-             FfiConverterString.allocationSize(value.verifier);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type SrpServerChallenge = {
-    salt: string,
-    serverPublicKey: string
-}
-
-/**
- * Generated factory for {@link SrpServerChallenge} record objects.
- */
-export const SrpServerChallenge = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<SrpServerChallenge, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<SrpServerChallenge>,
-    });
-})();
-
-const FfiConverterTypeSrpServerChallenge = (() => {
-    type TypeName = SrpServerChallenge;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                salt: FfiConverterString.read(from), 
-                serverPublicKey: FfiConverterString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.salt, into);
-            FfiConverterString.write(value.serverPublicKey, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.salt) +
-             FfiConverterString.allocationSize(value.serverPublicKey);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type TotpResult = {
-    code: string,
-    remainingSeconds: bigint,
-    period: bigint,
-    progress: number
-}
-
-/**
- * Generated factory for {@link TotpResult} record objects.
- */
-export const TotpResult = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<TotpResult, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<TotpResult>,
-    });
-})();
-
-const FfiConverterTypeTotpResult = (() => {
-    type TypeName = TotpResult;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                code: FfiConverterString.read(from), 
-                remainingSeconds: FfiConverterUInt64.read(from), 
-                period: FfiConverterUInt64.read(from), 
-                progress: FfiConverterFloat64.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterString.write(value.code, into);
-            FfiConverterUInt64.write(value.remainingSeconds, into);
-            FfiConverterUInt64.write(value.period, into);
-            FfiConverterFloat64.write(value.progress, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterString.allocationSize(value.code) +
-             FfiConverterUInt64.allocationSize(value.remainingSeconds) +
-             FfiConverterUInt64.allocationSize(value.period) +
-             FfiConverterFloat64.allocationSize(value.progress);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
-export type ValidationResult = {
-    valid: boolean,
-    errors: Array<string>
-}
-
-/**
- * Generated factory for {@link ValidationResult} record objects.
- */
-export const ValidationResult = (() => {
-    const defaults = () => ({
-    });
-    const create = (() => {
-        return uniffiCreateRecord<ValidationResult, ReturnType<typeof defaults>>(defaults);
-    })();
-    return Object.freeze({
-        create,
-        new: create,
-        defaults: () => Object.freeze(defaults()) as Partial<ValidationResult>,
-    });
-})();
-
-const FfiConverterTypeValidationResult = (() => {
-    type TypeName = ValidationResult;
-    class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-        read(from: RustBuffer): TypeName {
-            return {
-                valid: FfiConverterBool.read(from), 
-                errors: FfiConverterSequenceString.read(from)
-            };
-        }
-        write(value: TypeName, into: RustBuffer): void {
-            FfiConverterBool.write(value.valid, into);
-            FfiConverterSequenceString.write(value.errors, into);
-        }
-        allocationSize(value: TypeName): number {
-            return FfiConverterBool.allocationSize(value.valid) +
-             FfiConverterSequenceString.allocationSize(value.errors);
-            
-        }
-    };
-    return new FFIConverter();
-})();
-
 export interface SrpClientLike {
     
     deriveSafePrivateKey(salt: string, password: string, asyncOpts_?: { signal: AbortSignal }) /*throws*/: Promise<string>;
@@ -3873,9 +3845,6 @@ function uniffiEnsureInitialized() {
     }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_wrap_key() !== 24393) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_wrap_key");
-    }
-    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy() !== 37572) {
-        throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy");
     }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_constructor_srpclient_new() !== 22254) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_constructor_srpclient_new");

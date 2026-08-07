@@ -725,8 +725,6 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bittery_crypto_api_checksum_func_wrap_key(
     ): Int
-    external fun uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy(
-    ): Int
     external fun uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key(
     ): Int
     external fun uniffi_bittery_crypto_api_checksum_method_srpclient_derive_verifier(
@@ -761,8 +759,6 @@ internal object UniffiLib {
 ): Long
 external fun uniffi_bittery_crypto_api_fn_free_keyhandle(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(`ptr`: Long,
-): Long
 external fun uniffi_bittery_crypto_api_fn_clone_srpclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_bittery_crypto_api_fn_free_srpclient(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -1105,9 +1101,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_crypto_api_checksum_func_wrap_key() != 24393) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy() != 37572) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key() != 20216) {
@@ -1591,8 +1584,6 @@ public object FfiConverterByteArray: FfiConverterRustBuffer<ByteArray> {
 
 public interface KeyHandleInterface {
     
-    suspend fun `destroy`()
-    
     companion object
 }
 
@@ -1690,28 +1681,6 @@ open class KeyHandle: Disposable, AutoCloseable, KeyHandleInterface
         return uniffiRustCall() { status ->
             UniffiLib.uniffi_bittery_crypto_api_fn_clone_keyhandle(handle, status)
         }
-    }
-
-    
-    @Throws(CryptoException::class)
-    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-    override suspend fun `destroy`() {
-        return uniffiRustCallAsync(
-        callWithHandle { uniffiHandle ->
-            UniffiLib.uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(
-                uniffiHandle,
-                
-            )
-        },
-        { future, callback, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_poll_void(future, callback, continuation) },
-        { future, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_complete_void(future, continuation) },
-        { future -> UniffiLib.ffi_bittery_crypto_api_rust_future_free_void(future) },
-        // lift function
-        { Unit },
-        
-        // Error FFI converter
-        CryptoException.ErrorHandler,
-    )
     }
 
     

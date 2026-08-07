@@ -1778,916 +1778,7 @@ const FfiConverterTypeEncryptedData = (() => {
   return new FFIConverter();
 })();
 
-// Error type: CryptoError
-export enum CryptoError_Tags {
-  KeyDerivation = "KeyDerivation",
-  Encryption = "Encryption",
-  Decryption = "Decryption",
-  InvalidKeyLength = "InvalidKeyLength",
-  InvalidIvLength = "InvalidIvLength",
-  Rsa = "Rsa",
-  InvalidPem = "InvalidPem",
-  InvalidSecretKey = "InvalidSecretKey",
-  Base64Decode = "Base64Decode",
-  HexDecode = "HexDecode",
-  Srp = "Srp",
-  InvalidPublicEphemeral = "InvalidPublicEphemeral",
-  InvalidSessionProof = "InvalidSessionProof",
-  Utf8 = "Utf8",
-  InvalidInput = "InvalidInput",
-  KeyDestroyed = "KeyDestroyed",
-  KeyHandleUnavailable = "KeyHandleUnavailable",
-  BackgroundTaskFailed = "BackgroundTaskFailed",
-}
-export const CryptoError = (() => {
-  type KeyDerivation__interface = {
-    tag: CryptoError_Tags.KeyDerivation;
-    inner: Readonly<[string]>;
-  };
-  class KeyDerivation_ extends UniffiError implements KeyDerivation__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.KeyDerivation;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "KeyDerivation");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): KeyDerivation_ {
-      return new KeyDerivation_(v0);
-    }
-
-    static instanceOf(obj: any): obj is KeyDerivation_ {
-      return obj.tag === CryptoError_Tags.KeyDerivation;
-    }
-    static hasInner(obj: any): obj is KeyDerivation_ {
-      return KeyDerivation_.instanceOf(obj);
-    }
-
-    static getInner(obj: KeyDerivation_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type Encryption__interface = {
-    tag: CryptoError_Tags.Encryption;
-    inner: Readonly<[string]>;
-  };
-  class Encryption_ extends UniffiError implements Encryption__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.Encryption;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "Encryption");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): Encryption_ {
-      return new Encryption_(v0);
-    }
-
-    static instanceOf(obj: any): obj is Encryption_ {
-      return obj.tag === CryptoError_Tags.Encryption;
-    }
-    static hasInner(obj: any): obj is Encryption_ {
-      return Encryption_.instanceOf(obj);
-    }
-
-    static getInner(obj: Encryption_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type Decryption__interface = {
-    tag: CryptoError_Tags.Decryption;
-    inner: Readonly<[string]>;
-  };
-  class Decryption_ extends UniffiError implements Decryption__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.Decryption;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "Decryption");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): Decryption_ {
-      return new Decryption_(v0);
-    }
-
-    static instanceOf(obj: any): obj is Decryption_ {
-      return obj.tag === CryptoError_Tags.Decryption;
-    }
-    static hasInner(obj: any): obj is Decryption_ {
-      return Decryption_.instanceOf(obj);
-    }
-
-    static getInner(obj: Decryption_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type InvalidKeyLength__interface = {
-    tag: CryptoError_Tags.InvalidKeyLength;
-    inner: Readonly<{ expected: bigint; actual: bigint }>;
-  };
-  class InvalidKeyLength_
-    extends UniffiError
-    implements InvalidKeyLength__interface
-  {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.InvalidKeyLength;
-    readonly inner: Readonly<{ expected: bigint; actual: bigint }>;
-    constructor(inner: { expected: bigint; actual: bigint }) {
-      super("CryptoError", "InvalidKeyLength");
-
-      this.inner = Object.freeze(inner);
-    }
-    static new(inner: { expected: bigint; actual: bigint }): InvalidKeyLength_ {
-      return new InvalidKeyLength_(inner);
-    }
-
-    static instanceOf(obj: any): obj is InvalidKeyLength_ {
-      return obj.tag === CryptoError_Tags.InvalidKeyLength;
-    }
-    static hasInner(obj: any): obj is InvalidKeyLength_ {
-      return InvalidKeyLength_.instanceOf(obj);
-    }
-
-    static getInner(
-      obj: InvalidKeyLength_,
-    ): Readonly<{ expected: bigint; actual: bigint }> {
-      return obj.inner;
-    }
-  }
-
-  type InvalidIvLength__interface = {
-    tag: CryptoError_Tags.InvalidIvLength;
-    inner: Readonly<{ expected: bigint; actual: bigint }>;
-  };
-  class InvalidIvLength_
-    extends UniffiError
-    implements InvalidIvLength__interface
-  {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.InvalidIvLength;
-    readonly inner: Readonly<{ expected: bigint; actual: bigint }>;
-    constructor(inner: { expected: bigint; actual: bigint }) {
-      super("CryptoError", "InvalidIvLength");
-
-      this.inner = Object.freeze(inner);
-    }
-    static new(inner: { expected: bigint; actual: bigint }): InvalidIvLength_ {
-      return new InvalidIvLength_(inner);
-    }
-
-    static instanceOf(obj: any): obj is InvalidIvLength_ {
-      return obj.tag === CryptoError_Tags.InvalidIvLength;
-    }
-    static hasInner(obj: any): obj is InvalidIvLength_ {
-      return InvalidIvLength_.instanceOf(obj);
-    }
-
-    static getInner(
-      obj: InvalidIvLength_,
-    ): Readonly<{ expected: bigint; actual: bigint }> {
-      return obj.inner;
-    }
-  }
-
-  type Rsa__interface = {
-    tag: CryptoError_Tags.Rsa;
-    inner: Readonly<[string]>;
-  };
-  class Rsa_ extends UniffiError implements Rsa__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.Rsa;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "Rsa");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): Rsa_ {
-      return new Rsa_(v0);
-    }
-
-    static instanceOf(obj: any): obj is Rsa_ {
-      return obj.tag === CryptoError_Tags.Rsa;
-    }
-    static hasInner(obj: any): obj is Rsa_ {
-      return Rsa_.instanceOf(obj);
-    }
-
-    static getInner(obj: Rsa_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type InvalidPem__interface = {
-    tag: CryptoError_Tags.InvalidPem;
-    inner: Readonly<[string]>;
-  };
-  class InvalidPem_ extends UniffiError implements InvalidPem__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.InvalidPem;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "InvalidPem");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): InvalidPem_ {
-      return new InvalidPem_(v0);
-    }
-
-    static instanceOf(obj: any): obj is InvalidPem_ {
-      return obj.tag === CryptoError_Tags.InvalidPem;
-    }
-    static hasInner(obj: any): obj is InvalidPem_ {
-      return InvalidPem_.instanceOf(obj);
-    }
-
-    static getInner(obj: InvalidPem_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type InvalidSecretKey__interface = {
-    tag: CryptoError_Tags.InvalidSecretKey;
-  };
-  class InvalidSecretKey_
-    extends UniffiError
-    implements InvalidSecretKey__interface
-  {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.InvalidSecretKey;
-    constructor() {
-      super("CryptoError", "InvalidSecretKey");
-    }
-
-    static new(): InvalidSecretKey_ {
-      return new InvalidSecretKey_();
-    }
-
-    static instanceOf(obj: any): obj is InvalidSecretKey_ {
-      return obj.tag === CryptoError_Tags.InvalidSecretKey;
-    }
-    static hasInner(obj: any): obj is InvalidSecretKey_ {
-      return false;
-    }
-  }
-
-  type Base64Decode__interface = {
-    tag: CryptoError_Tags.Base64Decode;
-    inner: Readonly<[string]>;
-  };
-  class Base64Decode_ extends UniffiError implements Base64Decode__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.Base64Decode;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "Base64Decode");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): Base64Decode_ {
-      return new Base64Decode_(v0);
-    }
-
-    static instanceOf(obj: any): obj is Base64Decode_ {
-      return obj.tag === CryptoError_Tags.Base64Decode;
-    }
-    static hasInner(obj: any): obj is Base64Decode_ {
-      return Base64Decode_.instanceOf(obj);
-    }
-
-    static getInner(obj: Base64Decode_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type HexDecode__interface = {
-    tag: CryptoError_Tags.HexDecode;
-    inner: Readonly<[string]>;
-  };
-  class HexDecode_ extends UniffiError implements HexDecode__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.HexDecode;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "HexDecode");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): HexDecode_ {
-      return new HexDecode_(v0);
-    }
-
-    static instanceOf(obj: any): obj is HexDecode_ {
-      return obj.tag === CryptoError_Tags.HexDecode;
-    }
-    static hasInner(obj: any): obj is HexDecode_ {
-      return HexDecode_.instanceOf(obj);
-    }
-
-    static getInner(obj: HexDecode_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type Srp__interface = {
-    tag: CryptoError_Tags.Srp;
-    inner: Readonly<[string]>;
-  };
-  class Srp_ extends UniffiError implements Srp__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.Srp;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "Srp");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): Srp_ {
-      return new Srp_(v0);
-    }
-
-    static instanceOf(obj: any): obj is Srp_ {
-      return obj.tag === CryptoError_Tags.Srp;
-    }
-    static hasInner(obj: any): obj is Srp_ {
-      return Srp_.instanceOf(obj);
-    }
-
-    static getInner(obj: Srp_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type InvalidPublicEphemeral__interface = {
-    tag: CryptoError_Tags.InvalidPublicEphemeral;
-  };
-  class InvalidPublicEphemeral_
-    extends UniffiError
-    implements InvalidPublicEphemeral__interface
-  {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.InvalidPublicEphemeral;
-    constructor() {
-      super("CryptoError", "InvalidPublicEphemeral");
-    }
-
-    static new(): InvalidPublicEphemeral_ {
-      return new InvalidPublicEphemeral_();
-    }
-
-    static instanceOf(obj: any): obj is InvalidPublicEphemeral_ {
-      return obj.tag === CryptoError_Tags.InvalidPublicEphemeral;
-    }
-    static hasInner(obj: any): obj is InvalidPublicEphemeral_ {
-      return false;
-    }
-  }
-
-  type InvalidSessionProof__interface = {
-    tag: CryptoError_Tags.InvalidSessionProof;
-  };
-  class InvalidSessionProof_
-    extends UniffiError
-    implements InvalidSessionProof__interface
-  {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.InvalidSessionProof;
-    constructor() {
-      super("CryptoError", "InvalidSessionProof");
-    }
-
-    static new(): InvalidSessionProof_ {
-      return new InvalidSessionProof_();
-    }
-
-    static instanceOf(obj: any): obj is InvalidSessionProof_ {
-      return obj.tag === CryptoError_Tags.InvalidSessionProof;
-    }
-    static hasInner(obj: any): obj is InvalidSessionProof_ {
-      return false;
-    }
-  }
-
-  type Utf8__interface = {
-    tag: CryptoError_Tags.Utf8;
-    inner: Readonly<[string]>;
-  };
-  class Utf8_ extends UniffiError implements Utf8__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.Utf8;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "Utf8");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): Utf8_ {
-      return new Utf8_(v0);
-    }
-
-    static instanceOf(obj: any): obj is Utf8_ {
-      return obj.tag === CryptoError_Tags.Utf8;
-    }
-    static hasInner(obj: any): obj is Utf8_ {
-      return Utf8_.instanceOf(obj);
-    }
-
-    static getInner(obj: Utf8_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type InvalidInput__interface = {
-    tag: CryptoError_Tags.InvalidInput;
-    inner: Readonly<[string]>;
-  };
-  class InvalidInput_ extends UniffiError implements InvalidInput__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.InvalidInput;
-    readonly inner: Readonly<[string]>;
-    constructor(v0: string) {
-      super("CryptoError", "InvalidInput");
-
-      this.inner = Object.freeze([v0]);
-    }
-    static new(v0: string): InvalidInput_ {
-      return new InvalidInput_(v0);
-    }
-
-    static instanceOf(obj: any): obj is InvalidInput_ {
-      return obj.tag === CryptoError_Tags.InvalidInput;
-    }
-    static hasInner(obj: any): obj is InvalidInput_ {
-      return InvalidInput_.instanceOf(obj);
-    }
-
-    static getInner(obj: InvalidInput_): Readonly<[string]> {
-      return obj.inner;
-    }
-  }
-
-  type KeyDestroyed__interface = {
-    tag: CryptoError_Tags.KeyDestroyed;
-  };
-  class KeyDestroyed_ extends UniffiError implements KeyDestroyed__interface {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.KeyDestroyed;
-    constructor() {
-      super("CryptoError", "KeyDestroyed");
-    }
-
-    static new(): KeyDestroyed_ {
-      return new KeyDestroyed_();
-    }
-
-    static instanceOf(obj: any): obj is KeyDestroyed_ {
-      return obj.tag === CryptoError_Tags.KeyDestroyed;
-    }
-    static hasInner(obj: any): obj is KeyDestroyed_ {
-      return false;
-    }
-  }
-
-  type KeyHandleUnavailable__interface = {
-    tag: CryptoError_Tags.KeyHandleUnavailable;
-  };
-  class KeyHandleUnavailable_
-    extends UniffiError
-    implements KeyHandleUnavailable__interface
-  {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.KeyHandleUnavailable;
-    constructor() {
-      super("CryptoError", "KeyHandleUnavailable");
-    }
-
-    static new(): KeyHandleUnavailable_ {
-      return new KeyHandleUnavailable_();
-    }
-
-    static instanceOf(obj: any): obj is KeyHandleUnavailable_ {
-      return obj.tag === CryptoError_Tags.KeyHandleUnavailable;
-    }
-    static hasInner(obj: any): obj is KeyHandleUnavailable_ {
-      return false;
-    }
-  }
-
-  type BackgroundTaskFailed__interface = {
-    tag: CryptoError_Tags.BackgroundTaskFailed;
-  };
-  class BackgroundTaskFailed_
-    extends UniffiError
-    implements BackgroundTaskFailed__interface
-  {
-    /**
-     * @private
-     * This field is private and should not be used, use `tag` instead.
-     */
-    readonly [uniffiTypeNameSymbol] = "CryptoError";
-    readonly tag = CryptoError_Tags.BackgroundTaskFailed;
-    constructor() {
-      super("CryptoError", "BackgroundTaskFailed");
-    }
-
-    static new(): BackgroundTaskFailed_ {
-      return new BackgroundTaskFailed_();
-    }
-
-    static instanceOf(obj: any): obj is BackgroundTaskFailed_ {
-      return obj.tag === CryptoError_Tags.BackgroundTaskFailed;
-    }
-    static hasInner(obj: any): obj is BackgroundTaskFailed_ {
-      return false;
-    }
-  }
-
-  function instanceOf(obj: any): obj is CryptoError {
-    return obj[uniffiTypeNameSymbol] === "CryptoError";
-  }
-
-  return Object.freeze({
-    instanceOf,
-    KeyDerivation: KeyDerivation_,
-    Encryption: Encryption_,
-    Decryption: Decryption_,
-    InvalidKeyLength: InvalidKeyLength_,
-    InvalidIvLength: InvalidIvLength_,
-    Rsa: Rsa_,
-    InvalidPem: InvalidPem_,
-    InvalidSecretKey: InvalidSecretKey_,
-    Base64Decode: Base64Decode_,
-    HexDecode: HexDecode_,
-    Srp: Srp_,
-    InvalidPublicEphemeral: InvalidPublicEphemeral_,
-    InvalidSessionProof: InvalidSessionProof_,
-    Utf8: Utf8_,
-    InvalidInput: InvalidInput_,
-    KeyDestroyed: KeyDestroyed_,
-    KeyHandleUnavailable: KeyHandleUnavailable_,
-    BackgroundTaskFailed: BackgroundTaskFailed_,
-  });
-})();
-export type CryptoError = InstanceType<
-  (typeof CryptoError)[
-    | "KeyDerivation"
-    | "Encryption"
-    | "Decryption"
-    | "InvalidKeyLength"
-    | "InvalidIvLength"
-    | "Rsa"
-    | "InvalidPem"
-    | "InvalidSecretKey"
-    | "Base64Decode"
-    | "HexDecode"
-    | "Srp"
-    | "InvalidPublicEphemeral"
-    | "InvalidSessionProof"
-    | "Utf8"
-    | "InvalidInput"
-    | "KeyDestroyed"
-    | "KeyHandleUnavailable"
-    | "BackgroundTaskFailed"]
->;
-
-// FfiConverter for enum CryptoError
-const FfiConverterTypeCryptoError = (() => {
-  const ordinalConverter = FfiConverterInt32;
-  type TypeName = CryptoError;
-  class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
-    read(from: RustBuffer): TypeName {
-      switch (ordinalConverter.read(from)) {
-        case 1:
-          return new CryptoError.KeyDerivation(FfiConverterString.read(from));
-        case 2:
-          return new CryptoError.Encryption(FfiConverterString.read(from));
-        case 3:
-          return new CryptoError.Decryption(FfiConverterString.read(from));
-        case 4:
-          return new CryptoError.InvalidKeyLength({
-            expected: FfiConverterUInt64.read(from),
-            actual: FfiConverterUInt64.read(from),
-          });
-        case 5:
-          return new CryptoError.InvalidIvLength({
-            expected: FfiConverterUInt64.read(from),
-            actual: FfiConverterUInt64.read(from),
-          });
-        case 6:
-          return new CryptoError.Rsa(FfiConverterString.read(from));
-        case 7:
-          return new CryptoError.InvalidPem(FfiConverterString.read(from));
-        case 8:
-          return new CryptoError.InvalidSecretKey();
-        case 9:
-          return new CryptoError.Base64Decode(FfiConverterString.read(from));
-        case 10:
-          return new CryptoError.HexDecode(FfiConverterString.read(from));
-        case 11:
-          return new CryptoError.Srp(FfiConverterString.read(from));
-        case 12:
-          return new CryptoError.InvalidPublicEphemeral();
-        case 13:
-          return new CryptoError.InvalidSessionProof();
-        case 14:
-          return new CryptoError.Utf8(FfiConverterString.read(from));
-        case 15:
-          return new CryptoError.InvalidInput(FfiConverterString.read(from));
-        case 16:
-          return new CryptoError.KeyDestroyed();
-        case 17:
-          return new CryptoError.KeyHandleUnavailable();
-        case 18:
-          return new CryptoError.BackgroundTaskFailed();
-        default:
-          throw new UniffiInternalError.UnexpectedEnumCase();
-      }
-    }
-    write(value: TypeName, into: RustBuffer): void {
-      switch (value.tag) {
-        case CryptoError_Tags.KeyDerivation: {
-          ordinalConverter.write(1, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.Encryption: {
-          ordinalConverter.write(2, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.Decryption: {
-          ordinalConverter.write(3, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.InvalidKeyLength: {
-          ordinalConverter.write(4, into);
-          const inner = value.inner;
-          FfiConverterUInt64.write(inner.expected, into);
-          FfiConverterUInt64.write(inner.actual, into);
-          return;
-        }
-        case CryptoError_Tags.InvalidIvLength: {
-          ordinalConverter.write(5, into);
-          const inner = value.inner;
-          FfiConverterUInt64.write(inner.expected, into);
-          FfiConverterUInt64.write(inner.actual, into);
-          return;
-        }
-        case CryptoError_Tags.Rsa: {
-          ordinalConverter.write(6, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.InvalidPem: {
-          ordinalConverter.write(7, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.InvalidSecretKey: {
-          ordinalConverter.write(8, into);
-          return;
-        }
-        case CryptoError_Tags.Base64Decode: {
-          ordinalConverter.write(9, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.HexDecode: {
-          ordinalConverter.write(10, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.Srp: {
-          ordinalConverter.write(11, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.InvalidPublicEphemeral: {
-          ordinalConverter.write(12, into);
-          return;
-        }
-        case CryptoError_Tags.InvalidSessionProof: {
-          ordinalConverter.write(13, into);
-          return;
-        }
-        case CryptoError_Tags.Utf8: {
-          ordinalConverter.write(14, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.InvalidInput: {
-          ordinalConverter.write(15, into);
-          const inner = value.inner;
-          FfiConverterString.write(inner[0], into);
-          return;
-        }
-        case CryptoError_Tags.KeyDestroyed: {
-          ordinalConverter.write(16, into);
-          return;
-        }
-        case CryptoError_Tags.KeyHandleUnavailable: {
-          ordinalConverter.write(17, into);
-          return;
-        }
-        case CryptoError_Tags.BackgroundTaskFailed: {
-          ordinalConverter.write(18, into);
-          return;
-        }
-        default:
-          // Throwing from here means that CryptoError_Tags hasn't matched an ordinal.
-          throw new UniffiInternalError.UnexpectedEnumCase();
-      }
-    }
-    allocationSize(value: TypeName): number {
-      switch (value.tag) {
-        case CryptoError_Tags.KeyDerivation: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(1);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.Encryption: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(2);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.Decryption: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(3);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.InvalidKeyLength: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(4);
-          size += FfiConverterUInt64.allocationSize(inner.expected);
-          size += FfiConverterUInt64.allocationSize(inner.actual);
-          return size;
-        }
-        case CryptoError_Tags.InvalidIvLength: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(5);
-          size += FfiConverterUInt64.allocationSize(inner.expected);
-          size += FfiConverterUInt64.allocationSize(inner.actual);
-          return size;
-        }
-        case CryptoError_Tags.Rsa: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(6);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.InvalidPem: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(7);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.InvalidSecretKey: {
-          return ordinalConverter.allocationSize(8);
-        }
-        case CryptoError_Tags.Base64Decode: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(9);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.HexDecode: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(10);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.Srp: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(11);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.InvalidPublicEphemeral: {
-          return ordinalConverter.allocationSize(12);
-        }
-        case CryptoError_Tags.InvalidSessionProof: {
-          return ordinalConverter.allocationSize(13);
-        }
-        case CryptoError_Tags.Utf8: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(14);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.InvalidInput: {
-          const inner = value.inner;
-          let size = ordinalConverter.allocationSize(15);
-          size += FfiConverterString.allocationSize(inner[0]);
-          return size;
-        }
-        case CryptoError_Tags.KeyDestroyed: {
-          return ordinalConverter.allocationSize(16);
-        }
-        case CryptoError_Tags.KeyHandleUnavailable: {
-          return ordinalConverter.allocationSize(17);
-        }
-        case CryptoError_Tags.BackgroundTaskFailed: {
-          return ordinalConverter.allocationSize(18);
-        }
-        default:
-          throw new UniffiInternalError.UnexpectedEnumCase();
-      }
-    }
-  }
-  return new FFIConverter();
-})();
-
-export interface KeyHandleLike {
-  destroy(asyncOpts_?: { signal: AbortSignal }) /*throws*/ : Promise<void>;
-}
+export interface KeyHandleLike {}
 /**
  * @deprecated Use `KeyHandleLike` instead.
  */
@@ -2703,33 +1794,6 @@ export class KeyHandle extends UniffiAbstractObject implements KeyHandleLike {
     this[pointerLiteralSymbol] = pointer;
     this[destructorGuardSymbol] =
       uniffiTypeKeyHandleObjectFactory.bless(pointer);
-  }
-
-  async destroy(asyncOpts_?: {
-    signal: AbortSignal;
-  }): Promise<void> /*throws*/ {
-    return await uniffiRustCallAsync(
-      /*rustCaller:*/ uniffiCaller,
-      /*rustFutureFunc:*/ () => {
-        return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(
-          uniffiTypeKeyHandleObjectFactory.clonePointer(this),
-        );
-      },
-      /*pollFunc:*/ nativeModule()
-        .ubrn_ffi_bittery_crypto_api_rust_future_poll_void,
-      /*cancelFunc:*/ nativeModule()
-        .ubrn_ffi_bittery_crypto_api_rust_future_cancel_void,
-      /*completeFunc:*/ nativeModule()
-        .ubrn_ffi_bittery_crypto_api_rust_future_complete_void,
-      /*freeFunc:*/ nativeModule()
-        .ubrn_ffi_bittery_crypto_api_rust_future_free_void,
-      /*liftFunc:*/ (_v) => {},
-      /*liftString:*/ FfiConverterString.lift.bind(FfiConverterString),
-      /*asyncOpts:*/ asyncOpts_,
-      /*errorHandler:*/ FfiConverterTypeCryptoError.lift.bind(
-        FfiConverterTypeCryptoError,
-      ),
-    );
   }
 
   uniffiDestroy(): void {
@@ -3741,6 +2805,913 @@ const FfiConverterTypeValidationResult = (() => {
   return new FFIConverter();
 })();
 
+// Error type: CryptoError
+export enum CryptoError_Tags {
+  KeyDerivation = "KeyDerivation",
+  Encryption = "Encryption",
+  Decryption = "Decryption",
+  InvalidKeyLength = "InvalidKeyLength",
+  InvalidIvLength = "InvalidIvLength",
+  Rsa = "Rsa",
+  InvalidPem = "InvalidPem",
+  InvalidSecretKey = "InvalidSecretKey",
+  Base64Decode = "Base64Decode",
+  HexDecode = "HexDecode",
+  Srp = "Srp",
+  InvalidPublicEphemeral = "InvalidPublicEphemeral",
+  InvalidSessionProof = "InvalidSessionProof",
+  Utf8 = "Utf8",
+  InvalidInput = "InvalidInput",
+  KeyDestroyed = "KeyDestroyed",
+  KeyHandleUnavailable = "KeyHandleUnavailable",
+  BackgroundTaskFailed = "BackgroundTaskFailed",
+}
+export const CryptoError = (() => {
+  type KeyDerivation__interface = {
+    tag: CryptoError_Tags.KeyDerivation;
+    inner: Readonly<[string]>;
+  };
+  class KeyDerivation_ extends UniffiError implements KeyDerivation__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.KeyDerivation;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "KeyDerivation");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): KeyDerivation_ {
+      return new KeyDerivation_(v0);
+    }
+
+    static instanceOf(obj: any): obj is KeyDerivation_ {
+      return obj.tag === CryptoError_Tags.KeyDerivation;
+    }
+    static hasInner(obj: any): obj is KeyDerivation_ {
+      return KeyDerivation_.instanceOf(obj);
+    }
+
+    static getInner(obj: KeyDerivation_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type Encryption__interface = {
+    tag: CryptoError_Tags.Encryption;
+    inner: Readonly<[string]>;
+  };
+  class Encryption_ extends UniffiError implements Encryption__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.Encryption;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "Encryption");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): Encryption_ {
+      return new Encryption_(v0);
+    }
+
+    static instanceOf(obj: any): obj is Encryption_ {
+      return obj.tag === CryptoError_Tags.Encryption;
+    }
+    static hasInner(obj: any): obj is Encryption_ {
+      return Encryption_.instanceOf(obj);
+    }
+
+    static getInner(obj: Encryption_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type Decryption__interface = {
+    tag: CryptoError_Tags.Decryption;
+    inner: Readonly<[string]>;
+  };
+  class Decryption_ extends UniffiError implements Decryption__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.Decryption;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "Decryption");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): Decryption_ {
+      return new Decryption_(v0);
+    }
+
+    static instanceOf(obj: any): obj is Decryption_ {
+      return obj.tag === CryptoError_Tags.Decryption;
+    }
+    static hasInner(obj: any): obj is Decryption_ {
+      return Decryption_.instanceOf(obj);
+    }
+
+    static getInner(obj: Decryption_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type InvalidKeyLength__interface = {
+    tag: CryptoError_Tags.InvalidKeyLength;
+    inner: Readonly<{ expected: bigint; actual: bigint }>;
+  };
+  class InvalidKeyLength_
+    extends UniffiError
+    implements InvalidKeyLength__interface
+  {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.InvalidKeyLength;
+    readonly inner: Readonly<{ expected: bigint; actual: bigint }>;
+    constructor(inner: { expected: bigint; actual: bigint }) {
+      super("CryptoError", "InvalidKeyLength");
+
+      this.inner = Object.freeze(inner);
+    }
+    static new(inner: { expected: bigint; actual: bigint }): InvalidKeyLength_ {
+      return new InvalidKeyLength_(inner);
+    }
+
+    static instanceOf(obj: any): obj is InvalidKeyLength_ {
+      return obj.tag === CryptoError_Tags.InvalidKeyLength;
+    }
+    static hasInner(obj: any): obj is InvalidKeyLength_ {
+      return InvalidKeyLength_.instanceOf(obj);
+    }
+
+    static getInner(
+      obj: InvalidKeyLength_,
+    ): Readonly<{ expected: bigint; actual: bigint }> {
+      return obj.inner;
+    }
+  }
+
+  type InvalidIvLength__interface = {
+    tag: CryptoError_Tags.InvalidIvLength;
+    inner: Readonly<{ expected: bigint; actual: bigint }>;
+  };
+  class InvalidIvLength_
+    extends UniffiError
+    implements InvalidIvLength__interface
+  {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.InvalidIvLength;
+    readonly inner: Readonly<{ expected: bigint; actual: bigint }>;
+    constructor(inner: { expected: bigint; actual: bigint }) {
+      super("CryptoError", "InvalidIvLength");
+
+      this.inner = Object.freeze(inner);
+    }
+    static new(inner: { expected: bigint; actual: bigint }): InvalidIvLength_ {
+      return new InvalidIvLength_(inner);
+    }
+
+    static instanceOf(obj: any): obj is InvalidIvLength_ {
+      return obj.tag === CryptoError_Tags.InvalidIvLength;
+    }
+    static hasInner(obj: any): obj is InvalidIvLength_ {
+      return InvalidIvLength_.instanceOf(obj);
+    }
+
+    static getInner(
+      obj: InvalidIvLength_,
+    ): Readonly<{ expected: bigint; actual: bigint }> {
+      return obj.inner;
+    }
+  }
+
+  type Rsa__interface = {
+    tag: CryptoError_Tags.Rsa;
+    inner: Readonly<[string]>;
+  };
+  class Rsa_ extends UniffiError implements Rsa__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.Rsa;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "Rsa");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): Rsa_ {
+      return new Rsa_(v0);
+    }
+
+    static instanceOf(obj: any): obj is Rsa_ {
+      return obj.tag === CryptoError_Tags.Rsa;
+    }
+    static hasInner(obj: any): obj is Rsa_ {
+      return Rsa_.instanceOf(obj);
+    }
+
+    static getInner(obj: Rsa_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type InvalidPem__interface = {
+    tag: CryptoError_Tags.InvalidPem;
+    inner: Readonly<[string]>;
+  };
+  class InvalidPem_ extends UniffiError implements InvalidPem__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.InvalidPem;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "InvalidPem");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): InvalidPem_ {
+      return new InvalidPem_(v0);
+    }
+
+    static instanceOf(obj: any): obj is InvalidPem_ {
+      return obj.tag === CryptoError_Tags.InvalidPem;
+    }
+    static hasInner(obj: any): obj is InvalidPem_ {
+      return InvalidPem_.instanceOf(obj);
+    }
+
+    static getInner(obj: InvalidPem_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type InvalidSecretKey__interface = {
+    tag: CryptoError_Tags.InvalidSecretKey;
+  };
+  class InvalidSecretKey_
+    extends UniffiError
+    implements InvalidSecretKey__interface
+  {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.InvalidSecretKey;
+    constructor() {
+      super("CryptoError", "InvalidSecretKey");
+    }
+
+    static new(): InvalidSecretKey_ {
+      return new InvalidSecretKey_();
+    }
+
+    static instanceOf(obj: any): obj is InvalidSecretKey_ {
+      return obj.tag === CryptoError_Tags.InvalidSecretKey;
+    }
+    static hasInner(obj: any): obj is InvalidSecretKey_ {
+      return false;
+    }
+  }
+
+  type Base64Decode__interface = {
+    tag: CryptoError_Tags.Base64Decode;
+    inner: Readonly<[string]>;
+  };
+  class Base64Decode_ extends UniffiError implements Base64Decode__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.Base64Decode;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "Base64Decode");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): Base64Decode_ {
+      return new Base64Decode_(v0);
+    }
+
+    static instanceOf(obj: any): obj is Base64Decode_ {
+      return obj.tag === CryptoError_Tags.Base64Decode;
+    }
+    static hasInner(obj: any): obj is Base64Decode_ {
+      return Base64Decode_.instanceOf(obj);
+    }
+
+    static getInner(obj: Base64Decode_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type HexDecode__interface = {
+    tag: CryptoError_Tags.HexDecode;
+    inner: Readonly<[string]>;
+  };
+  class HexDecode_ extends UniffiError implements HexDecode__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.HexDecode;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "HexDecode");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): HexDecode_ {
+      return new HexDecode_(v0);
+    }
+
+    static instanceOf(obj: any): obj is HexDecode_ {
+      return obj.tag === CryptoError_Tags.HexDecode;
+    }
+    static hasInner(obj: any): obj is HexDecode_ {
+      return HexDecode_.instanceOf(obj);
+    }
+
+    static getInner(obj: HexDecode_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type Srp__interface = {
+    tag: CryptoError_Tags.Srp;
+    inner: Readonly<[string]>;
+  };
+  class Srp_ extends UniffiError implements Srp__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.Srp;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "Srp");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): Srp_ {
+      return new Srp_(v0);
+    }
+
+    static instanceOf(obj: any): obj is Srp_ {
+      return obj.tag === CryptoError_Tags.Srp;
+    }
+    static hasInner(obj: any): obj is Srp_ {
+      return Srp_.instanceOf(obj);
+    }
+
+    static getInner(obj: Srp_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type InvalidPublicEphemeral__interface = {
+    tag: CryptoError_Tags.InvalidPublicEphemeral;
+  };
+  class InvalidPublicEphemeral_
+    extends UniffiError
+    implements InvalidPublicEphemeral__interface
+  {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.InvalidPublicEphemeral;
+    constructor() {
+      super("CryptoError", "InvalidPublicEphemeral");
+    }
+
+    static new(): InvalidPublicEphemeral_ {
+      return new InvalidPublicEphemeral_();
+    }
+
+    static instanceOf(obj: any): obj is InvalidPublicEphemeral_ {
+      return obj.tag === CryptoError_Tags.InvalidPublicEphemeral;
+    }
+    static hasInner(obj: any): obj is InvalidPublicEphemeral_ {
+      return false;
+    }
+  }
+
+  type InvalidSessionProof__interface = {
+    tag: CryptoError_Tags.InvalidSessionProof;
+  };
+  class InvalidSessionProof_
+    extends UniffiError
+    implements InvalidSessionProof__interface
+  {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.InvalidSessionProof;
+    constructor() {
+      super("CryptoError", "InvalidSessionProof");
+    }
+
+    static new(): InvalidSessionProof_ {
+      return new InvalidSessionProof_();
+    }
+
+    static instanceOf(obj: any): obj is InvalidSessionProof_ {
+      return obj.tag === CryptoError_Tags.InvalidSessionProof;
+    }
+    static hasInner(obj: any): obj is InvalidSessionProof_ {
+      return false;
+    }
+  }
+
+  type Utf8__interface = {
+    tag: CryptoError_Tags.Utf8;
+    inner: Readonly<[string]>;
+  };
+  class Utf8_ extends UniffiError implements Utf8__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.Utf8;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "Utf8");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): Utf8_ {
+      return new Utf8_(v0);
+    }
+
+    static instanceOf(obj: any): obj is Utf8_ {
+      return obj.tag === CryptoError_Tags.Utf8;
+    }
+    static hasInner(obj: any): obj is Utf8_ {
+      return Utf8_.instanceOf(obj);
+    }
+
+    static getInner(obj: Utf8_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type InvalidInput__interface = {
+    tag: CryptoError_Tags.InvalidInput;
+    inner: Readonly<[string]>;
+  };
+  class InvalidInput_ extends UniffiError implements InvalidInput__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.InvalidInput;
+    readonly inner: Readonly<[string]>;
+    constructor(v0: string) {
+      super("CryptoError", "InvalidInput");
+
+      this.inner = Object.freeze([v0]);
+    }
+    static new(v0: string): InvalidInput_ {
+      return new InvalidInput_(v0);
+    }
+
+    static instanceOf(obj: any): obj is InvalidInput_ {
+      return obj.tag === CryptoError_Tags.InvalidInput;
+    }
+    static hasInner(obj: any): obj is InvalidInput_ {
+      return InvalidInput_.instanceOf(obj);
+    }
+
+    static getInner(obj: InvalidInput_): Readonly<[string]> {
+      return obj.inner;
+    }
+  }
+
+  type KeyDestroyed__interface = {
+    tag: CryptoError_Tags.KeyDestroyed;
+  };
+  class KeyDestroyed_ extends UniffiError implements KeyDestroyed__interface {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.KeyDestroyed;
+    constructor() {
+      super("CryptoError", "KeyDestroyed");
+    }
+
+    static new(): KeyDestroyed_ {
+      return new KeyDestroyed_();
+    }
+
+    static instanceOf(obj: any): obj is KeyDestroyed_ {
+      return obj.tag === CryptoError_Tags.KeyDestroyed;
+    }
+    static hasInner(obj: any): obj is KeyDestroyed_ {
+      return false;
+    }
+  }
+
+  type KeyHandleUnavailable__interface = {
+    tag: CryptoError_Tags.KeyHandleUnavailable;
+  };
+  class KeyHandleUnavailable_
+    extends UniffiError
+    implements KeyHandleUnavailable__interface
+  {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.KeyHandleUnavailable;
+    constructor() {
+      super("CryptoError", "KeyHandleUnavailable");
+    }
+
+    static new(): KeyHandleUnavailable_ {
+      return new KeyHandleUnavailable_();
+    }
+
+    static instanceOf(obj: any): obj is KeyHandleUnavailable_ {
+      return obj.tag === CryptoError_Tags.KeyHandleUnavailable;
+    }
+    static hasInner(obj: any): obj is KeyHandleUnavailable_ {
+      return false;
+    }
+  }
+
+  type BackgroundTaskFailed__interface = {
+    tag: CryptoError_Tags.BackgroundTaskFailed;
+  };
+  class BackgroundTaskFailed_
+    extends UniffiError
+    implements BackgroundTaskFailed__interface
+  {
+    /**
+     * @private
+     * This field is private and should not be used, use `tag` instead.
+     */
+    readonly [uniffiTypeNameSymbol] = "CryptoError";
+    readonly tag = CryptoError_Tags.BackgroundTaskFailed;
+    constructor() {
+      super("CryptoError", "BackgroundTaskFailed");
+    }
+
+    static new(): BackgroundTaskFailed_ {
+      return new BackgroundTaskFailed_();
+    }
+
+    static instanceOf(obj: any): obj is BackgroundTaskFailed_ {
+      return obj.tag === CryptoError_Tags.BackgroundTaskFailed;
+    }
+    static hasInner(obj: any): obj is BackgroundTaskFailed_ {
+      return false;
+    }
+  }
+
+  function instanceOf(obj: any): obj is CryptoError {
+    return obj[uniffiTypeNameSymbol] === "CryptoError";
+  }
+
+  return Object.freeze({
+    instanceOf,
+    KeyDerivation: KeyDerivation_,
+    Encryption: Encryption_,
+    Decryption: Decryption_,
+    InvalidKeyLength: InvalidKeyLength_,
+    InvalidIvLength: InvalidIvLength_,
+    Rsa: Rsa_,
+    InvalidPem: InvalidPem_,
+    InvalidSecretKey: InvalidSecretKey_,
+    Base64Decode: Base64Decode_,
+    HexDecode: HexDecode_,
+    Srp: Srp_,
+    InvalidPublicEphemeral: InvalidPublicEphemeral_,
+    InvalidSessionProof: InvalidSessionProof_,
+    Utf8: Utf8_,
+    InvalidInput: InvalidInput_,
+    KeyDestroyed: KeyDestroyed_,
+    KeyHandleUnavailable: KeyHandleUnavailable_,
+    BackgroundTaskFailed: BackgroundTaskFailed_,
+  });
+})();
+export type CryptoError = InstanceType<
+  (typeof CryptoError)[
+    | "KeyDerivation"
+    | "Encryption"
+    | "Decryption"
+    | "InvalidKeyLength"
+    | "InvalidIvLength"
+    | "Rsa"
+    | "InvalidPem"
+    | "InvalidSecretKey"
+    | "Base64Decode"
+    | "HexDecode"
+    | "Srp"
+    | "InvalidPublicEphemeral"
+    | "InvalidSessionProof"
+    | "Utf8"
+    | "InvalidInput"
+    | "KeyDestroyed"
+    | "KeyHandleUnavailable"
+    | "BackgroundTaskFailed"]
+>;
+
+// FfiConverter for enum CryptoError
+const FfiConverterTypeCryptoError = (() => {
+  const ordinalConverter = FfiConverterInt32;
+  type TypeName = CryptoError;
+  class FFIConverter extends AbstractFfiConverterByteArray<TypeName> {
+    read(from: RustBuffer): TypeName {
+      switch (ordinalConverter.read(from)) {
+        case 1:
+          return new CryptoError.KeyDerivation(FfiConverterString.read(from));
+        case 2:
+          return new CryptoError.Encryption(FfiConverterString.read(from));
+        case 3:
+          return new CryptoError.Decryption(FfiConverterString.read(from));
+        case 4:
+          return new CryptoError.InvalidKeyLength({
+            expected: FfiConverterUInt64.read(from),
+            actual: FfiConverterUInt64.read(from),
+          });
+        case 5:
+          return new CryptoError.InvalidIvLength({
+            expected: FfiConverterUInt64.read(from),
+            actual: FfiConverterUInt64.read(from),
+          });
+        case 6:
+          return new CryptoError.Rsa(FfiConverterString.read(from));
+        case 7:
+          return new CryptoError.InvalidPem(FfiConverterString.read(from));
+        case 8:
+          return new CryptoError.InvalidSecretKey();
+        case 9:
+          return new CryptoError.Base64Decode(FfiConverterString.read(from));
+        case 10:
+          return new CryptoError.HexDecode(FfiConverterString.read(from));
+        case 11:
+          return new CryptoError.Srp(FfiConverterString.read(from));
+        case 12:
+          return new CryptoError.InvalidPublicEphemeral();
+        case 13:
+          return new CryptoError.InvalidSessionProof();
+        case 14:
+          return new CryptoError.Utf8(FfiConverterString.read(from));
+        case 15:
+          return new CryptoError.InvalidInput(FfiConverterString.read(from));
+        case 16:
+          return new CryptoError.KeyDestroyed();
+        case 17:
+          return new CryptoError.KeyHandleUnavailable();
+        case 18:
+          return new CryptoError.BackgroundTaskFailed();
+        default:
+          throw new UniffiInternalError.UnexpectedEnumCase();
+      }
+    }
+    write(value: TypeName, into: RustBuffer): void {
+      switch (value.tag) {
+        case CryptoError_Tags.KeyDerivation: {
+          ordinalConverter.write(1, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.Encryption: {
+          ordinalConverter.write(2, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.Decryption: {
+          ordinalConverter.write(3, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.InvalidKeyLength: {
+          ordinalConverter.write(4, into);
+          const inner = value.inner;
+          FfiConverterUInt64.write(inner.expected, into);
+          FfiConverterUInt64.write(inner.actual, into);
+          return;
+        }
+        case CryptoError_Tags.InvalidIvLength: {
+          ordinalConverter.write(5, into);
+          const inner = value.inner;
+          FfiConverterUInt64.write(inner.expected, into);
+          FfiConverterUInt64.write(inner.actual, into);
+          return;
+        }
+        case CryptoError_Tags.Rsa: {
+          ordinalConverter.write(6, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.InvalidPem: {
+          ordinalConverter.write(7, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.InvalidSecretKey: {
+          ordinalConverter.write(8, into);
+          return;
+        }
+        case CryptoError_Tags.Base64Decode: {
+          ordinalConverter.write(9, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.HexDecode: {
+          ordinalConverter.write(10, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.Srp: {
+          ordinalConverter.write(11, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.InvalidPublicEphemeral: {
+          ordinalConverter.write(12, into);
+          return;
+        }
+        case CryptoError_Tags.InvalidSessionProof: {
+          ordinalConverter.write(13, into);
+          return;
+        }
+        case CryptoError_Tags.Utf8: {
+          ordinalConverter.write(14, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.InvalidInput: {
+          ordinalConverter.write(15, into);
+          const inner = value.inner;
+          FfiConverterString.write(inner[0], into);
+          return;
+        }
+        case CryptoError_Tags.KeyDestroyed: {
+          ordinalConverter.write(16, into);
+          return;
+        }
+        case CryptoError_Tags.KeyHandleUnavailable: {
+          ordinalConverter.write(17, into);
+          return;
+        }
+        case CryptoError_Tags.BackgroundTaskFailed: {
+          ordinalConverter.write(18, into);
+          return;
+        }
+        default:
+          // Throwing from here means that CryptoError_Tags hasn't matched an ordinal.
+          throw new UniffiInternalError.UnexpectedEnumCase();
+      }
+    }
+    allocationSize(value: TypeName): number {
+      switch (value.tag) {
+        case CryptoError_Tags.KeyDerivation: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(1);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.Encryption: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(2);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.Decryption: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(3);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.InvalidKeyLength: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(4);
+          size += FfiConverterUInt64.allocationSize(inner.expected);
+          size += FfiConverterUInt64.allocationSize(inner.actual);
+          return size;
+        }
+        case CryptoError_Tags.InvalidIvLength: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(5);
+          size += FfiConverterUInt64.allocationSize(inner.expected);
+          size += FfiConverterUInt64.allocationSize(inner.actual);
+          return size;
+        }
+        case CryptoError_Tags.Rsa: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(6);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.InvalidPem: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(7);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.InvalidSecretKey: {
+          return ordinalConverter.allocationSize(8);
+        }
+        case CryptoError_Tags.Base64Decode: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(9);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.HexDecode: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(10);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.Srp: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(11);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.InvalidPublicEphemeral: {
+          return ordinalConverter.allocationSize(12);
+        }
+        case CryptoError_Tags.InvalidSessionProof: {
+          return ordinalConverter.allocationSize(13);
+        }
+        case CryptoError_Tags.Utf8: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(14);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.InvalidInput: {
+          const inner = value.inner;
+          let size = ordinalConverter.allocationSize(15);
+          size += FfiConverterString.allocationSize(inner[0]);
+          return size;
+        }
+        case CryptoError_Tags.KeyDestroyed: {
+          return ordinalConverter.allocationSize(16);
+        }
+        case CryptoError_Tags.KeyHandleUnavailable: {
+          return ordinalConverter.allocationSize(17);
+        }
+        case CryptoError_Tags.BackgroundTaskFailed: {
+          return ordinalConverter.allocationSize(18);
+        }
+        default:
+          throw new UniffiInternalError.UnexpectedEnumCase();
+      }
+    }
+  }
+  return new FFIConverter();
+})();
+
 export interface SrpClientLike {
   deriveSafePrivateKey(
     salt: string,
@@ -4522,14 +4493,6 @@ function uniffiEnsureInitialized() {
   ) {
     throw new UniffiInternalError.ApiChecksumMismatch(
       "uniffi_bittery_crypto_api_checksum_func_wrap_key",
-    );
-  }
-  if (
-    nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy() !==
-    37572
-  ) {
-    throw new UniffiInternalError.ApiChecksumMismatch(
-      "uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy",
     );
   }
   if (

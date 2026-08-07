@@ -24,7 +24,6 @@ class NativeBitteryCryptoApi : public jsi::HostObject {
     jsi::Value cpp_uniffi_internal_fn_func_ffi__read_string_from_buffer(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_fn_clone_keyhandle(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_fn_free_keyhandle(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
-    jsi::Value cpp_uniffi_bittery_crypto_api_fn_method_keyhandle_destroy(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_fn_clone_srpclient(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_fn_free_srpclient(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_fn_constructor_srpclient_new(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
@@ -165,7 +164,6 @@ class NativeBitteryCryptoApi : public jsi::HostObject {
     jsi::Value cpp_uniffi_bittery_crypto_api_checksum_func_validate_secret_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_checksum_func_verify_server_session(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_checksum_func_wrap_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
-    jsi::Value cpp_uniffi_bittery_crypto_api_checksum_method_keyhandle_destroy(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_checksum_method_srpclient_derive_verifier(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
     jsi::Value cpp_uniffi_bittery_crypto_api_checksum_method_srpclient_generate_salt(jsi::Runtime& rt, const jsi::Value& thisVal, const jsi::Value* args, size_t count);
