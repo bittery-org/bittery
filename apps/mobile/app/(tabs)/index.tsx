@@ -100,8 +100,9 @@ export default function AllItemsScreen() {
 					</PressableFeedback>
 				</View>
 			) : (
+				// The tab bar already says which screen this is; a title here would
+				// only repeat it.
 				<AppBar
-					largeTitle={m.mob_tab_all_items()}
 					leading={<AccountSwitcher />}
 					actions={
 						<PressableFeedback
@@ -117,6 +118,7 @@ export default function AllItemsScreen() {
 			)}
 
 			<CategoryFilter
+				className="pt-3"
 				selectedCategory={selectedCategory}
 				onCategoryChange={setSelectedCategory}
 			/>

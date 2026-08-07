@@ -6,7 +6,6 @@ import { useState } from "react";
 import { Alert, Text, View } from "react-native";
 import { AccountAvatar, getAccountLabel } from "@/components/auth-kit";
 import {
-	GlowBar,
 	IconCheck,
 	IconLock,
 	IconPlus,
@@ -191,7 +190,6 @@ export function AccountSwitcher() {
 										)}
 									>
 										<PressableFeedback.Highlight />
-										{isActive ? <GlowBar /> : null}
 										<AccountAvatar account={account} />
 										<View className="min-w-0 flex-1">
 											<Text
