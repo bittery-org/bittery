@@ -1,0 +1,118 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Version change
+        required: true
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: prepare-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  PNPM_VERSION: "10.18.3"
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Calculate and sync next version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm run version:next -- "${{ inputs.release_type }}"
+          version="$(node -p "require('./package.json').version")"
+          if git rev-parse "v${version}" >/dev/null 2>&1; then
+            echo "Tag v${version} already exists"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Format version files
+        run: |
+          pnpm biome check --write \
+            package.json \
+            apps/desktop/package.json \
+            apps/extension/package.json \
+            apps/desktop/src-tauri/tauri.conf.json \
+            apps/mobile/app.json
+
+      - name: Verify version tooling
+        run: |
+          node --test scripts/release-version.test.mjs
+          pnpm run version:check
+
+      - name: Create or update release pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="release/v${VERSION}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$branch"
+          git add \
+            package.json \
+            apps/desktop/package.json \
+            apps/extension/package.json \
+            apps/desktop/src-tauri/tauri.conf.json \
+            apps/desktop/src-tauri/Cargo.toml \
+            apps/desktop/src-tauri/Cargo.lock \
+            apps/mobile/app.json \
+            apps/server/Cargo.toml \
+            apps/server/Cargo.lock
+          git commit -m "chore(release): v${VERSION}"
+          git fetch origin "$branch:refs/remotes/origin/$branch" || true
+          git push --force-with-lease origin "$branch"
+
+          previous="$(node --input-type=module -e 'import { latestVersionFromTags, readReleaseTags } from "./scripts/release-version.mjs"; console.log(`v${latestVersionFromTags(readReleaseTags())}`)')"
+          body_file="$RUNNER_TEMP/release-pr.md"
+          {
+            echo "<!-- bittery-release:v${VERSION} -->"
+            echo "## Release v${VERSION}"
+            echo
+            echo "This PR synchronizes every release surface. Merging it creates the tag and starts publication."
+            echo
+            echo "- [Review changes since ${previous}](https://github.com/${GITHUB_REPOSITORY}/compare/${previous}...main)"
+            echo "- [ ] Confirm the version change is correct"
+            echo "- [ ] Confirm user-facing changes are ready to publish"
+          } > "$body_file"
+
+          existing="$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --title "Release v${VERSION}" --body-file "$body_file"
+          else
+            gh pr create --base main --head "$branch" --title "Release v${VERSION}" --body-file "$body_file"
+          fi
+          gh workflow run ci.yml --ref "$branch"
