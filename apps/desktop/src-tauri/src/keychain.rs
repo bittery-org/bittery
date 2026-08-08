@@ -29,6 +29,34 @@ const VAULT_KEY: &str = "bittery_vault";
 /// `None` means the vault hasn't been loaded from the keychain yet.
 static VAULT_CACHE: LazyLock<Mutex<Option<HashMap<String, String>>>> =
     LazyLock::new(|| Mutex::new(None));
+static VAULT_ENTRY: LazyLock<Mutex<Option<Entry>>> = LazyLock::new(|| Mutex::new(None));
+
+fn with_vault_entry<T>(
+    operation: impl FnOnce(&Entry) -> Result<T, keyring::Error>,
+) -> Result<Result<T, keyring::Error>, String> {
+    let mut stored_entry = VAULT_ENTRY
+        .lock()
+        .map_err(|e| format!("Vault keychain entry lock poisoned: {}", e))?;
+    if stored_entry.is_none() {
+        *stored_entry = Some(
+            Entry::new(SERVICE, VAULT_KEY)
+                .map_err(|e| format!("Failed to create vault keychain entry: {}", e))?,
+        );
+    }
+
+    Ok(operation(stored_entry.as_ref().unwrap()))
+}
+
+fn read_vault_entry() -> Result<HashMap<String, String>, String> {
+    match with_vault_entry(Entry::get_password)? {
+        Ok(json) => serde_json::from_str(&json).map_err(|error| {
+            eprintln!("[keychain] Failed to deserialize vault: {}", error);
+            format!("Failed to deserialize vault from keychain: {}", error)
+        }),
+        Err(keyring::Error::NoEntry) => Ok(HashMap::new()),
+        Err(error) => Err(format!("Failed to read vault from keychain: {}", error)),
+    }
+}
 
 /// Load the vault from cache or keychain. Returns a clone of the current data.
 fn load_vault() -> Result<HashMap<String, String>, String> {
@@ -40,15 +68,7 @@ fn load_vault() -> Result<HashMap<String, String>, String> {
         return Ok(data.clone());
     }
 
-    // First access this session — read the single keychain entry
-    let entry = Entry::new(SERVICE, VAULT_KEY)
-        .map_err(|e| format!("Failed to create vault keychain entry: {}", e))?;
-
-    let data: HashMap<String, String> = match entry.get_password() {
-        Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
-        Err(keyring::Error::NoEntry) => HashMap::new(),
-        Err(e) => return Err(format!("Failed to read vault from keychain: {}", e)),
-    };
+    let data = read_vault_entry()?;
 
     *cache = Some(data.clone());
     Ok(data)
@@ -59,11 +79,7 @@ fn save_vault(data: &HashMap<String, String>) -> Result<(), String> {
     let json =
         serde_json::to_string(data).map_err(|e| format!("Failed to serialize vault: {}", e))?;
 
-    let entry = Entry::new(SERVICE, VAULT_KEY)
-        .map_err(|e| format!("Failed to create vault keychain entry: {}", e))?;
-
-    entry
-        .set_password(&json)
+    with_vault_entry(|entry| entry.set_password(&json))?
         .map_err(|e| format!("Failed to store vault in keychain: {}", e))?;
 
     Ok(())
@@ -99,16 +115,7 @@ pub fn keychain_set(key: &str, value: &str) -> Result<(), String> {
     let data = match cache.as_mut() {
         Some(d) => d,
         None => {
-            // Load from keychain first
-            let loaded = {
-                let entry = Entry::new(SERVICE, VAULT_KEY)
-                    .map_err(|e| format!("Failed to create vault keychain entry: {}", e))?;
-                match entry.get_password() {
-                    Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
-                    Err(keyring::Error::NoEntry) => HashMap::new(),
-                    Err(e) => return Err(format!("Failed to read vault from keychain: {}", e)),
-                }
-            };
+            let loaded = read_vault_entry()?;
             *cache = Some(loaded);
             cache.as_mut().unwrap()
         }
@@ -163,15 +170,7 @@ pub fn keychain_delete(key: &str) -> Result<bool, String> {
     let data = match cache.as_mut() {
         Some(d) => d,
         None => {
-            let loaded = {
-                let entry = Entry::new(SERVICE, VAULT_KEY)
-                    .map_err(|e| format!("Failed to create vault keychain entry: {}", e))?;
-                match entry.get_password() {
-                    Ok(json) => serde_json::from_str(&json).unwrap_or_default(),
-                    Err(keyring::Error::NoEntry) => HashMap::new(),
-                    Err(e) => return Err(format!("Failed to read vault from keychain: {}", e)),
-                }
-            };
+            let loaded = read_vault_entry()?;
             *cache = Some(loaded);
             cache.as_mut().unwrap()
         }
@@ -194,6 +193,20 @@ pub fn keychain_delete(key: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{MutexGuard, Once};
+
+    static INSTALL_MOCK_KEYRING: Once = Once::new();
+    static TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn setup() -> MutexGuard<'static, ()> {
+        let guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+        INSTALL_MOCK_KEYRING.call_once(|| {
+            keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
+        });
+        let _ = with_vault_entry(Entry::delete_credential);
+        reset_cache();
+        guard
+    }
 
     /// Reset the in-memory cache between tests
     fn reset_cache() {
@@ -202,9 +215,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "hits the real OS keychain: prompts for authorization on macOS and needs a running secret-service on Linux. Run explicitly with: cargo test -- --ignored"]
     fn test_keychain_roundtrip() {
-        reset_cache();
+        let _guard = setup();
 
         let test_key = "bittery_test_key";
         let test_value = "test_secret_value_12345";
@@ -240,9 +252,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "hits the real OS keychain: prompts for authorization on macOS and needs a running secret-service on Linux. Run explicitly with: cargo test -- --ignored"]
     fn test_multiple_keys_single_vault() {
-        reset_cache();
+        let _guard = setup();
 
         let _ = keychain_delete("key_a");
         let _ = keychain_delete("key_b");
@@ -264,9 +275,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "hits the real OS keychain: prompts for authorization on macOS and needs a running secret-service on Linux. Run explicitly with: cargo test -- --ignored"]
     fn test_cache_survives_across_calls() {
-        reset_cache();
+        let _guard = setup();
 
         let _ = keychain_delete("cache_test");
         reset_cache();
@@ -283,5 +293,22 @@ mod tests {
 
         // Cleanup
         let _ = keychain_delete("cache_test");
+    }
+
+    #[test]
+    fn corrupt_vault_is_reported_and_not_overwritten() {
+        let _guard = setup();
+        let corrupt_payload = "{truncated";
+        with_vault_entry(|entry| entry.set_password(corrupt_payload))
+            .unwrap()
+            .unwrap();
+
+        let error = keychain_set("new_key", "new_value").unwrap_err();
+
+        assert!(error.contains("deserialize"));
+        assert_eq!(
+            with_vault_entry(Entry::get_password).unwrap().unwrap(),
+            corrupt_payload
+        );
     }
 }
