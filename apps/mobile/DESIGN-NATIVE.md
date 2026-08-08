@@ -143,15 +143,17 @@ call sites can use `className="text-muted"`. Sizes: 16 in chips, 18 in rows, 20 
 
 ## Information architecture
 
-Four tabs, custom bar, no stock headers anywhere (`headerShown: false` throughout —
+Three tabs, custom bar, no stock headers anywhere (`headerShown: false` throughout —
 screens render `<AppBar />` themselves):
 
 | Tab | Route | Contents |
 |---|---|---|
-| Items | `(tabs)/index` | aurora, large title, inline search field, category chips, sectioned item list, FAB |
-| Search | `(tabs)/search` | focused search field, recent + results, category scoping |
+| Items | `(tabs)/index` | aurora, top-right search action, category chips, sectioned item list, FAB |
 | Browse | `(tabs)/vaults` | segmented **Vaults / Tags**; vault cards with counts, tag rows with color dots |
 | Settings | `(tabs)/settings` | the settings screen, grouped cards |
+
+Search is a mode of Items: the top-right action replaces the app bar with a focused
+field while preserving category scoping. It is not a separate navigation destination.
 
 `(tabs)/tags/*` stays routable (Browse pushes into it). `app/settings/index.tsx` and
 `(tabs)/settings.tsx` both render the same `SettingsScreen` component — the account sheet

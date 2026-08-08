@@ -95,6 +95,16 @@ every ref a caller still holds throws on use. The store owns the ref it hands ba
 destroy it. `decryptStoredMasterUnlockKey` is the one exception — it mints a fresh ref that
 belongs to the caller, because it deliberately does not unlock the account.
 
+**Reading the key never unlocks.** `getMasterUnlockKey` reports the cache and nothing else,
+so `null` is the honest answer to "is this account unlocked?". Unlocking is always an
+explicit call: `tryRestoreSession`, `tryRestoreSessionWithoutPrompt`, `unlockWithBiometric`,
+`unlockAllAccountsWithBiometric` or `setMasterUnlockKey`. The reason is not tidiness — the
+read is on the vault-key unwrap path, once per item, so a read that could restore the
+session raised one OS biometric prompt per cached item on a locked account. A JS context
+with its own cache (a web page load, the extension popup, an app launch) therefore restores
+at boot with `tryRestoreSessionWithoutPrompt`, which resumes only where no user interaction
+is due and otherwise leaves the account locked for an unlock flow to handle.
+
 ### What "never reaches JS" actually rests on
 
 A convention, not a structural guarantee, and this document will not pretend otherwise.

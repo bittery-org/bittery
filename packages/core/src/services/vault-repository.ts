@@ -137,6 +137,15 @@ export class VaultRepository {
 		return this.hydrated;
 	}
 
+	/**
+	 * Every item and vault key in here is decrypted under the account's master unlock key,
+	 * so a locked account has nothing this repository can build. Callers hydrate on mount
+	 * and on every account change, which is well before the user has unlocked.
+	 */
+	private async isLocked(): Promise<boolean> {
+		return (await this.storage.getMasterUnlockKey(this.accountId)) === null;
+	}
+
 	isHydrating(): boolean {
 		return this.hydrating;
 	}
@@ -686,6 +695,16 @@ export class VaultRepository {
 			return;
 		}
 
+		// Sync keeps running on a locked account, and the ciphertext is all the cache
+		// wants from it. Decryption waits for the hydrate that follows the unlock, rather
+		// than failing once per delta.
+		if (await this.isLocked()) {
+			this.items.delete(item.id);
+			await this.persistItem(item);
+			this.emit();
+			return;
+		}
+
 		try {
 			this.items.set(item.id, await this.decryptItem(item));
 		} catch (error) {
@@ -846,7 +865,7 @@ export class VaultRepository {
 	}
 
 	async hydrate(): Promise<void> {
-		if (this.hydrating) {
+		if (this.hydrating || (await this.isLocked())) {
 			return;
 		}
 
@@ -906,6 +925,10 @@ export class VaultRepository {
 	}
 
 	async hydrateFromServer(client: BootstrapItemsClient): Promise<void> {
+		if (await this.isLocked()) {
+			return;
+		}
+
 		getTravelModeEnforcer(this.storage, this.itemCache).assertVerified(
 			this.accountId,
 		);

@@ -65,6 +65,11 @@ export default function Index() {
 				return NO_SESSION;
 			}
 
+			// A launch inside the biometric grace period resumes silently; anything that
+			// would need a prompt belongs to the unlock screen, which owns the prompt and
+			// the retry. Nothing else on this path may unlock.
+			await storage.tryRestoreSessionWithoutPrompt(activeAccount.accountId);
+
 			const masterUnlockKey = await storage.getMasterUnlockKey(
 				activeAccount.accountId,
 			);
@@ -94,12 +99,16 @@ export default function Index() {
 		return <Redirect href="/(auth)/unlock" />;
 	}
 
-	if (requiresReauth || showAuthModal || !isUnlockKeyAvailable) {
-		return (
-			<LaunchSplash
-				caption={showAuthModal ? m.mob_index_authenticating() : undefined}
-			/>
-		);
+	// Only an in-flight biometric prompt holds the gate; it resolves on its own.
+	if (showAuthModal) {
+		return <LaunchSplash caption={m.mob_index_authenticating()} />;
+	}
+
+	// A locked account has no prompt of its own on a cold launch — the `AppState`
+	// listener that raises one only fires on a background/foreground transition — so
+	// the gate must hand off to the unlock screen instead of holding the splash.
+	if (requiresReauth || !isUnlockKeyAvailable) {
+		return <Redirect href="/(auth)/unlock" />;
 	}
 
 	return <Redirect href="/(tabs)" />;

@@ -49,7 +49,48 @@ export class VaultRepositoryCoordinator {
 		private readonly vaultCrypto: VaultCrypto,
 		private readonly storage: AccountStore,
 		private readonly itemCache: ItemCache,
-	) {}
+	) {
+		// Lock state belongs to the store, not to whichever screen happened to trigger it:
+		// a lock from settings, from auto-lock or from another window all have to drop the
+		// decrypted items, and the unlock after it has to bring them back without waiting
+		// for a screen to remount.
+		storage.onUnlockStateChanged((unlockedAccountIds) => {
+			this.applyUnlockState(unlockedAccountIds);
+		});
+	}
+
+	/**
+	 * Dropping is synchronous: no plaintext may outlive the lock by even a microtask.
+	 * Restoring is not — it reads the cache — so it runs detached.
+	 */
+	private applyUnlockState(unlockedAccountIds: string[]): void {
+		const unlocked = new Set(unlockedAccountIds);
+		for (const [accountId, entry] of this.repos) {
+			if (!unlocked.has(accountId)) {
+				entry.repo.clear();
+				continue;
+			}
+			if (entry.repo.isHydrated()) {
+				continue;
+			}
+			// Travel mode is verified by the unlock flow itself, and some flows only get
+			// there after the key is cached. Hydrating an unverified account would fail
+			// closed, so that case is left to the hydrate the next mount runs.
+			if (
+				!getTravelModeEnforcer(this.storage, this.itemCache).isVerified(
+					accountId,
+				)
+			) {
+				continue;
+			}
+			entry.repo.hydrate().catch((error) => {
+				console.error(
+					`[VaultRepositoryCoordinator] hydrate after unlock failed for account ${accountId}:`,
+					error,
+				);
+			});
+		}
+	}
 
 	private emit(): void {
 		this.snapshot++;

@@ -186,6 +186,13 @@ export interface AccountStore {
 		skipBiometric?: boolean,
 		accountId?: string,
 	): Promise<boolean>;
+	/**
+	 * Restore the session only where that needs no user interaction: inside the biometric
+	 * grace period, or on an account with biometric unlock off. `false` means the account
+	 * is still locked and an unlock flow — with its prompt or its password field — has to
+	 * run. This is what an app boot calls; nothing else may unlock on a read.
+	 */
+	tryRestoreSessionWithoutPrompt(accountId?: string): Promise<boolean>;
 	isAuthenticated(accountId?: string): Promise<boolean>;
 	canQuickUnlock(accountId?: string): Promise<boolean>;
 	/**
@@ -203,7 +210,9 @@ export interface AccountStore {
 
 	// --- master unlock key ---
 	/**
-	 * The cached key, restored from `session_data` if the session is still valid.
+	 * The cached key, or `null` on a locked account. A read never unlocks and never
+	 * prompts — `null` is the answer to "is this account unlocked?", and restoring is
+	 * `tryRestoreSession`/`tryRestoreSessionWithoutPrompt`/`unlockWithBiometric`.
 	 *
 	 * The store owns the returned ref for as long as the account stays unlocked, so a caller
 	 * must never destroy it — `clearMasterUnlockKey`, `clearSession`, `lockAllAccounts` and
@@ -1239,6 +1248,22 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			return true;
 		},
 
+		async tryRestoreSessionWithoutPrompt(accountId?: string): Promise<boolean> {
+			const resolved = await resolveAccountId(accountId);
+			if (!resolved) {
+				return false;
+			}
+			if (mukCache.has(resolved)) {
+				return true;
+			}
+			// Without this the `skipBiometric` below would walk past a due prompt and unlock
+			// with no authentication at all.
+			if (await isBiometricAuthRequired(resolved)) {
+				return false;
+			}
+			return store.tryRestoreSession(true, resolved);
+		},
+
 		async isAuthenticated(accountId?: string): Promise<boolean> {
 			return (await getAuthToken(accountId)) !== null;
 		},
@@ -1316,21 +1341,10 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				return null;
 			}
 
-			const cached = mukCache.get(resolved);
-			if (cached) {
-				return cached;
-			}
-
-			if (!(await isSessionValid(resolved))) {
-				return null;
-			}
-
-			const restored = await decryptStoredMasterUnlockKey(resolved, false);
-			if (restored) {
-				await setUnlockEntry(resolved, restored);
-				return restored;
-			}
-			return null;
+			// Reading is not unlocking: a locked account reports `null` and stays locked.
+			// Restoring here made every vault-key unwrap a potential unlock, so a locked
+			// account with cached items raised one OS biometric prompt per item.
+			return mukCache.get(resolved) ?? null;
 		},
 
 		async setMasterUnlockKey(key: KeyRef, accountId?: string): Promise<void> {
