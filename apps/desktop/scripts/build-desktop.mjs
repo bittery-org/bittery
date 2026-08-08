@@ -1,17 +1,8 @@
 import { execFileSync } from "node:child_process";
+import { resolveBuildPlatform } from "./build-platform.mjs";
 
 const forwardedArgs = process.argv.slice(2);
-const targetIndex = forwardedArgs.indexOf("--target");
-const platform = (() => {
-	const target =
-		targetIndex === -1 ? undefined : forwardedArgs[targetIndex + 1];
-	if (target?.includes("windows")) return "windows";
-	if (target?.includes("apple")) return "macos";
-	if (target?.includes("linux")) return "linux";
-	if (process.platform === "win32") return "windows";
-	if (process.platform === "darwin") return "macos";
-	return "linux";
-})();
+const platform = resolveBuildPlatform(forwardedArgs, process.platform);
 
 execFileSync(
 	"pnpm",

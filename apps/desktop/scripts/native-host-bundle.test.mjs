@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { resolveBuildPlatform } from "./build-platform.mjs";
 
 const desktopDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const repositoryDir = join(desktopDir, "..", "..");
@@ -77,4 +78,16 @@ test("local desktop release builds select a native-host bundle config", async ()
 		"node scripts/build-desktop.mjs",
 	);
 	assert.match(buildScript, /bundle\.\$\{platform\}\.conf\.json/);
+});
+
+test("local desktop builds select configs for both target argument forms", () => {
+	assert.equal(
+		resolveBuildPlatform(["--target", "aarch64-apple-darwin"], "linux"),
+		"macos",
+	);
+	assert.equal(
+		resolveBuildPlatform(["--target=x86_64-pc-windows-msvc"], "linux"),
+		"windows",
+	);
+	assert.equal(resolveBuildPlatform([], "darwin"), "macos");
 });
