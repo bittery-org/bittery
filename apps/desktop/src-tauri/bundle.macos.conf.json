@@ -1,0 +1,7 @@
+{
+	"bundle": {
+		"resources": {
+			"target/bundle-resources/bittery-native-host": "bittery-native-host"
+		}
+	}
+}

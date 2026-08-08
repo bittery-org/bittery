@@ -6,7 +6,7 @@
 	"build": {
 		"beforeDevCommand": "pnpm build:native-host:dev && pnpm dev:vite",
 		"devUrl": "http://localhost:3002",
-		"beforeBuildCommand": "tsc && vite build && cd src-tauri && cargo build --release --bin bittery-native-host",
+		"beforeBuildCommand": "tsc && vite build && node scripts/prepare-native-host.mjs",
 		"frontendDist": "../dist"
 	},
 	"app": {
