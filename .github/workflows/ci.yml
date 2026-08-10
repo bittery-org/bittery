@@ -2,6 +2,7 @@ name: CI
 
 on:
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -213,6 +214,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - uses: actions/download-artifact@v8
         with:
@@ -361,6 +364,11 @@ jobs:
             --filter='!@bittery/crypto-core'
           elapsed="$(( $(date +%s) - start ))"
           echo "package tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
+
+      # The repo scripts are outside every turbo package, so `turbo run test`
+      # above never reaches them.
+      - name: Script tests
+        run: node --test "scripts/**/*.test.mjs"
 
   # `expo-doctor` — config schema, duplicate native modules, SDK version drift —
   # has no equivalent anywhere else in CI, and the mobile typecheck only reaches
@@ -705,7 +713,7 @@ jobs:
         run: echo "DOCKER_BUILD_START=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Build ${{ matrix.name }} image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}

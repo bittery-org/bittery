@@ -1,104 +1,121 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import {
+	compareVersions,
+	latestVersionFromTags,
+	parseVersion,
+	readReleaseTags,
+	resolveVersion,
+} from "./release-version.mjs";
 
-const rootPackagePath = resolve("package.json");
-const rootPackage = JSON.parse(readFileSync(rootPackagePath, "utf8"));
+function main() {
+	const args = process.argv.slice(2);
+	const checkOnly = args.includes("--check");
+	const checkHistory = args.includes("--check-history");
+	const allowNoReleases = args.includes("--allow-no-releases");
+	const isBump = args.includes("--next");
 
-const args = process.argv.slice(2);
-const checkOnly = args.includes("--check");
-const explicitVersion = args.find((arg) => !arg.startsWith("--"));
-const version = explicitVersion ?? rootPackage.version;
+	const rootPackage = JSON.parse(readFileSync(resolve("package.json"), "utf8"));
+	const latestReleasedVersion =
+		isBump || checkHistory ? latestVersionFromTags(readReleaseTags()) : null;
 
-if (!version || !/^\d+\.\d+\.\d+/.test(version)) {
-	console.error(
-		`Invalid version "${version}". Expected semver like 1.2.3 in root package.json or as an argument.`,
-	);
+	// A missing tag list is far more likely to be a shallow checkout than a repo
+	// that has never released, and passing silently would hide the lost safeguard.
+	if (checkHistory && !latestReleasedVersion && !allowNoReleases) {
+		throw new Error(
+			"No stable release tags found. Check out with fetch-depth: 0, or pass --allow-no-releases for a first release.",
+		);
+	}
+
+	const version = resolveVersion({
+		args,
+		rootVersion: rootPackage.version,
+		latestReleasedVersion,
+	});
+
+	parseVersion(version);
+
+	if (
+		checkHistory &&
+		latestReleasedVersion &&
+		compareVersions(version, latestReleasedVersion) < 0
+	) {
+		throw new Error(
+			`Repository version ${version} is older than latest release v${latestReleasedVersion}.`,
+		);
+	}
+
+	if (isBump) {
+		if (
+			latestReleasedVersion &&
+			compareVersions(version, latestReleasedVersion) <= 0
+		) {
+			throw new Error(
+				`Next version must be newer than v${latestReleasedVersion}.`,
+			);
+		}
+
+		if (compareVersions(version, rootPackage.version) <= 0) {
+			throw new Error(
+				`Next version must be newer than repository version ${rootPackage.version}.`,
+			);
+		}
+	}
+
+	function replace(path, pattern, replacement, group = 1) {
+		const absolutePath = resolve(path);
+		const content = readFileSync(absolutePath, "utf8");
+		const match = content.match(pattern);
+		if (!match) throw new Error(`Could not read version from ${path}.`);
+
+		if (match[group] === version) return;
+		if (checkOnly)
+			throw new Error(`Version drift in ${path}: found ${match[group]}.`);
+
+		writeFileSync(absolutePath, content.replace(pattern, replacement));
+	}
+
+	const jsonVersion = /"version":\s*"([^"]+)"/;
+	for (const path of [
+		"package.json",
+		"apps/desktop/package.json",
+		"apps/extension/package.json",
+		"apps/desktop/src-tauri/tauri.conf.json",
+		"apps/mobile/app.json",
+	]) {
+		replace(path, jsonVersion, `"version": "${version}"`);
+	}
+
+	for (const path of [
+		"apps/server/Cargo.toml",
+		"apps/desktop/src-tauri/Cargo.toml",
+	]) {
+		replace(path, /^version\s*=\s*"([^"]+)"/m, `version = "${version}"`);
+	}
+
+	for (const [path, packageName] of [
+		["apps/server/Cargo.lock", "bittery-server"],
+		["apps/desktop/src-tauri/Cargo.lock", "Bittery"],
+	]) {
+		replace(
+			path,
+			new RegExp(
+				`(\\[\\[package\\]\\]\\nname = "${packageName}"\\nversion = )"([^"]+)"`,
+			),
+			`$1"${version}"`,
+			2,
+		);
+	}
+
+	const status = checkOnly
+		? "All release surfaces are synced at"
+		: "Synced release surfaces to";
+	console.log(`${status} version ${version}`);
+}
+
+try {
+	main();
+} catch (error) {
+	console.error(error.message);
 	process.exit(1);
-}
-
-function readJson(path) {
-	return JSON.parse(readFileSync(resolve(path), "utf8"));
-}
-
-function writeJson(path, value) {
-	writeFileSync(resolve(path), `${JSON.stringify(value, null, "\t")}\n`);
-}
-
-function updateCargoToml(path, nextVersion) {
-	const absolutePath = resolve(path);
-	const content = readFileSync(absolutePath, "utf8");
-	const updated = content.replace(
-		/^version\s*=\s*"[^"]*"/m,
-		`version = "${nextVersion}"`,
-	);
-
-	if (updated === content) {
-		throw new Error(`Could not update version in ${path}`);
-	}
-
-	if (!checkOnly) {
-		writeFileSync(absolutePath, updated);
-	}
-}
-
-function syncJsonVersion(path, updater) {
-	const current = readJson(path);
-	const next = updater(current);
-	const currentVersion = JSON.stringify(current);
-	const nextVersion = JSON.stringify(next);
-
-	if (currentVersion !== nextVersion) {
-		if (checkOnly) {
-			console.error(`Version drift in ${path}`);
-			process.exit(1);
-		}
-		writeJson(path, next);
-	}
-}
-
-syncJsonVersion("apps/desktop/package.json", (pkg) => ({ ...pkg, version }));
-syncJsonVersion("apps/extension/package.json", (pkg) => ({ ...pkg, version }));
-syncJsonVersion("apps/desktop/src-tauri/tauri.conf.json", (config) => ({
-	...config,
-	version,
-}));
-syncJsonVersion("apps/mobile/app.json", (config) => ({
-	...config,
-	expo: {
-		...config.expo,
-		version,
-	},
-}));
-
-for (const cargoPath of [
-	"apps/server/Cargo.toml",
-	"apps/desktop/src-tauri/Cargo.toml",
-]) {
-	const absolutePath = resolve(cargoPath);
-	const content = readFileSync(absolutePath, "utf8");
-	const match = content.match(/^version\s*=\s*"([^"]*)"/m);
-
-	if (!match) {
-		console.error(`Could not read version from ${cargoPath}`);
-		process.exit(1);
-	}
-
-	if (match[1] !== version) {
-		if (checkOnly) {
-			console.error(`Version drift in ${cargoPath}`);
-			process.exit(1);
-		}
-		updateCargoToml(cargoPath, version);
-	}
-}
-
-if (!checkOnly && rootPackage.version !== version) {
-	rootPackage.version = version;
-	writeJson("package.json", rootPackage);
-}
-
-if (checkOnly) {
-	console.log(`All release surfaces are synced to version ${version}`);
-} else {
-	console.log(`Synced release surfaces to version ${version}`);
 }

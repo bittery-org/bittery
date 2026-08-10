@@ -1,6 +1,7 @@
 /* eslint-disable */
 // @ts-nocheck
-/*    @@@@@@@@@@@@@ & ###############
+/*
+      @@@@@@@@@@@@@ & ###############
    @@@@@@@@@@@@@@ &&& ###############
  @@@@@@@@@@@@@@ &&&&& ###############
 ############### &&&&& ###############
@@ -8,375 +9,1202 @@
 ############### &&&&& ###############
 ############### &&&&& @@@@@@@@@@@@@@
 ############### && @@@@@@@@@@@@@@
-############### & @@@@@@@@@@@@@    */
+############### & @@@@@@@@@@@@@
 
-import type { Mutation, Query } from "@qubit-rs/client";
-import type { AcceptInvitationResponse } from "./AcceptInvitationResponse.ts";
-import type { AcknowledgeEventsInput } from "./AcknowledgeEventsInput.ts";
-import type { AcknowledgeEventsResponse } from "./AcknowledgeEventsResponse.ts";
-import type { AddVaultMemberInput } from "./AddVaultMemberInput.ts";
-import type { AppError } from "./AppError.ts";
-import type { AppErrorCode } from "./AppErrorCode.ts";
-import type { AttachmentDownloadResponse } from "./AttachmentDownloadResponse.ts";
-import type { AttachmentIdInput } from "./AttachmentIdInput.ts";
-import type { AttachmentUsageResponse } from "./AttachmentUsageResponse.ts";
-import type { AuditActionGroupFilter } from "./AuditActionGroupFilter.ts";
-import type { AuditResultFilter } from "./AuditResultFilter.ts";
-import type { AuthSessionUserResponse } from "./AuthSessionUserResponse.ts";
-import type { AuthVaultKeyResponse } from "./AuthVaultKeyResponse.ts";
-import type { BillingEntitlements } from "./BillingEntitlements.ts";
-import type { BillingEntitlementsResponse } from "./BillingEntitlementsResponse.ts";
-import type { BillingStatusResponse } from "./BillingStatusResponse.ts";
-import type { BootstrapItemResponse } from "./BootstrapItemResponse.ts";
-import type { BootstrapItemsInput } from "./BootstrapItemsInput.ts";
-import type { BootstrapItemsResponse } from "./BootstrapItemsResponse.ts";
-import type { BulkImportItemInput } from "./BulkImportItemInput.ts";
-import type { BulkImportItemsInput } from "./BulkImportItemsInput.ts";
-import type { BulkImportItemsResponse } from "./BulkImportItemsResponse.ts";
-import type { ChangePasswordInput } from "./ChangePasswordInput.ts";
-import type { CheckConflictInput } from "./CheckConflictInput.ts";
-import type { CheckConflictResponse } from "./CheckConflictResponse.ts";
-import type { CheckEmailInput } from "./CheckEmailInput.ts";
-import type { CheckEmailResponse } from "./CheckEmailResponse.ts";
-import type { CheckoutPlanInput } from "./CheckoutPlanInput.ts";
-import type { CheckoutSessionResponse } from "./CheckoutSessionResponse.ts";
-import type { ConvertVaultTypeInput } from "./ConvertVaultTypeInput.ts";
-import type { ConvertVaultTypeResponse } from "./ConvertVaultTypeResponse.ts";
-import type { CreateAttachmentInput } from "./CreateAttachmentInput.ts";
-import type { CreateAttachmentResponse } from "./CreateAttachmentResponse.ts";
-import type { CreateAttachmentUploadInput } from "./CreateAttachmentUploadInput.ts";
-import type { CreateImageUploadInput } from "./CreateImageUploadInput.ts";
-import type { CreateItemInput } from "./CreateItemInput.ts";
-import type { CreateItemResponse } from "./CreateItemResponse.ts";
-import type { CreateShareLinkInput } from "./CreateShareLinkInput.ts";
-import type { CreateShareLinkResponse } from "./CreateShareLinkResponse.ts";
-import type { CreateTeamInput } from "./CreateTeamInput.ts";
-import type { CreateVaultImageUploadInput } from "./CreateVaultImageUploadInput.ts";
-import type { CreateVaultInput } from "./CreateVaultInput.ts";
-import type { CreateVaultResponse } from "./CreateVaultResponse.ts";
-import type { DeleteAccountInput } from "./DeleteAccountInput.ts";
-import type { DeletedVaultItemWithVaultResponse } from "./DeletedVaultItemWithVaultResponse.ts";
-import type { DeviceSessionResponse } from "./DeviceSessionResponse.ts";
-import type { DisableTravelModeInput } from "./DisableTravelModeInput.ts";
-import type { EnableTravelModeInput } from "./EnableTravelModeInput.ts";
-import type { EncryptedVaultKeyInput } from "./EncryptedVaultKeyInput.ts";
-import type { EntitlementLimits } from "./EntitlementLimits.ts";
-import type { FinishLoginInput } from "./FinishLoginInput.ts";
-import type { FinishLoginResponse } from "./FinishLoginResponse.ts";
-import type { GetEventsSinceInput } from "./GetEventsSinceInput.ts";
-import type { GetEventsSinceResponse } from "./GetEventsSinceResponse.ts";
-import type { GetLastAcknowledgedInput } from "./GetLastAcknowledgedInput.ts";
-import type { GetRecoveryDataInput } from "./GetRecoveryDataInput.ts";
-import type { GetRecoveryDataResponse } from "./GetRecoveryDataResponse.ts";
-import type { GetSyncStateInput } from "./GetSyncStateInput.ts";
-import type { GetVaultRotationDataInput } from "./GetVaultRotationDataInput.ts";
-import type { InvitationIdInput } from "./InvitationIdInput.ts";
-import type { ItemClientInput } from "./ItemClientInput.ts";
-import type { ItemIdInput } from "./ItemIdInput.ts";
-import type { KdfParamsInput } from "./KdfParamsInput.ts";
-import type { LastAcknowledgedResponse } from "./LastAcknowledgedResponse.ts";
-import type { LeaveTeamInput } from "./LeaveTeamInput.ts";
-import type { LinkIdInput } from "./LinkIdInput.ts";
-import type { LoginKdfParamsResponse } from "./LoginKdfParamsResponse.ts";
-import type { LoginUserResponse } from "./LoginUserResponse.ts";
-import type { LogoutResponse } from "./LogoutResponse.ts";
-import type { LookupVaultUserInput } from "./LookupVaultUserInput.ts";
-import type { MemberAccessInput } from "./MemberAccessInput.ts";
-import type { MemberAccessResponse } from "./MemberAccessResponse.ts";
-import type { MemberDevice } from "./MemberDevice.ts";
-import type { MemberShareLink } from "./MemberShareLink.ts";
-import type { MemberVaultAccess } from "./MemberVaultAccess.ts";
-import type { MeResponse } from "./MeResponse.ts";
-import type { MoveItemInput } from "./MoveItemInput.ts";
-import type { PendingTeamInvitationResponse } from "./PendingTeamInvitationResponse.ts";
-import type { PendingVaultKeyEntry } from "./PendingVaultKeyEntry.ts";
-import type { PortalSessionResponse } from "./PortalSessionResponse.ts";
-import type { PresignedUploadResult } from "./PresignedUploadResult.ts";
-import type { PrivateDataResponse } from "./PrivateDataResponse.ts";
-import type { PrivateDataUserResponse } from "./PrivateDataUserResponse.ts";
-import type { PublicShareAccessResponse } from "./PublicShareAccessResponse.ts";
-import type { PublicShareInfoResponse } from "./PublicShareInfoResponse.ts";
-import type { PublicTokenInput } from "./PublicTokenInput.ts";
-import type { RecoveryVaultKeyResponse } from "./RecoveryVaultKeyResponse.ts";
-import type { RefreshSessionResponse } from "./RefreshSessionResponse.ts";
-import type { RegenerateSecretKeyInput } from "./RegenerateSecretKeyInput.ts";
-import type { RegistrationStatusResponse } from "./RegistrationStatusResponse.ts";
-import type { RemoveTeamMemberInput } from "./RemoveTeamMemberInput.ts";
-import type { RemoveTeamMemberResponse } from "./RemoveTeamMemberResponse.ts";
-import type { RemoveVaultMemberInput } from "./RemoveVaultMemberInput.ts";
-import type { RemoveVaultMemberResponse } from "./RemoveVaultMemberResponse.ts";
-import type { RenameDeviceInput } from "./RenameDeviceInput.ts";
-import type { RequestEmailVerificationInput } from "./RequestEmailVerificationInput.ts";
-import type { RequestEmailVerificationResponse } from "./RequestEmailVerificationResponse.ts";
-import type { RequestRecoveryVerificationInput } from "./RequestRecoveryVerificationInput.ts";
-import type { RequestSignupVerificationInput } from "./RequestSignupVerificationInput.ts";
-import type { ResendInvitationResponse } from "./ResendInvitationResponse.ts";
-import type { ResetPasswordInput } from "./ResetPasswordInput.ts";
-import type { ResetPasswordResponse } from "./ResetPasswordResponse.ts";
-import type { RotationDataResponse } from "./RotationDataResponse.ts";
-import type { RotationVaultInput } from "./RotationVaultInput.ts";
-import type { RotationVaultResponse } from "./RotationVaultResponse.ts";
-import type { SendInvitationInput } from "./SendInvitationInput.ts";
-import type { SendInvitationResponse } from "./SendInvitationResponse.ts";
-import type { SessionIdInput } from "./SessionIdInput.ts";
-import type { SetTravelModeHiddenVaultsInput } from "./SetTravelModeHiddenVaultsInput.ts";
-import type { ShareAccessLogResponse } from "./ShareAccessLogResponse.ts";
-import type { ShareAllowedEmailDetails } from "./ShareAllowedEmailDetails.ts";
-import type { ShareLinkDetailsResponse } from "./ShareLinkDetailsResponse.ts";
-import type { ShareLinkListEntry } from "./ShareLinkListEntry.ts";
-import type { ShareLinkListResponse } from "./ShareLinkListResponse.ts";
-import type { SignupInput } from "./SignupInput.ts";
-import type { SignupResponse } from "./SignupResponse.ts";
-import type { SignupWithInvitationInput } from "./SignupWithInvitationInput.ts";
-import type { StartLoginInput } from "./StartLoginInput.ts";
-import type { StartLoginResponse } from "./StartLoginResponse.ts";
-import type { StoreRecoveryKeyInput } from "./StoreRecoveryKeyInput.ts";
-import type { SuccessResponse } from "./SuccessResponse.ts";
-import type { SyncCursorResponse } from "./SyncCursorResponse.ts";
-import type { SyncEventDto } from "./SyncEventDto.ts";
-import type { SyncSeatsInput } from "./SyncSeatsInput.ts";
-import type { SyncSeatsResponse } from "./SyncSeatsResponse.ts";
-import type { SyncStateEntry } from "./SyncStateEntry.ts";
-import type { TeamDetailsResponse } from "./TeamDetailsResponse.ts";
-import type { TeamEvent } from "./TeamEvent.ts";
-import type { TeamEventsInput } from "./TeamEventsInput.ts";
-import type { TeamEventsResponse } from "./TeamEventsResponse.ts";
-import type { TeamIdInput } from "./TeamIdInput.ts";
-import type { TeamInvitationDetailsResponse } from "./TeamInvitationDetailsResponse.ts";
-import type { TeamInvitationListEntry } from "./TeamInvitationListEntry.ts";
-import type { TeamMemberResponse } from "./TeamMemberResponse.ts";
-import type { TeamRotationInput } from "./TeamRotationInput.ts";
-import type { TeamSeatInvoicePreviewLineResponse } from "./TeamSeatInvoicePreviewLineResponse.ts";
-import type { TeamSeatInvoicePreviewResponse } from "./TeamSeatInvoicePreviewResponse.ts";
-import type { TeamSummaryResponse } from "./TeamSummaryResponse.ts";
-import type { TeamVaultResponse } from "./TeamVaultResponse.ts";
-import type { TeamVaultRotationResult } from "./TeamVaultRotationResult.ts";
-import type { ToggleFavoriteInput } from "./ToggleFavoriteInput.ts";
-import type { TokenInput } from "./TokenInput.ts";
-import type { TravelModeResponse } from "./TravelModeResponse.ts";
-import type { UpdateAttachmentInput } from "./UpdateAttachmentInput.ts";
-import type { UpdateEmailInput } from "./UpdateEmailInput.ts";
-import type { UpdateItemInput } from "./UpdateItemInput.ts";
-import type { UpdateItemResponse } from "./UpdateItemResponse.ts";
-import type { UpdateShareLinkInput } from "./UpdateShareLinkInput.ts";
-import type { UpdateTeamInput } from "./UpdateTeamInput.ts";
-import type { UpdateVaultInput } from "./UpdateVaultInput.ts";
-import type { UpdateVaultMemberRoleInput } from "./UpdateVaultMemberRoleInput.ts";
-import type { UpdateVaultResponse } from "./UpdateVaultResponse.ts";
-import type { VaultAttachmentResponse } from "./VaultAttachmentResponse.ts";
-import type { VaultAvailableMemberResponse } from "./VaultAvailableMemberResponse.ts";
-import type { VaultDetailsResponse } from "./VaultDetailsResponse.ts";
-import type { VaultIdInput } from "./VaultIdInput.ts";
-import type { VaultItemDetailsResponse } from "./VaultItemDetailsResponse.ts";
-import type { VaultItemResponse } from "./VaultItemResponse.ts";
-import type { VaultItemWithVaultResponse } from "./VaultItemWithVaultResponse.ts";
-import type { VaultKeyRotationInput } from "./VaultKeyRotationInput.ts";
-import type { VaultKeyRotationSummaryResponse } from "./VaultKeyRotationSummaryResponse.ts";
-import type { VaultListEntryResponse } from "./VaultListEntryResponse.ts";
-import type { VaultLookupUserResponse } from "./VaultLookupUserResponse.ts";
-import type { VaultMemberResponse } from "./VaultMemberResponse.ts";
-import type { VaultRotationDataResponse } from "./VaultRotationDataResponse.ts";
-import type { VaultRotationItemResponse } from "./VaultRotationItemResponse.ts";
-import type { VaultRotationMemberResponse } from "./VaultRotationMemberResponse.ts";
-import type { VaultStatsResponse } from "./VaultStatsResponse.ts";
-import type { VaultSummaryResponse } from "./VaultSummaryResponse.ts";
-import type { VerifyEmailAndAccessInput } from "./VerifyEmailAndAccessInput.ts";
-import type { VerifyRecoveryCodeInput } from "./VerifyRecoveryCodeInput.ts";
-import type { VerifyRecoveryCodeResponse } from "./VerifyRecoveryCodeResponse.ts";
-import type { VerifySignupVerificationInput } from "./VerifySignupVerificationInput.ts";
-import type { VerifySignupVerificationResponse } from "./VerifySignupVerificationResponse.ts";
-
-export type { Mutation, Query } from "@qubit-rs/client";
-export type { AcceptInvitationResponse } from "./AcceptInvitationResponse.ts";
-export type { AcknowledgeEventsInput } from "./AcknowledgeEventsInput.ts";
-export type { AcknowledgeEventsResponse } from "./AcknowledgeEventsResponse.ts";
-export type { AddVaultMemberInput } from "./AddVaultMemberInput.ts";
-export type { AppError } from "./AppError.ts";
-export type { AppErrorCode } from "./AppErrorCode.ts";
-export type { AttachmentDownloadResponse } from "./AttachmentDownloadResponse.ts";
-export type { AttachmentIdInput } from "./AttachmentIdInput.ts";
-export type { AttachmentUsageResponse } from "./AttachmentUsageResponse.ts";
-export type { AuditActionGroupFilter } from "./AuditActionGroupFilter.ts";
-export type { AuditResultFilter } from "./AuditResultFilter.ts";
-export type { AuthSessionUserResponse } from "./AuthSessionUserResponse.ts";
-export type { AuthVaultKeyResponse } from "./AuthVaultKeyResponse.ts";
-export type { BillingEntitlements } from "./BillingEntitlements.ts";
-export type { BillingEntitlementsResponse } from "./BillingEntitlementsResponse.ts";
-export type { BillingStatusResponse } from "./BillingStatusResponse.ts";
-export type { BootstrapItemResponse } from "./BootstrapItemResponse.ts";
-export type { BootstrapItemsInput } from "./BootstrapItemsInput.ts";
-export type { BootstrapItemsResponse } from "./BootstrapItemsResponse.ts";
-export type { BulkImportItemInput } from "./BulkImportItemInput.ts";
-export type { BulkImportItemsInput } from "./BulkImportItemsInput.ts";
-export type { BulkImportItemsResponse } from "./BulkImportItemsResponse.ts";
-export type { ChangePasswordInput } from "./ChangePasswordInput.ts";
-export type { CheckConflictInput } from "./CheckConflictInput.ts";
-export type { CheckConflictResponse } from "./CheckConflictResponse.ts";
-export type { CheckEmailInput } from "./CheckEmailInput.ts";
-export type { CheckEmailResponse } from "./CheckEmailResponse.ts";
-export type { CheckoutPlanInput } from "./CheckoutPlanInput.ts";
-export type { CheckoutSessionResponse } from "./CheckoutSessionResponse.ts";
-export type { ConvertVaultTypeInput } from "./ConvertVaultTypeInput.ts";
-export type { ConvertVaultTypeResponse } from "./ConvertVaultTypeResponse.ts";
-export type { CreateAttachmentInput } from "./CreateAttachmentInput.ts";
-export type { CreateAttachmentResponse } from "./CreateAttachmentResponse.ts";
-export type { CreateAttachmentUploadInput } from "./CreateAttachmentUploadInput.ts";
-export type { CreateImageUploadInput } from "./CreateImageUploadInput.ts";
-export type { CreateItemInput } from "./CreateItemInput.ts";
-export type { CreateItemResponse } from "./CreateItemResponse.ts";
-export type { CreateShareLinkInput } from "./CreateShareLinkInput.ts";
-export type { CreateShareLinkResponse } from "./CreateShareLinkResponse.ts";
-export type { CreateTeamInput } from "./CreateTeamInput.ts";
-export type { CreateVaultImageUploadInput } from "./CreateVaultImageUploadInput.ts";
-export type { CreateVaultInput } from "./CreateVaultInput.ts";
-export type { CreateVaultResponse } from "./CreateVaultResponse.ts";
-export type { DeleteAccountInput } from "./DeleteAccountInput.ts";
-export type { DeletedVaultItemWithVaultResponse } from "./DeletedVaultItemWithVaultResponse.ts";
-export type { DeviceSessionResponse } from "./DeviceSessionResponse.ts";
-export type { DisableTravelModeInput } from "./DisableTravelModeInput.ts";
-export type { EnableTravelModeInput } from "./EnableTravelModeInput.ts";
-export type { EncryptedVaultKeyInput } from "./EncryptedVaultKeyInput.ts";
-export type { EntitlementLimits } from "./EntitlementLimits.ts";
-export type { FinishLoginInput } from "./FinishLoginInput.ts";
-export type { FinishLoginResponse } from "./FinishLoginResponse.ts";
-export type { GetEventsSinceInput } from "./GetEventsSinceInput.ts";
-export type { GetEventsSinceResponse } from "./GetEventsSinceResponse.ts";
-export type { GetLastAcknowledgedInput } from "./GetLastAcknowledgedInput.ts";
-export type { GetRecoveryDataInput } from "./GetRecoveryDataInput.ts";
-export type { GetRecoveryDataResponse } from "./GetRecoveryDataResponse.ts";
-export type { GetSyncStateInput } from "./GetSyncStateInput.ts";
-export type { GetVaultRotationDataInput } from "./GetVaultRotationDataInput.ts";
-export type { InvitationIdInput } from "./InvitationIdInput.ts";
-export type { ItemClientInput } from "./ItemClientInput.ts";
-export type { ItemIdInput } from "./ItemIdInput.ts";
-export type { KdfParamsInput } from "./KdfParamsInput.ts";
-export type { LastAcknowledgedResponse } from "./LastAcknowledgedResponse.ts";
-export type { LeaveTeamInput } from "./LeaveTeamInput.ts";
-export type { LinkIdInput } from "./LinkIdInput.ts";
-export type { LoginKdfParamsResponse } from "./LoginKdfParamsResponse.ts";
-export type { LoginUserResponse } from "./LoginUserResponse.ts";
-export type { LogoutResponse } from "./LogoutResponse.ts";
-export type { LookupVaultUserInput } from "./LookupVaultUserInput.ts";
-export type { MemberAccessInput } from "./MemberAccessInput.ts";
-export type { MemberAccessResponse } from "./MemberAccessResponse.ts";
-export type { MemberDevice } from "./MemberDevice.ts";
-export type { MemberShareLink } from "./MemberShareLink.ts";
-export type { MemberVaultAccess } from "./MemberVaultAccess.ts";
-export type { MeResponse } from "./MeResponse.ts";
-export type { MoveItemInput } from "./MoveItemInput.ts";
-export type { PendingTeamInvitationResponse } from "./PendingTeamInvitationResponse.ts";
-export type { PendingVaultKeyEntry } from "./PendingVaultKeyEntry.ts";
-export type { PortalSessionResponse } from "./PortalSessionResponse.ts";
-export type { PresignedUploadResult } from "./PresignedUploadResult.ts";
-export type { PrivateDataResponse } from "./PrivateDataResponse.ts";
-export type { PrivateDataUserResponse } from "./PrivateDataUserResponse.ts";
-export type { PublicShareAccessResponse } from "./PublicShareAccessResponse.ts";
-export type { PublicShareInfoResponse } from "./PublicShareInfoResponse.ts";
-export type { PublicTokenInput } from "./PublicTokenInput.ts";
-export type { RecoveryVaultKeyResponse } from "./RecoveryVaultKeyResponse.ts";
-export type { RefreshSessionResponse } from "./RefreshSessionResponse.ts";
-export type { RegenerateSecretKeyInput } from "./RegenerateSecretKeyInput.ts";
-export type { RegistrationStatusResponse } from "./RegistrationStatusResponse.ts";
-export type { RemoveTeamMemberInput } from "./RemoveTeamMemberInput.ts";
-export type { RemoveTeamMemberResponse } from "./RemoveTeamMemberResponse.ts";
-export type { RemoveVaultMemberInput } from "./RemoveVaultMemberInput.ts";
-export type { RemoveVaultMemberResponse } from "./RemoveVaultMemberResponse.ts";
-export type { RenameDeviceInput } from "./RenameDeviceInput.ts";
-export type { RequestEmailVerificationInput } from "./RequestEmailVerificationInput.ts";
-export type { RequestEmailVerificationResponse } from "./RequestEmailVerificationResponse.ts";
-export type { RequestRecoveryVerificationInput } from "./RequestRecoveryVerificationInput.ts";
-export type { RequestSignupVerificationInput } from "./RequestSignupVerificationInput.ts";
-export type { ResendInvitationResponse } from "./ResendInvitationResponse.ts";
-export type { ResetPasswordInput } from "./ResetPasswordInput.ts";
-export type { ResetPasswordResponse } from "./ResetPasswordResponse.ts";
-export type { RotationDataResponse } from "./RotationDataResponse.ts";
-export type { RotationVaultInput } from "./RotationVaultInput.ts";
-export type { RotationVaultResponse } from "./RotationVaultResponse.ts";
-export type { SendInvitationInput } from "./SendInvitationInput.ts";
-export type { SendInvitationResponse } from "./SendInvitationResponse.ts";
-export type { SessionIdInput } from "./SessionIdInput.ts";
-export type { SetTravelModeHiddenVaultsInput } from "./SetTravelModeHiddenVaultsInput.ts";
-export type { ShareAccessLogResponse } from "./ShareAccessLogResponse.ts";
-export type { ShareAllowedEmailDetails } from "./ShareAllowedEmailDetails.ts";
-export type { ShareLinkDetailsResponse } from "./ShareLinkDetailsResponse.ts";
-export type { ShareLinkListEntry } from "./ShareLinkListEntry.ts";
-export type { ShareLinkListResponse } from "./ShareLinkListResponse.ts";
-export type { SignupInput } from "./SignupInput.ts";
-export type { SignupResponse } from "./SignupResponse.ts";
-export type { SignupWithInvitationInput } from "./SignupWithInvitationInput.ts";
-export type { StartLoginInput } from "./StartLoginInput.ts";
-export type { StartLoginResponse } from "./StartLoginResponse.ts";
-export type { StoreRecoveryKeyInput } from "./StoreRecoveryKeyInput.ts";
-export type { SuccessResponse } from "./SuccessResponse.ts";
-export type { SyncCursorResponse } from "./SyncCursorResponse.ts";
-export type { SyncEventDto } from "./SyncEventDto.ts";
-export type { SyncSeatsInput } from "./SyncSeatsInput.ts";
-export type { SyncSeatsResponse } from "./SyncSeatsResponse.ts";
-export type { SyncStateEntry } from "./SyncStateEntry.ts";
-export type { TeamDetailsResponse } from "./TeamDetailsResponse.ts";
-export type { TeamEvent } from "./TeamEvent.ts";
-export type { TeamEventsInput } from "./TeamEventsInput.ts";
-export type { TeamEventsResponse } from "./TeamEventsResponse.ts";
-export type { TeamIdInput } from "./TeamIdInput.ts";
-export type { TeamInvitationDetailsResponse } from "./TeamInvitationDetailsResponse.ts";
-export type { TeamInvitationListEntry } from "./TeamInvitationListEntry.ts";
-export type { TeamMemberResponse } from "./TeamMemberResponse.ts";
-export type { TeamRotationInput } from "./TeamRotationInput.ts";
-export type { TeamSeatInvoicePreviewLineResponse } from "./TeamSeatInvoicePreviewLineResponse.ts";
-export type { TeamSeatInvoicePreviewResponse } from "./TeamSeatInvoicePreviewResponse.ts";
-export type { TeamSummaryResponse } from "./TeamSummaryResponse.ts";
-export type { TeamVaultResponse } from "./TeamVaultResponse.ts";
-export type { TeamVaultRotationResult } from "./TeamVaultRotationResult.ts";
-export type { ToggleFavoriteInput } from "./ToggleFavoriteInput.ts";
-export type { TokenInput } from "./TokenInput.ts";
-export type { TravelModeResponse } from "./TravelModeResponse.ts";
-export type { UpdateAttachmentInput } from "./UpdateAttachmentInput.ts";
-export type { UpdateEmailInput } from "./UpdateEmailInput.ts";
-export type { UpdateItemInput } from "./UpdateItemInput.ts";
-export type { UpdateItemResponse } from "./UpdateItemResponse.ts";
-export type { UpdateShareLinkInput } from "./UpdateShareLinkInput.ts";
-export type { UpdateTeamInput } from "./UpdateTeamInput.ts";
-export type { UpdateVaultInput } from "./UpdateVaultInput.ts";
-export type { UpdateVaultMemberRoleInput } from "./UpdateVaultMemberRoleInput.ts";
-export type { UpdateVaultResponse } from "./UpdateVaultResponse.ts";
-export type { VaultAttachmentResponse } from "./VaultAttachmentResponse.ts";
-export type { VaultAvailableMemberResponse } from "./VaultAvailableMemberResponse.ts";
-export type { VaultDetailsResponse } from "./VaultDetailsResponse.ts";
-export type { VaultIdInput } from "./VaultIdInput.ts";
-export type { VaultItemDetailsResponse } from "./VaultItemDetailsResponse.ts";
-export type { VaultItemResponse } from "./VaultItemResponse.ts";
-export type { VaultItemWithVaultResponse } from "./VaultItemWithVaultResponse.ts";
-export type { VaultKeyRotationInput } from "./VaultKeyRotationInput.ts";
-export type { VaultKeyRotationSummaryResponse } from "./VaultKeyRotationSummaryResponse.ts";
-export type { VaultListEntryResponse } from "./VaultListEntryResponse.ts";
-export type { VaultLookupUserResponse } from "./VaultLookupUserResponse.ts";
-export type { VaultMemberResponse } from "./VaultMemberResponse.ts";
-export type { VaultRotationDataResponse } from "./VaultRotationDataResponse.ts";
-export type { VaultRotationItemResponse } from "./VaultRotationItemResponse.ts";
-export type { VaultRotationMemberResponse } from "./VaultRotationMemberResponse.ts";
-export type { VaultStatsResponse } from "./VaultStatsResponse.ts";
-export type { VaultSummaryResponse } from "./VaultSummaryResponse.ts";
-export type { VerifyEmailAndAccessInput } from "./VerifyEmailAndAccessInput.ts";
-export type { VerifyRecoveryCodeInput } from "./VerifyRecoveryCodeInput.ts";
-export type { VerifyRecoveryCodeResponse } from "./VerifyRecoveryCodeResponse.ts";
-export type { VerifySignupVerificationInput } from "./VerifySignupVerificationInput.ts";
-export type { VerifySignupVerificationResponse } from "./VerifySignupVerificationResponse.ts";
-
+*/
+// biome-ignore lint/correctness/noUnusedImports: the stable preamble covers every handler kind
+import type { Mutation, Query, Subscription } from "@qubit-rs/client";
+export type ShareAllowedEmailDetails = {
+	id: string;
+	email: string;
+	verified: boolean;
+	verifiedAt: string | null;
+};
+export type DisableTravelModeInput = {
+	attemptId: string;
+	clientPublicKey: string;
+	clientProof: string;
+};
+export type TeamRotationInput = { teamId: string; excludeUserId: string };
+export type EncryptedVaultKeyInput = {
+	vaultId: string;
+	encryptedVaultKey: string;
+};
+export type VaultItemWithVaultResponse = {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+	attachments: Array<VaultAttachmentResponse>;
+	vault: VaultSummaryResponse | null;
+};
+export type VaultStatsResponse = {
+	teamCount: number;
+	vaultCount: bigint;
+	itemCount: bigint;
+};
+export type TeamSuccessResponse = { success: boolean };
+export type SyncStateEntry = {
+	latestEventId: string | null;
+	latestTimestamp: bigint | null;
+};
+export type DeviceSessionResponse = {
+	id: string;
+	deviceName: string | null;
+	platform: string;
+	browserName: string | null;
+	browserVersion: string | null;
+	osName: string | null;
+	osVersion: string | null;
+	ipAddress: string | null;
+	lastActiveAt: string;
+	createdAt: string;
+	isCurrentSession: boolean;
+};
+export type CheckConflictResponse = {
+	hasConflict: boolean;
+	currentVersion: number | null;
+	lastModifiedBy: string | null;
+	lastModifiedAt: bigint | null;
+};
+export type StartLoginInput = { email: string; clientPublicKey: string };
+export type SendInvitationInput = {
+	teamId: string;
+	email: string;
+	role: string;
+	pendingVaultKeys: Array<PendingVaultKeyEntry> | null;
+};
+export type AuthSessionUserResponse = {
+	id: string;
+	email: string;
+	name: string;
+	secretKeyHint: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+	teamId: string | null;
+	teamName: string | null;
+	teamType: string | null;
+	teamAvatarUrl: string | null;
+	role: string;
+};
+export type CheckoutPlanInput = { plan: string | null };
+export type MemberDevice = {
+	id: string;
+	deviceName: string | null;
+	platform: string | null;
+	browserName: string | null;
+	osName: string | null;
+	maskedIp: string | null;
+	createdAt: string;
+	lastActiveAt: string;
+	expiresAt: string;
+};
+export type GetEventsSinceInput = {
+	sinceId: string | null;
+	vaultIds: Array<string> | null;
+	limit: number | null;
+};
+export type TeamVaultResponse = {
+	id: string;
+	name: string;
+	encryptedVaultKey: string | null;
+};
+export type VerifySignupVerificationInput = {
+	email: string;
+	code: string;
+	invitationToken: string | null;
+};
+export type VaultKeyRotationInput = {
+	memberKeys: Array<RotationMemberKeyInput>;
+	reEncryptedItems: Array<RotationReEncryptedItemInput>;
+};
+export type GetLastAcknowledgedInput = { clientId: string };
+export type SyncEventDto = {
+	id: string;
+	type: string;
+	entityId: string;
+	entityType: string;
+	vaultId: string | null;
+	version: number;
+	clientId: string | null;
+	userId: string;
+	metadata: JsonValue | null;
+	timestamp: bigint;
+};
+export type UpdateEmailInput = {
+	newEmail: string;
+	srpSalt: string;
+	srpVerifier: string;
+	encryptedPrivateKey: string;
+	encryptedVaultKeys: Array<EncryptedVaultKeyInput>;
+	kdfParams: KdfParamsInput;
+};
+export type ConvertVaultTypeResponse = {
+	success: boolean;
+	vaultId: string;
+	previousType: string;
+	newType: string;
+};
+export type CreateTeamInput = { name: string; teamType: string | null };
+export type ShareLinkListResponse = {
+	links: Array<ShareLinkListEntry>;
+	baseShareUrl: string;
+};
+export type RemoveVaultMemberResponse = {
+	success: boolean;
+	keyRotation: VaultKeyRotationSummaryResponse;
+};
+export type VaultIdInput = { vaultId: string };
+export type VerifyRecoveryCodeInput = { email: string; code: string };
+export type RotationDataResponse = { vaults: Array<RotationVaultResponse> };
+export type ShareLinkListEntry = {
+	id: string;
+	status: string;
+	accessMode: string;
+	isOneTimeUse: boolean;
+	accessCount: number;
+	maxAccessCount: number | null;
+	allowedEmails: Array<ShareAllowedEmailSummary>;
+	expiresAt: string;
+	createdAt: string;
+	lastAccessedAt: string | null;
+};
+export type AuditResultFilter = "success" | "failure" | "all";
+export type KdfParamsInput = {
+	schemaVersion: number;
+	algorithm: string;
+	iterations: number;
+};
+export type UpdateVaultInput = {
+	vaultId: string;
+	name: string | null;
+	icon: string | null | null;
+	imageKey: string | null | null;
+	clientId: string | null;
+};
+export type VaultKeyRotationSummaryResponse = {
+	id: string;
+	newKeyVersion: number;
+	itemsReEncrypted: number;
+	membersUpdated: number;
+};
+export type StoreRecoveryKeyInput = {
+	encryptedMasterKey: string;
+	recoveryKeyHint: string;
+};
+export type VerifyRecoveryCodeResponse = {
+	success: boolean;
+	recoveryToken: string | null;
+};
+export type AuthVaultKeyResponse = {
+	vaultId: string;
+	vaultName: string;
+	vaultType: string;
+	vaultIcon: string | null;
+	vaultImageUrl: string | null;
+	encryptedVaultKey: string;
+	role: string;
+};
+export type BootstrapVaultSummary = {
+	id: string;
+	name: string;
+	vaultType: string;
+	icon: string | null;
+	imageUrl: string | null;
+	encryptedVaultKey: string;
+	role: string;
+};
+export type RefreshSessionResponse = {
+	token: string;
+	sessionId: string;
+	expiresAt: string;
+};
+export type UpdateTeamInput = {
+	teamId: string;
+	name: string | null;
+	imageKey: string | null | null;
+};
+export type LastAcknowledgedResponse = { eventId: string; timestamp: bigint };
+export type CheckEmailInput = { email: string };
+export type MemberShareLink = {
+	id: string;
+	itemId: string;
+	status: string;
+	accessMode: string;
+	accessCount: number;
+	maxAccessCount: number | null;
+	expiresAt: string;
+	createdAt: string;
+	lastAccessedAt: string | null;
+	/**
+	 * True when the link is still `active` but its expiry has already passed.
+	 */
+	isExpired: boolean;
+};
+export type RotationVaultInput = {
+	vaultId: string;
+	keyRotation: TeamVaultKeyRotationInput;
+};
+export type CreateItemResponse = { itemId: string; id: string };
+export type TravelModeResponse = {
+	enabled: boolean;
+	hiddenVaultIds: Array<string>;
+	enabledAt: string | null;
+	updatedAt: string;
+};
+export type PublicTokenInput = { token: string };
+export type RegenerateSecretKeyInput = {
+	secretKeyHint: string;
+	srpSalt: string;
+	srpVerifier: string;
+	encryptedPrivateKey: string;
+	encryptedVaultKeys: Array<EncryptedVaultKeyInput>;
+	kdfParams: KdfParamsInput;
+};
+export type CreateVaultImageUploadInput = {
+	vaultId: string | null;
+	fileName: string;
+	contentType: string;
+};
+export type TeamVaultRotationResult = {
+	vaultId: string;
+	rotationId: string;
+	newKeyVersion: number;
+};
+export type TeamEventResult = "success" | "failure";
+export type UpdateVaultMemberRoleInput = {
+	vaultId: string;
+	userId: string;
+	role: string;
+};
+export type FinishLoginInput = {
+	attemptId: string;
+	clientPublicKey: string;
+	clientProof: string;
+};
+export type SuccessResponse = { success: boolean };
+export type CreateAttachmentResponse = { attachmentId: string };
+export type RequestEmailVerificationInput = { token: string; email: string };
+export type EnableTravelModeInput = { hiddenVaultIds: Array<string> };
+export type GetEventsSinceResponse = {
+	events: Array<SyncEventDto>;
+	cursor: SyncCursorResponse | null;
+	hasMore: boolean;
+	requiresFullRefresh: boolean;
+};
+export type AddVaultMemberInput = {
+	vaultId: string;
+	userId: string;
+	role: string;
+	encryptedVaultKey: string;
+	clientId: string | null;
+};
+export type AttachmentIdInput = { attachmentId: string };
+export type GetRecoveryDataInput = { recoveryToken: string };
+export type BulkImportItemsResponse = {
+	success: boolean;
+	importedCount: number;
+	itemIds: Array<string>;
+};
+export type VerifyEmailAndAccessInput = {
+	token: string;
+	email: string;
+	code: string;
+};
+export type MoveItemInput = {
+	itemId: string;
+	sourceVaultId: string;
+	targetVaultId: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string | null;
+	clientId: string | null;
+};
+export type CheckConflictInput = { itemId: string; expectedVersion: number };
+export type SyncSeatsResponse = {
+	synced: boolean;
+	reason: string | null;
+	quantity: bigint | null;
+};
+export type VaultItemDetailsResponse = {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+	attachments: Array<VaultAttachmentResponse>;
+};
+export type BulkImportItemInput = {
+	itemId: string;
+	category: string;
+	favorite: boolean | null;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string | null;
+};
+export type UpdateItemResponse = { success: boolean; version: number };
+export type RecoveryVaultKeyResponse = {
+	vaultId: string;
+	encryptedVaultKey: string;
+	createdById: string;
+};
+export type SessionIdInput = { sessionId: string };
+export type VerifySignupVerificationResponse = {
+	success: boolean;
+	signupVerificationToken: string | null;
+};
+export type LinkIdInput = { linkId: string };
+export type TeamRotationReEncryptedItemInput = {
+	itemId: string;
+	encryptedData: string;
+	encryptionIv: string;
+};
+export type CreateVaultInput = {
+	vaultId: string | null;
+	name: string;
+	vaultType: string;
+	encryptedVaultKey: string;
+	icon: string | null;
+	imageKey: string | null;
+	clientId: string | null;
+};
+export type InvitationIdInput = { invitationId: string };
+export type AppError = { code: AppErrorCode; message: string };
+export type TeamEventActor = {
+	userId: string | null;
+	name: string | null;
+	email: string | null;
+};
+export type TeamInvitationDetailsResponse = {
+	id: string;
+	email: string;
+	teamId: string;
+	teamName: string;
+	role: string;
+	status: string;
+	invitedByName: string;
+	expiresAt: string;
+	createdAt: string;
+};
+export type VaultRotationDataResponse = {
+	keyVersion: number;
+	members: Array<VaultRotationMemberResponse>;
+	items: Array<VaultRotationItemResponse>;
+};
+export type VaultDetailsResponse = {
+	id: string;
+	name: string;
+	vaultType: string;
+	icon: string | null;
+	imageUrl: string | null;
+	userRole: string;
+	itemCount: bigint;
+	memberCount: bigint;
+	createdAt: string;
+};
+export type RotationMemberResponse = {
+	userId: string;
+	publicKey: string;
+	role: string;
+};
+export type ConvertVaultTypeInput = {
+	vaultId: string;
+	targetType: string;
+	personalEncryptedVaultKey: string | null;
+	clientId: string | null;
+};
+export type EventSource = "audit_log" | "share_access_log";
+export type SignupInput = {
+	userId: string | null;
+	vaultId: string | null;
+	email: string;
+	signupVerificationToken: string;
+	name: string;
+	plan: string | null;
+	organizationName: string | null;
+	secretKeyHint: string;
+	srpSalt: string;
+	srpVerifier: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+	encryptedMasterKey: string;
+	recoveryKeyHint: string;
+	encryptedVaultKey: string;
+	kdfParams: KdfParamsInput;
+};
+export type MemberAccessResponse = {
+	vaults: Array<MemberVaultAccess>;
+	devices: Array<MemberDevice>;
+	shareLinks: Array<MemberShareLink>;
+	/**
+	 * Total links created, which may exceed `share_links.len()` when capped.
+	 */
+	shareLinkTotal: number;
+	/**
+	 * Share links that are `active` and not past their expiry.
+	 */
+	activeShareLinkCount: number;
+};
+export type GetSyncStateInput = { vaultIds: Array<string> };
+export type VaultRotationItemResponse = {
+	id: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	/**
+	 * The client rebuilds this item's AAD from these; rotation does not change either.
+	 */
+	version: number;
+	lastModifiedBy: string | null;
+};
+export type RemoveTeamMemberResponse = {
+	success: boolean;
+	vaultRotations: Array<TeamVaultRotationResult>;
+};
+export type TeamVaultKeyRotationInput = {
+	memberKeys: Array<TeamRotationMemberKeyInput>;
+	reEncryptedItems: Array<TeamRotationReEncryptedItemInput>;
+};
+export type PortalSessionResponse = { url: string };
+export type LoginUserResponse = {
+	id: string;
+	email: string;
+	name: string;
+	secretKeyHint: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+};
+export type VaultItemResponse = {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+};
+export type VaultListEntryResponse = {
+	id: string;
+	name: string;
+	vaultType: string;
+	icon: string | null;
+	imageUrl: string | null;
+	role: string;
+	items: Array<VaultItemResponse>;
+	encryptedVaultKey: string;
+	createdById: string;
+};
+export type BulkImportItemsInput = {
+	vaultId: string;
+	clientId: string | null;
+	items: Array<BulkImportItemInput>;
+};
+export type RemoveTeamMemberInput = {
+	teamId: string;
+	userId: string;
+	vaultRotations: Array<RotationVaultInput>;
+	clientId: string | null;
+};
+export type BillingEntitlementsResponse = {
+	mode: string;
+	billingEnabled: boolean;
+	plan: string;
+	status: string;
+	isActive: boolean;
+	entitlements: BillingEntitlements;
+	limits: EntitlementLimits;
+};
+export type AcknowledgeEventsInput = {
+	eventIds: Array<string>;
+	clientId: string;
+};
+export type CreateShareLinkInput = {
+	itemId: string;
+	accessMode: string;
+	isOneTimeUse: boolean;
+	expiresIn: string;
+	allowedEmails: Array<string> | null;
+	encryptedItemData: string;
+	encryptionIv: string;
+	encryptedShareKey: string;
+	shareKeyIv: string;
+};
+export type CheckEmailResponse = { exists: boolean; secretKeyHint: string };
+export type AttachmentDownloadResponse = {
+	downloadUrl: string;
+	encryptedName: string;
+	encryptedContentType: string;
+	encryptionIv: string;
+	encryptedContentTypeIv: string;
+	encryptionAlgorithm: string;
+	fileSize: number;
+};
+export type AppErrorCode =
+	| "INTERNAL_SERVER_ERROR"
+	| "BAD_REQUEST"
+	| "NOT_FOUND"
+	| "FORBIDDEN"
+	| "UNAUTHORIZED"
+	| "CONFLICT"
+	| "TOO_MANY_REQUESTS";
+export type UpdateItemInput = {
+	itemId: string;
+	encryptedData: string | null;
+	encryptionIv: string | null;
+	encryptionAlgorithm: string | null;
+	expectedVersion: number | null;
+	clientId: string | null;
+};
+export type RotationVaultResponse = {
+	vaultId: string;
+	vaultName: string;
+	keyVersion: number;
+	members: Array<RotationMemberResponse>;
+	items: Array<RotationItemResponse>;
+};
+export type TeamEventsInput = {
+	cursor: string | null;
+	limit: number | null;
+	from: string | null;
+	to: string | null;
+	actionGroup: AuditActionGroupFilter | null;
+	actorUserId: string | null;
+	result: AuditResultFilter | null;
+	search: string | null;
+};
+export type VaultMemberResponse = {
+	userId: string;
+	name: string;
+	email: string;
+	role: string;
+};
+export type TeamRotationMemberKeyInput = {
+	userId: string;
+	encryptedVaultKey: string;
+};
+export type ResetPasswordResponse = {
+	token: string;
+	sessionId: string;
+	expiresAt: string;
+	userId: string;
+};
+export type VaultLookupUserResponse = {
+	id: string;
+	name: string;
+	email: string;
+	publicKey: string;
+};
+export type RotationReEncryptedItemInput = {
+	itemId: string;
+	encryptedData: string;
+	encryptionIv: string;
+};
+export type MeResponse = {
+	id: string;
+	email: string;
+	name: string;
+	teamId: string | null;
+	teamName: string | null;
+	teamType: string | null;
+	teamAvatarUrl: string | null;
+	role: string;
+	secretKeyHint: string | null;
+	publicKey: string;
+	encryptedPrivateKey: string;
+	hasRecoveryKey: boolean;
+	createdAt: string;
+};
+export type ItemClientInput = { itemId: string; clientId: string | null };
+export type TeamEvent = {
+	id: string;
+	timestamp: string;
+	source: EventSource;
+	action: string;
+	actionGroup: AuditActionGroup;
+	actor: TeamEventActor;
+	entity: TeamEventEntity;
+	result: TeamEventResult;
+	network: TeamEventNetwork;
+	metadata: JsonValue | null;
+};
+export type MemberAccessInput = { userId: string };
+export type SyncCursorResponse = { id: string };
+export type RemoveVaultMemberInput = {
+	vaultId: string;
+	userId: string;
+	keyRotation: VaultKeyRotationInput;
+	clientId: string | null;
+};
+export type TeamEventsResponse = {
+	events: Array<TeamEvent>;
+	nextCursor: string | null;
+};
+export type RequestRecoveryVerificationInput = { email: string };
+export type PresignedUploadResult = {
+	key: string;
+	uploadUrl: string;
+	publicUrl: string | null;
+};
+export type StartLoginResponse = {
+	attemptId: string;
+	salt: string;
+	serverPublicKey: string;
+	kdfParams: LoginKdfParamsResponse;
+};
+export type TeamInvitationListEntry = {
+	id: string;
+	email: string;
+	role: string;
+	status: string;
+	invitedBy: string;
+	createdAt: string;
+	expiresAt: string;
+};
+export type TeamSummaryResponse = {
+	id: string;
+	name: string;
+	teamType: string;
+	ownerId: string;
+	role: string;
+	memberCount: bigint;
+	memberLimit: number | null;
+	imageUrl: string | null;
+	createdAt: string;
+};
+export type GetRecoveryDataResponse = {
+	userId: string;
+	encryptedMasterKey: string;
+	encryptedPrivateKey: string;
+	secretKeyHint: string | null;
+	recoveryKeyHint: string | null;
+	vaultKeys: Array<RecoveryVaultKeyResponse>;
+};
+export type BootstrapItemResponse = {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+	attachments: Array<BootstrapAttachmentResponse>;
+	vault: BootstrapVaultSummary | null;
+};
+export type CreateItemInput = {
+	itemId: string | null;
+	vaultId: string;
+	category: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string | null;
+	clientId: string | null;
+};
+export type SyncSeatsInput = { teamId: string | null };
+export type RequestEmailVerificationResponse = {
+	success: boolean;
+	message: string;
+};
+export type CreateAttachmentInput = {
+	itemId: string;
+	storageKey: string;
+	encryptedName: string;
+	encryptedContentType: string;
+	encryptionIv: string;
+	encryptedContentTypeIv: string;
+	encryptionAlgorithm: string | null;
+	fileSize: number;
+};
+export type ResetPasswordInput = {
+	recoveryToken: string;
+	srpSalt: string;
+	srpVerifier: string;
+	encryptedPrivateKey: string;
+	encryptedMasterKey: string;
+	recoveryKeyHint: string;
+	secretKeyHint: string | null;
+	encryptedVaultKeys: Array<EncryptedVaultKeyInput>;
+	kdfParams: KdfParamsInput;
+};
+export type UpdateAttachmentInput = {
+	attachmentId: string;
+	encryptedName: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string | null;
+};
+export type ResendInvitationResponse = { invitationId: string; token: string };
+export type ShareAccessLogResponse = {
+	id: string;
+	accessedByEmail: string | null;
+	ipAddress: string | null;
+	userAgent: string | null;
+	success: boolean;
+	failureReason: string | null;
+	accessedAt: string;
+};
+export type PrivateDataUserResponse = {
+	token: string;
+	sessionId: string;
+	userId: string;
+	expiresAt: string;
+	platform: string;
+	clientId: string | null;
+};
+export type AcknowledgeEventsResponse = { acknowledged: number };
+export type ItemIdInput = { itemId: string };
+export type GetVaultRotationDataInput = {
+	vaultId: string;
+	excludeUserId: string;
+};
+export type PublicShareInfoResponse = {
+	valid: boolean;
+	reason: string | null;
+	accessMode: string;
+	isOneTimeUse: boolean | null;
+	expiresAt: string | null;
+};
+export type JsonValue =
+	| number
+	| string
+	| boolean
+	| Array<JsonValue>
+	| { [key in string]: JsonValue }
+	| null;
+export type CreateAttachmentUploadInput = {
+	itemId: string;
+	fileName: string;
+	contentType: string;
+	fileSize: number;
+};
+export type PublicShareAccessResponse = {
+	encryptedItemData: string;
+	encryptionIv: string;
+	encryptedShareKey: string;
+	shareKeyIv: string;
+};
+export type VaultAvailableMemberResponse = {
+	userId: string;
+	name: string;
+	email: string;
+	publicKey: string;
+};
+export type TeamDeleteAccountInput = {
+	teamId: string;
+	userId: string;
+	confirmation: string;
+};
+export type AttachmentUsageResponse = {
+	mode: string;
+	attachmentsEnabled: boolean;
+	quotaBytes: bigint | null;
+	committedStorageBytes: bigint;
+};
+export type TeamSeatInvoicePreviewLineResponse = {
+	id: string;
+	description: string;
+	amountCents: bigint;
+	currency: string;
+	periodStart: string;
+	periodEnd: string;
+	quantity: bigint | null;
+	unitAmountCents: bigint | null;
+	isProration: boolean;
+};
+export type CheckoutSessionResponse = { url: string; sessionId: string };
+export type ShareSuccessResponse = { success: boolean };
+export type DeleteAccountInput = { confirmEmail: string };
+export type ShareItemIdInput = { itemId: string };
+export type CreateVaultResponse = { vaultId: string };
+export type CreateShareLinkResponse = {
+	id: string;
+	/**
+	 * The only time the raw token is ever disclosed. The database holds just its
+	 * digest, so a link that is not copied here cannot be reconstructed later.
+	 */
+	token: string;
+	expiresAt: string;
+	baseShareUrl: string;
+};
+export type UpdateVaultResponse = {
+	id: string;
+	name: string;
+	icon: string | null;
+	imageUrl: string | null;
+};
+export type RegistrationStatusResponse = {
+	mode: string;
+	billingEnabled: boolean;
+	allowPublicSignup: boolean;
+	requiresEmailVerification: boolean;
+	reason: string | null;
+};
+export type EntitlementLimits = {
+	shareLinks: bigint | null;
+	sharedVaults: bigint | null;
+	attachmentMaxFileSizeBytes: bigint | null;
+	attachmentStorageBytes: bigint | null;
+};
+export type UpdateShareLinkInput = {
+	linkId: string;
+	isOneTimeUse: boolean | null;
+	addEmails: Array<string> | null;
+	removeEmailIds: Array<string> | null;
+};
+export type FinishLoginResponse = {
+	token: string;
+	sessionId: string;
+	expiresAt: string;
+	serverProof: string;
+	user: LoginUserResponse;
+};
+export type CreateImageUploadInput = {
+	teamId: string;
+	fileName: string;
+	contentType: string;
+};
+export type BillingStatusResponse = {
+	enabled: boolean;
+	plan: string;
+	status: string;
+	isActive: boolean;
+	requiresPayment: boolean;
+	isStripeConfigured: boolean;
+	stripeCustomerId: string | null;
+	stripeSubscriptionId: string | null;
+	stripePriceId: string | null;
+	currentPeriodEnd: string | null;
+	cancelAtPeriodEnd: boolean;
+	seatsPurchased: number | null;
+};
+export type PendingVaultKeyEntry = {
+	vaultId: string;
+	encryptedVaultKey: string;
+};
+export type TeamDetailsResponse = {
+	id: string;
+	name: string;
+	teamType: string;
+	ownerId: string;
+	ownerName: string;
+	userRole: string;
+	memberCount: bigint;
+	memberLimit: number | null;
+	imageUrl: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+export type BootstrapItemsResponse = {
+	items: Array<BootstrapItemResponse>;
+	nextCursor: string | null;
+	hasMore: boolean;
+};
+export type LogoutResponse = { success: boolean };
+export type VaultSummaryResponse = {
+	id: string;
+	name: string;
+	vaultType: string;
+	icon: string | null;
+	imageUrl: string | null;
+	encryptedVaultKey: string;
+	role: string;
+};
+export type LeaveTeamInput = {
+	teamId: string;
+	vaultRotations: Array<RotationVaultInput>;
+	clientId: string | null;
+};
+export type TeamIdInput = { teamId: string };
+export type AcceptInvitationResponse = { teamId: string; teamName: string };
+export type DeletedVaultItemWithVaultResponse = {
+	id: string;
+	vaultId: string;
+	category: string;
+	favorite: boolean;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	version: number;
+	lastModifiedBy: string | null;
+	createdAt: string;
+	updatedAt: string;
+	deletedAt: string | null;
+	vault: VaultSummaryResponse | null;
+};
+export type ToggleFavoriteInput = { itemId: string; favorite: boolean };
+export type ShareLinkDetailsResponse = {
+	id: string;
+	status: string;
+	accessMode: string;
+	isOneTimeUse: boolean;
+	accessCount: number;
+	maxAccessCount: number | null;
+	allowedEmails: Array<ShareAllowedEmailDetails>;
+	expiresAt: string;
+	createdAt: string;
+	lastAccessedAt: string | null;
+};
+export type ShareAllowedEmailSummary = { email: string; verified: boolean };
+export type BillingEntitlements = {
+	sentinel: boolean;
+	teamManagement: boolean;
+	vaultSharing: boolean;
+	shareLinks: boolean;
+	billingPortal: boolean;
+	attachments: boolean;
+};
+export type SignupResponse = {
+	success: boolean;
+	userId: string;
+	token: string;
+	sessionId: string;
+	expiresAt: string;
+	user: AuthSessionUserResponse;
+	vaultKeys: Array<AuthVaultKeyResponse>;
+};
+export type RotationMemberKeyInput = {
+	userId: string;
+	encryptedVaultKey: string;
+};
+export type LookupVaultUserInput = { vaultId: string; email: string };
+export type AuditActionGroupFilter =
+	| "auth"
+	| "team"
+	| "vault"
+	| "item"
+	| "share"
+	| "other"
+	| "all";
+export type MemberVaultAccess = {
+	id: string;
+	name: string;
+	vaultType: string;
+	role: string;
+	grantedAt: string;
+	itemCount: number;
+};
+export type RenameDeviceInput = { sessionId: string; deviceName: string };
+export type BootstrapItemsInput = {
+	cursor: string | null;
+	limit: number | null;
+};
+export type PendingTeamInvitationResponse = {
+	id: string;
+	teamId: string;
+	teamName: string;
+	role: string;
+	invitedBy: string;
+	expiresAt: string;
+};
+export type TeamMemberResponse = {
+	userId: string;
+	name: string;
+	email: string;
+	role: string;
+	joinedAt: string;
+};
+export type PrivateDataResponse = {
+	message: string;
+	user: PrivateDataUserResponse;
+};
+export type VaultAttachmentResponse = {
+	id: string;
+	itemId: string;
+	vaultId: string;
+	storageKey: string;
+	encryptedName: string;
+	encryptedContentType: string;
+	encryptionIv: string;
+	encryptedContentTypeIv: string | null;
+	encryptionAlgorithm: string;
+	fileSize: number;
+	uploadedBy: string | null;
+	createdAt: string;
+};
+export type TokenInput = { token: string };
+export type TeamSeatInvoicePreviewResponse = {
+	currency: string;
+	currentQuantity: bigint;
+	nextQuantity: bigint;
+	estimatedNextPaymentCents: bigint;
+	totalLineItemsCents: bigint;
+	lines: Array<TeamSeatInvoicePreviewLineResponse>;
+};
+export type TeamEventEntity = { type: string | null; id: string | null };
+export type ChangePasswordInput = {
+	srpSalt: string;
+	srpVerifier: string;
+	encryptedPrivateKey: string;
+	encryptedVaultKeys: Array<EncryptedVaultKeyInput>;
+	kdfParams: KdfParamsInput;
+};
+export type BootstrapAttachmentResponse = {
+	id: string;
+	itemId: string;
+	vaultId: string;
+	storageKey: string;
+	encryptedName: string;
+	encryptedContentType: string;
+	encryptionIv: string;
+	encryptedContentTypeIv: string | null;
+	encryptionAlgorithm: string;
+	fileSize: number;
+	uploadedBy: string | null;
+	createdAt: string;
+};
+export type TeamEventNetwork = {
+	maskedIp: string | null;
+	maskedUserAgent: string | null;
+	fullIp: string | null;
+	fullUserAgent: string | null;
+};
+export type RotationItemResponse = {
+	id: string;
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	/**
+	 * The client rebuilds this item's AAD from these; rotation does not change either.
+	 */
+	version: number;
+	lastModifiedBy: string | null;
+};
+export type LoginKdfParamsResponse = {
+	schemaVersion: number;
+	algorithm: string;
+	iterations: number;
+};
+export type SignupWithInvitationInput = {
+	token: string;
+	userId: string | null;
+	vaultId: string | null;
+	email: string;
+	signupVerificationToken: string;
+	name: string;
+	secretKeyHint: string;
+	srpSalt: string;
+	srpVerifier: string;
+	publicKey: string;
+	encryptedPrivateKey: string;
+	encryptedMasterKey: string;
+	recoveryKeyHint: string;
+	encryptedVaultKey: string;
+	kdfParams: KdfParamsInput;
+};
+export type AuditActionGroup =
+	| "auth"
+	| "team"
+	| "vault"
+	| "item"
+	| "share"
+	| "other";
+export type RequestSignupVerificationInput = {
+	email: string;
+	invitationToken: string | null;
+};
+export type SetTravelModeHiddenVaultsInput = { hiddenVaultIds: Array<string> };
+export type VaultRotationMemberResponse = {
+	userId: string;
+	publicKey: string;
+	role: string;
+};
+export type SendInvitationResponse = {
+	invitationId: string;
+	token: string;
+	existingUserPublicKey: string | null;
+};
 export type QubitServer = {
 	healthCheck: Query<[], string>;
 	privateData: Query<[], PrivateDataResponse>;
+	audit: {
+		teamEvents: Query<
+			[input: TeamEventsInput],
+			{ Ok: TeamEventsResponse } | { Err: AppError }
+		>;
+	};
 	auth: {
+		changePassword: Mutation<
+			[input: ChangePasswordInput],
+			{ Ok: LogoutResponse } | { Err: AppError }
+		>;
+		checkEmail: Query<
+			[input: CheckEmailInput],
+			{ Ok: CheckEmailResponse } | { Err: AppError }
+		>;
+		deleteAccount: Mutation<
+			[input: DeleteAccountInput],
+			{ Ok: LogoutResponse } | { Err: AppError }
+		>;
+		finishLogin: Mutation<
+			[input: FinishLoginInput],
+			{ Ok: FinishLoginResponse } | { Err: AppError }
+		>;
+		getRecoveryData: Query<
+			[input: GetRecoveryDataInput],
+			{ Ok: GetRecoveryDataResponse } | { Err: AppError }
+		>;
+		heartbeat: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
+		listDevices: Query<
+			[],
+			{ Ok: Array<DeviceSessionResponse> } | { Err: AppError }
+		>;
+		logout: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
+		logoutAll: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
+		me: Query<[], { Ok: MeResponse } | { Err: AppError }>;
+		refreshSession: Mutation<
+			[],
+			{ Ok: RefreshSessionResponse } | { Err: AppError }
+		>;
+		regenerateSecretKey: Mutation<
+			[input: RegenerateSecretKeyInput],
+			{ Ok: LogoutResponse } | { Err: AppError }
+		>;
 		registrationStatus: Query<
 			[],
 			{ Ok: RegistrationStatusResponse } | { Err: AppError }
+		>;
+		renameDevice: Mutation<
+			[input: RenameDeviceInput],
+			{ Ok: LogoutResponse } | { Err: AppError }
+		>;
+		requestRecoveryVerification: Mutation<
+			[input: RequestRecoveryVerificationInput],
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		requestSignupVerification: Mutation<
 			[input: RequestSignupVerificationInput],
 			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
-		verifySignupVerification: Mutation<
-			[input: VerifySignupVerificationInput],
-			{ Ok: VerifySignupVerificationResponse } | { Err: AppError }
+		resetPassword: Mutation<
+			[input: ResetPasswordInput],
+			{ Ok: ResetPasswordResponse } | { Err: AppError }
+		>;
+		revokeDevice: Mutation<
+			[input: SessionIdInput],
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		signup: Mutation<
 			[input: SignupInput],
@@ -390,83 +1218,24 @@ export type QubitServer = {
 			[input: StartLoginInput],
 			{ Ok: StartLoginResponse } | { Err: AppError }
 		>;
-		finishLogin: Mutation<
-			[input: FinishLoginInput],
-			{ Ok: FinishLoginResponse } | { Err: AppError }
+		storeRecoveryKey: Mutation<
+			[input: StoreRecoveryKeyInput],
+			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
-		requestRecoveryVerification: Mutation<
-			[input: RequestRecoveryVerificationInput],
+		updateEmail: Mutation<
+			[input: UpdateEmailInput],
 			{ Ok: LogoutResponse } | { Err: AppError }
 		>;
 		verifyRecoveryCode: Mutation<
 			[input: VerifyRecoveryCodeInput],
 			{ Ok: VerifyRecoveryCodeResponse } | { Err: AppError }
 		>;
-		getRecoveryData: Query<
-			[input: GetRecoveryDataInput],
-			{ Ok: GetRecoveryDataResponse } | { Err: AppError }
-		>;
-		resetPassword: Mutation<
-			[input: ResetPasswordInput],
-			{ Ok: ResetPasswordResponse } | { Err: AppError }
-		>;
-		checkEmail: Query<
-			[input: CheckEmailInput],
-			{ Ok: CheckEmailResponse } | { Err: AppError }
-		>;
-		me: Query<[], { Ok: MeResponse } | { Err: AppError }>;
-		updateEmail: Mutation<
-			[input: UpdateEmailInput],
-			{ Ok: LogoutResponse } | { Err: AppError }
-		>;
-		changePassword: Mutation<
-			[input: ChangePasswordInput],
-			{ Ok: LogoutResponse } | { Err: AppError }
-		>;
-		regenerateSecretKey: Mutation<
-			[input: RegenerateSecretKeyInput],
-			{ Ok: LogoutResponse } | { Err: AppError }
-		>;
-		storeRecoveryKey: Mutation<
-			[input: StoreRecoveryKeyInput],
-			{ Ok: LogoutResponse } | { Err: AppError }
-		>;
-		deleteAccount: Mutation<
-			[input: DeleteAccountInput],
-			{ Ok: LogoutResponse } | { Err: AppError }
-		>;
-		listDevices: Query<
-			[],
-			{ Ok: Array<DeviceSessionResponse> } | { Err: AppError }
-		>;
-		revokeDevice: Mutation<
-			[input: SessionIdInput],
-			{ Ok: LogoutResponse } | { Err: AppError }
-		>;
-		renameDevice: Mutation<
-			[input: RenameDeviceInput],
-			{ Ok: LogoutResponse } | { Err: AppError }
-		>;
-		heartbeat: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
-		logout: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
-		logoutAll: Mutation<[], { Ok: LogoutResponse } | { Err: AppError }>;
-		refreshSession: Mutation<
-			[],
-			{ Ok: RefreshSessionResponse } | { Err: AppError }
-		>;
-	};
-	audit: {
-		teamEvents: Query<
-			[input: TeamEventsInput],
-			{ Ok: TeamEventsResponse } | { Err: AppError }
+		verifySignupVerification: Mutation<
+			[input: VerifySignupVerificationInput],
+			{ Ok: VerifySignupVerificationResponse } | { Err: AppError }
 		>;
 	};
 	billing: {
-		status: Query<[], { Ok: BillingStatusResponse } | { Err: AppError }>;
-		entitlements: Query<
-			[],
-			{ Ok: BillingEntitlementsResponse } | { Err: AppError }
-		>;
 		attachmentUsage: Query<
 			[],
 			{ Ok: AttachmentUsageResponse } | { Err: AppError }
@@ -479,35 +1248,32 @@ export type QubitServer = {
 			[],
 			{ Ok: PortalSessionResponse } | { Err: AppError }
 		>;
-		syncSeats: Mutation<
-			[input: SyncSeatsInput],
-			{ Ok: SyncSeatsResponse } | { Err: AppError }
+		entitlements: Query<
+			[],
+			{ Ok: BillingEntitlementsResponse } | { Err: AppError }
 		>;
 		previewAdditionalTeamSeat: Query<
 			[],
 			{ Ok: TeamSeatInvoicePreviewResponse | null } | { Err: AppError }
 		>;
+		status: Query<[], { Ok: BillingStatusResponse } | { Err: AppError }>;
+		syncSeats: Mutation<
+			[input: SyncSeatsInput],
+			{ Ok: SyncSeatsResponse } | { Err: AppError }
+		>;
 	};
 	share: {
+		accessPublic: Mutation<
+			[input: PublicTokenInput],
+			{ Ok: PublicShareAccessResponse } | { Err: AppError }
+		>;
 		create: Mutation<
 			[input: CreateShareLinkInput],
 			{ Ok: CreateShareLinkResponse } | { Err: AppError }
 		>;
-		listByItem: Query<
-			[input: ItemIdInput],
-			{ Ok: ShareLinkListResponse } | { Err: AppError }
-		>;
 		get: Query<
 			[input: LinkIdInput],
 			{ Ok: ShareLinkDetailsResponse } | { Err: AppError }
-		>;
-		revoke: Mutation<
-			[input: LinkIdInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
-		>;
-		update: Mutation<
-			[input: UpdateShareLinkInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		getAccessLogs: Query<
 			[input: LinkIdInput],
@@ -517,31 +1283,43 @@ export type QubitServer = {
 			[input: PublicTokenInput],
 			{ Ok: PublicShareInfoResponse } | { Err: AppError }
 		>;
+		listByItem: Query<
+			[input: ShareItemIdInput],
+			{ Ok: ShareLinkListResponse } | { Err: AppError }
+		>;
 		requestEmailVerification: Mutation<
 			[input: RequestEmailVerificationInput],
 			{ Ok: RequestEmailVerificationResponse } | { Err: AppError }
+		>;
+		revoke: Mutation<
+			[input: LinkIdInput],
+			{ Ok: ShareSuccessResponse } | { Err: AppError }
+		>;
+		update: Mutation<
+			[input: UpdateShareLinkInput],
+			{ Ok: ShareSuccessResponse } | { Err: AppError }
 		>;
 		verifyEmailAndAccess: Mutation<
 			[input: VerifyEmailAndAccessInput],
 			{ Ok: PublicShareAccessResponse } | { Err: AppError }
 		>;
-		accessPublic: Mutation<
-			[input: PublicTokenInput],
-			{ Ok: PublicShareAccessResponse } | { Err: AppError }
-		>;
 	};
 	sync: {
+		acknowledgeEvents: Mutation<
+			[input: AcknowledgeEventsInput],
+			{ Ok: AcknowledgeEventsResponse } | { Err: AppError }
+		>;
 		bootstrapItems: Query<
 			[input: BootstrapItemsInput],
 			{ Ok: BootstrapItemsResponse } | { Err: AppError }
 		>;
+		checkConflict: Query<
+			[input: CheckConflictInput],
+			{ Ok: CheckConflictResponse } | { Err: AppError }
+		>;
 		getEventsSince: Query<
 			[input: GetEventsSinceInput],
 			{ Ok: GetEventsSinceResponse } | { Err: AppError }
-		>;
-		acknowledgeEvents: Mutation<
-			[input: AcknowledgeEventsInput],
-			{ Ok: AcknowledgeEventsResponse } | { Err: AppError }
 		>;
 		getLastAcknowledged: Query<
 			[input: GetLastAcknowledgedInput],
@@ -549,30 +1327,13 @@ export type QubitServer = {
 		>;
 		getSyncState: Query<
 			[input: GetSyncStateInput],
-			{ Ok: { [key in string]?: SyncStateEntry } } | { Err: AppError }
-		>;
-		checkConflict: Query<
-			[input: CheckConflictInput],
-			{ Ok: CheckConflictResponse } | { Err: AppError }
+			{ Ok: { [key in string]: SyncStateEntry } } | { Err: AppError }
 		>;
 	};
 	team: {
-		list: Query<[], { Ok: TeamSummaryResponse } | { Err: AppError }>;
-		get: Query<
-			[input: TeamIdInput],
-			{ Ok: TeamDetailsResponse } | { Err: AppError }
-		>;
-		vaults: Query<
-			[input: TeamIdInput],
-			{ Ok: Array<TeamVaultResponse> } | { Err: AppError }
-		>;
 		create: Mutation<
 			[input: CreateTeamInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
-		>;
-		update: Mutation<
-			[input: UpdateTeamInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
+			{ Ok: TeamSuccessResponse } | { Err: AppError }
 		>;
 		createImageUpload: Mutation<
 			[input: CreateImageUploadInput],
@@ -580,39 +1341,50 @@ export type QubitServer = {
 		>;
 		delete: Mutation<
 			[input: TeamIdInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
+			{ Ok: TeamSuccessResponse } | { Err: AppError }
 		>;
-		leave: Mutation<
-			[input: LeaveTeamInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
+		get: Query<
+			[input: TeamIdInput],
+			{ Ok: TeamDetailsResponse } | { Err: AppError }
 		>;
 		getLeaveRotationData: Query<
 			[input: TeamIdInput],
 			{ Ok: RotationDataResponse } | { Err: AppError }
 		>;
-		members: {
-			list: Query<
-				[input: TeamIdInput],
-				{ Ok: Array<TeamMemberResponse> } | { Err: AppError }
-			>;
-			access: Query<
-				[input: MemberAccessInput],
-				{ Ok: MemberAccessResponse } | { Err: AppError }
-			>;
-			getTeamRotationData: Query<
-				[input: TeamRotationInput],
-				{ Ok: RotationDataResponse } | { Err: AppError }
-			>;
-			remove: Mutation<
-				[input: RemoveTeamMemberInput],
-				{ Ok: RemoveTeamMemberResponse } | { Err: AppError }
-			>;
-			deleteAccount: Mutation<
-				[input: DeleteAccountInput],
-				{ Ok: SuccessResponse } | { Err: AppError }
-			>;
-		};
+		leave: Mutation<
+			[input: LeaveTeamInput],
+			{ Ok: TeamSuccessResponse } | { Err: AppError }
+		>;
+		list: Query<[], { Ok: TeamSummaryResponse } | { Err: AppError }>;
+		update: Mutation<
+			[input: UpdateTeamInput],
+			{ Ok: TeamSuccessResponse } | { Err: AppError }
+		>;
+		vaults: Query<
+			[input: TeamIdInput],
+			{ Ok: Array<TeamVaultResponse> } | { Err: AppError }
+		>;
 		invitations: {
+			accept: Mutation<
+				[input: TokenInput],
+				{ Ok: AcceptInvitationResponse } | { Err: AppError }
+			>;
+			acceptById: Mutation<
+				[input: InvitationIdInput],
+				{ Ok: AcceptInvitationResponse } | { Err: AppError }
+			>;
+			cancel: Mutation<
+				[input: InvitationIdInput],
+				{ Ok: TeamSuccessResponse } | { Err: AppError }
+			>;
+			decline: Mutation<
+				[input: TokenInput],
+				{ Ok: TeamSuccessResponse } | { Err: AppError }
+			>;
+			declineById: Mutation<
+				[input: InvitationIdInput],
+				{ Ok: TeamSuccessResponse } | { Err: AppError }
+			>;
 			getByToken: Query<
 				[input: TokenInput],
 				{ Ok: TeamInvitationDetailsResponse } | { Err: AppError }
@@ -625,116 +1397,126 @@ export type QubitServer = {
 				[],
 				{ Ok: Array<PendingTeamInvitationResponse> } | { Err: AppError }
 			>;
-			send: Mutation<
-				[input: SendInvitationInput],
-				{ Ok: SendInvitationResponse } | { Err: AppError }
-			>;
-			accept: Mutation<
-				[input: TokenInput],
-				{ Ok: AcceptInvitationResponse } | { Err: AppError }
-			>;
-			acceptById: Mutation<
-				[input: InvitationIdInput],
-				{ Ok: AcceptInvitationResponse } | { Err: AppError }
-			>;
-			cancel: Mutation<
-				[input: InvitationIdInput],
-				{ Ok: SuccessResponse } | { Err: AppError }
-			>;
 			resend: Mutation<
 				[input: InvitationIdInput],
 				{ Ok: ResendInvitationResponse } | { Err: AppError }
 			>;
-			decline: Mutation<
-				[input: TokenInput],
-				{ Ok: SuccessResponse } | { Err: AppError }
+			send: Mutation<
+				[input: SendInvitationInput],
+				{ Ok: SendInvitationResponse } | { Err: AppError }
 			>;
-			declineById: Mutation<
-				[input: InvitationIdInput],
-				{ Ok: SuccessResponse } | { Err: AppError }
+		};
+		members: {
+			access: Query<
+				[input: MemberAccessInput],
+				{ Ok: MemberAccessResponse } | { Err: AppError }
+			>;
+			deleteAccount: Mutation<
+				[input: TeamDeleteAccountInput],
+				{ Ok: TeamSuccessResponse } | { Err: AppError }
+			>;
+			getTeamRotationData: Query<
+				[input: TeamRotationInput],
+				{ Ok: RotationDataResponse } | { Err: AppError }
+			>;
+			list: Query<
+				[input: TeamIdInput],
+				{ Ok: Array<TeamMemberResponse> } | { Err: AppError }
+			>;
+			remove: Mutation<
+				[input: RemoveTeamMemberInput],
+				{ Ok: RemoveTeamMemberResponse } | { Err: AppError }
 			>;
 		};
 	};
 	travelMode: {
-		getTravelMode: Query<[], { Ok: TravelModeResponse } | { Err: AppError }>;
-		setTravelModeHiddenVaults: Mutation<
-			[input: SetTravelModeHiddenVaultsInput],
+		disableTravelMode: Mutation<
+			[input: DisableTravelModeInput],
 			{ Ok: TravelModeResponse } | { Err: AppError }
 		>;
 		enableTravelMode: Mutation<
 			[input: EnableTravelModeInput],
 			{ Ok: TravelModeResponse } | { Err: AppError }
 		>;
-		disableTravelMode: Mutation<
-			[input: DisableTravelModeInput],
+		getTravelMode: Query<[], { Ok: TravelModeResponse } | { Err: AppError }>;
+		setTravelModeHiddenVaults: Mutation<
+			[input: SetTravelModeHiddenVaultsInput],
 			{ Ok: TravelModeResponse } | { Err: AppError }
 		>;
 	};
 	vault: {
-		list: Query<[], { Ok: Array<VaultListEntryResponse> } | { Err: AppError }>;
-		get: Query<
-			[input: VaultIdInput],
-			{ Ok: VaultDetailsResponse } | { Err: AppError }
-		>;
-		create: Mutation<
-			[input: CreateVaultInput],
-			{ Ok: CreateVaultResponse } | { Err: AppError }
-		>;
-		update: Mutation<
-			[input: UpdateVaultInput],
-			{ Ok: UpdateVaultResponse } | { Err: AppError }
+		bulkImportItems: Mutation<
+			[input: BulkImportItemsInput],
+			{ Ok: BulkImportItemsResponse } | { Err: AppError }
 		>;
 		convertType: Mutation<
 			[input: ConvertVaultTypeInput],
 			{ Ok: ConvertVaultTypeResponse } | { Err: AppError }
 		>;
-		delete: Mutation<
-			[input: VaultIdInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
+		create: Mutation<
+			[input: CreateVaultInput],
+			{ Ok: CreateVaultResponse } | { Err: AppError }
 		>;
-		listItems: Query<
-			[input: VaultIdInput],
-			{ Ok: Array<VaultItemDetailsResponse> } | { Err: AppError }
+		createAttachment: Mutation<
+			[input: CreateAttachmentInput],
+			{ Ok: CreateAttachmentResponse } | { Err: AppError }
 		>;
-		listAllItems: Query<
-			[],
-			{ Ok: Array<VaultItemWithVaultResponse> } | { Err: AppError }
+		createAttachmentUpload: Mutation<
+			[input: CreateAttachmentUploadInput],
+			{ Ok: PresignedUploadResult } | { Err: AppError }
 		>;
-		listAllDeletedItems: Query<
-			[],
-			{ Ok: Array<DeletedVaultItemWithVaultResponse> } | { Err: AppError }
-		>;
-		listDeletedItems: Query<
-			[input: VaultIdInput],
-			{ Ok: Array<VaultItemResponse> } | { Err: AppError }
-		>;
-		getItem: Query<
-			[input: ItemIdInput],
-			{ Ok: VaultItemDetailsResponse } | { Err: AppError }
+		createImageUpload: Mutation<
+			[input: CreateVaultImageUploadInput],
+			{ Ok: PresignedUploadResult } | { Err: AppError }
 		>;
 		createItem: Mutation<
 			[input: CreateItemInput],
 			{ Ok: CreateItemResponse } | { Err: AppError }
 		>;
-		bulkImportItems: Mutation<
-			[input: BulkImportItemsInput],
-			{ Ok: BulkImportItemsResponse } | { Err: AppError }
+		delete: Mutation<
+			[input: VaultIdInput],
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
-		updateItem: Mutation<
-			[input: UpdateItemInput],
-			{ Ok: UpdateItemResponse } | { Err: AppError }
-		>;
-		toggleFavorite: Mutation<
-			[input: ToggleFavoriteInput],
+		deleteAttachment: Mutation<
+			[input: AttachmentIdInput],
 			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
 		deleteItem: Mutation<
 			[input: ItemClientInput],
 			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
-		restoreItem: Mutation<
-			[input: ItemClientInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
+		get: Query<
+			[input: VaultIdInput],
+			{ Ok: VaultDetailsResponse } | { Err: AppError }
+		>;
+		getAttachmentDownloadUrl: Mutation<
+			[input: AttachmentIdInput],
+			{ Ok: AttachmentDownloadResponse } | { Err: AppError }
+		>;
+		getItem: Query<
+			[input: ItemIdInput],
+			{ Ok: VaultItemDetailsResponse } | { Err: AppError }
+		>;
+		list: Query<[], { Ok: Array<VaultListEntryResponse> } | { Err: AppError }>;
+		listAllDeletedItems: Query<
+			[],
+			{ Ok: Array<DeletedVaultItemWithVaultResponse> } | { Err: AppError }
+		>;
+		listAllItems: Query<
+			[],
+			{ Ok: Array<VaultItemWithVaultResponse> } | { Err: AppError }
+		>;
+		listAttachments: Query<
+			[input: ItemIdInput],
+			{ Ok: Array<VaultAttachmentResponse> } | { Err: AppError }
+		>;
+		listDeletedItems: Query<
+			[input: VaultIdInput],
+			{ Ok: Array<VaultItemResponse> } | { Err: AppError }
+		>;
+		listItems: Query<
+			[input: VaultIdInput],
+			{ Ok: Array<VaultItemDetailsResponse> } | { Err: AppError }
 		>;
 		moveItem: Mutation<
 			[input: MoveItemInput],
@@ -744,63 +1526,55 @@ export type QubitServer = {
 			[input: ItemClientInput],
 			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
+		restoreItem: Mutation<
+			[input: ItemClientInput],
+			{ Ok: SuccessResponse } | { Err: AppError }
+		>;
 		stats: Query<[], { Ok: VaultStatsResponse } | { Err: AppError }>;
-		createImageUpload: Mutation<
-			[input: CreateVaultImageUploadInput],
-			{ Ok: PresignedUploadResult } | { Err: AppError }
+		toggleFavorite: Mutation<
+			[input: ToggleFavoriteInput],
+			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
-		createAttachmentUpload: Mutation<
-			[input: CreateAttachmentUploadInput],
-			{ Ok: PresignedUploadResult } | { Err: AppError }
-		>;
-		createAttachment: Mutation<
-			[input: CreateAttachmentInput],
-			{ Ok: CreateAttachmentResponse } | { Err: AppError }
-		>;
-		listAttachments: Query<
-			[input: ItemIdInput],
-			{ Ok: Array<VaultAttachmentResponse> } | { Err: AppError }
-		>;
-		getAttachmentDownloadUrl: Mutation<
-			[input: AttachmentIdInput],
-			{ Ok: AttachmentDownloadResponse } | { Err: AppError }
+		update: Mutation<
+			[input: UpdateVaultInput],
+			{ Ok: UpdateVaultResponse } | { Err: AppError }
 		>;
 		updateAttachment: Mutation<
 			[input: UpdateAttachmentInput],
 			{ Ok: SuccessResponse } | { Err: AppError }
 		>;
-		deleteAttachment: Mutation<
-			[input: AttachmentIdInput],
-			{ Ok: SuccessResponse } | { Err: AppError }
+		updateItem: Mutation<
+			[input: UpdateItemInput],
+			{ Ok: UpdateItemResponse } | { Err: AppError }
 		>;
 		members: {
-			list: Query<
-				[input: VaultIdInput],
-				{ Ok: Array<VaultMemberResponse> } | { Err: AppError }
+			add: Mutation<
+				[input: AddVaultMemberInput],
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 			availableTeamMembers: Query<
 				[input: VaultIdInput],
 				{ Ok: Array<VaultAvailableMemberResponse> } | { Err: AppError }
 			>;
-			updateRole: Mutation<
-				[input: UpdateVaultMemberRoleInput],
-				{ Ok: SuccessResponse } | { Err: AppError }
+			getRotationData: Query<
+				[input: GetVaultRotationDataInput],
+				{ Ok: VaultRotationDataResponse } | { Err: AppError }
+			>;
+			list: Query<
+				[input: VaultIdInput],
+				{ Ok: Array<VaultMemberResponse> } | { Err: AppError }
 			>;
 			lookupUser: Query<
 				[input: LookupVaultUserInput],
 				{ Ok: VaultLookupUserResponse } | { Err: AppError }
 			>;
-			add: Mutation<
-				[input: AddVaultMemberInput],
-				{ Ok: SuccessResponse } | { Err: AppError }
-			>;
-			getRotationData: Query<
-				[input: GetVaultRotationDataInput],
-				{ Ok: VaultRotationDataResponse } | { Err: AppError }
-			>;
 			remove: Mutation<
 				[input: RemoveVaultMemberInput],
 				{ Ok: RemoveVaultMemberResponse } | { Err: AppError }
+			>;
+			updateRole: Mutation<
+				[input: UpdateVaultMemberRoleInput],
+				{ Ok: SuccessResponse } | { Err: AppError }
 			>;
 		};
 	};

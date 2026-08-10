@@ -1,4 +1,4 @@
-use axum::{middleware, routing::get, Json, Router};
+use axum::{middleware, routing::get, Extension, Json, Router};
 use serde_json::json;
 
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
-    let (qubit_service, _server_handle) = create_rpc_router().to_service(state.clone());
+    let (qubit_service, server_handle) = create_rpc_router().as_rpc(state.clone()).into_service();
     let rpc_routes = Router::new()
         .nest_service("/rpc", qubit_service)
         .route_layer(middleware::from_fn(rpc_tracing_middleware))
@@ -16,7 +16,10 @@ pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
             state.clone(),
             rpc_request_context_middleware,
         ))
-        .layer(middleware::from_fn(rpc_request_guard_middleware));
+        .layer(middleware::from_fn(rpc_request_guard_middleware))
+        // Dropping the handle tells jsonrpsee to stop, closing WebSocket sessions and their
+        // subscriptions; the router owns it so the stop signal fires only once the app shuts down.
+        .layer(Extension(server_handle));
     let sync_routes = create_sync_http_router()
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
@@ -46,7 +49,7 @@ pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::{net::SocketAddr, sync::Arc, time::Duration};
 
     use async_trait::async_trait;
     use axum::{
@@ -54,7 +57,10 @@ mod tests {
         http::{header, HeaderMap, Request, StatusCode},
     };
     use serde_json::json;
+    use soketto::handshake::{Client, ServerResponse};
     use sqlx::postgres::PgPoolOptions;
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_util::compat::TokioAsyncReadCompatExt;
     use tower::util::ServiceExt;
 
     use super::create_app;
@@ -182,6 +188,63 @@ mod tests {
         })
         .await;
         assert_eq!(rpc.status, StatusCode::OK);
+    }
+
+    /// Qubit's `into_service` hands back a `ServerHandle` whose drop tells jsonrpsee to stop, which
+    /// closes every WebSocket session as soon as it is established.
+    #[tokio::test]
+    async fn websocket_rpc_sessions_outlive_the_handshake() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("test listener should report its address");
+        let app = create_app(AppState::default(), EdgeHttpConfig::default());
+        let server = tokio::spawn(async move {
+            axum::serve(
+                listener,
+                app.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .expect("test server should serve")
+        });
+
+        let socket = TcpStream::connect(address)
+            .await
+            .expect("websocket client should connect");
+        let mut client = Client::new(socket.compat(), "localhost", "/rpc");
+        assert!(matches!(
+            client
+                .handshake()
+                .await
+                .expect("websocket handshake should complete"),
+            ServerResponse::Accepted { .. }
+        ));
+
+        let (mut sender, mut receiver) = client.into_builder().finish();
+        sender
+            .send_text(
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "healthCheck",
+                    "params": [],
+                })
+                .to_string(),
+            )
+            .await
+            .expect("rpc request should send");
+        sender.flush().await.expect("rpc request should flush");
+
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), receiver.receive_data(&mut response))
+            .await
+            .expect("rpc response should arrive before the timeout")
+            .expect("websocket session should stay open");
+        assert!(String::from_utf8_lossy(&response).contains(r#""result":"OK""#));
+
+        server.abort();
     }
 
     struct PanickingRateLimiter;

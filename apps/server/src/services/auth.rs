@@ -9,7 +9,7 @@ use bittery_crypto_core::{
     srp6a::{HashAlgorithm, PrimeGroup, SrpServer},
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use qubit::server::{Extensions, FromRequestExtensions, RpcError};
+use qubit::{Extensions, FromRequestExtensions, RpcError};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
