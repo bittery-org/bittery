@@ -14,7 +14,6 @@ use reqwest::{
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use ts_rs::TS;
 use url::Url;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -40,7 +39,7 @@ pub struct StorageConfig {
 
 static HTTP_CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresignedUploadResult {
     pub key: String,
@@ -48,7 +47,7 @@ pub struct PresignedUploadResult {
     pub public_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageObjectHead {
     pub size: i64,

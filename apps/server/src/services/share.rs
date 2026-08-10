@@ -2,7 +2,6 @@ use rand::RngExt;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_as, query_scalar, PgPool};
-use ts_rs::TS;
 
 use crate::{
     config::{bittery_mode, db_pool, format_timestamp},
@@ -30,22 +29,21 @@ const SHARE_LINKS_UNAVAILABLE_MESSAGE: &str =
 const MAX_VERIFICATION_CODES_PER_EMAIL: i64 = 5;
 const DEFAULT_SHARE_LINK_DAILY_LIMIT: i64 = 50;
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "ShareItemIdInput")]
 pub struct ItemIdInput {
     pub item_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct LinkIdInput {
     pub link_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateShareLinkInput {
@@ -55,7 +53,7 @@ pub struct UpdateShareLinkInput {
     pub remove_email_ids: Option<Vec<String>>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateShareLinkInput {
@@ -71,7 +69,7 @@ pub struct CreateShareLinkInput {
     pub share_key_iv: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateShareLinkResponse {
     pub id: String,
@@ -82,14 +80,14 @@ pub struct CreateShareLinkResponse {
     pub base_share_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareAllowedEmailSummary {
     pub email: String,
     pub verified: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareAllowedEmailDetails {
     pub id: String,
@@ -98,7 +96,7 @@ pub struct ShareAllowedEmailDetails {
     pub verified_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareLinkListEntry {
     pub id: String,
@@ -113,14 +111,14 @@ pub struct ShareLinkListEntry {
     pub last_accessed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareLinkListResponse {
     pub links: Vec<ShareLinkListEntry>,
     pub base_share_url: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareLinkDetailsResponse {
     pub id: String,
@@ -135,7 +133,7 @@ pub struct ShareLinkDetailsResponse {
     pub last_accessed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareAccessLogResponse {
     pub id: String,
@@ -147,20 +145,19 @@ pub struct ShareAccessLogResponse {
     pub accessed_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
-#[ts(rename = "ShareSuccessResponse")]
+#[derive(Debug, Clone, Serialize)]
 pub struct SuccessResponse {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PublicTokenInput {
     pub token: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestEmailVerificationInput {
@@ -168,14 +165,14 @@ pub struct RequestEmailVerificationInput {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestEmailVerificationResponse {
     pub success: bool,
     pub message: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VerifyEmailAndAccessInput {
@@ -184,7 +181,7 @@ pub struct VerifyEmailAndAccessInput {
     pub code: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicShareInfoResponse {
     pub valid: bool,
@@ -194,7 +191,7 @@ pub struct PublicShareInfoResponse {
     pub expires_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicShareAccessResponse {
     pub encrypted_item_data: String,

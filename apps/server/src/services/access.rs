@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
-use ts_rs::TS;
 
 use crate::{
     error::AppError,
@@ -11,13 +10,13 @@ use crate::{
     services::{audit::mask_ip, team_admin::authorize_team_admin},
 };
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberAccessInput {
     pub user_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberVaultAccess {
     pub id: String,
@@ -28,7 +27,7 @@ pub struct MemberVaultAccess {
     pub item_count: u32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberDevice {
     pub id: String,
@@ -42,7 +41,7 @@ pub struct MemberDevice {
     pub expires_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberShareLink {
     pub id: String,
@@ -58,7 +57,7 @@ pub struct MemberShareLink {
     pub is_expired: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MemberAccessResponse {
     pub vaults: Vec<MemberVaultAccess>,

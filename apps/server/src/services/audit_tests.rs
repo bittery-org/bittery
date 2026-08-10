@@ -12,7 +12,7 @@ use crate::repo::common::hash_token;
 use crate::services::team_billing::team_management_enabled;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
 };
 
 fn with_bittery_mode<T>(value: Option<&str>, test_fn: impl FnOnce() -> T) -> T {
@@ -452,11 +452,11 @@ fn to_audit_event_drops_non_object_metadata() {
 
 #[tokio::test]
 async fn team_events_requires_authentication() {
-    with_rpc_test_app(
+    with_api_test_app(
         "audit_team_events_requires_authentication",
         |app| async move {
             let response = app
-                .rpc_call(
+                .call_operation(
                     "audit.teamEvents",
                     json!([{}]),
                     unauthenticated_json_headers(),
@@ -464,7 +464,7 @@ async fn team_events_requires_authentication() {
                 .await;
 
             assert_eq!(response.status, StatusCode::OK);
-            assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
+            assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
         },
     )
     .await;
@@ -472,13 +472,13 @@ async fn team_events_requires_authentication() {
 
 #[tokio::test]
 async fn team_events_enforce_access_control_and_team_not_found_paths() {
-    with_rpc_test_app("audit_team_events_access_control", |app| async move {
+    with_api_test_app("audit_team_events_access_control", |app| async move {
         with_bittery_mode_async(Some("cloud"), async {
             let fixture = build_audit_router_fixture(&app.pool).await;
 
             let member_session = app.issue_session(&fixture.member_user_id).await;
             let member_response = app
-                .rpc_call(
+                .call_operation(
                     "audit.teamEvents",
                     json!([{}]),
                     authenticated_json_headers(&member_session.token),
@@ -493,7 +493,7 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let personal_session = app.issue_session(&fixture.personal_owner_user_id).await;
             let personal_response = app
-                .rpc_call(
+                .call_operation(
                     "audit.teamEvents",
                     json!([{}]),
                     authenticated_json_headers(&personal_session.token),
@@ -508,7 +508,7 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let inactive_session = app.issue_session(&fixture.inactive_owner_user_id).await;
             let inactive_response = app
-                .rpc_call(
+                .call_operation(
                     "audit.teamEvents",
                     json!([{}]),
                     authenticated_json_headers(&inactive_session.token),
@@ -523,7 +523,7 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
             let no_team_response = app
-                .rpc_call(
+                .call_operation(
                     "audit.teamEvents",
                     json!([{}]),
                     authenticated_json_headers(&no_team_session.token),
@@ -539,12 +539,12 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
 #[tokio::test]
 async fn team_events_allow_self_hosted_admins_without_team_plan() {
-    with_rpc_test_app("audit_team_events_self_hosted", |app| async move {
+    with_api_test_app("audit_team_events_self_hosted", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.personal_owner_user_id).await;
         let response = with_bittery_mode_async(
             Some("self_hosted"),
-            app.rpc_call(
+            app.call_operation(
                 "audit.teamEvents",
                 json!([{ "limit": 1 }]),
                 authenticated_json_headers(&session.token),
@@ -564,13 +564,13 @@ async fn team_events_allow_self_hosted_admins_without_team_plan() {
 
 #[tokio::test]
 async fn team_events_reject_malformed_request_input() {
-    with_rpc_test_app("audit_team_events_malformed_request", |app| async move {
+    with_api_test_app("audit_team_events_malformed_request", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
 
         let date_response = app
-            .rpc_call(
+            .call_operation(
                 "audit.teamEvents",
                 json!([{
                     "from": "2025-05-03T00:00:00Z",
@@ -587,7 +587,7 @@ async fn team_events_reject_malformed_request_input() {
         );
 
         let cursor_response = app
-            .rpc_call(
+            .call_operation(
                 "audit.teamEvents",
                 json!([{ "cursor": "not-base64" }]),
                 headers,
@@ -605,7 +605,7 @@ async fn team_events_reject_malformed_request_input() {
 
 #[tokio::test]
 async fn team_events_return_paginated_merged_results_with_cursor() {
-    with_rpc_test_app("audit_team_events_success_pagination", |app| async move {
+    with_api_test_app("audit_team_events_success_pagination", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         seed_audit_event(
             &app.pool,
@@ -648,7 +648,7 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
 
         let session = app.issue_session(&fixture.owner_user_id).await;
         let first_page = app
-            .rpc_call(
+            .call_operation(
                 "audit.teamEvents",
                 json!([{ "limit": 2 }]),
                 authenticated_json_headers(&session.token),
@@ -685,7 +685,7 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
             .to_string();
 
         let second_page = app
-            .rpc_call(
+            .call_operation(
                 "audit.teamEvents",
                 json!([{ "cursor": next_cursor }]),
                 authenticated_json_headers(&session.token),
@@ -718,7 +718,7 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
 
 #[tokio::test]
 async fn team_events_apply_share_other_and_actor_filters() {
-    with_rpc_test_app("audit_team_events_filtering", |app| async move {
+    with_api_test_app("audit_team_events_filtering", |app| async move {
         let fixture = build_audit_router_fixture(&app.pool).await;
         seed_audit_event(
             &app.pool,
@@ -775,7 +775,7 @@ async fn team_events_apply_share_other_and_actor_filters() {
         let headers = authenticated_json_headers(&session.token);
 
         let share_failure_response = app
-            .rpc_call(
+            .call_operation(
                 "audit.teamEvents",
                 json!([{ "actionGroup": "share", "result": "failure" }]),
                 headers.clone(),
@@ -799,7 +799,7 @@ async fn team_events_apply_share_other_and_actor_filters() {
         );
 
         let other_response = app
-            .rpc_call(
+            .call_operation(
                 "audit.teamEvents",
                 json!([{ "actionGroup": "other" }]),
                 headers.clone(),
@@ -823,7 +823,7 @@ async fn team_events_apply_share_other_and_actor_filters() {
         );
 
         let unknown_actor_response = app
-            .rpc_call(
+            .call_operation(
                 "audit.teamEvents",
                 json!([{ "actorUserId": "missing_member" }]),
                 headers,
@@ -864,13 +864,11 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert_eq!(body["result"]["Err"]["code"], json!(code));
     assert_eq!(body["result"]["Err"]["message"], json!(message));
 }
 
-fn assert_rpc_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
+fn assert_transport_error(body: &serde_json::Value, code: &str, message: &str) {
     assert_eq!(body["error"]["message"], json!(message));
     assert_eq!(body["error"]["data"]["code"], json!(code));
 }

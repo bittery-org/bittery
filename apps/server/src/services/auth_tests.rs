@@ -18,7 +18,7 @@ use super::{
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     assign_user_to_team, authenticated_json_headers, seed_team, seed_user, seed_vault,
-    seed_vault_key, with_raw_test_db, with_rpc_test_app, RpcTestApp,
+    seed_vault_key, with_api_test_app, with_raw_test_db, ApiTestApp,
 };
 use crate::{repo::common::hash_token, services::session::now_utc};
 use time::{Duration, OffsetDateTime};
@@ -77,7 +77,7 @@ struct LoginEphemeralFixture {
 #[tokio::test]
 async fn auth_public_signup_login_and_logout_flow() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_public_signup_login_and_logout_flow",
             |app| async move {
                 let email = "MixedCase.Auth@example.com";
@@ -85,7 +85,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 let crypto = build_auth_crypto_fixture("public-signup", "signup-password-123");
 
                 let registration = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.registrationStatus",
                         json!([]),
                         unauthenticated_json_headers(),
@@ -103,7 +103,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let unknown_email = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.checkEmail",
                         json!([{ "email": email }]),
                         unauthenticated_json_headers(),
@@ -117,7 +117,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let request_verification = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestSignupVerification",
                         json!([{ "email": email, "invitationToken": null }]),
                         unauthenticated_json_headers(),
@@ -132,7 +132,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 let code = latest_signup_verification_code(email, None);
 
                 let wrong_code = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifySignupVerification",
                         json!([{ "email": email, "code": "000000", "invitationToken": null }]),
                         unauthenticated_json_headers(),
@@ -146,7 +146,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let verify = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifySignupVerification",
                         json!([{ "email": email, "code": code, "invitationToken": null }]),
                         unauthenticated_json_headers(),
@@ -161,7 +161,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                     .to_string();
 
                 let signup = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.signup",
                         json!([{
                             "email": email,
@@ -198,7 +198,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                     .to_string();
 
                 let me = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.me",
                         json!([]),
                         authenticated_json_headers(&signup_token),
@@ -209,7 +209,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 assert_eq!(me.body["result"]["Ok"]["hasRecoveryKey"], json!(true));
 
                 let existing_email = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.checkEmail",
                         json!([{ "email": normalized_email }]),
                         unauthenticated_json_headers(),
@@ -222,7 +222,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let malformed_start = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.startLogin",
                         json!([{ "email": normalized_email, "clientPublicKey": "not-hex" }]),
                         unauthenticated_json_headers(),
@@ -237,7 +237,7 @@ async fn auth_public_signup_login_and_logout_flow() {
 
                 let ephemeral = build_login_ephemeral_fixture();
                 let start_login = app
-					.rpc_call(
+					.call_operation(
 						"auth.startLogin",
 						json!([{ "email": normalized_email, "clientPublicKey": ephemeral.public_key }]),
 						unauthenticated_json_headers(),
@@ -258,7 +258,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let finish_login = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.finishLogin",
                         json!([{
                             "attemptId": start_ok["attemptId"],
@@ -279,7 +279,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                     .to_string();
 
                 let refreshed = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.refreshSession",
                         json!([]),
                         authenticated_json_headers(&login_token),
@@ -293,7 +293,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 assert_ne!(refreshed_token, login_token);
 
                 let logout = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.logout",
                         json!([]),
                         authenticated_json_headers(&refreshed_token),
@@ -303,14 +303,14 @@ async fn auth_public_signup_login_and_logout_flow() {
                 assert_eq!(logout.body["result"]["Ok"]["success"], json!(true));
 
                 let me_after_logout = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.me",
                         json!([]),
                         authenticated_json_headers(&refreshed_token),
                     )
                     .await;
                 assert_eq!(me_after_logout.status, StatusCode::OK);
-                assert_rpc_error(
+                assert_transport_error(
                     &me_after_logout.body,
                     "UNAUTHORIZED",
                     "Authentication required",
@@ -326,9 +326,9 @@ async fn auth_public_signup_login_and_logout_flow() {
 async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
     with_auth_test_env_async(Some("cloud"), async {
         unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
-        with_rpc_test_app("auth_cloud_public_signup_disabled", |app| async move {
+        with_api_test_app("auth_cloud_public_signup_disabled", |app| async move {
             let registration = app
-                .rpc_call(
+                .call_operation(
                     "auth.registrationStatus",
                     json!([]),
                     unauthenticated_json_headers(),
@@ -350,7 +350,7 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
             let signup_verification_token =
                 issue_signup_verification_token(&app, email, None).await;
             let signup = app
-                .rpc_call(
+                .call_operation(
                     "auth.signup",
                     json!([{
                         "email": email,
@@ -387,7 +387,7 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
 async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() {
     with_auth_test_env_async(Some("cloud"), async {
         unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
-        with_rpc_test_app("auth_invitation_signup_public_disabled", |app| async move {
+        with_api_test_app("auth_invitation_signup_public_disabled", |app| async move {
             let fixture = build_auth_invitation_fixture(&app.pool, "beta_disabled").await;
             let crypto = build_auth_crypto_fixture("beta-invite", "invite-success-pass");
             let signup_verification_token = issue_signup_verification_token(
@@ -398,7 +398,7 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
             .await;
 
             let signup = app
-                .rpc_call(
+                .call_operation(
                     "auth.signupWithInvitation",
                     json!([{
                         "token": fixture.invitation_token,
@@ -432,7 +432,7 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
 
 #[tokio::test]
 async fn auth_protected_handlers_require_authentication() {
-    with_rpc_test_app("auth_protected_handlers_require_authentication", |app| async move {
+    with_api_test_app("auth_protected_handlers_require_authentication", |app| async move {
 			let protected_calls = vec![
 				("auth.me", json!([])),
 				("auth.updateEmail", json!([{ "newEmail": "new@example.com", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
@@ -451,10 +451,10 @@ async fn auth_protected_handlers_require_authentication() {
 
 			for (method, params) in protected_calls {
 				let response = app
-					.rpc_call(method, params, unauthenticated_json_headers())
+					.call_operation(method, params, unauthenticated_json_headers())
 					.await;
 				assert_eq!(response.status, StatusCode::OK, "unexpected status for {method}");
-				assert_rpc_error(
+				assert_transport_error(
 					&response.body,
 					"UNAUTHORIZED",
 					"Authentication required",
@@ -467,7 +467,7 @@ async fn auth_protected_handlers_require_authentication() {
 #[tokio::test]
 async fn auth_self_hosted_registration_requires_bootstrap_invite() {
     with_auth_test_env_async(Some("self-hosted"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_self_hosted_registration_requires_bootstrap_invite",
             |app| async move {
                 seed_user(
@@ -479,7 +479,7 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                 .await;
 
                 let registration = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.registrationStatus",
                         json!([]),
                         unauthenticated_json_headers(),
@@ -504,7 +504,7 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                 );
 
                 let verification = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestSignupVerification",
                         json!([{ "email": "new-user@example.com", "invitationToken": null }]),
                         unauthenticated_json_headers(),
@@ -535,14 +535,14 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
     unsafe { std::env::remove_var("BITTERY_ENABLE_DEV_AUTH_STUBS") };
     unsafe { std::env::set_var("NODE_ENV", "production") };
 
-    with_rpc_test_app(
+    with_api_test_app(
         "auth_self_hosted_bootstrap_signup_skips_email_verification",
         |app| async move {
             let email = "admin@example.com";
             let crypto = build_auth_crypto_fixture("self-hosted-admin", "bootstrap-password");
 
             let registration = app
-                .rpc_call(
+                .call_operation(
                     "auth.registrationStatus",
                     json!([]),
                     unauthenticated_json_headers(),
@@ -559,7 +559,7 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
             );
 
             let request_verification = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestSignupVerification",
                     json!([{ "email": email, "invitationToken": null }]),
                     unauthenticated_json_headers(),
@@ -572,7 +572,7 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
             );
 
             let signup = app
-                .rpc_call(
+                .call_operation(
                     "auth.signup",
                     json!([{
                         "email": email,
@@ -621,7 +621,7 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
 #[tokio::test]
 async fn auth_invited_signup_handles_missing_and_valid_invitations() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_invited_signup_handles_missing_and_valid_invitations",
             |app| async move {
                 let fixture = build_auth_invitation_fixture(&app.pool, "signup").await;
@@ -629,7 +629,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                     build_auth_crypto_fixture("invitation-missing", "invite-missing-pass");
 
                 let missing = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.signupWithInvitation",
                         json!([{
                             "token": build_valid_token("missing_invite"),
@@ -665,7 +665,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                 let crypto = build_auth_crypto_fixture("invitation-success", "invite-success-pass");
 
                 let signup = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.signupWithInvitation",
                         json!([{
                             "token": fixture.invitation_token,
@@ -707,14 +707,14 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
 #[tokio::test]
 async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "auth_recovery_flow_verifies_codes_returns_data_and_resets_password",
             |app| async move {
                 let fixture = build_seeded_auth_account_fixture(&app.pool, "recovery").await;
                 let existing_session = app.issue_session(&fixture.user_id).await;
 
                 let request_recovery = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestRecoveryVerification",
                         json!([{ "email": fixture.email }]),
                         unauthenticated_json_headers(),
@@ -729,7 +729,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 let code = latest_recovery_code(&fixture.email);
 
                 let wrong_code = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifyRecoveryCode",
                         json!([{ "email": fixture.email, "code": "000000" }]),
                         unauthenticated_json_headers(),
@@ -739,7 +739,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 assert_eq!(wrong_code.body["result"]["Ok"]["success"], json!(false));
 
                 let verified = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifyRecoveryCode",
                         json!([{ "email": fixture.email, "code": code }]),
                         unauthenticated_json_headers(),
@@ -753,7 +753,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .to_string();
 
                 let replayed_code = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifyRecoveryCode",
                         json!([{ "email": fixture.email, "code": code }]),
                         unauthenticated_json_headers(),
@@ -764,7 +764,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 assert!(replayed_code.body["result"]["Ok"]["recoveryToken"].is_null());
 
                 let invalid_recovery = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.getRecoveryData",
                         json!([{ "recoveryToken": "invalid-token" }]),
                         unauthenticated_json_headers(),
@@ -778,7 +778,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 );
 
                 let recovery_data = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.getRecoveryData",
                         json!([{ "recoveryToken": recovery_token.clone() }]),
                         unauthenticated_json_headers(),
@@ -797,7 +797,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
 
                 let next_crypto = build_auth_crypto_fixture("recovery-reset", "reset-password-123");
                 let reset = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.resetPassword",
                         json!([{
                             "recoveryToken": verified.body["result"]["Ok"]["recoveryToken"],
@@ -820,7 +820,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 assert_eq!(reset.body["result"]["Ok"]["userId"], json!(fixture.user_id));
 
                 let reused_recovery = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.getRecoveryData",
                         json!([{ "recoveryToken": recovery_token }]),
                         unauthenticated_json_headers(),
@@ -855,7 +855,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
 
 #[tokio::test]
 async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
-    with_rpc_test_app(
+    with_api_test_app(
         "auth_account_mutations_update_credentials_and_revoke_sessions",
         |app| async move {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "mutations").await;
@@ -871,7 +871,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let update_crypto = build_auth_crypto_fixture("update-email", "update-email-pass");
 
             let conflict = app
-                .rpc_call(
+                .call_operation(
                     "auth.updateEmail",
                     json!([{
                         "newEmail": "conflict@example.com",
@@ -891,7 +891,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             assert_handler_error(&conflict.body, "BAD_REQUEST", "Email already in use");
 
             let update_email = app
-                .rpc_call(
+                .call_operation(
                     "auth.updateEmail",
                     json!([{
                         "newEmail": "updated-auth@example.com",
@@ -928,7 +928,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let change_crypto =
                 build_auth_crypto_fixture("change-password", "change-password-pass");
             let change_password = app
-                .rpc_call(
+                .call_operation(
                     "auth.changePassword",
                     json!([{
                         "srpSalt": change_crypto.srp_salt,
@@ -957,7 +957,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let regenerate_crypto =
                 build_auth_crypto_fixture("regen-secret-key", "regen-secret-pass");
             let regenerate = app
-                .rpc_call(
+                .call_operation(
                     "auth.regenerateSecretKey",
                     json!([{
                         "secretKeyHint": regenerate_crypto.secret_key_hint,
@@ -990,7 +990,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
 
             let recovery_session = app.issue_session(&fixture.user_id).await;
             let store_recovery = app
-                .rpc_call(
+                .call_operation(
                     "auth.storeRecoveryKey",
                     json!([{
                         "encryptedMasterKey": "stored-master-key",
@@ -1017,7 +1017,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
 
 #[tokio::test]
 async fn auth_session_management_and_account_deletion_flow() {
-    with_rpc_test_app(
+    with_api_test_app(
         "auth_session_management_and_account_deletion_flow",
         |app| async move {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "sessions").await;
@@ -1025,7 +1025,7 @@ async fn auth_session_management_and_account_deletion_flow() {
             let other_session = app.issue_session(&fixture.user_id).await;
 
             let devices = app
-                .rpc_call(
+                .call_operation(
                     "auth.listDevices",
                     json!([]),
                     authenticated_json_headers(&current_session.token),
@@ -1041,7 +1041,7 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let invalid_rename = app
-                .rpc_call(
+                .call_operation(
                     "auth.renameDevice",
                     json!([{ "sessionId": other_session.session_id, "deviceName": "   " }]),
                     authenticated_json_headers(&current_session.token),
@@ -1055,7 +1055,7 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let rename = app
-                .rpc_call(
+                .call_operation(
                     "auth.renameDevice",
                     json!([{ "sessionId": other_session.session_id, "deviceName": "Work Laptop" }]),
                     authenticated_json_headers(&current_session.token),
@@ -1073,7 +1073,7 @@ async fn auth_session_management_and_account_deletion_flow() {
             .expect("current session last_active_at should load");
 
             let heartbeat = app
-                .rpc_call(
+                .call_operation(
                     "auth.heartbeat",
                     json!([]),
                     authenticated_json_headers(&current_session.token),
@@ -1092,7 +1092,7 @@ async fn auth_session_management_and_account_deletion_flow() {
             assert!(after_heartbeat >= before_heartbeat);
 
             let current_revoke = app
-                .rpc_call(
+                .call_operation(
                     "auth.revokeDevice",
                     json!([{ "sessionId": current_session.session_id }]),
                     authenticated_json_headers(&current_session.token),
@@ -1106,7 +1106,7 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let revoke = app
-                .rpc_call(
+                .call_operation(
                     "auth.revokeDevice",
                     json!([{ "sessionId": other_session.session_id }]),
                     authenticated_json_headers(&current_session.token),
@@ -1123,7 +1123,7 @@ async fn auth_session_management_and_account_deletion_flow() {
 
             let extra_session = app.issue_session(&fixture.user_id).await;
             let logout_all = app
-                .rpc_call(
+                .call_operation(
                     "auth.logoutAll",
                     json!([]),
                     authenticated_json_headers(&current_session.token),
@@ -1146,7 +1146,7 @@ async fn auth_session_management_and_account_deletion_flow() {
 
             let delete_session = app.issue_session(&fixture.user_id).await;
             let wrong_confirm = app
-                .rpc_call(
+                .call_operation(
                     "auth.deleteAccount",
                     json!([{ "confirmEmail": "wrong@example.com" }]),
                     authenticated_json_headers(&delete_session.token),
@@ -1156,7 +1156,7 @@ async fn auth_session_management_and_account_deletion_flow() {
             assert_handler_error(&wrong_confirm.body, "BAD_REQUEST", "Email does not match");
 
             let delete_account = app
-                .rpc_call(
+                .call_operation(
                     "auth.deleteAccount",
                     json!([{ "confirmEmail": fixture.email }]),
                     authenticated_json_headers(&delete_session.token),
@@ -1453,13 +1453,11 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert_eq!(body["result"]["Err"]["code"], json!(code));
     assert_eq!(body["result"]["Err"]["message"], json!(message));
 }
 
-fn assert_rpc_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
+fn assert_transport_error(body: &serde_json::Value, code: &str, message: &str) {
     assert_eq!(body["error"]["message"], json!(message));
     assert_eq!(body["error"]["data"]["code"], json!(code));
 }
@@ -1498,12 +1496,12 @@ fn latest_recovery_code(email: &str) -> String {
 }
 
 async fn issue_signup_verification_token(
-    app: &RpcTestApp,
+    app: &ApiTestApp,
     email: &str,
     invitation_token: Option<&str>,
 ) -> String {
     let request = app
-        .rpc_call(
+        .call_operation(
             "auth.requestSignupVerification",
             json!([{ "email": email, "invitationToken": invitation_token }]),
             unauthenticated_json_headers(),
@@ -1514,7 +1512,7 @@ async fn issue_signup_verification_token(
 
     let code = latest_signup_verification_code(email, invitation_token);
     let verified = app
-        .rpc_call(
+        .call_operation(
             "auth.verifySignupVerification",
             json!([{ "email": email, "code": code, "invitationToken": invitation_token }]),
             unauthenticated_json_headers(),
@@ -1719,7 +1717,7 @@ fn object_keys(value: &serde_json::Value) -> Vec<String> {
 #[tokio::test]
 async fn verify_recovery_code_locks_out_after_repeated_failures() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "rate_limit_recovery_verify_lockout",
             |app| async move {
                 let _env = rate_limit_env(&[
@@ -1729,7 +1727,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                 let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery").await;
 
                 let request = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestRecoveryVerification",
                         json!([{ "email": fixture.email }]),
                         unauthenticated_json_headers(),
@@ -1741,7 +1739,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                 // Two wrong attempts stay below the threshold.
                 for _ in 0..2 {
                     let wrong = app
-                        .rpc_call(
+                        .call_operation(
                             "auth.verifyRecoveryCode",
                             json!([{ "email": fixture.email, "code": "000000" }]),
                             unauthenticated_json_headers(),
@@ -1752,7 +1750,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 
                 // Third wrong attempt trips the lockout.
                 let tripped = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifyRecoveryCode",
                         json!([{ "email": fixture.email, "code": "000000" }]),
                         unauthenticated_json_headers(),
@@ -1766,7 +1764,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 
                 // The correct code must still fail while locked.
                 let correct = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifyRecoveryCode",
                         json!([{ "email": fixture.email, "code": code }]),
                         unauthenticated_json_headers(),
@@ -1819,11 +1817,11 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 #[tokio::test]
 async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("signup_verification_code_hashed", |app| async move {
+        with_api_test_app("signup_verification_code_hashed", |app| async move {
             let email = "signup-code-hashed@example.com";
 
             let request = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestSignupVerification",
                     json!([{ "email": email, "invitationToken": null }]),
                     unauthenticated_json_headers(),
@@ -1846,7 +1844,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
 
             // Replaying the stored column as if it were the code must fail.
             let replayed = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifySignupVerification",
                     json!([{ "email": email, "code": stored, "invitationToken": null }]),
                     unauthenticated_json_headers(),
@@ -1855,7 +1853,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
             assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
 
             let wrong = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifySignupVerification",
                     json!([{ "email": email, "code": "000000", "invitationToken": null }]),
                     unauthenticated_json_headers(),
@@ -1864,7 +1862,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
             assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
 
             let verified = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifySignupVerification",
                     json!([{ "email": email, "code": code, "invitationToken": null }]),
                     unauthenticated_json_headers(),
@@ -1881,11 +1879,11 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
 #[tokio::test]
 async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("recovery_verification_code_hashed", |app| async move {
+        with_api_test_app("recovery_verification_code_hashed", |app| async move {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "codehash").await;
 
             let request = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestRecoveryVerification",
                     json!([{ "email": fixture.email }]),
                     unauthenticated_json_headers(),
@@ -1906,7 +1904,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
             assert_eq!(stored, hash_token(&code));
 
             let replayed = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifyRecoveryCode",
                     json!([{ "email": fixture.email, "code": stored }]),
                     unauthenticated_json_headers(),
@@ -1915,7 +1913,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
             assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
 
             let verified = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifyRecoveryCode",
                     json!([{ "email": fixture.email, "code": code }]),
                     unauthenticated_json_headers(),
@@ -1933,11 +1931,11 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
 #[tokio::test]
 async fn signup_verification_invitation_token_is_stored_hashed() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("signup_verification_invite_hashed", |app| async move {
+        with_api_test_app("signup_verification_invite_hashed", |app| async move {
             let fixture = build_auth_invitation_fixture(&app.pool, "invite_hashed").await;
 
             let request = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestSignupVerification",
                     json!([{
                         "email": fixture.invited_email,
@@ -1964,7 +1962,7 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
             let code =
                 latest_signup_verification_code(&fixture.invited_email, Some(&fixture.invitation_token));
             let verified = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifySignupVerification",
                     json!([{
                         "email": fixture.invited_email,
@@ -1988,7 +1986,7 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
 #[tokio::test]
 async fn verify_signup_verification_locks_out_across_code_re_request() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup_verify_lockout", |app| async move {
+        with_api_test_app("rate_limit_signup_verify_lockout", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "3"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_LOCK_MINUTES", "15"),
@@ -1999,7 +1997,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
             let ip = "198.51.100.20";
 
             let request = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestSignupVerification",
                     json!([{ "email": email, "invitationToken": null }]),
                     headers_with_ip(ip),
@@ -2010,7 +2008,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
             // Two wrong guesses against the first code stay below the threshold.
             for _ in 0..2 {
                 let wrong = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifySignupVerification",
                         json!([{ "email": email, "code": "000000", "invitationToken": null }]),
                         headers_with_ip(ip),
@@ -2021,7 +2019,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 
             // Requesting a fresh code resets `signup_verification.attempts` to 0.
             let re_request = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestSignupVerification",
                     json!([{ "email": email, "invitationToken": null }]),
                     headers_with_ip(ip),
@@ -2032,7 +2030,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 
             // The lifetime counter is unaffected, so the very next wrong guess trips it.
             let tripped = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifySignupVerification",
                     json!([{ "email": email, "code": "000000", "invitationToken": null }]),
                     headers_with_ip(ip),
@@ -2046,7 +2044,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 
             // The correct code must still fail while locked.
             let correct = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifySignupVerification",
                     json!([{ "email": email, "code": code, "invitationToken": null }]),
                     headers_with_ip(ip),
@@ -2086,7 +2084,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 #[tokio::test]
 async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup_verify_no_pending", |app| async move {
+        with_api_test_app("rate_limit_signup_verify_no_pending", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "2"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
@@ -2097,7 +2095,7 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
 
             for _ in 0..4 {
                 let attempt = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifySignupVerification",
                         json!([{ "email": email, "code": "000000", "invitationToken": null }]),
                         headers_with_ip(ip),
@@ -2120,7 +2118,7 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
 #[tokio::test]
 async fn verify_signup_verification_rejects_malformed_codes_without_consuming_attempts() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup_verify_malformed", |app| async move {
+        with_api_test_app("rate_limit_signup_verify_malformed", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_SIGNUP_VERIFY_MAX", "50"),
                 ("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "50"),
@@ -2130,7 +2128,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
             let ip = "198.51.100.22";
 
             let request = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestSignupVerification",
                     json!([{ "email": email, "invitationToken": null }]),
                     headers_with_ip(ip),
@@ -2141,7 +2139,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 
             for malformed in ["", "12345", "1234567", "abcdef", "12 456"] {
                 let attempt = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.verifySignupVerification",
                         json!([{ "email": email, "code": malformed, "invitationToken": null }]),
                         headers_with_ip(ip),
@@ -2161,7 +2159,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 
             // The real code is still redeemable.
             let verified = app
-                .rpc_call(
+                .call_operation(
                     "auth.verifySignupVerification",
                     json!([{ "email": email, "code": code, "invitationToken": null }]),
                     headers_with_ip(ip),
@@ -2178,7 +2176,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 #[tokio::test]
 async fn request_signup_verification_limits_one_email_across_rotating_ips() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "rate_limit_signup_verify_req_ip_rotation",
             |app| async move {
                 let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
@@ -2186,7 +2184,7 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
 
                 for ip in ["203.0.113.31", "203.0.113.32"] {
                     let response = app
-                        .rpc_call(
+                        .call_operation(
                             "auth.requestSignupVerification",
                             json!([{ "email": email, "invitationToken": null }]),
                             headers_with_ip(ip),
@@ -2196,7 +2194,7 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
                 }
 
                 let blocked = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestSignupVerification",
                         json!([{ "email": email, "invitationToken": null }]),
                         headers_with_ip("203.0.113.33"),
@@ -2218,7 +2216,7 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
 #[tokio::test]
 async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app(
+        with_api_test_app(
             "rate_limit_signup_verify_req_email_rotation",
             |app| async move {
                 let _env = rate_limit_env(&[("RATE_LIMIT_SIGNUP_VERIFY_REQUEST", "2")]);
@@ -2226,7 +2224,7 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
 
                 for email in ["sv-rot-a@example.com", "sv-rot-b@example.com"] {
                     let response = app
-                        .rpc_call(
+                        .call_operation(
                             "auth.requestSignupVerification",
                             json!([{ "email": email, "invitationToken": null }]),
                             headers_with_ip(ip),
@@ -2236,7 +2234,7 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
                 }
 
                 let blocked = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestSignupVerification",
                         json!([{ "email": "sv-rot-c@example.com", "invitationToken": null }]),
                         headers_with_ip(ip),
@@ -2257,7 +2255,7 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
 #[tokio::test]
 async fn start_login_is_rate_limited_per_ip() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_start_login_ip", |app| async move {
+        with_api_test_app("rate_limit_start_login_ip", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_LOGIN_IP", "3"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "50"),
@@ -2267,7 +2265,7 @@ async fn start_login_is_rate_limited_per_ip() {
 
             for _ in 0..3 {
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.startLogin",
                         json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
                         headers_with_ip("203.0.113.10"),
@@ -2277,7 +2275,7 @@ async fn start_login_is_rate_limited_per_ip() {
             }
 
             let blocked = app
-                .rpc_call(
+                .call_operation(
                     "auth.startLogin",
                     json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
                     headers_with_ip("203.0.113.10"),
@@ -2291,7 +2289,7 @@ async fn start_login_is_rate_limited_per_ip() {
 
             // A different IP is unaffected.
             let other_ip = app
-                .rpc_call(
+                .call_operation(
                     "auth.startLogin",
                     json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
                     headers_with_ip("203.0.113.99"),
@@ -2310,7 +2308,7 @@ async fn start_login_is_rate_limited_per_ip() {
 #[tokio::test]
 async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_start_login_spoofed_ip", |app| async move {
+        with_api_test_app("rate_limit_start_login_spoofed_ip", |app| async move {
             let _env = RateLimitEnvGuard::set(&[
                 ("TRUST_PROXY_MODE", "none"),
                 ("RATE_LIMIT_LOGIN_IP", "3"),
@@ -2321,7 +2319,7 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 
             for index in 0..3 {
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.startLogin",
                         json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
                         headers_with_ip(&format!("203.0.113.{index}")),
@@ -2332,7 +2330,7 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 
             // A fourth forged address does not escape the per-IP window.
             let blocked = app
-                .rpc_call(
+                .call_operation(
                     "auth.startLogin",
                     json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
                     headers_with_ip("203.0.113.250"),
@@ -2352,7 +2350,7 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 #[tokio::test]
 async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_start_login_email", |app| async move {
+        with_api_test_app("rate_limit_start_login_email", |app| async move {
             let _env = rate_limit_env(&[
                 ("RATE_LIMIT_LOGIN_IP", "50"),
                 ("RATE_LIMIT_LOGIN_EMAIL", "3"),
@@ -2364,7 +2362,7 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
             // across different IPs.
             for index in 0..3 {
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.startLogin",
                         json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
                         headers_with_ip(&format!("198.51.100.{index}")),
@@ -2373,7 +2371,7 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
                 assert!(response.body["result"]["Ok"].is_object());
             }
             let blocked = app
-                .rpc_call(
+                .call_operation(
                     "auth.startLogin",
                     json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
                     headers_with_ip("198.51.100.200"),
@@ -2397,14 +2395,14 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
                 .await
                 .expect("registered account SRP fixture should update");
             let registered = app
-                .rpc_call(
+                .call_operation(
                     "auth.startLogin",
                     json!([{ "email": fixture.email, "clientPublicKey": ephemeral.public_key }]),
                     headers_with_ip("198.51.100.240"),
                 )
                 .await;
             let fresh_missing = app
-                .rpc_call(
+                .call_operation(
                     "auth.startLogin",
                     json!([{ "email": "rl-login-fresh-missing@example.com", "clientPublicKey": ephemeral.public_key }]),
                     headers_with_ip("198.51.100.241"),
@@ -2423,7 +2421,7 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
 #[tokio::test]
 async fn signup_is_rate_limited_per_ip_and_per_email() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_signup", |app| async move {
+        with_api_test_app("rate_limit_signup", |app| async move {
             let crypto = build_auth_crypto_fixture("rl-signup", "signup-password-123");
 
             // Per-IP: same IP, varying emails.
@@ -2434,7 +2432,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                 ]);
                 for index in 0..2 {
                     let response = app
-                        .rpc_call(
+                        .call_operation(
                             "auth.signup",
                             signup_params(&crypto, &format!("rl-signup-ip-{index}@example.com")),
                             headers_with_ip("192.0.2.10"),
@@ -2444,7 +2442,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                     assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.signup",
                         signup_params(&crypto, "rl-signup-ip-blocked@example.com"),
                         headers_with_ip("192.0.2.10"),
@@ -2465,7 +2463,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                 let email = "rl-signup-email@example.com";
                 for index in 0..2 {
                     let response = app
-                        .rpc_call(
+                        .call_operation(
                             "auth.signup",
                             signup_params(&crypto, email),
                             headers_with_ip(&format!("192.0.2.{}", 100 + index)),
@@ -2474,7 +2472,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                     assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.signup",
                         signup_params(&crypto, email),
                         headers_with_ip("192.0.2.200"),
@@ -2494,13 +2492,13 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
 #[tokio::test]
 async fn request_recovery_verification_is_rate_limited() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_recovery_request", |app| async move {
+        with_api_test_app("rate_limit_recovery_request", |app| async move {
             let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery_req").await;
 
             for _ in 0..2 {
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestRecoveryVerification",
                         json!([{ "email": fixture.email }]),
                         headers_with_ip("192.0.2.55"),
@@ -2510,7 +2508,7 @@ async fn request_recovery_verification_is_rate_limited() {
             }
 
             let blocked = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestRecoveryVerification",
                     json!([{ "email": fixture.email }]),
                     headers_with_ip("192.0.2.55"),
@@ -2532,13 +2530,13 @@ async fn request_recovery_verification_is_rate_limited() {
 #[tokio::test]
 async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_recovery_req_ip_rotation", |app| async move {
+        with_api_test_app("rate_limit_recovery_req_ip_rotation", |app| async move {
             let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_rec_ip_rot").await;
 
             for ip in ["198.51.100.1", "198.51.100.2"] {
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestRecoveryVerification",
                         json!([{ "email": fixture.email }]),
                         headers_with_ip(ip),
@@ -2549,7 +2547,7 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 
             // A third, previously unseen IP still hits the per-email counter.
             let blocked = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestRecoveryVerification",
                     json!([{ "email": fixture.email }]),
                     headers_with_ip("198.51.100.3"),
@@ -2571,7 +2569,7 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 #[tokio::test]
 async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("rate_limit_recovery_req_email_rotation", |app| async move {
+        with_api_test_app("rate_limit_recovery_req_email_rotation", |app| async move {
             let _env = rate_limit_env(&[("RATE_LIMIT_RECOVERY_REQUEST", "2")]);
             let first = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_a").await;
             let second = build_seeded_auth_account_fixture(&app.pool, "rl_rec_em_rot_b").await;
@@ -2579,7 +2577,7 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
 
             for email in [&first.email, &second.email] {
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         "auth.requestRecoveryVerification",
                         json!([{ "email": email }]),
                         headers_with_ip("203.0.113.9"),
@@ -2590,7 +2588,7 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
 
             // A third, previously unseen email still hits the per-IP counter.
             let blocked = app
-                .rpc_call(
+                .call_operation(
                     "auth.requestRecoveryVerification",
                     json!([{ "email": third.email }]),
                     headers_with_ip("203.0.113.9"),
@@ -2656,10 +2654,10 @@ async fn insert_kdf_login_user(
     .expect("kdf login user should seed");
 }
 
-async fn start_login_ok(app: &RpcTestApp, email: &str) -> serde_json::Value {
+async fn start_login_ok(app: &ApiTestApp, email: &str) -> serde_json::Value {
     let ephemeral = build_login_ephemeral_fixture();
     let response = app
-        .rpc_call(
+        .call_operation(
             "auth.startLogin",
             json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
             unauthenticated_json_headers(),
@@ -2681,7 +2679,7 @@ async fn stored_kdf_row(pool: &PgPool, user_id: &str) -> (String, i32, i32) {
 
 #[tokio::test]
 async fn start_login_known_and_unknown_emails_return_identical_kdf_profiles() {
-    with_rpc_test_app("start_login_indistinguishable_kdf", |app| async move {
+    with_api_test_app("start_login_indistinguishable_kdf", |app| async move {
         let known = build_auth_crypto_fixture("kdf-known", "pw-known");
         insert_kdf_login_user(
             &app.pool,
@@ -2701,7 +2699,7 @@ async fn start_login_known_and_unknown_emails_return_identical_kdf_profiles() {
 
 #[tokio::test]
 async fn start_login_unknown_email_returns_stable_default_kdf_params() {
-    with_rpc_test_app("start_login_unknown_kdf", |app| async move {
+    with_api_test_app("start_login_unknown_kdf", |app| async move {
         let first = start_login_ok(&app, "ghost-kdf@example.com").await;
         let second = start_login_ok(&app, "ghost-kdf@example.com").await;
 
@@ -2724,14 +2722,14 @@ async fn start_login_unknown_email_returns_stable_default_kdf_params() {
 #[tokio::test]
 async fn signup_persists_only_the_exact_current_kdf_profile() {
     with_auth_test_env_async(Some("cloud"), async {
-        with_rpc_test_app("signup_kdf_round_trip", |app| async move {
+        with_api_test_app("signup_kdf_round_trip", |app| async move {
             let email = "kdf-signup@example.com";
             let crypto = build_auth_crypto_fixture("kdf-signup", "kdf-signup-pass");
             let signup_verification_token =
                 issue_signup_verification_token(&app, email, None).await;
 
             let signup = app
-                .rpc_call(
+                .call_operation(
                     "auth.signup",
                     json!([{
                         "email": email,
@@ -2773,7 +2771,7 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
 
             // Below-floor submission is rejected before the account is created.
             let below_floor = app
-                .rpc_call(
+                .call_operation(
                     "auth.signup",
                     json!([{
                         "email": "kdf-weak@example.com",
@@ -2804,7 +2802,7 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
 
 #[tokio::test]
 async fn change_password_rewrites_kdf_params_alongside_verifier() {
-    with_rpc_test_app("change_password_kdf", |app| async move {
+    with_api_test_app("change_password_kdf", |app| async move {
         let original = build_auth_crypto_fixture("kdf-change-orig", "orig-pass");
         insert_kdf_login_user(
             &app.pool,
@@ -2818,7 +2816,7 @@ async fn change_password_rewrites_kdf_params_alongside_verifier() {
 
         let next = build_auth_crypto_fixture("kdf-change-next", "next-pass");
         let change = app
-            .rpc_call(
+            .call_operation(
                 "auth.changePassword",
                 json!([{
                     "srpSalt": next.srp_salt,
@@ -2849,7 +2847,7 @@ async fn change_password_rewrites_kdf_params_alongside_verifier() {
 
 #[tokio::test]
 async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
-    with_rpc_test_app("verifier_mutation_kdf_policy", |app| async move {
+    with_api_test_app("verifier_mutation_kdf_policy", |app| async move {
         seed_user(
             &app.pool,
             "kdf_policy_user",
@@ -2912,7 +2910,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
 
             for (method, payload) in mutations {
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         method,
                         json!([payload]),
                         authenticated_json_headers(&session.token),
@@ -2927,7 +2925,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
 
 #[tokio::test]
 async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failure() {
-    with_rpc_test_app("change_password_kdf_rollback", |app| async move {
+    with_api_test_app("change_password_kdf_rollback", |app| async move {
         let original = build_auth_crypto_fixture("kdf-rollback-orig", "orig-pass");
         insert_kdf_login_user(
             &app.pool,
@@ -2978,7 +2976,7 @@ async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failur
         let session = app.issue_session("kdf_rollback_user").await;
         let next = build_auth_crypto_fixture("kdf-rollback-next", "next-pass");
         let response = app
-            .rpc_call(
+            .call_operation(
                 "auth.changePassword",
                 json!([{
                     "srpSalt": next.srp_salt,

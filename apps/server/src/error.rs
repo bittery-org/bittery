@@ -1,10 +1,6 @@
-use jsonrpsee_qubit::IntoResponse;
-use qubit::{ErrorCode, RpcError};
 use serde::Serialize;
-use serde_json::json;
-use ts_rs::TS;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, TS)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub enum AppErrorCode {
     #[serde(rename = "INTERNAL_SERVER_ERROR")]
     InternalServerError,
@@ -22,7 +18,7 @@ pub enum AppErrorCode {
     TooManyRequests,
 }
 
-#[derive(Clone, Debug, Serialize, TS)]
+#[derive(Clone, Debug, Serialize)]
 pub struct AppError {
     pub code: AppErrorCode,
     pub message: String,
@@ -82,33 +78,5 @@ impl AppError {
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}: {}", self.code, self.message)
-    }
-}
-
-impl From<AppError> for RpcError {
-    fn from(value: AppError) -> Self {
-        let code = match value.code {
-            AppErrorCode::Unauthorized => ErrorCode::ServerError(401),
-            AppErrorCode::Forbidden => ErrorCode::ServerError(403),
-            AppErrorCode::NotFound => ErrorCode::ServerError(404),
-            AppErrorCode::Conflict => ErrorCode::ServerError(409),
-            AppErrorCode::TooManyRequests => ErrorCode::ServerError(429),
-            AppErrorCode::BadRequest => ErrorCode::InvalidParams,
-            AppErrorCode::InternalServerError => ErrorCode::InternalError,
-        };
-
-        RpcError {
-            code,
-            message: value.message,
-            data: Some(json!({ "code": value.code })),
-        }
-    }
-}
-
-impl IntoResponse for AppError {
-    type Output = <RpcError as IntoResponse>::Output;
-
-    fn into_response(self) -> jsonrpsee_qubit::ResponsePayload<'static, Self::Output> {
-        RpcError::from(self).into_response()
     }
 }

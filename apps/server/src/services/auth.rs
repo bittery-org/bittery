@@ -9,7 +9,6 @@ use bittery_crypto_core::{
     srp6a::{HashAlgorithm, PrimeGroup, SrpServer},
 };
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
-use qubit::{Extensions, FromRequestExtensions, RpcError};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -19,7 +18,6 @@ use std::net::SocketAddr;
 use std::sync::LazyLock;
 use time::{Duration, OffsetDateTime};
 use tracing::info;
-use ts_rs::TS;
 
 use crate::{
     config::{
@@ -52,6 +50,9 @@ const AUTHORIZATION_HEADER: &str = "authorization";
 const CLIENT_ID_HEADER: &str = "x-client-id";
 const APP_PLATFORM_HEADER: &str = "x-app-platform";
 const SESSION_EXPIRY_HEADER: &str = "x-session-expires";
+const API_CLIENT_ID_HEADER: &str = "bittery-client-id";
+const API_CLIENT_PLATFORM_HEADER: &str = "bittery-client-platform";
+const API_SESSION_EXPIRY_HEADER: &str = "bittery-session-expires";
 const JWT_ISSUER: &str = "bittery";
 const SIGNUP_VERIFICATION_JWT_AUDIENCE: &str = "bittery-signup-verification";
 const RECOVERY_JWT_AUDIENCE: &str = "bittery-recovery";
@@ -68,24 +69,7 @@ const FAKE_SRP_VERIFIER: &str = concat!(
     "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 );
 
-pub struct RefreshSessionContext {
-    pub app_state: AppState,
-    pub session: VerifiedSession,
-    pub request: RequestMetadata,
-}
-
-#[derive(Clone)]
-pub struct AppContext {
-    pub app_state: AppState,
-}
-
-#[derive(Clone)]
-pub struct PublicAuthContext {
-    pub app_state: AppState,
-    pub request: RequestMetadata,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RegistrationStatusResponse {
     pub mode: String,
@@ -165,13 +149,13 @@ struct DbRecoveryVaultKeyRow {
     created_by_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckEmailInput {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestSignupVerificationInput {
@@ -179,7 +163,7 @@ pub struct RequestSignupVerificationInput {
     pub invitation_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VerifySignupVerificationInput {
@@ -188,14 +172,14 @@ pub struct VerifySignupVerificationInput {
     pub invitation_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckEmailResponse {
     pub exists: bool,
     pub secret_key_hint: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MeResponse {
     pub id: String,
@@ -213,12 +197,12 @@ pub struct MeResponse {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 pub struct LogoutResponse {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifySignupVerificationResponse {
     pub success: bool,
@@ -229,8 +213,8 @@ pub struct VerifySignupVerificationResponse {
 ///
 /// The salt is transported separately as `srp_salt`; these fields describe the
 /// algorithm/work factor so login can be reproduced and so verifier-producing
-/// RPCs can enforce the exact current server profile.
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+/// API requests can enforce the exact current server profile.
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct KdfParamsInput {
@@ -239,7 +223,7 @@ pub struct KdfParamsInput {
     pub iterations: u32,
 }
 
-/// A client profile accepted for persistence by a verifier-producing RPC.
+/// A client profile accepted for persistence by a verifier-producing request.
 ///
 /// This is deliberately stricter than the client-side profile window: while
 /// clients may validate a bounded future work factor, the server persists one
@@ -272,7 +256,7 @@ impl TryFrom<&KdfParamsInput> for ValidatedKdfProfile {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SignupInput {
@@ -294,7 +278,7 @@ pub struct SignupInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SignupWithInvitationInput {
@@ -315,7 +299,7 @@ pub struct SignupWithInvitationInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthSessionUserResponse {
     pub id: String,
@@ -331,7 +315,7 @@ pub struct AuthSessionUserResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuthVaultKeyResponse {
     pub vault_id: String,
@@ -343,7 +327,7 @@ pub struct AuthVaultKeyResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignupResponse {
     pub success: bool,
@@ -355,7 +339,7 @@ pub struct SignupResponse {
     pub vault_keys: Vec<AuthVaultKeyResponse>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct StartLoginInput {
@@ -363,7 +347,7 @@ pub struct StartLoginInput {
     pub client_public_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct FinishLoginInput {
@@ -372,7 +356,7 @@ pub struct FinishLoginInput {
     pub client_proof: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginKdfParamsResponse {
     pub schema_version: u32,
@@ -380,7 +364,7 @@ pub struct LoginKdfParamsResponse {
     pub iterations: u32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StartLoginResponse {
     pub attempt_id: String,
@@ -389,7 +373,7 @@ pub struct StartLoginResponse {
     pub kdf_params: LoginKdfParamsResponse,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LoginUserResponse {
     pub id: String,
@@ -400,7 +384,7 @@ pub struct LoginUserResponse {
     pub encrypted_private_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FinishLoginResponse {
     pub token: String,
@@ -410,14 +394,14 @@ pub struct FinishLoginResponse {
     pub user: LoginUserResponse,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RequestRecoveryVerificationInput {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VerifyRecoveryCodeInput {
@@ -425,21 +409,21 @@ pub struct VerifyRecoveryCodeInput {
     pub code: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerifyRecoveryCodeResponse {
     pub success: bool,
     pub recovery_token: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetRecoveryDataInput {
     pub recovery_token: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryVaultKeyResponse {
     pub vault_id: String,
@@ -447,7 +431,7 @@ pub struct RecoveryVaultKeyResponse {
     pub created_by_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetRecoveryDataResponse {
     pub user_id: String,
@@ -458,14 +442,14 @@ pub struct GetRecoveryDataResponse {
     pub vault_keys: Vec<RecoveryVaultKeyResponse>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EncryptedVaultKeyInput {
     pub vault_id: String,
     pub encrypted_vault_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ResetPasswordInput {
@@ -480,7 +464,7 @@ pub struct ResetPasswordInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetPasswordResponse {
     pub token: String,
@@ -489,7 +473,7 @@ pub struct ResetPasswordResponse {
     pub user_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateEmailInput {
@@ -501,7 +485,7 @@ pub struct UpdateEmailInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ChangePasswordInput {
@@ -512,7 +496,7 @@ pub struct ChangePasswordInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RegenerateSecretKeyInput {
@@ -524,7 +508,7 @@ pub struct RegenerateSecretKeyInput {
     pub kdf_params: KdfParamsInput,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct StoreRecoveryKeyInput {
@@ -532,7 +516,7 @@ pub struct StoreRecoveryKeyInput {
     pub recovery_key_hint: String,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct DeleteAccountInput {
@@ -602,52 +586,6 @@ pub(crate) struct PendingVaultKeyEntry {
     pub(crate) vault_id: String,
     #[serde(rename = "encryptedVaultKey")]
     pub(crate) encrypted_vault_key: String,
-}
-
-impl FromRequestExtensions<AppState> for RefreshSessionContext {
-    async fn from_request_extensions(
-        ctx: AppState,
-        extensions: Extensions,
-    ) -> Result<Self, RpcError> {
-        let request = extensions
-            .get::<RequestMetadata>()
-            .cloned()
-            .unwrap_or_default();
-        let session = extensions
-            .get::<VerifiedSession>()
-            .cloned()
-            .ok_or_else(|| unauthorized_error("Authentication required"))?;
-
-        Ok(Self {
-            app_state: ctx,
-            session,
-            request,
-        })
-    }
-}
-
-impl FromRequestExtensions<AppState> for AppContext {
-    async fn from_request_extensions(
-        ctx: AppState,
-        _extensions: Extensions,
-    ) -> Result<Self, RpcError> {
-        Ok(Self { app_state: ctx })
-    }
-}
-
-impl FromRequestExtensions<AppState> for PublicAuthContext {
-    async fn from_request_extensions(
-        ctx: AppState,
-        extensions: Extensions,
-    ) -> Result<Self, RpcError> {
-        Ok(Self {
-            app_state: ctx,
-            request: extensions
-                .get::<RequestMetadata>()
-                .cloned()
-                .unwrap_or_default(),
-        })
-    }
 }
 
 pub(crate) async fn request_signup_verification(
@@ -2092,15 +2030,17 @@ pub(crate) async fn do_refresh_session(
     app_state.sessions.refresh_session(session).await
 }
 
-pub async fn rpc_request_context_middleware(
+pub async fn request_context_middleware(
     State(state): State<AppState>,
     mut request: Request<axum::body::Body>,
     next: Next,
 ) -> Response {
     let metadata = RequestMetadata {
         auth_token: parse_bearer_token(&request),
-        client_id: header_value(&request, CLIENT_ID_HEADER),
-        app_platform: header_value(&request, APP_PLATFORM_HEADER),
+        client_id: header_value(&request, API_CLIENT_ID_HEADER)
+            .or_else(|| header_value(&request, CLIENT_ID_HEADER)),
+        app_platform: header_value(&request, API_CLIENT_PLATFORM_HEADER)
+            .or_else(|| header_value(&request, APP_PLATFORM_HEADER)),
         user_agent: header_value(&request, "user-agent"),
         ip_address: client_ip_address(&request),
     };
@@ -2125,7 +2065,10 @@ pub async fn rpc_request_context_middleware(
         if let Ok(value) = HeaderValue::from_str(&format_rfc3339(session.expires_at)) {
             response
                 .headers_mut()
-                .insert(session_expiry_header_name(), value);
+                .insert(session_expiry_header_name(), value.clone());
+            response
+                .headers_mut()
+                .insert(api_session_expiry_header_name(), value);
         }
     }
 
@@ -3174,10 +3117,6 @@ fn requires_signup_email_verification() -> bool {
     bittery_mode() != "self-hosted"
 }
 
-fn unauthorized_error(message: &str) -> RpcError {
-    AppError::unauthorized(message).into()
-}
-
 fn unauthorized_handler_error(message: &str) -> AppError {
     AppError::unauthorized(message)
 }
@@ -3188,6 +3127,10 @@ fn bad_request_handler_error(message: &str) -> AppError {
 
 fn session_expiry_header_name() -> HeaderName {
     HeaderName::from_static(SESSION_EXPIRY_HEADER)
+}
+
+fn api_session_expiry_header_name() -> HeaderName {
+    HeaderName::from_static(API_SESSION_EXPIRY_HEADER)
 }
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ use super::{
 use crate::error::AppErrorCode;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, with_rpc_test_app,
+    seed_item, seed_team, seed_user, seed_vault, with_api_test_app,
 };
 
 struct BillingTestEnv<'a> {
@@ -164,19 +164,16 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert_eq!(body["result"]["Err"]["code"], json!(code));
     assert_eq!(body["result"]["Err"]["message"], json!(message));
 }
 
-fn assert_rpc_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
+fn assert_transport_error(body: &Value, code: &str, message: &str) {
     assert_eq!(body["error"]["message"], json!(message));
     assert_eq!(body["error"]["data"]["code"], json!(code));
 }
 
 fn assert_invalid_params_error(body: &Value) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert!(
         body["error"].is_object(),
         "unexpected invalid params body: {body}"
@@ -459,7 +456,7 @@ fn cloud_billing_guard_rejects_self_hosted_and_missing_stripe_configuration() {
 
 #[tokio::test]
 async fn billing_handlers_require_authentication() {
-    with_rpc_test_app(
+    with_api_test_app(
         "billing_handlers_require_authentication",
         |app| async move {
             let protected_calls = vec![
@@ -474,14 +471,14 @@ async fn billing_handlers_require_authentication() {
 
             for (method, params) in protected_calls {
                 let response = app
-                    .rpc_call(method, params, unauthenticated_json_headers())
+                    .call_operation(method, params, unauthenticated_json_headers())
                     .await;
                 assert_eq!(
                     response.status,
                     StatusCode::OK,
                     "unexpected status for {method}"
                 );
-                assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
+                assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
             }
         },
     )
@@ -497,7 +494,7 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_query_handlers_success", |app| async move {
+            with_api_test_app("billing_query_handlers_success", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let period_end = datetime!(2026-05-22 12:00 UTC);
                 update_team_billing_state(
@@ -537,7 +534,7 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .rpc_call("billing.status", json!([]), headers.clone())
+                    .call_operation("billing.status", json!([]), headers.clone())
                     .await;
                 assert_eq!(status_response.status, StatusCode::OK);
                 assert_eq!(status_response.body["result"]["Ok"]["enabled"], json!(true));
@@ -584,7 +581,7 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                 );
 
                 let entitlements_response = app
-                    .rpc_call("billing.entitlements", json!([]), headers.clone())
+                    .call_operation("billing.entitlements", json!([]), headers.clone())
                     .await;
                 assert_eq!(entitlements_response.status, StatusCode::OK);
                 assert_eq!(
@@ -621,7 +618,7 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                 );
 
                 let usage_response = app
-                    .rpc_call("billing.attachmentUsage", json!([]), headers)
+                    .call_operation("billing.attachmentUsage", json!([]), headers)
                     .await;
                 assert_eq!(usage_response.status, StatusCode::OK);
                 assert_eq!(usage_response.body["result"]["Ok"]["mode"], json!("cloud"));
@@ -653,7 +650,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_cloud_beta_disabled", |app| async move {
+            with_api_test_app("billing_cloud_beta_disabled", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 update_team_billing_state(
                     &app.pool,
@@ -674,7 +671,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .rpc_call("billing.status", json!([]), headers.clone())
+                    .call_operation("billing.status", json!([]), headers.clone())
                     .await;
                 assert_eq!(status_response.status, StatusCode::OK);
                 assert_eq!(
@@ -696,7 +693,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                 );
 
                 let entitlements_response = app
-                    .rpc_call("billing.entitlements", json!([]), headers.clone())
+                    .call_operation("billing.entitlements", json!([]), headers.clone())
                     .await;
                 assert_eq!(entitlements_response.status, StatusCode::OK);
                 assert_eq!(
@@ -722,7 +719,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                     ("billing.syncSeats", json!([{}])),
                     ("billing.previewAdditionalTeamSeat", json!([])),
                 ] {
-                    let response = app.rpc_call(method, params, headers.clone()).await;
+                    let response = app.call_operation(method, params, headers.clone()).await;
                     assert_eq!(
                         response.status,
                         StatusCode::OK,
@@ -743,7 +740,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
 
 #[tokio::test]
 async fn waitlist_endpoint_upserts_without_email_enumeration() {
-    with_rpc_test_app("waitlist_endpoint_upserts", |app| async move {
+    with_api_test_app("waitlist_endpoint_upserts", |app| async move {
         let first = app
             .post_public_json(
                 "/waitlist",
@@ -807,7 +804,7 @@ async fn waitlist_endpoint_upserts_without_email_enumeration() {
 #[tokio::test]
 async fn billing_cloud_queries_return_team_not_found_without_team() {
     with_billing_test_env_async(BillingTestEnv::default(), async {
-        with_rpc_test_app("billing_cloud_queries_team_not_found", |app| async move {
+        with_api_test_app("billing_cloud_queries_team_not_found", |app| async move {
             let fixture = build_billing_router_fixture(&app.pool).await;
             let session = app.issue_session(&fixture.no_team_user_id).await;
             let headers = authenticated_json_headers(&session.token);
@@ -817,7 +814,7 @@ async fn billing_cloud_queries_return_team_not_found_without_team() {
                 "billing.entitlements",
                 "billing.attachmentUsage",
             ] {
-                let response = app.rpc_call(method, json!([]), headers.clone()).await;
+                let response = app.call_operation(method, json!([]), headers.clone()).await;
                 assert_eq!(
                     response.status,
                     StatusCode::OK,
@@ -839,13 +836,13 @@ async fn billing_self_hosted_queries_use_self_hosted_defaults() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_self_hosted_queries_defaults", |app| async move {
+            with_api_test_app("billing_self_hosted_queries_defaults", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.no_team_user_id).await;
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .rpc_call("billing.status", json!([]), headers.clone())
+                    .call_operation("billing.status", json!([]), headers.clone())
                     .await;
                 assert_eq!(status_response.status, StatusCode::OK);
                 assert_eq!(
@@ -859,7 +856,7 @@ async fn billing_self_hosted_queries_use_self_hosted_defaults() {
                 );
 
                 let entitlements_response = app
-                    .rpc_call("billing.entitlements", json!([]), headers.clone())
+                    .call_operation("billing.entitlements", json!([]), headers.clone())
                     .await;
                 assert_eq!(entitlements_response.status, StatusCode::OK);
                 assert_eq!(
@@ -884,7 +881,7 @@ async fn billing_self_hosted_queries_use_self_hosted_defaults() {
                 );
 
                 let usage_response = app
-                    .rpc_call("billing.attachmentUsage", json!([]), headers)
+                    .call_operation("billing.attachmentUsage", json!([]), headers)
                     .await;
                 assert_eq!(usage_response.status, StatusCode::OK);
                 assert_eq!(
@@ -918,7 +915,7 @@ async fn billing_mutation_handlers_reject_self_hosted_mode() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_mutations_reject_self_hosted", |app| async move {
+            with_api_test_app("billing_mutations_reject_self_hosted", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.owner_user_id).await;
                 let headers = authenticated_json_headers(&session.token);
@@ -930,7 +927,7 @@ async fn billing_mutation_handlers_reject_self_hosted_mode() {
                 ];
 
                 for (method, params) in mutation_calls {
-                    let response = app.rpc_call(method, params, headers.clone()).await;
+                    let response = app.call_operation(method, params, headers.clone()).await;
                     assert_eq!(
                         response.status,
                         StatusCode::OK,
@@ -958,14 +955,14 @@ async fn billing_create_checkout_session_rejects_invalid_payload_shape() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app(
+            with_api_test_app(
                 "billing_create_checkout_invalid_payload",
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let session = app.issue_session(&fixture.owner_user_id).await;
 
                     let response = app
-                        .rpc_call(
+                        .call_operation(
                             "billing.createCheckoutSession",
                             json!([{ "plan": 123 }]),
                             authenticated_json_headers(&session.token),
@@ -991,13 +988,13 @@ async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app(
+            with_api_test_app(
                 "billing_create_checkout_access_and_validation_v2",
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let member_session = app.issue_session(&fixture.member_user_id).await;
                     let forbidden_response = app
-                        .rpc_call(
+                        .call_operation(
                             "billing.createCheckoutSession",
                             json!([{ "plan": "team" }]),
                             authenticated_json_headers(&member_session.token),
@@ -1026,7 +1023,7 @@ async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
                     .await;
                     let owner_session = app.issue_session(&fixture.owner_user_id).await;
                     let bad_request_response = app
-                        .rpc_call(
+                        .call_operation(
                             "billing.createCheckoutSession",
                             json!([{ "plan": "free" }]),
                             authenticated_json_headers(&owner_session.token),
@@ -1057,12 +1054,12 @@ async fn billing_create_checkout_session_success_persists_incomplete_state_and_s
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_create_checkout_success", |app| async move {
+            with_api_test_app("billing_create_checkout_success", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.owner_user_id).await;
 
                 let response = app
-                    .rpc_call(
+                    .call_operation(
                         "billing.createCheckoutSession",
                         json!([{ "plan": "team" }]),
                         authenticated_json_headers(&session.token),
@@ -1126,12 +1123,12 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_create_portal_session_paths", |app| async move {
+            with_api_test_app("billing_create_portal_session_paths", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let session = app.issue_session(&fixture.owner_user_id).await;
 
                 let missing_customer_response = app
-                    .rpc_call(
+                    .call_operation(
                         "billing.createPortalSession",
                         json!([]),
                         authenticated_json_headers(&session.token),
@@ -1159,7 +1156,7 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
                 )
                 .await;
                 let success_response = app
-                    .rpc_call(
+                    .call_operation(
                         "billing.createPortalSession",
                         json!([]),
                         authenticated_json_headers(&session.token),
@@ -1194,7 +1191,7 @@ async fn billing_sync_seats_rejects_other_team_and_updates_quantity() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_sync_seats_paths", |app| async move {
+            with_api_test_app("billing_sync_seats_paths", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 update_team_billing_state(
                     &app.pool,
@@ -1213,7 +1210,7 @@ async fn billing_sync_seats_rejects_other_team_and_updates_quantity() {
                 let session = app.issue_session(&fixture.owner_user_id).await;
 
                 let forbidden_response = app
-                    .rpc_call(
+                    .call_operation(
                         "billing.syncSeats",
                         json!([{ "teamId": fixture.other_team_id }]),
                         authenticated_json_headers(&session.token),
@@ -1227,7 +1224,7 @@ async fn billing_sync_seats_rejects_other_team_and_updates_quantity() {
                 );
 
                 let success_response = app
-                    .rpc_call(
+                    .call_operation(
                         "billing.syncSeats",
                         json!([{}]),
                         authenticated_json_headers(&session.token),
@@ -1263,14 +1260,14 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app(
+            with_api_test_app(
                 "billing_preview_additional_team_seat_paths",
                 |app| async move {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let session = app.issue_session(&fixture.owner_user_id).await;
 
                     let none_response = app
-                        .rpc_call(
+                        .call_operation(
                             "billing.previewAdditionalTeamSeat",
                             json!([]),
                             authenticated_json_headers(&session.token),
@@ -1294,7 +1291,7 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
                     )
                     .await;
                     let preview_response = app
-                        .rpc_call(
+                        .call_operation(
                             "billing.previewAdditionalTeamSeat",
                             json!([]),
                             authenticated_json_headers(&session.token),
@@ -1382,7 +1379,7 @@ async fn billing_create_portal_and_preview_require_billing_admin() {
             ..BillingTestEnv::default()
         },
         async {
-            with_rpc_test_app("billing_admin_only_handlers", |app| async move {
+            with_api_test_app("billing_admin_only_handlers", |app| async move {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let member_session = app.issue_session(&fixture.member_user_id).await;
 
@@ -1391,7 +1388,7 @@ async fn billing_create_portal_and_preview_require_billing_admin() {
                     "billing.previewAdditionalTeamSeat",
                 ] {
                     let response = app
-                        .rpc_call(
+                        .call_operation(
                             method,
                             json!([]),
                             authenticated_json_headers(&member_session.token),

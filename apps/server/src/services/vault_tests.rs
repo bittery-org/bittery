@@ -1,13 +1,17 @@
 use super::{
     assert_item_write_access, attachment_quota_lock_key, base64_encoded_length,
-    encrypted_attachment_storage_size, pending_attachment_upload_expiry,
+    encrypted_attachment_storage_size, pending_attachment_upload_expiry, toggle_vault_favorite,
+    ToggleFavoriteInput,
 };
 use crate::error::AppErrorCode;
 use crate::test_support::{
     acquire_env_lock_async, assign_user_to_team, authenticated_json_headers, seed_item, seed_team,
-    seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    seed_user, seed_vault, seed_vault_key, with_api_test_app,
 };
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{
+    header::{CONTENT_TYPE, ETAG, IF_MATCH},
+    HeaderMap, HeaderValue, Method, StatusCode,
+};
 use serde_json::{json, Value};
 use sqlx::{query, query_scalar, PgPool};
 use std::future::Future;
@@ -113,20 +117,17 @@ fn unauthenticated_json_headers() -> HeaderMap {
     headers
 }
 
-fn assert_rpc_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
+fn assert_transport_error(body: &Value, code: &str, message: &str) {
     assert_eq!(body["error"]["message"], json!(message));
     assert_eq!(body["error"]["data"]["code"], json!(code));
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert_eq!(body["result"]["Err"]["code"], json!(code));
     assert_eq!(body["result"]["Err"]["message"], json!(message));
 }
 
 fn assert_invalid_params_error(body: &Value) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert!(
         body["error"].is_object(),
         "unexpected invalid params body: {body}"
@@ -523,7 +524,7 @@ fn pending_attachment_upload_expiry_adds_fifteen_minutes() {
 
 #[tokio::test]
 async fn vault_handlers_require_authentication() {
-    with_rpc_test_app("vault_handlers_require_authentication", |app| async move {
+    with_api_test_app("vault_handlers_require_authentication", |app| async move {
 			let protected_calls = vec![
 				("vault.list", json!([])),
 				("vault.get", json!([{ "vaultId": "vault_test" }])),
@@ -637,11 +638,11 @@ async fn vault_handlers_require_authentication() {
 
 			for (method, params) in protected_calls {
 				let response = app
-					.rpc_call(method, params, unauthenticated_json_headers())
+					.call_operation(method, params, unauthenticated_json_headers())
 					.await;
 
 				assert_eq!(response.status, StatusCode::OK, "{method}");
-				assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
+				assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
 			}
 		})
 		.await;
@@ -649,7 +650,7 @@ async fn vault_handlers_require_authentication() {
 
 #[tokio::test]
 async fn vault_handlers_reject_malformed_request_input() {
-    with_rpc_test_app(
+    with_api_test_app(
         "vault_handlers_reject_malformed_request_input",
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
@@ -666,7 +667,7 @@ async fn vault_handlers_reject_malformed_request_input() {
                     json!([{ "vaultId": fixture.main_vault_id, "userId": fixture.member_user_id }]),
                 ),
             ] {
-                let response = app.rpc_call(method, params, headers.clone()).await;
+                let response = app.call_operation(method, params, headers.clone()).await;
 
                 assert_eq!(response.status, StatusCode::OK, "{method}");
                 assert_invalid_params_error(&response.body);
@@ -678,7 +679,7 @@ async fn vault_handlers_reject_malformed_request_input() {
 
 #[tokio::test]
 async fn vault_query_handlers_return_expected_results() {
-    with_rpc_test_app(
+    with_api_test_app(
         "vault_query_handlers_return_expected_results",
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
@@ -686,7 +687,7 @@ async fn vault_query_handlers_return_expected_results() {
             let owner_headers = authenticated_json_headers(&owner_session.token);
 
             let list_response = app
-                .rpc_call("vault.list", json!([]), owner_headers.clone())
+                .call_operation("vault.list", json!([]), owner_headers.clone())
                 .await;
             assert_eq!(list_response.status, StatusCode::OK);
             let listed_vaults = list_response.body["result"]["Ok"]
@@ -699,7 +700,7 @@ async fn vault_query_handlers_return_expected_results() {
             assert_eq!(main_vault["items"].as_array().unwrap().len(), 3);
 
             let get_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.get",
                     json!([{ "vaultId": fixture.main_vault_id }]),
                     owner_headers.clone(),
@@ -714,7 +715,7 @@ async fn vault_query_handlers_return_expected_results() {
             assert_eq!(get_response.body["result"]["Ok"]["memberCount"], json!(4));
 
             let list_items_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.listItems",
                     json!([{ "vaultId": fixture.main_vault_id }]),
                     owner_headers.clone(),
@@ -733,7 +734,7 @@ async fn vault_query_handlers_return_expected_results() {
             );
 
             let list_all_items_response = app
-                .rpc_call("vault.listAllItems", json!([]), owner_headers.clone())
+                .call_operation("vault.listAllItems", json!([]), owner_headers.clone())
                 .await;
             assert_eq!(list_all_items_response.status, StatusCode::OK);
             let all_items = list_all_items_response.body["result"]["Ok"]
@@ -747,7 +748,7 @@ async fn vault_query_handlers_return_expected_results() {
             );
 
             let list_all_deleted_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.listAllDeletedItems",
                     json!([]),
                     owner_headers.clone(),
@@ -761,7 +762,7 @@ async fn vault_query_handlers_return_expected_results() {
             assert_eq!(all_deleted_items[0]["id"], json!(fixture.deleted_item_id));
 
             let list_deleted_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.listDeletedItems",
                     json!([{ "vaultId": fixture.main_vault_id }]),
                     owner_headers.clone(),
@@ -775,7 +776,7 @@ async fn vault_query_handlers_return_expected_results() {
             assert_eq!(deleted_items[0]["id"], json!(fixture.deleted_item_id));
 
             let get_item_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.getItem",
                     json!([{ "itemId": fixture.active_item_id }]),
                     owner_headers.clone(),
@@ -787,7 +788,9 @@ async fn vault_query_handlers_return_expected_results() {
                 json!(fixture.attachment_id)
             );
 
-            let stats_response = app.rpc_call("vault.stats", json!([]), owner_headers).await;
+            let stats_response = app
+                .call_operation("vault.stats", json!([]), owner_headers)
+                .await;
             assert_eq!(stats_response.status, StatusCode::OK);
             assert_eq!(stats_response.body["result"]["Ok"]["teamCount"], json!(1));
             assert_eq!(stats_response.body["result"]["Ok"]["vaultCount"], json!(3));
@@ -799,7 +802,7 @@ async fn vault_query_handlers_return_expected_results() {
 
 #[tokio::test]
 async fn vault_query_handlers_enforce_access_and_not_found() {
-    with_rpc_test_app(
+    with_api_test_app(
         "vault_query_handlers_enforce_access_and_not_found",
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
@@ -809,7 +812,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
             let outsider_headers = authenticated_json_headers(&outsider_session.token);
 
             let missing_vault_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.get",
                     json!([{ "vaultId": "vault_missing" }]),
                     owner_headers.clone(),
@@ -823,7 +826,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
             );
 
             let list_items_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.listItems",
                     json!([{ "vaultId": fixture.main_vault_id }]),
                     outsider_headers.clone(),
@@ -837,7 +840,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
             );
 
             let missing_item_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.getItem",
                     json!([{ "itemId": "item_missing" }]),
                     owner_headers.clone(),
@@ -847,7 +850,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
             assert_handler_error(&missing_item_response.body, "NOT_FOUND", "Item not found");
 
             let outsider_item_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.getItem",
                     json!([{ "itemId": fixture.active_item_id }]),
                     outsider_headers,
@@ -862,7 +865,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
 
 #[tokio::test]
 async fn vault_item_mutation_handlers_manage_item_lifecycle() {
-    with_rpc_test_app(
+    with_api_test_app(
         "vault_item_mutation_handlers_manage_item_lifecycle",
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
@@ -873,7 +876,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             let imported_item_b = "vault_import_item_b";
 
             let empty_import_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.bulkImportItems",
                     json!([{ "vaultId": fixture.owner_personal_vault_id, "items": [] }]),
                     owner_headers.clone(),
@@ -886,7 +889,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             );
 
             let create_item_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.createItem",
                     json!([{
                         "itemId": created_item_id,
@@ -905,7 +908,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             );
 
             let bulk_import_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.bulkImportItems",
                     json!([{
                         "vaultId": fixture.owner_personal_vault_id,
@@ -940,7 +943,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                 .await
                 .expect("active item version should load");
             let update_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.updateItem",
                     json!([{
                         "itemId": fixture.active_item_id,
@@ -965,7 +968,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(updated_data, "active-encrypted-data-updated");
 
             let toggle_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.toggleFavorite",
                     json!([{ "itemId": fixture.active_item_id, "favorite": true }]),
                     owner_headers.clone(),
@@ -980,7 +983,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(favorite);
 
             let delete_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.deleteItem",
                     json!([{ "itemId": imported_item_a }]),
                     owner_headers.clone(),
@@ -996,7 +999,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(deleted_at.is_some());
 
             let restore_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.restoreItem",
                     json!([{ "itemId": fixture.deleted_item_id }]),
                     owner_headers.clone(),
@@ -1012,7 +1015,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(restored_deleted_at.is_none());
 
             let move_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.moveItem",
                     json!([{
                         "itemId": fixture.movable_item_id,
@@ -1033,7 +1036,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(moved_vault_id, fixture.target_vault_id);
 
             let permanent_delete_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.permanentlyDeleteItem",
                     json!([{ "itemId": imported_item_a }]),
                     owner_headers,
@@ -1053,8 +1056,167 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
 }
 
 #[tokio::test]
+async fn rest_item_mutations_require_and_advance_strong_versions() {
+    with_api_test_app(
+        "rest_item_mutations_require_and_advance_strong_versions",
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let owner_session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&owner_session.token);
+            let item_uri = format!("/api/v1/items/{}", fixture.active_item_id);
+
+            let get = app
+                .api_json(Method::GET, &item_uri, None, headers.clone())
+                .await;
+            assert_eq!(get.status, StatusCode::OK);
+            assert_eq!(get.headers.get(ETAG).unwrap(), "\"1\"");
+
+            let missing_patch = app
+                .api_json(
+                    Method::PATCH,
+                    &item_uri,
+                    Some(json!({ "encryptedData": "must-not-write" })),
+                    headers.clone(),
+                )
+                .await;
+            assert_eq!(missing_patch.status, StatusCode::PRECONDITION_REQUIRED);
+            assert_eq!(missing_patch.body["code"], json!("PRECONDITION_REQUIRED"));
+
+            let missing_delete = app
+                .api_json(Method::DELETE, &item_uri, None, headers.clone())
+                .await;
+            assert_eq!(missing_delete.status, StatusCode::PRECONDITION_REQUIRED);
+
+            let mut stale_headers = headers.clone();
+            stale_headers.insert(IF_MATCH, HeaderValue::from_static("\"99\""));
+            let stale = app
+                .api_json(
+                    Method::PATCH,
+                    &item_uri,
+                    Some(json!({ "encryptedData": "stale-write" })),
+                    stale_headers,
+                )
+                .await;
+            assert_eq!(stale.status, StatusCode::PRECONDITION_FAILED);
+            assert_eq!(stale.body["code"], json!("VERSION_CONFLICT"));
+            let mut stale_delete_headers = headers.clone();
+            stale_delete_headers.insert(IF_MATCH, HeaderValue::from_static("\"99\""));
+            let stale_delete = app
+                .api_json(Method::DELETE, &item_uri, None, stale_delete_headers)
+                .await;
+            assert_eq!(stale_delete.status, StatusCode::PRECONDITION_FAILED);
+            assert_eq!(stale_delete.body["code"], json!("VERSION_CONFLICT"));
+            let unchanged: (String, i32, bool, Option<OffsetDateTime>) = sqlx::query_as(
+                "SELECT encrypted_data, version, favorite, deleted_at FROM item WHERE id = $1",
+            )
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+            assert_eq!(
+                unchanged,
+                ("active-encrypted-data".to_string(), 1, false, None)
+            );
+
+            let mut version_headers = headers.clone();
+            version_headers.insert(IF_MATCH, HeaderValue::from_static("\"1\""));
+            let updated = app
+                .api_json(
+                    Method::PATCH,
+                    &item_uri,
+                    Some(json!({ "encryptedData": "version-two" })),
+                    version_headers,
+                )
+                .await;
+            assert_eq!(updated.status, StatusCode::OK);
+            assert_eq!(updated.headers.get(ETAG).unwrap(), "\"2\"");
+
+            let mut favorite_headers = headers.clone();
+            favorite_headers.insert(IF_MATCH, HeaderValue::from_static("\"2\""));
+            let favorite = app
+                .api_json(
+                    Method::PUT,
+                    &format!("{item_uri}/favorite"),
+                    Some(json!({ "favorite": true })),
+                    favorite_headers,
+                )
+                .await;
+            assert_eq!(favorite.status, StatusCode::OK);
+            let after_favorite: (i32, bool) =
+                sqlx::query_as("SELECT version, favorite FROM item WHERE id = $1")
+                    .bind(&fixture.active_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(after_favorite, (3, true));
+
+            let mut trash_headers = headers.clone();
+            trash_headers.insert(IF_MATCH, HeaderValue::from_static("\"3\""));
+            let trashed = app
+                .api_json(Method::DELETE, &item_uri, None, trash_headers)
+                .await;
+            assert_eq!(trashed.status, StatusCode::OK);
+            let after_trash: (i32, Option<OffsetDateTime>) =
+                sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
+                    .bind(&fixture.active_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(after_trash.0, 4);
+            assert!(after_trash.1.is_some());
+
+            let mut restore_headers = headers;
+            restore_headers.insert(IF_MATCH, HeaderValue::from_static("\"4\""));
+            let restored = app
+                .api_json(
+                    Method::POST,
+                    &format!("{item_uri}/restore"),
+                    None,
+                    restore_headers,
+                )
+                .await;
+            assert_eq!(restored.status, StatusCode::OK);
+            let after_restore: (i32, Option<OffsetDateTime>) =
+                sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
+                    .bind(&fixture.active_item_id)
+                    .fetch_one(&app.pool)
+                    .await
+                    .unwrap();
+            assert_eq!(after_restore, (5, None));
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn favorite_service_advances_item_version() {
+    with_api_test_app("favorite_service_advances_item_version", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        toggle_vault_favorite(
+            &app.pool,
+            &fixture.owner_user_id,
+            ToggleFavoriteInput {
+                item_id: fixture.active_item_id.clone(),
+                favorite: true,
+                expected_version: None,
+            },
+        )
+        .await
+        .expect("favorite mutation should succeed");
+
+        let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+        assert_eq!(version, 2);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
-    with_rpc_test_app(
+    with_api_test_app(
         "vault_item_mutation_handlers_reject_invalid_state_and_access",
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
@@ -1064,7 +1226,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let readonly_headers = authenticated_json_headers(&readonly_session.token);
 
             let readonly_create_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.createItem",
                     json!([{
                         "vaultId": fixture.main_vault_id,
@@ -1083,7 +1245,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let readonly_update_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.updateItem",
                     json!([{ "itemId": fixture.active_item_id, "encryptedData": "enc" }]),
                     readonly_headers,
@@ -1093,7 +1255,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             assert_handler_error(&readonly_update_response.body, "FORBIDDEN", "Access denied");
 
             let duplicate_import_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.bulkImportItems",
                     json!([{
                         "vaultId": fixture.owner_personal_vault_id,
@@ -1123,7 +1285,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let stale_update_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.updateItem",
                     json!([{ "itemId": fixture.active_item_id, "expectedVersion": 99 }]),
                     owner_headers.clone(),
@@ -1137,7 +1299,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let restore_active_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.restoreItem",
                     json!([{ "itemId": fixture.active_item_id }]),
                     owner_headers.clone(),
@@ -1151,7 +1313,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let wrong_source_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.moveItem",
                     json!([{
                         "itemId": fixture.movable_item_id,
@@ -1171,7 +1333,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let permanent_delete_active_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.permanentlyDeleteItem",
                     json!([{ "itemId": fixture.active_item_id }]),
                     owner_headers,
@@ -1190,7 +1352,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
 
 #[tokio::test]
 async fn vault_management_handlers_manage_vault_lifecycle() {
-    with_rpc_test_app(
+    with_api_test_app(
             "vault_management_handlers_manage_vault_lifecycle",
             |app| async move {
                 let fixture = build_vault_router_fixture(&app.pool).await;
@@ -1204,7 +1366,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 let created_team_vault_id = "vault_created_team";
 
                 let create_personal_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.create",
                         json!([{
                             "vaultId": created_personal_vault_id,
@@ -1232,7 +1394,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 assert!(created_personal_team_id.is_none());
 
                 let create_team_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.create",
                         json!([{
                             "vaultId": created_team_vault_id,
@@ -1263,7 +1425,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 );
 
                 let update_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.update",
                         json!([{
                             "vaultId": fixture.main_vault_id,
@@ -1293,7 +1455,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 assert_eq!(updated_icon.as_deref(), Some("briefcase"));
 
                 let convert_to_team_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.convertType",
                         json!([{ "vaultId": fixture.owner_personal_vault_id, "targetType": "team" }]),
                         owner_headers.clone(),
@@ -1323,7 +1485,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 );
 
                 let convert_to_personal_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.convertType",
                         json!([{ "vaultId": fixture.target_vault_id, "targetType": "personal", "personalEncryptedVaultKey": "target-personal-key" }]),
                         owner_headers.clone(),
@@ -1359,7 +1521,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                 assert_eq!(converted_target_key, "target-personal-key");
 
                 let delete_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.delete",
                         json!([{ "vaultId": created_personal_vault_id }]),
                         solo_headers,
@@ -1380,7 +1542,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
 
 #[tokio::test]
 async fn vault_management_handlers_enforce_access_and_validation() {
-    with_rpc_test_app("vault_management_handlers_enforce_access_and_validation", |app| async move {
+    with_api_test_app("vault_management_handlers_enforce_access_and_validation", |app| async move {
 			let fixture = build_vault_router_fixture(&app.pool).await;
 			let owner_session = app.issue_session(&fixture.owner_user_id).await;
 			let admin_session = app.issue_session(&fixture.admin_user_id).await;
@@ -1392,7 +1554,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			let solo_headers = authenticated_json_headers(&solo_session.token);
 
 			let solo_team_create_response = app
-				.rpc_call(
+				.call_operation(
 					"vault.create",
 					json!([{ "name": "No Team Vault", "vaultType": "team", "encryptedVaultKey": "wrapped" }]),
 					solo_headers,
@@ -1406,7 +1568,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			);
 
 			let blank_update_response = app
-				.rpc_call(
+				.call_operation(
 					"vault.update",
 					json!([{ "vaultId": fixture.main_vault_id, "name": "   " }]),
 					owner_headers.clone(),
@@ -1416,7 +1578,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			assert_handler_error(&blank_update_response.body, "BAD_REQUEST", "Invalid params");
 
 			let member_update_response = app
-				.rpc_call(
+				.call_operation(
 					"vault.update",
 					json!([{ "vaultId": fixture.main_vault_id, "name": "Blocked Update" }]),
 					member_headers.clone(),
@@ -1426,7 +1588,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			assert_handler_error(&member_update_response.body, "FORBIDDEN", "Access denied");
 
 			let admin_convert_response = app
-				.rpc_call(
+				.call_operation(
 					"vault.convertType",
 					json!([{ "vaultId": fixture.main_vault_id, "targetType": "personal" }]),
 					admin_headers,
@@ -1440,7 +1602,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			);
 
 			let same_type_response = app
-				.rpc_call(
+				.call_operation(
 					"vault.convertType",
 					json!([{ "vaultId": fixture.main_vault_id, "targetType": "team" }]),
 					owner_headers.clone(),
@@ -1454,7 +1616,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			);
 
 			let member_delete_response = app
-				.rpc_call(
+				.call_operation(
 					"vault.delete",
 					json!([{ "vaultId": fixture.main_vault_id }]),
 					member_headers,
@@ -1470,7 +1632,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			set_team_billing(&app.pool, &fixture.paid_team_id, "free", "active").await;
 			let plan_forbidden_create_response = with_bittery_mode_async(
 				Some("cloud"),
-				app.rpc_call(
+				app.call_operation(
 					"vault.create",
 					json!([{ "name": "Blocked Team Vault", "vaultType": "team", "encryptedVaultKey": "blocked-key" }]),
 					owner_headers,
@@ -1490,7 +1652,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 #[tokio::test]
 async fn vault_attachment_handlers_cover_presign_and_access_paths() {
     with_storage_env_async(async {
-			with_rpc_test_app("vault_attachment_handlers_cover_presign_and_access_paths", |app| async move {
+			with_api_test_app("vault_attachment_handlers_cover_presign_and_access_paths", |app| async move {
 				let fixture = build_vault_router_fixture(&app.pool).await;
 				let owner_session = app.issue_session(&fixture.owner_user_id).await;
 				let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
@@ -1500,7 +1662,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				let member_headers = authenticated_json_headers(&member_session.token);
 
 				let image_upload_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.createImageUpload",
 						json!([{ "fileName": "cover.png", "contentType": "image/png" }]),
 						owner_headers.clone(),
@@ -1517,7 +1679,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert!(image_public_url.contains("cdn.example.invalid/assets/vaults/"));
 
 				let blocked_image_upload_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.createImageUpload",
 						json!([{
 							"vaultId": fixture.main_vault_id,
@@ -1531,7 +1693,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert_handler_error(&blocked_image_upload_response.body, "FORBIDDEN", "Access denied");
 
 				let invalid_attachment_upload_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.createAttachmentUpload",
 						json!([{
 							"itemId": fixture.active_item_id,
@@ -1550,7 +1712,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				);
 
 				let attachment_upload_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.createAttachmentUpload",
 						json!([{
 							"itemId": fixture.active_item_id,
@@ -1581,7 +1743,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert_eq!(pending_storage_size, 102);
 
 				let create_attachment_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.createAttachment",
 						json!([{
 							"itemId": fixture.active_item_id,
@@ -1603,7 +1765,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				);
 
 				let list_attachments_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.listAttachments",
 						json!([{ "itemId": fixture.active_item_id }]),
 						owner_headers.clone(),
@@ -1617,7 +1779,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert_eq!(attachments[0]["id"], json!(fixture.attachment_id));
 
 				let download_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.getAttachmentDownloadUrl",
 						json!([{ "attachmentId": fixture.attachment_id }]),
 						owner_headers.clone(),
@@ -1631,7 +1793,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert_eq!(download_response.body["result"]["Ok"]["fileSize"], json!(128));
 
 				let update_attachment_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.updateAttachment",
 						json!([{
 							"attachmentId": fixture.attachment_id,
@@ -1658,7 +1820,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert_eq!(updated_attachment_iv, "updated-attachment-iv");
 
 				let blocked_delete_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.deleteAttachment",
 						json!([{ "attachmentId": fixture.attachment_id }]),
 						member_headers,
@@ -1678,7 +1840,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 
 #[tokio::test]
 async fn vault_member_handlers_manage_members_and_rotation() {
-    with_rpc_test_app(
+    with_api_test_app(
         "vault_member_handlers_manage_members_and_rotation",
         |app| async move {
             let fixture = build_vault_router_fixture(&app.pool).await;
@@ -1692,7 +1854,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     .expect("starting key version should load");
 
             let members_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.members.list",
                     json!([{ "vaultId": fixture.main_vault_id }]),
                     owner_headers.clone(),
@@ -1708,7 +1870,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                 .any(|member| member["userId"] == json!(fixture.readonly_user_id)));
 
             let available_members_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.members.availableTeamMembers",
                     json!([{ "vaultId": fixture.main_vault_id }]),
                     owner_headers.clone(),
@@ -1726,7 +1888,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                 .any(|member| member["userId"] == json!(fixture.member_user_id)));
 
             let lookup_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.members.lookupUser",
                     json!([{
                         "vaultId": fixture.main_vault_id,
@@ -1742,7 +1904,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
             );
 
             let update_role_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.members.updateRole",
                     json!([{
                         "vaultId": fixture.main_vault_id,
@@ -1764,7 +1926,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
             assert_eq!(updated_role, "member");
 
             let add_member_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.members.add",
                     json!([{
                         "vaultId": fixture.main_vault_id,
@@ -1787,7 +1949,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
             assert_eq!(added_member_count, 1);
 
             let rotation_data_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.members.getRotationData",
                     json!([{
                         "vaultId": fixture.main_vault_id,
@@ -1815,7 +1977,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                 .any(|item| item["id"] == json!(fixture.active_item_id)));
 
             let remove_member_response = app
-                .rpc_call(
+                .call_operation(
                     "vault.members.remove",
                     json!([{
                         "vaultId": fixture.main_vault_id,
@@ -1856,7 +2018,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
 
 #[tokio::test]
 async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
-    with_rpc_test_app(
+    with_api_test_app(
             "vault_member_handlers_reject_invalid_and_forbidden_requests",
             |app| async move {
                 let fixture = build_vault_router_fixture(&app.pool).await;
@@ -1868,7 +2030,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 let member_headers = authenticated_json_headers(&member_session.token);
 
                 let blocked_available_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.members.availableTeamMembers",
                         json!([{ "vaultId": fixture.main_vault_id }]),
                         member_headers.clone(),
@@ -1882,7 +2044,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 );
 
                 let self_role_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.members.updateRole",
                         json!([{
                             "vaultId": fixture.main_vault_id,
@@ -1900,7 +2062,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 );
 
                 let owner_role_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.members.updateRole",
                         json!([{
                             "vaultId": fixture.main_vault_id,
@@ -1918,7 +2080,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 );
 
                 let missing_member_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.members.updateRole",
                         json!([{
                             "vaultId": fixture.main_vault_id,
@@ -1936,7 +2098,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 );
 
                 let self_lookup_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.members.lookupUser",
                         json!([{
                             "vaultId": fixture.main_vault_id,
@@ -1953,7 +2115,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 );
 
                 let missing_lookup_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.members.lookupUser",
                         json!([{ "vaultId": fixture.main_vault_id, "email": "missing-user@example.com" }]),
                         owner_headers.clone(),
@@ -1963,7 +2125,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 assert_handler_error(&missing_lookup_response.body, "NOT_FOUND", "User not found");
 
                 let wrong_team_add_response = app
-                    .rpc_call(
+                    .call_operation(
                         "vault.members.add",
                         json!([{
                             "vaultId": fixture.main_vault_id,
@@ -1982,7 +2144,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 );
 
                 let blocked_rotation_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.members.getRotationData",
 						json!([{ "vaultId": fixture.main_vault_id, "excludeUserId": fixture.member_user_id }]),
 						member_headers,
@@ -1996,7 +2158,7 @@ async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
                 );
 
                 let self_remove_response = app
-					.rpc_call(
+					.call_operation(
 						"vault.members.remove",
 						json!([{
 							"vaultId": fixture.main_vault_id,

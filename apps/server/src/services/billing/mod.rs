@@ -3,7 +3,6 @@ mod webhook;
 use serde::{Deserialize, Serialize};
 use sqlx::{query, query_scalar, PgPool};
 use time::OffsetDateTime;
-use ts_rs::TS;
 
 pub(crate) use self::webhook::{
     is_self_hosted_mode, is_stripe_webhook_configured, process_stripe_webhook_event,
@@ -30,7 +29,7 @@ use crate::{
 const MB: i64 = 1024 * 1024;
 const GB: i64 = 1024 * 1024 * 1024;
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillingStatusResponse {
     pub enabled: bool,
@@ -47,7 +46,7 @@ pub struct BillingStatusResponse {
     pub seats_purchased: Option<i32>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillingEntitlements {
     pub sentinel: bool,
@@ -58,7 +57,7 @@ pub struct BillingEntitlements {
     pub attachments: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntitlementLimits {
     pub share_links: Option<i64>,
@@ -67,7 +66,7 @@ pub struct EntitlementLimits {
     pub attachment_storage_bytes: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BillingEntitlementsResponse {
     pub mode: String,
@@ -79,7 +78,7 @@ pub struct BillingEntitlementsResponse {
     pub limits: EntitlementLimits,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentUsageResponse {
     pub mode: String,
@@ -88,32 +87,32 @@ pub struct AttachmentUsageResponse {
     pub committed_storage_bytes: i64,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckoutPlanInput {
     pub plan: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckoutSessionResponse {
     pub url: String,
     pub session_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortalSessionResponse {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSeatsInput {
     pub team_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSeatsResponse {
     pub synced: bool,
@@ -121,7 +120,7 @@ pub struct SyncSeatsResponse {
     pub quantity: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamSeatInvoicePreviewLineResponse {
     pub id: String,
@@ -135,7 +134,7 @@ pub struct TeamSeatInvoicePreviewLineResponse {
     pub is_proration: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamSeatInvoicePreviewResponse {
     pub currency: String,

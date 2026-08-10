@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
-use ts_rs::TS;
 
 use crate::{
     config::{bittery_mode, format_timestamp},
@@ -30,14 +29,14 @@ struct DbTeamMembershipActorRow {
     billing_status: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct TokenInput {
     pub token: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct TeamIdInput {
@@ -45,7 +44,7 @@ pub struct TeamIdInput {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateTeamInput {
@@ -53,7 +52,7 @@ pub struct CreateTeamInput {
     pub team_type: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateTeamInput {
@@ -62,7 +61,7 @@ pub struct UpdateTeamInput {
     pub image_key: Option<Option<String>>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateImageUploadInput {
@@ -71,7 +70,7 @@ pub struct CreateImageUploadInput {
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamSummaryResponse {
     pub id: String,
@@ -85,7 +84,7 @@ pub struct TeamSummaryResponse {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamDetailsResponse {
     pub id: String,
@@ -101,7 +100,7 @@ pub struct TeamDetailsResponse {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamVaultResponse {
     pub id: String,
@@ -109,7 +108,7 @@ pub struct TeamVaultResponse {
     pub encrypted_vault_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamMemberResponse {
     pub user_id: String,
@@ -119,7 +118,7 @@ pub struct TeamMemberResponse {
     pub joined_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RotationMemberResponse {
     pub user_id: String,
@@ -127,7 +126,7 @@ pub struct RotationMemberResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RotationItemResponse {
     pub id: String,
@@ -139,7 +138,7 @@ pub struct RotationItemResponse {
     pub last_modified_by: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RotationVaultResponse {
     pub vault_id: String,
@@ -149,20 +148,20 @@ pub struct RotationVaultResponse {
     pub items: Vec<RotationItemResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RotationDataResponse {
     pub vaults: Vec<RotationVaultResponse>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct InvitationIdInput {
     pub invitation_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct SendInvitationInput {
@@ -173,7 +172,7 @@ pub struct SendInvitationInput {
     pub pending_vault_keys: Option<Vec<PendingVaultKeyEntry>>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamInvitationDetailsResponse {
     pub id: String,
@@ -187,7 +186,7 @@ pub struct TeamInvitationDetailsResponse {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PendingTeamInvitationResponse {
     pub id: String,
@@ -198,7 +197,7 @@ pub struct PendingTeamInvitationResponse {
     pub expires_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SendInvitationResponse {
     pub invitation_id: String,
@@ -209,39 +208,37 @@ pub struct SendInvitationResponse {
 /// Resending rotates the invite token, so the caller receives a brand new raw
 /// token exactly like `SendInvitationResponse` does. Only the digest is stored,
 /// which means the previous link stops working the moment this returns.
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResendInvitationResponse {
     pub invitation_id: String,
     pub token: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AcceptInvitationResponse {
     pub team_id: String,
     pub team_name: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-#[ts(rename = "TeamSuccessResponse")]
 pub struct SuccessResponse {
     pub success: bool,
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "TeamDeleteAccountInput")]
 pub struct DeleteAccountInput {
     pub team_id: String,
     pub user_id: String,
     pub confirmation: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct TeamRotationInput {
@@ -253,35 +250,32 @@ const MAX_ROTATION_VAULTS: usize = 100;
 const MAX_ROTATION_MEMBER_KEYS: usize = 100;
 const MAX_ROTATION_REENCRYPTED_ITEMS: usize = 100;
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "TeamRotationMemberKeyInput")]
 pub struct RotationMemberKeyInput {
     pub user_id: String,
     pub encrypted_vault_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "TeamRotationReEncryptedItemInput")]
 pub struct RotationReEncryptedItemInput {
     pub item_id: String,
     pub encrypted_data: String,
     pub encryption_iv: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-#[ts(rename = "TeamVaultKeyRotationInput")]
 pub struct VaultKeyRotationInput {
     pub member_keys: Vec<RotationMemberKeyInput>,
     pub re_encrypted_items: Vec<RotationReEncryptedItemInput>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RotationVaultInput {
@@ -289,7 +283,7 @@ pub struct RotationVaultInput {
     pub key_rotation: VaultKeyRotationInput,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct LeaveTeamInput {
@@ -298,7 +292,7 @@ pub struct LeaveTeamInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RemoveTeamMemberInput {
@@ -308,7 +302,7 @@ pub struct RemoveTeamMemberInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamVaultRotationResult {
     pub vault_id: String,
@@ -316,14 +310,14 @@ pub struct TeamVaultRotationResult {
     pub new_key_version: i32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveTeamMemberResponse {
     pub success: bool,
     pub vault_rotations: Vec<TeamVaultRotationResult>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct PendingVaultKeyEntry {
@@ -1673,7 +1667,7 @@ pub(crate) mod member_handlers {
 pub(crate) mod invitation_handlers {
     use super::*;
 
-    #[derive(Debug, Clone, Serialize, TS)]
+    #[derive(Debug, Clone, Serialize)]
     #[serde(rename_all = "camelCase")]
     pub struct TeamInvitationListEntry {
         pub id: String,

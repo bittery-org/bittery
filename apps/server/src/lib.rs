@@ -6,41 +6,34 @@ pub(crate) mod http;
 pub(crate) mod integrations;
 mod jobs;
 pub(crate) mod repo;
-pub(crate) mod rpc;
 pub(crate) mod services;
 #[cfg(test)]
 pub(crate) mod test_support;
 
-use config::format_timestamp;
-use qubit::{handler, Router};
 use sqlx::PgPool;
-use ts_rs::TS;
 
 use std::sync::Arc;
 
 use fred::prelude::Pool as RedisPool;
-use serde::Serialize;
-
 use services::rate_limit::{NoopRateLimiter, PostgresRateLimiter};
 
 pub use app::create_app;
+pub(crate) use http::api::create_api_router;
+pub use http::api::dto::{
+    ApiLimits, ApiMetadata, ApiVersionMetadata, CursorPage, DecimalString, DecimalStringError,
+    PageCursor, PageRequest, PatchField, ProblemDetails, ProblemFieldError, RegistrationMetadata,
+    SyncCursor, API_MAJOR, BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_PAGE_SIZE,
+    ITEM_CIPHERTEXT_BYTES, MAX_PAGE_SIZE,
+};
+pub use http::api::openapi_json;
+pub(crate) use http::api::response_headers as api_response_headers;
 pub use http::middleware::{
     catch_panic_layer, edge_http_middleware, http_trace_layer, load_edge_http_config,
-    rpc_request_guard_middleware, EdgeHttpConfig,
+    EdgeHttpConfig,
 };
 pub use http::public::create_public_http_router;
-pub use http::rpc_tracing::rpc_tracing_middleware;
-pub use http::sync_sse::create_sync_http_router;
 pub use jobs::JobRunner;
-pub use rpc::audit::create_audit_router;
-pub use rpc::auth::create_auth_router;
-pub use rpc::billing::create_billing_router;
-pub use rpc::share::create_share_router;
-pub use rpc::sync::create_sync_router;
-pub use rpc::team::create_team_router;
-pub use rpc::travel_mode::create_travel_mode_router;
-pub use rpc::vault::create_vault_router;
-pub use services::auth::rpc_request_context_middleware;
+pub use services::auth::request_context_middleware;
 pub use services::connection_registry::ConnectionRegistry;
 pub use services::rate_limit::{build_rate_limiter, RateLimiter};
 pub use services::redis::init_redis;
@@ -56,24 +49,6 @@ pub struct AppState {
     pub sync_pubsub: SyncPubSub,
     pub instance_id: String,
     pub rate_limiter: Arc<dyn RateLimiter>,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PrivateDataUserResponse {
-    pub token: String,
-    pub session_id: String,
-    pub user_id: String,
-    pub expires_at: String,
-    pub platform: String,
-    pub client_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PrivateDataResponse {
-    pub message: String,
-    pub user: PrivateDataUserResponse,
 }
 
 impl Default for AppState {
@@ -146,40 +121,4 @@ impl<T> NotifySyncExt<T> for Result<T, error::AppError> {
         }
         self
     }
-}
-
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn healthCheck() -> String {
-    "OK".to_string()
-}
-
-#[allow(non_snake_case)]
-#[handler(query)]
-pub async fn privateData(ctx: services::auth::RefreshSessionContext) -> PrivateDataResponse {
-    PrivateDataResponse {
-        message: "This is private".to_string(),
-        user: PrivateDataUserResponse {
-            token: ctx.session.token,
-            session_id: ctx.session.session_id,
-            user_id: ctx.session.user_id,
-            expires_at: format_timestamp(ctx.session.expires_at),
-            platform: ctx.session.platform,
-            client_id: ctx.session.client_id,
-        },
-    }
-}
-
-pub fn create_rpc_router() -> Router<AppState> {
-    Router::new()
-        .handler(healthCheck)
-        .handler(privateData)
-        .nest("auth", create_auth_router())
-        .nest("audit", create_audit_router())
-        .nest("billing", create_billing_router())
-        .nest("share", create_share_router())
-        .nest("sync", create_sync_router())
-        .nest("team", create_team_router())
-        .nest("travelMode", create_travel_mode_router())
-        .nest("vault", create_vault_router())
 }

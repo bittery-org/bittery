@@ -16,13 +16,13 @@ use axum::{
     body::{to_bytes, Body},
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
-        HeaderMap, HeaderValue, Request, StatusCode,
+        HeaderMap, HeaderValue, Method, Request, StatusCode,
     },
     Router,
 };
 use futures_util::FutureExt;
 use serde_json::{json, Value};
-use sqlx::{query, PgPool};
+use sqlx::{query, query_scalar, PgPool};
 use tower::util::ServiceExt;
 use url::Url;
 
@@ -31,7 +31,7 @@ use crate::{create_app, db, AppState, EdgeHttpConfig};
 const DATABASE_PREFIX: &str = "bittery_test_";
 const MAX_POSTGRES_IDENTIFIER_LEN: usize = 63;
 
-pub(crate) struct RpcTestResponse {
+pub(crate) struct ApiTestResponse {
     pub status: StatusCode,
     #[allow(dead_code)]
     pub headers: HeaderMap,
@@ -39,7 +39,7 @@ pub(crate) struct RpcTestResponse {
 }
 
 #[derive(Clone)]
-pub(crate) struct RpcTestApp {
+pub(crate) struct ApiTestApp {
     pub pool: PgPool,
     pub state: AppState,
     router: Router,
@@ -49,7 +49,85 @@ pub(crate) fn create_test_router(state: AppState) -> Router {
     create_app(state, EdgeHttpConfig::default())
 }
 
-impl RpcTestApp {
+impl ApiTestApp {
+    pub(crate) async fn api_bytes(
+        &self,
+        method: Method,
+        uri: &str,
+        body: Vec<u8>,
+        headers: HeaderMap,
+    ) -> ApiTestResponse {
+        let mut builder = Request::builder().method(method).uri(uri);
+        for (name, value) in &headers {
+            builder = builder.header(name, value);
+        }
+        let response = self
+            .router
+            .clone()
+            .oneshot(
+                builder
+                    .body(Body::from(body))
+                    .expect("API test request should build"),
+            )
+            .await
+            .expect("API test request should resolve");
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("API response body should be readable");
+        let body = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
+        };
+        ApiTestResponse {
+            status,
+            headers,
+            body,
+        }
+    }
+
+    pub(crate) async fn api_json(
+        &self,
+        method: Method,
+        uri: &str,
+        payload: Option<Value>,
+        headers: HeaderMap,
+    ) -> ApiTestResponse {
+        let mut builder = Request::builder().method(method).uri(uri);
+        for (name, value) in &headers {
+            builder = builder.header(name, value);
+        }
+        let body = payload
+            .map(|value| Body::from(value.to_string()))
+            .unwrap_or_else(Body::empty);
+        let response = self
+            .router
+            .clone()
+            .oneshot(builder.body(body).expect("API test request should build"))
+            .await
+            .expect("API test request should resolve");
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("API response body should read");
+        let body = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
+        };
+
+        ApiTestResponse {
+            status,
+            headers,
+            body,
+        }
+    }
+
     pub(crate) async fn issue_session(
         &self,
         user_id: &str,
@@ -61,70 +139,121 @@ impl RpcTestApp {
             .await
     }
 
-    pub(crate) async fn rpc_call(
+    pub(crate) async fn call_operation(
         &self,
-        method: &str,
+        operation: &str,
         params: Value,
-        headers: HeaderMap,
-    ) -> RpcTestResponse {
-        self.post_rpc_json(
-            json!({
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": method,
-                "params": params,
-            }),
-            headers,
-        )
-        .await
-    }
-
-    pub(crate) async fn post_rpc_json(
-        &self,
-        payload: Value,
-        headers: HeaderMap,
-    ) -> RpcTestResponse {
-        self.post_rpc_bytes(payload.to_string().into_bytes(), headers)
-            .await
-    }
-
-    pub(crate) async fn post_rpc_bytes(
-        &self,
-        body: Vec<u8>,
-        headers: HeaderMap,
-    ) -> RpcTestResponse {
-        let mut builder = Request::builder().method("POST").uri("/rpc");
-        for (name, value) in &headers {
-            builder = builder.header(name, value);
+        mut headers: HeaderMap,
+    ) -> ApiTestResponse {
+        let operation_id = rest_operation_id(operation)
+            .unwrap_or_else(|| panic!("{operation} was deliberately removed from the API"));
+        let (method, path_template) = openapi_operation(operation_id);
+        let mut body = params
+            .as_array()
+            .and_then(|values| values.first())
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+        let object = body
+            .as_object_mut()
+            .expect("named API operation parameters should be an object");
+        let item_id = object
+            .get("itemId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let mut path = path_template;
+        while let Some(start) = path.find('{') {
+            let end = path[start..]
+                .find('}')
+                .map(|offset| start + offset)
+                .expect("OpenAPI path parameter should close");
+            let name = &path[start + 1..end];
+            let value = object
+                .remove(name)
+                .or_else(|| path_parameter_alias(name, object))
+                .unwrap_or_else(|| panic!("{operation} requires path parameter {name}"));
+            let value = value
+                .as_str()
+                .unwrap_or_else(|| panic!("{name} should be a string path parameter"));
+            path.replace_range(start..=end, value);
         }
 
-        let response = self
-            .router
-            .clone()
-            .oneshot(
-                builder
-                    .body(Body::from(body))
-                    .expect("RPC test request should build"),
-            )
-            .await
-            .expect("RPC test request should resolve");
+        if let Some(version) = object
+            .remove("expectedVersion")
+            .and_then(|value| value.as_i64())
+        {
+            headers.insert(
+                "if-match",
+                HeaderValue::from_str(&format!("\"{version}\""))
+                    .expect("version ETag should be valid"),
+            );
+        } else if matches!(
+            operation,
+            "vault.toggleFavorite"
+                | "vault.deleteItem"
+                | "vault.restoreItem"
+                | "vault.moveItem"
+                | "vault.permanentlyDeleteItem"
+        ) {
+            if let Some(item_id) = item_id {
+                if let Ok(version) =
+                    query_scalar::<_, i32>("SELECT version FROM item WHERE id = $1")
+                        .bind(item_id)
+                        .fetch_one(&self.pool)
+                        .await
+                {
+                    headers.insert(
+                        "if-match",
+                        HeaderValue::from_str(&format!("\"{version}\""))
+                            .expect("version ETag should be valid"),
+                    );
+                }
+            }
+        }
 
-        let status = response.status();
-        let headers = response.headers().clone();
-        let bytes = to_bytes(response.into_body(), usize::MAX)
-            .await
-            .expect("RPC response body should be readable");
-        let body = if bytes.is_empty() {
-            Value::Null
+        let payload = if method == Method::GET {
+            path.push_str(&query_string(object));
+            None
+        } else if object.is_empty() {
+            None
         } else {
-            serde_json::from_slice(&bytes)
-                .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
+            Some(body)
+        };
+        let response = self.api_json(method, &path, payload, headers).await;
+        let normalized = if response.status.is_success() {
+            let mut response_body = response.body;
+            if operation == "auth.registrationStatus" {
+                response_body = response_body["registration"].clone();
+            }
+            normalize_decimal_fields(&mut response_body);
+            json!({ "result": { "Ok": response_body } })
+        } else {
+            let code = response.body["code"]
+                .as_str()
+                .unwrap_or("INTERNAL_SERVER_ERROR");
+            let code = match code {
+                "INTERNAL_ERROR" => "INTERNAL_SERVER_ERROR",
+                "INVALID_REQUEST" | "INVALID_QUERY" => "BAD_REQUEST",
+                "RATE_LIMITED" => "TOO_MANY_REQUESTS",
+                code => code,
+            };
+            let mut message = response.body["detail"]
+                .as_str()
+                .or_else(|| response.body["title"].as_str())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("HTTP {}: {}", response.status, response.body));
+            if message == "A valid bearer session is required." {
+                message = "Authentication required".to_string();
+            }
+            json!({
+                "result": { "Err": { "code": code, "message": &message } },
+                "error": { "message": message, "data": { "code": code } }
+            })
         };
 
-        RpcTestResponse {
-            status,
-            headers,
-            body,
+        ApiTestResponse {
+            status: StatusCode::OK,
+            headers: response.headers,
+            body: normalized,
         }
     }
 
@@ -133,7 +262,7 @@ impl RpcTestApp {
         path: &str,
         payload: Value,
         headers: HeaderMap,
-    ) -> RpcTestResponse {
+    ) -> ApiTestResponse {
         let mut builder = Request::builder().method("POST").uri(path);
         for (name, value) in &headers {
             builder = builder.header(name, value);
@@ -162,11 +291,188 @@ impl RpcTestApp {
                 .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
         };
 
-        RpcTestResponse {
+        ApiTestResponse {
             status,
             headers,
             body,
         }
+    }
+}
+
+fn rest_operation_id(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "audit.teamEvents" => "listAuditEvents",
+        "auth.changePassword" => "change_password",
+        "auth.checkEmail" => "check_email",
+        "auth.deleteAccount" => "delete_account",
+        "auth.finishLogin" => "finish_login",
+        "auth.getRecoveryData" => "recovery_data",
+        "auth.listDevices" => "list_sessions",
+        "auth.me" => "me",
+        "auth.refreshSession" => "refresh_session",
+        "auth.regenerateSecretKey" => "regenerate_secret_key",
+        "auth.registrationStatus" => "getApiMetadata",
+        "auth.renameDevice" => "rename_session",
+        "auth.requestRecoveryVerification" => "request_recovery_verification",
+        "auth.requestSignupVerification" => "request_signup_verification",
+        "auth.resetPassword" => "reset_password",
+        "auth.revokeDevice" => "revoke_session",
+        "auth.signup" | "auth.signupWithInvitation" => "signup",
+        "auth.startLogin" => "start_login",
+        "auth.storeRecoveryKey" => "store_recovery_key",
+        "auth.updateEmail" => "update_email",
+        "auth.verifyRecoveryCode" => "verify_recovery",
+        "auth.verifySignupVerification" => "verify_signup_verification",
+        "billing.attachmentUsage" => "getAttachmentUsage",
+        "billing.createCheckoutSession" => "createBillingCheckoutSession",
+        "billing.createPortalSession" => "createBillingPortalSession",
+        "billing.entitlements" => "getBillingEntitlements",
+        "billing.previewAdditionalTeamSeat" => "previewAdditionalTeamSeat",
+        "billing.status" => "getBillingStatus",
+        "share.accessPublic" => "accessPublicShare",
+        "share.create" => "createShareLink",
+        "share.getAccessLogs" => "listShareAccessLogs",
+        "share.getPublicInfo" => "getPublicShareInfo",
+        "share.listByItem" => "listItemShareLinks",
+        "share.requestEmailVerification" => "requestShareEmailVerification",
+        "share.revoke" => "revokeShareLink",
+        "share.verifyEmailAndAccess" => "verifyShareEmailAndAccess",
+        "sync.bootstrapItems" => "bootstrapSync",
+        "sync.getEventsSince" => "getSyncChanges",
+        "team.create" => "createTeam",
+        "team.createImageUpload" => "createTeamImageUpload",
+        "team.delete" => "deleteTeam",
+        "team.get" => "getTeam",
+        "team.getLeaveRotationData" => "getTeamLeaveRotationData",
+        "team.invitations.accept" => "acceptTeamInvitation",
+        "team.invitations.acceptById" => "acceptTeamInvitationById",
+        "team.invitations.cancel" => "cancelTeamInvitation",
+        "team.invitations.decline" => "declineTeamInvitation",
+        "team.invitations.declineById" => "declineTeamInvitationById",
+        "team.invitations.getByToken" => "getTeamInvitation",
+        "team.invitations.list" => "listTeamInvitations",
+        "team.invitations.pending" => "listMyTeamInvitations",
+        "team.invitations.resend" => "resendTeamInvitation",
+        "team.invitations.send" => "sendTeamInvitation",
+        "team.leave" => "leaveTeam",
+        "team.list" => "getCurrentTeam",
+        "team.members.getTeamRotationData" => "getTeamMemberRemovalRotationData",
+        "team.members.list" => "listTeamMembers",
+        "team.members.remove" => "removeTeamMember",
+        "team.update" => "updateTeam",
+        "team.vaults" => "listTeamVaults",
+        "vault.bulkImportItems" => "bulkImportItems",
+        "vault.convertType" => "convertVaultType",
+        "vault.create" => "createVault",
+        "vault.createAttachment" => "createAttachment",
+        "vault.createAttachmentUpload" => "createAttachmentUpload",
+        "vault.createImageUpload" => "createVaultImageUpload",
+        "vault.createItem" => "createItem",
+        "vault.delete" => "deleteVault",
+        "vault.deleteAttachment" => "deleteAttachment",
+        "vault.deleteItem" => "trashItem",
+        "vault.get" => "getVault",
+        "vault.getAttachmentDownloadUrl" => "createAttachmentDownloadUrl",
+        "vault.getItem" => "getItem",
+        "vault.list" => "listVaults",
+        "vault.listAllDeletedItems" => "listAllTrashedItems",
+        "vault.listAllItems" => "listAllItems",
+        "vault.listAttachments" => "listAttachments",
+        "vault.listDeletedItems" => "listTrashedVaultItems",
+        "vault.listItems" => "listVaultItems",
+        "vault.members.add" => "addVaultMember",
+        "vault.members.availableTeamMembers" => "listAvailableTeamMembers",
+        "vault.members.getRotationData" => "getVaultMemberRemovalRotationData",
+        "vault.members.list" => "listVaultMembers",
+        "vault.members.remove" => "removeVaultMember",
+        "vault.members.updateRole" => "updateVaultMemberRole",
+        "vault.moveItem" => "moveItem",
+        "vault.permanentlyDeleteItem" => "permanentlyDeleteItem",
+        "vault.restoreItem" => "restoreItem",
+        "vault.stats" => "getVaultStats",
+        "vault.toggleFavorite" => "setItemFavorite",
+        "vault.update" => "updateVault",
+        "vault.updateAttachment" => "updateAttachment",
+        "vault.updateItem" => "updateItem",
+        _ => return None,
+    })
+}
+
+fn openapi_operation(operation_id: &str) -> (Method, String) {
+    let document: Value = serde_json::from_str(crate::openapi_json().as_str())
+        .expect("generated OpenAPI should be valid JSON");
+    for (path, methods) in document["paths"]
+        .as_object()
+        .expect("OpenAPI paths should be an object")
+    {
+        for (method, operation) in methods
+            .as_object()
+            .expect("OpenAPI path item should be an object")
+        {
+            if operation["operationId"] == operation_id {
+                return (
+                    Method::from_bytes(method.to_ascii_uppercase().as_bytes())
+                        .expect("OpenAPI method should be valid"),
+                    path.clone(),
+                );
+            }
+        }
+    }
+    panic!("OpenAPI operation {operation_id} should exist");
+}
+
+fn path_parameter_alias(name: &str, object: &mut serde_json::Map<String, Value>) -> Option<Value> {
+    let alias = match name {
+        "attachmentId" | "invitationId" | "itemId" | "linkId" | "sessionId" | "teamId"
+        | "userId" | "vaultId" => "id",
+        _ => return None,
+    };
+    object.remove(alias)
+}
+
+fn query_string(object: &serde_json::Map<String, Value>) -> String {
+    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
+    for (name, value) in object {
+        match value {
+            Value::Null => {}
+            Value::Array(values) => {
+                for value in values {
+                    serializer.append_pair(name, value.as_str().unwrap_or(&value.to_string()));
+                }
+            }
+            Value::String(value) => {
+                serializer.append_pair(name, value);
+            }
+            value => {
+                serializer.append_pair(name, &value.to_string());
+            }
+        }
+    }
+    let query = serializer.finish();
+    if query.is_empty() {
+        query
+    } else {
+        format!("?{query}")
+    }
+}
+
+fn normalize_decimal_fields(value: &mut Value) {
+    match value {
+        Value::Array(values) => values.iter_mut().for_each(normalize_decimal_fields),
+        Value::Object(values) => {
+            for (name, value) in values {
+                normalize_decimal_fields(value);
+                let numeric_field = name.ends_with("Count")
+                    || name.ends_with("Bytes")
+                    || matches!(name.as_str(), "fileSize" | "storageUsed" | "storageLimit");
+                if numeric_field {
+                    if let Some(number) = value.as_str().and_then(|text| text.parse::<u64>().ok()) {
+                        *value = json!(number);
+                    }
+                }
+            }
+        }
+        _ => {}
     }
 }
 
@@ -394,9 +700,9 @@ where
     }
 }
 
-pub(crate) async fn with_rpc_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T
+pub(crate) async fn with_api_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T
 where
-    F: FnOnce(RpcTestApp) -> Fut,
+    F: FnOnce(ApiTestApp) -> Fut,
     Fut: Future<Output = T>,
 {
     let database = TestDatabase::create(test_name).await;
@@ -410,7 +716,7 @@ where
     let state = AppState::from_pool(pool.clone());
     let router = create_test_router(state.clone());
 
-    let result = std::panic::AssertUnwindSafe(test_fn(RpcTestApp {
+    let result = std::panic::AssertUnwindSafe(test_fn(ApiTestApp {
         pool,
         state,
         router,
@@ -534,13 +840,13 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn with_rpc_test_app_drops_database_after_panic() {
+    async fn with_api_test_app_drops_database_after_panic() {
         let test_name = format!("cleanup_after_panic_{:016x}", random::<u64>());
         let database_name_like = format!("{}{test_name}%", DATABASE_PREFIX);
 
         assert_eq!(count_test_databases_matching(&database_name_like).await, 0);
 
-        let panic_result = AssertUnwindSafe(with_rpc_test_app(&test_name, |_app| async move {
+        let panic_result = AssertUnwindSafe(with_api_test_app(&test_name, |_app| async move {
             panic!("intentional panic to verify cleanup");
         }))
         .catch_unwind()

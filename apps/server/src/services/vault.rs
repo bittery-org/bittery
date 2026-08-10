@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
-use ts_rs::TS;
+use utoipa::ToSchema;
 
 use crate::{
     config::{bittery_mode, format_timestamp},
@@ -19,14 +19,14 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VaultIdInput {
     pub vault_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateVaultImageUploadInput {
@@ -35,14 +35,14 @@ pub struct CreateVaultImageUploadInput {
     pub content_type: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ItemIdInput {
     pub item_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateAttachmentUploadInput {
@@ -52,7 +52,7 @@ pub struct CreateAttachmentUploadInput {
     pub file_size: i32,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateAttachmentInput {
@@ -66,20 +66,20 @@ pub struct CreateAttachmentInput {
     pub file_size: i32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateAttachmentResponse {
     pub attachment_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct AttachmentIdInput {
     pub attachment_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateAttachmentInput {
@@ -89,7 +89,7 @@ pub struct UpdateAttachmentInput {
     pub encryption_algorithm: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateVaultMemberRoleInput {
@@ -98,7 +98,7 @@ pub struct UpdateVaultMemberRoleInput {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct LookupVaultUserInput {
@@ -106,7 +106,7 @@ pub struct LookupVaultUserInput {
     pub email: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct AddVaultMemberInput {
@@ -117,7 +117,7 @@ pub struct AddVaultMemberInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetVaultRotationDataInput {
@@ -125,7 +125,7 @@ pub struct GetVaultRotationDataInput {
     pub exclude_user_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RotationMemberKeyInput {
@@ -133,7 +133,7 @@ pub struct RotationMemberKeyInput {
     pub encrypted_vault_key: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RotationReEncryptedItemInput {
@@ -142,7 +142,7 @@ pub struct RotationReEncryptedItemInput {
     pub encryption_iv: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct VaultKeyRotationInput {
@@ -150,7 +150,7 @@ pub struct VaultKeyRotationInput {
     pub re_encrypted_items: Vec<RotationReEncryptedItemInput>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct RemoveVaultMemberInput {
@@ -160,7 +160,7 @@ pub struct RemoveVaultMemberInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateItemInput {
@@ -173,14 +173,14 @@ pub struct CreateItemInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateItemResponse {
     pub item_id: String,
     pub id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct BulkImportItemInput {
@@ -192,7 +192,7 @@ pub struct BulkImportItemInput {
     pub encryption_algorithm: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct BulkImportItemsInput {
@@ -201,7 +201,7 @@ pub struct BulkImportItemsInput {
     pub items: Vec<BulkImportItemInput>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BulkImportItemsResponse {
     pub success: bool,
@@ -209,7 +209,7 @@ pub struct BulkImportItemsResponse {
     pub item_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateItemInput {
@@ -221,14 +221,14 @@ pub struct UpdateItemInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateItemResponse {
     pub success: bool,
     pub version: i32,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct MoveItemInput {
@@ -238,26 +238,29 @@ pub struct MoveItemInput {
     pub encrypted_data: String,
     pub encryption_iv: String,
     pub encryption_algorithm: Option<String>,
+    pub expected_version: Option<i32>,
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ToggleFavoriteInput {
     pub item_id: String,
     pub favorite: bool,
+    pub expected_version: Option<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ItemClientInput {
     pub item_id: String,
+    pub expected_version: Option<i32>,
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CreateVaultInput {
@@ -270,7 +273,7 @@ pub struct CreateVaultInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultItemResponse {
     pub id: String,
@@ -287,7 +290,7 @@ pub struct VaultItemResponse {
     pub deleted_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultListEntryResponse {
     pub id: String,
@@ -301,7 +304,7 @@ pub struct VaultListEntryResponse {
     pub created_by_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultDetailsResponse {
     pub id: String,
@@ -315,13 +318,13 @@ pub struct VaultDetailsResponse {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateVaultResponse {
     pub vault_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct UpdateVaultInput {
@@ -332,7 +335,7 @@ pub struct UpdateVaultInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateVaultResponse {
     pub id: String,
@@ -341,7 +344,7 @@ pub struct UpdateVaultResponse {
     pub image_url: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct ConvertVaultTypeInput {
@@ -351,7 +354,7 @@ pub struct ConvertVaultTypeInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConvertVaultTypeResponse {
     pub success: bool,
@@ -360,12 +363,12 @@ pub struct ConvertVaultTypeResponse {
     pub new_type: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct SuccessResponse {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultAttachmentResponse {
     pub id: String,
@@ -382,7 +385,7 @@ pub struct VaultAttachmentResponse {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultItemDetailsResponse {
     pub id: String,
@@ -400,7 +403,7 @@ pub struct VaultItemDetailsResponse {
     pub attachments: Vec<VaultAttachmentResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultSummaryResponse {
     pub id: String,
@@ -412,7 +415,7 @@ pub struct VaultSummaryResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultItemWithVaultResponse {
     pub id: String,
@@ -431,7 +434,7 @@ pub struct VaultItemWithVaultResponse {
     pub vault: Option<VaultSummaryResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DeletedVaultItemWithVaultResponse {
     pub id: String,
@@ -449,7 +452,7 @@ pub struct DeletedVaultItemWithVaultResponse {
     pub vault: Option<VaultSummaryResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultStatsResponse {
     pub team_count: i32,
@@ -457,7 +460,7 @@ pub struct VaultStatsResponse {
     pub item_count: i64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultMemberResponse {
     pub user_id: String,
@@ -466,7 +469,7 @@ pub struct VaultMemberResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultAvailableMemberResponse {
     pub user_id: String,
@@ -475,7 +478,7 @@ pub struct VaultAvailableMemberResponse {
     pub public_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultLookupUserResponse {
     pub id: String,
@@ -484,7 +487,7 @@ pub struct VaultLookupUserResponse {
     pub public_key: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultRotationMemberResponse {
     pub user_id: String,
@@ -492,7 +495,7 @@ pub struct VaultRotationMemberResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultRotationItemResponse {
     pub id: String,
@@ -504,7 +507,7 @@ pub struct VaultRotationItemResponse {
     pub last_modified_by: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultRotationDataResponse {
     pub key_version: i32,
@@ -512,7 +515,7 @@ pub struct VaultRotationDataResponse {
     pub items: Vec<VaultRotationItemResponse>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct VaultKeyRotationSummaryResponse {
     pub id: String,
@@ -521,14 +524,14 @@ pub struct VaultKeyRotationSummaryResponse {
     pub members_updated: usize,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoveVaultMemberResponse {
     pub success: bool,
     pub key_rotation: VaultKeyRotationSummaryResponse,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentDownloadResponse {
     pub download_url: String,
@@ -1817,33 +1820,26 @@ pub(crate) async fn update_vault_item(
     let existing_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
-    let current_version = existing_item.version;
-    if let Some(expected_version) = input.expected_version {
-        if expected_version != current_version {
-            return Err(AppError::conflict(
-                "Item has been modified by another client",
-            ));
-        }
-    }
-    let new_version = current_version + 1;
+    let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start item update transaction");
         AppError::internal("Failed to start item update transaction")
     })?;
-    query(
-		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = $4, last_modified_by = $5, updated_at = $6 WHERE id = $7",
+    let new_version = query_scalar::<_, i32>(
+		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = version + 1, last_modified_by = $4, updated_at = $5 WHERE id = $6 AND version = $7 RETURNING version",
 	)
 	.bind(input.encrypted_data.as_deref())
 	.bind(input.encryption_iv.as_deref())
 	.bind(input.encryption_algorithm.as_deref())
-	.bind(new_version)
 	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
-	.execute(&mut *transaction)
+	.bind(expected_version)
+	.fetch_optional(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to update item"); AppError::internal("Failed to update item") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to update item"); AppError::internal("Failed to update item") })?
+    .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
         "item_updated",
@@ -1865,6 +1861,10 @@ pub(crate) async fn update_vault_item(
     })
 }
 
+fn item_version_conflict() -> AppError {
+    AppError::conflict("Item has been modified by another client")
+}
+
 pub(crate) async fn toggle_vault_favorite(
     pool: &PgPool,
     user_id: &str,
@@ -1874,20 +1874,25 @@ pub(crate) async fn toggle_vault_favorite(
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
 
+    let expected_version = input.expected_version.unwrap_or(existing_item.version);
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start favorite update transaction");
         AppError::internal("Failed to start favorite update transaction")
     })?;
-    query("UPDATE item SET favorite = $1, updated_at = $2 WHERE id = $3")
+    let new_version = query_scalar::<_, i32>(
+        "UPDATE item SET favorite = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND version = $4 RETURNING version",
+    )
         .bind(input.favorite)
         .bind(OffsetDateTime::now_utc())
         .bind(&input.item_id)
-        .execute(&mut *transaction)
+        .bind(expected_version)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to update favorite state");
             AppError::internal("Failed to update favorite state")
-        })?;
+        })?
+        .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
         "item_updated",
@@ -1895,7 +1900,7 @@ pub(crate) async fn toggle_vault_favorite(
         &existing_item.vault_id,
         user_id,
         None,
-        existing_item.version,
+        new_version,
     )
     .await?;
     transaction.commit().await.map_err(|e| {
@@ -1914,21 +1919,27 @@ pub(crate) async fn delete_vault_item(
     let existing_item = load_item_row(pool, &input.item_id).await?;
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
+    let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start item delete transaction");
         AppError::internal("Failed to start item delete transaction")
     })?;
-    query("UPDATE item SET deleted_at = $1, last_modified_by = $2 WHERE id = $3")
+    let new_version = query_scalar::<_, i32>(
+        "UPDATE item SET deleted_at = $1, version = version + 1, last_modified_by = $2, updated_at = $3 WHERE id = $4 AND version = $5 RETURNING version",
+    )
         .bind(OffsetDateTime::now_utc())
         .bind(user_id)
+        .bind(OffsetDateTime::now_utc())
         .bind(&input.item_id)
-        .execute(&mut *transaction)
+        .bind(expected_version)
+        .fetch_optional(&mut *transaction)
         .await
         .map_err(|e| {
             tracing::error!(error = %e, "Failed to delete item");
             AppError::internal("Failed to delete item")
-        })?;
+        })?
+        .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
         "item_deleted",
@@ -1936,7 +1947,7 @@ pub(crate) async fn delete_vault_item(
         &existing_item.vault_id,
         user_id,
         input.client_id.as_deref(),
-        existing_item.version,
+        new_version,
     )
     .await?;
     transaction.commit().await.map_err(|e| {
@@ -1948,7 +1959,7 @@ pub(crate) async fn delete_vault_item(
         "item_deleted",
         &input.item_id,
         user_id,
-        Some(json!({ "vaultId": existing_item.vault_id, "version": existing_item.version })),
+        Some(json!({ "vaultId": existing_item.vault_id, "version": new_version })),
     )
     .await?;
 
@@ -1984,23 +1995,26 @@ pub(crate) async fn restore_vault_item(
     }
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
+    let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start item restore transaction");
         AppError::internal("Failed to start item restore transaction")
     })?;
-    query(
-        "UPDATE item SET deleted_at = NULL, last_modified_by = $1, updated_at = $2 WHERE id = $3",
+    let new_version = query_scalar::<_, i32>(
+        "UPDATE item SET deleted_at = NULL, version = version + 1, last_modified_by = $1, updated_at = $2 WHERE id = $3 AND version = $4 RETURNING version",
     )
     .bind(user_id)
     .bind(OffsetDateTime::now_utc())
     .bind(&input.item_id)
-    .execute(&mut *transaction)
+    .bind(expected_version)
+    .fetch_optional(&mut *transaction)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to restore item");
         AppError::internal("Failed to restore item")
-    })?;
+    })?
+    .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
         "item_restored",
@@ -2008,7 +2022,7 @@ pub(crate) async fn restore_vault_item(
         &existing_item.vault_id,
         user_id,
         input.client_id.as_deref(),
-        existing_item.version,
+        new_version,
     )
     .await?;
     transaction.commit().await.map_err(|e| {
@@ -2020,7 +2034,7 @@ pub(crate) async fn restore_vault_item(
         "item_restored",
         &input.item_id,
         user_id,
-        Some(json!({ "vaultId": existing_item.vault_id, "version": existing_item.version })),
+        Some(json!({ "vaultId": existing_item.vault_id, "version": new_version })),
     )
     .await?;
 
@@ -2049,26 +2063,27 @@ pub(crate) async fn move_vault_item(
         &target_access.role,
         "Cannot move items to a read-only vault",
     )?;
-    let new_version = existing_item.version + 1;
+    let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start item move transaction");
         AppError::internal("Failed to start item move transaction")
     })?;
-    query(
-		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = COALESCE($4, encryption_algorithm), version = $5, last_modified_by = $6, updated_at = $7 WHERE id = $8",
+    let new_version = query_scalar::<_, i32>(
+		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = COALESCE($4, encryption_algorithm), version = version + 1, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
 	.bind(&input.target_vault_id)
 	.bind(&input.encrypted_data)
 	.bind(&input.encryption_iv)
 	.bind(input.encryption_algorithm.as_deref())
-	.bind(new_version)
 	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
-	.execute(&mut *transaction)
+	.bind(expected_version)
+	.fetch_optional(&mut *transaction)
 	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to move item"); AppError::internal("Failed to move item") })?;
+	.map_err(|e| { tracing::error!(error = %e, "Failed to move item"); AppError::internal("Failed to move item") })?
+    .ok_or_else(item_version_conflict)?;
     insert_item_sync_event_with_metadata(
         &mut transaction,
         "item_moved",
@@ -2116,11 +2131,24 @@ pub(crate) async fn permanently_delete_vault_item(
     }
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
+    let expected_version = input.expected_version.unwrap_or(existing_item.version);
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start permanent delete transaction");
         AppError::internal("Failed to start permanent delete transaction")
     })?;
+    let deleted_version = query_scalar::<_, i32>(
+        "DELETE FROM item WHERE id = $1 AND version = $2 RETURNING version + 1",
+    )
+    .bind(&input.item_id)
+    .bind(expected_version)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to permanently delete item");
+        AppError::internal("Failed to permanently delete item")
+    })?
+    .ok_or_else(item_version_conflict)?;
     insert_item_sync_event(
         &mut transaction,
         "item_permanently_deleted",
@@ -2128,17 +2156,9 @@ pub(crate) async fn permanently_delete_vault_item(
         &existing_item.vault_id,
         user_id,
         input.client_id.as_deref(),
-        existing_item.version,
+        deleted_version,
     )
     .await?;
-    query("DELETE FROM item WHERE id = $1")
-        .bind(&input.item_id)
-        .execute(&mut *transaction)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to permanently delete item");
-            AppError::internal("Failed to permanently delete item")
-        })?;
     transaction.commit().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to commit permanent delete");
         AppError::internal("Failed to commit permanent delete")
@@ -2148,7 +2168,7 @@ pub(crate) async fn permanently_delete_vault_item(
         "item_permanently_deleted",
         &input.item_id,
         user_id,
-        Some(json!({ "vaultId": existing_item.vault_id, "version": existing_item.version })),
+        Some(json!({ "vaultId": existing_item.vault_id, "version": deleted_version })),
     )
     .await?;
 

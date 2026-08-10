@@ -60,7 +60,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let app = create_app(app_state, edge_http_config);
 
     let listener = TcpListener::bind(&bind_address).await?;
-    info!(address = %bind_address, "rust rpc server listening");
+    info!(address = %bind_address, "Bittery API server listening");
     if let Some(seeded_session) = seeded_session {
         let redacted_token = &seeded_session.token[..seeded_session.token.len().min(8)];
         info!(

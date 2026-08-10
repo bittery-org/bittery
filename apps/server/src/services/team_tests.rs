@@ -10,7 +10,7 @@ use crate::repo::common::hash_token;
 use crate::services::session_control::load_session_revocation;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
 };
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
 use serde_json::{json, Value};
@@ -121,20 +121,17 @@ fn unauthenticated_json_headers() -> HeaderMap {
     headers
 }
 
-fn assert_rpc_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
+fn assert_transport_error(body: &Value, code: &str, message: &str) {
     assert_eq!(body["error"]["message"], json!(message));
     assert_eq!(body["error"]["data"]["code"], json!(code));
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert_eq!(body["result"]["Err"]["code"], json!(code));
     assert_eq!(body["result"]["Err"]["message"], json!(message));
 }
 
 fn assert_invalid_params_error(body: &Value) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert!(
         body["error"].is_object(),
         "unexpected invalid params body: {body}"
@@ -703,7 +700,7 @@ fn generate_secure_token_returns_32_url_safe_characters() {
 
 #[tokio::test]
 async fn team_protected_handlers_require_authentication() {
-    with_rpc_test_app("team_auth_matrix", |app| async move {
+    with_api_test_app("team_auth_matrix", |app| async move {
         let valid_token = "A234567890123456789012345678901";
         for (method, params) in [
             ("team.list", json!([])),
@@ -773,11 +770,11 @@ async fn team_protected_handlers_require_authentication() {
             ),
         ] {
             let response = app
-                .rpc_call(method, params, unauthenticated_json_headers())
+                .call_operation(method, params, unauthenticated_json_headers())
                 .await;
 
             assert_eq!(response.status, axum::http::StatusCode::OK, "{method}");
-            assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
+            assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
         }
     })
     .await;
@@ -785,17 +782,19 @@ async fn team_protected_handlers_require_authentication() {
 
 #[tokio::test]
 async fn team_handlers_reject_malformed_request_input() {
-    with_rpc_test_app("team_bad_params", |app| async move {
+    with_api_test_app("team_bad_params", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&owner_session.token);
 
-        let get_response = app.rpc_call("team.get", json!([{}]), headers.clone()).await;
+        let get_response = app
+            .call_operation("team.get", json!([{}]), headers.clone())
+            .await;
         assert_eq!(get_response.status, StatusCode::OK);
         assert_invalid_params_error(&get_response.body);
 
         let remove_response = app
-            .rpc_call(
+            .call_operation(
                 "team.members.remove",
                 json!([{ "teamId": fixture.team_id, "vaultRotations": [] }]),
                 headers,
@@ -805,7 +804,7 @@ async fn team_handlers_reject_malformed_request_input() {
         assert_invalid_params_error(&remove_response.body);
 
         let token_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{}]),
                 unauthenticated_json_headers(),
@@ -819,13 +818,13 @@ async fn team_handlers_reject_malformed_request_input() {
 
 #[tokio::test]
 async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
-    with_rpc_test_app("team_invite_manage", |app| async move {
+    with_api_test_app("team_invite_manage", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let send_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.send",
                 json!([{
                     "teamId": fixture.team_id,
@@ -853,7 +852,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             .to_string();
 
         let list_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.list",
                 json!([{ "teamId": fixture.team_id }]),
                 owner_headers.clone(),
@@ -867,7 +866,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
         let invitee_session = app.issue_session(&fixture.invitee_user_id).await;
         let pending_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.pending",
                 json!([]),
                 authenticated_json_headers(&invitee_session.token),
@@ -883,7 +882,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         assert!(pending_response.body["result"]["Ok"][0]["token"].is_null());
 
         let public_lookup = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": invitation_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -900,7 +899,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         );
 
         let invalid_token_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": "short-token" }]),
                 unauthenticated_json_headers(),
@@ -911,7 +910,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
         let missing_token = "0123456789abcdefghijklmnopqrstuv";
         let missing_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": missing_token }]),
                 unauthenticated_json_headers(),
@@ -933,7 +932,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         )
         .await;
         let expired_lookup = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": "ZXCVBNMASDFGHJKLQWERTYUIOP123456" }]),
                 unauthenticated_json_headers(),
@@ -947,7 +946,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_list = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.list",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&member_session.token),
@@ -967,7 +966,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             .await
             .expect("invitation should update");
         let resend_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.resend",
                 json!([{ "invitationId": invitation_id.clone() }]),
                 owner_headers.clone(),
@@ -992,7 +991,7 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         assert!(resent_expires_at > OffsetDateTime::now_utc());
 
         let cancel_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.cancel",
                 json!([{ "invitationId": invitation_id.clone() }]),
                 owner_headers,
@@ -1013,13 +1012,13 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
 #[tokio::test]
 async fn team_list_get_create_update_and_image_upload_paths() {
-    with_rpc_test_app("team_core_mutations", |app| async move {
+    with_api_test_app("team_core_mutations", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let list_response = app
-            .rpc_call("team.list", json!([]), owner_headers.clone())
+            .call_operation("team.list", json!([]), owner_headers.clone())
             .await;
         assert_eq!(list_response.status, StatusCode::OK);
         assert_eq!(
@@ -1030,7 +1029,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 
         let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
         let no_team_list = app
-            .rpc_call(
+            .call_operation(
                 "team.list",
                 json!([]),
                 authenticated_json_headers(&no_team_session.token),
@@ -1040,7 +1039,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         assert_handler_error(&no_team_list.body, "NOT_FOUND", "User has no team");
 
         let get_response = app
-            .rpc_call(
+            .call_operation(
                 "team.get",
                 json!([{ "teamId": fixture.team_id }]),
                 owner_headers.clone(),
@@ -1058,7 +1057,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
         let forbidden_get = app
-            .rpc_call(
+            .call_operation(
                 "team.get",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&outsider_session.token),
@@ -1072,7 +1071,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let create_response = app
-            .rpc_call(
+            .call_operation(
                 "team.create",
                 json!([{ "name": "Manual Team" }]),
                 owner_headers.clone(),
@@ -1087,7 +1086,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_update = app
-            .rpc_call(
+            .call_operation(
                 "team.update",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1104,7 +1103,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let update_response = app
-            .rpc_call(
+            .call_operation(
                 "team.update",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1133,7 +1132,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             Some("teams/team_router_main/custom-logo.png".to_string())
         );
 
-        let team_after_update = with_storage_env_async(app.rpc_call(
+        let team_after_update = with_storage_env_async(app.call_operation(
             "team.get",
             json!([{ "teamId": fixture.team_id }]),
             owner_headers.clone(),
@@ -1146,7 +1145,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let forbidden_upload = app
-            .rpc_call(
+            .call_operation(
                 "team.createImageUpload",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1164,7 +1163,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let invalid_upload = app
-            .rpc_call(
+            .call_operation(
                 "team.createImageUpload",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1181,7 +1180,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             "Only image files are allowed",
         );
 
-        let upload_response = with_storage_env_async(app.rpc_call(
+        let upload_response = with_storage_env_async(app.call_operation(
             "team.createImageUpload",
             json!([{
                 "teamId": fixture.team_id,
@@ -1221,13 +1220,13 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 
 #[tokio::test]
 async fn team_vaults_members_and_leave_rotation_queries() {
-    with_rpc_test_app("team_query_paths", |app| async move {
+    with_api_test_app("team_query_paths", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let vaults_response = app
-            .rpc_call(
+            .call_operation(
                 "team.vaults",
                 json!([{ "teamId": fixture.team_id }]),
                 owner_headers.clone(),
@@ -1248,7 +1247,7 @@ async fn team_vaults_members_and_leave_rotation_queries() {
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_vaults = app
-            .rpc_call(
+            .call_operation(
                 "team.vaults",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&member_session.token),
@@ -1262,7 +1261,7 @@ async fn team_vaults_members_and_leave_rotation_queries() {
         );
 
         let members_response = app
-            .rpc_call(
+            .call_operation(
                 "team.members.list",
                 json!([{ "teamId": fixture.team_id }]),
                 owner_headers.clone(),
@@ -1285,7 +1284,7 @@ async fn team_vaults_members_and_leave_rotation_queries() {
 
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
         let forbidden_members = app
-            .rpc_call(
+            .call_operation(
                 "team.members.list",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&outsider_session.token),
@@ -1299,7 +1298,7 @@ async fn team_vaults_members_and_leave_rotation_queries() {
         );
 
         let leave_rotation_response = app
-            .rpc_call(
+            .call_operation(
                 "team.getLeaveRotationData",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&member_session.token),
@@ -1332,13 +1331,13 @@ async fn team_vaults_members_and_leave_rotation_queries() {
 /// and is still redeemable, but a database read discloses only a digest.
 #[tokio::test]
 async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
-    with_rpc_test_app("team_invitation_token_hashed", |app| async move {
+    with_api_test_app("team_invitation_token_hashed", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let send_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.send",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1369,7 +1368,7 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         // The stored digest is not a bearer token: replaying it must not resolve.
         let replayed = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": stored }]),
                 unauthenticated_json_headers(),
@@ -1379,7 +1378,7 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         // A well-formed but wrong token still fails.
         let wrong = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": "0123456789abcdefghijklmnopqrstuv" }]),
                 unauthenticated_json_headers(),
@@ -1389,7 +1388,7 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         // The raw token from the emailed link still resolves and accepts.
         let lookup = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": token.clone() }]),
                 unauthenticated_json_headers(),
@@ -1399,7 +1398,7 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         let accept_session = app.issue_session(&fixture.accept_user_id).await;
         let accepted = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.accept",
                 json!([{ "token": token }]),
                 authenticated_json_headers(&accept_session.token),
@@ -1419,13 +1418,13 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 /// a fresh raw token back, and the previous one must stop working.
 #[tokio::test]
 async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
-    with_rpc_test_app("team_invitation_resend_rotates", |app| async move {
+    with_api_test_app("team_invitation_resend_rotates", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let send_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.send",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1452,7 +1451,7 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
                 .expect("invitation should load");
 
         let resend_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.resend",
                 json!([{ "invitationId": invitation_id.clone() }]),
                 owner_headers,
@@ -1490,7 +1489,7 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
 
         // The link handed out before the resend is dead.
         let stale_lookup = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": original_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -1500,7 +1499,7 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
 
         let accept_session = app.issue_session(&fixture.accept_user_id).await;
         let stale_accept = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.accept",
                 json!([{ "token": original_token }]),
                 authenticated_json_headers(&accept_session.token),
@@ -1514,7 +1513,7 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
 
         // The link built from the resend response works end to end.
         let fresh_lookup = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": rotated_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -1526,7 +1525,7 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
         );
 
         let accepted = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.accept",
                 json!([{ "token": rotated_token }]),
                 authenticated_json_headers(&accept_session.token),
@@ -1545,7 +1544,7 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
 /// hand out, not with the unreachable digest it was stored with.
 #[tokio::test]
 async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() {
-    with_rpc_test_app("team_invitation_resend_expired", |app| async move {
+    with_api_test_app("team_invitation_resend_expired", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let invitation_id = "team_invitation_resend_expired";
         let original_token = "ZXCVBNMASDFGHJKLQWERTYUIOP123456";
@@ -1569,7 +1568,7 @@ async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() 
 
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let resend_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.resend",
                 json!([{ "invitationId": invitation_id }]),
                 authenticated_json_headers(&owner_session.token),
@@ -1592,7 +1591,7 @@ async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() 
         assert_ne!(stored, hash_token(original_token));
 
         let stale_lookup = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.getByToken",
                 json!([{ "token": original_token }]),
                 unauthenticated_json_headers(),
@@ -1602,7 +1601,7 @@ async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() 
 
         let accept_session = app.issue_session(&fixture.accept_user_id).await;
         let accepted = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.accept",
                 json!([{ "token": rotated_token }]),
                 authenticated_json_headers(&accept_session.token),
@@ -1620,13 +1619,13 @@ async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() 
 /// token, so accepting/declining from it addresses the invitation by id.
 #[tokio::test]
 async fn team_invitation_accept_and_decline_by_id_paths() {
-    with_rpc_test_app("team_accept_decline_by_id", |app| async move {
+    with_api_test_app("team_accept_decline_by_id", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let accept_invitation = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.send",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1643,7 +1642,7 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
         // Someone else's invitation id is not a credential.
         let wrong_user_session = app.issue_session(&fixture.no_team_user_id).await;
         let wrong_user_accept = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.acceptById",
                 json!([{ "invitationId": accept_invitation_id.clone() }]),
                 authenticated_json_headers(&wrong_user_session.token),
@@ -1656,7 +1655,7 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
         );
 
         let unknown_accept = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.acceptById",
                 json!([{ "invitationId": "team_invitation_missing" }]),
                 authenticated_json_headers(&wrong_user_session.token),
@@ -1670,7 +1669,7 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
 
         let accept_user_session = app.issue_session(&fixture.accept_user_id).await;
         let accepted = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.acceptById",
                 json!([{ "invitationId": accept_invitation_id.clone() }]),
                 authenticated_json_headers(&accept_user_session.token),
@@ -1689,7 +1688,7 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
         assert_eq!(accepted_status, "accepted");
 
         let decline_invitation = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.send",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1705,7 +1704,7 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
 
         let decline_user_session = app.issue_session(&fixture.decline_user_id).await;
         let declined = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.declineById",
                 json!([{ "invitationId": decline_invitation_id.clone() }]),
                 authenticated_json_headers(&decline_user_session.token),
@@ -1725,13 +1724,13 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
 
 #[tokio::test]
 async fn team_invitation_accept_and_decline_paths() {
-    with_rpc_test_app("team_accept_decline", |app| async move {
+    with_api_test_app("team_accept_decline", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let accept_invitation = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.send",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1756,7 +1755,7 @@ async fn team_invitation_accept_and_decline_paths() {
 
         let wrong_user_session = app.issue_session(&fixture.no_team_user_id).await;
         let wrong_user_accept = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.accept",
                 json!([{ "token": accept_token.clone() }]),
                 authenticated_json_headers(&wrong_user_session.token),
@@ -1771,7 +1770,7 @@ async fn team_invitation_accept_and_decline_paths() {
 
         let accept_user_session = app.issue_session(&fixture.accept_user_id).await;
         let accept_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.accept",
                 json!([{ "token": accept_token.clone() }]),
                 authenticated_json_headers(&accept_user_session.token),
@@ -1814,7 +1813,7 @@ async fn team_invitation_accept_and_decline_paths() {
         assert_eq!(accepted_status, "accepted");
 
         let decline_invitation = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.send",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1835,7 +1834,7 @@ async fn team_invitation_accept_and_decline_paths() {
 
         let decline_user_session = app.issue_session(&fixture.decline_user_id).await;
         let decline_response = app
-            .rpc_call(
+            .call_operation(
                 "team.invitations.decline",
                 json!([{ "token": decline_token }]),
                 authenticated_json_headers(&decline_user_session.token),
@@ -1859,12 +1858,12 @@ async fn team_invitation_accept_and_decline_paths() {
 
 #[tokio::test]
 async fn team_leave_paths() {
-    with_rpc_test_app("team_leave", |app| async move {
+    with_api_test_app("team_leave", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
 
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_leave = app
-            .rpc_call(
+            .call_operation(
                 "team.leave",
                 json!([{ "teamId": fixture.team_id, "vaultRotations": [] }]),
                 authenticated_json_headers(&owner_session.token),
@@ -1880,7 +1879,7 @@ async fn team_leave_paths() {
         let leaving_session = app.issue_session(&fixture.member_user_id).await;
         let additional_session = app.issue_session(&fixture.member_user_id).await;
         let leave_response = app
-            .rpc_call(
+            .call_operation(
                 "team.leave",
                 json!([{
                     "teamId": fixture.team_id,
@@ -1985,13 +1984,13 @@ async fn team_leave_paths() {
 
 #[tokio::test]
 async fn team_delete_paths() {
-    with_rpc_test_app("team_delete", |app| async move {
+    with_api_test_app("team_delete", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_delete = with_bittery_mode_async(
             Some("cloud"),
-            app.rpc_call(
+            app.call_operation(
                 "team.delete",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&member_session.token),
@@ -2008,7 +2007,7 @@ async fn team_delete_paths() {
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let self_hosted_delete = with_bittery_mode_async(
             Some("self_hosted"),
-            app.rpc_call(
+            app.call_operation(
                 "team.delete",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&owner_session.token),
@@ -2024,7 +2023,7 @@ async fn team_delete_paths() {
 
         let members_blocked = with_bittery_mode_async(
             Some("cloud"),
-            app.rpc_call(
+            app.call_operation(
                 "team.delete",
                 json!([{ "teamId": fixture.team_id }]),
                 authenticated_json_headers(&owner_session.token),
@@ -2070,7 +2069,7 @@ async fn team_delete_paths() {
         let vault_owner_session = app.issue_session(vault_owner_id).await;
         let vault_blocked = with_bittery_mode_async(
             Some("cloud"),
-            app.rpc_call(
+            app.call_operation(
                 "team.delete",
                 json!([{ "teamId": vault_team_id }]),
                 authenticated_json_headers(&vault_owner_session.token),
@@ -2107,7 +2106,7 @@ async fn team_delete_paths() {
         let success_session = app.issue_session(success_owner_id).await;
         let delete_success = with_bittery_mode_async(
             Some("cloud"),
-            app.rpc_call(
+            app.call_operation(
                 "team.delete",
                 json!([{ "teamId": success_team_id }]),
                 authenticated_json_headers(&success_session.token),
@@ -2137,7 +2136,7 @@ async fn team_delete_paths() {
 
 #[tokio::test]
 async fn team_member_rotation_remove_and_delete_account_paths() {
-    with_rpc_test_app(
+    with_api_test_app(
 			"team_member_remove",
 			|app| async move {
 				let fixture = build_team_router_fixture(&app.pool).await;
@@ -2145,7 +2144,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				let owner_session = app.issue_session(&fixture.owner_user_id).await;
 				let owner_headers = authenticated_json_headers(&owner_session.token);
 				let owner_rotation = app
-					.rpc_call(
+					.call_operation(
 						"team.members.getTeamRotationData",
 						json!([{
 							"teamId": fixture.team_id,
@@ -2164,7 +2163,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 
 				let admin_session = app.issue_session(&fixture.admin_user_id).await;
 				let admin_rotation = app
-					.rpc_call(
+					.call_operation(
 						"team.members.getTeamRotationData",
 						json!([{
 							"teamId": fixture.team_id,
@@ -2182,7 +2181,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 
 				let member_session = app.issue_session(&fixture.member_user_id).await;
 				let member_rotation = app
-					.rpc_call(
+					.call_operation(
 						"team.members.getTeamRotationData",
 						json!([{
 							"teamId": fixture.team_id,
@@ -2199,7 +2198,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				);
 
 				let missing_target = app
-					.rpc_call(
+					.call_operation(
 						"team.members.remove",
 						json!([{
 							"teamId": fixture.team_id,
@@ -2217,7 +2216,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				);
 
 				let self_remove = app
-					.rpc_call(
+					.call_operation(
 						"team.members.remove",
 						json!([{
 							"teamId": fixture.team_id,
@@ -2236,7 +2235,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 
 				let removed_session = app.issue_session(&fixture.remove_target_user_id).await;
 				let remove_response = app
-					.rpc_call(
+					.call_operation(
 						"team.members.remove",
 						json!([{
 							"teamId": fixture.team_id,
@@ -2369,7 +2368,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				);
 
 				let invalid_delete_account = app
-					.rpc_call(
+					.call_operation(
 						"team.members.deleteAccount",
 						json!([{
 							"teamId": fixture.team_id,
@@ -2387,7 +2386,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				);
 
 				let deprecated_delete_account = app
-					.rpc_call(
+					.call_operation(
 						"team.members.deleteAccount",
 						json!([{
 							"teamId": fixture.team_id,

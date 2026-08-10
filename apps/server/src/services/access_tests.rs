@@ -8,7 +8,7 @@ use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
 use crate::test_support::{
     acquire_env_lock_async, assign_user_to_team, seed_item, seed_team, seed_user, seed_vault,
-    seed_vault_key, with_rpc_test_app,
+    seed_vault_key, with_api_test_app,
 };
 
 const ADMIN_ID: &str = "access-admin";
@@ -78,7 +78,7 @@ async fn seed_share_link(
 
 #[tokio::test]
 async fn member_access_reports_team_vaults_and_excludes_personal_ones() {
-    with_rpc_test_app("access_member_vaults", |app| async move {
+    with_api_test_app("access_member_vaults", |app| async move {
         with_bittery_mode_async(Some("cloud"), async {
             seed_team_fixture(&app.pool).await;
 
@@ -165,7 +165,7 @@ async fn member_access_reports_team_vaults_and_excludes_personal_ones() {
 
 #[tokio::test]
 async fn member_access_counts_only_unexpired_active_share_links() {
-    with_rpc_test_app("access_member_share_links", |app| async move {
+    with_api_test_app("access_member_share_links", |app| async move {
         with_bittery_mode_async(Some("cloud"), async {
             seed_team_fixture(&app.pool).await;
             seed_vault(
@@ -265,7 +265,7 @@ async fn member_access_counts_only_unexpired_active_share_links() {
 
 #[tokio::test]
 async fn member_access_reports_unexpired_sessions_with_masked_ip() {
-    with_rpc_test_app("access_member_sessions", |app| async move {
+    with_api_test_app("access_member_sessions", |app| async move {
         with_bittery_mode_async(Some("cloud"), async {
             seed_team_fixture(&app.pool).await;
             let session = app.issue_session(MEMBER_ID).await;
@@ -299,7 +299,7 @@ async fn member_access_reports_unexpired_sessions_with_masked_ip() {
 
 #[tokio::test]
 async fn member_access_rejects_non_admin_callers() {
-    with_rpc_test_app("access_member_forbidden", |app| async move {
+    with_api_test_app("access_member_forbidden", |app| async move {
         with_bittery_mode_async(Some("cloud"), async {
             seed_team_fixture(&app.pool).await;
 
@@ -322,7 +322,7 @@ async fn member_access_rejects_non_admin_callers() {
 
 #[tokio::test]
 async fn member_access_returns_empty_for_users_outside_the_team() {
-    with_rpc_test_app("access_member_cross_team", |app| async move {
+    with_api_test_app("access_member_cross_team", |app| async move {
         with_bittery_mode_async(Some("cloud"), async {
             seed_team_fixture(&app.pool).await;
             seed_user(&app.pool, "outsider", "Outsider", "outsider@example.com").await;

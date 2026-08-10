@@ -1,13 +1,13 @@
 use std::{any::Any, env, time::Duration};
 
 use axum::{
-    body::{to_bytes, Body},
+    body::Body,
     extract::State,
     http::{
         header::{
             HeaderName, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL,
-            CONTENT_TYPE, EXPIRES, ORIGIN, PRAGMA, VARY,
+            ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL, EXPIRES,
+            ORIGIN, PRAGMA, VARY,
         },
         Method, Request, StatusCode,
     },
@@ -19,8 +19,6 @@ use serde_json::json;
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use tracing::Span;
 use url::Url;
-
-use crate::http::rpc_tracing::RpcTraceRequest;
 
 type HttpTraceClassifier =
     tower_http::classify::SharedClassifier<tower_http::classify::ServerErrorsAsFailures>;
@@ -75,16 +73,12 @@ fn response_for_panic(panic: Box<dyn Any + Send + 'static>) -> Response {
 }
 
 fn make_http_trace_span(request: &Request<Body>) -> Span {
-    if request.uri().path() == "/rpc" {
-        tracing::debug_span!("request", route = "/rpc")
-    } else {
-        tracing::debug_span!(
-            "request",
-            method = %request.method(),
-            uri = %request.uri(),
-            version = ?request.version(),
-        )
-    }
+    tracing::debug_span!(
+        "request",
+        method = %request.method(),
+        uri = %request.uri(),
+        version = ?request.version(),
+    )
 }
 
 fn on_http_trace_request(request: &Request<Body>, _span: &Span) {
@@ -100,10 +94,9 @@ fn on_http_trace_response(response: &Response<Body>, latency: Duration, _span: &
 }
 
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
-const RPC_JSON_BODY_LIMIT_BYTES: usize = 16 * 1024 * 1024;
 const ALLOW_METHODS: &str = "GET, POST, OPTIONS";
-const ALLOW_HEADERS: &str = "Content-Type, Authorization, X-Client-Id, X-App-Platform";
-const EXPOSE_HEADERS: &str = "X-Session-Expires";
+const ALLOW_HEADERS: &str = "Content-Type, Authorization, X-Client-Id, X-App-Platform, Bittery-Client-Id, Bittery-Client-Platform, Bittery-Client-Version, Idempotency-Key, Traceparent, Tracestate, If-Match, If-None-Match";
+const EXPOSE_HEADERS: &str = "X-Session-Expires, Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After";
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
 const SECURITY_HEADERS: [(HeaderName, HeaderValue); 6] = [
     (
@@ -168,58 +161,8 @@ pub async fn edge_http_middleware(
     response
 }
 
-pub async fn rpc_request_guard_middleware(request: Request<Body>, next: Next) -> Response {
-    if matches!(
-        request.method(),
-        &Method::GET | &Method::HEAD | &Method::OPTIONS
-    ) {
-        return next.run(request).await;
-    }
-
-    if !is_json_content_type(
-        request
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok()),
-    ) {
-        return json_error(StatusCode::UNSUPPORTED_MEDIA_TYPE, "Unsupported Media Type");
-    }
-
-    if let Some(content_length) = request
-        .headers()
-        .get(axum::http::header::CONTENT_LENGTH)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse::<usize>().ok())
-    {
-        if content_length > RPC_JSON_BODY_LIMIT_BYTES {
-            return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large");
-        }
-    }
-
-    let (parts, body) = request.into_parts();
-    let bytes = match to_bytes(body, RPC_JSON_BODY_LIMIT_BYTES + 1).await {
-        Ok(bytes) => bytes,
-        Err(_) => return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large"),
-    };
-
-    if bytes.len() > RPC_JSON_BODY_LIMIT_BYTES {
-        return json_error(StatusCode::PAYLOAD_TOO_LARGE, "Payload Too Large");
-    }
-
-    let trace_request = RpcTraceRequest::from_body(&bytes);
-    let mut request = Request::from_parts(parts, Body::from(bytes));
-    request.extensions_mut().insert(trace_request);
-    next.run(request).await
-}
-
 fn json_error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
-}
-
-fn is_json_content_type(content_type: Option<&str>) -> bool {
-    content_type
-        .map(|value| value.to_ascii_lowercase().starts_with("application/json"))
-        .unwrap_or(false)
 }
 
 fn apply_security_headers(path: &str, response: &mut Response) {
@@ -305,8 +248,8 @@ fn is_public_asset_path(path: &str) -> bool {
 fn is_sensitive_path(path: &str) -> bool {
     path == "/"
         || path == "/healthz"
-        || path == "/rpc"
-        || path.starts_with("/rpc/")
+        || path == "/api/v1"
+        || path.starts_with("/api/v1/")
         || path == "/sync"
         || path.starts_with("/sync/")
         || path == "/webhooks"

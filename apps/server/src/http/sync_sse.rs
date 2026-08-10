@@ -8,8 +8,7 @@ use axum::{
         sse::{Event, Sse},
         IntoResponse as AxumIntoResponse, Response as AxumResponse,
     },
-    routing::get,
-    Extension, Json, Router as AxumRouter,
+    Extension, Json,
 };
 use serde_json::json;
 use time::OffsetDateTime;
@@ -31,17 +30,7 @@ use crate::{
 /// Interval for refreshing the Redis connection TTL (60s).
 const CONN_TTL_REFRESH_INTERVAL_MS: u64 = 60_000;
 
-pub fn create_sync_http_router() -> AxumRouter<AppState> {
-    AxumRouter::new()
-        .route("/events", get(sync_events))
-        .route("/health", get(sync_health))
-}
-
-async fn sync_health() -> Json<serde_json::Value> {
-    Json(json!({ "status": "ok" }))
-}
-
-async fn sync_events(
+pub(crate) async fn sync_events(
     State(state): State<AppState>,
     session: Option<Extension<VerifiedSession>>,
 ) -> AxumResponse {

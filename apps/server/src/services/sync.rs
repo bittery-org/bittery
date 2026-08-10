@@ -6,7 +6,7 @@ use sqlx::PgPool;
 use sqlx::{query, query_as};
 use std::sync::LazyLock;
 use time::OffsetDateTime;
-use ts_rs::TS;
+use utoipa::ToSchema;
 
 use crate::{
     config::{bittery_mode, format_timestamp},
@@ -23,7 +23,7 @@ use crate::{
     services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
 };
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct CheckConflictInput {
@@ -31,7 +31,7 @@ pub struct CheckConflictInput {
     pub expected_version: i32,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetEventsSinceInput {
@@ -40,7 +40,7 @@ pub struct GetEventsSinceInput {
     pub limit: Option<i32>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct AcknowledgeEventsInput {
@@ -48,21 +48,21 @@ pub struct AcknowledgeEventsInput {
     pub client_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetLastAcknowledgedInput {
     pub client_id: String,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct GetSyncStateInput {
     pub vault_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize, TS)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
 pub struct BootstrapItemsInput {
@@ -70,7 +70,7 @@ pub struct BootstrapItemsInput {
     pub limit: Option<i32>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckConflictResponse {
     pub has_conflict: bool,
@@ -79,27 +79,27 @@ pub struct CheckConflictResponse {
     pub last_modified_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AcknowledgeEventsResponse {
     pub acknowledged: i32,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LastAcknowledgedResponse {
     pub event_id: String,
     pub timestamp: i64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncStateEntry {
     pub latest_event_id: Option<String>,
     pub latest_timestamp: Option<i64>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncEventDto {
     pub id: String,
@@ -115,13 +115,13 @@ pub struct SyncEventDto {
     pub timestamp: i64,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncCursorResponse {
     pub id: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GetEventsSinceResponse {
     pub events: Vec<SyncEventDto>,
@@ -130,7 +130,7 @@ pub struct GetEventsSinceResponse {
     pub requires_full_refresh: bool,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapVaultSummary {
     pub id: String,
@@ -142,7 +142,7 @@ pub struct BootstrapVaultSummary {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapAttachmentResponse {
     pub id: String,
@@ -159,7 +159,7 @@ pub struct BootstrapAttachmentResponse {
     pub created_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapItemResponse {
     pub id: String,
@@ -178,7 +178,7 @@ pub struct BootstrapItemResponse {
     pub vault: Option<BootstrapVaultSummary>,
 }
 
-#[derive(Debug, Clone, Serialize, TS)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapItemsResponse {
     pub items: Vec<BootstrapItemResponse>,

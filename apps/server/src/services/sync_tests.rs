@@ -3,7 +3,7 @@ use std::future::Future;
 use axum::{
     body::{to_bytes, Body},
     http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Request, StatusCode},
-    middleware, Router as HttpRouter,
+    Router as HttpRouter,
 };
 use rand::random;
 use serde_json::{json, Value};
@@ -14,12 +14,10 @@ use tower::util::ServiceExt;
 use super::*;
 use crate::error::AppErrorCode;
 use crate::{
-    http::sync_sse::create_sync_http_router,
-    rpc_request_context_middleware,
     services::session_control::record_session_revocations,
     test_support::{
         acquire_env_lock, acquire_env_lock_async, authenticated_json_headers, seed_item, seed_user,
-        seed_vault, seed_vault_key, with_rpc_test_app, RpcTestApp,
+        seed_vault, seed_vault_key, with_api_test_app, ApiTestApp,
     },
     AppState,
 };
@@ -204,12 +202,7 @@ struct SyncHttpTestResponse {
 
 impl SyncHttpTestApp {
     fn new(state: AppState) -> Self {
-        let router = create_sync_http_router()
-            .route_layer(middleware::from_fn_with_state(
-                state.clone(),
-                rpc_request_context_middleware,
-            ))
-            .with_state(state);
+        let router = crate::test_support::create_test_router(state);
 
         Self { router }
     }
@@ -269,24 +262,22 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert_eq!(body["result"]["Err"]["code"], json!(code));
     assert_eq!(body["result"]["Err"]["message"], json!(message));
 }
 
-fn assert_rpc_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
+fn assert_transport_error(body: &Value, code: &str, message: &str) {
     assert_eq!(body["error"]["message"], json!(message));
     assert_eq!(body["error"]["data"]["code"], json!(code));
 }
 
 async fn with_sync_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T
 where
-    F: FnOnce(RpcTestApp) -> Fut,
+    F: FnOnce(ApiTestApp) -> Fut,
     Fut: Future<Output = T>,
 {
     let unique_name = format!("{test_name}_{:016x}", random::<u64>());
-    with_rpc_test_app(&unique_name, test_fn).await
+    with_api_test_app(&unique_name, test_fn).await
 }
 
 async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
@@ -565,14 +556,14 @@ async fn sync_handlers_require_authentication() {
 
         for (method, params) in protected_calls {
             let response = app
-                .rpc_call(method, params, unauthenticated_json_headers())
+                .call_operation(method, params, unauthenticated_json_headers())
                 .await;
             assert_eq!(
                 response.status,
                 StatusCode::OK,
                 "unexpected status for {method}"
             );
-            assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
+            assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
         }
     })
     .await;
@@ -627,7 +618,7 @@ async fn sync_handlers_reject_malformed_request_input() {
             ];
 
             for (method, params, code, message) in cases {
-                let response = app.rpc_call(method, params, headers.clone()).await;
+                let response = app.call_operation(method, params, headers.clone()).await;
                 assert_eq!(
                     response.status,
                     StatusCode::OK,
@@ -648,7 +639,7 @@ async fn check_conflict_reports_not_found_and_latest_version() {
         let headers = authenticated_json_headers(&session.token);
 
         let not_found = app
-            .rpc_call(
+            .call_operation(
                 "sync.checkConflict",
                 json!([{
                     "itemId": fixture.hidden_item_id,
@@ -661,7 +652,7 @@ async fn check_conflict_reports_not_found_and_latest_version() {
         assert_handler_error(&not_found.body, "NOT_FOUND", "Item not found");
 
         let no_conflict = app
-            .rpc_call(
+            .call_operation(
                 "sync.checkConflict",
                 json!([{
                     "itemId": fixture.primary_item_id,
@@ -678,7 +669,7 @@ async fn check_conflict_reports_not_found_and_latest_version() {
         assert_eq!(no_conflict.body["result"]["Ok"]["currentVersion"], json!(3));
 
         let conflict = app
-            .rpc_call(
+            .call_operation(
                 "sync.checkConflict",
                 json!([{
                     "itemId": fixture.primary_item_id,
@@ -711,7 +702,7 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
         let headers = authenticated_json_headers(&session.token);
 
         let first_page = app
-            .rpc_call(
+            .call_operation(
                 "sync.getEventsSince",
                 json!([{ "limit": 1 }]),
                 headers.clone(),
@@ -740,7 +731,7 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
         );
 
         let filtered = app
-				.rpc_call(
+				.call_operation(
 					"sync.getEventsSince",
 					json!([{
 						"vaultIds": [fixture.secondary_vault_id.clone(), fixture.hidden_vault_id.clone()]
@@ -762,7 +753,7 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
         );
 
         let next_page = app
-            .rpc_call(
+            .call_operation(
                 "sync.getEventsSince",
                 json!([{ "sinceId": fixture.old_primary_event_id }]),
                 headers.clone(),
@@ -787,7 +778,7 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
         assert_eq!(next_page.body["result"]["Ok"]["hasMore"], json!(false));
 
         let full_refresh = app
-            .rpc_call(
+            .call_operation(
                 "sync.getEventsSince",
                 json!([{ "sinceId": fixture.hidden_event_id }]),
                 headers,
@@ -816,7 +807,7 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
             let headers = authenticated_json_headers(&session.token);
 
             let first_page = app
-                .rpc_call(
+                .call_operation(
                     "sync.bootstrapItems",
                     json!([{ "limit": 1 }]),
                     headers.clone(),
@@ -852,7 +843,7 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
             );
 
             let second_page = app
-                .rpc_call(
+                .call_operation(
                     "sync.bootstrapItems",
                     json!([{ "cursor": fixture.primary_item_id }]),
                     headers,
@@ -886,7 +877,7 @@ async fn acknowledge_events_and_get_last_acknowledged_filter_inaccessible_events
         let headers = authenticated_json_headers(&session.token);
 
         let before_ack = app
-            .rpc_call(
+            .call_operation(
                 "sync.getLastAcknowledged",
                 json!([{ "clientId": "client-sync" }]),
                 headers.clone(),
@@ -896,7 +887,7 @@ async fn acknowledge_events_and_get_last_acknowledged_filter_inaccessible_events
         assert_eq!(before_ack.body["result"]["Ok"], Value::Null);
 
         let acknowledge = app
-				.rpc_call(
+				.call_operation(
 					"sync.acknowledgeEvents",
 					json!([{
 						"eventIds": [fixture.latest_primary_event_id.clone(), fixture.hidden_event_id.clone()],
@@ -919,7 +910,7 @@ async fn acknowledge_events_and_get_last_acknowledged_filter_inaccessible_events
         assert_eq!(ack_count, 1);
 
         let last_ack = app
-            .rpc_call(
+            .call_operation(
                 "sync.getLastAcknowledged",
                 json!([{ "clientId": "client-sync" }]),
                 headers,
@@ -946,7 +937,7 @@ async fn get_sync_state_returns_latest_visible_event_per_accessible_vault() {
         let fixture = build_sync_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let response = app
-            .rpc_call(
+            .call_operation(
                 "sync.getSyncState",
                 json!([{
                     "vaultIds": [
@@ -977,16 +968,12 @@ async fn get_sync_state_returns_latest_visible_event_per_accessible_vault() {
 }
 
 #[tokio::test]
-async fn sync_http_routes_cover_health_auth_and_revocation_paths() {
+async fn sync_sse_route_covers_auth_and_revocation_paths() {
     with_sync_test_app("sync_http_routes_paths", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;
         let http_app = SyncHttpTestApp::new(app.state.clone());
 
-        let health = http_app.get("/health", HeaderMap::new()).await;
-        assert_eq!(health.status, StatusCode::OK);
-        assert!(health.body.contains(r#"{"status":"ok"}"#));
-
-        let unauthorized = http_app.get("/events", HeaderMap::new()).await;
+        let unauthorized = http_app.get("/api/v1/sync/events", HeaderMap::new()).await;
         assert_eq!(unauthorized.status, StatusCode::UNAUTHORIZED);
         assert!(unauthorized.body.contains(r#"{"error":"Unauthorized"}"#));
 
@@ -1001,7 +988,10 @@ async fn sync_http_routes_cover_health_auth_and_revocation_paths() {
         .expect("session revocation should seed");
 
         let stream = http_app
-            .get("/events", authenticated_json_headers(&session.token))
+            .get(
+                "/api/v1/sync/events",
+                authenticated_json_headers(&session.token),
+            )
             .await;
         assert_eq!(stream.status, StatusCode::OK);
         assert_eq!(

@@ -7,7 +7,7 @@ use crate::error::AppErrorCode;
 use crate::services::auth_email::emailed_code_capture;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_rpc_test_app, EnvVarGuard,
+    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app, EnvVarGuard,
 };
 
 struct ShareActorFixture {
@@ -328,19 +328,16 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert_eq!(body["result"]["Err"]["code"], json!(code));
     assert_eq!(body["result"]["Err"]["message"], json!(message));
 }
 
-fn assert_rpc_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
+fn assert_transport_error(body: &Value, code: &str, message: &str) {
     assert_eq!(body["error"]["message"], json!(message));
     assert_eq!(body["error"]["data"]["code"], json!(code));
 }
 
 fn assert_invalid_params_error(body: &Value) {
-    assert_eq!(body["jsonrpc"], json!("2.0"));
     assert!(
         body["error"].is_object(),
         "unexpected invalid params body: {body}"
@@ -357,7 +354,7 @@ fn assert_invalid_params_error(body: &Value) {
 
 #[tokio::test]
 async fn protected_share_handlers_require_authentication() {
-    with_rpc_test_app("share_handlers_require_authentication", |app| async move {
+    with_api_test_app("share_handlers_require_authentication", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let protected_calls = vec![
@@ -399,14 +396,14 @@ async fn protected_share_handlers_require_authentication() {
 
         for (method, params) in protected_calls {
             let response = app
-                .rpc_call(method, params, unauthenticated_json_headers())
+                .call_operation(method, params, unauthenticated_json_headers())
                 .await;
             assert_eq!(
                 response.status,
                 StatusCode::OK,
                 "unexpected status for {method}"
             );
-            assert_rpc_error(&response.body, "UNAUTHORIZED", "Authentication required");
+            assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
         }
     })
     .await;
@@ -414,7 +411,7 @@ async fn protected_share_handlers_require_authentication() {
 
 #[tokio::test]
 async fn share_handlers_reject_malformed_params() {
-    with_rpc_test_app("share_handlers_reject_malformed_params", |app| async move {
+    with_api_test_app("share_handlers_reject_malformed_params", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
@@ -432,7 +429,9 @@ async fn share_handlers_reject_malformed_params() {
         ];
 
         for method in malformed_calls {
-            let response = app.rpc_call(method, json!([{}]), headers.clone()).await;
+            let response = app
+                .call_operation(method, json!([{}]), headers.clone())
+                .await;
             assert_eq!(
                 response.status,
                 StatusCode::OK,
@@ -445,13 +444,13 @@ async fn share_handlers_reject_malformed_params() {
 }
 
 #[tokio::test]
-async fn create_share_via_rpc_rejects_read_only_users() {
-    with_rpc_test_app("share_create_read_only_forbidden", |app| async move {
+async fn create_share_via_api_rejects_read_only_users() {
+    with_api_test_app("share_create_read_only_forbidden", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.read_only_user_id).await;
 
         let response = app
-            .rpc_call(
+            .call_operation(
                 "share.create",
                 json!([{
                     "itemId": fixture.item_id,
@@ -490,13 +489,13 @@ async fn create_share_via_rpc_rejects_read_only_users() {
 
 #[tokio::test]
 async fn list_by_item_returns_visible_links_for_owners_and_members() {
-    with_rpc_test_app("share_list_by_item_visibility", |app| async move {
+    with_api_test_app("share_list_by_item_visibility", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let member_session = app.issue_session(&fixture.member_user_id).await;
 
         let owner_response = app
-            .rpc_call(
+            .call_operation(
                 "share.listByItem",
                 json!([{ "itemId": fixture.item_id.clone() }]),
                 authenticated_json_headers(&owner_session.token),
@@ -522,7 +521,7 @@ async fn list_by_item_returns_visible_links_for_owners_and_members() {
         }
 
         let member_response = app
-            .rpc_call(
+            .call_operation(
                 "share.listByItem",
                 json!([{ "itemId": fixture.item_id }]),
                 authenticated_json_headers(&member_session.token),
@@ -544,12 +543,12 @@ async fn list_by_item_returns_visible_links_for_owners_and_members() {
 
 #[tokio::test]
 async fn list_by_item_returns_not_found_for_inaccessible_items() {
-    with_rpc_test_app("share_list_by_item_not_found", |app| async move {
+    with_api_test_app("share_list_by_item_not_found", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
 
         let response = app
-            .rpc_call(
+            .call_operation(
                 "share.listByItem",
                 json!([{ "itemId": fixture.item_id }]),
                 authenticated_json_headers(&outsider_session.token),
@@ -564,13 +563,13 @@ async fn list_by_item_returns_not_found_for_inaccessible_items() {
 
 #[tokio::test]
 async fn get_share_link_returns_details_for_visible_links_and_not_found_for_hidden_links() {
-    with_rpc_test_app("share_get_visibility", |app| async move {
+    with_api_test_app("share_get_visibility", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let member_session = app.issue_session(&fixture.member_user_id).await;
 
         let owner_response = app
-            .rpc_call(
+            .call_operation(
                 "share.get",
                 json!([{ "linkId": fixture.email_link_id.clone() }]),
                 authenticated_json_headers(&owner_session.token),
@@ -599,7 +598,7 @@ async fn get_share_link_returns_details_for_visible_links_and_not_found_for_hidd
             .any(|entry| entry["email"] == json!(fixture.allowed_email)));
 
         let hidden_response = app
-            .rpc_call(
+            .call_operation(
                 "share.get",
                 json!([{ "linkId": fixture.owner_link_id }]),
                 authenticated_json_headers(&member_session.token),
@@ -614,14 +613,14 @@ async fn get_share_link_returns_details_for_visible_links_and_not_found_for_hidd
 
 #[tokio::test]
 async fn revoke_share_link_enforces_role_rules_and_updates_status() {
-    with_rpc_test_app("share_revoke_paths", |app| async move {
+    with_api_test_app("share_revoke_paths", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let admin_session = app.issue_session(&fixture.admin_user_id).await;
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
 
         let forbidden_response = app
-            .rpc_call(
+            .call_operation(
                 "share.revoke",
                 json!([{ "linkId": fixture.owner_link_id.clone() }]),
                 authenticated_json_headers(&admin_session.token),
@@ -635,7 +634,7 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
         );
 
         let success_response = app
-            .rpc_call(
+            .call_operation(
                 "share.revoke",
                 json!([{ "linkId": fixture.member_link_id.clone() }]),
                 authenticated_json_headers(&member_session.token),
@@ -657,7 +656,7 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
         assert_eq!(status, "revoked");
 
         let hidden_response = app
-            .rpc_call(
+            .call_operation(
                 "share.revoke",
                 json!([{ "linkId": fixture.owner_link_id }]),
                 authenticated_json_headers(&outsider_session.token),
@@ -671,13 +670,13 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
 
 #[tokio::test]
 async fn update_share_link_updates_access_and_email_membership() {
-    with_rpc_test_app("share_update_success", |app| async move {
+    with_api_test_app("share_update_success", |app| async move {
 			let fixture = build_share_router_fixture(&app.pool).await;
 			let owner_session = app.issue_session(&fixture.owner_user_id).await;
 			let added_email = "added@example.com";
 
 			let response = app
-				.rpc_call(
+				.call_operation(
 					"share.update",
 					json!([{
 						"linkId": fixture.email_link_id.clone(),
@@ -734,13 +733,13 @@ async fn update_share_link_updates_access_and_email_membership() {
 
 #[tokio::test]
 async fn update_share_link_rejects_read_only_actors_and_invalid_emails() {
-    with_rpc_test_app("share_update_rejections", |app| async move {
+    with_api_test_app("share_update_rejections", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let read_only_session = app.issue_session(&fixture.read_only_user_id).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
 
         let forbidden_response = app
-            .rpc_call(
+            .call_operation(
                 "share.update",
                 json!([{ "linkId": fixture.read_only_link_id.clone(), "isOneTimeUse": true }]),
                 authenticated_json_headers(&read_only_session.token),
@@ -750,7 +749,7 @@ async fn update_share_link_rejects_read_only_actors_and_invalid_emails() {
         assert_handler_error(&forbidden_response.body, "FORBIDDEN", "Access denied");
 
         let invalid_email_response = app
-            .rpc_call(
+            .call_operation(
                 "share.update",
                 json!([{
                     "linkId": fixture.email_link_id.clone(),
@@ -771,13 +770,13 @@ async fn update_share_link_rejects_read_only_actors_and_invalid_emails() {
 
 #[tokio::test]
 async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
-    with_rpc_test_app("share_access_logs_paths", |app| async move {
+    with_api_test_app("share_access_logs_paths", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let member_session = app.issue_session(&fixture.member_user_id).await;
 
         let success_response = app
-            .rpc_call(
+            .call_operation(
                 "share.getAccessLogs",
                 json!([{ "linkId": fixture.owner_link_id.clone() }]),
                 authenticated_json_headers(&owner_session.token),
@@ -793,7 +792,7 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
         assert_eq!(logs[1]["failureReason"], json!("Invalid code"));
 
         let hidden_response = app
-            .rpc_call(
+            .call_operation(
                 "share.getAccessLogs",
                 json!([{ "linkId": fixture.owner_link_id }]),
                 authenticated_json_headers(&member_session.token),
@@ -807,11 +806,11 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
 
 #[tokio::test]
 async fn get_public_info_returns_valid_and_invalid_states() {
-    with_rpc_test_app("share_public_info_paths", |app| async move {
+    with_api_test_app("share_public_info_paths", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let valid_response = app
-            .rpc_call(
+            .call_operation(
                 "share.getPublicInfo",
                 json!([{ "token": fixture.one_time_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -830,7 +829,7 @@ async fn get_public_info_returns_valid_and_invalid_states() {
         assert!(valid_response.body["result"]["Ok"]["expiresAt"].is_string());
 
         let revoked_response = app
-            .rpc_call(
+            .call_operation(
                 "share.getPublicInfo",
                 json!([{ "token": fixture.revoked_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -848,7 +847,7 @@ async fn get_public_info_returns_valid_and_invalid_states() {
         );
 
         let missing_response = app
-            .rpc_call(
+            .call_operation(
                 "share.getPublicInfo",
                 json!([{ "token": share_token('9') }]),
                 unauthenticated_json_headers(),
@@ -866,11 +865,11 @@ async fn get_public_info_returns_valid_and_invalid_states() {
 
 #[tokio::test]
 async fn access_public_returns_payload_and_exhausts_one_time_links() {
-    with_rpc_test_app("share_access_public_one_time", |app| async move {
+    with_api_test_app("share_access_public_one_time", |app| async move {
 			let fixture = build_share_router_fixture(&app.pool).await;
 
 			let success_response = app
-				.rpc_call(
+				.call_operation(
 					"share.accessPublic",
 					json!([{ "token": fixture.one_time_token.clone() }]),
 					unauthenticated_json_headers(),
@@ -900,7 +899,7 @@ async fn access_public_returns_payload_and_exhausts_one_time_links() {
 			assert!(link_state.last_accessed_at.is_some());
 
 			let exhausted_response = app
-				.rpc_call(
+				.call_operation(
 					"share.accessPublic",
 					json!([{ "token": fixture.one_time_token.clone() }]),
 					unauthenticated_json_headers(),
@@ -927,11 +926,11 @@ async fn access_public_returns_payload_and_exhausts_one_time_links() {
 
 #[tokio::test]
 async fn access_public_rejects_non_public_and_revoked_links() {
-    with_rpc_test_app("share_access_public_rejections", |app| async move {
+    with_api_test_app("share_access_public_rejections", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let email_restricted_response = app
-            .rpc_call(
+            .call_operation(
                 "share.accessPublic",
                 json!([{ "token": fixture.email_link_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -945,7 +944,7 @@ async fn access_public_rejects_non_public_and_revoked_links() {
         );
 
         let revoked_response = app
-            .rpc_call(
+            .call_operation(
                 "share.accessPublic",
                 json!([{ "token": fixture.revoked_token }]),
                 unauthenticated_json_headers(),
@@ -970,11 +969,11 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
         ("BITTERY_DEV_MAIL_OUTBOX", ""),
     ]);
 
-    with_rpc_test_app("share_request_email_verification_paths", |app| async move {
+    with_api_test_app("share_request_email_verification_paths", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let success_response = app
-            .rpc_call(
+            .call_operation(
                 "share.requestEmailVerification",
                 json!([{
                     "token": fixture.email_link_token.clone(),
@@ -1004,7 +1003,7 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
         assert_eq!(verification_count, 1);
 
         let forbidden_response = app
-            .rpc_call(
+            .call_operation(
                 "share.requestEmailVerification",
                 json!([{
                     "token": fixture.email_link_token.clone(),
@@ -1021,7 +1020,7 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
         );
 
         let not_found_response = app
-            .rpc_call(
+            .call_operation(
                 "share.requestEmailVerification",
                 json!([{
                     "token": fixture.one_time_token,
@@ -1051,13 +1050,13 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
         ("BITTERY_DEV_MAIL_OUTBOX", ""),
     ]);
 
-    with_rpc_test_app(
+    with_api_test_app(
         "share_request_email_verification_delivers",
         |app| async move {
             let fixture = build_share_router_fixture(&app.pool).await;
 
             let requested = app
-                .rpc_call(
+                .call_operation(
                     "share.requestEmailVerification",
                     json!([{
                         "token": fixture.email_link_token.clone(),
@@ -1076,7 +1075,7 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
             .expect("share email verification code should have been emailed");
 
             let accessed = app
-                .rpc_call(
+                .call_operation(
                     "share.verifyEmailAndAccess",
                     json!([{
                         "token": fixture.email_link_token.clone(),
@@ -1107,7 +1106,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
         ("BITTERY_DEV_MAIL_OUTBOX", ""),
     ]);
 
-    with_rpc_test_app("share_verification_code_hashed", |app| async move {
+    with_api_test_app("share_verification_code_hashed", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         // The seeded code: the column holds its digest, not the code.
@@ -1125,7 +1124,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // A server-generated code is persisted the same way.
         let requested = app
-            .rpc_call(
+            .call_operation(
                 "share.requestEmailVerification",
                 json!([{
                     "token": fixture.email_link_token.clone(),
@@ -1148,7 +1147,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // Replaying the stored digest as the code is rejected.
         let replayed = app
-            .rpc_call(
+            .call_operation(
                 "share.verifyEmailAndAccess",
                 json!([{
                     "token": fixture.email_link_token.clone(),
@@ -1166,7 +1165,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // A wrong 6-digit code is still rejected.
         let wrong = app
-            .rpc_call(
+            .call_operation(
                 "share.verifyEmailAndAccess",
                 json!([{
                     "token": fixture.email_link_token.clone(),
@@ -1184,7 +1183,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // The raw code still resolves the hashed row.
         let verified = app
-            .rpc_call(
+            .call_operation(
                 "share.verifyEmailAndAccess",
                 json!([{
                     "token": fixture.email_link_token.clone(),
@@ -1218,10 +1217,10 @@ fn sample_create_share_params(item_id: &str) -> Value {
 
 /// Finding 5d: `share_link.token_hash` must never hold the share token. Both a
 /// seeded link and a freshly created one are persisted as a digest, and the raw
-/// token a caller holds still resolves end to end through the public RPCs.
+/// token a caller holds still resolves end to end through the public API routes.
 #[tokio::test]
 async fn share_link_token_is_stored_hashed_and_still_resolves() {
-    with_rpc_test_app("share_link_token_hashed", |app| async move {
+    with_api_test_app("share_link_token_hashed", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         // The seeded link: the column holds its digest, not the token.
@@ -1238,7 +1237,7 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
         // A server-generated token is persisted the same way.
         let session = app.issue_session(&fixture.owner_user_id).await;
         let created = app
-            .rpc_call(
+            .call_operation(
                 "share.create",
                 sample_create_share_params(&fixture.item_id),
                 authenticated_json_headers(&session.token),
@@ -1268,7 +1267,7 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
 
         // The raw token still resolves the hashed row, end to end.
         let info = app
-            .rpc_call(
+            .call_operation(
                 "share.getPublicInfo",
                 json!([{ "token": created_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -1279,7 +1278,7 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
         assert_eq!(info.body["result"]["Ok"]["accessMode"], json!("anyone"));
 
         let accessed = app
-            .rpc_call(
+            .call_operation(
                 "share.accessPublic",
                 json!([{ "token": created_token.clone() }]),
                 unauthenticated_json_headers(),
@@ -1298,7 +1297,7 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
 /// is not itself a valid token, on any public entry point.
 #[tokio::test]
 async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
-    with_rpc_test_app("share_link_token_hash_replay", |app| async move {
+    with_api_test_app("share_link_token_hash_replay", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let stored =
@@ -1311,7 +1310,7 @@ async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
 
         for method in ["share.getPublicInfo", "share.accessPublic"] {
             let response = app
-                .rpc_call(
+                .call_operation(
                     method,
                     json!([{ "token": stored.clone() }]),
                     unauthenticated_json_headers(),
@@ -1336,7 +1335,7 @@ async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
                 .await
                 .expect("seeded email-restricted share link should load");
         let requested = app
-            .rpc_call(
+            .call_operation(
                 "share.requestEmailVerification",
                 json!([{
                     "token": email_stored,
@@ -1358,12 +1357,12 @@ async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
 /// a digest, and a token without its URL fragment is a dead link anyway.
 #[tokio::test]
 async fn list_by_item_and_get_do_not_expose_share_tokens() {
-    with_rpc_test_app("share_list_and_get_hide_tokens", |app| async move {
+    with_api_test_app("share_list_and_get_hide_tokens", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
 
         let listed = app
-            .rpc_call(
+            .call_operation(
                 "share.listByItem",
                 json!([{ "itemId": fixture.item_id.clone() }]),
                 authenticated_json_headers(&session.token),
@@ -1382,7 +1381,7 @@ async fn list_by_item_and_get_do_not_expose_share_tokens() {
         }
 
         let details = app
-            .rpc_call(
+            .call_operation(
                 "share.get",
                 json!([{ "linkId": fixture.owner_link_id.clone() }]),
                 authenticated_json_headers(&session.token),
@@ -1405,12 +1404,12 @@ async fn list_by_item_and_get_do_not_expose_share_tokens() {
 /// copy-once: nothing afterwards can return it.
 #[tokio::test]
 async fn create_share_returns_token_exactly_once() {
-    with_rpc_test_app("share_create_token_once", |app| async move {
+    with_api_test_app("share_create_token_once", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
 
         let created = app
-            .rpc_call(
+            .call_operation(
                 "share.create",
                 sample_create_share_params(&fixture.item_id),
                 authenticated_json_headers(&session.token),
@@ -1428,7 +1427,7 @@ async fn create_share_returns_token_exactly_once() {
         assert_eq!(created_token.len(), 32);
 
         let details = app
-            .rpc_call(
+            .call_operation(
                 "share.get",
                 json!([{ "linkId": created_link_id.clone() }]),
                 authenticated_json_headers(&session.token),
@@ -1453,11 +1452,11 @@ async fn create_share_returns_token_exactly_once() {
 
 #[tokio::test]
 async fn verify_email_and_access_returns_payload_and_marks_email_verified() {
-    with_rpc_test_app("share_verify_email_success", |app| async move {
+    with_api_test_app("share_verify_email_success", |app| async move {
 			let fixture = build_share_router_fixture(&app.pool).await;
 
 			let response = app
-				.rpc_call(
+				.call_operation(
 					"share.verifyEmailAndAccess",
 					json!([{
 						"token": fixture.email_link_token.clone(),
@@ -1515,11 +1514,11 @@ async fn verify_email_and_access_returns_payload_and_marks_email_verified() {
 
 #[tokio::test]
 async fn verify_email_and_access_rejects_invalid_codes_and_increments_attempts() {
-    with_rpc_test_app("share_verify_email_invalid_code", |app| async move {
+    with_api_test_app("share_verify_email_invalid_code", |app| async move {
 			let fixture = build_share_router_fixture(&app.pool).await;
 
 			let response = app
-				.rpc_call(
+				.call_operation(
 					"share.verifyEmailAndAccess",
 					json!([{
 						"token": fixture.email_link_token.clone(),
@@ -1559,11 +1558,11 @@ async fn share_email_verification_lockout_burns_pending_code() {
         ("RATE_LIMIT_SHARE_EMAIL_VERIFY_LOCK_MINUTES", "15"),
     ]);
 
-    with_rpc_test_app("share_email_verification_lockout", |app| async move {
+    with_api_test_app("share_email_verification_lockout", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let wrong = || async {
-            app.rpc_call(
+            app.call_operation(
                 "share.verifyEmailAndAccess",
                 json!([{
                     "token": fixture.email_link_token.clone(),
@@ -1601,7 +1600,7 @@ async fn share_email_verification_lockout_burns_pending_code() {
         assert!(state.used_at.is_some());
 
         let correct = app
-            .rpc_call(
+            .call_operation(
                 "share.verifyEmailAndAccess",
                 json!([{
                     "token": fixture.email_link_token,
@@ -1621,8 +1620,8 @@ async fn share_email_verification_lockout_burns_pending_code() {
 }
 
 #[tokio::test]
-async fn create_share_via_rpc_persists_link_and_allowed_emails() {
-    with_rpc_test_app("share_create_happy_path", |app| async move {
+async fn create_share_via_api_persists_link_and_allowed_emails() {
+    with_api_test_app("share_create_happy_path", |app| async move {
 			let fixture = build_share_actor_fixture(&app.pool).await;
 			let session = app.issue_session(&fixture.user_id).await;
 			let expected_base_share_url = format!(
@@ -1635,7 +1634,7 @@ async fn create_share_via_rpc_persists_link_and_allowed_emails() {
 			);
 
 			let response = app
-				.rpc_call(
+				.call_operation(
 					"share.create",
 					json!([{
 						"itemId": fixture.item_id,
@@ -1653,7 +1652,6 @@ async fn create_share_via_rpc_persists_link_and_allowed_emails() {
 				.await;
 
 			assert_eq!(response.status, StatusCode::OK);
-			assert_eq!(response.body["jsonrpc"], json!("2.0"));
 			assert_eq!(response.body["result"]["Ok"]["baseShareUrl"], json!(expected_base_share_url));
 
 			let link_id = response.body["result"]["Ok"]["id"]
@@ -1688,13 +1686,13 @@ async fn create_share_via_rpc_persists_link_and_allowed_emails() {
 }
 
 #[tokio::test]
-async fn create_share_via_rpc_rejects_invalid_access_mode() {
-    with_rpc_test_app("share_create_invalid_access_mode", |app| async move {
+async fn create_share_via_api_rejects_invalid_access_mode() {
+    with_api_test_app("share_create_invalid_access_mode", |app| async move {
         let fixture = build_share_actor_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.user_id).await;
 
         let response = app
-            .rpc_call(
+            .call_operation(
                 "share.create",
                 json!([{
                     "itemId": fixture.item_id,
@@ -1729,12 +1727,19 @@ async fn create_share_via_rpc_rejects_invalid_access_mode() {
 }
 
 #[tokio::test]
-async fn rpc_guard_rejects_non_json_share_requests() {
-    with_rpc_test_app("share_rpc_guard_non_json", |app| async move {
+async fn api_content_type_rejects_non_json_share_requests() {
+    with_api_test_app("share_api_content_type_non_json", |app| async move {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
 
-        let response = app.post_rpc_bytes(b"not-json".to_vec(), headers).await;
+        let response = app
+            .api_bytes(
+                axum::http::Method::POST,
+                "/api/v1/items/item_malformed/share-links",
+                b"not-json".to_vec(),
+                headers,
+            )
+            .await;
 
         assert_eq!(response.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
         assert_eq!(response.body["error"], json!("Unsupported Media Type"));
@@ -2117,7 +2122,7 @@ async fn build_share_router_fixture(pool: &PgPool) -> ShareRouterFixture {
     }
 }
 
-/// `token` is the plaintext the tests hand to the public RPCs; only its digest is
+/// `token` is the plaintext the tests hand to the public API routes; only its digest is
 /// stored, exactly as `share.create` writes it.
 #[allow(clippy::too_many_arguments)]
 async fn seed_share_link(
@@ -2230,11 +2235,11 @@ async fn seed_share_email_verification(
 }
 
 #[tokio::test]
-async fn create_share_via_rpc_is_daily_rate_limited() {
+async fn create_share_via_api_is_daily_rate_limited() {
     let _guard = crate::test_support::acquire_env_lock_async().await;
     let _env = crate::test_support::EnvVarGuard::set(&[("SHARE_LINK_DAILY_LIMIT", "2")]);
 
-    with_rpc_test_app("share_create_daily_rate_limit", |app| async move {
+    with_api_test_app("share_create_daily_rate_limit", |app| async move {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
@@ -2253,14 +2258,14 @@ async fn create_share_via_rpc_is_daily_rate_limited() {
 
         for _ in 0..2 {
             let response = app
-                .rpc_call("share.create", params.clone(), headers.clone())
+                .call_operation("share.create", params.clone(), headers.clone())
                 .await;
             assert_eq!(response.status, StatusCode::OK);
             assert!(response.body["result"]["Ok"].is_object());
         }
 
         let blocked = app
-            .rpc_call("share.create", params.clone(), headers.clone())
+            .call_operation("share.create", params.clone(), headers.clone())
             .await;
         assert_eq!(blocked.status, StatusCode::OK);
         assert_handler_error(
