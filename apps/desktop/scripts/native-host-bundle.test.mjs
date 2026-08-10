@@ -29,6 +29,17 @@ test("desktop bundles the native messaging host at the resource root", async () 
 	}
 });
 
+test("Windows releases only build the published NSIS installer", async () => {
+	const config = JSON.parse(
+		await readFile(
+			join(desktopDir, "src-tauri", "bundle.windows.conf.json"),
+			"utf8",
+		),
+	);
+
+	assert.deepEqual(config.bundle?.targets, ["nsis"]);
+});
+
 test("desktop bundles module workers as ES modules", async () => {
 	const viteConfig = await readFile(join(desktopDir, "vite.config.ts"), "utf8");
 
