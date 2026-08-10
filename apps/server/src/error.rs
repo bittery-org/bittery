@@ -1,7 +1,5 @@
-use qubit::{
-    builder::IntoResponse,
-    server::{ErrorCode, RpcError},
-};
+use jsonrpsee_qubit::IntoResponse;
+use qubit::{ErrorCode, RpcError};
 use serde::Serialize;
 use serde_json::json;
 use ts_rs::TS;
@@ -110,7 +108,7 @@ impl From<AppError> for RpcError {
 impl IntoResponse for AppError {
     type Output = <RpcError as IntoResponse>::Output;
 
-    fn into_response(self) -> jsonrpsee::ResponsePayload<'static, Self::Output> {
+    fn into_response(self) -> jsonrpsee_qubit::ResponsePayload<'static, Self::Output> {
         RpcError::from(self).into_response()
     }
 }

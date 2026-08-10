@@ -65,7 +65,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-server
           tags: |
@@ -76,7 +76,7 @@ jobs:
 
       - name: Build and push server image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/server/Dockerfile
@@ -121,7 +121,7 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ github.repository_owner }}/bittery-web
           tags: |
@@ -132,7 +132,7 @@ jobs:
 
       - name: Build and push web image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/web/Dockerfile
@@ -222,7 +222,7 @@ jobs:
         run: node apps/desktop/scripts/prepare-native-host.mjs ${{ matrix.target }}
 
       - name: Build desktop app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BITTERY_EXTENSION_ID: ${{ vars.BITTERY_EXTENSION_ID || 'YOUR_PRODUCTION_EXTENSION_ID_HERE' }}

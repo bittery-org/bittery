@@ -222,6 +222,7 @@ pub struct AcceptInvitationResponse {
 
 #[derive(Debug, Clone, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename = "TeamSuccessResponse")]
 pub struct SuccessResponse {
     pub success: bool,
 }
@@ -230,6 +231,7 @@ pub struct SuccessResponse {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+#[ts(rename = "TeamDeleteAccountInput")]
 pub struct DeleteAccountInput {
     pub team_id: String,
     pub user_id: String,
@@ -251,6 +253,7 @@ const MAX_ROTATION_REENCRYPTED_ITEMS: usize = 100;
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+#[ts(rename = "TeamRotationMemberKeyInput")]
 pub struct RotationMemberKeyInput {
     pub user_id: String,
     pub encrypted_vault_key: String,
@@ -259,6 +262,7 @@ pub struct RotationMemberKeyInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+#[ts(rename = "TeamRotationReEncryptedItemInput")]
 pub struct RotationReEncryptedItemInput {
     pub item_id: String,
     pub encrypted_data: String,
@@ -268,6 +272,7 @@ pub struct RotationReEncryptedItemInput {
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+#[ts(rename = "TeamVaultKeyRotationInput")]
 pub struct VaultKeyRotationInput {
     pub member_keys: Vec<RotationMemberKeyInput>,
     pub re_encrypted_items: Vec<RotationReEncryptedItemInput>,
