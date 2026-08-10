@@ -17,7 +17,7 @@ use crate::{
 use super::{
     dto::{CursorPage, PageRequest},
     error::ApiError,
-    extract::{ApiJson, AuthenticatedRequest, PublicRequest},
+    extract::{ApiJson, ApiMergePatch, AuthenticatedRequest, PublicRequest},
     pagination::{page_values, ApiPageQuery},
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
@@ -722,12 +722,12 @@ async fn revoke_session(
     }))
 }
 
-#[utoipa::path(patch, path = "/sessions/{sessionId}", params(("sessionId" = String, Path)), request_body = RenameSessionRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(patch, path = "/sessions/{sessionId}", params(("sessionId" = String, Path)), request_body(content = RenameSessionRequest, content_type = "application/merge-patch+json"), responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 415, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
 async fn rename_session(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
     Path(session_id): Path<String>,
-    ApiJson(input): ApiJson<RenameSessionRequest>,
+    ApiMergePatch(input): ApiMergePatch<RenameSessionRequest>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let response = auth::rename_device(
         &state,

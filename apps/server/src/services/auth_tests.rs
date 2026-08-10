@@ -63,7 +63,6 @@ struct AuthAccountFixture {
 }
 
 struct AuthInvitationFixture {
-    team_id: String,
     team_vault_id: String,
     invitation_token: String,
     invited_email: String,
@@ -1541,7 +1540,6 @@ async fn build_auth_invitation_fixture(pool: &PgPool, label: &str) -> AuthInvita
     .await;
 
     AuthInvitationFixture {
-        team_id,
         team_vault_id,
         invitation_token,
         invited_email,

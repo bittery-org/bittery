@@ -2799,7 +2799,7 @@ export interface operations {
         };
         readonly requestBody: {
             readonly content: {
-                readonly "application/json": components["schemas"]["UpdateAttachmentBody"];
+                readonly "application/merge-patch+json": components["schemas"]["UpdateAttachmentBody"];
             };
         };
         readonly responses: {
@@ -4603,7 +4603,7 @@ export interface operations {
         };
         readonly requestBody: {
             readonly content: {
-                readonly "application/json": components["schemas"]["UpdateItemBody"];
+                readonly "application/merge-patch+json": components["schemas"]["UpdateItemBody"];
             };
         };
         readonly responses: {
@@ -5155,7 +5155,7 @@ export interface operations {
         };
         readonly requestBody: {
             readonly content: {
-                readonly "application/json": components["schemas"]["FavoriteBody"];
+                readonly "application/merge-patch+json": components["schemas"]["FavoriteBody"];
             };
         };
         readonly responses: {
@@ -5771,15 +5771,6 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -5968,15 +5959,6 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6056,15 +6038,6 @@ export interface operations {
             };
             /** @description Unsupported media type */
             readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6162,15 +6135,6 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6254,15 +6218,6 @@ export interface operations {
             };
             /** @description Unsupported media type */
             readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6356,8 +6311,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6451,8 +6406,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6546,8 +6501,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6723,7 +6678,7 @@ export interface operations {
         };
         readonly requestBody: {
             readonly content: {
-                readonly "application/json": components["schemas"]["RenameSessionRequest"];
+                readonly "application/merge-patch+json": components["schemas"]["RenameSessionRequest"];
             };
         };
         readonly responses: {
@@ -6760,6 +6715,14 @@ export interface operations {
                 };
             };
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6826,15 +6789,6 @@ export interface operations {
             };
             /** @description Unsupported media type */
             readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6921,15 +6875,6 @@ export interface operations {
             };
             /** @description Unsupported media type */
             readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7167,8 +7112,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7260,8 +7205,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7355,8 +7300,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7450,8 +7395,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7492,7 +7437,7 @@ export interface operations {
         };
         readonly requestBody: {
             readonly content: {
-                readonly "application/json": components["schemas"]["UpdateTeamRequest"];
+                readonly "application/merge-patch+json": components["schemas"]["UpdateTeamRequest"];
             };
         };
         readonly responses: {
@@ -7549,8 +7494,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7648,8 +7593,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7746,8 +7691,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7841,6 +7786,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7944,8 +7898,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8036,6 +7990,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8142,8 +8105,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8237,8 +8200,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8335,8 +8298,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8435,8 +8398,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8531,8 +8494,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8627,8 +8590,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8725,8 +8688,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -9351,8 +9314,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -9446,8 +9409,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -9541,8 +9504,8 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
-            /** @description Idempotency is not allowed for one-time-secret responses */
-            readonly 422: {
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -10246,7 +10209,7 @@ export interface operations {
         };
         readonly requestBody: {
             readonly content: {
-                readonly "application/json": components["schemas"]["UpdateVaultBody"];
+                readonly "application/merge-patch+json": components["schemas"]["UpdateVaultBody"];
             };
         };
         readonly responses: {
@@ -11606,7 +11569,7 @@ export interface operations {
         };
         readonly requestBody: {
             readonly content: {
-                readonly "application/json": components["schemas"]["UpdateVaultMemberRoleBody"];
+                readonly "application/merge-patch+json": components["schemas"]["UpdateVaultMemberRoleBody"];
             };
         };
         readonly responses: {

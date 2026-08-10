@@ -39,6 +39,18 @@ where
     type Rejection = Response;
 
     async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        let content_type = request
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim);
+        if content_type != Some("application/merge-patch+json") {
+            return Err(
+                ApiError::unsupported_media_type("Expected application/merge-patch+json.")
+                    .into_response(),
+            );
+        }
         Json::<T>::from_request(request, state)
             .await
             .map(|Json(value)| Self(value))
@@ -225,5 +237,36 @@ mod tests {
             "UNSUPPORTED_MEDIA_TYPE",
         )
         .await;
+    }
+
+    #[tokio::test]
+    async fn merge_patch_rejects_application_json() {
+        let request = Request::builder()
+            .header(CONTENT_TYPE, "application/json")
+            .body(Body::from(r#"{"_value":"ok"}"#))
+            .unwrap();
+
+        let response = ApiMergePatch::<TestBody>::from_request(request, &())
+            .await
+            .expect_err("PATCH must require the merge-patch media type");
+
+        assert_problem_response(
+            response,
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "UNSUPPORTED_MEDIA_TYPE",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn merge_patch_accepts_the_merge_patch_media_type() {
+        let request = Request::builder()
+            .header(CONTENT_TYPE, "application/merge-patch+json; charset=utf-8")
+            .body(Body::from(r#"{"_value":"ok"}"#))
+            .unwrap();
+
+        ApiMergePatch::<TestBody>::from_request(request, &())
+            .await
+            .expect("merge patch JSON should be accepted");
     }
 }

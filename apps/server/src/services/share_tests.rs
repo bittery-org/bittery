@@ -32,8 +32,6 @@ struct ShareRouterFixture {
     revoked_token: String,
     allowed_email_id: String,
     allowed_email: String,
-    removable_email_id: String,
-    removable_email: String,
     request_email: String,
     verification_code: String,
 }
@@ -222,29 +220,6 @@ fn generate_secure_token_yields_distinct_32_character_tokens() {
         generate_secure_token(),
         "two tokens should never collide",
     );
-}
-
-#[test]
-fn unique_email_ids_preserves_order_and_rejects_duplicates() {
-    let unique_ids = unique_email_ids(&[
-        "email_1".to_string(),
-        "email_2".to_string(),
-        "email_3".to_string(),
-    ])
-    .expect("unique ids should be accepted");
-    assert_eq!(
-        unique_ids,
-        vec![
-            "email_1".to_string(),
-            "email_2".to_string(),
-            "email_3".to_string(),
-        ]
-    );
-
-    let error = unique_email_ids(&["email_1".to_string(), "email_1".to_string()])
-        .expect_err("duplicate ids should be rejected");
-    assert_eq!(error.code, AppErrorCode::BadRequest);
-    assert_eq!(error.message, "Duplicate removeEmailIds are not allowed");
 }
 
 #[test]
@@ -1959,8 +1934,6 @@ async fn build_share_router_fixture(pool: &PgPool) -> ShareRouterFixture {
         revoked_token,
         allowed_email_id,
         allowed_email,
-        removable_email_id,
-        removable_email,
         request_email,
         verification_code,
     }

@@ -106,20 +106,6 @@ pub struct PortalSessionResponse {
     pub url: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSeatsInput {
-    pub team_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSeatsResponse {
-    pub synced: bool,
-    pub reason: Option<String>,
-    pub quantity: Option<i64>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamSeatInvoicePreviewLineResponse {
@@ -385,71 +371,6 @@ pub(crate) async fn create_portal_session(
             })?;
 
     Ok(PortalSessionResponse { url })
-}
-
-pub(crate) async fn sync_seats(
-    pool: &PgPool,
-    user_id: &str,
-    input: SyncSeatsInput,
-) -> Result<SyncSeatsResponse, AppError> {
-    assert_cloud_billing_enabled()?;
-    let actor = load_billing_actor(pool, user_id).await?;
-    let team_id = actor
-        .team_id
-        .clone()
-        .ok_or_else(|| AppError::not_found("Team not found"))?;
-    let team = ensure_team_billing(actor.clone())?;
-    ensure_billing_admin(&actor.role)?;
-
-    let target_team_id = input.team_id.unwrap_or_else(|| team_id.clone());
-    if target_team_id != team_id {
-        return Err(AppError::forbidden(
-            "You can only sync seats for your own team",
-        ));
-    }
-
-    if team.billing_plan != "team" {
-        return Ok(SyncSeatsResponse {
-            synced: false,
-            reason: Some("not_team_plan".to_string()),
-            quantity: None,
-        });
-    }
-    let subscription_item_id = match team.stripe_subscription_item_id.as_deref() {
-        Some(value) => value,
-        None => {
-            return Ok(SyncSeatsResponse {
-                synced: false,
-                reason: Some("missing_subscription_item".to_string()),
-                quantity: None,
-            })
-        }
-    };
-
-    let quantity = count_team_members(pool, &target_team_id).await?.max(1);
-    stripe_update_subscription_item_quantity(subscription_item_id, quantity)
-        .await
-        .map_err(|error| {
-            tracing::error!(error = %error, "Internal error");
-            AppError::internal("An internal error occurred")
-        })?;
-
-    query("UPDATE team SET seats_purchased = $1, updated_at = $2 WHERE id = $3")
-        .bind(quantity as i32)
-        .bind(OffsetDateTime::now_utc())
-        .bind(&target_team_id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to update purchased seats");
-            AppError::internal("Failed to update purchased seats")
-        })?;
-
-    Ok(SyncSeatsResponse {
-        synced: true,
-        reason: None,
-        quantity: Some(quantity),
-    })
 }
 
 pub(crate) async fn sync_team_seats_best_effort(pool: &PgPool, team_id: &str, billing_plan: &str) {

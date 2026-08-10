@@ -158,7 +158,11 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 		path: string,
 		requestOptions: ApiTransportRequest = {},
 	): Promise<ApiTransportResponse<T>> {
-		const request = requestOptions as never;
+		const headers = new Headers(requestOptions.headers);
+		if (method === "PATCH") {
+			headers.set("Content-Type", "application/merge-patch+json");
+		}
+		const request = { ...requestOptions, headers } as never;
 		const dispatch = () =>
 			method === "GET"
 				? client.GET(path as never, request)

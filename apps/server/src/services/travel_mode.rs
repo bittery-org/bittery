@@ -35,15 +35,6 @@ pub struct EnableTravelModeInput {
     pub hidden_vault_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct DisableTravelModeInput {
-    pub attempt_id: String,
-    pub client_public_key: String,
-    pub client_proof: String,
-}
-
 fn map_travel_mode_row(row: crate::repo::travel_mode::DbUserTravelModeRow) -> TravelModeResponse {
     TravelModeResponse {
         enabled: row.enabled,

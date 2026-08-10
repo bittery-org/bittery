@@ -78,14 +78,6 @@ fn sync_notification_session_revoked_serializes_correctly() {
 }
 
 #[test]
-fn validate_client_id_accepts_and_rejects_expected_values() {
-    assert!(validate_client_id("client_1-test").is_ok());
-    assert!(validate_client_id("").is_err());
-    assert!(validate_client_id("contains space").is_err());
-    assert!(validate_client_id(&"a".repeat(65)).is_err());
-}
-
-#[test]
 fn validate_resource_id_accepts_uuid_and_slug_variants() {
     assert!(validate_resource_id("550e8400-e29b-41d4-a716-446655440000").is_ok());
     assert!(validate_resource_id("resource_01").is_ok());
@@ -241,12 +233,10 @@ impl SyncHttpTestApp {
 struct SyncRouterFixture {
     owner_user_id: String,
     _outsider_user_id: String,
-    primary_vault_id: String,
     secondary_vault_id: String,
     hidden_vault_id: String,
     primary_item_id: String,
     secondary_item_id: String,
-    hidden_item_id: String,
     old_primary_event_id: String,
     latest_primary_event_id: String,
     secondary_event_id: String,
@@ -459,12 +449,10 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
     SyncRouterFixture {
         owner_user_id,
         _outsider_user_id: outsider_user_id,
-        primary_vault_id,
         secondary_vault_id,
         hidden_vault_id,
         primary_item_id,
         secondary_item_id,
-        hidden_item_id,
         old_primary_event_id,
         latest_primary_event_id,
         secondary_event_id,

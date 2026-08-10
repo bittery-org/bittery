@@ -48,7 +48,6 @@ struct BillingRouterFixture {
     member_user_id: String,
     no_team_user_id: String,
     team_id: String,
-    other_team_id: String,
     vault_id: String,
     item_id: String,
 }
@@ -194,7 +193,6 @@ async fn build_billing_router_fixture(pool: &PgPool) -> BillingRouterFixture {
     let member_user_id = "user_billing_member".to_string();
     let no_team_user_id = "user_billing_no_team".to_string();
     let team_id = "team_billing_primary".to_string();
-    let other_team_id = "team_billing_other".to_string();
     let vault_id = "vault_billing_team".to_string();
     let item_id = "item_billing_team".to_string();
 
@@ -265,7 +263,6 @@ async fn build_billing_router_fixture(pool: &PgPool) -> BillingRouterFixture {
         member_user_id,
         no_team_user_id,
         team_id,
-        other_team_id,
         vault_id,
         item_id,
     }

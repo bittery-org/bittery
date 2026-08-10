@@ -20,7 +20,7 @@ use crate::{
 use super::{
     dto::{CursorPage, DecimalString, PageRequest, PatchField, ProblemDetails},
     error::ApiError,
-    extract::{ApiJson, AuthenticatedRequest},
+    extract::{ApiJson, ApiMergePatch, AuthenticatedRequest},
     idempotency,
     pagination::{page_values, ApiPageQuery},
     ORDINARY_API_BODY_LIMIT_BYTES,
@@ -483,12 +483,6 @@ enum TeamErrorResponses {
     )]
     BadRequest(ProblemDetails),
     #[response(
-        status = 422,
-        description = "Idempotency is not allowed for one-time-secret responses",
-        content_type = "application/problem+json"
-    )]
-    Unprocessable(ProblemDetails),
-    #[response(
         status = 401,
         description = "Authentication required",
         content_type = "application/problem+json"
@@ -506,6 +500,12 @@ enum TeamErrorResponses {
         content_type = "application/problem+json"
     )]
     NotFound(ProblemDetails),
+    #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
     #[response(
         status = 409,
         description = "Conflict",
@@ -646,12 +646,12 @@ async fn create_team(
     ))
 }
 
-#[utoipa::path(patch, path = "/teams/{teamId}", operation_id = "updateTeam", tag = "teams", params(("teamId" = String, Path)), request_body = UpdateTeamRequest, responses((status = 200, body = SuccessResponse), TeamErrorResponses))]
+#[utoipa::path(patch, path = "/teams/{teamId}", operation_id = "updateTeam", tag = "teams", params(("teamId" = String, Path)), request_body(content = UpdateTeamRequest, content_type = "application/merge-patch+json"), responses((status = 200, body = SuccessResponse), TeamErrorResponses))]
 async fn update_team(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
     Path(team_id): Path<String>,
-    ApiJson(body): ApiJson<UpdateTeamRequest>,
+    ApiMergePatch(body): ApiMergePatch<UpdateTeamRequest>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let name = match body.name {
         PatchField::Missing => None,
@@ -823,7 +823,7 @@ async fn list_invitations(
     )?))
 }
 
-#[utoipa::path(post, path = "/teams/{teamId}/invitations", operation_id = "sendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), request_body = SendInvitationRequest, responses((status = 200, body = SendInvitationResponse), TeamErrorResponses))]
+#[utoipa::path(post, path = "/teams/{teamId}/invitations", operation_id = "sendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), request_body = SendInvitationRequest, responses((status = 200, body = SendInvitationResponse), (status = 422, description = "Idempotency is not allowed for one-time-secret responses", body = ProblemDetails, content_type = "application/problem+json"), TeamErrorResponses))]
 async fn send_invitation(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -942,7 +942,7 @@ async fn cancel_invitation(
     ))
 }
 
-#[utoipa::path(post, path = "/teams/{teamId}/invitations/{invitationId}/resend", operation_id = "resendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path), ("invitationId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), responses((status = 200, body = ResendInvitationResponse), TeamErrorResponses))]
+#[utoipa::path(post, path = "/teams/{teamId}/invitations/{invitationId}/resend", operation_id = "resendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path), ("invitationId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), responses((status = 200, body = ResendInvitationResponse), (status = 422, description = "Idempotency is not allowed for one-time-secret responses", body = ProblemDetails, content_type = "application/problem+json"), TeamErrorResponses))]
 async fn resend_invitation(
     State(state): State<AppState>,
     request: AuthenticatedRequest,

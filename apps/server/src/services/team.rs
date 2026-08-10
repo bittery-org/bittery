@@ -228,16 +228,6 @@ pub struct SuccessResponse {
     pub success: bool,
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct DeleteAccountInput {
-    pub team_id: String,
-    pub user_id: String,
-    pub confirmation: String,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
@@ -1647,20 +1637,6 @@ pub(crate) mod member_handlers {
                 })
                 .collect(),
         })
-    }
-
-    pub(crate) async fn delete_team_account(
-        _pool: &PgPool,
-        _user_id: &str,
-        input: DeleteAccountInput,
-    ) -> Result<SuccessResponse, AppError> {
-        if input.confirmation != "DELETE" {
-            return Err(AppError::bad_request("Invalid params"));
-        }
-
-        Err(AppError::bad_request(
-			"Account deletion by team admins is no longer supported. Use 'Remove member' instead. The removed user can delete their own account.",
-		))
     }
 }
 

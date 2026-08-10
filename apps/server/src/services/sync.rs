@@ -2,8 +2,8 @@ use axum::response::sse::Event;
 use rand::random;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use sqlx::query_as;
 use sqlx::PgPool;
-use sqlx::{query, query_as};
 use std::sync::LazyLock;
 use time::OffsetDateTime;
 use utoipa::ToSchema;
@@ -13,23 +13,12 @@ use crate::{
     db::models::*,
     error::AppError,
     integrations::storage,
-    repo::{
-        common::load_scoped_item_access,
-        sync::{
-            fetch_bootstrap_items, fetch_latest_visible_event_id, fetch_user_vault_ids,
-            fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
-        },
+    repo::sync::{
+        fetch_bootstrap_items, fetch_latest_visible_event_id, fetch_user_vault_ids,
+        fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
     },
     services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
 };
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct CheckConflictInput {
-    pub item_id: String,
-    pub expected_version: i32,
-}
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -43,60 +32,9 @@ pub struct GetEventsSinceInput {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-pub struct AcknowledgeEventsInput {
-    pub event_ids: Vec<String>,
-    pub client_id: String,
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct GetLastAcknowledgedInput {
-    pub client_id: String,
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
-pub struct GetSyncStateInput {
-    pub vault_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct BootstrapItemsInput {
     pub cursor: Option<String>,
     pub limit: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckConflictResponse {
-    pub has_conflict: bool,
-    pub current_version: Option<i32>,
-    pub last_modified_by: Option<String>,
-    pub last_modified_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct AcknowledgeEventsResponse {
-    pub acknowledged: i32,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct LastAcknowledgedResponse {
-    pub event_id: String,
-    pub timestamp: i64,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncStateEntry {
-    pub latest_event_id: Option<String>,
-    pub latest_timestamp: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -189,43 +127,6 @@ pub struct BootstrapItemsResponse {
 pub(crate) const DEFAULT_EVENTS_LIMIT: i32 = 100;
 const DEFAULT_BOOTSTRAP_LIMIT: i32 = 500;
 pub(crate) const SYNC_STREAM_HEARTBEAT_INTERVAL_MS: u64 = 15_000;
-
-pub(crate) async fn check_conflict(
-    pool: &PgPool,
-    user_id: &str,
-    input: CheckConflictInput,
-) -> Result<CheckConflictResponse, AppError> {
-    validate_resource_id(&input.item_id)?;
-
-    let accessible_item = load_scoped_item_access(pool, user_id, &input.item_id)
-        .await?
-        .ok_or_else(|| AppError::not_found("Item not found"))?;
-
-    let latest_item_event = query_as::<_, DbSyncConflictRow>(
-		"SELECT version, user_id, created_at FROM sync_event WHERE entity_id = $1 AND entity_type = 'item'::sync_entity_type AND vault_id = $2 ORDER BY created_at DESC LIMIT 1",
-	)
-	.bind(&input.item_id)
-	.bind(&accessible_item.vault_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load latest sync event"); AppError::internal("Failed to load latest sync event") })?;
-
-    let Some(latest_item_event) = latest_item_event else {
-        return Ok(CheckConflictResponse {
-            has_conflict: false,
-            current_version: None,
-            last_modified_by: None,
-            last_modified_at: None,
-        });
-    };
-
-    Ok(CheckConflictResponse {
-        has_conflict: latest_item_event.version > input.expected_version,
-        current_version: Some(latest_item_event.version),
-        last_modified_by: Some(latest_item_event.user_id),
-        last_modified_at: Some(timestamp_millis(latest_item_event.created_at)),
-    })
-}
 
 pub(crate) async fn get_events_since(
     pool: &PgPool,
@@ -402,157 +303,8 @@ pub(crate) async fn bootstrap_items(
     })
 }
 
-pub(crate) async fn acknowledge_events(
-    pool: &PgPool,
-    user_id: &str,
-    input: AcknowledgeEventsInput,
-) -> Result<AcknowledgeEventsResponse, AppError> {
-    validate_client_id(&input.client_id)?;
-    if input.event_ids.len() > 500 {
-        return Err(AppError::bad_request("Invalid params"));
-    }
-    for event_id in &input.event_ids {
-        validate_resource_id(event_id)?;
-    }
-    if input.event_ids.is_empty() {
-        return Ok(AcknowledgeEventsResponse { acknowledged: 0 });
-    }
-    let events = query_as::<_, DbSyncEventVaultRow>(
-        "SELECT id, vault_id FROM sync_event WHERE id = ANY($1)",
-    )
-    .bind(&input.event_ids)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load sync events");
-        AppError::internal("Failed to load sync events")
-    })?;
-    let user_vaults =
-        query_as::<_, DbVaultAccessRow>("SELECT vault_id FROM vault_key WHERE user_id = $1")
-            .bind(user_id)
-            .fetch_all(pool)
-            .await
-            .map_err(|e| {
-                tracing::error!(error = %e, "Failed to load vault access");
-                AppError::internal("Failed to load vault access")
-            })?;
-    let accessible_vault_ids: std::collections::HashSet<String> = user_vaults
-        .into_iter()
-        .map(|record| record.vault_id)
-        .collect();
-
-    let accessible_event_ids: Vec<String> = events
-        .into_iter()
-        .filter(|event| {
-            event
-                .vault_id
-                .as_ref()
-                .map(|vault_id| accessible_vault_ids.contains(vault_id))
-                .unwrap_or(false)
-        })
-        .map(|event| event.id)
-        .collect();
-
-    for event_id in &accessible_event_ids {
-        query(
-            "INSERT INTO sync_event_ack (id, event_id, user_id, client_id) VALUES ($1, $2, $3, $4)",
-        )
-        .bind(generate_sync_ack_id())
-        .bind(event_id)
-        .bind(user_id)
-        .bind(&input.client_id)
-        .execute(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to acknowledge sync event");
-            AppError::internal("Failed to acknowledge sync event")
-        })?;
-    }
-
-    Ok(AcknowledgeEventsResponse {
-        acknowledged: accessible_event_ids.len() as i32,
-    })
-}
-
-pub(crate) async fn get_last_acknowledged(
-    pool: &PgPool,
-    user_id: &str,
-    input: GetLastAcknowledgedInput,
-) -> Result<Option<LastAcknowledgedResponse>, AppError> {
-    validate_client_id(&input.client_id)?;
-    let last_ack = query_as::<_, DbLastAcknowledgedRow>(
-		"SELECT sea.event_id, se.created_at FROM sync_event_ack sea INNER JOIN sync_event se ON sea.event_id = se.id WHERE sea.user_id = $1 AND sea.client_id = $2 ORDER BY sea.acknowledged_at DESC LIMIT 1",
-	)
-	.bind(user_id)
-	.bind(&input.client_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load last acknowledged event"); AppError::internal("Failed to load last acknowledged event") })?;
-
-    Ok(last_ack.map(|ack| LastAcknowledgedResponse {
-        event_id: ack.event_id,
-        timestamp: timestamp_millis(ack.created_at),
-    }))
-}
-
-pub(crate) async fn get_sync_state(
-    pool: &PgPool,
-    user_id: &str,
-    input: GetSyncStateInput,
-) -> Result<std::collections::BTreeMap<String, SyncStateEntry>, AppError> {
-    if input.vault_ids.len() > 200 {
-        return Err(AppError::bad_request("Invalid params"));
-    }
-    for vault_id in &input.vault_ids {
-        validate_resource_id(vault_id)?;
-    }
-    let accessible_vaults = query_as::<_, DbVaultAccessRow>(
-        "SELECT vault_id FROM vault_key WHERE user_id = $1 AND vault_id = ANY($2)",
-    )
-    .bind(user_id)
-    .bind(&input.vault_ids)
-    .fetch_all(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to load accessible vaults");
-        AppError::internal("Failed to load accessible vaults")
-    })?;
-
-    let mut states = std::collections::BTreeMap::new();
-    for vault_access in accessible_vaults {
-        let latest_event = query_as::<_, DbSyncStateEventRow>(
-			"SELECT id, created_at FROM sync_event WHERE vault_id = $1 ORDER BY created_at DESC LIMIT 1",
-		)
-		.bind(&vault_access.vault_id)
-		.fetch_optional(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load latest sync state event"); AppError::internal("Failed to load latest sync state event") })?;
-
-        states.insert(
-            vault_access.vault_id,
-            SyncStateEntry {
-                latest_event_id: latest_event.as_ref().map(|event| event.id.clone()),
-                latest_timestamp: latest_event.map(|event| timestamp_millis(event.created_at)),
-            },
-        );
-    }
-
-    Ok(states)
-}
-
 pub(crate) fn timestamp_millis(value: OffsetDateTime) -> i64 {
     (value.unix_timestamp_nanos() / 1_000_000) as i64
-}
-
-fn validate_client_id(client_id: &str) -> Result<(), AppError> {
-    static RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"^[A-Za-z0-9_-]{1,64}$").expect("client id regex should be valid")
-    });
-    if RE.is_match(client_id) {
-        Ok(())
-    } else {
-        Err(AppError::bad_request("Invalid client ID"))
-    }
 }
 
 fn validate_resource_id(value: &str) -> Result<(), AppError> {
@@ -566,10 +318,6 @@ fn validate_resource_id(value: &str) -> Result<(), AppError> {
     } else {
         Err(AppError::bad_request("Invalid resource ID"))
     }
-}
-
-fn generate_sync_ack_id() -> String {
-    format!("syncack_{:016x}", random::<u64>())
 }
 
 pub(crate) fn generate_sync_connection_id() -> String {

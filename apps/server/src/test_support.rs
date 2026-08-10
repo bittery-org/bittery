@@ -121,8 +121,14 @@ impl ApiTestApp {
         method: Method,
         uri: &str,
         payload: Option<Value>,
-        headers: HeaderMap,
+        mut headers: HeaderMap,
     ) -> ApiTestResponse {
+        if method == Method::PATCH {
+            headers.insert(
+                CONTENT_TYPE,
+                HeaderValue::from_static("application/merge-patch+json"),
+            );
+        }
         let mut builder = Request::builder().method(method.clone()).uri(uri);
         for (name, value) in &headers {
             builder = builder.header(name, value);

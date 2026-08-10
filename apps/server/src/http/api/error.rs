@@ -46,16 +46,6 @@ impl ApiError {
     pub(crate) fn code(&self) -> &str {
         &self.problem.code
     }
-    pub(crate) fn invalid_request(detail: impl Into<String>) -> Self {
-        Self::new(
-            StatusCode::BAD_REQUEST,
-            "INVALID_REQUEST",
-            "Invalid request",
-            detail,
-            false,
-        )
-    }
-
     pub(crate) fn bad_request(code: &str, detail: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, code, "Bad request", detail, false)
     }

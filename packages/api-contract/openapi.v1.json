@@ -221,7 +221,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/merge-patch+json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateAttachmentBody"
               }
@@ -2655,7 +2655,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/merge-patch+json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateItemBody"
               }
@@ -3388,7 +3388,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/merge-patch+json": {
               "schema": {
                 "$ref": "#/components/schemas/FavoriteBody"
               }
@@ -4220,16 +4220,6 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "429": {
             "description": "Rate limited",
             "headers": {
@@ -4486,16 +4476,6 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "429": {
             "description": "Rate limited",
             "headers": {
@@ -4599,16 +4579,6 @@
           },
           "415": {
             "description": "Unsupported media type",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4738,16 +4708,6 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "429": {
             "description": "Rate limited",
             "headers": {
@@ -4869,16 +4829,6 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
           "429": {
             "description": "Rate limited",
             "headers": {
@@ -4990,8 +4940,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5111,8 +5061,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5234,8 +5184,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5479,7 +5429,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/merge-patch+json": {
               "schema": {
                 "$ref": "#/components/schemas/RenameSessionRequest"
               }
@@ -5529,6 +5479,16 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "415": {
             "description": "",
             "content": {
               "application/problem+json": {
@@ -5615,16 +5575,6 @@
           },
           "415": {
             "description": "Unsupported media type",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5741,16 +5691,6 @@
           },
           "415": {
             "description": "Unsupported media type",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetails"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6085,8 +6025,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6198,8 +6138,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6321,8 +6261,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6442,8 +6382,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6504,7 +6444,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/merge-patch+json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateTeamRequest"
               }
@@ -6573,8 +6513,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6706,8 +6646,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6847,8 +6787,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6990,6 +6930,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -7121,8 +7071,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7264,6 +7214,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -7397,8 +7357,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7520,8 +7480,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7661,8 +7621,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7802,8 +7762,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7933,8 +7893,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8064,8 +8024,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8205,8 +8165,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9008,8 +8968,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9131,8 +9091,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9254,8 +9214,8 @@
               }
             }
           },
-          "422": {
-            "description": "Idempotency is not allowed for one-time-secret responses",
+          "415": {
+            "description": "Unsupported media type",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10137,7 +10097,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/merge-patch+json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateVaultBody"
               }
@@ -11927,7 +11887,7 @@
         ],
         "requestBody": {
           "content": {
-            "application/json": {
+            "application/merge-patch+json": {
               "schema": {
                 "$ref": "#/components/schemas/UpdateVaultMemberRoleBody"
               }

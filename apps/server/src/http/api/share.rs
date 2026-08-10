@@ -277,12 +277,6 @@ enum ShareErrorResponses {
     )]
     BadRequest(ProblemDetails),
     #[response(
-        status = 422,
-        description = "Idempotency is not allowed for one-time-secret responses",
-        content_type = "application/problem+json"
-    )]
-    Unprocessable(ProblemDetails),
-    #[response(
         status = 401,
         description = "Authentication required",
         content_type = "application/problem+json"
@@ -332,7 +326,7 @@ fn validate_email_length(email: &str) -> Result<(), ApiError> {
     }
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/share-links", operation_id = "createShareLink", tag = "share-links", params(("itemId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), request_body = CreateShareLinkRequest, responses((status = 201, body = CreateShareLinkResponse), ShareErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/share-links", operation_id = "createShareLink", tag = "share-links", params(("itemId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), request_body = CreateShareLinkRequest, responses((status = 201, body = CreateShareLinkResponse), (status = 422, description = "Idempotency is not allowed for one-time-secret responses", body = ProblemDetails, content_type = "application/problem+json"), ShareErrorResponses))]
 async fn create_share_link(
     State(state): State<AppState>,
     request: AuthenticatedRequest,

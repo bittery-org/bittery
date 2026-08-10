@@ -26,7 +26,7 @@ use super::{
         BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_PAGE_SIZE, ITEM_CIPHERTEXT_BYTES,
     },
     error::ApiError,
-    extract::AuthenticatedRequest,
+    extract::{ApiMergePatch, AuthenticatedRequest},
     idempotency,
     pagination::{
         decode_page_key, page_prefetched, page_values, query_limit, timestamp_cursor_key,
@@ -41,6 +41,12 @@ struct ApiJson<T>(T);
 
 #[derive(Debug)]
 struct ApiJsonBytes<T> {
+    value: T,
+    bytes: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct ApiMergePatchBytes<T> {
     value: T,
     bytes: Vec<u8>,
 }
@@ -89,13 +95,47 @@ where
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.split(';').next())
             .map(str::trim);
-        if !matches!(
-            content_type,
-            Some("application/json" | "application/merge-patch+json")
-        ) && !content_type.is_some_and(|value| value.ends_with("+json"))
+        if !matches!(content_type, Some("application/json"))
+            && !content_type.is_some_and(|value| value.ends_with("+json"))
         {
             return Err(ApiError::unsupported_media_type(
                 "Expected a JSON request content type.",
+            ));
+        }
+        let bytes = to_bytes(request.into_body(), ITEM_BODY_LIMIT_BYTES)
+            .await
+            .map_err(|_| {
+                ApiError::payload_too_large("The request body exceeds this route's byte limit.")
+            })?;
+        let Json(value) = Json::<T>::from_bytes(&bytes)
+            .map_err(|error| ApiError::bad_request("INVALID_JSON", error.body_text()))?;
+        Ok(Self {
+            value,
+            bytes: bytes.to_vec(),
+        })
+    }
+}
+
+impl<S, T> FromRequest<S> for ApiMergePatchBytes<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(
+        request: Request<axum::body::Body>,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let content_type = request
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim);
+        if content_type != Some("application/merge-patch+json") {
+            return Err(ApiError::unsupported_media_type(
+                "Expected application/merge-patch+json.",
             ));
         }
         let bytes = to_bytes(request.into_body(), ITEM_BODY_LIMIT_BYTES)
@@ -1264,12 +1304,12 @@ async fn create_vault(
     Ok(Json(result.into()))
 }
 
-#[utoipa::path(patch, path = "/vaults/{vaultId}", operation_id = "updateVault", tag = "vaults", params(("vaultId" = String, Path)), request_body = UpdateVaultBody, responses((status = 200, description = "Success", body = UpdateVaultResponse), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/vaults/{vaultId}", operation_id = "updateVault", tag = "vaults", params(("vaultId" = String, Path)), request_body(content = UpdateVaultBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = UpdateVaultResponse), VaultErrorResponses))]
 async fn update_vault(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(vault_id): Path<String>,
-    ApiJson(body): ApiJson<UpdateVaultBody>,
+    ApiMergePatch(body): ApiMergePatch<UpdateVaultBody>,
 ) -> Result<Json<UpdateVaultResponse>, ApiError> {
     let name = optional_patch_value(body.name, "/name")?;
     let icon = nullable_patch_value(body.icon);
@@ -1600,13 +1640,13 @@ async fn bulk_import_items(
     Ok(Json(result.into()))
 }
 
-#[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body = UpdateItemBody, responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body(content = UpdateItemBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
 async fn update_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<UpdateItemBody>,
+    ApiMergePatchBytes { value: body, bytes }: ApiMergePatchBytes<UpdateItemBody>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let encrypted_data = optional_patch_value(body.encrypted_data, "/encryptedData")?;
@@ -1652,13 +1692,13 @@ async fn update_item(
     .await
 }
 
-#[utoipa::path(patch, path = "/items/{itemId}/favorite", operation_id = "setItemFavorite", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body = FavoriteBody, responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/items/{itemId}/favorite", operation_id = "setItemFavorite", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body(content = FavoriteBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
 async fn set_favorite(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<FavoriteBody>,
+    ApiMergePatchBytes { value: body, bytes }: ApiMergePatchBytes<FavoriteBody>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let pool = db_pool(&state)?.clone();
@@ -1943,12 +1983,12 @@ async fn create_attachment_download_url(
     ))
 }
 
-#[utoipa::path(patch, path = "/attachments/{attachmentId}", operation_id = "updateAttachment", tag = "attachments", params(("attachmentId" = String, Path)), request_body = UpdateAttachmentBody, responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/attachments/{attachmentId}", operation_id = "updateAttachment", tag = "attachments", params(("attachmentId" = String, Path)), request_body(content = UpdateAttachmentBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
 async fn update_attachment(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(attachment_id): Path<String>,
-    ApiJson(body): ApiJson<UpdateAttachmentBody>,
+    ApiMergePatch(body): ApiMergePatch<UpdateAttachmentBody>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let pool = db_pool(&state)?;
     let result = vault::update_vault_attachment(
@@ -2064,12 +2104,12 @@ async fn add_member(
     Ok(Json(result.into()))
 }
 
-#[utoipa::path(patch, path = "/vaults/{vaultId}/members/{userId}", operation_id = "updateVaultMemberRole", tag = "vault-members", params(("vaultId" = String, Path), ("userId" = String, Path)), request_body = UpdateVaultMemberRoleBody, responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/vaults/{vaultId}/members/{userId}", operation_id = "updateVaultMemberRole", tag = "vault-members", params(("vaultId" = String, Path), ("userId" = String, Path)), request_body(content = UpdateVaultMemberRoleBody, content_type = "application/merge-patch+json"), responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
 async fn update_member_role(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path((vault_id, user_id)): Path<(String, String)>,
-    ApiJson(body): ApiJson<UpdateVaultMemberRoleBody>,
+    ApiMergePatch(body): ApiMergePatch<UpdateVaultMemberRoleBody>,
 ) -> Result<Json<SuccessResponse>, ApiError> {
     let pool = db_pool(&state)?;
     let result = vault::member_handlers::update_vault_member_role(

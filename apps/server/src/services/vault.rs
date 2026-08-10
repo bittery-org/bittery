@@ -101,14 +101,6 @@ pub struct UpdateVaultMemberRoleInput {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
-pub struct LookupVaultUserInput {
-    pub vault_id: String,
-    pub email: String,
-}
-
-#[derive(Debug, Clone, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-#[serde(deny_unknown_fields)]
 pub struct AddVaultMemberInput {
     pub vault_id: String,
     pub user_id: String,
@@ -474,15 +466,6 @@ pub struct VaultMemberResponse {
 #[serde(rename_all = "camelCase")]
 pub struct VaultAvailableMemberResponse {
     pub user_id: String,
-    pub name: String,
-    pub email: String,
-    pub public_key: String,
-}
-
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultLookupUserResponse {
-    pub id: String,
     pub name: String,
     pub email: String,
     pub public_key: String,
@@ -860,24 +843,6 @@ pub(crate) async fn create_vault_attachment(
     })?;
 
     Ok(CreateAttachmentResponse { attachment_id })
-}
-
-pub(crate) async fn list_vault_attachments(
-    pool: &PgPool,
-    user_id: &str,
-    input: ItemIdInput,
-) -> Result<Vec<VaultAttachmentResponse>, AppError> {
-    let _actor = load_attachment_actor(pool, user_id).await?;
-    let scoped_item = load_item_row(pool, &input.item_id).await?;
-    let _access = load_vault_access(pool, &scoped_item.vault_id, user_id).await?;
-    let attachment_rows = query_as::<_, DbBootstrapAttachmentRow>(
-		"SELECT id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = $1 ORDER BY created_at ASC",
-	)
-	.bind(&input.item_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load item attachments"); AppError::internal("Failed to load item attachments") })?;
-    Ok(attachment_rows.into_iter().map(map_attachment).collect())
 }
 
 pub(crate) async fn list_vault_attachments_page(
@@ -1492,51 +1457,6 @@ pub(crate) async fn delete_vault(
     Ok(SuccessResponse { success: true })
 }
 
-pub(crate) async fn list_vault_items(
-    pool: &PgPool,
-    user_id: &str,
-    input: VaultIdInput,
-) -> Result<Vec<VaultItemDetailsResponse>, AppError> {
-    let vault_access = query_as::<_, DbItemVaultAccessRow>(
-        "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-    )
-    .bind(&input.vault_id)
-    .bind(user_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| {
-        tracing::error!(error = %e, "Failed to verify vault access");
-        AppError::internal("Failed to verify vault access")
-    })?;
-    if vault_access.is_none() {
-        return Err(AppError::forbidden("Access denied to this vault"));
-    }
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = $1 AND deleted_at IS NULL ORDER BY updated_at DESC",
-	)
-	.bind(&input.vault_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load vault items"); AppError::internal("Failed to load vault items") })?;
-    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
-    let attachments_by_item = if attachments_enabled {
-        load_item_attachments(pool, &item_rows).await?
-    } else {
-        HashMap::new()
-    };
-
-    Ok(item_rows
-        .into_iter()
-        .map(|item| VaultItemDetailsResponse {
-            attachments: attachments_by_item
-                .get(&item.id)
-                .cloned()
-                .unwrap_or_default(),
-            ..map_item_details(item)
-        })
-        .collect())
-}
-
 pub(crate) async fn list_vault_items_page(
     pool: &PgPool,
     user_id: &str,
@@ -1588,57 +1508,6 @@ pub(crate) async fn list_vault_items_page(
                 .cloned()
                 .unwrap_or_default(),
             ..map_item_details(item)
-        })
-        .collect())
-}
-
-pub(crate) async fn list_all_vault_items(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<Vec<VaultItemWithVaultResponse>, AppError> {
-    let user_vaults = load_user_vault_summaries(pool, user_id).await?;
-    if user_vaults.is_empty() {
-        return Ok(Vec::new());
-    }
-    let vault_ids: Vec<String> = user_vaults
-        .iter()
-        .map(|vault| vault.vault_id.clone())
-        .collect();
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) AND deleted_at IS NULL ORDER BY updated_at DESC",
-	)
-	.bind(&vault_ids)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load items"); AppError::internal("Failed to load items") })?;
-    let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
-    let attachments_by_item = if attachments_enabled {
-        load_item_attachments(pool, &item_rows).await?
-    } else {
-        HashMap::new()
-    };
-    let vault_map = build_vault_summary_map(user_vaults);
-
-    Ok(item_rows
-        .into_iter()
-        .map(|item| VaultItemWithVaultResponse {
-            id: item.id.clone(),
-            vault_id: item.vault_id.clone(),
-            category: item.category,
-            favorite: item.favorite,
-            encrypted_data: item.encrypted_data,
-            encryption_iv: item.encryption_iv,
-            encryption_algorithm: item.encryption_algorithm,
-            version: item.version,
-            last_modified_by: item.last_modified_by,
-            created_at: format_timestamp(item.created_at),
-            updated_at: format_timestamp(item.updated_at),
-            deleted_at: item.deleted_at.map(format_timestamp),
-            attachments: attachments_by_item
-                .get(&item.id)
-                .cloned()
-                .unwrap_or_default(),
-            vault: vault_map.get(&item.vault_id).cloned(),
         })
         .collect())
 }
@@ -1699,47 +1568,6 @@ pub(crate) async fn list_all_vault_items_page(
                 .get(&item.id)
                 .cloned()
                 .unwrap_or_default(),
-            vault: vault_map.get(&item.vault_id).cloned(),
-        })
-        .collect())
-}
-
-pub(crate) async fn list_all_deleted_vault_items(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<Vec<DeletedVaultItemWithVaultResponse>, AppError> {
-    let user_vaults = load_user_vault_summaries(pool, user_id).await?;
-    if user_vaults.is_empty() {
-        return Ok(Vec::new());
-    }
-    let vault_ids: Vec<String> = user_vaults
-        .iter()
-        .map(|vault| vault.vault_id.clone())
-        .collect();
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) AND deleted_at IS NOT NULL ORDER BY deleted_at DESC",
-	)
-	.bind(&vault_ids)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load deleted items"); AppError::internal("Failed to load deleted items") })?;
-    let vault_map = build_vault_summary_map(user_vaults);
-
-    Ok(item_rows
-        .into_iter()
-        .map(|item| DeletedVaultItemWithVaultResponse {
-            id: item.id.clone(),
-            vault_id: item.vault_id.clone(),
-            category: item.category,
-            favorite: item.favorite,
-            encrypted_data: item.encrypted_data,
-            encryption_iv: item.encryption_iv,
-            encryption_algorithm: item.encryption_algorithm,
-            version: item.version,
-            last_modified_by: item.last_modified_by,
-            created_at: format_timestamp(item.created_at),
-            updated_at: format_timestamp(item.updated_at),
-            deleted_at: item.deleted_at.map(format_timestamp),
             vault: vault_map.get(&item.vault_id).cloned(),
         })
         .collect())
@@ -2138,24 +1966,6 @@ pub(crate) async fn delete_vault_item(
     Ok(SuccessResponse { success: true })
 }
 
-pub(crate) async fn list_deleted_vault_items(
-    pool: &PgPool,
-    user_id: &str,
-    input: VaultIdInput,
-) -> Result<Vec<VaultItemResponse>, AppError> {
-    let access = load_vault_access(pool, &input.vault_id, user_id).await?;
-    let _ = access;
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = $1 AND deleted_at IS NOT NULL ORDER BY deleted_at DESC NULLS LAST",
-	)
-	.bind(&input.vault_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load deleted items"); AppError::internal("Failed to load deleted items") })?;
-
-    Ok(item_rows.into_iter().map(map_item).collect())
-}
-
 pub(crate) async fn list_deleted_vault_items_page(
     pool: &PgPool,
     user_id: &str,
@@ -2513,64 +2323,6 @@ pub(crate) mod member_handlers {
                 AppError::internal("Failed to update vault member role")
             })?;
         Ok(SuccessResponse { success: true })
-    }
-
-    pub(crate) async fn lookup_vault_user(
-        pool: &PgPool,
-        user_id: &str,
-        input: LookupVaultUserInput,
-    ) -> Result<VaultLookupUserResponse, AppError> {
-        let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
-        let normalized_email = input.email.trim().to_ascii_lowercase();
-        let current_user_email =
-            query_scalar::<_, String>("SELECT email FROM \"user\" WHERE id = $1 LIMIT 1")
-                .bind(user_id)
-                .fetch_optional(pool)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, "Failed to load current user");
-                    AppError::internal("Failed to load current user")
-                })?;
-        if current_user_email
-            .as_deref()
-            .map(|email| email.eq_ignore_ascii_case(&normalized_email))
-            .unwrap_or(false)
-        {
-            return Err(AppError::bad_request("Cannot add yourself as a member"));
-        }
-        let found_user = query_as::<_, DbVaultLookupUserRow>(
-			"SELECT id, name, email, public_key, team_id FROM \"user\" WHERE LOWER(email) = $1 LIMIT 1",
-		)
-		.bind(&normalized_email)
-		.fetch_optional(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to look up user"); AppError::internal("Failed to look up user") })?
-		.ok_or_else(|| AppError::not_found("User not found"))?;
-        if found_user.team_id.as_deref() != actor.team_id.as_deref() {
-            return Err(AppError::not_found("User not found"));
-        }
-        let existing_member = query_scalar::<_, String>(
-            "SELECT user_id FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
-        )
-        .bind(&input.vault_id)
-        .bind(&found_user.id)
-        .fetch_optional(pool)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "Failed to load existing vault member");
-            AppError::internal("Failed to load existing vault member")
-        })?;
-        if existing_member.is_some() {
-            return Err(AppError::bad_request(
-                "User is already a member of this vault",
-            ));
-        }
-        Ok(VaultLookupUserResponse {
-            id: found_user.id,
-            name: found_user.name,
-            email: found_user.email,
-            public_key: found_user.public_key,
-        })
     }
 
     pub(crate) async fn add_vault_member(
