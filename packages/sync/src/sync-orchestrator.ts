@@ -1,6 +1,6 @@
-import { type CatchUpClient, runCatchUp } from "./catch-up";
-import { type DeltaSyncClient, performDeltaSync } from "./delta-sync";
-import type { OutboundQueue, OutboundQueueClient } from "./outbound-queue";
+import { type CatchUpApiClient, runCatchUp } from "./catch-up";
+import { type DeltaSyncApiClient, performDeltaSync } from "./delta-sync";
+import type { OutboundQueue, OutboundQueueApiClient } from "./outbound-queue";
 import { createSyncManager, type SyncManager } from "./sync-manager";
 import type {
 	ConnectionStatus,
@@ -11,9 +11,13 @@ import type {
 	SyncStatus,
 } from "./types";
 
+export type SyncApiClient = CatchUpApiClient &
+	DeltaSyncApiClient &
+	OutboundQueueApiClient;
+
 export interface SyncOrchestratorOptions {
 	syncManager: Omit<SyncManagerOptions, "onStatusChange">;
-	rpcClient: DeltaSyncClient & CatchUpClient;
+	apiClient: SyncApiClient;
 	itemCache: SyncItemCache;
 	outboundQueue: OutboundQueue;
 	itemCacheAccountId?: string | null;
@@ -21,7 +25,11 @@ export interface SyncOrchestratorOptions {
 	itemCacheServerUrl?: string | null;
 	getClientForAccount?: (
 		accountId: string,
-	) => OutboundQueueClient | Promise<OutboundQueueClient>;
+	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
+	refreshFromServer?: (
+		apiClient: SyncApiClient,
+		accountId: string,
+	) => Promise<void>;
 	onEventProcessed?: (event: SyncEvent) => Promise<void>;
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
@@ -37,7 +45,7 @@ export class SyncOrchestrator {
 	private readonly itemCacheServerUrl?: string | null;
 	private readonly getClientForAccount?: (
 		accountId: string,
-	) => OutboundQueueClient | Promise<OutboundQueueClient>;
+	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
 	private readonly onEventProcessed?: (event: SyncEvent) => Promise<void>;
 
 	private status: SyncStatus = {
@@ -154,7 +162,7 @@ export class SyncOrchestrator {
 		}
 
 		await performDeltaSync(
-			this.options.rpcClient,
+			this.options.apiClient,
 			this.options.itemCache,
 			event,
 			this.getDeltaSyncAccountScope(),
@@ -186,7 +194,7 @@ export class SyncOrchestrator {
 			const cursor = await this.syncManager.getStoredLastSyncCursor();
 
 			const result = await runCatchUp({
-				client: this.options.rpcClient,
+				client: this.options.apiClient,
 				initialCursor: cursor ?? { id: "" },
 				shouldProcessEvent: (event) =>
 					event.clientId !== this.options.outboundQueue.getClientId() &&
@@ -195,7 +203,11 @@ export class SyncOrchestrator {
 					await this.applyEvent(event);
 				},
 				onRequiresFullRefresh: async () => {
-					await this.options.itemCache.clearItemCache(
+					if (!this.options.refreshFromServer) {
+						throw new Error("Sync requires a staged full-refresh handler");
+					}
+					await this.options.refreshFromServer(
+						this.options.apiClient,
 						this.getDeltaSyncAccountScope(),
 					);
 				},
@@ -219,7 +231,7 @@ export class SyncOrchestrator {
 				if (this.getClientForAccount) {
 					return this.getClientForAccount(accountId);
 				}
-				return this.options.rpcClient as unknown as OutboundQueueClient;
+				return this.options.apiClient;
 			});
 
 			for (const mapping of this.options.outboundQueue.consumeTempIdMappings()) {

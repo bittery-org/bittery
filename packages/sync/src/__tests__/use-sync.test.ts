@@ -6,7 +6,7 @@ function buildSource(overrides: Partial<SyncSource> = {}): SyncSource {
 		id: "default",
 		serverUrl: "http://localhost:3000",
 		getAuthToken: async () => "token",
-		rpcClient: {} as SyncSource["rpcClient"],
+		apiClient: {} as SyncSource["apiClient"],
 		...overrides,
 	};
 }

@@ -1,34 +1,29 @@
 import type { QueryClient } from "@tanstack/react-query";
 import type { SyncEvent, SyncEventType } from "./types";
 
-/**
- * tRPC-like interface for generating query keys
- * This allows the sync package to be decoupled from the specific tRPC implementation
- */
-export interface QueryKeyHelpers {
-	travelMode: {
-		getTravelMode: { queryKey: () => unknown[] };
-	};
-	vault: {
-		listItems: { queryKey: (input: { vaultId: string }) => unknown[] };
-		listAllItems: { queryKey: () => unknown[] };
-		getItem: { queryKey: (input: { itemId: string }) => unknown[] };
-		get: { queryKey: (input: { vaultId: string }) => unknown[] };
-		list: { queryKey: () => unknown[] };
-		listAllDeletedItems: { queryKey: () => unknown[] };
-		listDeletedItems: { queryKey: (input: { vaultId: string }) => unknown[] };
-		members: {
-			list: { queryKey: (input: { vaultId: string }) => unknown[] };
-		};
-	};
-}
+export const syncApiQueryKeys = {
+	travelMode: ["api", "v1", "travel-mode"] as unknown[],
+	vaults: {
+		list: ["api", "v1", "vaults"] as unknown[],
+		members: (vaultId: string) =>
+			["api", "v1", "vaults", vaultId, "members"] as unknown[],
+	},
+	items: {
+		all: ["api", "v1", "items"] as unknown[],
+		get: (itemId: string) => ["api", "v1", "items", itemId] as unknown[],
+		inVault: (vaultId: string) =>
+			["api", "v1", "vaults", vaultId, "items"] as unknown[],
+		trashed: ["api", "v1", "trashed-items"] as unknown[],
+		trashedInVault: (vaultId: string) =>
+			["api", "v1", "vaults", vaultId, "trashed-items"] as unknown[],
+	},
+};
 
 /**
  * Invalidation context for a sync event
  */
 export interface InvalidationContext {
 	queryClient: QueryClient;
-	rpc: QueryKeyHelpers;
 	event: SyncEvent;
 }
 
@@ -37,16 +32,12 @@ export interface InvalidationContext {
  */
 export interface QueryInvalidatorOptions {
 	queryClient: QueryClient;
-	rpc: QueryKeyHelpers;
 }
 
 /**
  * Get query keys to invalidate based on sync event type
  */
-export function getQueryKeysForEvent(
-	rpc: QueryKeyHelpers,
-	event: SyncEvent,
-): unknown[][] {
+export function getQueryKeysForEvent(event: SyncEvent): unknown[][] {
 	const keys: unknown[][] = [];
 	const { type, vaultId } = event;
 
@@ -62,48 +53,48 @@ export function getQueryKeysForEvent(
 
 		case "vault_created":
 			keys.push(["vault-keys"]);
-			keys.push(rpc.vault.list.queryKey());
+			keys.push(syncApiQueryKeys.vaults.list);
 			break;
 
 		case "vault_updated":
 			keys.push(["vault-keys"]);
-			keys.push(rpc.vault.list.queryKey());
+			keys.push(syncApiQueryKeys.vaults.list);
 			if (event.metadata?.reason === "bulk_import" && vaultId) {
-				keys.push(rpc.vault.listItems.queryKey({ vaultId }));
-				keys.push(rpc.vault.listAllItems.queryKey());
+				keys.push(syncApiQueryKeys.items.inVault(vaultId));
+				keys.push(syncApiQueryKeys.items.all);
 			}
 			break;
 
 		case "vault_deleted":
 			keys.push(["vault-keys"]);
-			keys.push(rpc.vault.list.queryKey());
+			keys.push(syncApiQueryKeys.vaults.list);
 			break;
 
 		case "vault_access_revoked": {
 			keys.push(["vault-keys"]);
-			keys.push(rpc.vault.list.queryKey());
+			keys.push(syncApiQueryKeys.vaults.list);
 			break;
 		}
 
 		case "vault_member_added":
 		case "vault_member_removed":
 			if (vaultId) {
-				keys.push(rpc.vault.members.list.queryKey({ vaultId }));
+				keys.push(syncApiQueryKeys.vaults.members(vaultId));
 			}
 			keys.push(["vault-keys"]);
-			keys.push(rpc.vault.list.queryKey());
+			keys.push(syncApiQueryKeys.vaults.list);
 			break;
 
 		case "vault_key_rotated":
 			keys.push(["vault-keys"]);
-			keys.push(rpc.vault.list.queryKey());
+			keys.push(syncApiQueryKeys.vaults.list);
 			break;
 
 		case "travel_mode_updated":
 			keys.push(["travel-mode"]);
 			keys.push(["all-vault-keys"]);
-			keys.push(rpc.travelMode.getTravelMode.queryKey());
-			keys.push(rpc.vault.list.queryKey());
+			keys.push(syncApiQueryKeys.travelMode);
+			keys.push(syncApiQueryKeys.vaults.list);
 			break;
 	}
 
@@ -116,7 +107,7 @@ export function getQueryKeysForEvent(
 export async function invalidateQueriesForEvent(
 	ctx: InvalidationContext,
 ): Promise<void> {
-	const keys = getQueryKeysForEvent(ctx.rpc, ctx.event);
+	const keys = getQueryKeysForEvent(ctx.event);
 
 	await Promise.all(
 		keys.map((queryKey) => ctx.queryClient.invalidateQueries({ queryKey })),
@@ -151,7 +142,6 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 
 			await invalidateQueriesForEvent({
 				queryClient: options.queryClient,
-				rpc: options.rpc,
 				event: syntheticEvent,
 			});
 		},
@@ -160,16 +150,16 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate item-related queries
 		 */
 		invalidateItem: async (itemId: string, vaultId: string): Promise<void> => {
-			const { queryClient, rpc } = options;
+			const { queryClient } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.listItems.queryKey({ vaultId }),
+					queryKey: syncApiQueryKeys.items.inVault(vaultId),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.getItem.queryKey({ itemId }),
+					queryKey: syncApiQueryKeys.items.get(itemId),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.listAllItems.queryKey(),
+					queryKey: syncApiQueryKeys.items.all,
 				}),
 			]);
 		},
@@ -178,14 +168,14 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate vault list queries
 		 */
 		invalidateVaultList: async (vaultId: string): Promise<void> => {
-			const { queryClient, rpc } = options;
+			const { queryClient } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.listItems.queryKey({ vaultId }),
+					queryKey: syncApiQueryKeys.items.inVault(vaultId),
 				}),
-				// Invalidate "All Objects" tRPC query
+				// The aggregate item view has its own cache entry outside a vault page.
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.listAllItems.queryKey(),
+					queryKey: syncApiQueryKeys.items.all,
 				}),
 			]);
 		},
@@ -194,13 +184,13 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate deleted items list
 		 */
 		invalidateDeletedItems: async (vaultId: string): Promise<void> => {
-			const { queryClient, rpc } = options;
+			const { queryClient } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.listDeletedItems.queryKey({ vaultId }),
+					queryKey: syncApiQueryKeys.items.trashedInVault(vaultId),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.listAllDeletedItems.queryKey(),
+					queryKey: syncApiQueryKeys.items.trashed,
 				}),
 			]);
 		},
@@ -209,11 +199,11 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate vault keys
 		 */
 		invalidateVaultKeys: async (): Promise<void> => {
-			const { queryClient, rpc } = options;
+			const { queryClient } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
 				queryClient.invalidateQueries({
-					queryKey: rpc.vault.list.queryKey(),
+					queryKey: syncApiQueryKeys.vaults.list,
 				}),
 			]);
 		},
@@ -255,9 +245,9 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Invalidate vault member queries
 		 */
 		invalidateVaultMembers: async (vaultId: string): Promise<void> => {
-			const { queryClient, rpc } = options;
+			const { queryClient } = options;
 			await queryClient.invalidateQueries({
-				queryKey: rpc.vault.members.list.queryKey({ vaultId }),
+				queryKey: syncApiQueryKeys.vaults.members(vaultId),
 			});
 		},
 
@@ -266,18 +256,18 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 * Use this when switching accounts to clear all cached data from the previous account
 		 */
 		invalidateAllAccountData: async (): Promise<void> => {
-			const { queryClient, rpc } = options;
+			const { queryClient } = options;
 
-			// Remove tRPC API queries entirely to prevent automatic refetch attempts
+			// Removing remote API queries prevents refetch without an account token.
 			// This is important when switching to "All Accounts" mode where there's no auth token
 			queryClient.removeQueries({
-				queryKey: rpc.vault.list.queryKey(),
+				queryKey: syncApiQueryKeys.vaults.list,
 			});
 			queryClient.removeQueries({
-				queryKey: rpc.vault.listAllItems.queryKey(),
+				queryKey: syncApiQueryKeys.items.all,
 			});
 			queryClient.removeQueries({
-				queryKey: rpc.vault.listAllDeletedItems.queryKey(),
+				queryKey: syncApiQueryKeys.items.trashed,
 			});
 
 			// Invalidate (not remove) local storage queries - these should refetch from storage

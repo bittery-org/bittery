@@ -1,11 +1,10 @@
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { OutboundQueue, type OutboundQueueClient } from "./outbound-queue";
+import { OutboundQueue, type OutboundQueueApiClient } from "./outbound-queue";
 import {
 	createQueryInvalidator,
 	invalidateQueriesForEvent,
-	type QueryKeyHelpers,
 } from "./query-invalidation";
 import {
 	SyncOrchestrator,
@@ -62,7 +61,8 @@ export interface SyncSource {
 	id: string;
 	serverUrl: string;
 	getAuthToken: () => Promise<string | null>;
-	rpcClient: SyncOrchestratorOptions["rpcClient"];
+	apiClient: SyncOrchestratorOptions["apiClient"];
+	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
 	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;
@@ -144,7 +144,8 @@ export interface UseSyncOptions {
 	sources?: SyncSource[];
 	getClientForAccount?: (
 		accountId: string,
-	) => OutboundQueueClient | Promise<OutboundQueueClient>;
+	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
+	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
 	resolveLegacyAccountId?: (
 		email: string,
 	) => string | undefined | Promise<string | undefined>;
@@ -163,8 +164,7 @@ export interface UseSyncOptions {
  * React hook for real-time synchronization
  */
 export function useSync(options: UseSyncOptions) {
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const apiClient = useApiClient();
 
 	const {
 		serverUrl,
@@ -180,6 +180,7 @@ export function useSync(options: UseSyncOptions) {
 		itemCacheServerUrl,
 		sources,
 		getClientForAccount,
+		refreshFromServer,
 		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed,
@@ -208,11 +209,10 @@ export function useSync(options: UseSyncOptions) {
 		async (event: Parameters<typeof invalidateQueriesForEvent>[0]["event"]) => {
 			await invalidateQueriesForEvent({
 				queryClient,
-				rpc: rpc as unknown as QueryKeyHelpers,
 				event,
 			});
 		},
-		[queryClient, rpc],
+		[queryClient],
 	);
 
 	const syncSources = useMemo<SyncSource[]>(() => {
@@ -225,7 +225,8 @@ export function useSync(options: UseSyncOptions) {
 				id: "default",
 				serverUrl,
 				getAuthToken,
-				rpcClient: rpcClient as unknown as SyncOrchestratorOptions["rpcClient"],
+				apiClient,
+				refreshFromServer,
 				itemCacheAccountId,
 				itemCacheAccountEmail,
 				itemCacheServerUrl,
@@ -235,7 +236,8 @@ export function useSync(options: UseSyncOptions) {
 		sources,
 		serverUrl,
 		getAuthToken,
-		rpcClient,
+		apiClient,
+		refreshFromServer,
 		itemCacheAccountId,
 		itemCacheAccountEmail,
 		itemCacheServerUrl,
@@ -276,7 +278,8 @@ export function useSync(options: UseSyncOptions) {
 					storage: sourceStorage,
 					fetch: fetchImpl,
 				},
-				rpcClient: source.rpcClient,
+				apiClient: source.apiClient,
+				refreshFromServer: source.refreshFromServer,
 				itemCache: itemCacheAdapter,
 				outboundQueue,
 				itemCacheAccountId: source.itemCacheAccountId,
@@ -387,9 +390,8 @@ export function useSync(options: UseSyncOptions) {
 		() =>
 			createQueryInvalidator({
 				queryClient,
-				rpc: rpc as unknown as QueryKeyHelpers,
 			}),
-		[queryClient, rpc],
+		[queryClient],
 	);
 
 	return {

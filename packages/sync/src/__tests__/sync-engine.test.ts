@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
 	OutboundQueue,
-	type OutboundQueueClient,
+	type OutboundQueueApiClient,
 	type PendingMutation,
 } from "../outbound-queue";
 import { createSyncManager } from "../sync-manager";
-import { SyncOrchestrator } from "../sync-orchestrator";
+import { type SyncApiClient, SyncOrchestrator } from "../sync-orchestrator";
 import type { SyncEvent, SyncItemCache, SyncStorage } from "../types";
 
 /**
@@ -60,53 +60,155 @@ function buildEvent(partial: Partial<SyncEvent> = {}): SyncEvent {
 	};
 }
 
-/** A catch-up page whose first item is the one that will not decrypt locally. */
-function poisonItemClient() {
+function apiResult<T>(data: T) {
+	return { data, etag: null, requestId: null };
+}
+
+interface TestApiClientOptions {
+	changes?: () => Promise<{
+		events: SyncEvent[];
+		hasMore: boolean;
+		requiresFullRefresh: boolean;
+		cursor: { id: string } | null;
+	}>;
+	getItem?: (itemId: string) => Promise<Record<string, unknown>>;
+}
+
+function testApiClient(options: TestApiClientOptions = {}): SyncApiClient {
 	return {
 		sync: {
-			getEventsSince: {
-				query: async () => ({
-					events: [
-						buildEvent({ id: "evt_11", entityId: "item_poison" }),
-						buildEvent({ id: "evt_12", entityId: "item_ok" }),
-					],
-					hasMore: false,
-					requiresFullRefresh: false,
-					cursor: { id: "evt_12" },
-				}),
-			},
+			changes: async () =>
+				apiResult(
+					await (options.changes?.() ??
+						Promise.resolve({
+							events: [],
+							hasMore: false,
+							requiresFullRefresh: false,
+							cursor: null,
+						})),
+				),
 		},
-		vault: {
-			getItem: {
-				query: async ({ itemId }: { itemId: string }) => ({
-					id: itemId,
-					vaultId: "vault_1",
-					category: "login",
-					favorite: false,
-					encryptedData: "ciphertext",
-					encryptionIv: "iv",
-					encryptionAlgorithm: "AES-GCM-AAD-V1",
-					version: 1,
-					lastModifiedBy: "user_1",
-					createdAt: "2026-03-13T00:00:00.000Z",
-					updatedAt: "2026-03-13T00:00:00.000Z",
-					deletedAt: null,
-					attachments: [],
-				}),
-			},
-			get: {
-				query: async () => ({
+		items: {
+			get: async (itemId: string) =>
+				apiResult(
+					await (options.getItem?.(itemId) ??
+						Promise.resolve({
+							id: itemId,
+							vaultId: "vault_1",
+							category: "login",
+							favorite: false,
+							encryptedData: "ciphertext",
+							encryptionIv: "iv",
+							encryptionAlgorithm: "AES-GCM-AAD-V1",
+							version: 1,
+							lastModifiedBy: "user_1",
+							createdAt: "2026-03-13T00:00:00.000Z",
+							updatedAt: "2026-03-13T00:00:00.000Z",
+							deletedAt: null,
+							attachments: [],
+						})),
+				),
+			listInVault: async () => apiResult([]),
+		},
+		vaults: {
+			get: async () =>
+				apiResult({
 					id: "vault_1",
 					name: "Vault",
 					vaultType: "personal",
 					icon: null,
 					imageUrl: null,
 				}),
-			},
-			listItems: { query: async () => [] },
-			list: { query: async () => [] },
+			list: async () => apiResult([]),
 		},
-	};
+	} as unknown as SyncApiClient;
+}
+
+interface TestWriteOptions {
+	etag?: string;
+	idempotencyKey?: string;
+}
+
+interface OutboundClientHandlers {
+	create?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+	update?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+	trash?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+	deletePermanently?: (
+		itemId: string,
+		options?: TestWriteOptions,
+	) => Promise<void>;
+	restore?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+	move?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+	setFavorite?: (itemId: string, options?: TestWriteOptions) => Promise<void>;
+}
+
+function outboundApiClient(
+	handlers: OutboundClientHandlers = {},
+): OutboundQueueApiClient {
+	return {
+		items: {
+			create: async (
+				_vaultId: string,
+				itemId: string,
+				_input: unknown,
+				options?: TestWriteOptions,
+			) => {
+				await handlers.create?.(itemId, options);
+				return apiResult({ itemId, id: itemId });
+			},
+			update: async (
+				itemId: string,
+				_input: unknown,
+				options?: TestWriteOptions,
+			) => {
+				await handlers.update?.(itemId, options);
+				return apiResult({ success: true, version: 1 });
+			},
+			trash: async (itemId: string, options?: TestWriteOptions) => {
+				await handlers.trash?.(itemId, options);
+				return apiResult({});
+			},
+			deletePermanently: async (itemId: string, options?: TestWriteOptions) => {
+				await handlers.deletePermanently?.(itemId, options);
+				return apiResult({});
+			},
+			restore: async (itemId: string, options?: TestWriteOptions) => {
+				await handlers.restore?.(itemId, options);
+				return apiResult({});
+			},
+			move: async (
+				itemId: string,
+				_input: unknown,
+				options?: TestWriteOptions,
+			) => {
+				await handlers.move?.(itemId, options);
+				return apiResult({});
+			},
+			setFavorite: async (
+				itemId: string,
+				_input: unknown,
+				options?: TestWriteOptions,
+			) => {
+				await handlers.setFavorite?.(itemId, options);
+				return apiResult({});
+			},
+		},
+	} as unknown as OutboundQueueApiClient;
+}
+
+/** A catch-up page whose first item is the one that will not decrypt locally. */
+function poisonItemClient() {
+	return testApiClient({
+		changes: async () => ({
+			events: [
+				buildEvent({ id: "evt_11", entityId: "item_poison" }),
+				buildEvent({ id: "evt_12", entityId: "item_ok" }),
+			],
+			hasMore: false,
+			requiresFullRefresh: false,
+			cursor: { id: "evt_12" },
+		}),
+	});
 }
 
 describe("sync engine regressions", () => {
@@ -122,40 +224,11 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			rpcClient: {
-				sync: {
-					getEventsSince: {
-						query: async () => ({
-							events: [],
-							hasMore: false,
-							requiresFullRefresh: false,
-							cursor: null,
-						}),
-					},
+			apiClient: testApiClient({
+				getItem: async () => {
+					throw new Error("delta failed");
 				},
-				vault: {
-					getItem: {
-						query: async () => {
-							throw new Error("delta failed");
-						},
-					},
-					get: {
-						query: async () => ({
-							id: "vault_1",
-							name: "Vault",
-							vaultType: "personal",
-							icon: null,
-							imageUrl: null,
-						}),
-					},
-					listItems: {
-						query: async () => [],
-					},
-					list: {
-						query: async () => [],
-					},
-				},
-			},
+			}),
 			itemCache: stubItemCache(),
 			outboundQueue,
 		});
@@ -180,16 +253,12 @@ describe("sync engine regressions", () => {
 		orchestrator.dispose();
 	});
 
-	test("clears cache and advances cursor when catch-up requires full refresh", async () => {
+	test("advances the cursor only after a staged full refresh succeeds", async () => {
 		const storage = new MemoryStorage();
 		await storage.set("lastSyncCursor", { id: "evt_5" });
 		const outboundQueue = new OutboundQueue(storage, "self_client");
-		const clearedAccounts: string[] = [];
-		const itemCache = stubItemCache({
-			clearItemCache: async (accountId: string) => {
-				clearedAccounts.push(accountId);
-			},
-		});
+		const refreshAccounts: string[] = [];
+		const itemCache = stubItemCache();
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
@@ -198,44 +267,24 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			rpcClient: {
-				sync: {
-					getEventsSince: {
-						query: async () => ({
-							events: [],
-							hasMore: false,
-							requiresFullRefresh: true,
-							cursor: { id: "evt_20" },
-						}),
-					},
-				},
-				vault: {
-					getItem: {
-						query: async () => {
-							throw new Error("unused");
-						},
-					},
-					get: {
-						query: async () => ({
-							id: "vault_1",
-							name: "Vault",
-							vaultType: "personal",
-							icon: null,
-							imageUrl: null,
-						}),
-					},
-					listItems: {
-						query: async () => [],
-					},
-					list: {
-						query: async () => [],
-					},
-				},
-			},
+			apiClient: testApiClient({
+				changes: async () => ({
+					events: [],
+					hasMore: false,
+					requiresFullRefresh: true,
+					cursor: { id: "evt_20" },
+				}),
+			}),
 			itemCache,
 			// Scoped by accountId, never the email: an email is not an identity.
 			itemCacheAccountId: "acc_alice",
 			itemCacheAccountEmail: "alice@example.com",
+			refreshFromServer: async (_client, accountId) => {
+				expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+					"evt_5",
+				);
+				refreshAccounts.push(accountId);
+			},
 			outboundQueue,
 		});
 
@@ -243,7 +292,44 @@ describe("sync engine regressions", () => {
 
 		const cursor = await storage.get<{ id: string }>("lastSyncCursor");
 		expect(cursor?.id).toBe("evt_20");
-		expect(clearedAccounts).toEqual(["acc_alice"]);
+		expect(refreshAccounts).toEqual(["acc_alice"]);
+
+		orchestrator.dispose();
+	});
+
+	test("keeps the previous cursor when a staged full refresh fails", async () => {
+		const storage = new MemoryStorage();
+		await storage.set("lastSyncCursor", { id: "evt_5" });
+		const outboundQueue = new OutboundQueue(storage, "self_client");
+		const orchestrator = new SyncOrchestrator({
+			syncManager: {
+				serverUrl: "http://localhost:3000",
+				getAuthToken: async () => "token",
+				clientId: "self_client",
+				storage,
+			},
+			apiClient: testApiClient({
+				changes: async () => ({
+					events: [],
+					hasMore: false,
+					requiresFullRefresh: true,
+					cursor: { id: "evt_20" },
+				}),
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "acc_alice",
+			refreshFromServer: async () => {
+				throw new Error("staging failed");
+			},
+			outboundQueue,
+		});
+
+		await expect((orchestrator as any).runCatchUp()).rejects.toThrow(
+			"staging failed",
+		);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_5",
+		);
 
 		orchestrator.dispose();
 	});
@@ -268,48 +354,7 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			rpcClient: {
-				sync: {
-					getEventsSince: {
-						query: async () => ({
-							events: [],
-							hasMore: false,
-							requiresFullRefresh: false,
-							cursor: null,
-						}),
-					},
-				},
-				vault: {
-					getItem: {
-						query: async () => ({
-							id: "item_1",
-							vaultId: "vault_1",
-							category: "login",
-							favorite: false,
-							encryptedData: "ciphertext",
-							encryptionIv: "iv",
-							encryptionAlgorithm: "aes-256-gcm",
-							version: 1,
-							lastModifiedBy: "user_1",
-							createdAt: "2026-03-13T00:00:00.000Z",
-							updatedAt: "2026-03-13T00:00:00.000Z",
-							deletedAt: null,
-							attachments: [],
-						}),
-					},
-					get: {
-						query: async () => ({
-							id: "vault_1",
-							name: "Vault",
-							vaultType: "personal",
-							icon: null,
-							imageUrl: null,
-						}),
-					},
-					listItems: { query: async () => [] },
-					list: { query: async () => [] },
-				},
-			},
+			apiClient: testApiClient(),
 			itemCache,
 			// Only an email is configured — no accountId to scope by.
 			itemCacheAccountEmail: "alice@example.com",
@@ -344,7 +389,7 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			rpcClient: poisonItemClient(),
+			apiClient: poisonItemClient(),
 			// `VaultRepository.upsertEncrypted` swallows a decryption failure and still
 			// caches the ciphertext, so the sync layer sees a plain successful write.
 			itemCache: stubItemCache({
@@ -380,7 +425,7 @@ describe("sync engine regressions", () => {
 				clientId: "self_client",
 				storage,
 			},
-			rpcClient: poisonItemClient(),
+			apiClient: poisonItemClient(),
 			itemCache: stubItemCache({
 				upsertCachedItem: async () => {
 					throw new Error("cache write failed");
@@ -424,6 +469,32 @@ describe("sync engine regressions", () => {
 
 		expect(pingCount).toBe(2);
 		expect(manager.getLastEventCursor()).toBeNull();
+		manager.disconnect();
+	});
+
+	test("connects to the versioned SSE hint endpoint", async () => {
+		const storage = new MemoryStorage();
+		let requestedUrl = "";
+		const manager = createSyncManager({
+			serverUrl: "https://self-hosted.example",
+			getAuthToken: async () => "token",
+			clientId: "self_client",
+			storage,
+			fetch: async (url) => {
+				requestedUrl = url;
+				return new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.close();
+						},
+					}),
+					{ status: 200 },
+				);
+			},
+		});
+
+		await manager.connect();
+		expect(requestedUrl).toBe("https://self-hosted.example/api/v1/sync/events");
 		manager.disconnect();
 	});
 
@@ -514,43 +585,28 @@ describe("sync engine regressions", () => {
 
 		const operations: string[] = [];
 		queue.compact();
-		await queue.drain(() => ({
-			vault: {
-				createItem: {
-					mutate: async () => ({}),
+		await queue.drain(() =>
+			outboundApiClient({
+				update: async () => {
+					operations.push("update");
 				},
-				updateItem: {
-					mutate: async () => {
-						operations.push("update");
-					},
+				trash: async () => {
+					operations.push("delete");
 				},
-				deleteItem: {
-					mutate: async () => {
-						operations.push("delete");
-					},
+				deletePermanently: async () => {
+					operations.push("permanent_delete");
 				},
-				permanentlyDeleteItem: {
-					mutate: async () => {
-						operations.push("permanent_delete");
-					},
+				restore: async () => {
+					operations.push("restore");
 				},
-				restoreItem: {
-					mutate: async () => {
-						operations.push("restore");
-					},
+				move: async () => {
+					operations.push("move");
 				},
-				moveItem: {
-					mutate: async () => {
-						operations.push("move");
-					},
+				setFavorite: async () => {
+					operations.push("toggle_favorite");
 				},
-				toggleFavorite: {
-					mutate: async () => {
-						operations.push("toggle_favorite");
-					},
-				},
-			},
-		}));
+			}),
+		);
 
 		expect(operations).toEqual(["delete", "restore", "update"]);
 		expect(queue.getPendingCount()).toBe(0);
@@ -593,43 +649,17 @@ describe("sync engine regressions", () => {
 		const perAccountItemIds = new Map<string, string[]>();
 		await restored.drain((accountId) => {
 			perAccountItemIds.set(accountId, []);
-			return {
-				vault: {
-					createItem: {
-						mutate: async () => ({}),
-					},
-					updateItem: {
-						mutate: async (input) => {
-							perAccountItemIds.get(accountId)?.push(input.itemId);
-						},
-					},
-					deleteItem: {
-						mutate: async (input) => {
-							perAccountItemIds.get(accountId)?.push(input.itemId);
-						},
-					},
-					permanentlyDeleteItem: {
-						mutate: async (input) => {
-							perAccountItemIds.get(accountId)?.push(input.itemId);
-						},
-					},
-					restoreItem: {
-						mutate: async (input) => {
-							perAccountItemIds.get(accountId)?.push(input.itemId);
-						},
-					},
-					moveItem: {
-						mutate: async (input) => {
-							perAccountItemIds.get(accountId)?.push(input.itemId);
-						},
-					},
-					toggleFavorite: {
-						mutate: async (input) => {
-							perAccountItemIds.get(accountId)?.push(input.itemId);
-						},
-					},
-				},
+			const recordItem = async (itemId: string) => {
+				perAccountItemIds.get(accountId)?.push(itemId);
 			};
+			return outboundApiClient({
+				update: recordItem,
+				trash: recordItem,
+				deletePermanently: recordItem,
+				restore: recordItem,
+				move: recordItem,
+				setFavorite: recordItem,
+			});
 		});
 
 		expect(perAccountItemIds.get("account-first")).toEqual(["item_1"]);
@@ -724,6 +754,62 @@ function networkError(): Error {
 }
 
 describe("outbound queue multi-account drain isolation", () => {
+	test("sends stable idempotency keys and version ETags", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+		queue.enqueue({
+			accountId: "account_a",
+			id: "mutation_create",
+			type: "create",
+			entityId: "item_new",
+			vaultId: "vault_1",
+			category: "login",
+			encryptedPayload: {
+				encryptedData: "cipher",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+			},
+			baseVersion: 0,
+			timestamp: 1,
+			retryCount: 0,
+		});
+		queue.enqueue({
+			accountId: "account_a",
+			id: "mutation_update",
+			type: "update",
+			entityId: "item_existing",
+			vaultId: "vault_1",
+			encryptedPayload: {
+				encryptedData: "cipher",
+				encryptionIv: "iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+			},
+			baseVersion: 7,
+			timestamp: 2,
+			retryCount: 0,
+		});
+		const sentOptions = new Map<string, TestWriteOptions | undefined>();
+
+		await queue.drain(() =>
+			outboundApiClient({
+				create: async (_itemId, options) => {
+					sentOptions.set("create", options);
+				},
+				update: async (_itemId, options) => {
+					sentOptions.set("update", options);
+				},
+			}),
+		);
+
+		expect(sentOptions.get("create")).toEqual({
+			idempotencyKey: "mutation_create",
+		});
+		expect(sentOptions.get("update")).toEqual({
+			etag: '"7"',
+			idempotencyKey: "mutation_update",
+		});
+	});
+
 	test("one account's failure does not starve other accounts' queues", async () => {
 		const storage = new MemoryStorage();
 		const queue = new OutboundQueue(storage, "self_client");
@@ -734,21 +820,16 @@ describe("outbound queue multi-account drain isolation", () => {
 
 		const deletedByAccount = new Map<string, string[]>();
 		const makeClient = (accountId: string, shouldFail: boolean) =>
-			({
-				vault: {
-					deleteItem: {
-						mutate: async ({ itemId }: { itemId: string }) => {
-							if (shouldFail) {
-								throw networkError();
-							}
-							const done = deletedByAccount.get(accountId) ?? [];
-							done.push(itemId);
-							deletedByAccount.set(accountId, done);
-							return {};
-						},
-					},
+			outboundApiClient({
+				trash: async (itemId) => {
+					if (shouldFail) {
+						throw networkError();
+					}
+					const done = deletedByAccount.get(accountId) ?? [];
+					done.push(itemId);
+					deletedByAccount.set(accountId, done);
 				},
-			}) as unknown as OutboundQueueClient;
+			});
 
 		await queue.drain((accountId) =>
 			makeClient(accountId, accountId === "account_a"),
@@ -772,20 +853,15 @@ describe("outbound queue multi-account drain isolation", () => {
 		const deleteCalls: string[] = [];
 		let inFlight = 0;
 		let observedConcurrency = 0;
-		const client = {
-			vault: {
-				deleteItem: {
-					mutate: async ({ itemId }: { itemId: string }) => {
-						inFlight += 1;
-						observedConcurrency = Math.max(observedConcurrency, inFlight);
-						await new Promise((resolve) => setTimeout(resolve, 5));
-						deleteCalls.push(itemId);
-						inFlight -= 1;
-						return {};
-					},
-				},
+		const client = outboundApiClient({
+			trash: async (itemId) => {
+				inFlight += 1;
+				observedConcurrency = Math.max(observedConcurrency, inFlight);
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				deleteCalls.push(itemId);
+				inFlight -= 1;
 			},
-		} as unknown as OutboundQueueClient;
+		});
 
 		// Kick off two overlapping drains against the shared queue.
 		await Promise.all([queue.drain(() => client), queue.drain(() => client)]);

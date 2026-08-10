@@ -165,14 +165,17 @@ export class SyncManager {
 			// Create abort controller for this connection
 			this.abortController = new AbortController();
 
-			const response = await this.fetchImpl(`${this.serverUrl}/sync/events`, {
-				method: "GET",
-				headers: {
-					Authorization: `Bearer ${token}`,
-					Accept: "text/event-stream",
+			const response = await this.fetchImpl(
+				`${this.serverUrl}/api/v1/sync/events`,
+				{
+					method: "GET",
+					headers: {
+						Authorization: `Bearer ${token}`,
+						Accept: "text/event-stream",
+					},
+					signal: this.abortController.signal,
 				},
-				signal: this.abortController.signal,
-			});
+			);
 
 			if (!response.ok) {
 				throw new Error(`SSE connection failed: ${response.status}`);
@@ -246,7 +249,7 @@ export class SyncManager {
 	 * Process a single SSE event.
 	 *
 	 * The server sends lightweight pings:
-	 *   event: sync       → something changed, client should call getEventsSince
+	 *   event: sync       → something changed, client should fetch `/sync/changes`
 	 *   event: session_revoked → a session was revoked
 	 *   event: connected   → connection established
 	 *   event: limit_exceeded → plan connection limit reached
@@ -297,7 +300,7 @@ export class SyncManager {
 				return;
 			}
 
-			// Handle sync ping — server says something changed, fetch via getEventsSince
+			// A sync event is only a hint; durable changes come from `/sync/changes`.
 			if (eventType === "sync" && !event.id) {
 				void this.onSyncPing?.();
 				return;

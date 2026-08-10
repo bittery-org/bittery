@@ -1,3 +1,4 @@
+import type { AppApiClient } from "@bittery/shared/api-client";
 import type { SyncStorage } from "./types";
 
 export interface PendingMutation {
@@ -34,53 +35,7 @@ export interface TempIdMapping {
 	accountEmail?: string;
 }
 
-export interface OutboundQueueClient {
-	vault: {
-		createItem: {
-			mutate: (input: {
-				itemId?: string;
-				vaultId: string;
-				category: string;
-				encryptedData: string;
-				encryptionIv: string;
-				encryptionAlgorithm: string;
-			}) => Promise<{ itemId?: string; id?: string }>;
-		};
-		updateItem: {
-			mutate: (input: {
-				itemId: string;
-				encryptedData: string;
-				encryptionIv: string;
-				encryptionAlgorithm?: string;
-			}) => Promise<unknown>;
-		};
-		deleteItem: {
-			mutate: (input: { itemId: string }) => Promise<unknown>;
-		};
-		permanentlyDeleteItem: {
-			mutate: (input: { itemId: string }) => Promise<unknown>;
-		};
-		restoreItem: {
-			mutate: (input: { itemId: string }) => Promise<unknown>;
-		};
-		moveItem: {
-			mutate: (input: {
-				itemId: string;
-				sourceVaultId: string;
-				targetVaultId: string;
-				encryptedData: string;
-				encryptionIv: string;
-				encryptionAlgorithm?: string;
-			}) => Promise<unknown>;
-		};
-		toggleFavorite: {
-			mutate: (input: {
-				itemId: string;
-				favorite: boolean;
-			}) => Promise<unknown>;
-		};
-	};
-}
+export type OutboundQueueApiClient = Pick<AppApiClient, "items">;
 
 const QUEUE_INDEX_KEY = "bittery_pending_mutation_account_ids_v2";
 const LEGACY_QUEUE_INDEX_KEY = "bittery_pending_mutation_accounts";
@@ -132,6 +87,16 @@ function isNetworkError(error: unknown): boolean {
 
 	const message = error instanceof Error ? error.message : String(error ?? "");
 	return /network|fetch|offline|timeout|connection|abort/i.test(message);
+}
+
+function writeOptions(mutation: PendingMutation): {
+	etag: string;
+	idempotencyKey: string;
+} {
+	return {
+		etag: `"${mutation.baseVersion}"`,
+		idempotencyKey: mutation.id,
+	};
 }
 
 function findLastIndexByEntityAndType(
@@ -325,7 +290,7 @@ export class OutboundQueue {
 	}
 
 	private async processMutation(
-		client: OutboundQueueClient,
+		client: OutboundQueueApiClient,
 		mutation: PendingMutation,
 	): Promise<void> {
 		switch (mutation.type) {
@@ -336,14 +301,17 @@ export class OutboundQueue {
 						`Invalid create mutation payload for ${mutation.entityId}`,
 					);
 				}
-				const result = await client.vault.createItem.mutate({
-					itemId: mutation.entityId,
-					vaultId: mutation.vaultId,
-					category: mutation.category,
-					encryptedData: payload.encryptedData,
-					encryptionIv: payload.encryptionIv,
-					encryptionAlgorithm: payload.encryptionAlgorithm,
-				});
+				const { data: result } = await client.items.create(
+					mutation.vaultId,
+					mutation.entityId,
+					{
+						category: mutation.category,
+						encryptedData: payload.encryptedData,
+						encryptionIv: payload.encryptionIv,
+						encryptionAlgorithm: payload.encryptionAlgorithm,
+					},
+					{ idempotencyKey: mutation.id },
+				);
 
 				const fallbackId =
 					result.id && result.id !== mutation.vaultId ? result.id : undefined;
@@ -366,60 +334,61 @@ export class OutboundQueue {
 						`Invalid update mutation payload for ${mutation.entityId}`,
 					);
 				}
-				await client.vault.updateItem.mutate({
-					itemId: mutation.entityId,
-					encryptedData: payload.encryptedData,
-					encryptionIv: payload.encryptionIv,
-					encryptionAlgorithm: payload.encryptionAlgorithm,
-				});
+				await client.items.update(
+					mutation.entityId,
+					{
+						encryptedData: payload.encryptedData,
+						encryptionIv: payload.encryptionIv,
+						encryptionAlgorithm: payload.encryptionAlgorithm,
+					},
+					writeOptions(mutation),
+				);
 				break;
 			}
 			case "delete":
-				await client.vault.deleteItem.mutate({ itemId: mutation.entityId });
+				await client.items.trash(mutation.entityId, writeOptions(mutation));
 				break;
 			case "permanent_delete":
-				await client.vault.permanentlyDeleteItem.mutate({
-					itemId: mutation.entityId,
-				});
+				await client.items.deletePermanently(
+					mutation.entityId,
+					writeOptions(mutation),
+				);
 				break;
 			case "restore":
-				await client.vault.restoreItem.mutate({ itemId: mutation.entityId });
+				await client.items.restore(mutation.entityId, writeOptions(mutation));
 				break;
 			case "move": {
 				const payload = mutation.encryptedPayload;
 				if (!payload || !mutation.targetVaultId) {
 					throw new Error(`Invalid move payload for ${mutation.entityId}`);
 				}
-				await client.vault.moveItem.mutate({
-					itemId: mutation.entityId,
-					sourceVaultId: mutation.vaultId,
-					targetVaultId: mutation.targetVaultId,
-					encryptedData: payload.encryptedData,
-					encryptionIv: payload.encryptionIv,
-					encryptionAlgorithm: payload.encryptionAlgorithm,
-				});
+				await client.items.move(
+					mutation.entityId,
+					{
+						sourceVaultId: mutation.vaultId,
+						targetVaultId: mutation.targetVaultId,
+						encryptedData: payload.encryptedData,
+						encryptionIv: payload.encryptionIv,
+						encryptionAlgorithm: payload.encryptionAlgorithm,
+					},
+					writeOptions(mutation),
+				);
 				break;
 			}
 			case "toggle_favorite":
-				await client.vault.toggleFavorite.mutate({
-					itemId: mutation.entityId,
-					favorite: mutation.favorite ?? false,
-				});
+				await client.items.setFavorite(
+					mutation.entityId,
+					{ favorite: mutation.favorite ?? false },
+					writeOptions(mutation),
+				);
 				break;
 		}
-	}
-
-	private async forcePushMutation(
-		client: OutboundQueueClient,
-		mutation: PendingMutation,
-	): Promise<void> {
-		await this.processMutation(client, mutation);
 	}
 
 	async drain(
 		getClient: (
 			accountId: string,
-		) => OutboundQueueClient | Promise<OutboundQueueClient>,
+		) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>,
 	): Promise<void> {
 		// Serialize drains across all callers (multiple sync sources may share
 		// this queue). A drain triggered while another is in flight is coalesced
@@ -444,7 +413,7 @@ export class OutboundQueue {
 	private async drainOnce(
 		getClient: (
 			accountId: string,
-		) => OutboundQueueClient | Promise<OutboundQueueClient>,
+		) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>,
 	): Promise<void> {
 		if (this.unresolvedLegacyEmails.size > 0) {
 			throw new Error(
@@ -472,23 +441,11 @@ export class OutboundQueue {
 				} catch (error) {
 					const status = getHttpStatus(error);
 
-					if (status === 409) {
-						try {
-							await this.forcePushMutation(client, mutation);
-							queue.shift();
-							await this.persistQueue(accountId);
-							this.emit();
-							continue;
-						} catch (forceError) {
-							console.error(
-								"[OutboundQueue] force-push retry failed:",
-								forceError,
-							);
-							mutation.retryCount += 1;
-							await this.persistQueue(accountId);
-							this.emit();
-							break;
-						}
+					if (status === 409 || status === 412) {
+						mutation.retryCount += 1;
+						await this.persistQueue(accountId);
+						this.emit();
+						break;
 					}
 
 					if (status === 400 || status === 404) {

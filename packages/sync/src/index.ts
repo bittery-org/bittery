@@ -1,18 +1,18 @@
 // Query invalidation helpers
 
 export type {
-	CatchUpClient,
+	CatchUpApiClient,
 	CatchUpPageResponse,
 	RunCatchUpOptions,
 	RunCatchUpResult,
 } from "./catch-up";
 export { runCatchUp } from "./catch-up";
 // Delta sync (platform-agnostic)
-export type { DeltaSyncClient } from "./delta-sync";
+export type { DeltaSyncApiClient } from "./delta-sync";
 export { performDeltaSync } from "./delta-sync";
 export {
 	OutboundQueue,
-	type OutboundQueueClient,
+	type OutboundQueueApiClient,
 	type PendingMutation,
 	type TempIdMapping,
 } from "./outbound-queue";
@@ -20,16 +20,17 @@ export type {
 	InvalidationContext,
 	QueryInvalidator,
 	QueryInvalidatorOptions,
-	QueryKeyHelpers,
 } from "./query-invalidation";
 export {
 	createQueryInvalidator,
 	getQueryKeysForEvent,
 	invalidateQueriesForEvent,
+	syncApiQueryKeys,
 } from "./query-invalidation";
 // Core sync functionality
 export { createSyncManager, SyncManager } from "./sync-manager";
 export {
+	type SyncApiClient,
 	SyncOrchestrator,
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";

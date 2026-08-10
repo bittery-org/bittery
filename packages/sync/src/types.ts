@@ -168,7 +168,7 @@ export interface SyncManagerOptions {
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
-	/** Called when the server sends a sync ping — client should fetch events via getEventsSince. */
+	/** Called when the server sends a sync ping so the client can fetch `/sync/changes`. */
 	onSyncPing?: () => void | Promise<void>;
 	reconnectDelay?: number;
 	maxReconnectDelay?: number;

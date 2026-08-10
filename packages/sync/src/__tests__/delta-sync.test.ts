@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { CachedVaultMetadata } from "@bittery/types";
-import { type DeltaSyncClient, performDeltaSync } from "../delta-sync";
+import { type DeltaSyncApiClient, performDeltaSync } from "../delta-sync";
 import type { SyncEvent, SyncItemCache, SyncVaultKeyEntry } from "../types";
 
 function serverVault() {
@@ -13,31 +13,27 @@ function serverVault() {
 	};
 }
 
-function client(): DeltaSyncClient {
+function client(): DeltaSyncApiClient {
 	return {
-		vault: {
-			getItem: {
-				query: async () => {
-					throw new Error("not used");
-				},
+		items: {
+			get: async () => {
+				throw new Error("not used");
 			},
-			get: {
-				query: async () => serverVault(),
-			},
-			listItems: {
-				query: async () => [],
-			},
-			list: {
-				query: async () => [
+			listInVault: async () => ({ data: [] }),
+		},
+		vaults: {
+			get: async () => ({ data: serverVault() }),
+			list: async () => ({
+				data: [
 					{
 						...serverVault(),
 						encryptedVaultKey: "ZW5jcnlwdGVk",
 						role: "owner",
 					},
 				],
-			},
+			}),
 		},
-	} as unknown as DeltaSyncClient;
+	} as unknown as DeltaSyncApiClient;
 }
 
 function event(overrides: Partial<SyncEvent> = {}): SyncEvent {

@@ -1,3 +1,4 @@
+import type { AppApiClient } from "@bittery/shared/api-client";
 import type { SyncCursor, SyncEvent } from "./types";
 
 export interface CatchUpPageResponse {
@@ -7,19 +8,10 @@ export interface CatchUpPageResponse {
 	cursor: SyncCursor | null;
 }
 
-export interface CatchUpClient {
-	sync: {
-		getEventsSince: {
-			query: (input: {
-				sinceId?: string | null;
-				limit?: number;
-			}) => Promise<CatchUpPageResponse>;
-		};
-	};
-}
+export type CatchUpApiClient = Pick<AppApiClient, "sync">;
 
 export interface RunCatchUpOptions {
-	client: CatchUpClient;
+	client: CatchUpApiClient;
 	initialCursor: SyncCursor;
 	limit?: number;
 	shouldProcessEvent?: (event: SyncEvent) => boolean | Promise<boolean>;
@@ -47,10 +39,24 @@ export async function runCatchUp({
 
 	while (true) {
 		const previousId = cursor.id;
-		const page = await client.sync.getEventsSince.query({
-			sinceId: cursor.id || null,
+		const { data: apiPage } = await client.sync.changes({
+			sinceId: cursor.id || undefined,
 			limit,
 		});
+		const page: CatchUpPageResponse = {
+			events: apiPage.events.map((event) => ({
+				...event,
+				type: event.type as SyncEvent["type"],
+				entityType: event.entityType as SyncEvent["entityType"],
+				vaultId: event.vaultId ?? null,
+				clientId: event.clientId ?? null,
+				timestamp: Number(event.timestamp),
+				metadata: event.metadata as SyncEvent["metadata"],
+			})),
+			hasMore: apiPage.hasMore,
+			requiresFullRefresh: apiPage.requiresFullRefresh,
+			cursor: apiPage.cursor ?? null,
+		};
 
 		if (page.requiresFullRefresh) {
 			requiresFullRefresh = true;
