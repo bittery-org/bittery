@@ -1,0 +1,2 @@
+/crate/target/
+/generated/wasm-bindgen/*.wasm

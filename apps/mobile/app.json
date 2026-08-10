@@ -7,12 +7,6 @@
 		"icon": "./assets/ios-light.png",
 		"scheme": "bittery",
 		"userInterfaceStyle": "automatic",
-		"newArchEnabled": true,
-		"splash": {
-			"image": "./assets/splash-icon-dark.png",
-			"resizeMode": "contain",
-			"backgroundColor": "#ffffff"
-		},
 		"ios": {
 			"supportsTablet": true,
 			"bundleIdentifier": "io.bittery.app",
@@ -30,19 +24,13 @@
 				"tinted": "./assets/ios-tinted.png"
 			}
 		},
-		"_associatedDomains_backup": [
-			"applinks:app.bittery.io",
-			"webcredentials:app.bittery.io"
-		],
-		"_associatedDomains_note": "Move back to ios.associatedDomains when you have a paid Apple Developer account",
 		"android": {
 			"adaptiveIcon": {
 				"foregroundImage": "./assets/adaptive-icon.png",
 				"backgroundColor": "#ffffff"
 			},
 			"package": "io.bittery.app",
-			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"],
-			"usesCleartextTraffic": true
+			"permissions": ["USE_BIOMETRIC", "USE_FINGERPRINT", "CAMERA"]
 		},
 		"web": {
 			"bundler": "metro",
@@ -66,7 +54,24 @@
 					"cameraPermission": "Allow Bittery to access your camera to scan TOTP QR codes"
 				}
 			],
-			"./modules/credential-provider/app.plugin.js"
+			"./modules/credential-provider/app.plugin.js",
+			[
+				"expo-build-properties",
+				{
+					"android": {
+						"usesCleartextTraffic": true
+					}
+				}
+			],
+			"expo-image",
+			[
+				"expo-splash-screen",
+				{
+					"image": "./assets/splash-icon-dark.png",
+					"resizeMode": "contain",
+					"backgroundColor": "#ffffff"
+				}
+			]
 		],
 		"experiments": {
 			"typedRoutes": true
@@ -77,6 +82,9 @@
 			},
 			"eas": {
 				"projectId": "your-project-id"
+			},
+			"notes": {
+				"associatedDomains": "ios.associatedDomains only builds with a paid Apple Developer account; clear the array to build on a free account."
 			}
 		},
 		"updates": {

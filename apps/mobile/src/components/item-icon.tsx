@@ -4,62 +4,62 @@ import type {
 	ItemCategory,
 } from "@bittery/shared/types";
 import { Image } from "expo-image";
-import { CreditCard, FileText, Key, Timer, User } from "lucide-react-native";
 import { useState } from "react";
 import { View } from "react-native";
 import { withUniwind } from "uniwind";
+import {
+	type AppIcon,
+	GradientTile,
+	IconCreditCard,
+	IconFileText,
+	IconKey,
+	IconTimer,
+	IconUser,
+} from "@/components/ui";
 import { useServerUrl } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 
-// Create styled icon components
-const StyledKey = withUniwind(Key);
-const StyledCreditCard = withUniwind(CreditCard);
-const StyledUser = withUniwind(User);
-const StyledFileText = withUniwind(FileText);
-const StyledTimer = withUniwind(Timer);
 const StyledImage = withUniwind(Image);
 
-const categoryIcons: Record<
-	ItemCategory,
-	| typeof StyledKey
-	| typeof StyledCreditCard
-	| typeof StyledUser
-	| typeof StyledFileText
-	| typeof StyledTimer
-> = {
-	login: StyledKey,
-	"credit-card": StyledCreditCard,
-	identity: StyledUser,
-	"secure-note": StyledFileText,
-	totp: StyledTimer,
+const categoryIcons: Record<ItemCategory, AppIcon> = {
+	login: IconKey,
+	"credit-card": IconCreditCard,
+	identity: IconUser,
+	"secure-note": IconFileText,
+	totp: IconTimer,
 };
 
 interface ItemIconProps {
 	item?: Pick<
 		DecryptedItemWithContext,
-		"url" | "category" | "serverUrl" | "account"
+		"url" | "category" | "serverUrl" | "account" | "title"
 	>;
 	category: ItemCategory;
+	/** Hashed to pick the fallback gradient. Falls back to the URL, then the category. */
+	title?: string;
 	url?: string;
 	serverUrl?: string;
-	/** Size of the container (default: 32px for 8 Tailwind units) */
 	size?: "sm" | "md" | "lg";
-	/** Custom className for the container */
 	className?: string;
 }
 
 const sizeMap = {
-	sm: { container: "h-8 w-8", icon: 16, favicon: 32 as const },
-	md: { container: "h-10 w-10", icon: 20, favicon: 32 as const },
-	lg: { container: "h-12 w-12", icon: 24, favicon: 64 as const },
+	sm: { tile: 32, radius: 9, glyph: 16, favicon: 32 as const },
+	md: { tile: 40, radius: 12, glyph: 20, favicon: 32 as const },
+	lg: { tile: 56, radius: 16, glyph: 26, favicon: 64 as const },
 };
 
+/**
+ * Leading tile for an item row: the site favicon when we have a URL, otherwise
+ * a deterministic gradient tile carrying the item category's glyph.
+ */
 export function ItemIcon({
 	item,
 	category,
+	title,
 	url,
 	serverUrl,
-	size = "sm",
+	size = "md",
 	className,
 }: ItemIconProps) {
 	const resolvedCategory = item?.category ?? category;
@@ -67,39 +67,27 @@ export function ItemIcon({
 	const [faviconError, setFaviconError] = useState(false);
 	const { serverUrl: contextServerUrl } = useServerUrl();
 
-	// Get favicon URL for login items with a URL
+	const { tile, radius, glyph, favicon } = sizeMap[size];
+	const resolvedServerUrl = serverUrl ?? contextServerUrl ?? undefined;
+
 	const faviconUrl =
 		resolvedCategory === "login" && !faviconError
 			? item
-				? getItemFaviconUrl(
-						item,
-						sizeMap[size].favicon,
-						serverUrl ?? contextServerUrl ?? undefined,
-					)
+				? getItemFaviconUrl(item, favicon, resolvedServerUrl)
 				: url
-					? getFaviconUrl(
-							url,
-							sizeMap[size].favicon,
-							serverUrl ?? contextServerUrl ?? undefined,
-						)
+					? getFaviconUrl(url, favicon, resolvedServerUrl)
 					: null
 			: null;
 
-	const { container, icon } = sizeMap[size];
-
-	return (
-		<View
-			className={cn(
-				"items-center",
-				"justify-center",
-				"overflow-hidden",
-				"rounded-lg",
-				"bg-surface-secondary",
-				container,
-				className || "",
-			)}
-		>
-			{faviconUrl ? (
+	if (faviconUrl) {
+		return (
+			<View
+				className={cn(
+					"items-center justify-center overflow-hidden border border-border bg-surface-secondary",
+					className,
+				)}
+				style={{ width: tile, height: tile, borderRadius: radius }}
+			>
 				<StyledImage
 					source={{ uri: faviconUrl }}
 					className="h-full w-full"
@@ -107,9 +95,20 @@ export function ItemIcon({
 					cachePolicy="memory-disk"
 					onError={() => setFaviconError(true)}
 				/>
-			) : (
-				<Icon size={icon} className="text-muted" />
-			)}
-		</View>
+			</View>
+		);
+	}
+
+	const gradientName = title ?? item?.title ?? item?.url ?? url ?? category;
+
+	return (
+		<GradientTile
+			name={gradientName}
+			size={tile}
+			radius={radius}
+			className={className}
+		>
+			<Icon size={glyph} className="text-white" />
+		</GradientTile>
 	);
 }

@@ -38,6 +38,9 @@ mock.module(path.join(libDir, "storage.ts"), () => ({
 		lockAllAccounts: async () => {
 			lockAllAccountsCalls++;
 		},
+		// The vault repositories follow this to drop their plaintext on lock; this test
+		// never locks through the store, so the subscription only has to exist.
+		onUnlockStateChanged: () => () => {},
 	},
 	itemCache: {
 		clearItemCache: async () => {},

@@ -5,6 +5,6 @@
  * the port that minted it.
  */
 
-import { createExpoCryptoPort } from "@bittery/crypto-port/adapters/expo";
+import { createReactNativeCryptoPort } from "@bittery/crypto-port/adapters/react-native";
 
-export const crypto = createExpoCryptoPort();
+export const crypto = createReactNativeCryptoPort();

@@ -379,6 +379,14 @@ describe("AccountStore — session expiry", () => {
 		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
 	});
 
+	it("restores without a prompt where biometric unlock is off", async () => {
+		const { store } = await withSession(60_000);
+		await store.clearMasterUnlockKey("a");
+
+		expect(await store.tryRestoreSessionWithoutPrompt("a")).toBe(true);
+		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
+	});
+
 	it("lowercases the stored email", async () => {
 		const { store } = await withSession(60_000);
 
@@ -679,6 +687,42 @@ describe("AccountStore — biometric", () => {
 		port.biometricState.authenticates = false;
 
 		expect(await store.decryptStoredMasterUnlockKey("a")).toBeNull();
+	});
+
+	/**
+	 * Reading the key is not an unlock. Every cached item's vault-key unwrap reads it,
+	 * so a read that could restore the session raised one OS prompt per item on a
+	 * locked account — and answered them all with "not available" anyway.
+	 */
+	it("never prompts, and never unlocks, when the key is only read", async () => {
+		const { port, store } = await biometricHarness();
+		await store.lockAllAccounts();
+		port.resetCalls();
+
+		expect(await store.getMasterUnlockKey("a")).toBeNull();
+		expect(await store.getMasterUnlockKey("a")).toBeNull();
+
+		expect(port.calls.biometricAuthenticate).toBe(0);
+		expect(await store.getUnlockedAccounts()).toEqual([]);
+	});
+
+	it("restores inside the grace period without a prompt, and refuses once one is due", async () => {
+		const { port, store } = await biometricHarness();
+		expect(await store.unlockWithBiometric("a")).toBe(true);
+		await store.clearMasterUnlockKey("a");
+		port.resetCalls();
+
+		expect(await store.tryRestoreSessionWithoutPrompt("a")).toBe(true);
+		expect(await store.getUnlockedAccounts()).toEqual(["a"]);
+		expect(port.calls.biometricAuthenticate).toBe(0);
+
+		// A lock drops the grace marker, so restoring now needs a prompt — which this
+		// entry point never shows. The account stays locked until an unlock flow runs.
+		await store.lockAllAccounts();
+
+		expect(await store.tryRestoreSessionWithoutPrompt("a")).toBe(false);
+		expect(await store.getUnlockedAccounts()).toEqual([]);
+		expect(port.calls.biometricAuthenticate).toBe(0);
 	});
 
 	it("unlocks a single account with biometric", async () => {

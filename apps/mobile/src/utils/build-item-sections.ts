@@ -3,8 +3,10 @@ import type { DecryptedItem } from "@bittery/shared/types";
 
 type Item = DecryptedItem | UnifiedItem;
 
+export type ItemSectionKind = "favorites" | "all";
+
 export type ItemSection =
-	| { type: "header"; title: string; count: number }
+	| { type: "header"; kind: ItemSectionKind; count: number }
 	| {
 			type: "item";
 			item: Item;
@@ -18,9 +20,8 @@ export interface BuildItemSectionsOptions {
 }
 
 /**
- * Builds a flat array of sections (headers + items) for FlatList rendering.
- * This allows rendering favorites and regular items as separate sections
- * with headers and proper first/last item indicators for styling.
+ * Flattens favorites and the rest into one array a `FlatList` can virtualise,
+ * carrying the position flags each row needs to round its grouped-card corners.
  */
 export function buildItemSections({
 	favorites,
@@ -28,34 +29,21 @@ export function buildItemSections({
 }: BuildItemSectionsOptions): ItemSection[] {
 	const sections: ItemSection[] = [];
 
-	if (favorites.length > 0) {
-		sections.push({
-			type: "header",
-			title: "Favorites",
-			count: favorites.length,
-		});
-		for (let i = 0; i < favorites.length; i++) {
-			sections.push({
-				type: "item",
-				item: favorites[i],
-				isFirst: i === 0,
-				isLast: i === favorites.length - 1,
-			});
-		}
-	}
+	for (const [kind, items] of [
+		["favorites", favorites],
+		["all", regularItems],
+	] as const) {
+		if (items.length === 0) continue;
 
-	if (regularItems.length > 0) {
-		sections.push({
-			type: "header",
-			title: "All Items",
-			count: regularItems.length,
-		});
-		for (let i = 0; i < regularItems.length; i++) {
+		sections.push({ type: "header", kind, count: items.length });
+		for (let i = 0; i < items.length; i++) {
+			const item = items[i];
+			if (!item) continue;
 			sections.push({
 				type: "item",
-				item: regularItems[i],
+				item,
 				isFirst: i === 0,
-				isLast: i === regularItems.length - 1,
+				isLast: i === items.length - 1,
 			});
 		}
 	}

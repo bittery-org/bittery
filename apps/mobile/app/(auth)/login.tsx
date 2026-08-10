@@ -1,5 +1,6 @@
 import { useLogin } from "@bittery/core/hooks";
 import {
+	type DeviceSetupParamPayload,
 	type ParsedDeviceSetupPayload,
 	parseDeviceSetupParams,
 } from "@bittery/shared";
@@ -7,60 +8,117 @@ import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { useQuery } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-	Button,
 	ControlField,
 	Description,
-	Input,
 	Label,
 	PressableFeedback,
-	TextField,
 } from "heroui-native";
+import { useMemo, useState } from "react";
 import {
-	ChevronRight,
-	Eye,
-	EyeOff,
-	Fingerprint,
-	Lock,
-	Mail,
-	QrCode,
-	Server,
-} from "lucide-react-native";
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-	Alert,
-	Image,
 	KeyboardAvoidingView,
 	Platform,
-	Pressable,
 	ScrollView,
 	Text,
 	View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { withUniwind } from "uniwind";
+import {
+	AuthDivider,
+	AuthField,
+	BrandLockup,
+	InlineNotice,
+	PasswordField,
+} from "@/components/auth-kit";
 import { DeviceSetupQrScanner } from "@/components/device-setup-qr-scanner";
-import { SafeAreaView } from "@/components/safe-area-view";
+import {
+	BrandButton,
+	GradientTile,
+	IconAlertCircle,
+	IconChevronRight,
+	IconFingerprint,
+	IconInfo,
+	IconKeyRound,
+	IconLock,
+	IconMail,
+	IconQrCode,
+	IconServer,
+	IconTriangleAlert,
+	IconUser,
+	iconSize,
+	layout,
+	PressScale,
+	Screen,
+	useBottomInset,
+} from "@/components/ui";
 import { defaultServerUrl } from "@/constants/server-url";
+import { useAccount } from "@/contexts/account-context";
 import { useBiometricType } from "@/lib/biometric-type";
-import { useAccount } from "../../src/contexts/account-context";
-import { useServerUrl } from "../../src/lib/rpc";
-import { useI18n } from "../../src/providers/i18n-provider";
-import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "../../src/services/credential-provider-master-unlock-key";
-import { storage } from "../../src/services/storage";
+import { useServerUrl } from "@/lib/rpc";
+import { cn } from "@/lib/utils";
+import { useI18n } from "@/providers/i18n-provider";
+import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/services/credential-provider-master-unlock-key";
+import { storage } from "@/services/storage";
 
-// Create styled icon components
-const StyledServer = withUniwind(Server);
-const StyledMail = withUniwind(Mail);
-const StyledLock = withUniwind(Lock);
-const StyledEye = withUniwind(Eye);
-const StyledEyeOff = withUniwind(EyeOff);
-const StyledFingerprint = withUniwind(Fingerprint);
-const StyledQrCode = withUniwind(QrCode);
-const StyledChevronRight = withUniwind(ChevronRight);
+type SetupLink =
+	| { status: "none" }
+	| { status: "loaded"; payload: ParsedDeviceSetupPayload }
+	| { status: "invalid"; message: string };
+
+/** Who you are, then what unlocks you — the screen never shows both at once. */
+type Step = "identity" | "password";
+
+const STEPS: readonly Step[] = ["identity", "password"];
+
+/**
+ * Read a device-setup deep link. Pure, so the prefilled values are derived on
+ * render instead of copied into state by an effect.
+ */
+function readSetupLink(
+	params: DeviceSetupParamPayload,
+	fallbackMessage: string,
+): SetupLink {
+	const setupValue = Array.isArray(params.setup)
+		? params.setup[0]
+		: params.setup;
+	if (setupValue !== "1") {
+		return { status: "none" };
+	}
+
+	try {
+		const parsed = parseDeviceSetupParams(params);
+		return parsed ? { status: "loaded", payload: parsed } : { status: "none" };
+	} catch (error) {
+		return {
+			status: "invalid",
+			message: error instanceof Error ? error.message : fallbackMessage,
+		};
+	}
+}
+
+/** How far along the two-step flow is — the one accent bar on this screen. */
+function StepProgress({ step, label }: { step: Step; label: string }) {
+	const activeIndex = STEPS.indexOf(step);
+
+	return (
+		<View
+			accessibilityRole="progressbar"
+			accessibilityLabel={label}
+			className="mt-6 flex-row items-center justify-center gap-1.5"
+		>
+			{STEPS.map((name, index) => (
+				<View
+					key={name}
+					className={cn(
+						"h-1 rounded-full",
+						index <= activeIndex ? "w-7 bg-accent" : "w-4 bg-border",
+					)}
+				/>
+			))}
+		</View>
+	);
+}
 
 export default function LoginScreen() {
 	const router = useRouter();
-	const insets = useSafeAreaInsets();
 	const { m } = useI18n();
 	const searchParams = useLocalSearchParams<{
 		setup?: string;
@@ -72,16 +130,57 @@ export default function LoginScreen() {
 	}>();
 	const { setServerUrl: setGlobalServerUrl } = useServerUrl();
 	const { refreshAccounts } = useAccount();
-	const processedSetupParamsRef = useRef<string | null>(null);
+	const bottomInset = useBottomInset();
 
-	const [serverUrl, setServerUrl] = useState(defaultServerUrl);
-	const [email, setEmail] = useState("");
+	const [scannedSetup, setScannedSetup] =
+		useState<ParsedDeviceSetupPayload | null>(null);
+	const [isSetupDismissed, setIsSetupDismissed] = useState(false);
+	const [emailEdit, setEmailEdit] = useState<string | null>(null);
+	const [serverUrlEdit, setServerUrlEdit] = useState<string | null>(null);
+	const [secretKeyEdit, setSecretKeyEdit] = useState<string | null>(null);
 	const [password, setPassword] = useState("");
-	const [secretKey, setSecretKey] = useState("");
-	const [showSetupScanner, setShowSetupScanner] = useState(false);
-	const [setupComplete, setSetupComplete] = useState(false);
-	const [showPassword, setShowPassword] = useState(false);
+	const [isScannerOpen, setIsScannerOpen] = useState(false);
+	const [isServerExpanded, setIsServerExpanded] = useState(false);
 	const [enableBiometric, setEnableBiometric] = useState(true);
+	const [formError, setFormError] = useState<string | null>(null);
+	// Null means "wherever the setup payload puts us", so a scan lands on the
+	// password step without an effect copying the step into state.
+	const [stepOverride, setStepOverride] = useState<Step | null>(null);
+
+	const setupLink = useMemo(
+		() =>
+			readSetupLink(
+				{
+					setup: searchParams.setup,
+					v: searchParams.v,
+					email: searchParams.email,
+					serverUrl: searchParams.serverUrl,
+					secretKey: searchParams.secretKey,
+					teamName: searchParams.teamName,
+				},
+				m.login_alert_invalid_setup_message(),
+			),
+		[
+			searchParams.setup,
+			searchParams.v,
+			searchParams.email,
+			searchParams.serverUrl,
+			searchParams.secretKey,
+			searchParams.teamName,
+			m.login_alert_invalid_setup_message,
+		],
+	);
+
+	const linkPayload = setupLink.status === "loaded" ? setupLink.payload : null;
+	const prefill = isSetupDismissed ? null : (scannedSetup ?? linkPayload);
+	const email = emailEdit ?? prefill?.email ?? "";
+	const serverUrl = serverUrlEdit ?? prefill?.serverUrl ?? defaultServerUrl;
+	const secretKey = secretKeyEdit ?? prefill?.secretKey ?? "";
+	// A payload that carried a Secret Key leaves only the master password to enter.
+	const isSetupComplete = Boolean(prefill?.secretKey);
+	const step: Step =
+		stepOverride ?? (isSetupComplete ? "password" : "identity");
+
 	// Both of these are cached async reads of a device fact, which is what `useQuery` is for.
 	const { label: biometricTypeLabel } = useBiometricType();
 	const biometricDetailsQuery = useQuery({
@@ -96,83 +195,6 @@ export default function LoginScreen() {
 	const biometricAvailable =
 		biometricDetails.hasHardware && biometricDetails.isEnrolled;
 
-	const applySetupPayload = useCallback((payload: ParsedDeviceSetupPayload) => {
-		setEmail(payload.email);
-		setServerUrl(payload.serverUrl);
-		if (payload.secretKey) {
-			setSecretKey(payload.secretKey);
-			setSetupComplete(true);
-		}
-	}, []);
-
-	useEffect(() => {
-		const signature = JSON.stringify({
-			setup: searchParams.setup,
-			v: searchParams.v,
-			email: searchParams.email,
-			serverUrl: searchParams.serverUrl,
-			secretKey: searchParams.secretKey,
-			teamName: searchParams.teamName,
-		});
-
-		if (processedSetupParamsRef.current === signature) {
-			return;
-		}
-
-		const setupValue = Array.isArray(searchParams.setup)
-			? searchParams.setup[0]
-			: searchParams.setup;
-		if (setupValue !== "1") {
-			return;
-		}
-
-		try {
-			const parsed = parseDeviceSetupParams({
-				setup: searchParams.setup,
-				v: searchParams.v,
-				email: searchParams.email,
-				serverUrl: searchParams.serverUrl,
-				secretKey: searchParams.secretKey,
-				teamName: searchParams.teamName,
-			});
-
-			if (!parsed) {
-				return;
-			}
-
-			applySetupPayload(parsed);
-			processedSetupParamsRef.current = signature;
-
-			if (!parsed.secretKey) {
-				Alert.alert(
-					m.login_alert_setup_loaded_title(),
-					m.login_alert_setup_loaded_message(),
-				);
-			}
-		} catch (error) {
-			processedSetupParamsRef.current = signature;
-			Alert.alert(
-				m.login_alert_invalid_setup_title(),
-				error instanceof Error
-					? error.message
-					: m.login_alert_invalid_setup_message(),
-			);
-		}
-	}, [
-		searchParams.email,
-		searchParams.secretKey,
-		searchParams.serverUrl,
-		searchParams.setup,
-		searchParams.teamName,
-		searchParams.v,
-		applySetupPayload,
-		m.login_alert_invalid_setup_message,
-		m.login_alert_invalid_setup_title,
-		m.login_alert_setup_loaded_message,
-		m.login_alert_setup_loaded_title,
-	]);
-
-	// Use the shared login hook
 	const loginMutation = useLogin({
 		enableBiometric: enableBiometric && biometricAvailable,
 		onSuccess: async (_result, _input) => {
@@ -196,8 +218,7 @@ export default function LoginScreen() {
 			router.replace("/(vault)");
 		},
 		onError: (error) => {
-			Alert.alert(
-				m.login_alert_error_title(),
+			setFormError(
 				error instanceof Error
 					? error.message
 					: m.login_alert_login_failed_message(),
@@ -205,25 +226,40 @@ export default function LoginScreen() {
 		},
 	});
 
-	const handleLogin = async () => {
+	const handleContinue = () => {
+		if (!email.trim() || !secretKey.trim()) {
+			setFormError(m.login_alert_fields_required_message());
+			return;
+		}
+
+		if (!normalizeServerUrl(serverUrl)) {
+			setFormError(m.login_alert_invalid_url_message());
+			setIsServerExpanded(true);
+			return;
+		}
+
+		setFormError(null);
+		setStepOverride("password");
+	};
+
+	const handleEditIdentity = () => {
+		setFormError(null);
+		setStepOverride("identity");
+	};
+
+	const handleSignIn = async () => {
 		if (!email.trim() || !password.trim() || !secretKey.trim()) {
-			Alert.alert(
-				m.login_alert_error_title(),
-				m.login_alert_fields_required_message(),
-			);
+			setFormError(m.login_alert_fields_required_message());
 			return;
 		}
 
 		const normalizedServerUrl = normalizeServerUrl(serverUrl);
 		if (!normalizedServerUrl) {
-			Alert.alert(
-				m.login_alert_error_title(),
-				m.login_alert_invalid_url_message(),
-			);
+			setFormError(m.login_alert_invalid_url_message());
 			return;
 		}
 
-		// Update global server URL
+		setFormError(null);
 		setGlobalServerUrl(normalizedServerUrl);
 
 		// Allow UI to re-render and show loading state before heavy crypto work
@@ -238,229 +274,129 @@ export default function LoginScreen() {
 		});
 	};
 
+	const handleStartOver = () => {
+		setIsSetupDismissed(true);
+		setScannedSetup(null);
+		setEmailEdit(null);
+		setServerUrlEdit(null);
+		setSecretKeyEdit(null);
+		setPassword("");
+		setFormError(null);
+		setStepOverride(null);
+	};
+
+	const errorNotice = formError ? (
+		<InlineNotice
+			tone="danger"
+			icon={IconAlertCircle}
+			description={formError}
+		/>
+	) : null;
+
 	return (
-		<SafeAreaView className="flex-1 bg-background">
+		<Screen aurora>
 			<KeyboardAvoidingView
-				behavior={Platform.OS === "ios" ? "padding" : "height"}
-				contentContainerClassName="grow"
 				className="flex-1"
+				behavior={Platform.OS === "ios" ? "padding" : "height"}
 			>
 				<ScrollView
 					className="flex-1"
-					contentContainerClassName="grow"
-					contentContainerStyle={{
-						paddingBottom: Math.max(insets.bottom + 24, 32),
-					}}
 					keyboardShouldPersistTaps="handled"
+					keyboardDismissMode="interactive"
+					showsVerticalScrollIndicator={false}
+					contentContainerStyle={{
+						flexGrow: 1,
+						justifyContent: "center",
+						paddingHorizontal: layout.screenPadding,
+						paddingTop: layout.gap.lg,
+						paddingBottom: bottomInset,
+					}}
 				>
-					<View className="flex-1 justify-center px-6 pt-2 pb-8">
-						{/* Header */}
-						<View className="mb-8 items-center">
-							<PressableFeedback
-								onPress={() => {
-									// DEV ONLY: Auto-fill credentials
-									setEmail("user@bittery.com");
-									setPassword("Hofmann01");
-									setSecretKey("A3-73ASV5-LCMRCU-B7TMM-VMH3K-QC27G");
-								}}
-							>
-								<Image
-									source={require("../../assets/logo.png")}
-									style={{ width: 224, height: 76 }}
-									resizeMode="contain"
-								/>
-							</PressableFeedback>
-							<Text className="mt-1 text-center text-muted">
-								{m.login_subtitle()}
-							</Text>
-						</View>
+					<BrandLockup
+						subtitle={
+							step === "password"
+								? m.login_step_password_subtitle()
+								: m.login_subtitle()
+						}
+					/>
 
-						{setupComplete ? (
-							/* Simplified post-scan view */
-							<View className="gap-4">
-								<View className="items-center gap-1">
-									<Text className="font-semibold text-foreground text-xl">
-										{m.login_setup_complete_welcome_back()}
+					<StepProgress
+						step={step}
+						label={m.login_step_progress({
+							current: String(STEPS.indexOf(step) + 1),
+							total: String(STEPS.length),
+						})}
+					/>
+
+					{setupLink.status === "invalid" ? (
+						<InlineNotice
+							tone="danger"
+							icon={IconAlertCircle}
+							title={m.login_alert_invalid_setup_title()}
+							description={setupLink.message}
+							className="mt-6"
+						/>
+					) : null}
+
+					{step === "password" ? (
+						<View className="mt-7 gap-4">
+							<View className="flex-row items-center gap-3 rounded-2xl border border-border bg-surface p-3 shadow-surface">
+								<GradientTile
+									name="Bittery"
+									accent
+									size={layout.iconTile}
+									radius={14}
+								>
+									<IconUser
+										size={iconSize.bar}
+										className="text-accent-foreground"
+									/>
+								</GradientTile>
+								<View className="min-w-0 flex-1">
+									<Text
+										numberOfLines={1}
+										className="font-medium text-base text-foreground"
+									>
+										{email}
 									</Text>
-									<Text className="text-center text-muted text-sm">
-										{email} · {serverUrl}
+									<Text numberOfLines={1} className="text-muted text-xs">
+										{serverUrl}
 									</Text>
 								</View>
-
-								{/* Password field only */}
-								<TextField>
-									<Label>{m.auth_signin_label_password()}</Label>
-									<View className="w-full flex-row items-center">
-										<Input
-											placeholder={m.auth_signin_placeholder_password()}
-											value={password}
-											onChangeText={setPassword}
-											secureTextEntry={!showPassword}
-											textContentType="password"
-											className="flex-1 pr-12 pl-12"
-										/>
-										<StyledLock
-											size={20}
-											className="absolute left-3.5 text-muted"
-											pointerEvents="none"
-										/>
-										<Pressable
-											onPress={() => setShowPassword(!showPassword)}
-											className="absolute right-4"
-										>
-											{showPassword ? (
-												<StyledEyeOff size={20} className="text-muted" />
-											) : (
-												<StyledEye size={20} className="text-muted" />
-											)}
-										</Pressable>
-									</View>
-								</TextField>
-
-								<Button
-									onPress={handleLogin}
-									isDisabled={loginMutation.isPending}
-									variant="primary"
-									size="lg"
+								<PressableFeedback
+									onPress={handleEditIdentity}
+									accessibilityRole="button"
+									className="h-9 items-center justify-center rounded-full px-3"
 								>
-									{loginMutation.isPending
-										? m.auth_signin_button_signing_in()
-										: m.auth_signin_button_sign_in()}
-								</Button>
-
-								<Button
-									onPress={() => {
-										setSetupComplete(false);
-										setEmail("");
-										setServerUrl(defaultServerUrl);
-										setSecretKey("");
-										setPassword("");
-									}}
-									variant="ghost"
-								>
-									<Text className="text-muted">
-										{m.login_setup_complete_not_you()}
+									<PressableFeedback.Highlight />
+									<Text className="font-medium text-muted text-sm">
+										{m.login_action_change()}
 									</Text>
-								</Button>
+								</PressableFeedback>
 							</View>
-						) : (
-							/* Full login form */
-							<View className="gap-4">
-								{/* Setting up this device? banner */}
-								<Pressable
-									onPress={() => setShowSetupScanner(true)}
-									className="flex-row items-center gap-3 rounded-xl border border-border bg-card px-4 py-3"
-								>
-									<View className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
-										<StyledQrCode size={20} className="text-muted-foreground" />
-									</View>
-									<View className="flex-1">
-										<Text className="font-semibold text-foreground text-sm">
-											{m.login_setup_device_banner_title()}
-										</Text>
-										<Text className="text-muted text-xs">
-											{m.login_setup_device_banner_description()}
-										</Text>
-									</View>
-									<StyledChevronRight size={18} className="text-muted" />
-								</Pressable>
 
-								{/* Server URL */}
-								<TextField>
-									<Label>{m.login_server_url_label()}</Label>
-									<View className="w-full flex-row items-center">
-										<Input
-											placeholder={m.login_server_url_placeholder()}
-											value={serverUrl}
-											onChangeText={setServerUrl}
-											autoCapitalize="none"
-											autoCorrect={false}
-											keyboardType="url"
-											className="flex-1 pr-4 pl-12"
-										/>
-										<StyledServer
-											size={20}
-											className="absolute left-3.5 text-muted"
-											pointerEvents="none"
-										/>
-									</View>
-									<Description>{m.login_server_url_description()}</Description>
-								</TextField>
+							<PasswordField
+								label={m.auth_signin_label_password()}
+								placeholder={m.auth_signin_placeholder_password()}
+								value={password}
+								onChangeText={setPassword}
+								icon={IconLock}
+								isInvalid={Boolean(formError)}
+								autoFocus
+								onSubmit={handleSignIn}
+							/>
 
-								{/* Email */}
-								<TextField>
-									<Label>{m.auth_signin_label_email()}</Label>
-									<View className="w-full flex-row items-center">
-										<Input
-											placeholder={m.auth_signin_placeholder_email()}
-											value={email}
-											onChangeText={setEmail}
-											autoCapitalize="none"
-											autoCorrect={false}
-											keyboardType="email-address"
-											textContentType="emailAddress"
-											className="flex-1 pr-4 pl-12"
-										/>
-										<StyledMail
-											size={20}
-											className="absolute left-3.5 text-muted"
-											pointerEvents="none"
-										/>
-									</View>
-								</TextField>
-
-								{/* Password */}
-								<TextField>
-									<Label>{m.auth_signin_label_password()}</Label>
-									<View className="w-full flex-row items-center">
-										<Input
-											placeholder={m.auth_signin_placeholder_password()}
-											value={password}
-											onChangeText={setPassword}
-											secureTextEntry={!showPassword}
-											textContentType="password"
-											className="flex-1 pr-12 pl-12"
-										/>
-										<StyledLock
-											size={20}
-											className="absolute left-3.5 text-muted"
-											pointerEvents="none"
-										/>
-										<Pressable
-											onPress={() => setShowPassword(!showPassword)}
-											className="absolute right-4"
-										>
-											{showPassword ? (
-												<StyledEyeOff size={20} className="text-muted" />
-											) : (
-												<StyledEye size={20} className="text-muted" />
-											)}
-										</Pressable>
-									</View>
-								</TextField>
-
-								{/* Secret Key */}
-								<TextField>
-									<Label>{m.auth_signin_label_secret_key()}</Label>
-									<Input
-										placeholder={m.auth_signin_placeholder_secret_key()}
-										value={secretKey}
-										onChangeText={setSecretKey}
-										autoCapitalize="characters"
-										autoCorrect={false}
-										className="font-mono"
-									/>
-									<Description>{m.auth_signin_secret_key_help()}</Description>
-								</TextField>
-
-								{/* Biometric Toggle */}
-								{biometricAvailable && (
+							{biometricAvailable ? (
+								<View className="rounded-2xl border border-border bg-surface p-3.5 shadow-surface">
 									<ControlField
 										isSelected={enableBiometric}
 										onSelectedChange={setEnableBiometric}
 									>
-										<View className="mt-2 flex-1 flex-row items-center gap-3">
-											<StyledFingerprint size={20} className="text-muted" />
+										<View className="flex-1 flex-row items-center gap-3">
+											<IconFingerprint
+												size={iconSize.bar}
+												className="text-muted"
+											/>
 											<View className="flex-1">
 												<Label>
 													{m.login_biometric_enable_label({
@@ -476,52 +412,167 @@ export default function LoginScreen() {
 										</View>
 										<ControlField.Indicator />
 									</ControlField>
-								)}
+								</View>
+							) : null}
 
-								{/* Show message if device has hardware but no biometrics enrolled */}
-								{biometricDetails.hasHardware &&
-									!biometricDetails.isEnrolled && (
-										<View className="rounded-lg bg-amber-50 p-4">
-											<View className="flex-row items-start">
-												<Fingerprint size={20} color="#f59e0b" />
-												<View className="ml-3 flex-1">
-													<Text className="font-medium text-amber-800">
-														{m.login_biometric_not_enrolled_title()}
-													</Text>
-													<Text className="text-amber-700 text-sm">
-														{m.login_biometric_not_enrolled_description({
-															biometricType: biometricTypeLabel,
-														})}
-													</Text>
-												</View>
-											</View>
-										</View>
-									)}
+							{biometricDetails.hasHardware && !biometricDetails.isEnrolled ? (
+								<InlineNotice
+									tone="warning"
+									icon={IconTriangleAlert}
+									title={m.login_biometric_not_enrolled_title()}
+									description={m.login_biometric_not_enrolled_description({
+										biometricType: biometricTypeLabel,
+									})}
+								/>
+							) : null}
 
-								{/* Login Button */}
-								<Button
-									onPress={handleLogin}
-									isDisabled={loginMutation.isPending}
-									variant="primary"
-									size="lg"
-									className="mt-4"
-								>
-									{loginMutation.isPending
+							{errorNotice}
+
+							<BrandButton
+								label={
+									loginMutation.isPending
 										? m.auth_signin_button_signing_in()
-										: m.auth_signin_button_sign_in()}
-								</Button>
-							</View>
-						)}
-					</View>
+										: m.auth_signin_button_sign_in()
+								}
+								onPress={handleSignIn}
+								isLoading={loginMutation.isPending}
+								size="lg"
+							/>
+
+							{prefill ? (
+								<PressableFeedback
+									onPress={handleStartOver}
+									accessibilityRole="button"
+									className="h-11 items-center justify-center rounded-xl"
+								>
+									<PressableFeedback.Highlight />
+									<Text className="font-medium text-muted text-sm">
+										{m.login_setup_complete_not_you()}
+									</Text>
+								</PressableFeedback>
+							) : null}
+						</View>
+					) : (
+						<View className="mt-7 gap-4">
+							{/* The fast path leads: a desktop or web session fills every field. */}
+							<PressScale
+								onPress={() => setIsScannerOpen(true)}
+								accessibilityRole="button"
+								className="flex-row items-center gap-3.5 rounded-2xl border border-border bg-surface p-4 shadow-surface"
+							>
+								<GradientTile name="Bittery" accent glow size={44} radius={14}>
+									<IconQrCode
+										size={iconSize.header}
+										className="text-accent-foreground"
+									/>
+								</GradientTile>
+								<View className="min-w-0 flex-1">
+									<Text className="font-semibold text-base text-foreground">
+										{m.login_setup_device_banner_title()}
+									</Text>
+									<Text className="mt-0.5 text-muted text-sm">
+										{m.login_setup_device_banner_description()}
+									</Text>
+								</View>
+								<IconChevronRight
+									size={iconSize.row}
+									className="text-muted opacity-60"
+								/>
+							</PressScale>
+
+							{setupLink.status === "loaded" && !linkPayload?.secretKey ? (
+								<InlineNotice
+									tone="info"
+									icon={IconInfo}
+									title={m.login_alert_setup_loaded_title()}
+									description={m.login_alert_setup_loaded_message()}
+								/>
+							) : null}
+
+							<AuthDivider label={m.login_manual_divider()} />
+
+							<AuthField
+								label={m.auth_signin_label_email()}
+								placeholder={m.auth_signin_placeholder_email()}
+								icon={IconMail}
+								value={email}
+								onChangeText={setEmailEdit}
+								keyboardType="email-address"
+								textContentType="emailAddress"
+							/>
+
+							<AuthField
+								label={m.auth_signin_label_secret_key()}
+								placeholder={m.auth_signin_placeholder_secret_key()}
+								description={m.auth_signin_secret_key_help()}
+								icon={IconKeyRound}
+								value={secretKey}
+								onChangeText={setSecretKeyEdit}
+								autoCapitalize="characters"
+								inputClassName="font-mono"
+							/>
+
+							{errorNotice}
+
+							<BrandButton
+								label={m.login_action_continue()}
+								onPress={handleContinue}
+								size="lg"
+							/>
+
+							{/* Self-hosters change the server here; everyone else never sees a URL field. */}
+							{isServerExpanded ? (
+								<AuthField
+									label={m.login_server_url_label()}
+									placeholder={m.login_server_url_placeholder()}
+									description={m.login_server_url_description()}
+									icon={IconServer}
+									value={serverUrl}
+									onChangeText={setServerUrlEdit}
+									keyboardType="url"
+									autoFocus
+								/>
+							) : (
+								<PressableFeedback
+									onPress={() => setIsServerExpanded(true)}
+									accessibilityRole="button"
+									accessibilityLabel={m.login_server_url_label()}
+									className="h-11 flex-row items-center gap-2.5 rounded-xl px-3"
+								>
+									<PressableFeedback.Highlight />
+									<IconServer size={iconSize.chip} className="text-muted" />
+									<Text className="text-muted text-xs">
+										{m.login_server_row_label()}
+									</Text>
+									<Text
+										numberOfLines={1}
+										className="min-w-0 flex-1 text-foreground text-xs"
+									>
+										{serverUrl}
+									</Text>
+									<Text className="font-medium text-muted text-xs">
+										{m.login_action_change()}
+									</Text>
+								</PressableFeedback>
+							)}
+						</View>
+					)}
 				</ScrollView>
 			</KeyboardAvoidingView>
+
 			<DeviceSetupQrScanner
-				visible={showSetupScanner}
-				onClose={() => setShowSetupScanner(false)}
+				visible={isScannerOpen}
+				onClose={() => setIsScannerOpen(false)}
 				onScanSuccess={(payload) => {
-					applySetupPayload(payload);
+					setIsSetupDismissed(false);
+					setScannedSetup(payload);
+					setEmailEdit(null);
+					setServerUrlEdit(null);
+					setSecretKeyEdit(null);
+					setFormError(null);
+					setStepOverride(null);
 				}}
 			/>
-		</SafeAreaView>
+		</Screen>
 	);
 }

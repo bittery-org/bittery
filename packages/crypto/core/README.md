@@ -1,10 +1,9 @@
 # Bittery Crypto
 
-Unified Rust cryptographic core for the Bittery password manager. Compiles to multiple targets:
-
-- **WASM** - Web browsers, browser extensions, Node.js/Bun
-- **FFI** - React Native via Nitro Module
-- **Native Rust** - Tauri desktop app
+The Rust core is the only implementation of Bittery's crypto formats and primitives. The
+`bittery-crypto-api` UniFFI crate generates the WASM bindings used by web, desktop, and the
+browser extension, plus JSI/TurboModule bindings for React Native. The server links the core
+crate directly; ADR 0010 documents the limited desktop native-host dependency.
 
 ## Features
 
@@ -19,9 +18,8 @@ Unified Rust cryptographic core for the Bittery password manager. Compiles to mu
 
 ### Prerequisites
 
-- Rust 1.70+
-- wasm-pack (for WASM target)
-- cargo-ndk (for Android)
+- Rust stable with the `wasm32-unknown-unknown` target
+- Node.js 24 and the repository's pinned pnpm version
 - Xcode command line tools (for iOS)
 
 ### Core Library
@@ -31,77 +29,33 @@ cargo build --release
 cargo test
 ```
 
-### WASM
+### Web and extension WASM
 
 ```bash
-wasm-pack build crates/bittery-crypto-wasm --target web --release
+pnpm run build:crypto-wasm
 ```
 
-### Android (.so)
+### React Native
 
 ```bash
-cargo ndk -t arm64-v8a -t armeabi-v7a -t x86_64 -o ./jniLibs build --release
+pnpm run build:crypto-android
+pnpm run build:crypto-ios
 ```
 
-### iOS (.a)
-
-```bash
-cargo build --target aarch64-apple-ios --release
-cargo build --target aarch64-apple-ios-sim --release
-```
+These commands generate the Kotlin, Objective-C++, C++, JSI, and TurboModule sources consumed
+by `@bittery/crypto-react-native`. The Android command covers all shipped ABIs; the iOS command
+builds device and simulator XCFrameworks. `BUILD.md` describes the generated and ignored
+outputs.
 
 ## Crate Structure
 
 ```
 crates/
 ├── bittery-crypto-core/    # Core crypto primitives (no platform deps)
-├── bittery-crypto-wasm/    # WASM bindings via wasm-bindgen
-└── bittery-crypto-ffi/     # C FFI for React Native Nitro Module
+└── bittery-crypto-api/     # Shared UniFFI API for web and React Native
 ```
 
 ## API Usage
-
-### TypeScript (WASM)
-
-```typescript
-import init, {
-  deriveKeys,
-  encrypt,
-  decrypt,
-  generateEncryptionKey,
-  generateSecretKey,
-  JsSrpClient,
-  JsSrpServer,
-} from '@bittery/crypto-wasm';
-
-await init();
-
-// Key derivation
-const keys = deriveKeys(
-  'password',
-  'A3-XXXXXX-...',
-  'user@example.com',
-  1,
-  'pbkdf2-sha256',
-  600_000,
-);
-console.log(keys.auth_key, keys.master_unlock_key);
-
-// Encryption
-const key = generateEncryptionKey();
-const encrypted = encrypt('secret data', key);
-const decrypted = decrypt(encrypted, key);
-
-// Context-aware variants are also available:
-// encryptWithContext(plaintext, key, { vault_id, entity_id, entity_type, version, user_id })
-// decryptWithContext(encryptedData, key, { vault_id, entity_id, entity_type, version, user_id })
-
-// SRP-6a Authentication
-const client = new JsSrpClient('SHA-256', 4096);
-const salt = client.generateSalt();
-const privateKey = client.deriveSafePrivateKey(salt, 'password');
-const verifier = client.deriveVerifier(privateKey);
-```
 
 ### Rust (Native)
 
@@ -139,13 +93,14 @@ All cryptographic operations use audited RustCrypto implementations:
 
 ## Testing
 
-Run the full test suite:
+Run the full core and generated API test suite:
 
 ```bash
 cargo test
 ```
 
-Test vectors are verified against the existing TypeScript implementation to ensure compatibility.
+The workspace includes persisted-format vectors. WASM linting and native binding generation are
+covered by CI; device and browser smoke checks remain required after binding changes.
 
 ## License
 

@@ -4,6 +4,7 @@ import type { AccountStore, ItemCache } from "@bittery/storage";
 import {
 	createTestAccountStore,
 	createTestItemCache,
+	mukRefFor,
 } from "../testing/account-store-harness";
 import type { AccountInfo } from "./account-resolver";
 import {
@@ -32,6 +33,19 @@ async function createLayers(): Promise<{
 		crypto,
 		vaultCrypto: createVaultCrypto({ crypto, storage: store }),
 	};
+}
+
+/** Repositories only hydrate unlocked accounts, so every hydrate test needs one. */
+async function unlock(
+	{ storage, crypto }: { storage: AccountStore; crypto: InMemoryCryptoPort },
+	...accountIds: string[]
+): Promise<void> {
+	for (const accountId of accountIds) {
+		await storage.setMasterUnlockKey(
+			await mukRefFor(crypto, accountId),
+			accountId,
+		);
+	}
 }
 
 function makeTravelModeClient(hiddenVaultIds: string[] = []) {
@@ -187,6 +201,7 @@ describe("VaultRepositoryCoordinator", () => {
 	describe("M4 — hydrate isolates per-account failures", () => {
 		it("one unverified account does not abort hydration of the others", async () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+			await unlock({ storage, crypto }, "acc-verified", "acc-unverified");
 			const enforcer = getTravelModeEnforcer(storage, itemCache);
 			// Only acc-verified has a verified policy; acc-unverified will throw
 			// from assertVerified inside repo.hydrate().
@@ -230,6 +245,7 @@ describe("VaultRepositoryCoordinator", () => {
 			// nothing re-ran the unlock flow. Hydrate must re-verify rather than
 			// fail closed on a perfectly valid session.
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+			await unlock({ storage, crypto }, "acc-reloaded");
 			const travelMode = makeTravelModeClient();
 			const coordinator = new VaultRepositoryCoordinator(
 				crypto,

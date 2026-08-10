@@ -1,294 +1,102 @@
 # Building Bittery Crypto
 
-This document describes how to build the Rust crypto packages for different platforms.
+The cryptographic implementation lives in `crates/bittery-crypto-core`. The
+`bittery-crypto-api` UniFFI crate exposes the shared asynchronous client API and is the
+source for the generated web and React Native bindings.
 
 ## Prerequisites
 
-### Rust Toolchain
+- Rust stable with `wasm32-unknown-unknown` installed.
+- Node.js 24 and the repository's pinned pnpm version.
+- The repository dependencies installed with `pnpm install`.
+
+The WASM script checks for `wasm-bindgen-cli` 0.2.126 and installs that exact version with
+Cargo when it is missing or a different version is active. The ubrn generator, its
+JavaScript runtime, Prettier, and Binaryen 131.0.0 are exact dependencies of
+`packages/crypto/wasm`. Binaryen runs `wasm-opt -Oz` after binding generation.
+
 ```bash
-# Install Rust via rustup
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Verify installation
-rustc --version
-cargo --version
-```
-
-### WASM Target (for web/extension)
-```bash
-# Install wasm-pack
-cargo install wasm-pack
-
-# Add WASM target
 rustup target add wasm32-unknown-unknown
+pnpm install
 ```
 
-### Node.js/pnpm (for NAPI builds)
-```bash
-# The repo's toolchain targets Node.js 24 (see the README prerequisites).
-# The published @bittery/crypto-napi addon itself still supports Node.js 18+.
-node --version  # Should be >= 24
-
-# Install pnpm globally
-npm install -g pnpm
-```
-
-## Quick Start
+## Web and extension WASM
 
 From the repository root:
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Build both WASM and NAPI packages
-pnpm run build:crypto
-
-# Or build them separately:
-pnpm run build:crypto-wasm   # WASM for web/extension
-pnpm run build:crypto-napi   # Native addon for server
-```
-
-## Package Overview
-
-| Package | Target | Used By |
-|---------|--------|---------|
-| `@bittery/crypto-wasm` | WASM (web target) | Web app, Browser extension |
-| `@bittery/crypto-napi` | Native Node addon | Node.js/Bun runtimes |
-
-## Build Commands
-
-### WASM Package (`@bittery/crypto-wasm`)
-
-```bash
-# From repository root
 pnpm run build:crypto-wasm
-
-# Or manually
-cd packages/bittery-crypto
-./build-wasm.sh
 ```
 
-**Output:** `packages/bittery-crypto/pkg/`
-- `bittery_crypto.js` - JavaScript bindings
-- `bittery_crypto.d.ts` - TypeScript declarations
-- `bittery_crypto_bg.wasm` - WASM binary
-
-### NAPI Package (`@bittery/crypto-napi`)
+The same build can be invoked directly:
 
 ```bash
-# From repository root
-pnpm run build:crypto-napi
-
-# Or manually
-cd packages/bittery-crypto
-./build-napi.sh
+packages/crypto/core/build-wasm.sh
 ```
 
-**Output:** `packages/bittery-crypto/crates/bittery-crypto-napi/`
-- `bittery-crypto.darwin-arm64.node` (on macOS ARM)
-- `bittery-crypto.darwin-x64.node` (on macOS Intel)
-- `bittery-crypto.linux-x64-gnu.node` (on Linux x64)
-- etc.
+The script runs the pinned ubrn web flow from `packages/crypto/wasm`, using
+`packages/crypto/core/ubrn.config.yaml`. Its generated source and scaffolding are tracked so a
+fresh checkout can typecheck and resolve bindings; only the WASM binary is ignored:
 
-## Running Tests
+- `packages/crypto/wasm/crate/`: the generated wasm-bindgen Rust crate and lockfile;
+- `packages/crypto/wasm/generated/bittery_crypto_api*.ts`: the UniFFI TypeScript bindings;
+- `packages/crypto/wasm/generated/wasm-bindgen/`: the JavaScript and `.d.ts` emitted by
+  wasm-bindgen; and
+- `packages/crypto/wasm/index.ts`: the generated initialization entrypoint.
+
+`packages/crypto/wasm/package.json` is intentionally tracked. A fresh worktree therefore
+has a resolvable workspace package before generation, so `pnpm install` can install ubrn;
+`scripts/setup-worktree.sh` builds the generated files afterward when the WASM binary is
+absent.
+
+### Migration size checkpoint
+
+Release artifacts measured during the UniFFI migration:
+
+- previous hand-written wasm-bindgen binary: 1,199,470 bytes;
+- generated ubrn binary after `wasm-opt -Oz`: 790,712 bytes (34.1% smaller).
+
+## React Native
+
+From the repository root, generate all four Android ABIs or the iOS device and simulator
+XCFrameworks:
 
 ```bash
-# Run all Rust tests
-cd packages/bittery-crypto
-cargo test
-
-# Run tests for specific crate
-cargo test -p bittery-crypto-core    # Core crypto logic
-cargo test -p bittery-crypto-napi    # NAPI bindings
-cargo test -p bittery-crypto-wasm    # WASM bindings
+pnpm run build:crypto-android
+pnpm run build:crypto-ios
 ```
 
-## CI/CD Integration
+The pinned ubrn generator writes its TypeScript, C++, Kotlin, and Objective-C++ sources to
+`packages/crypto/react-native`, whose package name is `@bittery/crypto-react-native`.
+Native libraries and XCFrameworks are ignored build artifacts; generated source and module
+scaffolding are tracked so React Native codegen and autolinking can resolve the package in a
+fresh worktree. The mobile `android` and `ios` scripts build the corresponding artifacts;
+its `eas-build-post-install` script selects the active `EAS_BUILD_PLATFORM`. CI exercises both
+native generation paths independently.
 
-### GitHub Actions Example
+Android's credential-provider module depends on that same Gradle project and calls the
+generated Kotlin UniFFI API directly. Its explicitly audited master-unlock-key export does
+not pass through JavaScript.
 
-```yaml
-name: Build Crypto Packages
+## Rust checks
 
-on:
-  push:
-    paths:
-      - 'packages/bittery-crypto/**'
-  pull_request:
-    paths:
-      - 'packages/bittery-crypto/**'
+Run the full native workspace suite:
 
-jobs:
-  build-wasm:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
-        with:
-          targets: wasm32-unknown-unknown
-
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
-
-      - name: Build WASM
-        run: pnpm run build:crypto-wasm
-
-      - name: Upload WASM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: crypto-wasm
-          path: packages/bittery-crypto/pkg/
-
-  build-napi:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-13
-            target: x86_64-apple-darwin
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 10
-
-      - name: Install dependencies
-        run: pnpm install
-
-      - name: Build NAPI
-        working-directory: packages/bittery-crypto/crates/bittery-crypto-napi
-        run: |
-          pnpm exec napi build --platform --release --target ${{ matrix.target }}
-
-      - name: Upload NAPI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: crypto-napi-${{ matrix.target }}
-          path: packages/bittery-crypto/crates/bittery-crypto-napi/*.node
-
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
-
-      - name: Run tests
-        working-directory: packages/bittery-crypto
-        run: cargo test --all
-```
-
-## Development Workflow
-
-### After modifying Rust code:
-
-1. **Run tests first:**
-   ```bash
-   cd packages/bittery-crypto
-   cargo test
-   ```
-
-2. **Rebuild affected packages:**
-   ```bash
-   # If you modified core crypto or WASM bindings:
-   pnpm run build:crypto-wasm
-
-   # If you modified core crypto or NAPI bindings:
-   pnpm run build:crypto-napi
-   ```
-
-3. **Run TypeScript type check:**
-   ```bash
-   pnpm run check-types
-   ```
-
-### Adding new functions:
-
-1. Add to `bittery-crypto-core/src/lib.rs` or relevant module
-2. Export in `bittery-crypto-wasm/src/lib.rs` (for web)
-3. Export in `bittery-crypto-napi/src/lib.rs` (for server)
-4. Update TypeScript declarations in `index.d.ts`
-5. Rebuild and test
-
-## Troubleshooting
-
-### WASM build fails with "wasm-pack not found"
 ```bash
-cargo install wasm-pack
+cd packages/crypto/core
+cargo test --workspace
 ```
 
-### NAPI build fails with "@napi-rs/cli not found"
+Compile the exported API with its browser randomness backends enabled:
+
 ```bash
-cd packages/bittery-crypto/crates/bittery-crypto-napi
-pnpm add -D @napi-rs/cli
+cargo clippy --manifest-path packages/crypto/core/Cargo.toml \
+  -p bittery-crypto-api --target wasm32-unknown-unknown --lib -- -D warnings
 ```
 
-### "Cannot find module '@bittery/crypto-napi'"
-Ensure the package is linked in pnpm workspace:
-```bash
-pnpm install
-```
+Both getrandom generations are intentional. `getrandom` 0.4 serves the current RustCrypto
+stack and uses `wasm_js`; `getrandom` 0.2 serves `rsa` 0.9's older `rand_core` graph and
+uses its `js` feature.
 
-### Tests fail after modifying SRP code
-The SRP implementation must be compatible across all platforms. Run:
-```bash
-cargo test -p bittery-crypto-core -- srp
-cargo test -p bittery-crypto-napi
-```
-
-## Architecture
-
-```
-packages/bittery-crypto/
-├── Cargo.toml                    # Workspace manifest
-├── build-wasm.sh                 # WASM build script
-├── build-napi.sh                 # NAPI build script
-├── crates/
-│   ├── bittery-crypto-core/      # Core Rust crypto (shared)
-│   │   └── src/
-│   │       ├── lib.rs
-│   │       ├── encryption.rs     # AES-256-GCM
-│   │       ├── key_derivation.rs # PBKDF2 + HKDF
-│   │       ├── rsa.rs            # RSA-4096 OAEP
-│   │       ├── secret_key.rs     # A3-XXXXXX format
-│   │       └── srp6a/            # SRP-6a protocol
-│   │
-│   ├── bittery-crypto-wasm/      # WASM bindings (wasm-bindgen)
-│   │   └── src/lib.rs            # All functions for web
-│   │
-│   ├── bittery-crypto-napi/      # NAPI bindings (napi-rs)
-│   │   ├── src/lib.rs            # SRP server functions
-│   │   ├── index.js              # Module loader
-│   │   └── index.d.ts            # TypeScript types
-│   │
-│   └── bittery-crypto-ffi/       # C FFI (for React Native)
-│       └── src/lib.rs
-│
-└── pkg/                          # Built WASM output (@bittery/crypto-wasm)
-```
-
-## Performance Notes
-
-- **NAPI** provides ~2-5x faster SRP operations compared to WASM on the server
-- **WASM** is cross-platform and works in all browsers
-- The core Rust implementation is shared, ensuring identical behavior
+After changing the Rust API, rebuild the WASM package, run the crypto-port adapter tests,
+then run the repository typecheck and tests.

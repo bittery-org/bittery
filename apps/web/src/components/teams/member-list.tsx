@@ -1,4 +1,5 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
+import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
 import { useRPCClient } from "@bittery/shared/rpc";
 import {
 	AlertDialog,
@@ -122,7 +123,18 @@ export function MemberList({
 							userId: m.userId,
 							publicKey: m.publicKey,
 						})),
-						vaultData.items,
+						vaultData.items.map((item) => ({
+							id: item.id,
+							encryptedData: item.encryptedData,
+							encryptionIv: item.encryptionIv,
+							encryptionAlgorithm: item.encryptionAlgorithm,
+							context: buildItemEncryptionContext({
+								vaultId: vaultData.vaultId,
+								itemId: item.id,
+								version: item.version,
+								userId: item.lastModifiedBy ?? currentUserId,
+							}),
+						})),
 						vaultData.vaultId,
 						vaultData.keyVersion + 1,
 						currentUserId,

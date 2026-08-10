@@ -119,6 +119,14 @@ function aggregateStatuses(
 }
 
 /**
+ * `SyncOrchestrator.getDeltaSyncAccountScope()` throws without an accountId, so a source
+ * that has not resolved one yet can only produce an orchestrator that fails on connect.
+ */
+export function selectScopedSyncSources(sources: SyncSource[]): SyncSource[] {
+	return sources.filter((source) => !!source.itemCacheAccountId);
+}
+
+/**
  * Options for useSync hook
  */
 export interface UseSyncOptions {
@@ -209,10 +217,10 @@ export function useSync(options: UseSyncOptions) {
 
 	const syncSources = useMemo<SyncSource[]>(() => {
 		if (sources && sources.length > 0) {
-			return sources;
+			return selectScopedSyncSources(sources);
 		}
 
-		return [
+		return selectScopedSyncSources([
 			{
 				id: "default",
 				serverUrl,
@@ -222,7 +230,7 @@ export function useSync(options: UseSyncOptions) {
 				itemCacheAccountEmail,
 				itemCacheServerUrl,
 			},
-		];
+		]);
 	}, [
 		sources,
 		serverUrl,

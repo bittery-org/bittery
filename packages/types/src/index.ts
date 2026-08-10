@@ -127,13 +127,18 @@ export interface MemberKeyData {
 }
 
 /**
- * Item data for re-encryption during key rotation
+ * Item data for re-encryption during key rotation.
+ *
+ * `context` is the AAD the stored ciphertext is bound to. Rotation re-binds the replacement
+ * to the same context, so an item that was bound stays bound and one written before AAD
+ * binding existed stays unbound.
  */
 export interface ItemData {
 	id: string;
 	encryptedData: string;
 	encryptionIv: string;
 	encryptionAlgorithm: string;
+	context: EncryptionContext;
 }
 
 /**

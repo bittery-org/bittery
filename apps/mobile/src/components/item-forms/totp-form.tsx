@@ -5,32 +5,25 @@ import {
 } from "@bittery/shared/totp";
 import type { TotpAlgorithm, TotpDigits } from "@bittery/shared/types";
 import * as Clipboard from "expo-clipboard";
-import {
-	Button,
-	FieldError,
-	Input,
-	Label,
-	TextField,
-	useToast,
-} from "heroui-native";
-import {
-	Camera,
-	ChevronDown,
-	ChevronRight,
-	ClipboardPaste,
-} from "lucide-react-native";
+import { Input, PressableFeedback, useToast } from "heroui-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { withUniwind } from "uniwind";
-import { cn } from "@/lib/utils";
+import { Text, View } from "react-native";
+import {
+	type AppIcon,
+	IconCamera,
+	IconChevronDown,
+	IconChevronRight,
+	IconClipboardPaste,
+	iconSize,
+	ListCard,
+	SectionLabel,
+	Segmented,
+	type SegmentedOption,
+} from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
 import { QrCodeScanner } from "../qr-code-scanner";
 import { TotpDisplay } from "../totp-display";
-
-const StyledCamera = withUniwind(Camera);
-const StyledClipboardPaste = withUniwind(ClipboardPaste);
-const StyledChevronDown = withUniwind(ChevronDown);
-const StyledChevronRight = withUniwind(ChevronRight);
+import { FormField } from "./form-field";
 
 export interface TotpFormData {
 	totpSecret: string;
@@ -51,6 +44,41 @@ interface TotpFormProps {
 	initialData?: Partial<TotpFormData>;
 }
 
+const DIGIT_OPTIONS: SegmentedOption<string>[] = [
+	{ value: "6", label: "6" },
+	{ value: "7", label: "7" },
+	{ value: "8", label: "8" },
+];
+
+const ALGORITHM_OPTIONS: SegmentedOption<string>[] = [
+	{ value: "SHA1", label: "SHA1" },
+	{ value: "SHA256", label: "SHA256" },
+	{ value: "SHA512", label: "SHA512" },
+];
+
+function ImportAction({
+	icon: Icon,
+	label,
+	onPress,
+}: {
+	icon: AppIcon;
+	label: string;
+	onPress: () => void;
+}) {
+	return (
+		<PressableFeedback
+			onPress={onPress}
+			accessibilityRole="button"
+			accessibilityLabel={label}
+			className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-xl border border-border bg-surface"
+		>
+			<PressableFeedback.Highlight />
+			<Icon size={iconSize.chip} className="text-accent" />
+			<Text className="font-medium text-base text-foreground">{label}</Text>
+		</PressableFeedback>
+	);
+}
+
 export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 	({ onTitleAutoFill, initialData }, ref) => {
 		const { m } = useI18n();
@@ -67,8 +95,8 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 			initialData?.totpDigits || 6,
 		);
 		const [totpPeriod, setTotpPeriod] = useState(initialData?.totpPeriod || 30);
-		const [showTotpAdvanced, setShowTotpAdvanced] = useState(false);
-		const [showQrScanner, setShowQrScanner] = useState(false);
+		const [isAdvancedOpen, setIsAdvancedOpen] = useState(false);
+		const [isScannerOpen, setIsScannerOpen] = useState(false);
 
 		useImperativeHandle(ref, () => ({
 			getData: () => ({
@@ -92,7 +120,9 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 
 			// Auto-fill title if callback provided
 			if (onTitleAutoFill && (data.issuer || data.accountName)) {
-				onTitleAutoFill(data.issuer || data.accountName || "TOTP");
+				onTitleAutoFill(
+					data.issuer || data.accountName || m.mob_category_totp(),
+				);
 			}
 
 			toast.show({
@@ -153,46 +183,35 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 			}
 		};
 
+		const hasSecretError = Boolean(totpSecret) && !isValidBase32(totpSecret);
+		const hasValidSecret = Boolean(totpSecret) && isValidBase32(totpSecret);
+
 		return (
 			<>
 				<QrCodeScanner
-					visible={showQrScanner}
-					onClose={() => setShowQrScanner(false)}
+					visible={isScannerOpen}
+					onClose={() => setIsScannerOpen(false)}
 					onScanSuccess={handleQrScanSuccess}
 				/>
 
-				{/* Quick Import Buttons */}
-				<View className="mb-4 flex-row gap-2">
-					<Button
-						onPress={() => setShowQrScanner(true)}
-						variant="secondary"
-						className="flex-1"
-					>
-						<StyledCamera size={18} className="text-accent-soft-foreground" />
-						<Button.Label>{m.mob_form_totp_scan_qr()}</Button.Label>
-					</Button>
-					<Button
+				<View className="flex-row gap-3">
+					<ImportAction
+						icon={IconCamera}
+						label={m.mob_form_totp_scan_qr()}
+						onPress={() => setIsScannerOpen(true)}
+					/>
+					<ImportAction
+						icon={IconClipboardPaste}
+						label={m.mob_form_totp_paste()}
 						onPress={handlePasteTotp}
-						variant="secondary"
-						className="flex-1"
-					>
-						<StyledClipboardPaste
-							size={18}
-							className="text-accent-soft-foreground"
-						/>
-						<Button.Label>{m.mob_form_totp_paste()}</Button.Label>
-					</Button>
+					/>
 				</View>
 
-				{/* Secret Key Input */}
-				<TextField
-					className="mb-4"
+				<FormField
+					label={m.mob_form_totp_secret_label()}
 					isRequired
-					isInvalid={
-						totpSecret && !isValidBase32(totpSecret) ? true : undefined
-					}
+					error={hasSecretError ? m.mob_form_totp_secret_error() : null}
 				>
-					<Label>{m.mob_form_totp_secret_label()}</Label>
 					<Input
 						placeholder={m.mob_form_totp_secret_placeholder()}
 						value={totpSecret}
@@ -201,142 +220,100 @@ export const TotpForm = forwardRef<TotpFormRef, TotpFormProps>(
 						autoCorrect={false}
 						className="font-mono"
 					/>
-					{totpSecret && !isValidBase32(totpSecret) && (
-						<FieldError>{m.mob_form_totp_secret_error()}</FieldError>
-					)}
-				</TextField>
+				</FormField>
 
-				{/* Live Preview */}
-				{totpSecret && isValidBase32(totpSecret) && (
-					<View className="mb-4">
-						<Text className="mb-2 font-medium text-foreground text-sm">
-							Preview
-						</Text>
-						<TotpDisplay
-							totpSecret={totpSecret}
-							totpAlgorithm={totpAlgorithm}
-							totpDigits={totpDigits}
-							totpPeriod={totpPeriod}
-							compact
-						/>
+				{hasValidSecret ? (
+					<View>
+						<SectionLabel>{m.mob_form_totp_preview_label()}</SectionLabel>
+						<ListCard>
+							<View className="p-4">
+								<TotpDisplay
+									totpSecret={totpSecret}
+									totpAlgorithm={totpAlgorithm}
+									totpDigits={totpDigits}
+									totpPeriod={totpPeriod}
+									label={totpIssuer || undefined}
+								/>
+							</View>
+						</ListCard>
 					</View>
-				)}
+				) : null}
 
-				{/* Issuer & Account */}
-				<View className="mb-4 flex-row gap-2">
-					<TextField className="flex-1">
-						<Label>{m.mob_form_totp_service_label()}</Label>
+				<View className="flex-row gap-3">
+					<FormField label={m.mob_form_totp_service_label()} className="flex-1">
 						<Input
 							placeholder={m.mob_form_totp_service_placeholder()}
 							value={totpIssuer}
 							onChangeText={setTotpIssuer}
 						/>
-					</TextField>
+					</FormField>
 
-					<TextField className="flex-1">
-						<Label>{m.mob_form_totp_account_label()}</Label>
+					<FormField label={m.mob_form_totp_account_label()} className="flex-1">
 						<Input
 							placeholder={m.mob_form_totp_account_placeholder()}
 							value={totpAccountName}
 							onChangeText={setTotpAccountName}
+							autoCapitalize="none"
 						/>
-					</TextField>
+					</FormField>
 				</View>
 
-				{/* Advanced Settings */}
-				<Pressable
-					onPress={() => setShowTotpAdvanced(!showTotpAdvanced)}
-					className="mb-4 flex-row items-center justify-between rounded-lg border border-border p-3"
-				>
-					<Text className="font-medium text-foreground text-sm">
-						{m.mob_form_totp_advanced_label()}
-					</Text>
-					{showTotpAdvanced ? (
-						<StyledChevronDown size={16} className="text-muted" />
-					) : (
-						<StyledChevronRight size={16} className="text-muted" />
-					)}
-				</Pressable>
-				{showTotpAdvanced && (
-					<View className="mb-4 rounded-lg bg-secondary/30 p-3">
-						<View className="mb-4 flex-row gap-2">
-							<View className="flex-1">
-								<Text className="mb-1 text-muted text-xs">
-									{m.mob_form_totp_digits_label()}
-								</Text>
-								<View className="flex-row rounded-lg border border-input bg-background">
-									{[6, 7, 8].map((d) => (
-										<Pressable
-											key={d}
-											onPress={() => setTotpDigits(d as TotpDigits)}
-											className={cn(
-												"flex-1",
-												"items-center",
-												"py-2",
-												totpDigits === d ? "bg-primary" : "",
-											)}
-										>
-											<Text
-												className={cn(
-													"text-sm",
-													totpDigits === d
-														? "text-primary-foreground"
-														: "text-foreground",
-												)}
-											>
-												{d}
-											</Text>
-										</Pressable>
-									))}
-								</View>
-							</View>
-							<TextField className="flex-1">
-								<Label className="mb-1 text-muted text-xs">
-									{m.mob_form_totp_period_label()}
-								</Label>
-								<Input
-									value={totpPeriod.toString()}
-									onChangeText={(v: string) =>
-										setTotpPeriod(Number.parseInt(v, 10) || 30)
-									}
-									keyboardType="numeric"
-								/>
-							</TextField>
-						</View>
-						<View>
-							<Text className="mb-1 text-muted text-xs">
-								{m.mob_form_totp_algorithm_label()}
+				<View>
+					<ListCard>
+						<PressableFeedback
+							onPress={() => setIsAdvancedOpen(!isAdvancedOpen)}
+							accessibilityRole="button"
+							accessibilityLabel={m.mob_form_totp_advanced_label()}
+							className="h-12 flex-row items-center px-4"
+						>
+							<PressableFeedback.Highlight />
+							<Text className="flex-1 font-medium text-base text-foreground">
+								{m.mob_form_totp_advanced_label()}
 							</Text>
-							<View className="flex-row rounded-lg border border-input bg-background">
-								{(["SHA1", "SHA256", "SHA512"] as TotpAlgorithm[]).map(
-									(algo) => (
-										<Pressable
-											key={algo}
-											onPress={() => setTotpAlgorithm(algo)}
-											className={cn(
-												"flex-1",
-												"items-center",
-												"py-2",
-												totpAlgorithm === algo ? "bg-primary" : "",
-											)}
-										>
-											<Text
-												className={cn(
-													"text-xs",
-													totpAlgorithm === algo
-														? "text-primary-foreground"
-														: "text-foreground",
-												)}
-											>
-												{algo}
-											</Text>
-										</Pressable>
-									),
-								)}
+							{isAdvancedOpen ? (
+								<IconChevronDown size={iconSize.row} className="text-muted" />
+							) : (
+								<IconChevronRight size={iconSize.row} className="text-muted" />
+							)}
+						</PressableFeedback>
+						{isAdvancedOpen ? (
+							<View className="gap-4 p-4">
+								<View>
+									<SectionLabel>{m.mob_form_totp_digits_label()}</SectionLabel>
+									<Segmented
+										options={DIGIT_OPTIONS}
+										value={String(totpDigits)}
+										onChange={(value) =>
+											setTotpDigits(Number(value) as TotpDigits)
+										}
+									/>
+								</View>
+								<View>
+									<SectionLabel>
+										{m.mob_form_totp_algorithm_label()}
+									</SectionLabel>
+									<Segmented
+										options={ALGORITHM_OPTIONS}
+										value={totpAlgorithm}
+										onChange={(value) =>
+											setTotpAlgorithm(value as TotpAlgorithm)
+										}
+									/>
+								</View>
+								<FormField label={m.mob_form_totp_period_label()}>
+									<Input
+										value={String(totpPeriod)}
+										onChangeText={(value: string) =>
+											setTotpPeriod(Number.parseInt(value, 10) || 30)
+										}
+										keyboardType="numeric"
+										className="font-mono"
+									/>
+								</FormField>
 							</View>
-						</View>
-					</View>
-				)}
+						) : null}
+					</ListCard>
+				</View>
 			</>
 		);
 	},

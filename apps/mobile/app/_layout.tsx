@@ -54,21 +54,25 @@ function AppContent() {
 			}}
 		>
 			<Stack
+				// Every screen renders its own `AppBar`, so stock headers stay off app-wide.
 				screenOptions={{
 					headerShown: false,
 					contentStyle: { backgroundColor: background },
+					animation: "slide_from_right",
+					animationDuration: 180,
 				}}
 			>
-				<Stack.Screen name="index" />
-				<Stack.Screen name="(auth)" options={{ headerShown: false }} />
-				<Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-				<Stack.Screen name="(vault)" options={{ headerShown: false }} />
-				<Stack.Screen name="settings" options={{ headerShown: false }} />
+				{/* The gate and the surfaces it replaces cross-fade; only pushes slide. */}
+				<Stack.Screen name="index" options={{ animation: "fade" }} />
+				<Stack.Screen name="(auth)" options={{ animation: "fade" }} />
+				<Stack.Screen name="(tabs)" options={{ animation: "fade" }} />
+				<Stack.Screen name="(vault)" />
+				<Stack.Screen name="settings" />
 				<Stack.Screen
 					name="autofill-unlock"
 					options={{
-						headerShown: false,
 						presentation: "modal",
+						animation: "slide_from_bottom",
 					}}
 				/>
 			</Stack>

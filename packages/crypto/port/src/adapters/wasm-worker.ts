@@ -1,53 +1,14 @@
-/**
- * Web's crypto adapter: a `CryptoPort` on the main thread, one worker below it.
- *
- * Because the port is **total** there is nothing to enumerate. Every member marshals the
- * same way — take the arguments, send them, wait for the answer — so this adapter is one
- * generic `(method, args)` forward rather than 39 hand-written message types on each side.
- * `FORWARDED_MEMBERS` is the only list, it is data rather than logic, and the compiler
- * checks it against `keyof CryptoPort` in both directions: a name that no longer exists
- * fails the `satisfies`, and a member the port grows fails `EveryMemberIsForwarded`.
- *
- * ## Key material never reaches this thread
- *
- * A `KeyRef` here is an identity token minted by `createKeyRefTable`, and the payload it
- * maps to is a `bigint` — the WASM key-table handle, which is where the bytes actually
- * live. `toWire` swaps a ref for its handle on the way in and `fromWire` mints a ref for
- * every handle on the way out, both by walking the value generically, so no member has to
- * remember to do it. Two consequences worth stating:
- *
- *   - `toWire` classifies by shape and treats anything that is not a primitive, an array,
- *     a `Uint8Array` or a plain object as a `KeyRef`, which means it hands it to the table.
- *     A foreign ref therefore throws `invalid-key-ref` and a destroyed one `key-destroyed`
- *     **before** anything is posted, and no unrecognised object can reach `postMessage`.
- *   - A handle crosses as a `bigint` rather than as a tagged wrapper. Nothing else on the
- *     port is a `bigint`, so the encoding needs no marker and no shared constant, and it
- *     lands on WASM's own `u64` handle type without a conversion step.
- *
- * The one member that is not a plain forward is `destroyKey`, because ref *lifetime* is
- * owned here rather than in the worker: it has to retire the ref locally, and it has to
- * stay idempotent, which the generic path cannot do because that path throws on a
- * destroyed ref by design.
- *
- * `exportKey` is the single member whose reply carries bytes, and
- * `OnlyExportKeyCrossesWithBytes` below makes the compiler say so.
- */
-
 import type { CryptoPort, KeyRef } from "../crypto-port";
 import { CryptoPortError, type CryptoPortErrorCode } from "../errors";
 import { createKeyRefTable } from "../key-ref";
 
-// ============================================================================
-// The wire
-// ============================================================================
+/** KeyRefs cross `postMessage` as worker tokens; raw import bytes remain `Uint8Array`. */
+export interface WorkerKeyToken {
+	readonly __bitteryWorkerKey: number;
+}
 
-/**
- * A port value as it crosses `postMessage`: a `KeyRef` becomes the worker's key-table
- * handle and everything else is itself. `Uint8Array` is matched before `object` so a
- * mapped type is never spread over a typed array's methods.
- */
 export type Wire<T> = T extends KeyRef
-	? bigint
+	? WorkerKeyToken
 	: T extends Uint8Array
 		? Uint8Array
 		: T extends object
@@ -59,12 +20,7 @@ export type WireArgs<T extends readonly unknown[]> = {
 	[K in keyof T]: Wire<T[K]>;
 };
 
-/**
- * What the worker must implement: `CryptoPort`, with handles where the refs were.
- *
- * Derived from `CryptoPort` rather than written out, so the worker cannot fall behind the
- * port — adding a member breaks the worker's compile, not its runtime.
- */
+/** A `CryptoPort`-shaped worker backend whose key-bearing values use worker tokens. */
 export type WasmWorkerBackend = {
 	[K in keyof CryptoPort]: (
 		...args: WireArgs<Parameters<CryptoPort[K]>>
@@ -78,18 +34,10 @@ export interface CryptoPortCall {
 	args: readonly unknown[];
 }
 
-/**
- * One inbound answer. A failure crosses as a code plus a message rather than as an
- * `Error`: the structured clone of a thrown value is unreliable across engines, and the
- * closed code set is what callers above the seam actually branch on.
- */
+/** Errors cross as data because structured cloning thrown values varies by engine. */
 export type CryptoPortReply =
 	| { id: number; ok: true; value: unknown }
 	| { id: number; ok: false; code: CryptoPortErrorCode; message: string };
-
-// ============================================================================
-// What the compiler checks
-// ============================================================================
 
 const FORWARDED_MEMBERS = [
 	"initialize",
@@ -153,6 +101,7 @@ type StructuredCloneable =
 	| number
 	| boolean
 	| bigint
+	| WorkerKeyToken
 	| Uint8Array
 	| readonly StructuredCloneable[]
 	| { readonly [key: string]: StructuredCloneable };
@@ -172,11 +121,7 @@ type UncloneableMember = {
 		: K;
 }[keyof CryptoPort];
 
-/**
- * Fails to compile when a member gains an argument or a result `postMessage` cannot carry
- * — a `Date`, a `Map`, a class instance, a function. Cheaper to learn here than from a
- * `DataCloneError` in a browser.
- */
+/** Compile-time guard against values that structured clone cannot carry. */
 export type EveryPortValueSurvivesPostMessage = [UncloneableMember] extends [
 	never,
 ]
@@ -193,11 +138,7 @@ type MemberCrossingWithBytes = {
 		: never;
 }[keyof CryptoPort];
 
-/**
- * The deliberate hole, held open by the compiler: `exportKey` is the only member whose
- * answer carries raw key bytes back to this thread. Everything else stays behind a handle
- * for its whole life, which is the property web's `KeyRef` exists for.
- */
+/** Compile-time guard that only `exportKey` returns raw key bytes to this thread. */
 export type OnlyExportKeyCrossesWithBytes = [MemberCrossingWithBytes] extends [
 	"exportKey",
 ]
@@ -209,14 +150,7 @@ export type OnlyExportKeyCrossesWithBytes = [MemberCrossingWithBytes] extends [
 
 export const onlyExportKeyCrossesWithBytes: OnlyExportKeyCrossesWithBytes = true;
 
-// ============================================================================
-// The worker, as this adapter uses it
-// ============================================================================
-
-/**
- * The slice of the `Worker` global this adapter touches, declared structurally so a test
- * can supply an in-process double. A real `Worker` satisfies it.
- */
+/** A structural Worker slice lets tests supply an in-process double. */
 export interface CryptoWorkerHandle {
 	postMessage(message: unknown): void;
 	onmessage: ((event: MessageEvent) => void) | null;
@@ -235,18 +169,18 @@ const DEFAULT_DEPS: WasmWorkerDeps = {
 		}),
 };
 
-// ============================================================================
-// Walking values across the boundary
-// ============================================================================
-
 function isPlainObject(value: object): boolean {
 	const prototype = Object.getPrototypeOf(value) as object | null;
 	return prototype === Object.prototype || prototype === null;
 }
 
-// ============================================================================
-// The adapter
-// ============================================================================
+function isWorkerKeyToken(value: object): value is WorkerKeyToken {
+	return (
+		Object.getPrototypeOf(value) === Object.prototype &&
+		Object.keys(value).length === 1 &&
+		typeof (value as Partial<WorkerKeyToken>).__bitteryWorkerKey === "number"
+	);
+}
 
 interface PendingCall {
 	resolve: (value: unknown) => void;
@@ -256,7 +190,7 @@ interface PendingCall {
 export function createWasmWorkerCryptoPort(
 	deps: WasmWorkerDeps = DEFAULT_DEPS,
 ): CryptoPort {
-	const keys = createKeyRefTable<bigint>();
+	const keys = createKeyRefTable<WorkerKeyToken>();
 	const pending = new Map<number, PendingCall>();
 	let worker: CryptoWorkerHandle | null = null;
 	let backendFailure: CryptoPortError | null = null;
@@ -323,18 +257,16 @@ export function createWasmWorkerCryptoPort(
 				Object.entries(value).map(([key, member]) => [key, toWire(member)]),
 			);
 		}
-		// The port carries data and key references and nothing else, so an object of any
-		// other shape is a ref — and the table is what says whether it is ours, was ours
-		// until it was destroyed, or was never ours at all.
+		// Only refs use non-plain object shapes, so the table validates their ownership.
 		return keys.read(value as KeyRef);
 	}
 
 	function fromWire(value: unknown): unknown {
-		if (typeof value === "bigint") {
-			return keys.create(value);
-		}
 		if (typeof value !== "object" || value === null) {
 			return value;
+		}
+		if (isWorkerKeyToken(value)) {
+			return keys.create(value);
 		}
 		if (value instanceof Uint8Array) {
 			return value;
@@ -364,9 +296,6 @@ export function createWasmWorkerCryptoPort(
 		return fromWire(await answer);
 	}
 
-	// `EveryMemberIsForwarded` has already proven the list covers `keyof CryptoPort`, which
-	// is what makes the assertion safe — every member is the same three lines, so there is
-	// nothing left for the compiler to check one by one.
 	const forwarded = Object.fromEntries(
 		FORWARDED_MEMBERS.map((member) => [
 			member,

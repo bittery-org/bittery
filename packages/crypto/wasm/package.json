@@ -1,0 +1,36 @@
+{
+  "name": "@bittery/crypto-wasm",
+  "type": "module",
+  "description": "WebAssembly bindings for Bittery crypto",
+  "version": "0.1.0",
+  "license": "GPL-3.0-only",
+  "files": [
+    "crate",
+    "generated",
+    "index.ts"
+  ],
+  "main": "index.ts",
+  "types": "index.ts",
+  "exports": {
+    ".": {
+      "types": "./index.ts",
+      "import": "./index.ts"
+    }
+  },
+  "sideEffects": [
+    "./index.ts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bittery-org/bittery",
+    "directory": "packages/crypto/wasm"
+  },
+  "dependencies": {
+    "@ubjs/core": "0.31.0-3"
+  },
+  "devDependencies": {
+    "binaryen": "131.0.0",
+    "prettier": "3.6.2",
+    "uniffi-bindgen-react-native": "0.31.0-3"
+  }
+}

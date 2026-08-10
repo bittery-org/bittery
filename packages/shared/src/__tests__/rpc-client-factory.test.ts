@@ -18,6 +18,13 @@ function setWindowOrigin(origin: string) {
 	});
 }
 
+function setWindowWithoutLocation() {
+	Object.defineProperty(globalThis, "window", {
+		configurable: true,
+		value: {},
+	});
+}
+
 function restoreWindow() {
 	if (originalWindow) {
 		Object.defineProperty(globalThis, "window", originalWindow);
@@ -57,6 +64,12 @@ describe("rpc client factory", () => {
 
 	test("falls back to localhost for non-HTTP browser origins", () => {
 		setWindowOrigin("chrome-extension://extension-id");
+
+		expect(getDefaultServerUrl()).toBe("http://localhost:3000");
+	});
+
+	test("falls back to localhost when the runtime window has no location", () => {
+		setWindowWithoutLocation();
 
 		expect(getDefaultServerUrl()).toBe("http://localhost:3000");
 	});

@@ -17,6 +17,11 @@ export const Route = createFileRoute("/_app")({
 		if (!(await storage.isAuthenticated())) {
 			throw redirect({ to: "/login" });
 		}
+		// The master unlock key cache dies with the page while `session_data` survives it,
+		// so a reload has to reopen the session here: reading the key never restores it.
+		for (const account of await storage.getAccountsList()) {
+			await storage.tryRestoreSessionWithoutPrompt(account.accountId);
+		}
 	},
 });
 

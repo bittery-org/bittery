@@ -11,3 +11,4 @@
 - For a critical bug, write a failing automated test first, then fix it.
 - Follow [RELEASING.md](RELEASING.md) for version changes and releases. Do not edit release versions or create release tags by hand.
 - Comments: explain **why**, never **what**. Max 1-2 lines, only for non-obvious constraints, workarounds, or security rules. If a comment restates the code, delete it and pick a better name. No comment blocks, no commented-out code, and no changelog ("was X, now Y") — describe the code as it stands. Constraints that still bind (back-compat shims, version pins, old data shapes) are a why, so keep those.
+- For crypto core, API, or binding changes, follow [`packages/crypto/core/DEVELOPMENT.md`](packages/crypto/core/DEVELOPMENT.md).

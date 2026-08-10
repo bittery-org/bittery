@@ -1,0 +1,42 @@
+diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -18,2 +18,3 @@
+   "exports": {
++    "./package.json": "./package.json",
+     ".": {
+diff --git a/crates/uniffi-runtime-javascript/Cargo.toml b/crates/uniffi-runtime-javascript/Cargo.toml
+index 9f83f9a..005a77e 100644
+--- a/crates/uniffi-runtime-javascript/Cargo.toml
++++ b/crates/uniffi-runtime-javascript/Cargo.toml
+@@ -14 +14 @@
+-uniffi_core = { version = "=0.31.0", default-features = false }
++uniffi_core = { version = "=0.31.2", default-features = false }
+diff --git a/Cargo.toml b/Cargo.toml
+index 5e66ba2..7a19b55 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -25,4 +25,4 @@ toml = "0.8.22"
+-uniffi = "=0.31.0"
+-uniffi_bindgen = "=0.31.0"
+-uniffi_core = { version = "=0.31.0", default-features = false }
+-uniffi_meta = "=0.31.0"
++uniffi = "=0.31.2"
++uniffi_bindgen = "=0.31.2"
++uniffi_core = { version = "=0.31.2", default-features = false }
++uniffi_meta = "=0.31.2"
+diff --git a/crates/ubrn_cli/templates/wasm/index.web.ts b/crates/ubrn_cli/templates/wasm/index.web.ts
+--- a/crates/ubrn_cli/templates/wasm/index.web.ts
++++ b/crates/ubrn_cli/templates/wasm/index.web.ts
+@@ -18 +18 @@ import initAsync from './{{ bindings }}/wasm-bindgen/index.js';
+-import wasmPath from './{{ bindings }}/wasm-bindgen/index_bg.wasm';
++const wasmPath = new URL('./{{ bindings }}/wasm-bindgen/index_bg.wasm', import.meta.url);
+diff --git a/crates/ubrn_cli/tests/web_variants.rs b/crates/ubrn_cli/tests/web_variants.rs
+--- a/crates/ubrn_cli/tests/web_variants.rs
++++ b/crates/ubrn_cli/tests/web_variants.rs
+@@ -204 +204 @@ fn test_override_bindings_in_config_yaml() -> Result<()> {
+-                .contains("import wasmPath from './bindings/wasm-bindgen/index_bg.wasm';"),
++                .contains("const wasmPath = new URL('./bindings/wasm-bindgen/index_bg.wasm', import.meta.url);"),
+@@ -252 +252 @@ fn test_override_entrypoint_in_config_yaml() -> Result<()> {
+-                .contains("import wasmPath from './../bindings/wasm/wasm-bindgen/index_bg.wasm';"),
++                .contains("const wasmPath = new URL('./../bindings/wasm/wasm-bindgen/index_bg.wasm', import.meta.url);"),

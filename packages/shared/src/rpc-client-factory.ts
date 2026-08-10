@@ -23,7 +23,7 @@ export function getDefaultServerUrl(): string {
 			typeof process !== "undefined" ? process.env.VITE_SERVER_URL : null,
 		) ??
 		(typeof window !== "undefined"
-			? normalizeServerUrl(window.location.origin)
+			? normalizeServerUrl(window.location?.origin)
 			: null) ??
 		"http://localhost:3000"
 	);

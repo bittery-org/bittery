@@ -4,15 +4,11 @@ import {
 	formatCardNumber,
 	getCardBrandDisplayName,
 } from "@bittery/shared/credit-card";
-import { Input, Label, TextField } from "heroui-native";
-import { Eye, EyeOff } from "lucide-react-native";
+import { Input } from "heroui-native";
 import { forwardRef, useImperativeHandle, useState } from "react";
-import { Pressable, Text, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { Text, View } from "react-native";
 import { useI18n } from "@/providers/i18n-provider";
-
-const StyledEye = withUniwind(Eye);
-const StyledEyeOff = withUniwind(EyeOff);
+import { FormField, SecretInput } from "./form-field";
 
 export interface CreditCardFormData {
 	cardholderName: string;
@@ -50,7 +46,7 @@ export const CreditCardForm = forwardRef<
 			? detectCardBrand(initialData.cardNumber)
 			: "",
 	);
-	const [showCvv, setShowCvv] = useState(false);
+	const [isCvvRevealed, setIsCvvRevealed] = useState(false);
 
 	useImperativeHandle(ref, () => ({
 		getData: () => ({
@@ -67,8 +63,7 @@ export const CreditCardForm = forwardRef<
 		const cleaned = value.replace(/\D/g, "");
 
 		if (cleaned.length >= 4) {
-			const brand = detectCardBrand(cleaned);
-			setDetectedCardBrand(brand);
+			setDetectedCardBrand(detectCardBrand(cleaned));
 		} else {
 			setDetectedCardBrand("");
 		}
@@ -85,31 +80,37 @@ export const CreditCardForm = forwardRef<
 	};
 
 	const handleCvvChange = (value: string) => {
-		const cleaned = value.replace(/\D/g, "");
-		setCvv(cleaned);
+		setCvv(value.replace(/\D/g, ""));
 	};
+
+	const brandDisplayName =
+		detectedCardBrand && detectedCardBrand !== "unknown"
+			? getCardBrandDisplayName(detectedCardBrand)
+			: null;
 
 	return (
 		<>
-			<TextField className="mb-4">
-				<Label>{m.mob_form_cc_cardholder_label()}</Label>
+			<FormField label={m.mob_form_cc_cardholder_label()}>
 				<Input
 					placeholder={m.mob_form_cc_cardholder_placeholder()}
 					value={cardholderName}
 					onChangeText={setCardholderName}
 					autoCapitalize="words"
 				/>
-			</TextField>
+			</FormField>
 
-			<TextField className="mb-4">
-				<View className="mb-2 flex-row items-center justify-between">
-					<Label>{m.mob_form_cc_number_label()}</Label>
-					{detectedCardBrand && detectedCardBrand !== "unknown" && (
-						<Text className="text-muted text-xs">
-							{getCardBrandDisplayName(detectedCardBrand)}
-						</Text>
-					)}
-				</View>
+			<FormField
+				label={m.mob_form_cc_number_label()}
+				labelAccessory={
+					brandDisplayName ? (
+						<View className="rounded-lg bg-default px-2 py-0.5">
+							<Text className="font-medium text-2xs text-muted">
+								{brandDisplayName}
+							</Text>
+						</View>
+					) : null
+				}
+			>
 				<Input
 					placeholder={m.mob_form_cc_number_placeholder()}
 					value={formatCardNumber(cardNumber, detectedCardBrand || undefined)}
@@ -118,11 +119,10 @@ export const CreditCardForm = forwardRef<
 					maxLength={23}
 					className="font-mono"
 				/>
-			</TextField>
+			</FormField>
 
-			<View className="mb-4 flex-row gap-2">
-				<TextField className="flex-1">
-					<Label>{m.mob_form_cc_expiry_label()}</Label>
+			<View className="flex-row gap-3">
+				<FormField label={m.mob_form_cc_expiry_label()} className="flex-1">
 					<Input
 						placeholder={m.mob_form_cc_expiry_placeholder()}
 						value={expiryDate}
@@ -131,36 +131,24 @@ export const CreditCardForm = forwardRef<
 						maxLength={5}
 						className="font-mono"
 					/>
-				</TextField>
+				</FormField>
 
-				<TextField className="flex-1">
-					<Label>{m.mob_form_cc_cvv_label()}</Label>
-					<View className="w-full flex-row items-center">
-						<Input
-							placeholder={m.mob_form_cc_cvv_placeholder()}
-							value={cvv}
-							onChangeText={handleCvvChange}
-							keyboardType="numeric"
-							secureTextEntry={!showCvv}
-							maxLength={detectedCardBrand === "amex" ? 4 : 3}
-							className="flex-1 pr-12 font-mono"
-						/>
-						<Pressable
-							onPress={() => setShowCvv(!showCvv)}
-							className="absolute right-4"
-						>
-							{showCvv ? (
-								<StyledEyeOff size={20} className="text-muted" />
-							) : (
-								<StyledEye size={20} className="text-muted" />
-							)}
-						</Pressable>
-					</View>
-				</TextField>
+				<FormField label={m.mob_form_cc_cvv_label()} className="flex-1">
+					<SecretInput
+						placeholder={m.mob_form_cc_cvv_placeholder()}
+						value={cvv}
+						onChangeText={handleCvvChange}
+						keyboardType="numeric"
+						maxLength={detectedCardBrand === "amex" ? 4 : 3}
+						isRevealed={isCvvRevealed}
+						onToggleReveal={() => setIsCvvRevealed(!isCvvRevealed)}
+						revealLabel={m.mob_form_cc_cvv_label()}
+						className="font-mono"
+					/>
+				</FormField>
 			</View>
 
-			<TextField className="mb-4">
-				<Label>{m.mob_form_cc_billing_label()}</Label>
+			<FormField label={m.mob_form_cc_billing_label()}>
 				<Input
 					placeholder={m.mob_form_cc_billing_placeholder()}
 					value={billingAddress}
@@ -168,9 +156,9 @@ export const CreditCardForm = forwardRef<
 					multiline
 					numberOfLines={2}
 					textAlignVertical="top"
-					style={{ minHeight: 60 }}
+					style={{ minHeight: 72 }}
 				/>
-			</TextField>
+			</FormField>
 		</>
 	);
 });

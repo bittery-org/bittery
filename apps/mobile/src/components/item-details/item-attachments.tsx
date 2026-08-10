@@ -7,30 +7,24 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as DocumentPicker from "expo-document-picker";
 import * as FileSystem from "expo-file-system";
 import * as Sharing from "expo-sharing";
-import { Button, Card, useToast } from "heroui-native";
-import {
-	Check,
-	Download,
-	File,
-	Loader2,
-	Paperclip,
-	Pencil,
-	Trash2,
-	X,
-} from "lucide-react-native";
+import { Input, PressableFeedback, TextField, useToast } from "heroui-native";
 import { useCallback, useState } from "react";
-import { ActivityIndicator, Alert, Text, TextInput, View } from "react-native";
-import { withUniwind } from "uniwind";
+import { ActivityIndicator, Alert, Text, View } from "react-native";
+import {
+	BrandButton,
+	IconCheck,
+	IconDownload,
+	IconFile,
+	IconPaperclip,
+	IconPencil,
+	IconTrash,
+	IconX,
+	iconSize,
+	ListCard,
+} from "@/components/ui";
 import { useI18n } from "@/providers/i18n-provider";
-
-const StyledFile = withUniwind(File);
-const StyledDownload = withUniwind(Download);
-const StyledTrash2 = withUniwind(Trash2);
-const StyledPaperclip = withUniwind(Paperclip);
-const StyledLoader2 = withUniwind(Loader2);
-const StyledPencil = withUniwind(Pencil);
-const StyledCheck = withUniwind(Check);
-const StyledX = withUniwind(X);
+import { DetailSection } from "./detail-section";
+import { RowAction } from "./field-row";
 
 interface ItemAttachmentsProps {
 	itemId: string;
@@ -154,88 +148,82 @@ function AttachmentRow({
 	}
 
 	return (
-		<Card variant="default" className="mb-2">
-			<Card.Body className="py-2">
-				<View className="flex-row items-center gap-3">
-					<StyledFile size={18} className="shrink-0 text-muted" />
-					<View className="flex-1">
-						{isEditing ? (
-							<View className="flex-row items-center gap-1">
-								<TextInput
-									value={editValue}
-									onChangeText={setEditValue}
-									className="flex-1 border-muted border-b pb-0.5 text-foreground text-sm"
-									autoFocus
-									editable={!isRenaming}
-									submitBehavior="submit"
-									onSubmitEditing={confirmRename}
-								/>
-								<Button
-									isIconOnly
-									size="sm"
-									variant="ghost"
-									onPress={confirmRename}
-									isDisabled={isRenaming}
-								>
-									{isRenaming ? (
-										<StyledLoader2
-											size={14}
-											className="animate-spin text-foreground"
-										/>
-									) : (
-										<StyledCheck size={14} className="text-foreground" />
-									)}
-								</Button>
-								<Button
-									isIconOnly
-									size="sm"
-									variant="ghost"
-									onPress={() => setIsEditing(false)}
-									isDisabled={isRenaming}
-								>
-									<StyledX size={14} className="text-foreground" />
-								</Button>
-							</View>
+		<View className="flex-row items-center gap-3 px-4 py-3">
+			<View className="h-10 w-10 items-center justify-center rounded-xl bg-field-background">
+				<IconFile size={iconSize.row} className="text-muted" />
+			</View>
+			<View className="min-w-0 flex-1">
+				{isEditing ? (
+					<View className="flex-row items-center gap-1">
+						<TextField className="flex-1">
+							<Input
+								value={editValue}
+								onChangeText={setEditValue}
+								autoFocus
+								editable={!isRenaming}
+								submitBehavior="submit"
+								onSubmitEditing={confirmRename}
+							/>
+						</TextField>
+						{isRenaming ? (
+							<ActivityIndicator size="small" />
 						) : (
-							<Text
-								className="font-medium text-foreground text-sm"
-								numberOfLines={1}
-							>
-								{displayName}
-							</Text>
+							<RowAction
+								icon={IconCheck}
+								accessibilityLabel={m.mob_attachments_toast_renamed()}
+								onPress={confirmRename}
+							/>
 						)}
-						<Text className="text-muted text-xs">
+						<RowAction
+							icon={IconX}
+							accessibilityLabel={m.mob_attachments_cancel()}
+							onPress={() => setIsEditing(false)}
+						/>
+					</View>
+				) : (
+					<>
+						<Text
+							numberOfLines={1}
+							className="font-medium text-base text-foreground"
+						>
+							{displayName}
+						</Text>
+						<Text className="mt-0.5 text-muted text-sm">
 							{formatBytes(attachment.fileSize)}
 						</Text>
-					</View>
-					<View className="flex-row items-center gap-1">
-						<Button
-							isIconOnly
-							size="sm"
-							variant="ghost"
-							onPress={() => onDownload(attachment)}
+					</>
+				)}
+			</View>
+			{isEditing ? null : (
+				<View className="flex-row items-center">
+					<RowAction
+						icon={IconDownload}
+						accessibilityLabel={m.mob_attachments_save_dialog_title({
+							fileName: displayName,
+						})}
+						onPress={() => onDownload(attachment)}
+					/>
+					{canEdit ? (
+						<RowAction
+							icon={IconPencil}
+							accessibilityLabel={m.mob_item_header_action_edit()}
+							onPress={startEdit}
+						/>
+					) : null}
+					{canEdit ? (
+						<PressableFeedback
+							onPress={() => onDelete(attachment.id)}
+							accessibilityRole="button"
+							accessibilityLabel={m.mob_attachments_delete_dialog_title()}
+							className="h-10 w-10 items-center justify-center rounded-full"
 						>
-							<StyledDownload size={18} className="text-foreground" />
-						</Button>
-						{canEdit && !isEditing && (
-							<Button isIconOnly size="sm" variant="ghost" onPress={startEdit}>
-								<StyledPencil size={18} className="text-foreground" />
-							</Button>
-						)}
-						{canEdit && (
-							<Button
-								isIconOnly
-								size="sm"
-								variant="ghost"
-								onPress={() => onDelete(attachment.id)}
-							>
-								<StyledTrash2 size={18} className="text-danger" />
-							</Button>
-						)}
-					</View>
+							<PressableFeedback.Highlight />
+							<IconTrash size={iconSize.row} className="text-danger" />
+						</PressableFeedback>
+					) : null}
 				</View>
-			</Card.Body>
-		</Card>
+			)}
+		</View>
 	);
 }
 
@@ -355,11 +343,14 @@ export function ItemAttachments({
 				if (canShare) {
 					await Sharing.shareAsync(tempFile.uri, {
 						mimeType: "application/octet-stream",
-						dialogTitle: `Save ${fileName}`,
+						dialogTitle: m.mob_attachments_save_dialog_title({ fileName }),
 						UTI: "public.data",
 					});
 				} else {
-					Alert.alert("Error", m.mob_attachments_sharing_not_available());
+					Alert.alert(
+						m.mob_common_error_title(),
+						m.mob_attachments_sharing_not_available(),
+					);
 				}
 			} catch {
 				toast.show({
@@ -375,9 +366,11 @@ export function ItemAttachments({
 		[
 			download,
 			toast,
+			m.mob_attachments_save_dialog_title,
 			m.mob_attachments_sharing_not_available,
 			m.mob_attachments_toast_download_failed,
 			m.mob_attachments_toast_download_failed_description,
+			m.mob_common_error_title,
 		],
 	);
 
@@ -426,91 +419,100 @@ export function ItemAttachments({
 		],
 	);
 
-	return (
-		<Card variant="default" className="mb-2">
-			<Card.Body className="py-3">
-				<View className="mb-2 flex-row items-center justify-between">
-					<Card.Description>
-						Attachments
-						{attachments.length > 0 ? ` (${attachments.length})` : ""}
-					</Card.Description>
-					{canEdit && (
-						<Button
-							size="sm"
-							variant="ghost"
-							onPress={handlePickFile}
-							isDisabled={isUploading || !!pendingAsset}
-						>
-							<StyledPaperclip size={14} className="text-foreground" />
-							<Text className="ml-1 text-foreground text-sm">Attach</Text>
-						</Button>
-					)}
-				</View>
+	const attachButton = canEdit ? (
+		<PressableFeedback
+			onPress={handlePickFile}
+			isDisabled={isUploading || !!pendingAsset}
+			accessibilityRole="button"
+			accessibilityLabel={m.mob_attachments_attach_button()}
+			className="h-8 flex-row items-center gap-1.5 rounded-full px-2"
+		>
+			<PressableFeedback.Highlight />
+			<IconPaperclip size={iconSize.chip} className="text-accent" />
+			<Text className="font-medium text-accent text-sm">
+				{m.mob_attachments_attach_button()}
+			</Text>
+		</PressableFeedback>
+	) : null;
 
-				{/* Name input shown after picking a file */}
-				{pendingAsset && (
-					<View className="mb-2 gap-2 rounded-md border border-muted p-2">
-						<Text className="text-muted text-xs">
-							Display name for{" "}
+	return (
+		<DetailSection
+			title={
+				attachments.length > 0
+					? m.mob_attachments_title_count({ count: String(attachments.length) })
+					: m.mob_attachments_title()
+			}
+			action={attachButton}
+		>
+			<ListCard>
+				{pendingAsset ? (
+					<View className="gap-3 p-4">
+						<Text className="text-muted text-sm">
+							{m.mob_attachments_display_name_label()}{" "}
 							<Text className="font-medium text-foreground">
 								{pendingAsset.name}
 							</Text>
 						</Text>
-						<TextInput
-							value={pendingName}
-							onChangeText={setPendingName}
-							className="rounded border border-muted px-2 py-1 text-foreground text-sm"
-							placeholder={pendingAsset.name}
-							editable={!isUploading}
-							submitBehavior="submit"
-							onSubmitEditing={handleConfirmUpload}
-						/>
+						<TextField>
+							<Input
+								value={pendingName}
+								onChangeText={setPendingName}
+								placeholder={pendingAsset.name}
+								editable={!isUploading}
+								submitBehavior="submit"
+								onSubmitEditing={handleConfirmUpload}
+							/>
+						</TextField>
 						<View className="flex-row gap-2">
-							<Button
-								size="sm"
+							<BrandButton
+								label={
+									isUploading
+										? m.mob_attachments_uploading()
+										: m.mob_attachments_upload_button()
+								}
 								onPress={handleConfirmUpload}
-								isDisabled={isUploading}
+								isLoading={isUploading}
+								fullWidth={false}
 								className="flex-1"
-							>
-								{isUploading ? (
-									<StyledLoader2
-										size={14}
-										className="mr-1 animate-spin text-foreground"
-									/>
-								) : null}
-								<Text className="text-sm">
-									{isUploading ? "Uploading..." : "Upload"}
-								</Text>
-							</Button>
-							<Button
-								size="sm"
-								variant="ghost"
+							/>
+							<PressableFeedback
 								onPress={() => {
 									setPendingAsset(null);
 									setPendingName("");
 								}}
 								isDisabled={isUploading}
+								accessibilityRole="button"
+								accessibilityLabel={m.mob_attachments_cancel()}
+								className="h-11 flex-1 items-center justify-center rounded-xl border border-border"
 							>
-								<Text className="text-sm">Cancel</Text>
-							</Button>
+								<PressableFeedback.Highlight />
+								<Text className="font-medium text-base text-foreground">
+									{m.mob_attachments_cancel()}
+								</Text>
+							</PressableFeedback>
 						</View>
 					</View>
-				)}
+				) : null}
 
-				{isLoading && (
-					<View className="flex-row items-center gap-2 py-2">
+				{isLoading ? (
+					<View className="flex-row items-center gap-2 px-4 py-4">
 						<ActivityIndicator size="small" />
-						<Text className="text-muted text-sm">Loading attachments...</Text>
+						<Text className="text-muted text-sm">
+							{m.mob_attachments_loading()}
+						</Text>
 					</View>
-				)}
+				) : null}
 
-				{!isLoading && attachments.length === 0 && (
-					<Text className="text-muted text-sm">No attachments.</Text>
-				)}
+				{!isLoading && attachments.length === 0 && !pendingAsset ? (
+					<View className="px-4 py-4">
+						<Text className="text-muted text-sm">
+							{m.mob_attachments_empty()}
+						</Text>
+					</View>
+				) : null}
 
-				{!isLoading && attachments.length > 0 && (
-					<View>
-						{attachments.map((attachment) => (
+				{!isLoading
+					? attachments.map((attachment) => (
 							<AttachmentRow
 								key={attachment.id}
 								attachment={attachment}
@@ -519,17 +521,18 @@ export function ItemAttachments({
 								canEdit={canEdit}
 								accountEmail={accountEmail}
 							/>
-						))}
-					</View>
-				)}
+						))
+					: null}
 
-				{isDownloading && (
-					<View className="mt-2 flex-row items-center gap-2">
+				{isDownloading ? (
+					<View className="flex-row items-center gap-2 px-4 py-3">
 						<ActivityIndicator size="small" />
-						<Text className="text-muted text-sm">Preparing download...</Text>
+						<Text className="text-muted text-sm">
+							{m.mob_attachments_preparing_download()}
+						</Text>
 					</View>
-				)}
-			</Card.Body>
-		</Card>
+				) : null}
+			</ListCard>
+		</DetailSection>
 	);
 }

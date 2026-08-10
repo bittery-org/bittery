@@ -2,9 +2,9 @@
 # Bootstraps a fresh git worktree so all checks can run:
 #   1. copies the gitignored env files (root .env, apps/*/.env, ...) from the
 #      main checkout, for each one missing here
-#   2. builds the generated @bittery/crypto-wasm workspace package (required
-#      before pnpm install can resolve the workspace)
-#   3. installs JS dependencies
+#   2. installs JS dependencies (the tracked WASM package manifest makes the
+#      workspace resolvable before generated bindings exist)
+#   3. builds @bittery/crypto-wasm when its generated binary is absent
 #   4. gives the worktree its own database, cloned from the dev one, so
 #      branches with diverging migrations don't share a schema
 set -euo pipefail
@@ -31,13 +31,11 @@ if [[ "$main_checkout" != "$PWD" ]]; then
 		-- ':(glob)**/.env' ':(glob)**/.env.*' ':(glob,exclude)**/node_modules/**')
 fi
 
-if [[ ! -f packages/crypto/wasm/package.json ]]; then
-	# build-wasm.sh installs wasm-pack itself when it is missing, so don't
-	# pre-empt that with our own hard failure.
-	(cd packages/crypto/core && ./build-wasm.sh)
-fi
-
 pnpm install --prefer-offline
+
+if [[ ! -f packages/crypto/wasm/generated/wasm-bindgen/index_bg.wasm ]]; then
+	packages/crypto/core/build-wasm.sh
+fi
 
 # ---------------------------------------------------------------------------
 # 4. Per-worktree database

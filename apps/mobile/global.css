@@ -2,14 +2,166 @@
 @import "uniwind";
 @import "heroui-native/styles";
 
-@source "./node_modules/heroui-native/lib";
+/*
+ * Bittery mobile theme — the native translation of packages/ui/src/tokens.css.
+ *
+ * HeroUI Native owns the variable names (background / surface / surface-secondary
+ * / surface-tertiary / overlay / accent / …); this file re-points every one of
+ * them at the Brand-Forward ladder so the app matches desktop, web and the
+ * extension. Read apps/mobile/DESIGN-NATIVE.md before changing a value here.
+ */
+
+@theme {
+	/* Base radius drives the whole heroui radius scale (sm 5 / md 7.5 / lg 10 / xl 15 / 2xl 20 / 3xl 30). */
+	--radius: 0.625rem;
+	--field-radius: calc(var(--radius) * 1.2);
+	--field-border-width: 1px;
+
+	/* Touch-density type scale. Desktop's 13px base is too tight for a phone. */
+	--text-2xs: 10px;
+	--text-2xs--line-height: 13px;
+	--text-xs: 11px;
+	--text-xs--line-height: 15px;
+	--text-sm: 13px;
+	--text-sm--line-height: 18px;
+	--text-base: 15px;
+	--text-base--line-height: 21px;
+	--text-lg: 17px;
+	--text-lg--line-height: 23px;
+	--text-xl: 20px;
+	--text-xl--line-height: 26px;
+	--text-2xl: 24px;
+	--text-2xl--line-height: 30px;
+	--text-3xl: 28px;
+	--text-3xl--line-height: 34px;
+	--text-4xl: 34px;
+	--text-4xl--line-height: 40px;
+}
 
 @layer theme {
-	@variant light {
-		--accent: oklch(0.6011 0.1834 290.4);
-	}
+	:root {
+		@variant light {
+			--background: oklch(0.985 0.003 286);
+			--foreground: oklch(0.185 0.012 285);
 
-	@variant dark {
-		--accent: oklch(0.6011 0.1834 290.4);
+			/* Elevation ladder: canvas → card → grouped-row → raised */
+			--surface: oklch(1 0 0);
+			--surface-foreground: oklch(0.185 0.012 285);
+			--surface-secondary: oklch(0.955 0.006 286);
+			--surface-secondary-foreground: oklch(0.25 0.015 285);
+			--surface-tertiary: oklch(0.93 0.008 287);
+			--surface-tertiary-foreground: oklch(0.25 0.015 285);
+
+			/* Sheets, dialogs, menus */
+			--overlay: oklch(1 0 0);
+			--overlay-foreground: oklch(0.185 0.012 285);
+			--backdrop: oklch(0.185 0.012 285 / 0.32);
+
+			--muted: oklch(0.5 0.013 286);
+
+			--default: oklch(0.955 0.006 286);
+			--default-foreground: oklch(0.25 0.015 285);
+
+			--accent: oklch(0.585 0.19 289);
+			--accent-foreground: oklch(0.985 0.005 288);
+			--accent-deep: oklch(0.5 0.2 292);
+			--selected: oklch(0.585 0.19 289 / 0.1);
+
+			--field-background: oklch(1 0 0);
+			--field-foreground: oklch(0.185 0.012 285);
+			--field-placeholder: oklch(0.5 0.013 286);
+			--field-border: oklch(0 0 0 / 0.1);
+
+			--success: oklch(0.55 0.14 160);
+			--success-foreground: oklch(0.985 0.005 288);
+			--warning: oklch(0.6 0.13 75);
+			--warning-foreground: oklch(0.985 0.005 288);
+			--danger: oklch(0.577 0.245 27.325);
+			--danger-foreground: oklch(0.985 0.005 288);
+			--info: oklch(0.55 0.12 230);
+			--info-foreground: oklch(0.985 0.005 288);
+
+			--segment: oklch(1 0 0);
+			--segment-foreground: oklch(0.185 0.012 285);
+
+			--border: oklch(0 0 0 / 0.08);
+			--border-strong: oklch(0 0 0 / 0.14);
+			--separator: oklch(0 0 0 / 0.08);
+			--focus: oklch(0.585 0.19 289);
+			--link: oklch(0.585 0.19 289);
+
+			--surface-shadow:
+				0 1px 2px 0 rgba(16, 12, 28, 0.05), 0 4px 12px 0 rgba(16, 12, 28, 0.04);
+			--overlay-shadow:
+				0 2px 8px 0 rgba(16, 12, 28, 0.06), 0 16px 40px 0 rgba(16, 12, 28, 0.1);
+			--field-shadow: 0 1px 2px 0 rgba(16, 12, 28, 0.04);
+		}
+
+		@variant dark {
+			--background: oklch(0.126 0.008 282);
+			--foreground: oklch(0.935 0.005 288);
+
+			--surface: oklch(0.172 0.013 283);
+			--surface-foreground: oklch(0.935 0.005 288);
+			--surface-secondary: oklch(0.196 0.015 284);
+			--surface-secondary-foreground: oklch(0.9 0.008 288);
+			--surface-tertiary: oklch(0.225 0.017 284);
+			--surface-tertiary-foreground: oklch(0.9 0.008 288);
+
+			--overlay: oklch(0.196 0.015 284);
+			--overlay-foreground: oklch(0.935 0.005 288);
+			--backdrop: oklch(0.08 0.006 282 / 0.6);
+
+			--muted: oklch(0.6 0.012 288);
+
+			--default: oklch(0.21 0.016 283);
+			--default-foreground: oklch(0.9 0.008 288);
+
+			--accent: oklch(0.7 0.165 288);
+			--accent-foreground: oklch(0.985 0.005 288);
+			--accent-deep: oklch(0.58 0.185 292);
+			--selected: oklch(0.7 0.165 288 / 0.1);
+
+			--field-background: oklch(0.148 0.011 283);
+			--field-foreground: oklch(0.935 0.005 288);
+			--field-placeholder: oklch(0.6 0.012 288);
+			--field-border: oklch(1 0 0 / 0.09);
+
+			--success: oklch(0.72 0.14 160);
+			--success-foreground: oklch(0.126 0.008 282);
+			--warning: oklch(0.78 0.13 75);
+			--warning-foreground: oklch(0.126 0.008 282);
+			--danger: oklch(0.68 0.18 22);
+			--danger-foreground: oklch(0.985 0.005 288);
+			--info: oklch(0.72 0.12 230);
+			--info-foreground: oklch(0.126 0.008 282);
+
+			--segment: oklch(0.225 0.017 284);
+			--segment-foreground: oklch(0.935 0.005 288);
+
+			--border: oklch(1 0 0 / 0.07);
+			--border-strong: oklch(1 0 0 / 0.11);
+			--separator: oklch(1 0 0 / 0.07);
+			--focus: oklch(0.7 0.165 288);
+			--link: oklch(0.7 0.165 288);
+
+			--surface-shadow: 0 0 0 0 transparent inset;
+			--overlay-shadow: 0 0 1px 0 rgba(255, 255, 255, 0.08) inset;
+			--field-shadow: 0 0 0 0 transparent inset;
+		}
 	}
+}
+
+/* Brand-Forward extras heroui has no slot for. */
+@theme inline {
+	--color-accent-deep: var(--accent-deep);
+	--color-selected: var(--selected);
+	--color-border-strong: var(--border-strong);
+	--color-info: var(--info);
+	--color-info-foreground: var(--info-foreground);
+	/* heroui ships accent/success/warning/danger-soft but no info-soft. */
+	--color-info-soft: color-mix(in oklab, var(--info) 15%, transparent);
+	--color-info-soft-foreground: var(--info);
+	/* heroui defines --backdrop but never maps it into the colour scale. */
+	--color-backdrop: var(--backdrop);
 }

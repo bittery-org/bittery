@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, mock } from "bun:test";
+import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import type { AccountStore, ItemCache } from "@bittery/storage";
@@ -18,6 +18,7 @@ import {
 } from "./travel-mode-enforcer";
 import { createVaultCrypto, type VaultCrypto } from "./vault-crypto";
 import { type BootstrapItemsClient, VaultRepository } from "./vault-repository";
+import { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
 
 const ACCOUNT_ID = "acc-1";
 /** `accountMetadata` derives this from the account id. */
@@ -217,6 +218,111 @@ describe("VaultRepository.hydrateFromServer", () => {
 	});
 });
 
+describe("VaultRepository hydration on a locked account", () => {
+	beforeEach(() => {
+		resetTravelModeEnforcerForTests();
+	});
+
+	/**
+	 * A locked account has no key to decrypt with, so hydrating it can only produce one
+	 * "Master Unlock Key not available" per cached item. It stays un-hydrated instead,
+	 * and the next hydrate after the unlock does the work.
+	 */
+	it("decrypts nothing and asks the server for nothing", async () => {
+		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup();
+		await itemCache.setCachedItems(
+			[await cachedItem("item_1", crypto, vaultCrypto)],
+			ACCOUNT_ID,
+		);
+		await storage.lockAllAccounts();
+		const client = createClient();
+
+		await repo.hydrate();
+		await repo.hydrateFromServer(client);
+
+		expect(repo.isHydrated()).toBe(false);
+		expect(repo.getAll()).toEqual([]);
+		expect(client.sync.bootstrapItems.query).not.toHaveBeenCalled();
+	});
+
+	/**
+	 * Sync does not stop at the lock, so every delta that arrives after it used to be one
+	 * more "Master Unlock Key not available" — a couple of hundred of them on a full
+	 * catch-up. The ciphertext still has to reach the cache, or the sync cursor would
+	 * advance past items nothing ever stored.
+	 */
+	it("caches a synced delta without decrypting it, and without logging", async () => {
+		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("item_1", crypto, vaultCrypto);
+		await storage.lockAllAccounts();
+		const logged = spyOn(console, "error").mockImplementation(() => {});
+		let loggedCalls = 0;
+
+		try {
+			await repo.upsertEncrypted(item, ACCOUNT_ID);
+			// Read before restoring: `mockRestore` also drops the recorded calls.
+			loggedCalls = logged.mock.calls.length;
+		} finally {
+			logged.mockRestore();
+		}
+
+		expect(loggedCalls).toBe(0);
+		expect(repo.getAll()).toEqual([]);
+		const cached = (await itemCache.getCachedItems(ACCOUNT_ID)) ?? [];
+		expect(cached.map((entry) => entry.id)).toEqual(["item_1"]);
+	});
+});
+
+describe("VaultRepositoryCoordinator follows the store's lock state", () => {
+	beforeEach(() => {
+		resetTravelModeEnforcerForTests();
+	});
+
+	/** The re-hydrate is detached from the lock event, so the state has to be polled. */
+	async function until(condition: () => boolean): Promise<void> {
+		for (let attempt = 0; attempt < 50; attempt++) {
+			if (condition()) return;
+			await new Promise((resolve) => setTimeout(resolve, 5));
+		}
+		throw new Error("condition never became true");
+	}
+
+	it("drops the decrypted items on lock and rebuilds them on unlock", async () => {
+		const { storage, itemCache, crypto } = await createLayers();
+		const vaultCrypto = createVaultCrypto({ crypto, storage });
+		await getTravelModeEnforcer(storage, itemCache).applyConfig(ACCOUNT_ID, {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		const coordinator = new VaultRepositoryCoordinator(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		await itemCache.setCachedItems(
+			[await cachedItem("item_1", crypto, vaultCrypto)],
+			ACCOUNT_ID,
+		);
+		const repo = coordinator.getRepositoryForAccount(ACCOUNT_ID);
+		await repo.hydrate();
+		expect(repo.getAll()).toHaveLength(1);
+
+		// No await between the lock and the assertion: plaintext must not outlive it.
+		await storage.lockAllAccounts();
+		expect(repo.getAll()).toEqual([]);
+		expect(repo.isHydrated()).toBe(false);
+
+		await storage.setMasterUnlockKey(
+			await crypto.importKey(new Uint8Array(32)),
+			ACCOUNT_ID,
+		);
+
+		await until(() => repo.isHydrated());
+		expect(repo.getAll()).toHaveLength(1);
+	});
+});
+
 /**
  * `packages/storage` proves `ItemCache` is O(1) in isolation; these prove the property
  * survives the path the app actually takes — through `VaultRepository`, which is what
@@ -276,5 +382,51 @@ describe("VaultRepository per-item persistence is O(1)", () => {
 		);
 
 		expect(recordPort.collections()).toEqual([`${ACCOUNT_ID}:items`]);
+	});
+});
+
+/**
+ * Sync applies one event at a time and only stores the cursor once the write returns,
+ * so a throw here replayed the same undecryptable item on every reconnect forever.
+ */
+describe("VaultRepository absorbs an undecryptable sync write", () => {
+	const UNOPENABLE = "bm90LWNpcGhlcnRleHQ=";
+
+	beforeEach(() => {
+		resetTravelModeEnforcerForTests();
+	});
+
+	it("caches the ciphertext and leaves the item unlisted", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+
+		await repo.upsertCachedItem(
+			{
+				...(await cachedItem("item_poison", crypto, vaultCrypto)),
+				encryptedData: UNOPENABLE,
+			},
+			ACCOUNT_ID,
+		);
+
+		const cached = (await itemCache.getCachedItems(ACCOUNT_ID)) ?? [];
+		expect(cached.map((item) => item.id)).toEqual(["item_poison"]);
+		expect(cached[0]?.encryptedData).toBe(UNOPENABLE);
+		expect(repo.getById("item_poison")).toBeUndefined();
+	});
+
+	// Stale plaintext carries a superseded `_encrypted` blob that a later favorite or
+	// delete write would persist back over the ciphertext sync just delivered.
+	it("evicts the previously decrypted copy of the item", async () => {
+		const { repo, crypto, vaultCrypto } = await setup();
+		const good = await cachedItem("item_1", crypto, vaultCrypto);
+
+		await repo.upsertCachedItem(good, ACCOUNT_ID);
+		expect(repo.getById("item_1")).toBeDefined();
+
+		await repo.upsertCachedItem(
+			{ ...good, version: 2, encryptedData: UNOPENABLE },
+			ACCOUNT_ID,
+		);
+
+		expect(repo.getById("item_1")).toBeUndefined();
 	});
 });

@@ -1,17 +1,5 @@
-/**
- * Web worker adapter conformance.
- *
- * The behavioural contract comes from the shared suite; this file only has to hand it a
- * fresh port backed by a faked `Worker` and a faked `@bittery/crypto-wasm`. The extra
- * tests below pin the facts that are *specific* to running crypto on another thread and
- * are therefore invisible to a suite that must stay platform-agnostic: that key material
- * never crosses `postMessage`, that a `KeyRef` is translated into a worker handle on the
- * way in and minted back on the way out, that `decryptMany` costs one round trip, that
- * concurrent calls are matched by id rather than by arrival order, that the worker boots
- * once, and that WASM's error vocabulary lands on the port's codes.
- */
-
 import { describe, expect, test } from "bun:test";
+import { CryptoError } from "@bittery/crypto-wasm";
 import type { KdfProfile } from "@bittery/types";
 import { CryptoPortError } from "../errors";
 import { runCryptoPortConformance } from "./port-conformance";
@@ -102,7 +90,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 		await port.encrypt("plain", key, null);
 
 		const [call] = doubles.worker.callsTo("encrypt");
-		expect(call?.args).toEqual(["plain", 1n, null]);
+		expect(call?.args).toEqual(["plain", { __bitteryWorkerKey: 0 }, null]);
 	});
 
 	test("a key nested inside an argument is translated too", async () => {
@@ -113,7 +101,16 @@ describe("wasm-worker adapter — the thread boundary", () => {
 		await port.decryptMany([{ id: "a", data, key, context: null }]);
 
 		const [call] = doubles.worker.callsTo("decryptMany");
-		expect(call?.args).toEqual([[{ id: "a", data, key: 1n, context: null }]]);
+		expect(call?.args).toEqual([
+			[
+				{
+					id: "a",
+					data,
+					key: { __bitteryWorkerKey: 0 },
+					context: null,
+				},
+			],
+		]);
 	});
 
 	test("a returned handle is minted into a distinct KeyRef", async () => {
@@ -129,7 +126,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 					(reply) => methodOf(doubles, reply.id) === "generateEncryptionKey",
 				)
 				.map((reply) => (reply.ok ? reply.value : null)),
-		).toEqual([1n, 2n]);
+		).toEqual([{ __bitteryWorkerKey: 0 }, { __bitteryWorkerKey: 1 }]);
 	});
 
 	test("no message carries key bytes except importKey's call and exportKey's answer", async () => {
@@ -204,7 +201,10 @@ describe("wasm-worker adapter — the thread boundary", () => {
 			);
 			expect(replies).toHaveLength(1);
 			expect(replies[0]).toMatchObject({ ok: true });
-			expect(replies[0]?.ok && typeof replies[0].value).toBe("bigint");
+			expect(replies[0]).toMatchObject({
+				ok: true,
+				value: { __bitteryWorkerKey: expect.any(Number) },
+			});
 		}
 
 		const compositeCall = doubles.worker.callsTo("decryptRsaWrappedKey")[0];
@@ -248,10 +248,6 @@ describe("wasm-worker adapter — the thread boundary", () => {
 });
 
 describe("wasm-worker adapter — the double itself", () => {
-	// The suite derives two keys and asserts they differ, which only samples this. The
-	// double's byte expansion once collapsed to 256 distinct outputs, so that assertion
-	// failed roughly one run in 256 — a flake that reads as a bug in the adapter. Pinning
-	// the property directly is what makes the whole suite's derivation tests trustworthy.
 	test("distinct derivations produce distinct keys, not one of 256", async () => {
 		const { port } = await makePort();
 		const derived = new Set<string>();
@@ -357,8 +353,6 @@ describe("wasm-worker adapter — failure", () => {
 		);
 	});
 
-	// The strings are `bittery_crypto_core::CryptoError`'s `Display` output verbatim, which
-	// is what a `JsError` from the binding actually carries.
 	test.each([
 		["Invalid or expired key handle", "invalid-key-ref"],
 		["Decryption failed: aead::Error", "decryption-failed"],
@@ -383,5 +377,41 @@ describe("wasm-worker adapter — failure", () => {
 		doubles.wasm.nextUuidFailure = new Error(message);
 
 		await expect(port.generateUuid()).rejects.toMatchObject({ code, message });
+	});
+
+	// The worker classifies before postMessage, so the tag has to survive as code and text.
+	test.each([
+		[
+			"Decryption",
+			() => new CryptoError.Decryption("decryption failed: aead::Error"),
+			"decryption-failed",
+			"CryptoError.Decryption: decryption failed: aead::Error",
+		],
+		[
+			"KeyDestroyed",
+			() => new CryptoError.KeyDestroyed(),
+			"key-destroyed",
+			"CryptoError.KeyDestroyed",
+		],
+		[
+			"InvalidIvLength",
+			() => new CryptoError.InvalidIvLength({ expected: 12n, actual: 16n }),
+			"invalid-input",
+			"CryptoError.InvalidIvLength: expected=12, actual=16",
+		],
+		[
+			"BackgroundTaskFailed",
+			() => new CryptoError.BackgroundTaskFailed(),
+			"backend-failure",
+			"CryptoError.BackgroundTaskFailed",
+		],
+	])("generated %s error becomes %s", async (_variant, build, code, message) => {
+		const { port, doubles } = await makePort();
+		doubles.wasm.nextUuidFailure = build();
+
+		await expect(port.generateUuid()).rejects.toMatchObject({
+			code,
+			message,
+		});
 	});
 });

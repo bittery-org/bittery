@@ -1,7 +1,13 @@
 {
 	"name": "@bittery/crypto-core",
 	"private": true,
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/bittery-org/bittery",
+		"directory": "packages/crypto/core"
+	},
 	"scripts": {
-		"test": "cargo test --manifest-path Cargo.toml -p bittery-crypto-core"
+		"test": "cargo test --manifest-path Cargo.toml --workspace",
+		"build:wasm": "./build-wasm.sh"
 	}
 }

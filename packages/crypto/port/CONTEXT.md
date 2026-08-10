@@ -10,7 +10,7 @@ adapter suite can and cannot establish.
                /        \
       AccountStore      CryptoPort            deep modules over a dumb, total seam
                \        /
-        PlatformPort   wasm-worker · wasm · tauri · expo
+        PlatformPort   wasm-worker · wasm · react-native
                               |
                          Rust crypto core      algorithms and formats
 ```
@@ -89,24 +89,22 @@ keeps both the decrypted private-key PEM and RSA-unwrapped symmetric key below t
 
 ---
 
-## 3. Four adapters, three key representations
+## 3. Three adapters, one generated-handle model
 
-The four production adapters and the in-memory fake share the same contract:
+The three production adapters and the in-memory fake share the same contract:
 
 | consumer | adapter | material behind a `KeyRef` |
 | --- | --- | --- |
-| web | `wasm-worker` | a WASM key-table handle in the crypto worker; the main thread holds only its own opaque token |
+| web and desktop | `wasm-worker` | a generated UniFFI `KeyHandle` in the crypto worker; the main thread holds only its own opaque token |
 | browser extension | `wasm` | a WASM key-table handle in the same JavaScript context |
-| desktop | `tauri` | a boxed `Uint8Array` in JavaScript, base64-marshalled over Tauri IPC and zeroized on destroy |
-| mobile | `expo` | a boxed `Uint8Array` in JavaScript, base64-marshalled to the native module and zeroized on destroy |
+| mobile | `react-native` | a generated UniFFI `KeyHandle` owned by the native module |
 | tests | `in-memory-crypto` | an in-process boxed value behind the same ref table; its cipher is deliberately not secure |
 
 On web, port arguments cross the main-thread/worker boundary as worker handles, not key
 bytes. When a Rust binding itself requires base64 key material, that conversion stays inside
-the worker. `decryptMany` is one worker round trip for the whole batch. The extension has no
-worker boundary: its ref maps directly to a handle in its same-context WASM table. Desktop
-and mobile have no native key table, so opacity prevents callers from reading a ref but does
-not move the backing bytes out of JavaScript.
+the worker. `decryptMany` is one worker round trip for the whole batch. Desktop uses the same
+worker adapter. The extension has no worker boundary: its ref maps directly to a handle in its
+same-context WASM table. Mobile passes only generated handles through its native module.
 
 ---
 
@@ -133,7 +131,7 @@ to export MUKs.
 
 ## 5. What adapter conformance establishes
 
-`src/adapters/port-conformance.ts` is one suite body run against all four adapters and the
+`src/adapters/port-conformance.ts` is one suite body run against all three adapters and the
 in-memory fake. Two rules are load-bearing:
 
 1. **No platform import.** The shared suite sees only `CryptoPort`; importing Worker, WASM,
@@ -144,12 +142,13 @@ in-memory fake. Two rules are load-bearing:
 The suite pins what the TypeScript layer owns: member totality, argument and result
 marshalling, base64 boundaries, `KeyRef` identity and lifetime, error-code translation, batch
 ordering and isolation, and observable call composition. Each production adapter runs those
-checks over a doubled backend; the fake is the fifth subject.
+checks over a doubled backend; the fake is the fourth subject.
 
 ## 6. What conformance does not prove
 
-No real production backend loads under `bun:test`: web WASM is built for the browser, Expo
-requires its native module, and desktop requires Tauri IPC. A green adapter suite can
+No real production backend loads under `bun:test`: web and desktop use browser-built WASM,
+React Native requires its generated native module, and the extension requires its MV3 runtime.
+A green adapter suite can
 therefore miss a defect shared by an adapter and its double. It does not prove an algorithm,
 the bytes of a ciphertext, native linking, backend startup and teardown, performance, or
 cross-platform interoperability. Those belong to Rust tests and format vectors, native

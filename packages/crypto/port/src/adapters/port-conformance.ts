@@ -117,6 +117,10 @@ const CONTEXT = {
 	userId: "user-1",
 } as const;
 
+function itemContext(itemId: string): ItemData["context"] {
+	return { ...CONTEXT, entityId: itemId };
+}
+
 const UUID_V4 =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -521,6 +525,18 @@ export function runCryptoPortConformance(
 			expect([...(await port.exportKey(legacyRestored))]).toEqual([
 				...AWKWARD_KEY_BYTES,
 			]);
+
+			await expectPortError(
+				() =>
+					port.unwrapKey(legacy, wrappingKey, {
+						context: null,
+						legacyEnvelope: {
+							marker: "wrong-marker",
+							context: "legacy-context",
+						},
+					}),
+				"invalid-input",
+			);
 		});
 
 		test("wrapping a destroyed key throws", async () => {
@@ -1010,7 +1026,44 @@ export function runCryptoPortConformance(
 			});
 		});
 
-		test("reEncryptItem moves an item from the old key to the new key", async () => {
+		test("reEncryptItem keeps a bound item bound to the same context", async () => {
+			const port = await make();
+			const oldKey = await port.generateEncryptionKey();
+			const newKey = await port.generateEncryptionKey();
+			const sealed = await port.encrypt(
+				UNICODE_PLAINTEXT,
+				oldKey,
+				itemContext("item-7"),
+			);
+
+			const reEncrypted = await port.reEncryptItem(
+				{
+					id: "item-7",
+					encryptedData: sealed.ciphertext,
+					encryptionIv: sealed.iv,
+					encryptionAlgorithm: sealed.algorithm,
+					context: itemContext("item-7"),
+				},
+				oldKey,
+				newKey,
+			);
+
+			const rotated = {
+				ciphertext: reEncrypted.encryptedData,
+				iv: reEncrypted.encryptionIv,
+				algorithm: sealed.algorithm,
+			};
+			expect(reEncrypted.itemId).toBe("item-7");
+			expect(await port.decrypt(rotated, newKey, itemContext("item-7"))).toBe(
+				UNICODE_PLAINTEXT,
+			);
+			await expectPortError(() => port.decrypt(rotated, newKey, null));
+			await expectPortError(() =>
+				port.decrypt(rotated, newKey, itemContext("item-8")),
+			);
+		});
+
+		test("reEncryptItem leaves an unbound item unbound", async () => {
 			const port = await make();
 			const oldKey = await port.generateEncryptionKey();
 			const newKey = await port.generateEncryptionKey();
@@ -1022,23 +1075,21 @@ export function runCryptoPortConformance(
 					encryptedData: sealed.ciphertext,
 					encryptionIv: sealed.iv,
 					encryptionAlgorithm: sealed.algorithm,
+					context: itemContext("item-7"),
 				},
 				oldKey,
 				newKey,
 			);
 
-			expect(reEncrypted.itemId).toBe("item-7");
-			expect(
-				await port.decrypt(
-					{
-						ciphertext: reEncrypted.encryptedData,
-						iv: reEncrypted.encryptionIv,
-						algorithm: sealed.algorithm,
-					},
-					newKey,
-					null,
-				),
-			).toBe(UNICODE_PLAINTEXT);
+			const rotated = {
+				ciphertext: reEncrypted.encryptedData,
+				iv: reEncrypted.encryptionIv,
+				algorithm: sealed.algorithm,
+			};
+			expect(await port.decrypt(rotated, newKey, null)).toBe(UNICODE_PLAINTEXT);
+			await expectPortError(() =>
+				port.decrypt(rotated, newKey, itemContext("item-7")),
+			);
 		});
 
 		test("reEncryptItem rejects an item the old key cannot open", async () => {
@@ -1055,6 +1106,7 @@ export function runCryptoPortConformance(
 						encryptedData: sealed.ciphertext,
 						encryptionIv: sealed.iv,
 						encryptionAlgorithm: sealed.algorithm,
+						context: itemContext("item-7"),
 					},
 					oldKey,
 					newKey,
@@ -1095,12 +1147,17 @@ export function runCryptoPortConformance(
 			const member = await port.generateRsaKeyPair();
 			const items: ItemData[] = [];
 			for (const id of ["item-a", "item-b"]) {
-				const sealed = await port.encrypt(`plain-${id}`, oldVaultKey, null);
+				const sealed = await port.encrypt(
+					`plain-${id}`,
+					oldVaultKey,
+					itemContext(id),
+				);
 				items.push({
 					id,
 					encryptedData: sealed.ciphertext,
 					encryptionIv: sealed.iv,
 					encryptionAlgorithm: sealed.algorithm,
+					context: itemContext(id),
 				});
 			}
 
@@ -1141,7 +1198,11 @@ export function runCryptoPortConformance(
 			const oldVaultKey = await port.generateEncryptionKey();
 			const muk = await port.generateEncryptionKey();
 			const member = await port.generateRsaKeyPair();
-			const sealed = await port.encrypt(UNICODE_PLAINTEXT, oldVaultKey, null);
+			const sealed = await port.encrypt(
+				UNICODE_PLAINTEXT,
+				oldVaultKey,
+				itemContext("item-a"),
+			);
 
 			const result = await port.performKeyRotation(
 				oldVaultKey,
@@ -1152,6 +1213,7 @@ export function runCryptoPortConformance(
 						encryptedData: sealed.ciphertext,
 						encryptionIv: sealed.iv,
 						encryptionAlgorithm: sealed.algorithm,
+						context: itemContext("item-a"),
 					},
 				],
 				"vault-9",
@@ -1178,7 +1240,7 @@ export function runCryptoPortConformance(
 						algorithm: sealed.algorithm,
 					},
 					newVaultKey,
-					null,
+					itemContext("item-a"),
 				),
 			).toBe(UNICODE_PLAINTEXT);
 		});
