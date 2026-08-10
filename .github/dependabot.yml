@@ -46,15 +46,18 @@ updates:
       - dependency-name: react-dom
         update-types: ["version-update:semver-major"]
 
-  # One block for every Rust root in the repo — deliberately not one block per
-  # root.
+  # One block for every independently maintained Rust root in the repo —
+  # deliberately not one block per root.
   #
-  # There are four independent cargo resolution roots, each with its own
-  # Cargo.lock: /apps/server, /apps/desktop/src-tauri, /packages/crypto/napi and
-  # the workspace at /packages/crypto/core. The first three are *not* members of
-  # that workspace; they reach bittery-crypto-core through a path dependency,
-  # and bittery-crypto-core takes every crypto version from
+  # There are three independent cargo resolution roots, each with its own
+  # Cargo.lock: /apps/server, /apps/desktop/src-tauri and the workspace at
+  # /packages/crypto/core. The first two are *not* members of that workspace;
+  # they reach bittery-crypto-core through a path dependency, and
+  # bittery-crypto-core takes every crypto version from
   # `[workspace.dependencies]` in packages/crypto/core/Cargo.toml.
+  # /packages/crypto/wasm/crate is generator-owned and its runtime dependency
+  # is pinned through the npm UniFFI generator, so it is regenerated rather than
+  # updated independently by Dependabot.
   #
   # So a block per root had all of them proposing the same edit to that one
   # shared manifest. hmac 0.12 -> 0.13 was raised three times (#96, #95, #89)
@@ -64,24 +67,20 @@ updates:
   # the `crypto` and `server` jobs too, so failures never pointed at the PR that
   # caused them.
   #
-  # `directories` puts all four roots behind one block: the shared manifest is
+  # `directories` puts all three roots behind one block: the shared manifest is
   # edited once and every affected lockfile moves with it, in one PR.
   - package-ecosystem: cargo
     directories:
       - "/apps/server"
       - "/apps/desktop/src-tauri"
       - "/packages/crypto/core"
-      # Previously uncovered. It is a fourth cargo root with its own lockfile
-      # and the same path dependency on bittery-crypto-core, so leaving it out
-      # let it drift behind the other three.
-      - "/packages/crypto/napi"
     schedule:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
     # Dependabot has no per-group labels, so the crypto review signal has to be
     # carried by the whole block rather than by the crypto group alone. That is
-    # the safe direction here: all four roots link bittery-crypto-core, so any
+    # the safe direction here: all three roots link bittery-crypto-core, so any
     # cargo PR can move crypto code. Over-labelling a tauri bump costs a glance;
     # letting an aes-gcm bump through unflagged does not.
     # The old per-root `server` / `desktop` labels are gone because a PR now

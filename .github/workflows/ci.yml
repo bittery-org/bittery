@@ -87,6 +87,7 @@ jobs:
           echo "crypto tests: ${elapsed}s" >> "$GITHUB_STEP_SUMMARY"
 
   crypto-bindings:
+    name: crypto-bindings-${{ matrix.binding }}
     if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
