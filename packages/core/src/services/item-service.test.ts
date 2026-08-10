@@ -7,6 +7,10 @@ import {
 	encryptAttachmentParts,
 } from "./attachment-crypto";
 import { ItemService } from "./item-service";
+import {
+	getTravelModeEnforcer,
+	resetTravelModeEnforcerForTests,
+} from "./travel-mode-enforcer";
 import { createVaultCrypto } from "./vault-crypto";
 
 interface TestAccount {
@@ -27,6 +31,10 @@ async function createFixture(
 		Array<{ vaultId: string; encryptedVaultKey: string }>
 	>();
 	let vaultKeyReads = 0;
+	const travelModeByAccount = new Map<
+		string,
+		{ enabled: boolean; hiddenVaultIds: string[] }
+	>();
 	const storage = {
 		getActiveAccount: async () => accounts[0]?.accountId ?? null,
 		getAccountsList: async () =>
@@ -59,6 +67,14 @@ async function createFixture(
 		},
 		getActiveAccountUserId: async () => accounts[0]?.userId ?? null,
 		getPinnedKdfProfile: async () => null,
+		getTravelModeCache: async (accountId?: string) =>
+			travelModeByAccount.get(accountId ?? "") ?? null,
+		storeTravelModeCache: async (
+			config: { enabled: boolean; hiddenVaultIds: string[] },
+			accountId?: string,
+		) => {
+			travelModeByAccount.set(accountId ?? "", config);
+		},
 	} as never;
 	const vaultCrypto = createVaultCrypto({ crypto, storage });
 
@@ -127,6 +143,104 @@ const TARGET = {
 };
 
 describe("ItemService", () => {
+	test("consumes active attachment arrays and accepts trashed items without attachments", async () => {
+		resetTravelModeEnforcerForTests();
+		const fixture = await createFixture([SOURCE]);
+		const vaultKey = await fixture.vaultCrypto.getVaultKey({
+			vaultId: "vault_source",
+			accountId: SOURCE.accountId,
+			userId: SOURCE.userId,
+		});
+		if (!vaultKey) throw new Error("Missing test vault key");
+		const activeEncrypted = await fixture.vaultCrypto.encryptItem(
+			JSON.stringify({ title: "Active item" }),
+			vaultKey,
+			{
+				vaultId: "vault_source",
+				itemId: "active-item",
+				version: 1,
+				userId: SOURCE.userId,
+			},
+		);
+		const trashedEncrypted = await fixture.vaultCrypto.encryptItem(
+			JSON.stringify({ title: "Trashed item" }),
+			vaultKey,
+			{
+				vaultId: "vault_source",
+				itemId: "trashed-item",
+				version: 1,
+				userId: SOURCE.userId,
+			},
+		);
+		await fixture.crypto.destroyKey(vaultKey);
+
+		const itemCache = {
+			getCachedItems: async () => null,
+			getCachedVaults: async () => null,
+		};
+		const trashedWireItem = {
+			id: "trashed-item",
+			vaultId: "vault_source",
+			category: "login",
+			favorite: false,
+			encryptedData: trashedEncrypted.ciphertext,
+			encryptionIv: trashedEncrypted.iv,
+			encryptionAlgorithm: trashedEncrypted.algorithm,
+			version: 1,
+			lastModifiedBy: SOURCE.userId,
+			createdAt: "2026-08-10T00:00:00Z",
+			updatedAt: "2026-08-10T00:00:00Z",
+			deletedAt: "2026-08-10T01:00:00Z",
+			vault: {
+				id: "vault_source",
+				name: "Personal",
+				vaultType: "personal",
+			},
+		};
+		const apiClient = {
+			items: {
+				listInVault: async () => ({
+					data: [
+						{
+							id: "active-item",
+							vaultId: "vault_source",
+							category: "login",
+							favorite: false,
+							encryptedData: activeEncrypted.ciphertext,
+							encryptionIv: activeEncrypted.iv,
+							encryptionAlgorithm: activeEncrypted.algorithm,
+							version: 1,
+							lastModifiedBy: SOURCE.userId,
+							createdAt: "2026-08-10T00:00:00Z",
+							updatedAt: "2026-08-10T00:00:00Z",
+							attachments: [{ id: "attachment-1" }],
+						},
+					],
+				}),
+				listTrashed: async () => ({ data: [trashedWireItem] }),
+			},
+		};
+		const service = fixture.service(() => apiClient, itemCache);
+		await getTravelModeEnforcer(
+			fixture.storage,
+			itemCache as never,
+		).applyConfig(SOURCE.accountId, { enabled: false, hiddenVaultIds: [] });
+		const account = {
+			...SOURCE,
+			name: "Alice",
+			authToken: "token",
+			serverUrl: "https://api.example.test",
+			apiClient,
+		} as never;
+
+		const active = await service.fetchVaultItems("vault_source", [account]);
+		const trashed = await service.fetchDeletedItems([account]);
+
+		expect(active[0]?.title).toBe("Active item");
+		expect(trashed[0]?.title).toBe("Trashed item");
+		expect("attachments" in trashedWireItem).toBe(false);
+	});
+
 	test("never reads vault keys when the account scope cannot be resolved", async () => {
 		const fixture = await createFixture([SOURCE]);
 		const service = fixture.service(() => ({}));

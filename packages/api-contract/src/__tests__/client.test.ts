@@ -429,9 +429,12 @@ describe("Bittery API facade", () => {
 				const cursor = new URL(request.url).searchParams.get("cursor");
 				return Response.json(
 					cursor
-						? { items: [{ id: "item-2" }], hasMore: false }
+						? {
+								items: [{ id: "item-2", attachments: [] }],
+								hasMore: false,
+							}
 						: {
-								items: [{ id: "item-1" }],
+								items: [{ id: "item-1", attachments: [] }],
 								hasMore: true,
 								nextCursor: "cursor-2",
 							},
@@ -442,10 +445,48 @@ describe("Bittery API facade", () => {
 		const result = await client.items.list();
 
 		expect(result.data.map((item) => item.id)).toEqual(["item-1", "item-2"]);
+		expect(result.data.every((item) => Array.isArray(item.attachments))).toBe(
+			true,
+		);
 		expect(requests.map((request) => request.url)).toEqual([
 			"https://api.example.test/api/v1/items",
 			"https://api.example.test/api/v1/items?cursor=cursor-2",
 		]);
+	});
+
+	test("requires active attachment arrays while allowing trashed items to omit them", async () => {
+		let includeActiveAttachments = true;
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async (request) =>
+				Response.json({
+					items: [
+						request.url.endsWith("/trashed")
+							? { id: "trashed-item" }
+							: {
+									id: "active-item",
+									...(includeActiveAttachments ? { attachments: [] } : {}),
+								},
+					],
+					hasMore: false,
+				}),
+		});
+
+		const active = await client.items.list();
+		const trashed = await client.items.listTrashed();
+		expect(active.data[0]?.attachments).toEqual([]);
+		expect("attachments" in (trashed.data[0] ?? {})).toBe(false);
+
+		includeActiveAttachments = false;
+		expect(client.items.list()).rejects.toThrow(
+			"attachments must be an array for an active item",
+		);
 	});
 
 	test("rejects malformed collection continuation metadata", async () => {

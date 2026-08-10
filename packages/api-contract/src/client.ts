@@ -724,6 +724,28 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		};
 	}
 
+	type WireActiveItem = Omit<VaultItem, "attachments"> & {
+		attachments?: readonly Attachment[] | null;
+	};
+
+	async function drainActiveItems(
+		path: string,
+		request?: ApiTransportRequest,
+	): Promise<ApiResult<readonly VaultItem[]>> {
+		const result = await drainPages<WireActiveItem>(path, request);
+		return {
+			...result,
+			data: result.data.map((item, index) => {
+				if (!Array.isArray(item.attachments)) {
+					throw new TypeError(
+						`${path}/items/${index}/attachments must be an array for an active item.`,
+					);
+				}
+				return { ...item, attachments: item.attachments };
+			}),
+		};
+	}
+
 	async function getMetadata(): Promise<ApiMeta> {
 		const result = await transport.getApiMetadata();
 		return parseApiMeta(result.data);
@@ -898,10 +920,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			},
 		},
 		items: {
-			list: () => drainPages<VaultItem>("/api/v1/items"),
+			list: () => drainActiveItems("/api/v1/items"),
 			listTrashed: () => drainPages<DeletedVaultItem>("/api/v1/items/trashed"),
 			listInVault: (vaultId, page) =>
-				drainPages<VaultItem>("/api/v1/vaults/{vaultId}/items", {
+				drainActiveItems("/api/v1/vaults/{vaultId}/items", {
 					params: { path: { vaultId }, query: page },
 				}),
 			listTrashedInVault: (vaultId, page) =>

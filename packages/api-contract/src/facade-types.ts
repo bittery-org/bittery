@@ -88,7 +88,10 @@ export type ConvertVaultResponse = Schema<"ConvertVaultTypeResponse">;
 export type BulkImportInput = Schema<"BulkImportBody">;
 export type BulkImportResponse = Schema<"BulkImportItemsResponse">;
 
-export type VaultItem = Schema<"AllItemsResponse">["items"][number];
+type WireVaultItem = Schema<"AllItemsResponse">["items"][number];
+export type VaultItem = Omit<WireVaultItem, "attachments"> & {
+	attachments: readonly Attachment[];
+};
 export type VaultItemDetails = Schema<"VaultItemDetailsResponse">;
 export type DeletedVaultItem = Schema<"DeletedVaultItemWithVaultResponse">;
 export type CreateItemInput = Schema<"CreateItemBody">;
