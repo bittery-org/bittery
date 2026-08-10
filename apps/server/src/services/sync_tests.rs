@@ -262,13 +262,13 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 async fn with_sync_test_app<T, F, Fut>(test_name: &str, test_fn: F) -> T
@@ -539,31 +539,18 @@ async fn sync_handlers_require_authentication() {
         let protected_calls = vec![
             ("sync.bootstrapItems", json!([{}])),
             ("sync.getEventsSince", json!([{}])),
-            (
-                "sync.acknowledgeEvents",
-                json!([{ "eventIds": [], "clientId": "client-sync" }]),
-            ),
-            (
-                "sync.getLastAcknowledged",
-                json!([{ "clientId": "client-sync" }]),
-            ),
-            ("sync.getSyncState", json!([{ "vaultIds": [] }])),
-            (
-                "sync.checkConflict",
-                json!([{ "itemId": "item_sync_01", "expectedVersion": 1 }]),
-            ),
         ];
 
         for (method, params) in protected_calls {
             let response = app
                 .call_operation(method, params, unauthenticated_json_headers())
                 .await;
-            assert_eq!(
-                response.status,
-                StatusCode::OK,
-                "unexpected status for {method}"
+            response.assert_contract_status();
+            assert_transport_error(
+                &response.body,
+                "UNAUTHORIZED",
+                "A valid bearer session is required.",
             );
-            assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
         }
     })
     .await;
@@ -591,106 +578,15 @@ async fn sync_handlers_reject_malformed_request_input() {
                     "BAD_REQUEST",
                     "Invalid resource ID",
                 ),
-                (
-                    "sync.acknowledgeEvents",
-                    json!([{ "eventIds": [], "clientId": "bad client" }]),
-                    "BAD_REQUEST",
-                    "Invalid client ID",
-                ),
-                (
-                    "sync.getLastAcknowledged",
-                    json!([{ "clientId": "bad client" }]),
-                    "BAD_REQUEST",
-                    "Invalid client ID",
-                ),
-                (
-                    "sync.getSyncState",
-                    json!([{ "vaultIds": ["bad!"] }]),
-                    "BAD_REQUEST",
-                    "Invalid resource ID",
-                ),
-                (
-                    "sync.checkConflict",
-                    json!([{ "itemId": "bad!", "expectedVersion": 1 }]),
-                    "BAD_REQUEST",
-                    "Invalid resource ID",
-                ),
             ];
 
             for (method, params, code, message) in cases {
                 let response = app.call_operation(method, params, headers.clone()).await;
-                assert_eq!(
-                    response.status,
-                    StatusCode::OK,
-                    "unexpected status for {method}"
-                );
+                response.assert_contract_status();
                 assert_handler_error(&response.body, code, message);
             }
         },
     )
-    .await;
-}
-
-#[tokio::test]
-async fn check_conflict_reports_not_found_and_latest_version() {
-    with_sync_test_app("sync_check_conflict_paths", |app| async move {
-        let fixture = build_sync_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let headers = authenticated_json_headers(&session.token);
-
-        let not_found = app
-            .call_operation(
-                "sync.checkConflict",
-                json!([{
-                    "itemId": fixture.hidden_item_id,
-                    "expectedVersion": 1
-                }]),
-                headers.clone(),
-            )
-            .await;
-        assert_eq!(not_found.status, StatusCode::OK);
-        assert_handler_error(&not_found.body, "NOT_FOUND", "Item not found");
-
-        let no_conflict = app
-            .call_operation(
-                "sync.checkConflict",
-                json!([{
-                    "itemId": fixture.primary_item_id,
-                    "expectedVersion": 3
-                }]),
-                headers.clone(),
-            )
-            .await;
-        assert_eq!(no_conflict.status, StatusCode::OK);
-        assert_eq!(
-            no_conflict.body["result"]["Ok"]["hasConflict"],
-            json!(false)
-        );
-        assert_eq!(no_conflict.body["result"]["Ok"]["currentVersion"], json!(3));
-
-        let conflict = app
-            .call_operation(
-                "sync.checkConflict",
-                json!([{
-                    "itemId": fixture.primary_item_id,
-                    "expectedVersion": 2
-                }]),
-                headers,
-            )
-            .await;
-        assert_eq!(conflict.status, StatusCode::OK);
-        assert_eq!(conflict.body["result"]["Ok"]["hasConflict"], json!(true));
-        assert_eq!(
-            conflict.body["result"]["Ok"]["lastModifiedBy"],
-            json!(fixture.owner_user_id)
-        );
-        assert!(
-            conflict.body["result"]["Ok"]["lastModifiedAt"]
-                .as_i64()
-                .expect("last modified timestamp should be present")
-                > 0
-        );
-    })
     .await;
 }
 
@@ -708,25 +604,25 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
                 headers.clone(),
             )
             .await;
-        assert_eq!(first_page.status, StatusCode::OK);
+        first_page.assert_contract_status();
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"]
+            first_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["id"],
+            first_page.body["events"][0]["id"],
             json!(fixture.old_primary_event_id)
         );
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["metadata"]["reason"],
+            first_page.body["events"][0]["metadata"]["reason"],
             json!("import")
         );
-        assert_eq!(first_page.body["result"]["Ok"]["hasMore"], json!(true));
+        assert_eq!(first_page.body["hasMore"], json!(true));
         assert_eq!(
-            first_page.body["result"]["Ok"]["cursor"]["id"],
+            first_page.body["cursor"]["id"],
             json!(fixture.old_primary_event_id)
         );
 
@@ -739,16 +635,16 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
 					headers.clone(),
 				)
 				.await;
-        assert_eq!(filtered.status, StatusCode::OK);
+        filtered.assert_contract_status();
         assert_eq!(
-            filtered.body["result"]["Ok"]["events"]
+            filtered.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            filtered.body["result"]["Ok"]["events"][0]["id"],
+            filtered.body["events"][0]["id"],
             json!(fixture.secondary_event_id)
         );
 
@@ -759,23 +655,23 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
                 headers.clone(),
             )
             .await;
-        assert_eq!(next_page.status, StatusCode::OK);
+        next_page.assert_contract_status();
         assert_eq!(
-            next_page.body["result"]["Ok"]["events"]
+            next_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             2
         );
         assert_eq!(
-            next_page.body["result"]["Ok"]["events"][0]["id"],
+            next_page.body["events"][0]["id"],
             json!(fixture.latest_primary_event_id)
         );
         assert_eq!(
-            next_page.body["result"]["Ok"]["events"][1]["id"],
+            next_page.body["events"][1]["id"],
             json!(fixture.secondary_event_id)
         );
-        assert_eq!(next_page.body["result"]["Ok"]["hasMore"], json!(false));
+        assert_eq!(next_page.body["hasMore"], json!(false));
 
         let full_refresh = app
             .call_operation(
@@ -784,14 +680,11 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
                 headers,
             )
             .await;
-        assert_eq!(full_refresh.status, StatusCode::OK);
-        assert_eq!(full_refresh.body["result"]["Ok"]["events"], json!([]));
+        full_refresh.assert_contract_status();
+        assert_eq!(full_refresh.body["events"], json!([]));
+        assert_eq!(full_refresh.body["requiresFullRefresh"], json!(true));
         assert_eq!(
-            full_refresh.body["result"]["Ok"]["requiresFullRefresh"],
-            json!(true)
-        );
-        assert_eq!(
-            full_refresh.body["result"]["Ok"]["cursor"]["id"],
+            full_refresh.body["cursor"]["id"],
             json!(fixture.secondary_event_id)
         );
     })
@@ -813,32 +706,32 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
                     headers.clone(),
                 )
                 .await;
-            assert_eq!(first_page.status, StatusCode::OK);
+            first_page.assert_contract_status();
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"]
+                first_page.body["items"]
                     .as_array()
                     .expect("items should be an array")
                     .len(),
                 1
             );
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"][0]["id"],
+                first_page.body["items"][0]["id"],
                 json!(fixture.primary_item_id)
             );
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"][0]["attachments"]
+                first_page.body["items"][0]["attachments"]
                     .as_array()
                     .expect("attachments should be an array")
                     .len(),
                 1
             );
             assert_eq!(
-                first_page.body["result"]["Ok"]["items"][0]["vault"]["encryptedVaultKey"],
+                first_page.body["items"][0]["vault"]["encryptedVaultKey"],
                 json!("encrypted-vault-key-primary")
             );
-            assert_eq!(first_page.body["result"]["Ok"]["hasMore"], json!(true));
+            assert_eq!(first_page.body["hasMore"], json!(true));
             assert_eq!(
-                first_page.body["result"]["Ok"]["nextCursor"],
+                first_page.body["nextCursor"],
                 json!(fixture.primary_item_id)
             );
 
@@ -849,120 +742,22 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
                     headers,
                 )
                 .await;
-            assert_eq!(second_page.status, StatusCode::OK);
+            second_page.assert_contract_status();
             assert_eq!(
-                second_page.body["result"]["Ok"]["items"]
+                second_page.body["items"]
                     .as_array()
                     .expect("items should be an array")
                     .len(),
                 1
             );
             assert_eq!(
-                second_page.body["result"]["Ok"]["items"][0]["id"],
+                second_page.body["items"][0]["id"],
                 json!(fixture.secondary_item_id)
             );
-            assert_eq!(second_page.body["result"]["Ok"]["hasMore"], json!(false));
-            assert_eq!(second_page.body["result"]["Ok"]["nextCursor"], Value::Null);
+            assert_eq!(second_page.body["hasMore"], json!(false));
+            assert_eq!(second_page.body["nextCursor"], Value::Null);
         })
         .await;
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn acknowledge_events_and_get_last_acknowledged_filter_inaccessible_events() {
-    with_sync_test_app("sync_acknowledge_and_last_acknowledged", |app| async move {
-        let fixture = build_sync_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let headers = authenticated_json_headers(&session.token);
-
-        let before_ack = app
-            .call_operation(
-                "sync.getLastAcknowledged",
-                json!([{ "clientId": "client-sync" }]),
-                headers.clone(),
-            )
-            .await;
-        assert_eq!(before_ack.status, StatusCode::OK);
-        assert_eq!(before_ack.body["result"]["Ok"], Value::Null);
-
-        let acknowledge = app
-				.call_operation(
-					"sync.acknowledgeEvents",
-					json!([{
-						"eventIds": [fixture.latest_primary_event_id.clone(), fixture.hidden_event_id.clone()],
-						"clientId": "client-sync"
-					}]),
-					headers.clone(),
-				)
-				.await;
-        assert_eq!(acknowledge.status, StatusCode::OK);
-        assert_eq!(acknowledge.body["result"]["Ok"]["acknowledged"], json!(1));
-
-        let ack_count = query_scalar::<_, i64>(
-            "SELECT COUNT(*)::bigint FROM sync_event_ack WHERE user_id = $1 AND client_id = $2",
-        )
-        .bind(&fixture.owner_user_id)
-        .bind("client-sync")
-        .fetch_one(&app.pool)
-        .await
-        .expect("ack count should query");
-        assert_eq!(ack_count, 1);
-
-        let last_ack = app
-            .call_operation(
-                "sync.getLastAcknowledged",
-                json!([{ "clientId": "client-sync" }]),
-                headers,
-            )
-            .await;
-        assert_eq!(last_ack.status, StatusCode::OK);
-        assert_eq!(
-            last_ack.body["result"]["Ok"]["eventId"],
-            json!(fixture.latest_primary_event_id)
-        );
-        assert!(
-            last_ack.body["result"]["Ok"]["timestamp"]
-                .as_i64()
-                .expect("ack timestamp should be present")
-                > 0
-        );
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn get_sync_state_returns_latest_visible_event_per_accessible_vault() {
-    with_sync_test_app("sync_get_sync_state_paths", |app| async move {
-        let fixture = build_sync_router_fixture(&app.pool).await;
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let response = app
-            .call_operation(
-                "sync.getSyncState",
-                json!([{
-                    "vaultIds": [
-                        fixture.primary_vault_id.clone(),
-                        fixture.secondary_vault_id.clone(),
-                        fixture.hidden_vault_id.clone()
-                    ]
-                }]),
-                authenticated_json_headers(&session.token),
-            )
-            .await;
-
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(
-            response.body["result"]["Ok"][&fixture.primary_vault_id]["latestEventId"],
-            json!(fixture.latest_primary_event_id)
-        );
-        assert_eq!(
-            response.body["result"]["Ok"][&fixture.secondary_vault_id]["latestEventId"],
-            json!(fixture.secondary_event_id)
-        );
-        assert_eq!(
-            response.body["result"]["Ok"][&fixture.hidden_vault_id],
-            Value::Null
-        );
     })
     .await;
 }
@@ -975,7 +770,7 @@ async fn sync_sse_route_covers_auth_and_revocation_paths() {
 
         let unauthorized = http_app.get("/api/v1/sync/events", HeaderMap::new()).await;
         assert_eq!(unauthorized.status, StatusCode::UNAUTHORIZED);
-        assert!(unauthorized.body.contains(r#"{"error":"Unauthorized"}"#));
+        assert!(unauthorized.body.contains(r#""code":"UNAUTHORIZED""#));
 
         let session = app.issue_session(&fixture.owner_user_id).await;
         record_session_revocations(

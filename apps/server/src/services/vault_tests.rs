@@ -118,26 +118,29 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
 fn assert_invalid_params_error(body: &Value) {
     assert!(
-        body["error"].is_object(),
+        body["code"].is_string(),
         "unexpected invalid params body: {body}"
     );
-    let message = body["error"]["message"]
+    let message = body["detail"]
         .as_str()
         .unwrap_or_default()
         .to_ascii_lowercase();
     assert!(
-        message.contains("invalid params"),
+        (matches!(
+            body["code"].as_str(),
+            Some("INVALID_REQUEST" | "INVALID_JSON")
+        ) || message.contains("invalid")),
         "unexpected invalid params body: {body}"
     );
 }
@@ -619,10 +622,6 @@ async fn vault_handlers_require_authentication() {
 					json!([{ "vaultId": "vault_test", "userId": "user_test", "role": "member" }]),
 				),
 				(
-					"vault.members.lookupUser",
-					json!([{ "vaultId": "vault_test", "email": "user@example.com" }]),
-				),
-				(
 					"vault.members.add",
 					json!([{ "vaultId": "vault_test", "userId": "user_test", "role": "member", "encryptedVaultKey": "wrapped-key" }]),
 				),
@@ -641,8 +640,8 @@ async fn vault_handlers_require_authentication() {
 					.call_operation(method, params, unauthenticated_json_headers())
 					.await;
 
-				assert_eq!(response.status, StatusCode::OK, "{method}");
-				assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
+				response.assert_contract_status();
+				assert_transport_error(&response.body, "UNAUTHORIZED", "A valid bearer session is required.");
 			}
 		})
 		.await;
@@ -658,7 +657,6 @@ async fn vault_handlers_reject_malformed_request_input() {
             let headers = authenticated_json_headers(&owner_session.token);
 
             for (method, params) in [
-                ("vault.get", json!([{}])),
                 ("vault.createAttachmentUpload", json!([{}])),
                 ("vault.createAttachment", json!([{}])),
                 ("vault.createItem", json!([{}])),
@@ -669,7 +667,7 @@ async fn vault_handlers_reject_malformed_request_input() {
             ] {
                 let response = app.call_operation(method, params, headers.clone()).await;
 
-                assert_eq!(response.status, StatusCode::OK, "{method}");
+                response.assert_contract_status();
                 assert_invalid_params_error(&response.body);
             }
         },
@@ -689,8 +687,9 @@ async fn vault_query_handlers_return_expected_results() {
             let list_response = app
                 .call_operation("vault.list", json!([]), owner_headers.clone())
                 .await;
-            assert_eq!(list_response.status, StatusCode::OK);
-            let listed_vaults = list_response.body["result"]["Ok"]
+            list_response.assert_contract_status();
+            let listed_vaults = list_response
+                .body
                 .as_array()
                 .expect("vault.list should return an array");
             assert_eq!(listed_vaults.len(), 3);
@@ -706,13 +705,10 @@ async fn vault_query_handlers_return_expected_results() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(get_response.status, StatusCode::OK);
-            assert_eq!(
-                get_response.body["result"]["Ok"]["id"],
-                json!(fixture.main_vault_id)
-            );
-            assert_eq!(get_response.body["result"]["Ok"]["itemCount"], json!(2));
-            assert_eq!(get_response.body["result"]["Ok"]["memberCount"], json!(4));
+            get_response.assert_contract_status();
+            assert_eq!(get_response.body["id"], json!(fixture.main_vault_id));
+            assert_eq!(get_response.body["itemCount"], json!("2"));
+            assert_eq!(get_response.body["memberCount"], json!("4"));
 
             let list_items_response = app
                 .call_operation(
@@ -721,8 +717,9 @@ async fn vault_query_handlers_return_expected_results() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(list_items_response.status, StatusCode::OK);
-            let list_items = list_items_response.body["result"]["Ok"]
+            list_items_response.assert_contract_status();
+            let list_items = list_items_response
+                .body
                 .as_array()
                 .expect("vault.listItems should return an array");
             assert_eq!(list_items.len(), 2);
@@ -736,8 +733,9 @@ async fn vault_query_handlers_return_expected_results() {
             let list_all_items_response = app
                 .call_operation("vault.listAllItems", json!([]), owner_headers.clone())
                 .await;
-            assert_eq!(list_all_items_response.status, StatusCode::OK);
-            let all_items = list_all_items_response.body["result"]["Ok"]
+            list_all_items_response.assert_contract_status();
+            let all_items = list_all_items_response
+                .body
                 .as_array()
                 .expect("vault.listAllItems should return an array");
             assert_eq!(all_items.len(), 3);
@@ -754,8 +752,9 @@ async fn vault_query_handlers_return_expected_results() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(list_all_deleted_response.status, StatusCode::OK);
-            let all_deleted_items = list_all_deleted_response.body["result"]["Ok"]
+            list_all_deleted_response.assert_contract_status();
+            let all_deleted_items = list_all_deleted_response
+                .body
                 .as_array()
                 .expect("vault.listAllDeletedItems should return an array");
             assert_eq!(all_deleted_items.len(), 1);
@@ -768,8 +767,9 @@ async fn vault_query_handlers_return_expected_results() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(list_deleted_response.status, StatusCode::OK);
-            let deleted_items = list_deleted_response.body["result"]["Ok"]
+            list_deleted_response.assert_contract_status();
+            let deleted_items = list_deleted_response
+                .body
                 .as_array()
                 .expect("vault.listDeletedItems should return an array");
             assert_eq!(deleted_items.len(), 1);
@@ -782,19 +782,16 @@ async fn vault_query_handlers_return_expected_results() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(get_item_response.status, StatusCode::OK);
-            assert_eq!(
-                get_item_response.body["result"]["Ok"]["attachments"][0]["id"],
-                json!(fixture.attachment_id)
-            );
+            get_item_response.assert_contract_status();
+            assert_eq!(get_item_response.body["id"], json!(fixture.active_item_id));
 
             let stats_response = app
                 .call_operation("vault.stats", json!([]), owner_headers)
                 .await;
-            assert_eq!(stats_response.status, StatusCode::OK);
-            assert_eq!(stats_response.body["result"]["Ok"]["teamCount"], json!(1));
-            assert_eq!(stats_response.body["result"]["Ok"]["vaultCount"], json!(3));
-            assert_eq!(stats_response.body["result"]["Ok"]["itemCount"], json!(3));
+            stats_response.assert_contract_status();
+            assert_eq!(stats_response.body["teamCount"], json!(1));
+            assert_eq!(stats_response.body["vaultCount"], json!("3"));
+            assert_eq!(stats_response.body["itemCount"], json!("3"));
         },
     )
     .await;
@@ -818,7 +815,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(missing_vault_response.status, StatusCode::OK);
+            missing_vault_response.assert_contract_status();
             assert_handler_error(
                 &missing_vault_response.body,
                 "NOT_FOUND",
@@ -832,7 +829,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
                     outsider_headers.clone(),
                 )
                 .await;
-            assert_eq!(list_items_response.status, StatusCode::OK);
+            list_items_response.assert_contract_status();
             assert_handler_error(
                 &list_items_response.body,
                 "FORBIDDEN",
@@ -846,7 +843,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(missing_item_response.status, StatusCode::OK);
+            missing_item_response.assert_contract_status();
             assert_handler_error(&missing_item_response.body, "NOT_FOUND", "Item not found");
 
             let outsider_item_response = app
@@ -856,7 +853,7 @@ async fn vault_query_handlers_enforce_access_and_not_found() {
                     outsider_headers,
                 )
                 .await;
-            assert_eq!(outsider_item_response.status, StatusCode::OK);
+            outsider_item_response.assert_contract_status();
             assert_handler_error(&outsider_item_response.body, "FORBIDDEN", "Access denied");
         },
     )
@@ -882,11 +879,8 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(empty_import_response.status, StatusCode::OK);
-            assert_eq!(
-                empty_import_response.body["result"]["Ok"]["importedCount"],
-                json!(0)
-            );
+            empty_import_response.assert_contract_status();
+            assert_eq!(empty_import_response.body["importedCount"], json!(0));
 
             let create_item_response = app
                 .call_operation(
@@ -901,11 +895,8 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(create_item_response.status, StatusCode::OK);
-            assert_eq!(
-                create_item_response.body["result"]["Ok"]["itemId"],
-                json!(created_item_id)
-            );
+            create_item_response.assert_contract_status();
+            assert_eq!(create_item_response.body["itemId"], json!(created_item_id));
 
             let bulk_import_response = app
                 .call_operation(
@@ -931,11 +922,8 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(bulk_import_response.status, StatusCode::OK);
-            assert_eq!(
-                bulk_import_response.body["result"]["Ok"]["importedCount"],
-                json!(2)
-            );
+            bulk_import_response.assert_contract_status();
+            assert_eq!(bulk_import_response.body["importedCount"], json!(2));
 
             let current_version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
                 .bind(&fixture.active_item_id)
@@ -954,11 +942,8 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(update_response.status, StatusCode::OK);
-            assert_eq!(
-                update_response.body["result"]["Ok"]["version"],
-                json!(current_version + 1)
-            );
+            update_response.assert_contract_status();
+            assert_eq!(update_response.body["version"], json!(current_version + 1));
             let updated_data: String =
                 query_scalar("SELECT encrypted_data FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -974,7 +959,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(toggle_response.status, StatusCode::OK);
+            toggle_response.assert_contract_status();
             let favorite: bool = query_scalar("SELECT favorite FROM item WHERE id = $1")
                 .bind(&fixture.active_item_id)
                 .fetch_one(&app.pool)
@@ -989,7 +974,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(delete_response.status, StatusCode::OK);
+            delete_response.assert_contract_status();
             let deleted_at: Option<OffsetDateTime> =
                 query_scalar("SELECT deleted_at FROM item WHERE id = $1")
                     .bind(imported_item_a)
@@ -1005,7 +990,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(restore_response.status, StatusCode::OK);
+            restore_response.assert_contract_status();
             let restored_deleted_at: Option<OffsetDateTime> =
                 query_scalar("SELECT deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.deleted_item_id)
@@ -1027,7 +1012,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(move_response.status, StatusCode::OK);
+            move_response.assert_contract_status();
             let moved_vault_id: String = query_scalar("SELECT vault_id FROM item WHERE id = $1")
                 .bind(&fixture.movable_item_id)
                 .fetch_one(&app.pool)
@@ -1042,7 +1027,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                     owner_headers,
                 )
                 .await;
-            assert_eq!(permanent_delete_response.status, StatusCode::OK);
+            permanent_delete_response.assert_contract_status();
             let remaining_rows: i64 =
                 query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
                     .bind(imported_item_a)
@@ -1068,7 +1053,7 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
             let get = app
                 .api_json(Method::GET, &item_uri, None, headers.clone())
                 .await;
-            assert_eq!(get.status, StatusCode::OK);
+            get.assert_contract_status();
             assert_eq!(get.headers.get(ETAG).unwrap(), "\"1\"");
 
             let missing_patch = app
@@ -1128,7 +1113,7 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                     version_headers,
                 )
                 .await;
-            assert_eq!(updated.status, StatusCode::OK);
+            updated.assert_contract_status();
             assert_eq!(updated.headers.get(ETAG).unwrap(), "\"2\"");
 
             let mut favorite_headers = headers.clone();
@@ -1141,7 +1126,7 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                     favorite_headers,
                 )
                 .await;
-            assert_eq!(favorite.status, StatusCode::OK);
+            favorite.assert_contract_status();
             let after_favorite: (i32, bool) =
                 sqlx::query_as("SELECT version, favorite FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1155,7 +1140,7 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
             let trashed = app
                 .api_json(Method::DELETE, &item_uri, None, trash_headers)
                 .await;
-            assert_eq!(trashed.status, StatusCode::OK);
+            trashed.assert_contract_status();
             let after_trash: (i32, Option<OffsetDateTime>) =
                 sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1175,7 +1160,7 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
                     restore_headers,
                 )
                 .await;
-            assert_eq!(restored.status, StatusCode::OK);
+            restored.assert_contract_status();
             let after_restore: (i32, Option<OffsetDateTime>) =
                 sqlx::query_as("SELECT version, deleted_at FROM item WHERE id = $1")
                     .bind(&fixture.active_item_id)
@@ -1215,6 +1200,54 @@ async fn favorite_service_advances_item_version() {
 }
 
 #[tokio::test]
+async fn move_item_requires_source_vault_write_access() {
+    with_api_test_app(
+        "move_item_requires_source_vault_write_access",
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            seed_vault_key(
+                &app.pool,
+                "vault_key_target_readonly_source",
+                &fixture.target_vault_id,
+                &fixture.readonly_user_id,
+                "target-member-key",
+                "member",
+            )
+            .await;
+            let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
+
+            let response = app
+                .call_operation(
+                    "vault.moveItem",
+                    json!([{
+                        "itemId": fixture.movable_item_id,
+                        "sourceVaultId": fixture.main_vault_id,
+                        "targetVaultId": fixture.target_vault_id,
+                        "encryptedData": "moved-encrypted-data",
+                        "encryptionIv": "moved-iv"
+                    }]),
+                    authenticated_json_headers(&readonly_session.token),
+                )
+                .await;
+
+            response.assert_contract_status();
+            assert_handler_error(
+                &response.body,
+                "FORBIDDEN",
+                "Cannot move items from a read-only vault",
+            );
+            let vault_id: String = query_scalar("SELECT vault_id FROM item WHERE id = $1")
+                .bind(&fixture.movable_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("item vault should load");
+            assert_eq!(vault_id, fixture.main_vault_id);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
     with_api_test_app(
         "vault_item_mutation_handlers_reject_invalid_state_and_access",
@@ -1237,7 +1270,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                     readonly_headers.clone(),
                 )
                 .await;
-            assert_eq!(readonly_create_response.status, StatusCode::OK);
+            readonly_create_response.assert_contract_status();
             assert_handler_error(
                 &readonly_create_response.body,
                 "FORBIDDEN",
@@ -1247,11 +1280,15 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let readonly_update_response = app
                 .call_operation(
                     "vault.updateItem",
-                    json!([{ "itemId": fixture.active_item_id, "encryptedData": "enc" }]),
+                    json!([{
+                        "itemId": fixture.active_item_id,
+                        "encryptedData": "enc",
+                        "expectedVersion": 1
+                    }]),
                     readonly_headers,
                 )
                 .await;
-            assert_eq!(readonly_update_response.status, StatusCode::OK);
+            readonly_update_response.assert_contract_status();
             assert_handler_error(&readonly_update_response.body, "FORBIDDEN", "Access denied");
 
             let duplicate_import_response = app
@@ -1277,7 +1314,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(duplicate_import_response.status, StatusCode::OK);
+            duplicate_import_response.assert_contract_status();
             assert_handler_error(
                 &duplicate_import_response.body,
                 "BAD_REQUEST",
@@ -1287,14 +1324,18 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let stale_update_response = app
                 .call_operation(
                     "vault.updateItem",
-                    json!([{ "itemId": fixture.active_item_id, "expectedVersion": 99 }]),
+                    json!([{
+                        "itemId": fixture.active_item_id,
+                        "encryptedData": "stale-update",
+                        "expectedVersion": 99
+                    }]),
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(stale_update_response.status, StatusCode::OK);
+            stale_update_response.assert_contract_status();
             assert_handler_error(
                 &stale_update_response.body,
-                "CONFLICT",
+                "VERSION_CONFLICT",
                 "Item has been modified by another client",
             );
 
@@ -1305,7 +1346,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(restore_active_response.status, StatusCode::OK);
+            restore_active_response.assert_contract_status();
             assert_handler_error(
                 &restore_active_response.body,
                 "BAD_REQUEST",
@@ -1325,7 +1366,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(wrong_source_response.status, StatusCode::OK);
+            wrong_source_response.assert_contract_status();
             assert_handler_error(
                 &wrong_source_response.body,
                 "BAD_REQUEST",
@@ -1339,7 +1380,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                     owner_headers,
                 )
                 .await;
-            assert_eq!(permanent_delete_active_response.status, StatusCode::OK);
+            permanent_delete_active_response.assert_contract_status();
             assert_handler_error(
                 &permanent_delete_active_response.body,
                 "BAD_REQUEST",
@@ -1377,7 +1418,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                         solo_headers.clone(),
                     )
                     .await;
-                assert_eq!(create_personal_response.status, StatusCode::OK);
+                create_personal_response.assert_contract_status();
                 let created_personal_type: String =
                     query_scalar("SELECT type::text FROM vault WHERE id = $1")
                         .bind(created_personal_vault_id)
@@ -1405,7 +1446,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                         owner_headers.clone(),
                     )
                     .await;
-                assert_eq!(create_team_response.status, StatusCode::OK);
+                create_team_response.assert_contract_status();
                 let created_team_type: String =
                     query_scalar("SELECT type::text FROM vault WHERE id = $1")
                         .bind(created_team_vault_id)
@@ -1435,9 +1476,9 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                         admin_headers,
                     )
                     .await;
-                assert_eq!(update_response.status, StatusCode::OK);
+                update_response.assert_contract_status();
                 assert_eq!(
-                    update_response.body["result"]["Ok"]["name"],
+                    update_response.body["name"],
                     json!("Updated Main Vault")
                 );
                 let updated_name: String = query_scalar("SELECT name FROM vault WHERE id = $1")
@@ -1461,9 +1502,9 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                         owner_headers.clone(),
                     )
                     .await;
-                assert_eq!(convert_to_team_response.status, StatusCode::OK);
+                convert_to_team_response.assert_contract_status();
                 assert_eq!(
-                    convert_to_team_response.body["result"]["Ok"]["previousType"],
+                    convert_to_team_response.body["previousType"],
                     json!("personal")
                 );
                 let converted_personal_type: String =
@@ -1491,9 +1532,9 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                         owner_headers.clone(),
                     )
                     .await;
-                assert_eq!(convert_to_personal_response.status, StatusCode::OK);
+                convert_to_personal_response.assert_contract_status();
                 assert_eq!(
-                    convert_to_personal_response.body["result"]["Ok"]["newType"],
+                    convert_to_personal_response.body["newType"],
                     json!("personal")
                 );
                 let converted_target_type: String =
@@ -1527,7 +1568,7 @@ async fn vault_management_handlers_manage_vault_lifecycle() {
                         solo_headers,
                     )
                     .await;
-                assert_eq!(delete_response.status, StatusCode::OK);
+                delete_response.assert_contract_status();
                 let remaining_rows: i64 =
                     query_scalar("SELECT COUNT(*)::bigint FROM vault WHERE id = $1")
                         .bind(created_personal_vault_id)
@@ -1560,7 +1601,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 					solo_headers,
 				)
 				.await;
-			assert_eq!(solo_team_create_response.status, StatusCode::OK);
+			solo_team_create_response.assert_contract_status();
 			assert_handler_error(
 				&solo_team_create_response.body,
 				"BAD_REQUEST",
@@ -1574,7 +1615,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 					owner_headers.clone(),
 				)
 				.await;
-			assert_eq!(blank_update_response.status, StatusCode::OK);
+			blank_update_response.assert_contract_status();
 			assert_handler_error(&blank_update_response.body, "BAD_REQUEST", "Invalid params");
 
 			let member_update_response = app
@@ -1584,7 +1625,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 					member_headers.clone(),
 				)
 				.await;
-			assert_eq!(member_update_response.status, StatusCode::OK);
+			member_update_response.assert_contract_status();
 			assert_handler_error(&member_update_response.body, "FORBIDDEN", "Access denied");
 
 			let admin_convert_response = app
@@ -1594,7 +1635,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 					admin_headers,
 				)
 				.await;
-			assert_eq!(admin_convert_response.status, StatusCode::OK);
+			admin_convert_response.assert_contract_status();
 			assert_handler_error(
 				&admin_convert_response.body,
 				"FORBIDDEN",
@@ -1608,7 +1649,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 					owner_headers.clone(),
 				)
 				.await;
-			assert_eq!(same_type_response.status, StatusCode::OK);
+			same_type_response.assert_contract_status();
 			assert_handler_error(
 				&same_type_response.body,
 				"BAD_REQUEST",
@@ -1622,7 +1663,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 					member_headers,
 				)
 				.await;
-			assert_eq!(member_delete_response.status, StatusCode::OK);
+			member_delete_response.assert_contract_status();
 			assert_handler_error(
 				&member_delete_response.body,
 				"FORBIDDEN",
@@ -1639,7 +1680,7 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 				),
 			)
 			.await;
-			assert_eq!(plan_forbidden_create_response.status, StatusCode::OK);
+			plan_forbidden_create_response.assert_contract_status();
 			assert_handler_error(
 				&plan_forbidden_create_response.body,
 				"FORBIDDEN",
@@ -1664,16 +1705,23 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				let image_upload_response = app
 					.call_operation(
 						"vault.createImageUpload",
-						json!([{ "fileName": "cover.png", "contentType": "image/png" }]),
+						json!([{
+							"vaultId": fixture.main_vault_id,
+							"fileName": "cover.png",
+							"contentType": "image/png"
+						}]),
 						owner_headers.clone(),
 					)
 					.await;
-				assert_eq!(image_upload_response.status, StatusCode::OK);
-				let image_key = image_upload_response.body["result"]["Ok"]["key"]
+				image_upload_response.assert_contract_status();
+				let image_key = image_upload_response.body["key"]
 					.as_str()
 					.expect("image upload key should exist");
-				assert!(image_key.starts_with(&format!("vaults/{}/draft/", fixture.owner_user_id)));
-				let image_public_url = image_upload_response.body["result"]["Ok"]["publicUrl"]
+				assert!(image_key.starts_with(&format!(
+					"vaults/{}/{}/",
+					fixture.owner_user_id, fixture.main_vault_id
+				)));
+				let image_public_url = image_upload_response.body["publicUrl"]
 					.as_str()
 					.expect("image public url should exist");
 				assert!(image_public_url.contains("cdn.example.invalid/assets/vaults/"));
@@ -1689,7 +1737,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						readonly_headers,
 					)
 					.await;
-				assert_eq!(blocked_image_upload_response.status, StatusCode::OK);
+				blocked_image_upload_response.assert_contract_status();
 				assert_handler_error(&blocked_image_upload_response.body, "FORBIDDEN", "Access denied");
 
 				let invalid_attachment_upload_response = app
@@ -1704,7 +1752,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						owner_headers.clone(),
 					)
 					.await;
-				assert_eq!(invalid_attachment_upload_response.status, StatusCode::OK);
+				invalid_attachment_upload_response.assert_contract_status();
 				assert_handler_error(
 					&invalid_attachment_upload_response.body,
 					"BAD_REQUEST",
@@ -1723,15 +1771,15 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						owner_headers.clone(),
 					)
 					.await;
-				assert_eq!(attachment_upload_response.status, StatusCode::OK);
-				let attachment_upload_key = attachment_upload_response.body["result"]["Ok"]["key"]
+				attachment_upload_response.assert_contract_status();
+				let attachment_upload_key = attachment_upload_response.body["key"]
 					.as_str()
 					.expect("attachment upload key should exist");
 				assert!(attachment_upload_key.starts_with(&format!(
 					"attachments/{}/{}/",
 					fixture.owner_user_id, fixture.active_item_id
 				)));
-				assert_eq!(attachment_upload_response.body["result"]["Ok"]["publicUrl"], Value::Null);
+				assert_eq!(attachment_upload_response.body["publicUrl"], Value::Null);
 				let pending_storage_size: i32 = query_scalar(
 					"SELECT storage_size FROM pending_attachment_upload WHERE item_id = $1 AND created_by = $2 ORDER BY created_at DESC LIMIT 1",
 				)
@@ -1757,7 +1805,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						owner_headers.clone(),
 					)
 					.await;
-				assert_eq!(create_attachment_response.status, StatusCode::OK);
+				create_attachment_response.assert_contract_status();
 				assert_handler_error(
 					&create_attachment_response.body,
 					"BAD_REQUEST",
@@ -1771,8 +1819,8 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						owner_headers.clone(),
 					)
 					.await;
-				assert_eq!(list_attachments_response.status, StatusCode::OK);
-				let attachments = list_attachments_response.body["result"]["Ok"]
+				list_attachments_response.assert_contract_status();
+				let attachments = list_attachments_response.body
 					.as_array()
 					.expect("attachments should be returned");
 				assert_eq!(attachments.len(), 1);
@@ -1785,12 +1833,12 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						owner_headers.clone(),
 					)
 					.await;
-				assert_eq!(download_response.status, StatusCode::OK);
-				let download_url = download_response.body["result"]["Ok"]["downloadUrl"]
+				download_response.assert_contract_status();
+				let download_url = download_response.body["downloadUrl"]
 					.as_str()
 					.expect("download url should exist");
 				assert!(download_url.contains("storage.example.invalid"));
-				assert_eq!(download_response.body["result"]["Ok"]["fileSize"], json!(128));
+				assert_eq!(download_response.body["fileSize"], json!(128));
 
 				let update_attachment_response = app
 					.call_operation(
@@ -1803,7 +1851,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						owner_headers.clone(),
 					)
 					.await;
-				assert_eq!(update_attachment_response.status, StatusCode::OK);
+				update_attachment_response.assert_contract_status();
 				let updated_attachment_name: String =
 					query_scalar("SELECT encrypted_name FROM item_attachment WHERE id = $1")
 						.bind(&fixture.attachment_id)
@@ -1826,7 +1874,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 						member_headers,
 					)
 					.await;
-				assert_eq!(blocked_delete_response.status, StatusCode::OK);
+				blocked_delete_response.assert_contract_status();
 				assert_handler_error(
 					&blocked_delete_response.body,
 					"FORBIDDEN",
@@ -1860,8 +1908,9 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(members_response.status, StatusCode::OK);
-            let members = members_response.body["result"]["Ok"]
+            members_response.assert_contract_status();
+            let members = members_response
+                .body
                 .as_array()
                 .expect("members should be returned");
             assert_eq!(members.len(), 4);
@@ -1876,8 +1925,9 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(available_members_response.status, StatusCode::OK);
-            let available_members = available_members_response.body["result"]["Ok"]
+            available_members_response.assert_contract_status();
+            let available_members = available_members_response
+                .body
                 .as_array()
                 .expect("available members should be returned");
             assert!(available_members
@@ -1886,22 +1936,6 @@ async fn vault_member_handlers_manage_members_and_rotation() {
             assert!(!available_members
                 .iter()
                 .any(|member| member["userId"] == json!(fixture.member_user_id)));
-
-            let lookup_response = app
-                .call_operation(
-                    "vault.members.lookupUser",
-                    json!([{
-                        "vaultId": fixture.main_vault_id,
-                        "email": "  VAULT-ADDABLE@EXAMPLE.COM  "
-                    }]),
-                    owner_headers.clone(),
-                )
-                .await;
-            assert_eq!(lookup_response.status, StatusCode::OK);
-            assert_eq!(
-                lookup_response.body["result"]["Ok"]["id"],
-                json!(fixture.addable_user_id)
-            );
 
             let update_role_response = app
                 .call_operation(
@@ -1914,7 +1948,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(update_role_response.status, StatusCode::OK);
+            update_role_response.assert_contract_status();
             let updated_role: String = query_scalar(
                 "SELECT role::text FROM vault_key WHERE vault_id = $1 AND user_id = $2",
             )
@@ -1937,7 +1971,7 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(add_member_response.status, StatusCode::OK);
+            add_member_response.assert_contract_status();
             let added_member_count: i64 = query_scalar(
                 "SELECT COUNT(*)::bigint FROM vault_key WHERE vault_id = $1 AND user_id = $2",
             )
@@ -1958,18 +1992,18 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     owner_headers.clone(),
                 )
                 .await;
-            assert_eq!(rotation_data_response.status, StatusCode::OK);
+            rotation_data_response.assert_contract_status();
             assert_eq!(
-                rotation_data_response.body["result"]["Ok"]["keyVersion"],
+                rotation_data_response.body["keyVersion"],
                 json!(starting_key_version)
             );
-            let rotation_members = rotation_data_response.body["result"]["Ok"]["members"]
+            let rotation_members = rotation_data_response.body["members"]
                 .as_array()
                 .expect("rotation members should be returned");
             assert!(!rotation_members
                 .iter()
                 .any(|member| member["userId"] == json!(fixture.member_user_id)));
-            let rotation_items = rotation_data_response.body["result"]["Ok"]["items"]
+            let rotation_items = rotation_data_response.body["items"]
                 .as_array()
                 .expect("rotation items should be returned");
             assert!(rotation_items
@@ -1990,9 +2024,9 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     owner_headers,
                 )
                 .await;
-            assert_eq!(remove_member_response.status, StatusCode::OK);
+            remove_member_response.assert_contract_status();
             assert_eq!(
-                remove_member_response.body["result"]["Ok"]["keyRotation"]["newKeyVersion"],
+                remove_member_response.body["keyRotation"]["newKeyVersion"],
                 json!(starting_key_version + 1)
             );
             let removed_member_count: i64 = query_scalar(
@@ -2019,165 +2053,138 @@ async fn vault_member_handlers_manage_members_and_rotation() {
 #[tokio::test]
 async fn vault_member_handlers_reject_invalid_and_forbidden_requests() {
     with_api_test_app(
-            "vault_member_handlers_reject_invalid_and_forbidden_requests",
-            |app| async move {
-                let fixture = build_vault_router_fixture(&app.pool).await;
-                let owner_session = app.issue_session(&fixture.owner_user_id).await;
-                let admin_session = app.issue_session(&fixture.admin_user_id).await;
-                let member_session = app.issue_session(&fixture.member_user_id).await;
-                let owner_headers = authenticated_json_headers(&owner_session.token);
-                let admin_headers = authenticated_json_headers(&admin_session.token);
-                let member_headers = authenticated_json_headers(&member_session.token);
+        "vault_member_handlers_reject_invalid_and_forbidden_requests",
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let owner_session = app.issue_session(&fixture.owner_user_id).await;
+            let admin_session = app.issue_session(&fixture.admin_user_id).await;
+            let member_session = app.issue_session(&fixture.member_user_id).await;
+            let owner_headers = authenticated_json_headers(&owner_session.token);
+            let admin_headers = authenticated_json_headers(&admin_session.token);
+            let member_headers = authenticated_json_headers(&member_session.token);
 
-                let blocked_available_response = app
-                    .call_operation(
-                        "vault.members.availableTeamMembers",
-                        json!([{ "vaultId": fixture.main_vault_id }]),
-                        member_headers.clone(),
-                    )
-                    .await;
-                assert_eq!(blocked_available_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &blocked_available_response.body,
-                    "FORBIDDEN",
-                    "Only vault owner or admin can manage members",
-                );
+            let blocked_available_response = app
+                .call_operation(
+                    "vault.members.availableTeamMembers",
+                    json!([{ "vaultId": fixture.main_vault_id }]),
+                    member_headers.clone(),
+                )
+                .await;
+            blocked_available_response.assert_contract_status();
+            assert_handler_error(
+                &blocked_available_response.body,
+                "FORBIDDEN",
+                "Only vault owner or admin can manage members",
+            );
 
-                let self_role_response = app
-                    .call_operation(
-                        "vault.members.updateRole",
-                        json!([{
-                            "vaultId": fixture.main_vault_id,
-                            "userId": fixture.owner_user_id,
-                            "role": "member"
-                        }]),
-                        owner_headers.clone(),
-                    )
-                    .await;
-                assert_eq!(self_role_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &self_role_response.body,
-                    "BAD_REQUEST",
-                    "Cannot change your own role",
-                );
+            let self_role_response = app
+                .call_operation(
+                    "vault.members.updateRole",
+                    json!([{
+                        "vaultId": fixture.main_vault_id,
+                        "userId": fixture.owner_user_id,
+                        "role": "member"
+                    }]),
+                    owner_headers.clone(),
+                )
+                .await;
+            self_role_response.assert_contract_status();
+            assert_handler_error(
+                &self_role_response.body,
+                "BAD_REQUEST",
+                "Cannot change your own role",
+            );
 
-                let owner_role_response = app
-                    .call_operation(
-                        "vault.members.updateRole",
-                        json!([{
-                            "vaultId": fixture.main_vault_id,
-                            "userId": fixture.owner_user_id,
-                            "role": "member"
-                        }]),
-                        admin_headers,
-                    )
-                    .await;
-                assert_eq!(owner_role_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &owner_role_response.body,
-                    "FORBIDDEN",
-                    "Cannot change vault owner's role",
-                );
+            let owner_role_response = app
+                .call_operation(
+                    "vault.members.updateRole",
+                    json!([{
+                        "vaultId": fixture.main_vault_id,
+                        "userId": fixture.owner_user_id,
+                        "role": "member"
+                    }]),
+                    admin_headers,
+                )
+                .await;
+            owner_role_response.assert_contract_status();
+            assert_handler_error(
+                &owner_role_response.body,
+                "FORBIDDEN",
+                "Cannot change vault owner's role",
+            );
 
-                let missing_member_response = app
-                    .call_operation(
-                        "vault.members.updateRole",
-                        json!([{
-                            "vaultId": fixture.main_vault_id,
-                            "userId": "missing_member_user",
-                            "role": "member"
-                        }]),
-                        owner_headers.clone(),
-                    )
-                    .await;
-                assert_eq!(missing_member_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &missing_member_response.body,
-                    "NOT_FOUND",
-                    "Member not found",
-                );
+            let missing_member_response = app
+                .call_operation(
+                    "vault.members.updateRole",
+                    json!([{
+                        "vaultId": fixture.main_vault_id,
+                        "userId": "missing_member_user",
+                        "role": "member"
+                    }]),
+                    owner_headers.clone(),
+                )
+                .await;
+            missing_member_response.assert_contract_status();
+            assert_handler_error(
+                &missing_member_response.body,
+                "NOT_FOUND",
+                "Member not found",
+            );
 
-                let self_lookup_response = app
-                    .call_operation(
-                        "vault.members.lookupUser",
-                        json!([{
-                            "vaultId": fixture.main_vault_id,
-                            "email": "vault-owner@example.com"
-                        }]),
-                        owner_headers.clone(),
-                    )
-                    .await;
-                assert_eq!(self_lookup_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &self_lookup_response.body,
-                    "BAD_REQUEST",
-                    "Cannot add yourself as a member",
-                );
+            let wrong_team_add_response = app
+                .call_operation(
+                    "vault.members.add",
+                    json!([{
+                        "vaultId": fixture.main_vault_id,
+                        "userId": fixture.outsider_user_id,
+                        "role": "member",
+                        "encryptedVaultKey": "outsider-key"
+                    }]),
+                    owner_headers.clone(),
+                )
+                .await;
+            wrong_team_add_response.assert_contract_status();
+            assert_handler_error(
+                &wrong_team_add_response.body,
+                "BAD_REQUEST",
+                "User must belong to the same team as this vault",
+            );
 
-                let missing_lookup_response = app
-                    .call_operation(
-                        "vault.members.lookupUser",
-                        json!([{ "vaultId": fixture.main_vault_id, "email": "missing-user@example.com" }]),
-                        owner_headers.clone(),
-                    )
-                    .await;
-                assert_eq!(missing_lookup_response.status, StatusCode::OK);
-                assert_handler_error(&missing_lookup_response.body, "NOT_FOUND", "User not found");
-
-                let wrong_team_add_response = app
-                    .call_operation(
-                        "vault.members.add",
-                        json!([{
-                            "vaultId": fixture.main_vault_id,
-                            "userId": fixture.outsider_user_id,
-                            "role": "member",
-                            "encryptedVaultKey": "outsider-key"
-                        }]),
-                        owner_headers.clone(),
-                    )
-                    .await;
-                assert_eq!(wrong_team_add_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &wrong_team_add_response.body,
-                    "BAD_REQUEST",
-                    "User must belong to the same team as this vault",
-                );
-
-                let blocked_rotation_response = app
+            let blocked_rotation_response = app
 					.call_operation(
 						"vault.members.getRotationData",
 						json!([{ "vaultId": fixture.main_vault_id, "excludeUserId": fixture.member_user_id }]),
 						member_headers,
 					)
 					.await;
-                assert_eq!(blocked_rotation_response.status, StatusCode::OK);
-                assert_handler_error(
-                    &blocked_rotation_response.body,
-                    "FORBIDDEN",
-                    "Only vault owner or admin can manage members",
-                );
+            blocked_rotation_response.assert_contract_status();
+            assert_handler_error(
+                &blocked_rotation_response.body,
+                "FORBIDDEN",
+                "Only vault owner or admin can manage members",
+            );
 
-                let self_remove_response = app
-					.call_operation(
-						"vault.members.remove",
-						json!([{
-							"vaultId": fixture.main_vault_id,
-							"userId": fixture.owner_user_id,
-							"keyRotation": {
-								"memberKeys": [],
-								"reEncryptedItems": []
-							}
-						}]),
-						owner_headers,
-					)
-					.await;
-                assert_eq!(self_remove_response.status, StatusCode::OK);
-                assert_handler_error(
-					&self_remove_response.body,
-					"BAD_REQUEST",
-					"Cannot remove yourself",
-				);
-            },
-        )
-        .await;
+            let self_remove_response = app
+                .call_operation(
+                    "vault.members.remove",
+                    json!([{
+                        "vaultId": fixture.main_vault_id,
+                        "userId": fixture.owner_user_id,
+                        "keyRotation": {
+                            "memberKeys": [],
+                            "reEncryptedItems": []
+                        }
+                    }]),
+                    owner_headers,
+                )
+                .await;
+            self_remove_response.assert_contract_status();
+            assert_handler_error(
+                &self_remove_response.body,
+                "BAD_REQUEST",
+                "Cannot remove yourself",
+            );
+        },
+    )
+    .await;
 }

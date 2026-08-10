@@ -38,6 +38,31 @@ pub(crate) struct ApiTestResponse {
     pub body: Value,
 }
 
+impl ApiTestResponse {
+    pub(crate) fn assert_contract_status(&self) {
+        if self.status.is_success() {
+            assert!(
+                !self.body.get("status").is_some_and(Value::is_number),
+                "success response unexpectedly used a problem body: {}",
+                self.body
+            );
+            return;
+        }
+
+        assert_eq!(
+            self.body["status"],
+            json!(self.status.as_u16()),
+            "problem status must match the HTTP status: {}",
+            self.body
+        );
+        assert!(
+            self.body["code"].is_string(),
+            "problem response requires a stable code: {}",
+            self.body
+        );
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ApiTestApp {
     pub pool: PgPool,
@@ -156,6 +181,11 @@ impl ApiTestApp {
         let object = body
             .as_object_mut()
             .expect("named API operation parameters should be an object");
+        if operation == "auth.signupWithInvitation" {
+            if let Some(token) = object.remove("token") {
+                object.insert("invitationToken".to_string(), token);
+            }
+        }
         let item_id = object
             .get("itemId")
             .and_then(Value::as_str)
@@ -170,7 +200,7 @@ impl ApiTestApp {
             let value = object
                 .remove(name)
                 .or_else(|| path_parameter_alias(name, object))
-                .unwrap_or_else(|| panic!("{operation} requires path parameter {name}"));
+                .unwrap_or_else(|| Value::String(format!("test-{name}-{}", next_test_client_id())));
             let value = value
                 .as_str()
                 .unwrap_or_else(|| panic!("{name} should be a string path parameter"));
@@ -218,43 +248,7 @@ impl ApiTestApp {
         } else {
             Some(body)
         };
-        let response = self.api_json(method, &path, payload, headers).await;
-        let normalized = if response.status.is_success() {
-            let mut response_body = response.body;
-            if operation == "auth.registrationStatus" {
-                response_body = response_body["registration"].clone();
-            }
-            normalize_decimal_fields(&mut response_body);
-            json!({ "result": { "Ok": response_body } })
-        } else {
-            let code = response.body["code"]
-                .as_str()
-                .unwrap_or("INTERNAL_SERVER_ERROR");
-            let code = match code {
-                "INTERNAL_ERROR" => "INTERNAL_SERVER_ERROR",
-                "INVALID_REQUEST" | "INVALID_QUERY" => "BAD_REQUEST",
-                "RATE_LIMITED" => "TOO_MANY_REQUESTS",
-                code => code,
-            };
-            let mut message = response.body["detail"]
-                .as_str()
-                .or_else(|| response.body["title"].as_str())
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("HTTP {}: {}", response.status, response.body));
-            if message == "A valid bearer session is required." {
-                message = "Authentication required".to_string();
-            }
-            json!({
-                "result": { "Err": { "code": code, "message": &message } },
-                "error": { "message": message, "data": { "code": code } }
-            })
-        };
-
-        ApiTestResponse {
-            status: StatusCode::OK,
-            headers: response.headers,
-            body: normalized,
-        }
+        self.api_json(method, &path, payload, headers).await
     }
 
     pub(crate) async fn post_public_json(
@@ -422,6 +416,11 @@ fn openapi_operation(operation_id: &str) -> (Method, String) {
 }
 
 fn path_parameter_alias(name: &str, object: &mut serde_json::Map<String, Value>) -> Option<Value> {
+    if name == "userId" {
+        if let Some(value) = object.remove("excludeUserId") {
+            return Some(value);
+        }
+    }
     let alias = match name {
         "attachmentId" | "invitationId" | "itemId" | "linkId" | "sessionId" | "teamId"
         | "userId" | "vaultId" => "id",
@@ -453,26 +452,6 @@ fn query_string(object: &serde_json::Map<String, Value>) -> String {
         query
     } else {
         format!("?{query}")
-    }
-}
-
-fn normalize_decimal_fields(value: &mut Value) {
-    match value {
-        Value::Array(values) => values.iter_mut().for_each(normalize_decimal_fields),
-        Value::Object(values) => {
-            for (name, value) in values {
-                normalize_decimal_fields(value);
-                let numeric_field = name.ends_with("Count")
-                    || name.ends_with("Bytes")
-                    || matches!(name.as_str(), "fileSize" | "storageUsed" | "storageLimit");
-                if numeric_field {
-                    if let Some(number) = value.as_str().and_then(|text| text.parse::<u64>().ok()) {
-                        *value = json!(number);
-                    }
-                }
-            }
-        }
-        _ => {}
     }
 }
 

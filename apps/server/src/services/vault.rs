@@ -2057,7 +2057,11 @@ pub(crate) async fn move_vault_item(
             "Cannot move items that are in trash. Restore first.",
         ));
     }
-    let _source_access = load_vault_access(pool, &input.source_vault_id, user_id).await?;
+    let source_access = load_vault_access(pool, &input.source_vault_id, user_id).await?;
+    assert_item_write_access(
+        &source_access.role,
+        "Cannot move items from a read-only vault",
+    )?;
     let target_access = load_vault_access(pool, &input.target_vault_id, user_id).await?;
     assert_item_write_access(
         &target_access.role,

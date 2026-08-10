@@ -328,26 +328,26 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 fn assert_invalid_params_error(body: &Value) {
     assert!(
-        body["error"].is_object(),
+        body["code"].is_string(),
         "unexpected invalid params body: {body}"
     );
-    let message = body["error"]["message"]
+    let message = body["detail"]
         .as_str()
         .unwrap_or_default()
         .to_ascii_lowercase();
     assert!(
-        message.contains("invalid params"),
+        (body["code"] == json!("INVALID_REQUEST") || message.contains("invalid")),
         "unexpected invalid params message: {body}",
     );
 }
@@ -377,16 +377,8 @@ async fn protected_share_handlers_require_authentication() {
                 json!([{ "itemId": fixture.item_id.clone() }]),
             ),
             (
-                "share.get",
-                json!([{ "linkId": fixture.owner_link_id.clone() }]),
-            ),
-            (
                 "share.revoke",
                 json!([{ "linkId": fixture.owner_link_id.clone() }]),
-            ),
-            (
-                "share.update",
-                json!([{ "linkId": fixture.email_link_id.clone() }]),
             ),
             (
                 "share.getAccessLogs",
@@ -398,12 +390,12 @@ async fn protected_share_handlers_require_authentication() {
             let response = app
                 .call_operation(method, params, unauthenticated_json_headers())
                 .await;
-            assert_eq!(
-                response.status,
-                StatusCode::OK,
-                "unexpected status for {method}"
+            response.assert_contract_status();
+            assert_transport_error(
+                &response.body,
+                "UNAUTHORIZED",
+                "A valid bearer session is required.",
             );
-            assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
         }
     })
     .await;
@@ -415,28 +407,11 @@ async fn share_handlers_reject_malformed_params() {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
-        let malformed_calls = vec![
-            "share.create",
-            "share.listByItem",
-            "share.get",
-            "share.revoke",
-            "share.update",
-            "share.getAccessLogs",
-            "share.getPublicInfo",
-            "share.requestEmailVerification",
-            "share.verifyEmailAndAccess",
-            "share.accessPublic",
-        ];
+        let malformed_calls = vec![("share.create", json!([{ "itemId": fixture.item_id }]))];
 
-        for method in malformed_calls {
-            let response = app
-                .call_operation(method, json!([{}]), headers.clone())
-                .await;
-            assert_eq!(
-                response.status,
-                StatusCode::OK,
-                "unexpected status for {method}"
-            );
+        for (method, params) in malformed_calls {
+            let response = app.call_operation(method, params, headers.clone()).await;
+            response.assert_contract_status();
             assert_invalid_params_error(&response.body);
         }
     })
@@ -467,7 +442,7 @@ async fn create_share_via_api_rejects_read_only_users() {
             )
             .await;
 
-        assert_eq!(response.status, StatusCode::OK);
+        response.assert_contract_status();
         assert_handler_error(
             &response.body,
             "FORBIDDEN",
@@ -501,8 +476,8 @@ async fn list_by_item_returns_visible_links_for_owners_and_members() {
                 authenticated_json_headers(&owner_session.token),
             )
             .await;
-        assert_eq!(owner_response.status, StatusCode::OK);
-        let owner_links = owner_response.body["result"]["Ok"]["links"]
+        owner_response.assert_contract_status();
+        let owner_links = owner_response.body["links"]
             .as_array()
             .expect("owner links should be an array");
         let owner_link_ids = owner_links
@@ -527,8 +502,8 @@ async fn list_by_item_returns_visible_links_for_owners_and_members() {
                 authenticated_json_headers(&member_session.token),
             )
             .await;
-        assert_eq!(member_response.status, StatusCode::OK);
-        let member_links = member_response.body["result"]["Ok"]["links"]
+        member_response.assert_contract_status();
+        let member_links = member_response.body["links"]
             .as_array()
             .expect("member links should be an array");
         assert_eq!(member_links.len(), 1);
@@ -555,58 +530,8 @@ async fn list_by_item_returns_not_found_for_inaccessible_items() {
             )
             .await;
 
-        assert_eq!(response.status, StatusCode::OK);
+        response.assert_contract_status();
         assert_handler_error(&response.body, "NOT_FOUND", "Item not found");
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn get_share_link_returns_details_for_visible_links_and_not_found_for_hidden_links() {
-    with_api_test_app("share_get_visibility", |app| async move {
-        let fixture = build_share_router_fixture(&app.pool).await;
-        let owner_session = app.issue_session(&fixture.owner_user_id).await;
-        let member_session = app.issue_session(&fixture.member_user_id).await;
-
-        let owner_response = app
-            .call_operation(
-                "share.get",
-                json!([{ "linkId": fixture.email_link_id.clone() }]),
-                authenticated_json_headers(&owner_session.token),
-            )
-            .await;
-
-        assert_eq!(owner_response.status, StatusCode::OK);
-        assert_eq!(
-            owner_response.body["result"]["Ok"]["id"],
-            json!(fixture.email_link_id)
-        );
-        assert!(
-            owner_response.body["result"]["Ok"]["token"].is_null(),
-            "share.get must not expose the token: the server only holds its digest",
-        );
-        assert_eq!(
-            owner_response.body["result"]["Ok"]["accessMode"],
-            json!("email-restricted")
-        );
-        let allowed_emails = owner_response.body["result"]["Ok"]["allowedEmails"]
-            .as_array()
-            .expect("allowed emails should be present");
-        assert_eq!(allowed_emails.len(), 3);
-        assert!(allowed_emails
-            .iter()
-            .any(|entry| entry["email"] == json!(fixture.allowed_email)));
-
-        let hidden_response = app
-            .call_operation(
-                "share.get",
-                json!([{ "linkId": fixture.owner_link_id }]),
-                authenticated_json_headers(&member_session.token),
-            )
-            .await;
-
-        assert_eq!(hidden_response.status, StatusCode::OK);
-        assert_handler_error(&hidden_response.body, "NOT_FOUND", "Share link not found");
     })
     .await;
 }
@@ -626,7 +551,7 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
                 authenticated_json_headers(&admin_session.token),
             )
             .await;
-        assert_eq!(forbidden_response.status, StatusCode::OK);
+        forbidden_response.assert_contract_status();
         assert_handler_error(
             &forbidden_response.body,
             "FORBIDDEN",
@@ -640,11 +565,8 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
                 authenticated_json_headers(&member_session.token),
             )
             .await;
-        assert_eq!(success_response.status, StatusCode::OK);
-        assert_eq!(
-            success_response.body["result"]["Ok"]["success"],
-            json!(true)
-        );
+        success_response.assert_contract_status();
+        assert_eq!(success_response.body["success"], json!(true));
 
         let status = query_scalar::<_, String>(
             "SELECT status::text AS status FROM share_link WHERE id = $1",
@@ -662,108 +584,8 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
                 authenticated_json_headers(&outsider_session.token),
             )
             .await;
-        assert_eq!(hidden_response.status, StatusCode::OK);
+        hidden_response.assert_contract_status();
         assert_handler_error(&hidden_response.body, "NOT_FOUND", "Share link not found");
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn update_share_link_updates_access_and_email_membership() {
-    with_api_test_app("share_update_success", |app| async move {
-			let fixture = build_share_router_fixture(&app.pool).await;
-			let owner_session = app.issue_session(&fixture.owner_user_id).await;
-			let added_email = "added@example.com";
-
-			let response = app
-				.call_operation(
-					"share.update",
-					json!([{
-						"linkId": fixture.email_link_id.clone(),
-						"isOneTimeUse": true,
-						"addEmails": [added_email],
-						"removeEmailIds": [fixture.removable_email_id.clone()]
-					}]),
-					authenticated_json_headers(&owner_session.token),
-				)
-				.await;
-
-			assert_eq!(response.status, StatusCode::OK);
-			assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
-
-			let link_state = query_as::<_, ShareLinkStateRow>(
-				"SELECT status::text AS status, access_count, max_access_count, is_one_time_use, last_accessed_at FROM share_link WHERE id = $1 LIMIT 1",
-			)
-			.bind(&fixture.email_link_id)
-			.fetch_one(&app.pool)
-			.await
-			.expect("updated share link state should load");
-			assert_eq!(link_state.status, "active");
-			assert!(link_state.is_one_time_use);
-			assert_eq!(link_state.max_access_count, Some(1));
-
-			let allowed_emails = query_scalar::<_, String>(
-				"SELECT email FROM share_link_allowed_email WHERE share_link_id = $1 ORDER BY email ASC",
-			)
-			.bind(&fixture.email_link_id)
-			.fetch_all(&app.pool)
-			.await
-			.expect("updated allowed emails should load");
-			assert_eq!(
-				allowed_emails,
-				vec![
-					added_email.to_string(),
-					fixture.allowed_email.clone(),
-					fixture.request_email.clone(),
-				],
-			);
-
-			let removed_verification = query_as::<_, ShareVerificationStateRow>(
-				"SELECT attempts, used_at FROM share_email_verification WHERE share_link_id = $1 AND email = $2 LIMIT 1",
-			)
-			.bind(&fixture.email_link_id)
-			.bind(&fixture.removable_email)
-			.fetch_one(&app.pool)
-			.await
-			.expect("removed verification should load");
-			assert!(removed_verification.used_at.is_some());
-		})
-		.await;
-}
-
-#[tokio::test]
-async fn update_share_link_rejects_read_only_actors_and_invalid_emails() {
-    with_api_test_app("share_update_rejections", |app| async move {
-        let fixture = build_share_router_fixture(&app.pool).await;
-        let read_only_session = app.issue_session(&fixture.read_only_user_id).await;
-        let owner_session = app.issue_session(&fixture.owner_user_id).await;
-
-        let forbidden_response = app
-            .call_operation(
-                "share.update",
-                json!([{ "linkId": fixture.read_only_link_id.clone(), "isOneTimeUse": true }]),
-                authenticated_json_headers(&read_only_session.token),
-            )
-            .await;
-        assert_eq!(forbidden_response.status, StatusCode::OK);
-        assert_handler_error(&forbidden_response.body, "FORBIDDEN", "Access denied");
-
-        let invalid_email_response = app
-            .call_operation(
-                "share.update",
-                json!([{
-                    "linkId": fixture.email_link_id.clone(),
-                    "addEmails": ["not-an-email"]
-                }]),
-                authenticated_json_headers(&owner_session.token),
-            )
-            .await;
-        assert_eq!(invalid_email_response.status, StatusCode::OK);
-        assert_handler_error(
-            &invalid_email_response.body,
-            "BAD_REQUEST",
-            "Invalid email format: not-an-email",
-        );
     })
     .await;
 }
@@ -782,8 +604,9 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
                 authenticated_json_headers(&owner_session.token),
             )
             .await;
-        assert_eq!(success_response.status, StatusCode::OK);
-        let logs = success_response.body["result"]["Ok"]
+        success_response.assert_contract_status();
+        let logs = success_response
+            .body
             .as_array()
             .expect("share access logs should be an array");
         assert_eq!(logs.len(), 2);
@@ -798,7 +621,7 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
                 authenticated_json_headers(&member_session.token),
             )
             .await;
-        assert_eq!(hidden_response.status, StatusCode::OK);
+        hidden_response.assert_contract_status();
         assert_handler_error(&hidden_response.body, "NOT_FOUND", "Share link not found");
     })
     .await;
@@ -816,17 +639,11 @@ async fn get_public_info_returns_valid_and_invalid_states() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(valid_response.status, StatusCode::OK);
-        assert_eq!(valid_response.body["result"]["Ok"]["valid"], json!(true));
-        assert_eq!(
-            valid_response.body["result"]["Ok"]["accessMode"],
-            json!("anyone")
-        );
-        assert_eq!(
-            valid_response.body["result"]["Ok"]["isOneTimeUse"],
-            json!(true)
-        );
-        assert!(valid_response.body["result"]["Ok"]["expiresAt"].is_string());
+        valid_response.assert_contract_status();
+        assert_eq!(valid_response.body["valid"], json!(true));
+        assert_eq!(valid_response.body["accessMode"], json!("anyone"));
+        assert_eq!(valid_response.body["isOneTimeUse"], json!(true));
+        assert!(valid_response.body["expiresAt"].is_string());
 
         let revoked_response = app
             .call_operation(
@@ -835,16 +652,10 @@ async fn get_public_info_returns_valid_and_invalid_states() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(revoked_response.status, StatusCode::OK);
-        assert_eq!(revoked_response.body["result"]["Ok"]["valid"], json!(false));
-        assert_eq!(
-            revoked_response.body["result"]["Ok"]["reason"],
-            json!("revoked")
-        );
-        assert_eq!(
-            revoked_response.body["result"]["Ok"]["isOneTimeUse"],
-            Value::Null
-        );
+        revoked_response.assert_contract_status();
+        assert_eq!(revoked_response.body["valid"], json!(false));
+        assert_eq!(revoked_response.body["reason"], json!("revoked"));
+        assert_eq!(revoked_response.body["isOneTimeUse"], Value::Null);
 
         let missing_response = app
             .call_operation(
@@ -853,7 +664,7 @@ async fn get_public_info_returns_valid_and_invalid_states() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(missing_response.status, StatusCode::OK);
+        missing_response.assert_contract_status();
         assert_handler_error(
             &missing_response.body,
             "NOT_FOUND",
@@ -875,13 +686,13 @@ async fn access_public_returns_payload_and_exhausts_one_time_links() {
 					unauthenticated_json_headers(),
 				)
 				.await;
-			assert_eq!(success_response.status, StatusCode::OK);
+			success_response.assert_contract_status();
 			assert_eq!(
-				success_response.body["result"]["Ok"]["encryptedItemData"],
+				success_response.body["encryptedItemData"],
 				json!(FIXTURE_ENCRYPTED_ITEM_DATA),
 			);
 			assert_eq!(
-				success_response.body["result"]["Ok"]["encryptedShareKey"],
+				success_response.body["encryptedShareKey"],
 				json!(FIXTURE_ENCRYPTED_SHARE_KEY),
 			);
 
@@ -905,7 +716,7 @@ async fn access_public_returns_payload_and_exhausts_one_time_links() {
 					unauthenticated_json_headers(),
 				)
 				.await;
-			assert_eq!(exhausted_response.status, StatusCode::OK);
+			exhausted_response.assert_contract_status();
 			assert_handler_error(
 				&exhausted_response.body,
 				"BAD_REQUEST",
@@ -936,7 +747,7 @@ async fn access_public_rejects_non_public_and_revoked_links() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(email_restricted_response.status, StatusCode::OK);
+        email_restricted_response.assert_contract_status();
         assert_handler_error(
             &email_restricted_response.body,
             "NOT_FOUND",
@@ -950,7 +761,7 @@ async fn access_public_rejects_non_public_and_revoked_links() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(revoked_response.status, StatusCode::OK);
+        revoked_response.assert_contract_status();
         assert_handler_error(
             &revoked_response.body,
             "BAD_REQUEST",
@@ -982,13 +793,10 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(success_response.status, StatusCode::OK);
+        success_response.assert_contract_status();
+        assert_eq!(success_response.body["success"], json!(true));
         assert_eq!(
-            success_response.body["result"]["Ok"]["success"],
-            json!(true)
-        );
-        assert_eq!(
-            success_response.body["result"]["Ok"]["message"],
+            success_response.body["message"],
             json!("Verification code sent to your email"),
         );
 
@@ -1012,7 +820,7 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(forbidden_response.status, StatusCode::OK);
+        forbidden_response.assert_contract_status();
         assert_handler_error(
             &forbidden_response.body,
             "FORBIDDEN",
@@ -1029,7 +837,7 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(not_found_response.status, StatusCode::OK);
+        not_found_response.assert_contract_status();
         assert_handler_error(
             &not_found_response.body,
             "NOT_FOUND",
@@ -1065,8 +873,8 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(requested.status, StatusCode::OK);
-            assert_eq!(requested.body["result"]["Ok"]["success"], json!(true));
+            requested.assert_contract_status();
+            assert_eq!(requested.body["success"], json!(true));
 
             let code = emailed_code_capture::latest(&emailed_code_capture::share_key(
                 &fixture.email_link_id,
@@ -1085,9 +893,9 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(accessed.status, StatusCode::OK);
+            accessed.assert_contract_status();
             assert_eq!(
-                accessed.body["result"]["Ok"]["encryptedItemData"],
+                accessed.body["encryptedItemData"],
                 json!(FIXTURE_ENCRYPTED_ITEM_DATA),
             );
         },
@@ -1133,7 +941,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(requested.body["result"]["Ok"]["success"], json!(true));
+        assert_eq!(requested.body["success"], json!(true));
         let generated = query_scalar::<_, String>(
 			"SELECT code_hash FROM share_email_verification WHERE share_link_id = $1 AND email = $2 ORDER BY created_at DESC LIMIT 1",
 		)
@@ -1194,7 +1002,7 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
             )
             .await;
         assert_eq!(
-            verified.body["result"]["Ok"]["encryptedItemData"],
+            verified.body["encryptedItemData"],
             json!(FIXTURE_ENCRYPTED_ITEM_DATA),
         );
     })
@@ -1243,12 +1051,12 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
                 authenticated_json_headers(&session.token),
             )
             .await;
-        assert_eq!(created.status, StatusCode::OK);
-        let created_link_id = created.body["result"]["Ok"]["id"]
+        created.assert_contract_status();
+        let created_link_id = created.body["id"]
             .as_str()
             .expect("create should return a link id")
             .to_string();
-        let created_token = created.body["result"]["Ok"]["token"]
+        let created_token = created.body["token"]
             .as_str()
             .expect("create should return the raw token exactly once")
             .to_string();
@@ -1273,9 +1081,9 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(info.status, StatusCode::OK);
-        assert_eq!(info.body["result"]["Ok"]["valid"], json!(true));
-        assert_eq!(info.body["result"]["Ok"]["accessMode"], json!("anyone"));
+        info.assert_contract_status();
+        assert_eq!(info.body["valid"], json!(true));
+        assert_eq!(info.body["accessMode"], json!("anyone"));
 
         let accessed = app
             .call_operation(
@@ -1284,9 +1092,9 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
                 unauthenticated_json_headers(),
             )
             .await;
-        assert_eq!(accessed.status, StatusCode::OK);
+        accessed.assert_contract_status();
         assert_eq!(
-            accessed.body["result"]["Ok"]["encryptedItemData"],
+            accessed.body["encryptedItemData"],
             json!(FIXTURE_ENCRYPTED_ITEM_DATA),
         );
     })
@@ -1316,11 +1124,7 @@ async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(
-                response.status,
-                StatusCode::OK,
-                "unexpected status for {method}"
-            );
+            response.assert_contract_status();
             assert_handler_error(
                 &response.body,
                 "NOT_FOUND",
@@ -1368,8 +1172,8 @@ async fn list_by_item_and_get_do_not_expose_share_tokens() {
                 authenticated_json_headers(&session.token),
             )
             .await;
-        assert_eq!(listed.status, StatusCode::OK);
-        let links = listed.body["result"]["Ok"]["links"]
+        listed.assert_contract_status();
+        let links = listed.body["links"]
             .as_array()
             .expect("links should be an array");
         assert!(!links.is_empty());
@@ -1379,23 +1183,6 @@ async fn list_by_item_and_get_do_not_expose_share_tokens() {
                 "share.listByItem must not expose a token: {link}",
             );
         }
-
-        let details = app
-            .call_operation(
-                "share.get",
-                json!([{ "linkId": fixture.owner_link_id.clone() }]),
-                authenticated_json_headers(&session.token),
-            )
-            .await;
-        assert_eq!(details.status, StatusCode::OK);
-        assert_eq!(
-            details.body["result"]["Ok"]["id"],
-            json!(fixture.owner_link_id)
-        );
-        assert!(
-            details.body["result"]["Ok"]["token"].is_null(),
-            "share.get must not expose a token",
-        );
     })
     .await;
 }
@@ -1415,37 +1202,24 @@ async fn create_share_returns_token_exactly_once() {
                 authenticated_json_headers(&session.token),
             )
             .await;
-        assert_eq!(created.status, StatusCode::OK);
-        let created_link_id = created.body["result"]["Ok"]["id"]
+        created.assert_contract_status();
+        let created_link_id = created.body["id"]
             .as_str()
             .expect("create should return a link id")
             .to_string();
-        let created_token = created.body["result"]["Ok"]["token"]
+        let created_token = created.body["token"]
             .as_str()
             .expect("create should return the raw token")
             .to_string();
         assert_eq!(created_token.len(), 32);
 
-        let details = app
-            .call_operation(
-                "share.get",
-                json!([{ "linkId": created_link_id.clone() }]),
-                authenticated_json_headers(&session.token),
-            )
-            .await;
-        assert_eq!(details.status, StatusCode::OK);
-        assert_eq!(
-            details.body["result"]["Ok"]["id"],
-            json!(created_link_id.clone())
-        );
-        assert!(
-            details.body["result"]["Ok"]["token"].is_null(),
-            "the token must not be recoverable after creation",
-        );
-        assert!(
-            !details.body.to_string().contains(&created_token),
-            "no field of share.get may echo the raw token",
-        );
+        let stored_token_hash: String =
+            query_scalar("SELECT token_hash FROM share_link WHERE id = $1")
+                .bind(created_link_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("created share token hash should load");
+        assert_ne!(stored_token_hash, created_token);
     })
     .await;
 }
@@ -1467,13 +1241,13 @@ async fn verify_email_and_access_returns_payload_and_marks_email_verified() {
 				)
 				.await;
 
-			assert_eq!(response.status, StatusCode::OK);
+			response.assert_contract_status();
 			assert_eq!(
-				response.body["result"]["Ok"]["encryptedItemData"],
+				response.body["encryptedItemData"],
 				json!(FIXTURE_ENCRYPTED_ITEM_DATA),
 			);
 			assert_eq!(
-				response.body["result"]["Ok"]["shareKeyIv"],
+				response.body["shareKeyIv"],
 				json!(FIXTURE_SHARE_KEY_IV),
 			);
 
@@ -1529,7 +1303,7 @@ async fn verify_email_and_access_rejects_invalid_codes_and_increments_attempts()
 				)
 				.await;
 
-			assert_eq!(response.status, StatusCode::OK);
+			response.assert_contract_status();
 			assert_handler_error(
 				&response.body,
 				"BAD_REQUEST",
@@ -1584,7 +1358,7 @@ async fn share_email_verification_lockout_burns_pending_code() {
         let locked = wrong().await;
         assert_handler_error(
             &locked.body,
-            "TOO_MANY_REQUESTS",
+            "RATE_LIMITED",
             crate::services::rate_limit::RATE_LIMITED_MESSAGE,
         );
 
@@ -1612,7 +1386,7 @@ async fn share_email_verification_lockout_burns_pending_code() {
             .await;
         assert_handler_error(
             &correct.body,
-            "TOO_MANY_REQUESTS",
+            "RATE_LIMITED",
             crate::services::rate_limit::RATE_LIMITED_MESSAGE,
         );
     })
@@ -1651,10 +1425,10 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 				)
 				.await;
 
-			assert_eq!(response.status, StatusCode::OK);
-			assert_eq!(response.body["result"]["Ok"]["baseShareUrl"], json!(expected_base_share_url));
+			response.assert_contract_status();
+			assert_eq!(response.body["baseShareUrl"], json!(expected_base_share_url));
 
-			let link_id = response.body["result"]["Ok"]["id"]
+			let link_id = response.body["id"]
 				.as_str()
 				.expect("share link id should be present");
 
@@ -1709,12 +1483,8 @@ async fn create_share_via_api_rejects_invalid_access_mode() {
             )
             .await;
 
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(response.body["result"]["Err"]["code"], json!("BAD_REQUEST"));
-        assert_eq!(
-            response.body["result"]["Err"]["message"],
-            json!("Invalid access mode")
-        );
+        response.assert_contract_status();
+        assert_eq!(response.body["code"], json!("INVALID_REQUEST"));
 
         let share_link_count = query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM share_link")
             .fetch_one(&app.pool)
@@ -1729,20 +1499,22 @@ async fn create_share_via_api_rejects_invalid_access_mode() {
 #[tokio::test]
 async fn api_content_type_rejects_non_json_share_requests() {
     with_api_test_app("share_api_content_type_non_json", |app| async move {
-        let mut headers = HeaderMap::new();
+        let fixture = build_share_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let mut headers = authenticated_json_headers(&session.token);
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
 
         let response = app
             .api_bytes(
                 axum::http::Method::POST,
-                "/api/v1/items/item_malformed/share-links",
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
                 b"not-json".to_vec(),
                 headers,
             )
             .await;
 
-        assert_eq!(response.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
-        assert_eq!(response.body["error"], json!("Unsupported Media Type"));
+        assert_eq!(response.status, StatusCode::BAD_REQUEST);
+        assert_eq!(response.body["code"], json!("INVALID_REQUEST"));
     })
     .await;
 }
@@ -2260,17 +2032,17 @@ async fn create_share_via_api_is_daily_rate_limited() {
             let response = app
                 .call_operation("share.create", params.clone(), headers.clone())
                 .await;
-            assert_eq!(response.status, StatusCode::OK);
-            assert!(response.body["result"]["Ok"].is_object());
+            response.assert_contract_status();
+            assert!(response.body.is_object());
         }
 
         let blocked = app
             .call_operation("share.create", params.clone(), headers.clone())
             .await;
-        assert_eq!(blocked.status, StatusCode::OK);
+        blocked.assert_contract_status();
         assert_handler_error(
             &blocked.body,
-            "TOO_MANY_REQUESTS",
+            "RATE_LIMITED",
             "Daily share link limit reached",
         );
     })

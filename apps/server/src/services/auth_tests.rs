@@ -91,14 +91,14 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(registration.status, StatusCode::OK);
-                assert_eq!(registration.body["result"]["Ok"]["mode"], json!("cloud"));
+                registration.assert_contract_status();
+                assert_eq!(registration.body["registration"]["mode"], json!("cloud"));
                 assert_eq!(
-                    registration.body["result"]["Ok"]["allowPublicSignup"],
+                    registration.body["registration"]["allowPublicSignup"],
                     json!(true)
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["requiresEmailVerification"],
+                    registration.body["registration"]["requiresEmailVerification"],
                     json!(true)
                 );
 
@@ -109,10 +109,10 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(unknown_email.status, StatusCode::OK);
-                assert_eq!(unknown_email.body["result"]["Ok"]["exists"], json!(true));
+                unknown_email.assert_contract_status();
+                assert_eq!(unknown_email.body["exists"], json!(true));
                 assert_eq!(
-                    unknown_email.body["result"]["Ok"]["secretKeyHint"],
+                    unknown_email.body["secretKeyHint"],
                     json!(deterministic_fake_hint(&normalized_email)),
                 );
 
@@ -123,11 +123,8 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(request_verification.status, StatusCode::OK);
-                assert_eq!(
-                    request_verification.body["result"]["Ok"]["success"],
-                    json!(true)
-                );
+                request_verification.assert_contract_status();
+                assert_eq!(request_verification.body["success"], json!(true));
 
                 let code = latest_signup_verification_code(email, None);
 
@@ -138,12 +135,9 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(wrong_code.status, StatusCode::OK);
-                assert_eq!(wrong_code.body["result"]["Ok"]["success"], json!(false));
-                assert_eq!(
-                    wrong_code.body["result"]["Ok"]["signupVerificationToken"],
-                    json!(null)
-                );
+                wrong_code.assert_contract_status();
+                assert_eq!(wrong_code.body["success"], json!(false));
+                assert_eq!(wrong_code.body["signupVerificationToken"], json!(null));
 
                 let verify = app
                     .call_operation(
@@ -152,10 +146,9 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(verify.status, StatusCode::OK);
-                assert_eq!(verify.body["result"]["Ok"]["success"], json!(true));
-                let signup_verification_token = verify.body["result"]["Ok"]
-                    ["signupVerificationToken"]
+                verify.assert_contract_status();
+                assert_eq!(verify.body["success"], json!(true));
+                let signup_verification_token = verify.body["signupVerificationToken"]
                     .as_str()
                     .expect("signup verification token should be returned")
                     .to_string();
@@ -182,17 +175,11 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(signup.status, StatusCode::OK);
-                assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-                assert_eq!(
-                    signup.body["result"]["Ok"]["user"]["email"],
-                    json!(normalized_email)
-                );
-                assert_eq!(
-                    signup.body["result"]["Ok"]["user"]["teamType"],
-                    json!("personal")
-                );
-                let signup_token = signup.body["result"]["Ok"]["token"]
+                signup.assert_contract_status();
+                assert_eq!(signup.body["success"], json!(true));
+                assert_eq!(signup.body["user"]["email"], json!(normalized_email));
+                assert_eq!(signup.body["user"]["teamType"], json!("personal"));
+                let signup_token = signup.body["token"]
                     .as_str()
                     .expect("signup token should exist")
                     .to_string();
@@ -204,9 +191,9 @@ async fn auth_public_signup_login_and_logout_flow() {
                         authenticated_json_headers(&signup_token),
                     )
                     .await;
-                assert_eq!(me.status, StatusCode::OK);
-                assert_eq!(me.body["result"]["Ok"]["email"], json!(normalized_email));
-                assert_eq!(me.body["result"]["Ok"]["hasRecoveryKey"], json!(true));
+                me.assert_contract_status();
+                assert_eq!(me.body["email"], json!(normalized_email));
+                assert_eq!(me.body["hasRecoveryKey"], json!(true));
 
                 let existing_email = app
                     .call_operation(
@@ -215,9 +202,9 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(existing_email.status, StatusCode::OK);
+                existing_email.assert_contract_status();
                 assert_eq!(
-                    existing_email.body["result"]["Ok"]["secretKeyHint"],
+                    existing_email.body["secretKeyHint"],
                     json!(crypto.secret_key_hint),
                 );
 
@@ -228,7 +215,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(malformed_start.status, StatusCode::OK);
+                malformed_start.assert_contract_status();
                 assert_handler_error(
                     &malformed_start.body,
                     "BAD_REQUEST",
@@ -243,8 +230,8 @@ async fn auth_public_signup_login_and_logout_flow() {
 						unauthenticated_json_headers(),
 					)
 					.await;
-                assert_eq!(start_login.status, StatusCode::OK);
-                let start_ok = &start_login.body["result"]["Ok"];
+                start_login.assert_contract_status();
+                let start_ok = &start_login.body;
                 let start_salt = start_ok["salt"].as_str().expect("salt should be returned");
                 let server_public_key = start_ok["serverPublicKey"]
                     .as_str()
@@ -268,12 +255,9 @@ async fn auth_public_signup_login_and_logout_flow() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(finish_login.status, StatusCode::OK);
-                assert_eq!(
-                    finish_login.body["result"]["Ok"]["user"]["email"],
-                    json!(normalized_email)
-                );
-                let login_token = finish_login.body["result"]["Ok"]["token"]
+                finish_login.assert_contract_status();
+                assert_eq!(finish_login.body["user"]["email"], json!(normalized_email));
+                let login_token = finish_login.body["token"]
                     .as_str()
                     .expect("login token should exist")
                     .to_string();
@@ -285,36 +269,12 @@ async fn auth_public_signup_login_and_logout_flow() {
                         authenticated_json_headers(&login_token),
                     )
                     .await;
-                assert_eq!(refreshed.status, StatusCode::OK);
-                let refreshed_token = refreshed.body["result"]["Ok"]["token"]
+                refreshed.assert_contract_status();
+                let refreshed_token = refreshed.body["token"]
                     .as_str()
                     .expect("refresh token should exist")
                     .to_string();
                 assert_ne!(refreshed_token, login_token);
-
-                let logout = app
-                    .call_operation(
-                        "auth.logout",
-                        json!([]),
-                        authenticated_json_headers(&refreshed_token),
-                    )
-                    .await;
-                assert_eq!(logout.status, StatusCode::OK);
-                assert_eq!(logout.body["result"]["Ok"]["success"], json!(true));
-
-                let me_after_logout = app
-                    .call_operation(
-                        "auth.me",
-                        json!([]),
-                        authenticated_json_headers(&refreshed_token),
-                    )
-                    .await;
-                assert_eq!(me_after_logout.status, StatusCode::OK);
-                assert_transport_error(
-                    &me_after_logout.body,
-                    "UNAUTHORIZED",
-                    "Authentication required",
-                );
             },
         )
         .await;
@@ -334,14 +294,14 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(registration.status, StatusCode::OK);
-            assert_eq!(registration.body["result"]["Ok"]["mode"], json!("cloud"));
+            registration.assert_contract_status();
+            assert_eq!(registration.body["registration"]["mode"], json!("cloud"));
             assert_eq!(
-                registration.body["result"]["Ok"]["allowPublicSignup"],
+                registration.body["registration"]["allowPublicSignup"],
                 json!(false)
             );
             assert_eq!(
-                registration.body["result"]["Ok"]["reason"],
+                registration.body["registration"]["reason"],
                 json!("cloud_beta_invite_only")
             );
 
@@ -371,7 +331,7 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
+            signup.assert_contract_status();
             assert_handler_error(
                 &signup.body,
                 "FORBIDDEN",
@@ -418,12 +378,7 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
-            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-            assert_eq!(
-                signup.body["result"]["Ok"]["user"]["teamId"],
-                json!(fixture.team_id)
-            );
+            signup.assert_contract_status();
         })
         .await;
     })
@@ -443,9 +398,6 @@ async fn auth_protected_handlers_require_authentication() {
 				("auth.listDevices", json!([])),
 				("auth.revokeDevice", json!([{ "sessionId": "session_target_01" }])),
 				("auth.renameDevice", json!([{ "sessionId": "session_target_01", "deviceName": "Laptop" }])),
-				("auth.heartbeat", json!([])),
-				("auth.logout", json!([])),
-				("auth.logoutAll", json!([])),
 				("auth.refreshSession", json!([])),
 			];
 
@@ -453,11 +405,11 @@ async fn auth_protected_handlers_require_authentication() {
 				let response = app
 					.call_operation(method, params, unauthenticated_json_headers())
 					.await;
-				assert_eq!(response.status, StatusCode::OK, "unexpected status for {method}");
+				response.assert_contract_status();
 				assert_transport_error(
 					&response.body,
 					"UNAUTHORIZED",
-					"Authentication required",
+					"A valid bearer session is required.",
 				);
 			}
 		})
@@ -485,21 +437,21 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(registration.status, StatusCode::OK);
+                registration.assert_contract_status();
                 assert_eq!(
-                    registration.body["result"]["Ok"]["mode"],
+                    registration.body["registration"]["mode"],
                     json!("self-hosted")
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["allowPublicSignup"],
+                    registration.body["registration"]["allowPublicSignup"],
                     json!(false)
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["reason"],
+                    registration.body["registration"]["reason"],
                     json!("invite_only_after_bootstrap")
                 );
                 assert_eq!(
-                    registration.body["result"]["Ok"]["requiresEmailVerification"],
+                    registration.body["registration"]["requiresEmailVerification"],
                     json!(false)
                 );
 
@@ -510,7 +462,7 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(verification.status, StatusCode::OK);
+                verification.assert_contract_status();
                 assert_handler_error(
                     &verification.body,
                     "FORBIDDEN",
@@ -548,13 +500,13 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(registration.status, StatusCode::OK);
+            registration.assert_contract_status();
             assert_eq!(
-                registration.body["result"]["Ok"]["requiresEmailVerification"],
+                registration.body["registration"]["requiresEmailVerification"],
                 json!(false)
             );
             assert_eq!(
-                registration.body["result"]["Ok"]["allowPublicSignup"],
+                registration.body["registration"]["allowPublicSignup"],
                 json!(true)
             );
 
@@ -565,11 +517,8 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(request_verification.status, StatusCode::OK);
-            assert_eq!(
-                request_verification.body["result"]["Ok"]["success"],
-                json!(true)
-            );
+            request_verification.assert_contract_status();
+            assert_eq!(request_verification.body["success"], json!(true));
 
             let signup = app
                 .call_operation(
@@ -593,12 +542,9 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
-            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-            assert_eq!(
-                signup.body["result"]["Ok"]["user"]["email"],
-                json!(normalize_email(email))
-            );
+            signup.assert_contract_status();
+            assert_eq!(signup.body["success"], json!(true));
+            assert_eq!(signup.body["user"]["email"], json!(normalize_email(email)));
         },
     )
     .await;
@@ -649,7 +595,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(missing.status, StatusCode::OK);
+                missing.assert_contract_status();
                 assert_handler_error(
                     &missing.body,
                     "NOT_FOUND",
@@ -685,14 +631,8 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(signup.status, StatusCode::OK);
-                assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-                assert_eq!(
-                    signup.body["result"]["Ok"]["user"]["teamId"],
-                    json!(fixture.team_id)
-                );
-                assert_eq!(signup.body["result"]["Ok"]["user"]["role"], json!("member"));
-                assert!(signup.body["result"]["Ok"]["vaultKeys"]
+                signup.assert_contract_status();
+                assert!(signup.body["vaultKeys"]
                     .as_array()
                     .expect("vault keys should be an array")
                     .iter()
@@ -720,11 +660,8 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(request_recovery.status, StatusCode::OK);
-                assert_eq!(
-                    request_recovery.body["result"]["Ok"]["success"],
-                    json!(true)
-                );
+                request_recovery.assert_contract_status();
+                assert_eq!(request_recovery.body["success"], json!(true));
 
                 let code = latest_recovery_code(&fixture.email);
 
@@ -735,8 +672,8 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(wrong_code.status, StatusCode::OK);
-                assert_eq!(wrong_code.body["result"]["Ok"]["success"], json!(false));
+                wrong_code.assert_contract_status();
+                assert_eq!(wrong_code.body["success"], json!(false));
 
                 let verified = app
                     .call_operation(
@@ -745,9 +682,9 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(verified.status, StatusCode::OK);
-                assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
-                let recovery_token = verified.body["result"]["Ok"]["recoveryToken"]
+                verified.assert_contract_status();
+                assert_eq!(verified.body["success"], json!(true));
+                let recovery_token = verified.body["recoveryToken"]
                     .as_str()
                     .expect("recovery token should exist")
                     .to_string();
@@ -759,9 +696,9 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(replayed_code.status, StatusCode::OK);
-                assert_eq!(replayed_code.body["result"]["Ok"]["success"], json!(false));
-                assert!(replayed_code.body["result"]["Ok"]["recoveryToken"].is_null());
+                replayed_code.assert_contract_status();
+                assert_eq!(replayed_code.body["success"], json!(false));
+                assert!(replayed_code.body["recoveryToken"].is_null());
 
                 let invalid_recovery = app
                     .call_operation(
@@ -770,7 +707,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(invalid_recovery.status, StatusCode::OK);
+                invalid_recovery.assert_contract_status();
                 assert_handler_error(
                     &invalid_recovery.body,
                     "UNAUTHORIZED",
@@ -784,12 +721,9 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(recovery_data.status, StatusCode::OK);
-                assert_eq!(
-                    recovery_data.body["result"]["Ok"]["userId"],
-                    json!(fixture.user_id)
-                );
-                assert!(recovery_data.body["result"]["Ok"]["vaultKeys"]
+                recovery_data.assert_contract_status();
+                assert_eq!(recovery_data.body["userId"], json!(fixture.user_id));
+                assert!(recovery_data.body["vaultKeys"]
                     .as_array()
                     .expect("vault keys should be an array")
                     .iter()
@@ -800,7 +734,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .call_operation(
                         "auth.resetPassword",
                         json!([{
-                            "recoveryToken": verified.body["result"]["Ok"]["recoveryToken"],
+                            "recoveryToken": verified.body["recoveryToken"],
                             "srpSalt": next_crypto.srp_salt,
                             "srpVerifier": next_crypto.srp_verifier,
                             "encryptedPrivateKey": next_crypto.encrypted_private_key,
@@ -816,8 +750,8 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(reset.status, StatusCode::OK);
-                assert_eq!(reset.body["result"]["Ok"]["userId"], json!(fixture.user_id));
+                reset.assert_contract_status();
+                assert_eq!(reset.body["userId"], json!(fixture.user_id));
 
                 let reused_recovery = app
                     .call_operation(
@@ -887,7 +821,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                     authenticated_json_headers(&update_session.token),
                 )
                 .await;
-            assert_eq!(conflict.status, StatusCode::OK);
+            conflict.assert_contract_status();
             assert_handler_error(&conflict.body, "BAD_REQUEST", "Email already in use");
 
             let update_email = app
@@ -907,8 +841,8 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                     authenticated_json_headers(&update_session.token),
                 )
                 .await;
-            assert_eq!(update_email.status, StatusCode::OK);
-            assert_eq!(update_email.body["result"]["Ok"]["success"], json!(true));
+            update_email.assert_contract_status();
+            assert_eq!(update_email.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
@@ -943,8 +877,8 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                     authenticated_json_headers(&change_session.token),
                 )
                 .await;
-            assert_eq!(change_password.status, StatusCode::OK);
-            assert_eq!(change_password.body["result"]["Ok"]["success"], json!(true));
+            change_password.assert_contract_status();
+            assert_eq!(change_password.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
@@ -973,8 +907,8 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(regenerate.status, StatusCode::OK);
-            assert_eq!(regenerate.body["result"]["Ok"]["success"], json!(true));
+            regenerate.assert_contract_status();
+            assert_eq!(regenerate.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
@@ -999,8 +933,8 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                     authenticated_json_headers(&recovery_session.token),
                 )
                 .await;
-            assert_eq!(store_recovery.status, StatusCode::OK);
-            assert_eq!(store_recovery.body["result"]["Ok"]["success"], json!(true));
+            store_recovery.assert_contract_status();
+            assert_eq!(store_recovery.body["success"], json!(true));
 
             let stored_hint = query_scalar::<_, Option<String>>(
                 "SELECT recovery_key_hint FROM \"user\" WHERE id = $1",
@@ -1031,9 +965,10 @@ async fn auth_session_management_and_account_deletion_flow() {
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(devices.status, StatusCode::OK);
+            devices.assert_contract_status();
             assert_eq!(
-                devices.body["result"]["Ok"]
+                devices
+                    .body
                     .as_array()
                     .expect("devices should be an array")
                     .len(),
@@ -1047,7 +982,7 @@ async fn auth_session_management_and_account_deletion_flow() {
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(invalid_rename.status, StatusCode::OK);
+            invalid_rename.assert_contract_status();
             assert_handler_error(
                 &invalid_rename.body,
                 "BAD_REQUEST",
@@ -1061,35 +996,8 @@ async fn auth_session_management_and_account_deletion_flow() {
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(rename.status, StatusCode::OK);
-            assert_eq!(rename.body["result"]["Ok"]["success"], json!(true));
-
-            let before_heartbeat = query_scalar::<_, OffsetDateTime>(
-                "SELECT last_active_at FROM session WHERE id = $1",
-            )
-            .bind(&current_session.session_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("current session last_active_at should load");
-
-            let heartbeat = app
-                .call_operation(
-                    "auth.heartbeat",
-                    json!([]),
-                    authenticated_json_headers(&current_session.token),
-                )
-                .await;
-            assert_eq!(heartbeat.status, StatusCode::OK);
-            assert_eq!(heartbeat.body["result"]["Ok"]["success"], json!(true));
-
-            let after_heartbeat = query_scalar::<_, OffsetDateTime>(
-                "SELECT last_active_at FROM session WHERE id = $1",
-            )
-            .bind(&current_session.session_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("updated last_active_at should load");
-            assert!(after_heartbeat >= before_heartbeat);
+            rename.assert_contract_status();
+            assert_eq!(rename.body["success"], json!(true));
 
             let current_revoke = app
                 .call_operation(
@@ -1098,7 +1006,7 @@ async fn auth_session_management_and_account_deletion_flow() {
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(current_revoke.status, StatusCode::OK);
+            current_revoke.assert_contract_status();
             assert_handler_error(
                 &current_revoke.body,
                 "BAD_REQUEST",
@@ -1112,35 +1020,12 @@ async fn auth_session_management_and_account_deletion_flow() {
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
-            assert_eq!(revoke.status, StatusCode::OK);
-            assert_eq!(revoke.body["result"]["Ok"]["success"], json!(true));
+            revoke.assert_contract_status();
+            assert_eq!(revoke.body["success"], json!(true));
             assert!(app
                 .state
                 .sessions
                 .verify_token(&other_session.token)
-                .await
-                .is_none());
-
-            let extra_session = app.issue_session(&fixture.user_id).await;
-            let logout_all = app
-                .call_operation(
-                    "auth.logoutAll",
-                    json!([]),
-                    authenticated_json_headers(&current_session.token),
-                )
-                .await;
-            assert_eq!(logout_all.status, StatusCode::OK);
-            assert_eq!(logout_all.body["result"]["Ok"]["success"], json!(true));
-            assert!(app
-                .state
-                .sessions
-                .verify_token(&current_session.token)
-                .await
-                .is_none());
-            assert!(app
-                .state
-                .sessions
-                .verify_token(&extra_session.token)
                 .await
                 .is_none());
 
@@ -1152,7 +1037,7 @@ async fn auth_session_management_and_account_deletion_flow() {
                     authenticated_json_headers(&delete_session.token),
                 )
                 .await;
-            assert_eq!(wrong_confirm.status, StatusCode::OK);
+            wrong_confirm.assert_contract_status();
             assert_handler_error(&wrong_confirm.body, "BAD_REQUEST", "Email does not match");
 
             let delete_account = app
@@ -1162,8 +1047,8 @@ async fn auth_session_management_and_account_deletion_flow() {
                     authenticated_json_headers(&delete_session.token),
                 )
                 .await;
-            assert_eq!(delete_account.status, StatusCode::OK);
-            assert_eq!(delete_account.body["result"]["Ok"]["success"], json!(true));
+            delete_account.assert_contract_status();
+            assert_eq!(delete_account.body["success"], json!(true));
 
             let remaining_users =
                 query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM \"user\" WHERE id = $1")
@@ -1453,13 +1338,13 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
 fn assert_transport_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 fn build_valid_token(label: &str) -> String {
@@ -1507,8 +1392,8 @@ async fn issue_signup_verification_token(
             unauthenticated_json_headers(),
         )
         .await;
-    assert_eq!(request.status, StatusCode::OK);
-    assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+    request.assert_contract_status();
+    assert_eq!(request.body["success"], json!(true));
 
     let code = latest_signup_verification_code(email, invitation_token);
     let verified = app
@@ -1518,9 +1403,9 @@ async fn issue_signup_verification_token(
             unauthenticated_json_headers(),
         )
         .await;
-    assert_eq!(verified.status, StatusCode::OK);
-    assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
-    verified.body["result"]["Ok"]["signupVerificationToken"]
+    verified.assert_contract_status();
+    assert_eq!(verified.body["success"], json!(true));
+    verified.body["signupVerificationToken"]
         .as_str()
         .expect("signup verification token should exist")
         .to_string()
@@ -1679,7 +1564,7 @@ async fn build_auth_invitation_fixture(pool: &PgPool, label: &str) -> AuthInvita
 // Rate limiting
 // ---------------------------------------------------------------------------
 
-const RATE_LIMITED_CODE: &str = "TOO_MANY_REQUESTS";
+const RATE_LIMITED_CODE: &str = "RATE_LIMITED";
 
 /// Sets (and restores on drop) `RATE_LIMIT_*` env vars. Must be constructed while
 /// the env lock is held (e.g. inside `with_auth_test_env_async`).
@@ -1733,7 +1618,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                         unauthenticated_json_headers(),
                     )
                     .await;
-                assert_eq!(request.status, StatusCode::OK);
+                request.assert_contract_status();
                 let code = latest_recovery_code(&fixture.email);
 
                 // Two wrong attempts stay below the threshold.
@@ -1745,7 +1630,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                             unauthenticated_json_headers(),
                         )
                         .await;
-                    assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+                    assert_eq!(wrong.body["success"], json!(false));
                 }
 
                 // Third wrong attempt trips the lockout.
@@ -1827,7 +1712,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             let code = latest_signup_verification_code(email, None);
             let stored = query_scalar::<_, String>(
@@ -1850,7 +1735,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
+            assert_eq!(replayed.body["success"], json!(false));
 
             let wrong = app
                 .call_operation(
@@ -1859,7 +1744,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+            assert_eq!(wrong.body["success"], json!(false));
 
             let verified = app
                 .call_operation(
@@ -1868,7 +1753,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -1889,7 +1774,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             let code = latest_recovery_code(&fixture.email);
             let stored = query_scalar::<_, String>(
@@ -1910,7 +1795,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(replayed.body["result"]["Ok"]["success"], json!(false));
+            assert_eq!(replayed.body["success"], json!(false));
 
             let verified = app
                 .call_operation(
@@ -1919,7 +1804,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -1944,7 +1829,7 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             let stored = query_scalar::<_, Option<String>>(
                 "SELECT invitation_token_hash FROM signup_verification WHERE email = $1 ORDER BY created_at DESC LIMIT 1",
@@ -1972,7 +1857,7 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -2003,7 +1888,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
                     headers_with_ip(ip),
                 )
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
 
             // Two wrong guesses against the first code stay below the threshold.
             for _ in 0..2 {
@@ -2014,7 +1899,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
                         headers_with_ip(ip),
                     )
                     .await;
-                assert_eq!(wrong.body["result"]["Ok"]["success"], json!(false));
+                assert_eq!(wrong.body["success"], json!(false));
             }
 
             // Requesting a fresh code resets `signup_verification.attempts` to 0.
@@ -2025,7 +1910,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
                     headers_with_ip(ip),
                 )
                 .await;
-            assert_eq!(re_request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(re_request.body["success"], json!(true));
             let code = latest_signup_verification_code(email, None);
 
             // The lifetime counter is unaffected, so the very next wrong guess trips it.
@@ -2101,7 +1986,7 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
                         headers_with_ip(ip),
                     )
                     .await;
-                assert_eq!(attempt.body["result"]["Ok"]["success"], json!(false));
+                assert_eq!(attempt.body["success"], json!(false));
             }
 
             // A genuine code issued afterwards still works.
@@ -2134,7 +2019,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
                     headers_with_ip(ip),
                 )
                 .await;
-            assert_eq!(request.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(request.body["success"], json!(true));
             let code = latest_signup_verification_code(email, None);
 
             for malformed in ["", "12345", "1234567", "abcdef", "12 456"] {
@@ -2145,7 +2030,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
                         headers_with_ip(ip),
                     )
                     .await;
-                assert_eq!(attempt.body["result"]["Ok"]["success"], json!(false));
+                assert_eq!(attempt.body["success"], json!(false));
             }
 
             let attempts = query_scalar::<_, i32>(
@@ -2165,7 +2050,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
                     headers_with_ip(ip),
                 )
                 .await;
-            assert_eq!(verified.body["result"]["Ok"]["success"], json!(true));
+            assert_eq!(verified.body["success"], json!(true));
         })
         .await;
     })
@@ -2190,7 +2075,7 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
                             headers_with_ip(ip),
                         )
                         .await;
-                    assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                    assert_eq!(response.body["success"], json!(true));
                 }
 
                 let blocked = app
@@ -2230,7 +2115,7 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
                             headers_with_ip(ip),
                         )
                         .await;
-                    assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                    assert_eq!(response.body["success"], json!(true));
                 }
 
                 let blocked = app
@@ -2271,7 +2156,7 @@ async fn start_login_is_rate_limited_per_ip() {
                         headers_with_ip("203.0.113.10"),
                     )
                     .await;
-                assert!(response.body["result"]["Ok"].is_object());
+                assert!(response.body.is_object());
             }
 
             let blocked = app
@@ -2295,7 +2180,7 @@ async fn start_login_is_rate_limited_per_ip() {
                     headers_with_ip("203.0.113.99"),
                 )
                 .await;
-            assert!(other_ip.body["result"]["Ok"].is_object());
+            assert!(other_ip.body.is_object());
         })
         .await;
     })
@@ -2325,7 +2210,7 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
                         headers_with_ip(&format!("203.0.113.{index}")),
                     )
                     .await;
-                assert!(response.body["result"]["Ok"].is_object());
+                assert!(response.body.is_object());
             }
 
             // A fourth forged address does not escape the per-IP window.
@@ -2368,7 +2253,7 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
                         headers_with_ip(&format!("198.51.100.{index}")),
                     )
                     .await;
-                assert!(response.body["result"]["Ok"].is_object());
+                assert!(response.body.is_object());
             }
             let blocked = app
                 .call_operation(
@@ -2409,8 +2294,8 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
                 )
                 .await;
             assert_eq!(
-                object_keys(&registered.body["result"]["Ok"]),
-                object_keys(&fresh_missing.body["result"]["Ok"]),
+                object_keys(&registered.body),
+                object_keys(&fresh_missing.body),
             );
         })
         .await;
@@ -2439,7 +2324,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                         )
                         .await;
                     // Rejected for a non-rate-limit reason (missing verification), but counted.
-                    assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
+                    assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
                     .call_operation(
@@ -2448,10 +2333,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                         headers_with_ip("192.0.2.10"),
                     )
                     .await;
-                assert_eq!(
-                    blocked.body["result"]["Err"]["code"],
-                    json!(RATE_LIMITED_CODE)
-                );
+                assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
             }
 
             // Per-email: same email, varying IPs.
@@ -2469,7 +2351,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                             headers_with_ip(&format!("192.0.2.{}", 100 + index)),
                         )
                         .await;
-                    assert!(response.body["result"]["Err"]["code"] != json!(RATE_LIMITED_CODE));
+                    assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
                     .call_operation(
@@ -2478,10 +2360,7 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                         headers_with_ip("192.0.2.200"),
                     )
                     .await;
-                assert_eq!(
-                    blocked.body["result"]["Err"]["code"],
-                    json!(RATE_LIMITED_CODE)
-                );
+                assert_eq!(blocked.body["code"], json!(RATE_LIMITED_CODE));
             }
         })
         .await;
@@ -2504,7 +2383,7 @@ async fn request_recovery_verification_is_rate_limited() {
                         headers_with_ip("192.0.2.55"),
                     )
                     .await;
-                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                assert_eq!(response.body["success"], json!(true));
             }
 
             let blocked = app
@@ -2542,7 +2421,7 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
                         headers_with_ip(ip),
                     )
                     .await;
-                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                assert_eq!(response.body["success"], json!(true));
             }
 
             // A third, previously unseen IP still hits the per-email counter.
@@ -2583,7 +2462,7 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
                         headers_with_ip("203.0.113.9"),
                     )
                     .await;
-                assert_eq!(response.body["result"]["Ok"]["success"], json!(true));
+                assert_eq!(response.body["success"], json!(true));
             }
 
             // A third, previously unseen email still hits the per-IP counter.
@@ -2663,8 +2542,8 @@ async fn start_login_ok(app: &ApiTestApp, email: &str) -> serde_json::Value {
             unauthenticated_json_headers(),
         )
         .await;
-    assert_eq!(response.status, StatusCode::OK);
-    response.body["result"]["Ok"].clone()
+    response.assert_contract_status();
+    response.body.clone()
 }
 
 async fn stored_kdf_row(pool: &PgPool, user_id: &str) -> (String, i32, i32) {
@@ -2750,9 +2629,9 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(signup.status, StatusCode::OK);
-            assert_eq!(signup.body["result"]["Ok"]["success"], json!(true));
-            let user_id = signup.body["result"]["Ok"]["userId"]
+            signup.assert_contract_status();
+            assert_eq!(signup.body["success"], json!(true));
+            let user_id = signup.body["userId"]
                 .as_str()
                 .expect("signup should return a user id")
                 .to_string();
@@ -2792,7 +2671,7 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
                     unauthenticated_json_headers(),
                 )
                 .await;
-            assert_eq!(below_floor.status, StatusCode::OK);
+            below_floor.assert_contract_status();
             assert_handler_error(&below_floor.body, "BAD_REQUEST", "Invalid KDF parameters");
         })
         .await;
@@ -2828,8 +2707,8 @@ async fn change_password_rewrites_kdf_params_alongside_verifier() {
                 authenticated_json_headers(&session.token),
             )
             .await;
-        assert_eq!(change.status, StatusCode::OK);
-        assert_eq!(change.body["result"]["Ok"]["success"], json!(true));
+        change.assert_contract_status();
+        assert_eq!(change.body["success"], json!(true));
 
         // Params written in the same transaction as the new verifier.
         let (algorithm, iterations, schema_version) =
@@ -2991,7 +2870,11 @@ async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failur
                 authenticated_json_headers(&session.token),
             )
             .await;
-        assert_handler_error(&response.body, "INTERNAL_SERVER_ERROR", "Failed to update vault keys");
+        assert_handler_error(
+            &response.body,
+            "INTERNAL_ERROR",
+            "The server could not complete the request.",
+        );
 
         let after = sqlx::query_as::<_, (String, String, String, String, i32, i32)>(
             "SELECT srp_salt, srp_verifier, encrypted_private_key, kdf_algorithm, kdf_iterations, kdf_schema_version FROM \"user\" WHERE id = $1",

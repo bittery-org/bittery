@@ -463,8 +463,12 @@ async fn team_events_requires_authentication() {
                 )
                 .await;
 
-            assert_eq!(response.status, StatusCode::OK);
-            assert_transport_error(&response.body, "UNAUTHORIZED", "Authentication required");
+            response.assert_contract_status();
+            assert_transport_error(
+                &response.body,
+                "UNAUTHORIZED",
+                "A valid bearer session is required.",
+            );
         },
     )
     .await;
@@ -484,7 +488,7 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
                     authenticated_json_headers(&member_session.token),
                 )
                 .await;
-            assert_eq!(member_response.status, StatusCode::OK);
+            member_response.assert_contract_status();
             assert_handler_error(
                 &member_response.body,
                 "FORBIDDEN",
@@ -499,7 +503,7 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
                     authenticated_json_headers(&personal_session.token),
                 )
                 .await;
-            assert_eq!(personal_response.status, StatusCode::OK);
+            personal_response.assert_contract_status();
             assert_handler_error(
                 &personal_response.body,
                 "FORBIDDEN",
@@ -514,7 +518,7 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
                     authenticated_json_headers(&inactive_session.token),
                 )
                 .await;
-            assert_eq!(inactive_response.status, StatusCode::OK);
+            inactive_response.assert_contract_status();
             assert_handler_error(
                 &inactive_response.body,
                 "FORBIDDEN",
@@ -529,7 +533,7 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
                     authenticated_json_headers(&no_team_session.token),
                 )
                 .await;
-            assert_eq!(no_team_response.status, StatusCode::OK);
+            no_team_response.assert_contract_status();
             assert_handler_error(&no_team_response.body, "NOT_FOUND", "Team not found");
         })
         .await;
@@ -552,9 +556,9 @@ async fn team_events_allow_self_hosted_admins_without_team_plan() {
         )
         .await;
 
-        assert_eq!(response.status, StatusCode::OK);
+        response.assert_contract_status();
         assert!(
-            response.body["result"]["Ok"]["events"].is_array(),
+            response.body["events"].is_array(),
             "expected team events payload, got {:?}",
             response.body
         );
@@ -579,7 +583,7 @@ async fn team_events_reject_malformed_request_input() {
                 headers.clone(),
             )
             .await;
-        assert_eq!(date_response.status, StatusCode::OK);
+        date_response.assert_contract_status();
         assert_handler_error(
             &date_response.body,
             "BAD_REQUEST",
@@ -593,7 +597,7 @@ async fn team_events_reject_malformed_request_input() {
                 headers,
             )
             .await;
-        assert_eq!(cursor_response.status, StatusCode::OK);
+        cursor_response.assert_contract_status();
         assert_handler_error(
             &cursor_response.body,
             "BAD_REQUEST",
@@ -655,31 +659,22 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
             )
             .await;
 
-        assert_eq!(first_page.status, StatusCode::OK);
+        first_page.assert_contract_status();
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"]
+            first_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             2
         );
+        assert_eq!(first_page.body["events"][0]["id"], json!("audit_newest"));
+        assert_eq!(first_page.body["events"][1]["id"], json!("audit_same_time"));
         assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["id"],
-            json!("audit_newest")
-        );
-        assert_eq!(
-            first_page.body["result"]["Ok"]["events"][1]["id"],
-            json!("audit_same_time")
-        );
-        assert_eq!(
-            first_page.body["result"]["Ok"]["events"][0]["network"]["maskedIp"],
+            first_page.body["events"][0]["network"]["maskedIp"],
             json!("10.20.x.x")
         );
-        assert_eq!(
-            first_page.body["result"]["Ok"]["events"][1]["actionGroup"],
-            json!("auth")
-        );
-        let next_cursor = first_page.body["result"]["Ok"]["nextCursor"]
+        assert_eq!(first_page.body["events"][1]["actionGroup"], json!("auth"));
+        let next_cursor = first_page.body["nextCursor"]
             .as_str()
             .expect("next cursor should be present")
             .to_string();
@@ -692,26 +687,20 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
             )
             .await;
 
-        assert_eq!(second_page.status, StatusCode::OK);
+        second_page.assert_contract_status();
         assert_eq!(
-            second_page.body["result"]["Ok"]["events"]
+            second_page.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
+        assert_eq!(second_page.body["events"][0]["id"], json!("share_success"));
         assert_eq!(
-            second_page.body["result"]["Ok"]["events"][0]["id"],
-            json!("share_success")
-        );
-        assert_eq!(
-            second_page.body["result"]["Ok"]["events"][0]["source"],
+            second_page.body["events"][0]["source"],
             json!("share_access_log")
         );
-        assert_eq!(
-            second_page.body["result"]["Ok"]["nextCursor"],
-            serde_json::Value::Null
-        );
+        assert_eq!(second_page.body["nextCursor"], serde_json::Value::Null);
     })
     .await;
 }
@@ -781,20 +770,20 @@ async fn team_events_apply_share_other_and_actor_filters() {
                 headers.clone(),
             )
             .await;
-        assert_eq!(share_failure_response.status, StatusCode::OK);
+        share_failure_response.assert_contract_status();
         assert_eq!(
-            share_failure_response.body["result"]["Ok"]["events"]
+            share_failure_response.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
         assert_eq!(
-            share_failure_response.body["result"]["Ok"]["events"][0]["id"],
+            share_failure_response.body["events"][0]["id"],
             json!("share_failed")
         );
         assert_eq!(
-            share_failure_response.body["result"]["Ok"]["events"][0]["result"],
+            share_failure_response.body["events"][0]["result"],
             json!("failure")
         );
 
@@ -805,20 +794,17 @@ async fn team_events_apply_share_other_and_actor_filters() {
                 headers.clone(),
             )
             .await;
-        assert_eq!(other_response.status, StatusCode::OK);
+        other_response.assert_contract_status();
         assert_eq!(
-            other_response.body["result"]["Ok"]["events"]
+            other_response.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             1
         );
+        assert_eq!(other_response.body["events"][0]["id"], json!("audit_other"));
         assert_eq!(
-            other_response.body["result"]["Ok"]["events"][0]["id"],
-            json!("audit_other")
-        );
-        assert_eq!(
-            other_response.body["result"]["Ok"]["events"][0]["actionGroup"],
+            other_response.body["events"][0]["actionGroup"],
             json!("other")
         );
 
@@ -829,16 +815,16 @@ async fn team_events_apply_share_other_and_actor_filters() {
                 headers,
             )
             .await;
-        assert_eq!(unknown_actor_response.status, StatusCode::OK);
+        unknown_actor_response.assert_contract_status();
         assert_eq!(
-            unknown_actor_response.body["result"]["Ok"]["events"]
+            unknown_actor_response.body["events"]
                 .as_array()
                 .expect("events should be an array")
                 .len(),
             0
         );
         assert_eq!(
-            unknown_actor_response.body["result"]["Ok"]["nextCursor"],
+            unknown_actor_response.body["nextCursor"],
             serde_json::Value::Null
         );
     })
@@ -864,13 +850,13 @@ fn unauthenticated_json_headers() -> HeaderMap {
 }
 
 fn assert_handler_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["result"]["Err"]["code"], json!(code));
-    assert_eq!(body["result"]["Err"]["message"], json!(message));
+    assert_eq!(body["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
 }
 
 fn assert_transport_error(body: &serde_json::Value, code: &str, message: &str) {
-    assert_eq!(body["error"]["message"], json!(message));
-    assert_eq!(body["error"]["data"]["code"], json!(code));
+    assert_eq!(body["detail"], json!(message));
+    assert_eq!(body["code"], json!(code));
 }
 
 async fn build_audit_router_fixture(pool: &PgPool) -> AuditRouterFixture {

@@ -4567,13 +4567,16 @@
           {
             "name": "vaultIds",
             "in": "query",
+            "description": "Repeat `vaultIds` for each filter value.",
             "required": false,
             "schema": {
               "type": "array",
               "items": {
                 "type": "string"
               }
-            }
+            },
+            "style": "form",
+            "explode": true
           },
           {
             "name": "limit",

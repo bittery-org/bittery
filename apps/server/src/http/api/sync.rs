@@ -57,11 +57,67 @@ fn default_bootstrap_limit() -> u16 {
 #[into_params(parameter_in = Query, rename_all = "camelCase")]
 struct ChangesQuery {
     since_id: Option<String>,
+    /// Repeat `vaultIds` for each filter value.
+    #[param(style = Form, explode)]
     #[schema(max_items = 200)]
     vault_ids: Option<Vec<String>>,
     #[serde(default = "default_changes_limit")]
     #[schema(minimum = 1, maximum = 500, default = 100)]
     limit: u16,
+}
+
+struct ChangesApiQuery(ChangesQuery);
+
+impl<S> FromRequestParts<S> for ChangesApiQuery
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let mut since_id = None;
+        let mut vault_ids = Vec::new();
+        let mut limit = None;
+
+        for (name, value) in
+            url::form_urlencoded::parse(parts.uri.query().unwrap_or_default().as_bytes())
+        {
+            match name.as_ref() {
+                "sinceId" if since_id.is_none() => since_id = Some(value.into_owned()),
+                "vaultIds" => vault_ids.push(value.into_owned()),
+                "limit" if limit.is_none() => {
+                    limit = Some(value.parse::<u16>().map_err(|_| {
+                        ApiError::bad_request("INVALID_QUERY", "limit must be an integer")
+                    })?);
+                }
+                "sinceId" | "limit" => {
+                    return Err(ApiError::bad_request(
+                        "INVALID_QUERY",
+                        format!("{name} must not be repeated"),
+                    ));
+                }
+                _ => {
+                    return Err(ApiError::bad_request(
+                        "INVALID_QUERY",
+                        format!("unknown query field: {name}"),
+                    ));
+                }
+            }
+        }
+
+        if vault_ids.len() > 200 {
+            return Err(ApiError::bad_request(
+                "INVALID_QUERY",
+                "vaultIds must contain at most 200 values",
+            ));
+        }
+
+        Ok(Self(ChangesQuery {
+            since_id,
+            vault_ids: (!vault_ids.is_empty()).then_some(vault_ids),
+            limit: limit.unwrap_or_else(default_changes_limit),
+        }))
+    }
 }
 
 fn default_changes_limit() -> u16 {
@@ -176,7 +232,7 @@ async fn bootstrap(
 async fn changes(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
-    ApiQuery(query): ApiQuery<ChangesQuery>,
+    ChangesApiQuery(query): ChangesApiQuery,
 ) -> Result<Json<SyncChangesResponse>, ApiError> {
     let pool = db_pool(&state)?;
     Ok(Json(
@@ -218,9 +274,10 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
 
 #[cfg(test)]
 mod tests {
+    use axum::{extract::FromRequestParts, http::Request};
     use serde_json::json;
 
-    use super::{router, SyncChangesResponse};
+    use super::{router, ChangesApiQuery, SyncChangesResponse};
     use crate::services::sync::{GetEventsSinceResponse, SyncCursorResponse, SyncEventDto};
 
     #[test]
@@ -248,6 +305,24 @@ mod tests {
 
         let json = serde_json::to_value(response).expect("response should serialize");
         assert_eq!(json["events"][0]["timestamp"], json!(i64::MAX.to_string()));
+    }
+
+    #[tokio::test]
+    async fn changes_query_accepts_openapi_exploded_vault_filters() {
+        let (mut parts, _) = Request::builder()
+            .uri("/sync/changes?vaultIds=vault_a&vaultIds=vault_b&limit=25")
+            .body(())
+            .unwrap()
+            .into_parts();
+
+        let ChangesApiQuery(query) = ChangesApiQuery::from_request_parts(&mut parts, &())
+            .await
+            .expect("OpenAPI form+explode arrays should deserialize");
+        assert_eq!(
+            query.vault_ids,
+            Some(vec!["vault_a".into(), "vault_b".into()])
+        );
+        assert_eq!(query.limit, 25);
     }
 
     #[test]

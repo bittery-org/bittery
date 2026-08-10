@@ -6121,6 +6121,7 @@ export interface operations {
         readonly parameters: {
             readonly query?: {
                 readonly sinceId?: string;
+                /** @description Repeat `vaultIds` for each filter value. */
                 readonly vaultIds?: readonly string[];
                 readonly limit?: number;
             };
