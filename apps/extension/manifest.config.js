@@ -1,10 +1,17 @@
+import { readFileSync } from "node:fs";
 import { defineManifest } from "@crxjs/vite-plugin";
+
+// Derived rather than tracked in scripts/sync-version.mjs so the version users
+// see in the browser cannot drift from the rest of the release.
+const { version } = JSON.parse(
+	readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+);
 
 export default defineManifest({
 	manifest_version: 3,
 	default_locale: "en",
 	name: "__MSG_extName__",
-	version: "0.1.0",
+	version,
 	description: "__MSG_extDescription__",
 	permissions: [
 		"storage",

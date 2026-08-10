@@ -18,7 +18,7 @@
 		"check-types": "turbo check-types",
 		"i18n:check": "pnpm --filter @bittery/i18n run check:keys",
 		"shadcn": "pnpm --filter @bittery/ui run shadcn",
-		"test": "turbo test",
+		"test": "node --test \"scripts/**/*.test.mjs\" && turbo test",
 		"test:server": "pnpm --filter server test",
 		"dev": "turbo dev",
 		"dev:desktop": "turbo -F desktop dev",
@@ -54,7 +54,8 @@
 		"stripe:webhooks": "stripe listen --forward-to http://localhost:3000/webhooks/stripe",
 		"i18n:generate": "pnpm --filter @bittery/i18n run build",
 		"version:sync": "node ./scripts/sync-version.mjs",
-		"version:check": "node ./scripts/sync-version.mjs --check",
+		"version:check": "node ./scripts/sync-version.mjs --check --check-history",
+		"version:next": "node ./scripts/sync-version.mjs --next",
 		"env:check": "node ./scripts/check-env-docs.mjs"
 	},
 	"dependencies": {
