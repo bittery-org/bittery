@@ -65,14 +65,6 @@ const UNDOCUMENTED_SERVER_VARS = new Map([
 		"local-development stub for auth email delivery; must not be advertised as a deployment option",
 	],
 	[
-		"BITTERY_RPC_SLOW_MS",
-		"internal slow-RPC tracing threshold with a compiled-in default",
-	],
-	[
-		"BITTERY_RUST_RPC_OUTPUT_DIR",
-		"build tooling only: output directory of the write-bindings binary",
-	],
-	[
 		"BITTERY_STORAGE_PUBLIC_URL",
 		"legacy fallback for BITTERY_STORAGE_CDN_URL, which is the documented name",
 	],

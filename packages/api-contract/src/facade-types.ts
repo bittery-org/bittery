@@ -60,6 +60,7 @@ export type Session = Omit<
 	lastActiveAt: Date;
 };
 export type RefreshSessionResponse = Schema<"RefreshSessionResponse">;
+export type AuthVaultKey = Schema<"AuthVaultKeyResponse">;
 
 export type Vault = Schema<"VaultListEntryResponse">;
 export type VaultDetails = Schema<"VaultDetailsResponseDto">;
@@ -182,6 +183,7 @@ export interface AuditEventsRequest extends ApiPageRequest {
 }
 
 export type SyncBootstrapPage = Schema<"BootstrapItemsResponse">;
+export type SyncBootstrapItem = Schema<"BootstrapItemResponse">;
 export type SyncEvent = Omit<Schema<"SyncEventResponse">, "timestamp"> & {
 	timestamp: bigint;
 };

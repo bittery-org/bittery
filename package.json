@@ -33,8 +33,6 @@
 		"dev:mobile": "turbo -F mobile dev",
 		"dev:marketing": "turbo -F marketing dev",
 		"check:server": "cargo check --manifest-path apps/server/Cargo.toml",
-		"generate:rust-rpc": "pnpm --filter @bittery/rust-rpc run generate",
-		"generate:server-bindings": "pnpm run generate:rust-rpc",
 		"build": "turbo build",
 		"build:desktop": "turbo -F desktop build:release",
 		"build:web": "pnpm build:crypto-wasm && turbo -F web build",

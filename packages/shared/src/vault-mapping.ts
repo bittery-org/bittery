@@ -1,20 +1,20 @@
 import type {
-	AuthVaultKeyResponse,
-	BootstrapItemResponse,
-	VaultDetailsResponse,
-	VaultListEntryResponse,
-} from "@bittery/rust-rpc";
+	AuthVaultKey,
+	SyncBootstrapItem,
+	Vault,
+	VaultDetails,
+} from "@bittery/api-contract";
 
 export type VaultType = "personal" | "team";
 export type VaultRole = "owner" | "admin" | "member" | "read-only";
 
-/** Structural wire shape keeps client-specific RPC interfaces checked at compile time. */
+/** Structural wire shape keeps client-specific API interfaces checked at compile time. */
 export interface ServerVaultSummary {
 	id: string;
 	name: string;
 	vaultType: string;
-	icon: string | null;
-	imageUrl: string | null;
+	icon?: string | null;
+	imageUrl?: string | null;
 }
 
 export interface ServerVaultListEntry extends ServerVaultSummary {
@@ -27,8 +27,8 @@ export interface ServerAuthVaultKeyEntry {
 	vaultId: string;
 	vaultName: string;
 	vaultType: string;
-	vaultIcon: string | null;
-	vaultImageUrl: string | null;
+	vaultIcon?: string | null;
+	vaultImageUrl?: string | null;
 	encryptedVaultKey: string;
 	role: string;
 }
@@ -75,8 +75,8 @@ function toCanonicalVaultKeyEntry(input: {
 	vaultId: string;
 	vaultName: string;
 	vaultType: string;
-	vaultIcon: string | null;
-	vaultImageUrl: string | null;
+	vaultIcon?: string | null;
+	vaultImageUrl?: string | null;
 	encryptedVaultKey: string;
 	role: string;
 }): VaultKeyEntry {
@@ -113,8 +113,8 @@ export function toCachedVaultFields(vault: ServerVaultSummary): VaultSummary {
 		id: vault.id,
 		name: vault.name,
 		type: decodeVaultType(vault.vaultType),
-		icon: vault.icon,
-		imageUrl: vault.imageUrl,
+		icon: vault.icon ?? null,
+		imageUrl: vault.imageUrl ?? null,
 	};
 }
 
@@ -126,18 +126,15 @@ export function toAuthVaultKeyEntry(
 }
 
 // Schema drift fails type checks here rather than silently corrupting a cache write.
-const _listEntryMatchesServer = (
-	entry: VaultListEntryResponse,
-): ServerVaultListEntry => entry;
+const _listEntryMatchesServer = (entry: Vault): ServerVaultListEntry => entry;
 const _authVaultKeyMatchesServer = (
-	entry: AuthVaultKeyResponse,
+	entry: AuthVaultKey,
 ): ServerAuthVaultKeyEntry => entry;
 const _bootstrapSummaryMatchesServer = (
-	summary: NonNullable<BootstrapItemResponse["vault"]>,
+	summary: NonNullable<SyncBootstrapItem["vault"]>,
 ): ServerVaultListEntry => summary;
-const _detailsMatchServer = (
-	details: VaultDetailsResponse,
-): ServerVaultSummary => details;
+const _detailsMatchServer = (details: VaultDetails): ServerVaultSummary =>
+	details;
 
 void _listEntryMatchesServer;
 void _authVaultKeyMatchesServer;

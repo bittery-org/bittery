@@ -6,9 +6,6 @@ settings:
 
 catalogs:
   default:
-    '@qubit-rs/client':
-      specifier: 0.5.0-beta.1
-      version: 0.5.0-beta.1
     '@types/react':
       specifier: ~19.2.18
       version: 19.2.18
@@ -852,16 +849,6 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
-  packages/rust-rpc:
-    dependencies:
-      '@qubit-rs/client':
-        specifier: 'catalog:'
-        version: 0.5.0-beta.1
-    devDependencies:
-      typescript:
-        specifier: ^5.7.2
-        version: 5.9.3
-
   packages/shared:
     dependencies:
       '@bittery/api-contract':
@@ -870,9 +857,6 @@ importers:
       '@bittery/device':
         specifier: workspace:*
         version: link:../device
-      '@bittery/rust-rpc':
-        specifier: workspace:*
-        version: link:../rust-rpc
       '@bittery/types':
         specifier: workspace:*
         version: link:../types
@@ -2385,9 +2369,6 @@ packages:
     resolution: {integrity: sha512-6TyEnHgd6SArQO8UO2OMTxshln3QMWBtPGrOCgs3wVEmQmwyuNtB10IZMfmYDE0riwNR1cu4q+pPcxMVtaG3TA==}
     engines: {node: '>=18'}
     hasBin: true
-
-  '@qubit-rs/client@0.5.0-beta.1':
-    resolution: {integrity: sha512-/VfpUN3Yqci+Rk547zhG9+AuG4kVH5nhtY+wnErvPgLRigdSg/jCsTvTuynEsKEtRK0A4J905ovbNv4QqGDZSw==}
 
   '@radix-ui/number@1.1.1':
     resolution: {integrity: sha512-MkKCwxlXTgz6CFoJx3pCwn07GKp36+aZyu/u2Ln2VrA5DcdyCZkASEDBTd8x5whTQQL5CiYf4prXKLcgQdv29g==}
@@ -10350,8 +10331,6 @@ snapshots:
   '@playwright/test@1.57.0':
     dependencies:
       playwright: 1.57.0
-
-  '@qubit-rs/client@0.5.0-beta.1': {}
 
   '@radix-ui/number@1.1.1': {}
 

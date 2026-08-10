@@ -163,7 +163,7 @@ function apiServerEnv(options: {
 function webAppEnv(serverUrl: string, webAppUrl: string) {
 	return {
 		// apps/web has no `.env` and Vite's envDir is apps/web, so the repo-root
-		// `.env` never reaches it - without this every RPC call 404s against the
+		// `.env` never reaches it - without this every API call 404s against the
 		// web app's own origin.
 		VITE_SERVER_URL: serverUrl,
 		VITE_WEBAPP_URL: webAppUrl,

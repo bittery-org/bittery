@@ -25,10 +25,6 @@
 		"./api-query": "./src/api-query.ts",
 		"./api-session-refresh": "./src/api-session-refresh.ts",
 		"./totp": "./src/totp.ts",
-		"./rpc": "./src/rpc.ts",
-		"./rpc-client": "./src/rpc-client.ts",
-		"./rpc-client-factory": "./src/rpc-client-factory.ts",
-		"./rpc-session-refresh": "./src/rpc-session-refresh.ts",
 		"./crypto": "./src/crypto.ts",
 		"./kdf-policy": "./src/kdf-policy.ts",
 		"./server-url": "./src/server-url.ts",
@@ -37,13 +33,11 @@
 		"./types": "./src/types.ts",
 		"./pricing": "./src/pricing.ts",
 		"./releases": "./src/releases.ts",
-		"./rust-rpc-client": "./src/rust-rpc-client.ts",
 		"./vault-mapping": "./src/vault-mapping.ts"
 	},
 	"dependencies": {
 		"@bittery/api-contract": "workspace:*",
 		"@bittery/device": "workspace:*",
-		"@bittery/rust-rpc": "workspace:*",
 		"@bittery/types": "workspace:*",
 		"@tanstack/react-query": "^5.85.5",
 		"jszip": "^3.10.1"

@@ -63,9 +63,8 @@ docker compose up -d
 Database migrations are forward-only. If you roll back to an older server version, ensure the database schema is still compatible. For major version upgrades, always back up your database first.
 </Callout>
 
-Never mix server and web releases during an update or rollback. After the REST cutover, rollback
-means deploying the previous compatible `/api/v1` server and web pair; it does not restore the
-legacy RPC transport.
+Never mix server and web releases during an update or rollback. Rollback means deploying the
+previous compatible `/api/v1` server and web pair.
 
 ## Monitoring
 
