@@ -2082,8 +2082,6 @@ dependencies = [
 [[package]]
 name = "qubit"
 version = "1.0.0-beta.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94681c273248407cdf513e5a683685d1841ca9245ac31d92c151beef1cc39455"
 dependencies = [
  "axum",
  "derive_more",

@@ -33,6 +33,7 @@ const DEFAULT_SHARE_LINK_DAILY_LIMIT: i64 = 50;
 #[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
+#[ts(rename = "ShareItemIdInput")]
 pub struct ItemIdInput {
     pub item_id: String,
 }
@@ -147,6 +148,7 @@ pub struct ShareAccessLogResponse {
 }
 
 #[derive(Debug, Clone, Serialize, TS)]
+#[ts(rename = "ShareSuccessResponse")]
 pub struct SuccessResponse {
     pub success: bool,
 }

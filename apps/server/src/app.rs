@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub fn create_app(state: AppState, edge_config: EdgeHttpConfig) -> Router {
-    let (qubit_service, _server_handle) = create_rpc_router().to_service(state.clone());
+    let (qubit_service, _server_handle) = create_rpc_router().as_rpc(state.clone()).into_service();
     let rpc_routes = Router::new()
         .nest_service("/rpc", qubit_service)
         .route_layer(middleware::from_fn(rpc_tracing_middleware))

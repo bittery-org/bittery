@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use qubit::{handler, server::Router};
+use qubit::{handler, Router};
 
 use crate::{
     config::db_pool,

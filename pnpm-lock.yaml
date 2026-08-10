@@ -7,8 +7,8 @@ settings:
 catalogs:
   default:
     '@qubit-rs/client':
-      specifier: ^0.4.5
-      version: 0.4.5
+      specifier: 0.5.0-beta.1
+      version: 0.5.0-beta.1
     '@types/react':
       specifier: ~19.1.9
       version: 19.1.17
@@ -308,7 +308,7 @@ importers:
         version: 12.34.4(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
       nitro:
         specifier: npm:nitro-nightly@latest
-        version: nitro-nightly@3.0.1-20260731-205209-52abde8a(chokidar@5.0.0)(dotenv@17.3.1)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.7.0)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
+        version: nitro-nightly@3.0.1-20260810-100628-59ae597b(chokidar@5.0.0)(dotenv@17.3.1)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.7.0)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2))
       radix-ui:
         specifier: ^1.4.3
         version: 1.4.3(@types/react-dom@19.1.11(@types/react@19.1.17))(@types/react@19.1.17)(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
@@ -829,7 +829,7 @@ importers:
     dependencies:
       '@qubit-rs/client':
         specifier: 'catalog:'
-        version: 0.4.5
+        version: 0.5.0-beta.1
     devDependencies:
       typescript:
         specifier: ^5.7.2
@@ -2998,8 +2998,8 @@ packages:
     engines: {node: '>=18'}
     hasBin: true
 
-  '@qubit-rs/client@0.4.5':
-    resolution: {integrity: sha512-L7pBAUs1sPWCkuoRq7rdwqXy1+iLOmOVhADxj+QoNY24yu4J1aiTUSlJJllK9rXRxfvkjRNEPSeUE5H+U3ncug==}
+  '@qubit-rs/client@0.5.0-beta.1':
+    resolution: {integrity: sha512-/VfpUN3Yqci+Rk547zhG9+AuG4kVH5nhtY+wnErvPgLRigdSg/jCsTvTuynEsKEtRK0A4J905ovbNv4QqGDZSw==}
 
   '@radix-ui/number@1.1.1':
     resolution: {integrity: sha512-MkKCwxlXTgz6CFoJx3pCwn07GKp36+aZyu/u2Ln2VrA5DcdyCZkASEDBTd8x5whTQQL5CiYf4prXKLcgQdv29g==}
@@ -5221,6 +5221,7 @@ packages:
 
   '@ungap/structured-clone@1.3.0':
     resolution: {integrity: sha512-WmoN8qaIAo7WTYWbAZuG8PYEhn5fkz7dZrqTBZ7dtt//lL2Gwms1IcnQ5yHqjDfX8Ft5j4YzDM23f87zBfDe9g==}
+    deprecated: Potential CWE-502 - Update to 1.3.1 or higher
 
   '@urql/core@5.2.0':
     resolution: {integrity: sha512-/n0ieD0mvvDnVAXEQgX/7qJiVcvYvNkOHeBvkwtylfjydar123caCXcl58PXFY11oU1oquJocVXHxLAbtv4x1A==}
@@ -7855,8 +7856,8 @@ packages:
   nf3@0.3.22:
     resolution: {integrity: sha512-NOcqlHu22X1rUakd0SrqllP8kb3LWFmSAi1svTxaKxz+yB604xlaOmUfI3oO+RkODvaocKDDy8bgthnZL8hrkw==}
 
-  nitro-nightly@3.0.1-20260731-205209-52abde8a:
-    resolution: {integrity: sha512-KI1rwOJPgD0U57mE+1AefoEPjd+aJPJ4GCTLym0cXyfBBi8JtVsHmtB/4D3g1RaDwntjoz8H5nWnWGg7agYnuA==}
+  nitro-nightly@3.0.1-20260810-100628-59ae597b:
+    resolution: {integrity: sha512-4xMduZ2pXgyd0Hh2oJc/Rw92pNHFxvni7G2Jnsjct06uam/NMJoKo04MAsJf4ZAexkhlmba7BTcKLUwD5EI/8A==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
     peerDependencies:
@@ -9066,6 +9067,7 @@ packages:
   tsconfck@3.1.6:
     resolution: {integrity: sha512-ks6Vjr/jEw0P1gmOVwutM3B7fWxoWBL2KRDb1JfqGVawBmO5UsvmWOQFGHBPl5yxYz4eERr19E6L7NMv+Fej4w==}
     engines: {node: ^18 || >=20}
+    deprecated: unmaintained
     hasBin: true
     peerDependencies:
       typescript: ^5.0.0
@@ -11915,7 +11917,7 @@ snapshots:
     dependencies:
       playwright: 1.57.0
 
-  '@qubit-rs/client@0.4.5': {}
+  '@qubit-rs/client@0.5.0-beta.1': {}
 
   '@radix-ui/number@1.1.1': {}
 
@@ -17767,7 +17769,7 @@ snapshots:
 
   nf3@0.3.22: {}
 
-  nitro-nightly@3.0.1-20260731-205209-52abde8a(chokidar@5.0.0)(dotenv@17.3.1)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.7.0)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)):
+  nitro-nightly@3.0.1-20260810-100628-59ae597b(chokidar@5.0.0)(dotenv@17.3.1)(drizzle-orm@0.45.1(@types/pg@8.16.0)(bun-types@1.3.6)(expo-sqlite@16.0.10(expo@54.0.32)(react-native@0.81.5(@babel/core@7.28.6)(@types/react@19.1.17)(react@19.1.0))(react@19.1.0))(kysely@0.27.6)(pg@8.17.2))(jiti@2.7.0)(lru-cache@11.2.6)(rollup@4.56.0)(vite@7.3.1(@types/node@22.19.13)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.21.0)(yaml@2.8.2)):
     dependencies:
       consola: 3.4.2
       crossws: 0.4.10(srvx@0.11.22)
