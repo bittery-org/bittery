@@ -99,29 +99,26 @@ async function getApiClientId(): Promise<string> {
 
 const apiClient = createSessionRefreshingApiClient({
 	defaultServerUrl: getServerUrl(),
-	getServerUrl: async () => getServerUrl(),
-	getSessionSnapshot: async () => {
+	getAccountSnapshot: async () => {
 		await initializeStorage();
-		const [token, sessionData] = await Promise.all([
-			storage.getAuthToken(),
-			storage.getStoredSessionData(),
+		const accountId = await storage.getActiveAccount();
+		if (!accountId) return null;
+		const [token, sessionData, serverUrl] = await Promise.all([
+			storage.getAuthToken(accountId),
+			storage.getStoredSessionData(accountId),
+			storage.getServerUrl(accountId),
 		]);
 		return {
+			accountId,
+			serverUrl: serverUrl ?? getServerUrl(),
 			token,
 			issuedAt: sessionData?.createdAt ?? null,
 			expiresAt: sessionData?.serverExpiresAt ?? sessionData?.expiresAt ?? null,
 		};
 	},
-	getRefreshToken: async () => {
-		await initializeStorage();
-		return storage.getAuthToken();
-	},
-	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-		await initializeStorage();
-		const accountId = await storage.getActiveAccount();
-		if (!accountId) return;
-		await storage.storeAuthToken(token, accountId);
-		await storage.updateStoredSessionMetadata(accountId, {
+	storeRefreshedSession: async (snapshot, { token, sessionId, expiresAt }) => {
+		await storage.storeAuthToken(token, snapshot.accountId);
+		await storage.updateStoredSessionMetadata(snapshot.accountId, {
 			sessionId,
 			expiresAt,
 		});

@@ -12,7 +12,6 @@ import {
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { subscribeBackgroundPushes } from "./lib/background-events";
-import { storage } from "./lib/storage";
 import { applyEarlyTheme } from "./lib/theme";
 import { I18nProvider } from "./providers/i18n-provider";
 import { ExtensionPlatformProvider } from "./providers/platform-provider";
@@ -37,25 +36,33 @@ const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 
 async function resolveServerRequest(request: Request): Promise<Response> {
-	const storedServerUrl = await storage.getServerUrl();
-	const server = new URL(storedServerUrl ?? fallbackServerUrl);
+	const snapshot = await chrome.runtime.sendMessage({
+		type: "GET_AUTH_TOKEN",
+	});
+	const serverUrl = normalizeServerUrl(snapshot.serverUrl ?? fallbackServerUrl);
+	if (!serverUrl) {
+		throw new TypeError(
+			"Account server URL is invalid or remote HTTP transport is not authorized.",
+		);
+	}
+	const server = new URL(serverUrl);
 	const target = new URL(request.url);
 	const serverPath = server.pathname.replace(/\/$/, "");
 	target.protocol = server.protocol;
 	target.host = server.host;
 	target.pathname = `${serverPath}${target.pathname}`;
-	return fetch(new Request(target, request));
+	const headers = new Headers(request.headers);
+	if (snapshot.token) {
+		headers.set("Authorization", `Bearer ${snapshot.token}`);
+	} else {
+		headers.delete("Authorization");
+	}
+	return fetch(new Request(target, request), { headers });
 }
 
 const apiClient = createAppApiClient({
 	serverUrl: fallbackServerUrl,
 	supportedApiMajors: [1],
-	getAccessToken: async () => {
-		const response = await chrome.runtime.sendMessage({
-			type: "GET_AUTH_TOKEN",
-		});
-		return response.token ?? null;
-	},
 	getClientMetadata: async () => {
 		const response = await chrome.runtime.sendMessage({
 			type: "GET_SYNC_CLIENT_ID",

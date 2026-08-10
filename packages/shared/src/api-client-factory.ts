@@ -1,11 +1,11 @@
-import type { ApiClientPlatform } from "@bittery/api-contract";
+import type {
+	ApiClientPlatform,
+	InsecureTransportPolicy,
+} from "@bittery/api-contract";
 import { type AppApiClient, createAppApiClient } from "./api-client";
-import {
-	createSessionRefreshingApiClient,
-	type SessionRefreshingApiClientOptions,
-} from "./api-session-refresh";
+import { createSessionRefreshingApiClient } from "./api-session-refresh";
 import { normalizeServerUrl } from "./server-url";
-import type { SessionSnapshot } from "./session-refresh";
+import type { RefreshResult, SessionSnapshot } from "./session-refresh";
 
 interface AccountStoreLike {
 	getUnlockedAccounts(): Promise<string[]>;
@@ -16,12 +16,13 @@ interface AccountStoreLike {
 export interface AccountApiClientMetadataOptions {
 	clientPlatform?: string;
 	clientVersion?: string;
+	insecureTransport?: InsecureTransportPolicy;
 }
 
 export interface AccountSessionRefreshOptions {
+	accountId?: string;
 	getSessionSnapshot: () => Promise<SessionSnapshot>;
-	getRefreshToken: () => Promise<string | null>;
-	storeRefreshedSession: SessionRefreshingApiClientOptions["storeRefreshedSession"];
+	storeRefreshedSession: (session: RefreshResult) => Promise<void>;
 	thresholdRatio?: number;
 	appPlatform?: string;
 }
@@ -80,20 +81,35 @@ function getClientVersion(value?: string): string {
 }
 
 export function getDefaultServerUrl(): string {
-	return (
-		normalizeServerUrl(import.meta.env?.VITE_SERVER_URL) ??
-		normalizeServerUrl(
-			typeof process !== "undefined" ? process.env.VITE_SERVER_URL : null,
-		) ??
-		(typeof window !== "undefined"
-			? normalizeServerUrl(window.location?.origin)
-			: null) ??
-		"http://localhost:3000"
-	);
+	const configuredServerUrl = import.meta.env?.VITE_SERVER_URL;
+	if (configuredServerUrl?.trim()) {
+		return resolveServerUrl(configuredServerUrl);
+	}
+	const processServerUrl =
+		typeof process !== "undefined" ? process.env.VITE_SERVER_URL : null;
+	if (processServerUrl?.trim()) {
+		return resolveServerUrl(processServerUrl);
+	}
+	const windowOrigin =
+		typeof window !== "undefined" ? window.location?.origin : null;
+	if (windowOrigin?.trim()) {
+		return resolveServerUrl(windowOrigin);
+	}
+	return normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 }
 
-function resolveServerUrl(serverUrl?: string | null): string {
-	return normalizeServerUrl(serverUrl) ?? getDefaultServerUrl();
+function resolveServerUrl(
+	serverUrl?: string | null,
+	insecureTransport?: InsecureTransportPolicy,
+): string {
+	if (!serverUrl) return getDefaultServerUrl();
+	const normalized = normalizeServerUrl(serverUrl, insecureTransport);
+	if (!normalized) {
+		throw new TypeError(
+			"Server URL is invalid or remote HTTP transport is not authorized.",
+		);
+	}
+	return normalized;
 }
 
 function cacheKey(
@@ -101,8 +117,9 @@ function cacheKey(
 	serverUrl: string,
 	clientId: string,
 	mode: "static" | "session-refresh",
+	insecureTransport?: InsecureTransportPolicy,
 ): string {
-	return `${serverUrl}:${authToken ?? ""}:${clientId}:${mode}`;
+	return `${serverUrl}:${authToken ?? ""}:${clientId}:${mode}:${insecureTransport?.operatorEnabled === true}:${insecureTransport?.accountConfirmed === true}`;
 }
 
 export function createAccountApiClient(
@@ -112,29 +129,44 @@ export function createAccountApiClient(
 	sessionRefresh?: AccountSessionRefreshOptions,
 	metadata?: AccountApiClientMetadataOptions,
 ): AppApiClient {
-	const resolvedServerUrl = resolveServerUrl(serverUrl);
+	const insecureTransport = metadata?.insecureTransport;
+	const resolvedServerUrl = resolveServerUrl(serverUrl, insecureTransport);
 	const resolvedClientId = resolveClientId(clientId);
 	const clientPlatform = normalizePlatform(
 		metadata?.clientPlatform ?? sessionRefresh?.appPlatform,
 	);
 	const clientVersion = getClientVersion(metadata?.clientVersion);
 	const mode = sessionRefresh ? "session-refresh" : "static";
-	const key = cacheKey(authToken, resolvedServerUrl, resolvedClientId, mode);
+	const key = cacheKey(
+		authToken,
+		resolvedServerUrl,
+		resolvedClientId,
+		mode,
+		insecureTransport,
+	);
 	const cached = clientCache.get(key);
 	if (cached) return cached;
 
 	const client = sessionRefresh
 		? createSessionRefreshingApiClient({
 				defaultServerUrl: resolvedServerUrl,
-				getSessionSnapshot: sessionRefresh.getSessionSnapshot,
-				getRefreshToken: sessionRefresh.getRefreshToken,
-				storeRefreshedSession: sessionRefresh.storeRefreshedSession,
+				insecureTransport,
+				getAccountSnapshot: async () => ({
+					...(await sessionRefresh.getSessionSnapshot()),
+					accountId:
+						sessionRefresh.accountId ?? `${resolvedServerUrl}:${authToken}`,
+					serverUrl: resolvedServerUrl,
+					insecureTransport,
+				}),
+				storeRefreshedSession: (_snapshot, session) =>
+					sessionRefresh.storeRefreshedSession(session),
 				getClientId: async () => resolvedClientId,
 				clientPlatform,
 				clientVersion,
 			})
 		: createAppApiClient({
 				serverUrl: resolvedServerUrl,
+				insecureTransport,
 				supportedApiMajors: [1],
 				getAccessToken: () => authToken,
 				getClientMetadata: () => ({
@@ -152,14 +184,28 @@ export function clearAccountApiClient(
 	authToken: string,
 	serverUrl?: string | null,
 	clientId?: string,
+	metadata?: AccountApiClientMetadataOptions,
 ) {
-	const resolvedServerUrl = resolveServerUrl(serverUrl);
+	const insecureTransport = metadata?.insecureTransport;
+	const resolvedServerUrl = resolveServerUrl(serverUrl, insecureTransport);
 	const resolvedClientId = resolveClientId(clientId);
 	clientCache.delete(
-		cacheKey(authToken, resolvedServerUrl, resolvedClientId, "static"),
+		cacheKey(
+			authToken,
+			resolvedServerUrl,
+			resolvedClientId,
+			"static",
+			insecureTransport,
+		),
 	);
 	clientCache.delete(
-		cacheKey(authToken, resolvedServerUrl, resolvedClientId, "session-refresh"),
+		cacheKey(
+			authToken,
+			resolvedServerUrl,
+			resolvedClientId,
+			"session-refresh",
+			insecureTransport,
+		),
 	);
 }
 
@@ -172,14 +218,22 @@ export function createApiClientForServer(
 	clientId?: string,
 	metadata?: AccountApiClientMetadataOptions,
 ): AppApiClient {
-	const resolvedServerUrl = resolveServerUrl(serverUrl);
+	const insecureTransport = metadata?.insecureTransport;
+	const resolvedServerUrl = resolveServerUrl(serverUrl, insecureTransport);
 	const resolvedClientId = resolveClientId(clientId);
-	const key = cacheKey(null, resolvedServerUrl, resolvedClientId, "static");
+	const key = cacheKey(
+		null,
+		resolvedServerUrl,
+		resolvedClientId,
+		"static",
+		insecureTransport,
+	);
 	const cached = clientCache.get(key);
 	if (cached) return cached;
 
 	const client = createAppApiClient({
 		serverUrl: resolvedServerUrl,
+		insecureTransport,
 		supportedApiMajors: [1],
 		getClientMetadata: () => ({
 			id: resolvedClientId,

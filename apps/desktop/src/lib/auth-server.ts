@@ -7,10 +7,15 @@ const MAX_KNOWN_AUTH_SERVERS = 10;
 const activeAuthServerListeners = new Set<(serverUrl: string) => void>();
 
 function getFallbackServerUrl(): string {
-	return (
-		normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
-		"http://localhost:3000"
-	);
+	const configured = import.meta.env.VITE_SERVER_URL;
+	if (!configured?.trim()) return "http://localhost:3000";
+	const normalized = normalizeServerUrl(configured);
+	if (!normalized) {
+		throw new TypeError(
+			"Configured server URL is invalid or remote HTTP transport is not authorized.",
+		);
+	}
+	return normalized;
 }
 
 function normalizeServerList(value: unknown): string[] {

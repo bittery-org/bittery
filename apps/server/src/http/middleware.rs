@@ -94,7 +94,7 @@ fn on_http_trace_response(response: &Response<Body>, latency: Duration, _span: &
 }
 
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
-const ALLOW_METHODS: &str = "GET, POST, OPTIONS";
+const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 const ALLOW_HEADERS: &str = "Content-Type, Authorization, X-Client-Id, X-App-Platform, Bittery-Client-Id, Bittery-Client-Platform, Bittery-Client-Version, Idempotency-Key, Traceparent, Tracestate, If-Match, If-None-Match";
 const EXPOSE_HEADERS: &str = "X-Session-Expires, Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After";
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
@@ -326,14 +326,85 @@ fn assert_valid_origin(value: &str) -> Result<String, String> {
 mod tests {
     use axum::{
         body::{to_bytes, Body},
-        http::{header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue, Request, StatusCode},
+        http::{
+            header::{
+                ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
+                ACCESS_CONTROL_ALLOW_ORIGIN,
+            },
+            HeaderValue, Request, StatusCode,
+        },
         response::Response,
         routing::get,
         Router,
     };
     use tower::util::ServiceExt;
 
-    use super::{apply_public_asset_cors, catch_panic_layer, parse_cors_origins};
+    use super::{
+        apply_cors_headers, apply_public_asset_cors, catch_panic_layer, parse_cors_origins,
+        EdgeHttpConfig,
+    };
+
+    #[test]
+    fn api_cors_preflight_allows_every_supported_method_and_header() {
+        let config = EdgeHttpConfig {
+            allowed_origins: vec!["https://app.example.com".to_string()],
+        };
+        let mut response = Response::new(Body::empty());
+
+        apply_cors_headers(&config, Some("https://app.example.com"), &mut response);
+
+        assert_eq!(
+            response.headers().get(ACCESS_CONTROL_ALLOW_METHODS),
+            Some(&HeaderValue::from_static(
+                "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+            ))
+        );
+        let allowed_headers = response
+            .headers()
+            .get(ACCESS_CONTROL_ALLOW_HEADERS)
+            .expect("allowlisted API origin should receive request header policy")
+            .to_str()
+            .expect("header policy should be ASCII");
+        for required in [
+            "Content-Type",
+            "Authorization",
+            "Bittery-Client-Id",
+            "Bittery-Client-Platform",
+            "Bittery-Client-Version",
+            "Idempotency-Key",
+            "Traceparent",
+            "Tracestate",
+            "If-Match",
+            "If-None-Match",
+        ] {
+            assert!(
+                allowed_headers.split(", ").any(|header| header == required),
+                "missing required CORS header {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn api_cors_does_not_echo_an_origin_outside_the_exact_allowlist() {
+        let config = EdgeHttpConfig {
+            allowed_origins: vec!["https://app.example.com".to_string()],
+        };
+        let mut response = Response::new(Body::empty());
+
+        apply_cors_headers(
+            &config,
+            Some("https://app.example.com.evil.test"),
+            &mut response,
+        );
+
+        assert!(
+            response
+                .headers()
+                .get(ACCESS_CONTROL_ALLOW_ORIGIN)
+                .is_none(),
+            "CORS allowlisting must compare complete origins"
+        );
+    }
 
     #[test]
     fn adds_wildcard_cors_for_favicon_responses() {

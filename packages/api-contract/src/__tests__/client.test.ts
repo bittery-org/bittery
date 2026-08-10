@@ -22,6 +22,45 @@ function metadata() {
 }
 
 describe("Bittery API facade", () => {
+	test("rejects remote HTTP unless both insecure transport approvals are explicit", () => {
+		const options = {
+			serverUrl: "http://192.0.2.10:3000",
+			supportedApiMajors: [1],
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "desktop" as const,
+				version: "0.5.1",
+			}),
+		};
+
+		expect(() => createApiClient(options)).toThrow(
+			"Remote HTTP requires operator enablement and per-account confirmation.",
+		);
+		expect(() =>
+			createApiClient({
+				...options,
+				insecureTransport: {
+					operatorEnabled: true,
+					accountConfirmed: false,
+				},
+			}),
+		).toThrow(
+			"Remote HTTP requires operator enablement and per-account confirmation.",
+		);
+		expect(() =>
+			createApiClient({
+				...options,
+				insecureTransport: {
+					operatorEnabled: true,
+					accountConfirmed: true,
+				},
+			}),
+		).not.toThrow();
+		expect(() =>
+			createApiClient({ ...options, serverUrl: "http://127.0.0.1:3000" }),
+		).not.toThrow();
+	});
+
 	test("adds auth and Bittery metadata through transport middleware", async () => {
 		const requests: Request[] = [];
 		const sessionExpires: string[] = [];
@@ -206,12 +245,14 @@ describe("Bittery API facade", () => {
 		expect(result.data.events[0]?.timestamp).toBe(1_710_000_000_000n);
 	});
 
-	test("notifies the session owner when an authenticated request is rejected", async () => {
+	test("refreshes and replays an authenticated request exactly once after a 401", async () => {
 		let refreshRequired = 0;
+		let accessToken = "expired-token";
+		const requests: Request[] = [];
 		const client = createApiClient({
 			serverUrl: "https://api.example.test",
 			supportedApiMajors: [1],
-			getAccessToken: () => "access-token",
+			getAccessToken: () => accessToken,
 			getClientMetadata: () => ({
 				id: "client-123",
 				platform: "extension",
@@ -219,9 +260,14 @@ describe("Bittery API facade", () => {
 			}),
 			onSessionRefreshRequired: () => {
 				refreshRequired += 1;
+				accessToken = "refreshed-token";
 			},
-			fetch: async () =>
-				new Response(
+			fetch: async (request) => {
+				requests.push(request);
+				if (request.headers.get("Authorization") === "Bearer refreshed-token") {
+					return Response.json({});
+				}
+				return new Response(
 					JSON.stringify({
 						type: "https://bittery.com/problems/authentication-required",
 						title: "Authentication required",
@@ -232,11 +278,16 @@ describe("Bittery API facade", () => {
 						status: 401,
 						headers: { "Content-Type": "application/problem+json" },
 					},
-				),
+				);
+			},
 		});
 
-		await expect(client.items.get("item-1")).rejects.toBeInstanceOf(ApiError);
+		await client.items.get("item-1");
 		expect(refreshRequired).toBe(1);
+		expect(requests).toHaveLength(2);
+		expect(
+			requests.map((request) => request.headers.get("Authorization")),
+		).toEqual(["Bearer expired-token", "Bearer refreshed-token"]);
 	});
 
 	test("keeps one-time share secrets and final domain operations inside the facade", async () => {

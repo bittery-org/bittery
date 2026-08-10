@@ -23,9 +23,16 @@ export function useServerUrl() {
 	return useContext(ServerUrlContext);
 }
 
-const DEFAULT_SERVER_URL =
-	normalizeServerUrl(process.env.EXPO_PUBLIC_SERVER_URL) ||
-	"http://localhost:3000";
+function resolveDefaultServerUrl(): string {
+	const configured = process.env.EXPO_PUBLIC_SERVER_URL;
+	if (!configured?.trim()) return "http://localhost:3000";
+	const normalized = normalizeServerUrl(configured);
+	if (normalized) return normalized;
+	throw new TypeError(
+		"Configured server URL is invalid or remote HTTP transport is not authorized.",
+	);
+}
+const DEFAULT_SERVER_URL = resolveDefaultServerUrl();
 
 interface ApiProviderProps {
 	children: ReactNode;
@@ -71,35 +78,32 @@ export function ApiProvider({ children }: ApiProviderProps) {
 		() =>
 			createSessionRefreshingApiClient({
 				defaultServerUrl: serverUrl ?? DEFAULT_SERVER_URL,
-				getServerUrl: async () =>
-					(await storage.getServerUrl()) || DEFAULT_SERVER_URL,
-				getSessionSnapshot: async () => {
-					const [token, activeAccount] = await Promise.all([
-						storage.getAuthToken(),
-						storage.getActiveAccount(),
+				getAccountSnapshot: async () => {
+					const activeAccount = await storage.getActiveAccount();
+					if (!activeAccount) return null;
+					const [token, sessionData, accountServerUrl] = await Promise.all([
+						storage.getAuthToken(activeAccount),
+						storage.getStoredSessionData(activeAccount),
+						storage.getServerUrl(activeAccount),
 					]);
 
-					const activeAccountId = activeAccount ?? undefined;
-					const sessionData =
-						await storage.getStoredSessionData(activeAccountId);
-
 					return {
+						accountId: activeAccount,
+						serverUrl: accountServerUrl || DEFAULT_SERVER_URL,
 						token,
 						issuedAt: sessionData?.createdAt ?? null,
 						expiresAt: sessionData?.expiresAt ?? null,
 					};
 				},
-				getRefreshToken: () => storage.getAuthToken(),
-				storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-					await storage.storeAuthToken(token);
-					const activeAccount = await storage.getActiveAccount();
-					const activeAccountId = activeAccount ?? undefined;
-					if (activeAccountId) {
-						await storage.updateStoredSessionMetadata(activeAccountId, {
-							sessionId,
-							expiresAt,
-						});
-					}
+				storeRefreshedSession: async (
+					snapshot,
+					{ token, sessionId, expiresAt },
+				) => {
+					await storage.storeAuthToken(token, snapshot.accountId);
+					await storage.updateStoredSessionMetadata(snapshot.accountId, {
+						sessionId,
+						expiresAt,
+					});
 				},
 				getClientId: async () => getOrCreateMobileSyncClientId(),
 				clientPlatform: "mobile",

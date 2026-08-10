@@ -104,6 +104,7 @@ import {
 	type ApiHttpMethod,
 	type ApiTransportRequest,
 	createApiTransport,
+	type InsecureTransportPolicy,
 } from "./transport.ts";
 import { parseDecimalString, parseRfc3339Utc } from "./value-codecs.ts";
 
@@ -112,10 +113,12 @@ export type {
 	ApiClientMetadata,
 	ApiClientMetadataProvider,
 	ApiClientPlatform,
+	InsecureTransportPolicy,
 };
 
 export interface ApiClientOptions {
 	serverUrl: string;
+	insecureTransport?: InsecureTransportPolicy;
 	supportedApiMajors: readonly number[];
 	fetch?: (request: Request) => Promise<Response>;
 	getAccessToken?: ApiAccessTokenProvider;
@@ -660,6 +663,7 @@ function validateAttachmentUsage(value: unknown): Final.AttachmentUsage {
 export function createApiClient(options: ApiClientOptions): ApiClient {
 	const transport = createApiTransport({
 		baseUrl: options.serverUrl,
+		insecureTransport: options.insecureTransport,
 		fetch: options.fetch,
 		getAccessToken: options.getAccessToken,
 		getClientMetadata: options.getClientMetadata,

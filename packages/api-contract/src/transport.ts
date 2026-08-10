@@ -5,6 +5,11 @@ import type { paths } from "./generated/schema.ts";
 export type ApiClientPlatform = "web" | "desktop" | "mobile" | "extension";
 export type ApiHttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
+export interface InsecureTransportPolicy {
+	operatorEnabled: boolean;
+	accountConfirmed: boolean;
+}
+
 export interface ApiClientMetadata {
 	id: string;
 	platform: ApiClientPlatform;
@@ -21,6 +26,7 @@ export type ApiClientMetadataProvider = () =>
 
 export interface ApiTransportOptions {
 	baseUrl: string;
+	insecureTransport?: InsecureTransportPolicy;
 	fetch?: (request: Request) => Promise<Response>;
 	getAccessToken?: ApiAccessTokenProvider;
 	getClientMetadata: ApiClientMetadataProvider;
@@ -63,7 +69,20 @@ function nonEmptyHeaderValue(value: string, name: string): string {
 	return value;
 }
 
-function normalizeBaseUrl(value: string): string {
+function isLoopbackHostname(hostname: string): boolean {
+	const normalized = hostname.toLowerCase();
+	return (
+		normalized === "localhost" ||
+		normalized === "::1" ||
+		normalized === "[::1]" ||
+		/^127(?:\.\d{1,3}){3}$/.test(normalized)
+	);
+}
+
+function normalizeBaseUrl(
+	value: string,
+	insecureTransport?: InsecureTransportPolicy,
+): string {
 	const url = new URL(value);
 	if (url.protocol !== "http:" && url.protocol !== "https:") {
 		throw new TypeError("API base URL must use HTTP or HTTPS.");
@@ -71,12 +90,21 @@ function normalizeBaseUrl(value: string): string {
 	if (url.search || url.hash) {
 		throw new TypeError("API base URL must not include a query or fragment.");
 	}
+	if (
+		url.protocol === "http:" &&
+		!isLoopbackHostname(url.hostname) &&
+		!(insecureTransport?.operatorEnabled && insecureTransport.accountConfirmed)
+	) {
+		throw new TypeError(
+			"Remote HTTP requires operator enablement and per-account confirmation.",
+		);
+	}
 
 	return url.toString().replace(/\/$/, "");
 }
 
 export function createApiTransport(options: ApiTransportOptions): ApiTransport {
-	const baseUrl = normalizeBaseUrl(options.baseUrl);
+	const baseUrl = normalizeBaseUrl(options.baseUrl, options.insecureTransport);
 	const fetchImplementation =
 		options.fetch ?? ((request: Request) => globalThis.fetch(request));
 	const client = createClient<paths>({
@@ -117,17 +145,10 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 				headers: await requestHeaders(request.headers),
 			});
 		},
-		async onResponse({ request, response }) {
+		async onResponse({ response }) {
 			const sessionExpires = response.headers.get("Bittery-Session-Expires");
 			if (sessionExpires) {
 				await options.onSessionExpires?.(sessionExpires);
-			}
-			if (
-				response.status === 401 &&
-				request.headers.has("Authorization") &&
-				!request.url.endsWith("/api/v1/sessions/current/refresh")
-			) {
-				await options.onSessionRefreshRequired?.();
 			}
 		},
 	});
@@ -138,15 +159,26 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 		requestOptions: ApiTransportRequest = {},
 	): Promise<ApiTransportResponse<T>> {
 		const request = requestOptions as never;
-		const result = await (method === "GET"
-			? client.GET(path as never, request)
-			: method === "POST"
-				? client.POST(path as never, request)
-				: method === "PUT"
-					? client.PUT(path as never, request)
-					: method === "PATCH"
-						? client.PATCH(path as never, request)
-						: client.DELETE(path as never, request));
+		const dispatch = () =>
+			method === "GET"
+				? client.GET(path as never, request)
+				: method === "POST"
+					? client.POST(path as never, request)
+					: method === "PUT"
+						? client.PUT(path as never, request)
+						: method === "PATCH"
+							? client.PATCH(path as never, request)
+							: client.DELETE(path as never, request);
+		let result = await dispatch();
+		if (
+			result.response.status === 401 &&
+			path !== "/api/v1/sessions/current/refresh" &&
+			options.getAccessToken &&
+			options.onSessionRefreshRequired
+		) {
+			await options.onSessionRefreshRequired();
+			result = await dispatch();
+		}
 
 		if (!result.response.ok) {
 			throw await normalizeApiError(result.response, Date.now(), result.error);

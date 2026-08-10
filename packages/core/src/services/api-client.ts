@@ -43,6 +43,7 @@ export async function createStoredAccountApiClient(
 
 	const resolvedServerUrl = serverUrl || getDefaultServerUrl();
 	return createAccountApiClient(authToken, resolvedServerUrl, clientId, {
+		accountId,
 		getSessionSnapshot: async () => {
 			const [token, sessionData] = await Promise.all([
 				storage.getAuthToken(accountId),
@@ -54,7 +55,6 @@ export async function createStoredAccountApiClient(
 				expiresAt: sessionData?.expiresAt ?? null,
 			};
 		},
-		getRefreshToken: () => storage.getAuthToken(accountId),
 		storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 			await storage.storeAuthToken(token, accountId);
 			await storage.updateStoredSessionMetadata(accountId, {

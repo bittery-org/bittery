@@ -239,8 +239,15 @@ export async function handleCanQuickUnlock(): Promise<MessageResponse> {
  * Handle GET_AUTH_TOKEN message - Get the auth token
  */
 export async function handleGetAuthToken(): Promise<MessageResponse> {
-	const token = await storage.getAuthToken();
-	return { success: true, token };
+	const accountId = await storage.getActiveAccount();
+	if (!accountId) {
+		return { success: true, accountId: null, token: null, serverUrl: null };
+	}
+	const [token, serverUrl] = await Promise.all([
+		storage.getAuthToken(accountId),
+		storage.getServerUrl(accountId),
+	]);
+	return { success: true, accountId, token, serverUrl };
 }
 
 /**

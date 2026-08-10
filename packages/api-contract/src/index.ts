@@ -16,6 +16,7 @@ export {
 	type ApiClientOptions,
 	type ApiClientPlatform,
 	createApiClient,
+	type InsecureTransportPolicy,
 } from "./client.ts";
 export {
 	ApiError,

@@ -36,11 +36,8 @@ async function getOrCreateSyncClientId(): Promise<string> {
 	return clientId;
 }
 
-async function getAuthToken(): Promise<string | null> {
-	const activeAccount = await storage.getActiveAccount();
-	const accountId = activeAccount ?? undefined;
-
-	if (accountId && desktopSync.isDesktopAvailable()) {
+async function getAuthToken(accountId: string): Promise<string | null> {
+	if (desktopSync.isDesktopAvailable()) {
 		try {
 			const desktopToken = await desktopClient.getAuthToken(accountId);
 			if (desktopToken) {
@@ -57,35 +54,29 @@ async function getAuthToken(): Promise<string | null> {
 
 export const apiClient = createSessionRefreshingApiClient({
 	defaultServerUrl: fallbackServerUrl,
-	getServerUrl: async () => {
-		const storedServerUrl = await storage.getServerUrl();
-		return storedServerUrl ?? fallbackServerUrl;
-	},
-	getSessionSnapshot: async () => {
+	getAccountSnapshot: async () => {
 		const activeAccount = await storage.getActiveAccount();
-		const accountId = activeAccount ?? undefined;
-		const [token, sessionData] = await Promise.all([
-			getAuthToken(),
-			storage.getStoredSessionData(accountId),
+		if (!activeAccount) return null;
+		const [token, sessionData, serverUrl] = await Promise.all([
+			getAuthToken(activeAccount),
+			storage.getStoredSessionData(activeAccount),
+			storage.getServerUrl(activeAccount),
 		]);
 
 		return {
+			accountId: activeAccount,
+			serverUrl: serverUrl ?? fallbackServerUrl,
 			token,
 			issuedAt: sessionData?.createdAt ?? null,
 			expiresAt: sessionData?.expiresAt ?? null,
 		};
 	},
-	getRefreshToken: getAuthToken,
-	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-		const activeAccount = await storage.getActiveAccount();
-		const accountId = activeAccount ?? undefined;
-		await storage.storeAuthToken(token, accountId);
-		if (accountId) {
-			await storage.updateStoredSessionMetadata(accountId, {
-				sessionId,
-				expiresAt,
-			});
-		}
+	storeRefreshedSession: async (snapshot, { token, sessionId, expiresAt }) => {
+		await storage.storeAuthToken(token, snapshot.accountId);
+		await storage.updateStoredSessionMetadata(snapshot.accountId, {
+			sessionId,
+			expiresAt,
+		});
 	},
 	getClientId: async () => getOrCreateSyncClientId(),
 	clientPlatform: "extension",

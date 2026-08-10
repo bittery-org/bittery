@@ -9,9 +9,16 @@ import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
 
-const fallbackServerUrl =
-	normalizeServerUrl(import.meta.env.VITE_SERVER_URL ?? "") ??
-	"http://localhost:3000";
+function resolveFallbackServerUrl(): string {
+	const configured = import.meta.env.VITE_SERVER_URL;
+	if (!configured?.trim()) return "http://localhost:3000";
+	const normalized = normalizeServerUrl(configured);
+	if (normalized) return normalized;
+	throw new TypeError(
+		"Configured server URL is invalid or remote HTTP transport is not authorized.",
+	);
+}
+const fallbackServerUrl = resolveFallbackServerUrl();
 
 let isHandlingAuthError = false;
 
@@ -97,42 +104,43 @@ export async function createDesktopApiClient() {
 	const serverUrl = await resolveDesktopServerUrl();
 	return createSessionRefreshingApiClient({
 		defaultServerUrl: serverUrl,
-		getServerUrl: resolveDesktopServerUrl,
 		clientPlatform: "desktop",
 		clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
-		getSessionSnapshot: async () => {
+		getAccountSnapshot: async () => {
 			const activeAccount = await storage.getActiveAccount();
-			if (!activeAccount) {
-				return { token: null, issuedAt: null, expiresAt: null };
-			}
+			if (!activeAccount) return null;
 
-			const [token, sessionData] = await Promise.all([
+			const [token, sessionData, accountServerUrl] = await Promise.all([
 				storage.getAuthToken(activeAccount),
 				storage.getStoredSessionData(activeAccount),
+				storage.getServerUrl(activeAccount),
 			]);
+			const normalizedAccountServerUrl = accountServerUrl
+				? normalizeServerUrl(accountServerUrl)
+				: null;
+			if (accountServerUrl && !normalizedAccountServerUrl) {
+				throw new TypeError(
+					"Account server URL is invalid or remote HTTP transport is not authorized.",
+				);
+			}
 
 			return {
+				accountId: activeAccount,
+				serverUrl: normalizedAccountServerUrl ?? fallbackServerUrl,
 				token,
 				issuedAt: sessionData?.createdAt ?? null,
 				expiresAt: sessionData?.expiresAt ?? null,
 			};
 		},
-		getRefreshToken: async () => {
-			const activeAccount = await storage.getActiveAccount();
-			if (!activeAccount) {
-				return null;
-			}
-			return storage.getAuthToken(activeAccount);
-		},
-		storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-			const activeAccount = await storage.getActiveAccount();
-			if (activeAccount) {
-				await storage.storeAuthToken(token, activeAccount);
-				await storage.updateStoredSessionMetadata(activeAccount, {
-					sessionId,
-					expiresAt,
-				});
-			}
+		storeRefreshedSession: async (
+			snapshot,
+			{ token, sessionId, expiresAt },
+		) => {
+			await storage.storeAuthToken(token, snapshot.accountId);
+			await storage.updateStoredSessionMetadata(snapshot.accountId, {
+				sessionId,
+				expiresAt,
+			});
 		},
 		getClientId: async () => getOrCreateDesktopSyncClientId(),
 	});
