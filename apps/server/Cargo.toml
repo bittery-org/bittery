@@ -20,6 +20,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cron = "0.17"
 jsonrpsee = { version = "0.26", features = ["server"] }
 jsonrpsee-qubit = { package = "jsonrpsee", version = "0.25", features = ["server"] }
+# Vendored 1.0.0-beta.2, patched locally: upstream panics instead of returning a JSON-RPC error
+# when RPC params fail to deserialize. Diff against the published crate before re-vendoring.
 qubit = { path = "vendor/qubit" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -51,4 +53,8 @@ bittery-crypto-core = { path = "../../packages/crypto/core/crates/bittery-crypto
 
 [dev-dependencies]
 futures-util = "0.3"
+# Pinned to the version jsonrpsee's server already uses, so the WebSocket RPC test
+# speaks the same handshake as the server it drives.
+soketto = "0.8"
+tokio-util = { version = "0.7", features = ["compat"] }
 tower = { version = "0.5", features = ["util"] }

@@ -8,6 +8,9 @@ fn main() {
         .map(PathBuf::from)
         .unwrap_or_else(default_output_dir);
 
+    // `write_type` only creates the file, so the parent directory has to exist first.
+    std::fs::create_dir_all(&output_dir).expect("failed to create Qubit bindings output directory");
+
     let output_path = output_dir.join("index.ts");
     create_rpc_router()
         .as_codegen()
