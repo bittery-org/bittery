@@ -18,7 +18,14 @@ import type {
 	CachedVaultMetadata,
 	ItemCacheMetadata,
 } from "@bittery/types";
-import { itemsCollection, metaCollection, vaultsCollection } from "./keys";
+import {
+	itemsCollection,
+	metaCollection,
+	stagedItemBaselineCollection,
+	stagedItemsCollection,
+	stagedVaultsCollection,
+	vaultsCollection,
+} from "./keys";
 import type { RecordPort } from "./record-port";
 
 // ============================================================================
@@ -32,12 +39,24 @@ import type { RecordPort } from "./record-port";
 const META_RECORD_ID = "meta";
 
 /** Schema version of {@link ItemCacheStateDocument}. Bump when the shape changes. */
-export const ITEM_CACHE_STATE_VERSION = 1 as const;
+export const ITEM_CACHE_STATE_VERSION = 2 as const;
+
+/** Schema version of the cache pointer a native host reads from the metadata record. */
+export const ITEM_CACHE_NATIVE_VIEW_VERSION = 1 as const;
 
 /**
- * The published shape of the `meta` record. The Rust native host reads the item and vault
- * collections by the names `AccountStore` publishes in `native_view`, so this document is
- * part of the on-disk contract too.
+ * The only cache state a native host consumes. Prefixes are fully resolved here so the
+ * host follows the promoted generation without knowing how collections are named.
+ */
+export interface ItemCacheNativeView {
+	v: typeof ITEM_CACHE_NATIVE_VIEW_VERSION;
+	itemsKeyPrefix: string;
+	vaultsKeyPrefix: string;
+}
+
+/**
+ * The published shape of the `meta` record. `AccountStore` gives the native host a ref to
+ * this record, whose `nativeView` points it at the active item and vault collections.
  *
  * `itemsPrimed` / `vaultsPrimed` are how a **cold** cache is told apart from a genuinely
  * **empty** one. `setCachedItems` / `setCachedVaults` are the only writers: a caller that has
@@ -51,6 +70,8 @@ export interface ItemCacheStateDocument {
 	itemsPrimed: boolean;
 	vaultsPrimed: boolean;
 	metadata: ItemCacheMetadata | null;
+	activeGeneration: string | null;
+	nativeView: ItemCacheNativeView;
 }
 
 // ============================================================================
@@ -72,8 +93,11 @@ export interface ItemCache {
 	): Promise<void>;
 	/** `null` means "never synced"; `[]` means "synced, and there is nothing". */
 	getCachedItems(accountId: string): Promise<CachedEncryptedItem[] | null>;
-	/** Exactly one `recordPut`. */
-	upsertCachedItem(item: CachedEncryptedItem, accountId: string): Promise<void>;
+	/** Returns false when the active cache already has a newer version of this item. */
+	upsertCachedItem(
+		item: CachedEncryptedItem,
+		accountId: string,
+	): Promise<boolean>;
 	/** Exactly one `recordDelete`. */
 	removeCachedItem(itemId: string, accountId: string): Promise<void>;
 
@@ -99,8 +123,20 @@ export interface ItemCache {
 		accountId: string,
 	): Promise<void>;
 
+	/** Creates an unreachable write generation for a full bootstrap. */
+	beginStagedGeneration(accountId: string): Promise<ItemCacheStagingGeneration>;
+
 	/** Wipes items, vaults and metadata **for this account only**. */
 	clearItemCache(accountId: string): Promise<void>;
+}
+
+export interface ItemCacheStagingGeneration {
+	upsertCachedItem(item: CachedEncryptedItem): Promise<boolean>;
+	upsertCachedVault(vault: CachedVaultMetadata): Promise<void>;
+	/** Atomically makes this complete generation visible to cache readers. */
+	promote(metadata: Omit<ItemCacheMetadata, "itemCount">): Promise<void>;
+	/** Discards an unpublished generation after a failed bootstrap. */
+	discard(): Promise<void>;
 }
 
 // ============================================================================
@@ -142,21 +178,84 @@ function parseRecords<T>(
 	return parsed;
 }
 
-function coldState(): ItemCacheStateDocument {
-	return {
-		v: ITEM_CACHE_STATE_VERSION,
-		itemsPrimed: false,
-		vaultsPrimed: false,
-		metadata: null,
-	};
-}
-
 // ============================================================================
 // Factory
 // ============================================================================
 
 export function createItemCache(options: ItemCacheOptions): ItemCache {
 	const { port } = options;
+	const accountLocks = new Map<string, Promise<void>>();
+	let nextGeneration = 0;
+
+	async function withAccountLock<T>(
+		accountId: string,
+		operation: () => Promise<T>,
+	): Promise<T> {
+		const previous = accountLocks.get(accountId) ?? Promise.resolve();
+		let release: (() => void) | undefined;
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const pending = previous.then(() => gate);
+		accountLocks.set(accountId, pending);
+		await previous;
+
+		try {
+			return await operation();
+		} finally {
+			release?.();
+			if (accountLocks.get(accountId) === pending) {
+				accountLocks.delete(accountId);
+			}
+		}
+	}
+
+	function createGenerationId(): string {
+		nextGeneration += 1;
+		return `${Date.now().toString(36)}-${nextGeneration.toString(36)}-${Math.random()
+			.toString(36)
+			.slice(2)}`;
+	}
+
+	function itemCollectionFor(
+		accountId: string,
+		generation: string | null,
+	): string {
+		return generation
+			? stagedItemsCollection(accountId, generation)
+			: itemsCollection(accountId);
+	}
+
+	function vaultCollectionFor(
+		accountId: string,
+		generation: string | null,
+	): string {
+		return generation
+			? stagedVaultsCollection(accountId, generation)
+			: vaultsCollection(accountId);
+	}
+
+	function nativeViewFor(
+		accountId: string,
+		generation: string | null,
+	): ItemCacheNativeView {
+		return {
+			v: ITEM_CACHE_NATIVE_VIEW_VERSION,
+			itemsKeyPrefix: `${port.recordKeyPrefix}${itemCollectionFor(accountId, generation)}:`,
+			vaultsKeyPrefix: `${port.recordKeyPrefix}${vaultCollectionFor(accountId, generation)}:`,
+		};
+	}
+
+	function coldState(accountId: string): ItemCacheStateDocument {
+		return {
+			v: ITEM_CACHE_STATE_VERSION,
+			itemsPrimed: false,
+			vaultsPrimed: false,
+			metadata: null,
+			activeGeneration: null,
+			nativeView: nativeViewFor(accountId, null),
+		};
+	}
 
 	// ------------------------------------------------------------------
 	// The meta record — the one place cold-vs-empty and metadata are tracked
@@ -165,7 +264,7 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 	async function readState(accountId: string): Promise<ItemCacheStateDocument> {
 		const raw = await port.recordGet(metaCollection(accountId), META_RECORD_ID);
 		if (raw === null) {
-			return coldState();
+			return coldState(accountId);
 		}
 
 		const parsed = parseRecord<Partial<ItemCacheStateDocument>>(
@@ -174,14 +273,21 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 		);
 		if (parsed === null) {
 			// A corrupt state record demotes the account to cold: the caller re-syncs.
-			return coldState();
+			return coldState(accountId);
 		}
+
+		const activeGeneration =
+			typeof parsed.activeGeneration === "string"
+				? parsed.activeGeneration
+				: null;
 
 		return {
 			v: ITEM_CACHE_STATE_VERSION,
 			itemsPrimed: parsed.itemsPrimed === true,
 			vaultsPrimed: parsed.vaultsPrimed === true,
 			metadata: parsed.metadata ?? null,
+			activeGeneration,
+			nativeView: nativeViewFor(accountId, activeGeneration),
 		};
 	}
 
@@ -234,16 +340,32 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 
 	/** Replace the whole contents of a collection. Clear, then write, then prime. */
 	async function replaceCollection<T extends { id: string }>(
-		accountId: string,
 		collection: string,
 		values: T[],
-		which: "items" | "vaults",
 	): Promise<void> {
 		await port.recordClear(collection);
 		for (const value of values) {
 			await port.recordPut(collection, value.id, JSON.stringify(value));
 		}
-		await prime(accountId, which);
+	}
+
+	async function writeNewerItem(
+		collection: string,
+		item: CachedEncryptedItem,
+	): Promise<boolean> {
+		const existing = await port.recordGet(collection, item.id);
+		if (existing !== null) {
+			const parsed = parseRecord<CachedEncryptedItem>(
+				{ id: item.id, value: existing },
+				"item",
+			);
+			if (parsed !== null && parsed.version > item.version) {
+				return false;
+			}
+		}
+
+		await port.recordPut(collection, item.id, JSON.stringify(item));
+		return true;
 	}
 
 	// ==================================================================
@@ -261,39 +383,52 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 			items: CachedEncryptedItem[],
 			accountId: string,
 		): Promise<void> {
-			await replaceCollection(
-				accountId,
-				itemsCollection(accountId),
-				items,
-				"items",
-			);
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				await replaceCollection(
+					itemCollectionFor(accountId, state.activeGeneration),
+					items,
+				);
+				await prime(accountId, "items");
+			});
 		},
 
 		async getCachedItems(
 			accountId: string,
 		): Promise<CachedEncryptedItem[] | null> {
-			return readCollection<CachedEncryptedItem>(
-				itemsCollection(accountId),
-				"item",
-				async () => (await readState(accountId)).itemsPrimed,
-			);
+			return withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				return readCollection<CachedEncryptedItem>(
+					itemCollectionFor(accountId, state.activeGeneration),
+					"item",
+					async () => state.itemsPrimed,
+				);
+			});
 		},
 
 		/** One `recordPut`. Never reads the collection. */
 		async upsertCachedItem(
 			item: CachedEncryptedItem,
 			accountId: string,
-		): Promise<void> {
-			await port.recordPut(
-				itemsCollection(accountId),
-				item.id,
-				JSON.stringify(item),
-			);
+		): Promise<boolean> {
+			return withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				return writeNewerItem(
+					itemCollectionFor(accountId, state.activeGeneration),
+					item,
+				);
+			});
 		},
 
 		/** One `recordDelete`. Deleting an absent item is a no-op at the port. */
 		async removeCachedItem(itemId: string, accountId: string): Promise<void> {
-			await port.recordDelete(itemsCollection(accountId), itemId);
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				await port.recordDelete(
+					itemCollectionFor(accountId, state.activeGeneration),
+					itemId,
+				);
+			});
 		},
 
 		// --- vaults ---
@@ -302,33 +437,41 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 			vaults: CachedVaultMetadata[],
 			accountId: string,
 		): Promise<void> {
-			await replaceCollection(
-				accountId,
-				vaultsCollection(accountId),
-				vaults,
-				"vaults",
-			);
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				await replaceCollection(
+					vaultCollectionFor(accountId, state.activeGeneration),
+					vaults,
+				);
+				await prime(accountId, "vaults");
+			});
 		},
 
 		async getCachedVaults(
 			accountId: string,
 		): Promise<CachedVaultMetadata[] | null> {
-			return readCollection<CachedVaultMetadata>(
-				vaultsCollection(accountId),
-				"vault",
-				async () => (await readState(accountId)).vaultsPrimed,
-			);
+			return withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				return readCollection<CachedVaultMetadata>(
+					vaultCollectionFor(accountId, state.activeGeneration),
+					"vault",
+					async () => state.vaultsPrimed,
+				);
+			});
 		},
 
 		async upsertCachedVault(
 			vault: CachedVaultMetadata,
 			accountId: string,
 		): Promise<void> {
-			await port.recordPut(
-				vaultsCollection(accountId),
-				vault.id,
-				JSON.stringify(vault),
-			);
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				await port.recordPut(
+					vaultCollectionFor(accountId, state.activeGeneration),
+					vault.id,
+					JSON.stringify(vault),
+				);
+			});
 		},
 
 		/**
@@ -336,15 +479,21 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 		 * whose vault key is gone, and they would still be counted by every list read.
 		 */
 		async removeCachedVault(vaultId: string, accountId: string): Promise<void> {
-			await port.recordDelete(vaultsCollection(accountId), vaultId);
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				await port.recordDelete(
+					vaultCollectionFor(accountId, state.activeGeneration),
+					vaultId,
+				);
 
-			const collection = itemsCollection(accountId);
-			for (const record of await port.recordList(collection)) {
-				const item = parseRecord<CachedEncryptedItem>(record, "item");
-				if (item !== null && item.vaultId === vaultId) {
-					await port.recordDelete(collection, record.id);
+				const collection = itemCollectionFor(accountId, state.activeGeneration);
+				for (const record of await port.recordList(collection)) {
+					const item = parseRecord<CachedEncryptedItem>(record, "item");
+					if (item !== null && item.vaultId === vaultId) {
+						await port.recordDelete(collection, record.id);
+					}
 				}
-			}
+			});
 		},
 
 		// --- metadata ---
@@ -352,15 +501,132 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 		async getItemCacheMetadata(
 			accountId: string,
 		): Promise<ItemCacheMetadata | null> {
-			return (await readState(accountId)).metadata;
+			return withAccountLock(
+				accountId,
+				async () => (await readState(accountId)).metadata,
+			);
 		},
 
 		async setItemCacheMetadata(
 			metadata: ItemCacheMetadata,
 			accountId: string,
 		): Promise<void> {
-			const state = await readState(accountId);
-			await writeState(accountId, { ...state, metadata });
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				await writeState(accountId, { ...state, metadata });
+			});
+		},
+
+		async beginStagedGeneration(
+			accountId: string,
+		): Promise<ItemCacheStagingGeneration> {
+			const generation = createGenerationId();
+			const items = stagedItemsCollection(accountId, generation);
+			const vaults = stagedVaultsCollection(accountId, generation);
+			const itemBaseline = stagedItemBaselineCollection(accountId, generation);
+			let settled = false;
+
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				const activeItems = await port.recordList(
+					itemCollectionFor(accountId, state.activeGeneration),
+				);
+				await Promise.all([
+					port.recordClear(items),
+					port.recordClear(vaults),
+					port.recordClear(itemBaseline),
+				]);
+				for (const record of activeItems) {
+					await port.recordPut(itemBaseline, record.id, record.value);
+				}
+			});
+
+			function assertPending(): void {
+				if (settled) {
+					throw new Error(
+						"Item cache staging generation is no longer writable.",
+					);
+				}
+			}
+
+			return {
+				async upsertCachedItem(item: CachedEncryptedItem): Promise<boolean> {
+					assertPending();
+					return writeNewerItem(items, item);
+				},
+				async upsertCachedVault(vault: CachedVaultMetadata): Promise<void> {
+					assertPending();
+					await port.recordPut(vaults, vault.id, JSON.stringify(vault));
+				},
+				async promote(
+					metadata: Omit<ItemCacheMetadata, "itemCount">,
+				): Promise<void> {
+					assertPending();
+					await withAccountLock(accountId, async () => {
+						const previous = await readState(accountId);
+						const previousItems = itemCollectionFor(
+							accountId,
+							previous.activeGeneration,
+						);
+
+						for (const record of await port.recordList(previousItems)) {
+							const baseline = await port.recordGet(itemBaseline, record.id);
+							const staged = await port.recordGet(items, record.id);
+							const activeItem = parseRecord<CachedEncryptedItem>(
+								record,
+								"item",
+							);
+							const stagedItem =
+								staged === null
+									? null
+									: parseRecord<CachedEncryptedItem>(
+											{ id: record.id, value: staged },
+											"item",
+										);
+							if (
+								activeItem !== null &&
+								(baseline !== record.value ||
+									(stagedItem !== null &&
+										activeItem.version > stagedItem.version))
+							) {
+								await port.recordPut(items, record.id, record.value);
+							}
+						}
+
+						const itemCount = (await port.recordList(items)).length;
+						await writeState(accountId, {
+							v: ITEM_CACHE_STATE_VERSION,
+							itemsPrimed: true,
+							vaultsPrimed: true,
+							metadata: { ...metadata, itemCount },
+							activeGeneration: generation,
+							nativeView: nativeViewFor(accountId, generation),
+						});
+						settled = true;
+
+						if (previous.activeGeneration !== null) {
+							await Promise.all([
+								port.recordClear(previousItems),
+								port.recordClear(
+									vaultCollectionFor(accountId, previous.activeGeneration),
+								),
+							]);
+						}
+						await port.recordClear(itemBaseline);
+					});
+				},
+				async discard(): Promise<void> {
+					if (settled) {
+						return;
+					}
+					settled = true;
+					await Promise.all([
+						port.recordClear(items),
+						port.recordClear(vaults),
+						port.recordClear(itemBaseline),
+					]);
+				},
+			};
 		},
 
 		/**
@@ -368,9 +634,20 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 		 * cached, so the next read must say "never synced" rather than "empty".
 		 */
 		async clearItemCache(accountId: string): Promise<void> {
-			await port.recordClear(itemsCollection(accountId));
-			await port.recordClear(vaultsCollection(accountId));
-			await port.recordClear(metaCollection(accountId));
+			await withAccountLock(accountId, async () => {
+				const state = await readState(accountId);
+				await Promise.all([
+					port.recordClear(itemsCollection(accountId)),
+					port.recordClear(vaultsCollection(accountId)),
+					port.recordClear(
+						itemCollectionFor(accountId, state.activeGeneration),
+					),
+					port.recordClear(
+						vaultCollectionFor(accountId, state.activeGeneration),
+					),
+					port.recordClear(metaCollection(accountId)),
+				]);
+			});
 		},
 	};
 

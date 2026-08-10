@@ -11,7 +11,7 @@ import {
 	NATIVE_VIEW_VERSION,
 	type NativeHostView,
 } from "./account-store";
-import { accountKey, itemsCollection, vaultsCollection } from "./keys";
+import { accountKey, metaCollection } from "./keys";
 import {
 	createInMemoryPlatformPort,
 	type InMemoryPlatformPort,
@@ -1235,13 +1235,12 @@ describe("AccountStore — native host projection", () => {
 		expect(durableAccount?.sessionData.store).toBe("secret");
 		expect(durableAccount?.vaultKeys.store).toBe("secret");
 		expect(durableAccount?.encryptedPrivateKey.store).toBe("secret");
-		// Published from the canonical helpers in keys.ts, so ItemCache and the native host
-		// cannot drift onto different collection names. Fully resolved with the port's own
-		// record key prefix, so the host prefix-scans and concatenates nothing.
-		expect(durableAccount?.itemsKeyPrefix).toBe(`${itemsCollection("a")}:`);
-		expect(durableAccount?.vaultsKeyPrefix).toBe(`${vaultsCollection("a")}:`);
-		expect(durableAccount?.itemsKeyPrefix).toBe("a:items:");
-		expect(durableAccount?.vaultsKeyPrefix).toBe("a:vaults:");
+		// AccountStore names only the fixed metadata record. ItemCache owns the active
+		// generation and publishes the opaque item/vault prefixes in that one record.
+		expect(durableAccount?.itemCacheState).toEqual({
+			key: `${metaCollection("a")}:meta`,
+			store: "plain",
+		});
 
 		// The port owns the record key prefix; the projection resolves it in. Desktop is the
 		// only platform where it is non-empty, and the only platform with a native reader.
@@ -1256,8 +1255,10 @@ describe("AccountStore — native host projection", () => {
 		await prefixedStore.initialize();
 		await seedAccount(prefixedStore, "a", { active: true });
 		const prefixedAccount = nativeView(prefixed).accounts[0];
-		expect(prefixedAccount?.itemsKeyPrefix).toBe("record:a:items:");
-		expect(prefixedAccount?.vaultsKeyPrefix).toBe("record:a:vaults:");
+		expect(prefixedAccount?.itemCacheState).toEqual({
+			key: "record:a:meta:meta",
+			store: "plain",
+		});
 
 		const ephemeral = await makeStore({ sessionSurvivesRestart: false });
 		await seedAccount(ephemeral.store, "a", { active: true });

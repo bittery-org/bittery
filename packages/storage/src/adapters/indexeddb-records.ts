@@ -78,6 +78,7 @@ export function createIndexedDbRecordPort(): RecordPort {
 	};
 
 	return {
+		recordKeyPrefix: "",
 		initialize: async () => {
 			await database();
 		},

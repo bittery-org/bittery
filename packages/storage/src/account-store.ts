@@ -36,8 +36,7 @@ import {
 	accountKey,
 	type GlobalValueName,
 	globalKey,
-	itemsCollection,
-	vaultsCollection,
+	metaCollection,
 } from "./keys";
 import type { BiometricPortResult, PlatformPort } from "./platform-port";
 import {
@@ -69,7 +68,7 @@ import {
 // ============================================================================
 
 /** Schema version of {@link NativeHostView}. Bump when the shape changes. */
-export const NATIVE_VIEW_VERSION = 2 as const;
+export const NATIVE_VIEW_VERSION = 3 as const;
 
 /**
  * A key plus which store it lives in, so the native host never has to know the tier table.
@@ -130,16 +129,11 @@ export interface NativeHostView {
 		vaultKeys: NativeKeyRef;
 		encryptedPrivateKey: NativeKeyRef;
 		/**
-		 * Fully-resolved key prefixes under which this account's cached records live, in
-		 * whatever store the platform's `RecordPort` uses. Records are always plain.
-		 *
-		 * Resolved rather than logical on purpose: the native host does a pure prefix scan
-		 * and concatenates nothing, so it can never re-derive — and drift from — the record
-		 * key format. On desktop these read `record:{accountId}:items:` and
-		 * `record:{accountId}:vaults:`.
+		 * The single ItemCache metadata record. It contains the active generation's fully
+		 * resolved item and vault prefixes, so a native host follows an atomic promotion
+		 * without `AccountStore` reaching across its sibling boundary into `ItemCache`.
 		 */
-		itemsKeyPrefix: string;
-		vaultsKeyPrefix: string;
+		itemCacheState: NativeKeyRef;
 	}>;
 }
 
@@ -538,8 +532,8 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 	 * owns the collection name; concatenating them here is the only place the two meet, so
 	 * Rust never rebuilds either half.
 	 */
-	function recordKeyPrefixFor(collection: string): string {
-		return `${port.recordKeyPrefix}${collection}:`;
+	function recordKeyFor(collection: string, id: string): string {
+		return `${port.recordKeyPrefix}${collection}:${id}`;
 	}
 
 	// ------------------------------------------------------------------
@@ -684,10 +678,10 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 					"encrypted_private_key",
 					accountKey(account.accountId, "encrypted_private_key"),
 				),
-				itemsKeyPrefix: recordKeyPrefixFor(itemsCollection(account.accountId)),
-				vaultsKeyPrefix: recordKeyPrefixFor(
-					vaultsCollection(account.accountId),
-				),
+				itemCacheState: {
+					key: recordKeyFor(metaCollection(account.accountId), "meta"),
+					store: "plain",
+				},
 			});
 		}
 

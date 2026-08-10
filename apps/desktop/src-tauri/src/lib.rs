@@ -85,7 +85,12 @@ const NATIVE_VIEW_KEY: &str = "bittery_native_view";
 /// other version is refused, never partially interpreted: the writer is free to
 /// change field meanings behind a bump, so guessing would be a correctness bug
 /// with security consequences (`biometricEnabled` is an authorisation input).
-const NATIVE_VIEW_VERSION: u64 = 2;
+const NATIVE_VIEW_VERSION: u64 = 3;
+
+/// The only cache-metadata projection this host consumes. `ItemCache` writes it in the
+/// same record as the active-generation pointer, so a prefix pair can never straddle two
+/// promoted generations.
+const ITEM_CACHE_NATIVE_VIEW_VERSION: u64 = 1;
 
 /// Which store a published key lives in. This exists so Rust never re-derives
 /// the tier table: `Secret` is the OS keychain, `Plain` is `store.json`.
@@ -129,10 +134,24 @@ struct NativeAccountView {
     session_data: NativeKeyRef,
     vault_keys: NativeKeyRef,
     encrypted_private_key: NativeKeyRef,
-    /// Fully-resolved `store.json` key prefixes for this account's cached
-    /// records -- one record per key. Prefix-scan them; never concatenate.
+    /// The ItemCache metadata record containing the active generation's fully-resolved
+    /// item and vault prefixes. This host follows that record rather than naming a cache
+    /// collection itself.
+    item_cache_state: NativeKeyRef,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeItemCacheView {
+    v: u64,
     items_key_prefix: String,
     vaults_key_prefix: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeItemCacheState {
+    native_view: NativeItemCacheView,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -158,6 +177,24 @@ impl NativeHostView {
             .iter()
             .any(|value| value == account_id)
     }
+}
+
+fn load_item_cache_view<R: Runtime>(
+    store: &Store<R>,
+    account: &NativeAccountView,
+) -> Result<NativeItemCacheView, String> {
+    let raw = read_key_ref(store, &account.item_cache_state).ok_or("No item cache state found")?;
+    let state: NativeItemCacheState = serde_json::from_str(&raw)
+        .map_err(|error| format!("Failed to parse item cache state: {}", error))?;
+
+    if state.native_view.v != ITEM_CACHE_NATIVE_VIEW_VERSION {
+        return Err(format!(
+            "Unsupported item cache view version: {}",
+            state.native_view.v
+        ));
+    }
+
+    Ok(state.native_view)
 }
 
 /// Why the published view could not be used. Both variants mean the same thing
@@ -840,12 +877,14 @@ async fn get_items_snapshot_internal(
 
         let decrypted_vault_keys = load_decrypted_vault_keys(&store, &view, account)?;
 
-        // Cached items and vaults are one `store.json` record per key under the
-        // prefixes the view publishes. Scan them; concatenate nothing.
+        // ItemCache publishes this pointer in the same metadata write that promotes a
+        // generation, so a native read sees either the old complete generation or the new
+        // one, never a reconstructed key scheme.
+        let cache_view = load_item_cache_view(&store, account)?;
         let cached_items: Vec<CachedItemRecord> =
-            read_records(&store, &account.items_key_prefix, "item");
+            read_records(&store, &cache_view.items_key_prefix, "item");
         let cached_vaults: Vec<CachedVaultRecord> =
-            read_records(&store, &account.vaults_key_prefix, "vault");
+            read_records(&store, &cache_view.vaults_key_prefix, "vault");
         let vault_map = cached_vaults
             .into_iter()
             .map(|vault| (vault.id.clone(), vault))
@@ -2114,8 +2153,9 @@ mod tests {
     use super::{
         biometric_signature, build_snapshot_item_payload, decode_records, parse_native_view,
         read_key_ref_with, records_under_prefix, serialize_encryption_context,
-        unwrap_plaintext_with_context, CachedItemRecord, CachedVaultRecord, NativeKeyStore,
-        NativeViewProblem, CONTEXT_ENVELOPE_MARKER, NATIVE_VIEW_VERSION,
+        unwrap_plaintext_with_context, CachedItemRecord, CachedVaultRecord, NativeItemCacheState,
+        NativeKeyStore, NativeViewProblem, CONTEXT_ENVELOPE_MARKER, ITEM_CACHE_NATIVE_VIEW_VERSION,
+        NATIVE_VIEW_VERSION,
     };
 
     #[test]
@@ -2139,7 +2179,7 @@ mod tests {
 
     /// A document shaped exactly like the one `account-store.ts` writes: two
     /// accounts, secret-tier refs for the four per-account secrets and for the
-    /// device key, and fully-resolved `record:` prefixes.
+    /// device key, plus the ItemCache state record each native read resolves.
     fn native_view_document(version: u64) -> String {
         serde_json::json!({
             "v": version,
@@ -2163,8 +2203,7 @@ mod tests {
                     "sessionData": { "key": "bittery_account_acct-a_session_data", "store": "secret" },
                     "vaultKeys": { "key": "bittery_account_acct-a_vault_keys", "store": "secret" },
                     "encryptedPrivateKey": { "key": "bittery_account_acct-a_encrypted_private_key", "store": "secret" },
-                    "itemsKeyPrefix": "record:acct-a:items:",
-                    "vaultsKeyPrefix": "record:acct-a:vaults:"
+                    "itemCacheState": { "key": "record:acct-a:meta:meta", "store": "plain" }
                 },
                 // No team fields at all: the optional half must survive being absent.
                 {
@@ -2180,8 +2219,7 @@ mod tests {
                     "sessionData": { "key": "bittery_account_acct-b_session_data", "store": "secret" },
                     "vaultKeys": { "key": "bittery_account_acct-b_vault_keys", "store": "secret" },
                     "encryptedPrivateKey": { "key": "bittery_account_acct-b_encrypted_private_key", "store": "secret" },
-                    "itemsKeyPrefix": "record:acct-b:items:",
-                    "vaultsKeyPrefix": "record:acct-b:vaults:"
+                    "itemCacheState": { "key": "record:acct-b:meta:meta", "store": "plain" }
                 }
             ]
         })
@@ -2220,8 +2258,8 @@ mod tests {
         assert!(alice.biometric_enabled);
         assert_eq!(alice.token.key, "bittery_account_acct-a_jwt_token");
         assert_eq!(alice.session_data.store, NativeKeyStore::Secret);
-        assert_eq!(alice.items_key_prefix, "record:acct-a:items:");
-        assert_eq!(alice.vaults_key_prefix, "record:acct-a:vaults:");
+        assert_eq!(alice.item_cache_state.key, "record:acct-a:meta:meta");
+        assert_eq!(alice.item_cache_state.store, NativeKeyStore::Plain);
 
         // A published `false` is honoured; nothing here defaults it to `true`.
         let bob = view.account("acct-b").expect("acct-b must be published");
@@ -2231,6 +2269,32 @@ mod tests {
         assert_eq!(bob.team_avatar_url, None);
 
         assert!(view.account("acct-missing").is_none());
+    }
+
+    #[test]
+    fn parse_item_cache_view_reads_only_the_promoted_prefix_pair() {
+        let state: NativeItemCacheState = serde_json::from_str(
+            r#"{
+                "v": 2,
+                "activeGeneration": "ignored-by-rust",
+                "nativeView": {
+                    "v": 1,
+                    "itemsKeyPrefix": "record:item-cache-stage:acct-a:gen:items:",
+                    "vaultsKeyPrefix": "record:item-cache-stage:acct-a:gen:vaults:"
+                }
+            }"#,
+        )
+        .expect("the ItemCache native projection must parse");
+
+        assert_eq!(state.native_view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
+        assert_eq!(
+            state.native_view.items_key_prefix,
+            "record:item-cache-stage:acct-a:gen:items:"
+        );
+        assert_eq!(
+            state.native_view.vaults_key_prefix,
+            "record:item-cache-stage:acct-a:gen:vaults:"
+        );
     }
 
     #[test]

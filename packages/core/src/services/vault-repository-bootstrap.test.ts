@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import type { AccountStore, ItemCache } from "@bittery/storage";
-import { createItemCache } from "@bittery/storage";
+import { createItemCache, metaCollection } from "@bittery/storage";
 import {
 	createInMemoryRecordPort,
 	type InMemoryRecordPort,
@@ -216,6 +216,75 @@ describe("VaultRepository.hydrateFromServer", () => {
 		expect(cached?.type).toBe("team");
 		expect(cached?.name).toBe("Team Vault");
 	});
+
+	it.each([
+		0, 1,
+	])("keeps the previous cache when bootstrap fails at page boundary %i", async (failureAt) => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		await itemCache.setCachedItems(
+			[await cachedItem("previous", crypto, vaultCrypto)],
+			ACCOUNT_ID,
+		);
+		const client = createClient();
+		let request = 0;
+		client.sync.bootstrapItems.query = mock(async () => {
+			if (request++ === failureAt) {
+				throw new Error("network interrupted bootstrap");
+			}
+			return {
+				items: [],
+				hasMore: true,
+				nextCursor: "next-page",
+			};
+		});
+
+		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
+			"network interrupted bootstrap",
+		);
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["previous"]);
+	});
+
+	it("does not publish a partial generation when the promotion write fails", async () => {
+		const { repo, itemCache, recordPort, crypto, vaultCrypto } = await setup();
+		await itemCache.setCachedItems(
+			[await cachedItem("previous", crypto, vaultCrypto)],
+			ACCOUNT_ID,
+		);
+		const write = recordPort.recordPut.bind(recordPort);
+		recordPort.recordPut = async (collection, id, value) => {
+			if (collection === metaCollection(ACCOUNT_ID) && id === "meta") {
+				throw new Error("promotion interrupted");
+			}
+			await write(collection, id, value);
+		};
+
+		await expect(repo.hydrateFromServer(createClient())).rejects.toThrow(
+			"promotion interrupted",
+		);
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["previous"]);
+	});
+
+	it("publishes a complete cache before any failure after promotion", async () => {
+		const { repo, itemCache, storage } = await setup();
+		const client = createClient();
+		const storeVaultKeys = storage.storeVaultKeys.bind(storage);
+		storage.storeVaultKeys = async () => {
+			throw new Error("vault key persistence interrupted");
+		};
+
+		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
+			"vault key persistence interrupted",
+		);
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["item_1"]);
+
+		storage.storeVaultKeys = storeVaultKeys;
+	});
 });
 
 describe("VaultRepository hydration on a locked account", () => {
@@ -428,5 +497,22 @@ describe("VaultRepository absorbs an undecryptable sync write", () => {
 		);
 
 		expect(repo.getById("item_1")).toBeUndefined();
+	});
+
+	it("does not replace a newer cached delta with an older event", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const older = await cachedItem("item_1", crypto, vaultCrypto);
+		const newer = {
+			...older,
+			version: 2,
+			encryptedData: UNOPENABLE,
+		};
+
+		await repo.upsertCachedItem(newer, ACCOUNT_ID);
+		await repo.upsertCachedItem(older, ACCOUNT_ID);
+
+		const cached = await itemCache.getCachedItems(ACCOUNT_ID);
+		expect(cached?.[0]?.version).toBe(2);
+		expect(cached?.[0]?.encryptedData).toBe(UNOPENABLE);
 	});
 });

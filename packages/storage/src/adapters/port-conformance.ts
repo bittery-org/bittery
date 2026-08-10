@@ -363,6 +363,13 @@ export function runPortConformance(
 	});
 
 	describe(`${name} adapter — RecordPort`, () => {
+		test("declares the record key prefix used by native cache pointers", async () => {
+			const { platform, record } = await make();
+
+			expect(typeof record.recordKeyPrefix).toBe("string");
+			expect(record.recordKeyPrefix).toBe(platform.recordKeyPrefix);
+		});
+
 		test("initialize is idempotent", async () => {
 			const { record } = await make();
 

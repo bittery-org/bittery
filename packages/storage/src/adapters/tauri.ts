@@ -393,6 +393,7 @@ export function createTauriRecordPort(
 	};
 
 	return {
+		recordKeyPrefix: RECORD_PREFIX,
 		initialize: async () => {
 			await store();
 		},

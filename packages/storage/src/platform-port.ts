@@ -82,8 +82,9 @@ export interface PlatformPort {
 	 * that read the same store directly. Empty string when nothing outside the app reads
 	 * records — which is every platform except desktop.
 	 *
-	 * `AccountStore` concatenates it into the `native_view` projection so the Rust host does
-	 * a pure prefix scan and never rebuilds a key format the projection exists to publish.
+	 * `AccountStore` uses it to publish the fixed ItemCache-state record; `ItemCache` uses
+	 * the matching `RecordPort` prefix to publish its active-generation scan prefixes. Rust
+	 * reads those published values and never rebuilds a key format itself.
 	 */
 	readonly recordKeyPrefix: string;
 

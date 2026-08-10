@@ -21,7 +21,11 @@ export type {
 	NativeKeyRef,
 } from "./account-store";
 export { createAccountStore, NATIVE_VIEW_VERSION } from "./account-store";
-export type { ItemCache, ItemCacheOptions } from "./item-cache";
+export type {
+	ItemCache,
+	ItemCacheOptions,
+	ItemCacheStagingGeneration,
+} from "./item-cache";
 export { createItemCache } from "./item-cache";
 // The key scheme. Canonical here so `AccountStore`, `ItemCache` and the Rust native host
 // can never disagree about a key or a collection name.
@@ -33,6 +37,9 @@ export {
 	globalKey,
 	itemsCollection,
 	metaCollection,
+	stagedItemBaselineCollection,
+	stagedItemsCollection,
+	stagedVaultsCollection,
 	vaultsCollection,
 } from "./keys";
 export type {

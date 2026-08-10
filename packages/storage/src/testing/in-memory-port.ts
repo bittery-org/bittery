@@ -255,7 +255,9 @@ export interface InMemoryRecordPort extends RecordPort {
 	resetCalls(): void;
 }
 
-export function createInMemoryRecordPort(): InMemoryRecordPort {
+export function createInMemoryRecordPort(
+	options: { recordKeyPrefix?: string } = {},
+): InMemoryRecordPort {
 	// collection -> id -> value. A real per-record map, so put/delete are O(1) here too
 	// and a test asserting `calls.recordPut === 1` is asserting the real property.
 	const store = new Map<string, Map<string, string>>();
@@ -270,6 +272,7 @@ export function createInMemoryRecordPort(): InMemoryRecordPort {
 	};
 
 	return {
+		recordKeyPrefix: options.recordKeyPrefix ?? "",
 		calls,
 
 		initialize: async () => {

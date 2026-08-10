@@ -594,6 +594,7 @@ export function createReactNativeRecordPort(
 	const database = openDatabase(deps, CREATE_RECORDS_TABLE);
 
 	return {
+		recordKeyPrefix: "",
 		initialize: async () => {
 			await database();
 		},

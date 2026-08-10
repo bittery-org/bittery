@@ -595,8 +595,8 @@ export class VaultRepository {
 	 * One `recordPut`, no read-modify-write. Delta sync calls this once per changed
 	 * item, which is exactly why `RecordPort` has per-record primitives.
 	 */
-	private async persistItem(item: CachedEncryptedItem): Promise<void> {
-		await this.itemCache.upsertCachedItem(item, this.accountId);
+	private async persistItem(item: CachedEncryptedItem): Promise<boolean> {
+		return this.itemCache.upsertCachedItem(item, this.accountId);
 	}
 
 	private buildItem(
@@ -694,13 +694,15 @@ export class VaultRepository {
 		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
+		if (!(await this.persistItem(item))) {
+			return;
+		}
 
 		// Sync keeps running on a locked account, and the ciphertext is all the cache
 		// wants from it. Decryption waits for the hydrate that follows the unlock, rather
 		// than failing once per delta.
 		if (await this.isLocked()) {
 			this.items.delete(item.id);
-			await this.persistItem(item);
 			this.emit();
 			return;
 		}
@@ -716,7 +718,6 @@ export class VaultRepository {
 				error,
 			);
 		}
-		await this.persistItem(item);
 		this.emit();
 	}
 
@@ -935,56 +936,70 @@ export class VaultRepository {
 		await this.ensureServerUrl();
 
 		let cursor: string | undefined;
-		const cachedItems: CachedEncryptedItem[] = [];
-		const vaults = new Map<string, CachedVaultMetadata>();
+		const staging = await this.itemCache.beginStagedGeneration(this.accountId);
+		let refreshedVaultKeys: VaultKeyData[] | null = null;
 
-		while (true) {
-			const page = await client.sync.bootstrapItems.query({
-				cursor,
-				limit: 500,
-			});
-
-			for (const rawItem of page.items) {
-				const cachedItem: CachedEncryptedItem = {
-					id: rawItem.id,
-					vaultId: rawItem.vaultId,
-					accountId: this.accountId,
-					accountEmail: this.accountEmail,
-					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-					category: rawItem.category,
-					favorite: rawItem.favorite,
-					encryptedData: rawItem.encryptedData,
-					encryptionIv: rawItem.encryptionIv,
-					encryptionAlgorithm: rawItem.encryptionAlgorithm,
-					version: rawItem.version ?? 0,
-					lastModifiedBy: rawItem.lastModifiedBy ?? null,
-					createdAt: String(rawItem.createdAt),
-					updatedAt: String(rawItem.updatedAt),
-					deletedAt: rawItem.deletedAt ? String(rawItem.deletedAt) : null,
-					attachments: rawItem.attachments,
-				};
-				cachedItems.push(cachedItem);
-
-				vaults.set(rawItem.vault.id, {
-					...toCachedVaultFields(rawItem.vault),
-					accountId: this.accountId,
-					accountEmail: this.accountEmail,
-					serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+		try {
+			while (true) {
+				const page = await client.sync.bootstrapItems.query({
+					cursor,
+					limit: 500,
 				});
+
+				for (const rawItem of page.items) {
+					const cachedItem: CachedEncryptedItem = {
+						id: rawItem.id,
+						vaultId: rawItem.vaultId,
+						accountId: this.accountId,
+						accountEmail: this.accountEmail,
+						serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+						category: rawItem.category,
+						favorite: rawItem.favorite,
+						encryptedData: rawItem.encryptedData,
+						encryptionIv: rawItem.encryptionIv,
+						encryptionAlgorithm: rawItem.encryptionAlgorithm,
+						version: rawItem.version ?? 0,
+						lastModifiedBy: rawItem.lastModifiedBy ?? null,
+						createdAt: String(rawItem.createdAt),
+						updatedAt: String(rawItem.updatedAt),
+						deletedAt: rawItem.deletedAt ? String(rawItem.deletedAt) : null,
+						attachments: rawItem.attachments,
+					};
+					await staging.upsertCachedItem(cachedItem);
+
+					await staging.upsertCachedVault({
+						...toCachedVaultFields(rawItem.vault),
+						accountId: this.accountId,
+						accountEmail: this.accountEmail,
+						serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+					});
+				}
+
+				if (!page.hasMore || !page.nextCursor) {
+					break;
+				}
+				cursor = page.nextCursor;
 			}
 
-			if (!page.hasMore || !page.nextCursor) {
-				break;
-			}
-			cursor = page.nextCursor;
+			refreshedVaultKeys = await this.fetchVaultKeysFromServer(client);
+			await staging.promote({
+				lastFullSyncAt: Date.now(),
+				cacheVersion: 1,
+			});
+		} catch (error) {
+			await staging.discard();
+			throw error;
 		}
 
-		const refreshedVaultKeys = await this.fetchVaultKeysFromServer(client);
+		const [cachedItems, cachedVaults] = await Promise.all([
+			this.itemCache.getCachedItems(this.accountId),
+			this.itemCache.getCachedVaults(this.accountId),
+		]);
 		const vaultKeys =
 			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.accountId));
 
 		this.vaults.clear();
-		for (const vault of vaults.values()) {
+		for (const vault of cachedVaults ?? []) {
 			this.vaults.set(vault.id, vault);
 		}
 
@@ -994,7 +1009,7 @@ export class VaultRepository {
 		this.mergeVaultKeyEntries(vaultKeys);
 
 		this.items.clear();
-		for (const outcome of await this.decryptItemBatch(cachedItems)) {
+		for (const outcome of await this.decryptItemBatch(cachedItems ?? [])) {
 			if ("decrypted" in outcome) {
 				this.items.set(outcome.item.id, outcome.decrypted);
 			} else {
@@ -1004,22 +1019,6 @@ export class VaultRepository {
 				);
 			}
 		}
-
-		await Promise.all([
-			this.itemCache.setCachedItems(cachedItems, this.accountId),
-			this.itemCache.setCachedVaults(
-				Array.from(this.vaults.values()),
-				this.accountId,
-			),
-			this.itemCache.setItemCacheMetadata(
-				{
-					lastFullSyncAt: Date.now(),
-					itemCount: cachedItems.length,
-					cacheVersion: 1,
-				},
-				this.accountId,
-			),
-		]);
 
 		this.hasCacheSnapshotFlag = true;
 		this.hydrated = true;

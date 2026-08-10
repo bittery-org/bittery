@@ -184,7 +184,7 @@ describe("ItemCache per-account isolation", () => {
 // ============================================================================
 
 describe("ItemCache O(1) single-record writes", () => {
-	it("upsertCachedItem costs exactly one recordPut and no reads", async () => {
+	it("upsertCachedItem costs one recordPut and two constant-time reads", async () => {
 		const { cache, port } = makeCache();
 		await cache.setCachedItems(
 			[item("i1", "v1"), item("i2", "v1"), item("i3", "v1")],
@@ -196,7 +196,7 @@ describe("ItemCache O(1) single-record writes", () => {
 
 		expect(port.calls.recordPut).toBe(1);
 		expect(port.calls.recordList).toBe(0);
-		expect(port.calls.recordGet).toBe(0);
+		expect(port.calls.recordGet).toBe(2);
 		expect(port.calls.recordClear).toBe(0);
 		expect(ids(await cache.getCachedItems("a"))).toEqual([
 			"i1",
@@ -217,6 +217,16 @@ describe("ItemCache O(1) single-record writes", () => {
 		const items = await cache.getCachedItems("a");
 		expect(items).toHaveLength(1);
 		expect(items?.[0]?.version).toBe(7);
+	});
+
+	it("never lets an older item version overwrite a newer cache entry", async () => {
+		const { cache } = makeCache();
+		await cache.upsertCachedItem(item("i1", "v1", { version: 3 }), "a");
+
+		expect(
+			await cache.upsertCachedItem(item("i1", "v1", { version: 2 }), "a"),
+		).toBe(false);
+		expect((await cache.getCachedItems("a"))?.[0]?.version).toBe(3);
 	});
 
 	it("removeCachedItem costs exactly one recordDelete", async () => {
@@ -252,6 +262,110 @@ describe("ItemCache O(1) single-record writes", () => {
 
 		expect(port.calls.recordPut).toBe(1);
 		expect(ids(await cache.getCachedVaults("a"))).toEqual(["v1", "v2"]);
+	});
+});
+
+// ============================================================================
+// Staged bootstrap generations
+// ============================================================================
+
+describe("ItemCache staged generations", () => {
+	it("keeps the active cache visible until a complete generation is promoted", async () => {
+		const { cache } = makeCache();
+		await cache.setCachedItems([item("old", "v1")], "a");
+		await cache.setCachedVaults([vault("v1", "Old")], "a");
+
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedItem(item("new", "v2"));
+		await stage.upsertCachedVault(vault("v2", "New"));
+
+		expect(ids(await cache.getCachedItems("a"))).toEqual(["old"]);
+		expect(ids(await cache.getCachedVaults("a"))).toEqual(["v1"]);
+
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		expect(ids(await cache.getCachedItems("a"))).toEqual(["new"]);
+		expect(ids(await cache.getCachedVaults("a"))).toEqual(["v2"]);
+		expect((await cache.getItemCacheMetadata("a"))?.itemCount).toBe(1);
+	});
+
+	it("publishes the promoted generation through the native cache pointer", async () => {
+		const port = createInMemoryRecordPort({ recordKeyPrefix: "record:" });
+		const cache = createItemCache({ port });
+		await cache.setCachedItems([item("old", "v1")], "a");
+
+		const before = JSON.parse(
+			(await port.recordGet(metaCollection("a"), "meta")) ?? "{}",
+		) as { nativeView?: { itemsKeyPrefix?: string } };
+		expect(before.nativeView?.itemsKeyPrefix).toBe("record:a:items:");
+
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedItem(item("new", "v2"));
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		const promoted = JSON.parse(
+			(await port.recordGet(metaCollection("a"), "meta")) ?? "{}",
+		) as {
+			activeGeneration?: string;
+			nativeView?: {
+				v?: number;
+				itemsKeyPrefix?: string;
+				vaultsKeyPrefix?: string;
+			};
+		};
+		expect(promoted.nativeView?.v).toBe(1);
+		expect(promoted.nativeView?.itemsKeyPrefix).toBe(
+			`record:item-cache-stage:a:${promoted.activeGeneration}:items:`,
+		);
+		expect(promoted.nativeView?.vaultsKeyPrefix).toBe(
+			`record:item-cache-stage:a:${promoted.activeGeneration}:vaults:`,
+		);
+	});
+
+	it("discards an interrupted generation without touching the active cache", async () => {
+		const { cache } = makeCache();
+		await cache.setCachedItems([item("old", "v1")], "a");
+
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedItem(item("new", "v1"));
+		await stage.discard();
+
+		expect(ids(await cache.getCachedItems("a"))).toEqual(["old"]);
+	});
+
+	it("merges a newer active item before publishing the staged generation", async () => {
+		const { cache } = makeCache();
+		await cache.setCachedItems([item("i1", "v1", { version: 1 })], "a");
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedItem(item("i1", "v1", { version: 2 }));
+
+		await cache.upsertCachedItem(item("i1", "v1", { version: 3 }), "a");
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		expect((await cache.getCachedItems("a"))?.[0]?.version).toBe(3);
+	});
+
+	it("retains a mutation that arrived after staging began", async () => {
+		const { cache } = makeCache();
+		await cache.setCachedItems([item("old", "v1")], "a");
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedItem(item("snapshot", "v2"));
+		await cache.upsertCachedItem(item("delta", "v3"), "a");
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		expect(ids(await cache.getCachedItems("a"))).toEqual(["delta", "snapshot"]);
+	});
+
+	it("does not cross account staging generations", async () => {
+		const { cache } = makeCache();
+		await cache.setCachedItems([item("a-old", "v1")], "a");
+		await cache.setCachedItems([item("b-live", "v2")], "b");
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedItem(item("a-new", "v3"));
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		expect(ids(await cache.getCachedItems("a"))).toEqual(["a-new"]);
+		expect(ids(await cache.getCachedItems("b"))).toEqual(["b-live"]);
 	});
 });
 
