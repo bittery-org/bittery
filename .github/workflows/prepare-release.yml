@@ -17,7 +17,10 @@ concurrency:
   group: prepare-release
   cancel-in-progress: false
 
+# `actions: write` is what lets the final step dispatch CI for the release
+# branch: pull requests opened with GITHUB_TOKEN do not trigger workflows.
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -28,6 +31,12 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "Prepare release must be dispatched from main, not ${GITHUB_REF_NAME}."
+          exit 1
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -46,10 +55,12 @@ jobs:
 
       - name: Calculate and sync next version
         id: version
+        env:
+          RELEASE_TYPE: ${{ inputs.release_type }}
         shell: bash
         run: |
           set -euo pipefail
-          pnpm run version:next -- "${{ inputs.release_type }}"
+          pnpm run version:next -- "$RELEASE_TYPE"
           version="$(node -p "require('./package.json').version")"
           if git rev-parse "v${version}" >/dev/null 2>&1; then
             echo "Tag v${version} already exists"
@@ -68,7 +79,7 @@ jobs:
 
       - name: Verify version tooling
         run: |
-          node --test scripts/release-version.test.mjs
+          node --test "scripts/**/*.test.mjs"
           pnpm run version:check
 
       - name: Create or update release pull request
@@ -93,10 +104,11 @@ jobs:
             apps/server/Cargo.toml \
             apps/server/Cargo.lock
           git commit -m "chore(release): v${VERSION}"
-          git fetch origin "$branch:refs/remotes/origin/$branch" || true
-          git push --force-with-lease origin "$branch"
+          # Re-running the workflow deliberately resets the release branch from
+          # current main, so a lease against the remote would only be decorative.
+          git push --force origin "$branch"
 
-          previous="$(node --input-type=module -e 'import { latestVersionFromTags, readReleaseTags } from "./scripts/release-version.mjs"; console.log(`v${latestVersionFromTags(readReleaseTags())}`)')"
+          previous="$(node --input-type=module -e 'import { latestVersionFromTags, readReleaseTags } from "./scripts/release-version.mjs"; console.log(latestVersionFromTags(readReleaseTags()) ?? "")')"
           body_file="$RUNNER_TEMP/release-pr.md"
           {
             echo "<!-- bittery-release:v${VERSION} -->"
@@ -104,7 +116,9 @@ jobs:
             echo
             echo "This PR synchronizes every release surface. Merging it creates the tag and starts publication."
             echo
-            echo "- [Review changes since ${previous}](https://github.com/${GITHUB_REPOSITORY}/compare/${previous}...main)"
+            if [ -n "$previous" ]; then
+              echo "- [Review changes since v${previous}](https://github.com/${GITHUB_REPOSITORY}/compare/v${previous}...main)"
+            fi
             echo "- [ ] Confirm the version change is correct"
             echo "- [ ] Confirm user-facing changes are ready to publish"
           } > "$body_file"

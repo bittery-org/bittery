@@ -8,14 +8,14 @@ Maintainers normally release entirely through GitHub. Do not edit version files 
 
 1. Open the repository's **Actions** tab.
 2. Select **Prepare release**.
-3. Choose **Run workflow** from `main`.
+3. Choose **Run workflow** from `main`. The workflow refuses to run from any other branch.
 4. Select the version change:
    - `patch` for compatible fixes, such as `0.4.1` to `0.4.2`.
    - `minor` for compatible features, such as `0.4.1` to `0.5.0`.
    - `major` for breaking changes, such as `0.4.1` to `1.0.0`.
 5. Run the workflow.
 
-The workflow calculates the next version from the latest stable `v*` tag. It then updates every release surface, formats the affected JSON files, verifies the result, pushes `release/vX.Y.Z`, opens a release pull request, and starts CI for that branch.
+The workflow calculates the next version from whichever is newer, the latest stable `v*` tag or the version already on `main`. Bumping from the tag alone would walk the version backwards whenever a release pull request merged but tagging failed. It then updates every release surface, formats the affected JSON files, verifies the result, pushes `release/vX.Y.Z`, opens a release pull request, and starts CI for that branch.
 
 Running the workflow again for the same version updates the existing release branch and pull request rather than creating another release.
 
@@ -66,13 +66,17 @@ The GitHub Release is currently the project changelog. If Bittery later adds a t
 - Server and desktop `Cargo.toml`
 - The Bittery package entries in the server and desktop Cargo lockfiles
 
+The browser extension manifest is not on that list because `apps/extension/manifest.config.js` derives its version from `apps/extension/package.json`, so it cannot drift.
+
 The repository version may equal the latest tag immediately after publication, but it may never be lower. Release preparation additionally requires a strictly newer version.
+
+The history check needs the release tags, so every job that runs it must check out with `fetch-depth: 0`. Missing tags fail the check rather than skipping it silently; a repository that has genuinely never released can pass `--allow-no-releases` for its first release.
 
 For local diagnosis, these commands do not publish anything:
 
 ```bash
 pnpm run version:check
-node --test scripts/release-version.test.mjs
+node --test "scripts/**/*.test.mjs"
 ```
 
 `pnpm run version:sync -- X.Y.Z` remains available for repairing version drift on a development branch. Run Biome over the changed JSON files afterward and submit the repair through a normal pull request. It must not be used as a substitute for the **Prepare release** workflow.

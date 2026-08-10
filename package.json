@@ -18,7 +18,7 @@
 		"check-types": "turbo check-types",
 		"i18n:check": "pnpm --filter @bittery/i18n run check:keys",
 		"shadcn": "pnpm --filter @bittery/ui run shadcn",
-		"test": "node --test scripts/*.test.mjs && turbo test",
+		"test": "node --test \"scripts/**/*.test.mjs\" && turbo test",
 		"test:server": "pnpm --filter server test",
 		"dev": "turbo dev",
 		"dev:desktop": "turbo -F desktop dev",

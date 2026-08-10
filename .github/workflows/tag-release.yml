@@ -7,6 +7,10 @@ on:
     types:
       - closed
 
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
 permissions:
   actions: write
   contents: write
@@ -39,12 +43,15 @@ jobs:
             exit 1
           fi
           node scripts/sync-version.mjs --check --check-history
-          latest="$(node --input-type=module -e 'import { latestVersionFromTags, readReleaseTags } from "./scripts/release-version.mjs"; console.log(`v${latestVersionFromTags(readReleaseTags())}`)')"
-          if [ "$latest" = "v${version}" ] || git rev-parse "v${version}" >/dev/null 2>&1; then
+          if git rev-parse "v${version}" >/dev/null 2>&1; then
             echo "Tag v${version} already exists"
             exit 1
           fi
-          node --input-type=module -e 'import { compareVersions } from "./scripts/release-version.mjs"; if (compareVersions(process.argv[1], process.argv[2]) <= 0) process.exit(1)' "$version" "${latest#v}"
+          latest="$(node --input-type=module -e 'import { latestVersionFromTags, readReleaseTags } from "./scripts/release-version.mjs"; console.log(latestVersionFromTags(readReleaseTags()) ?? "")')"
+          if [ -n "$latest" ] && ! node --input-type=module -e 'import { compareVersions } from "./scripts/release-version.mjs"; process.exit(compareVersions(process.argv[1], process.argv[2]) > 0 ? 0 : 1)' "$version" "$latest"; then
+            echo "Version v${version} is not newer than latest release v${latest}"
+            exit 1
+          fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Create release tag

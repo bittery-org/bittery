@@ -41,6 +41,30 @@ export function bumpVersion(version, releaseType) {
 	}
 }
 
+export function resolveVersion({ args, rootVersion, latestReleasedVersion }) {
+	const nextIndex = args.indexOf("--next");
+	const releaseType = nextIndex === -1 ? null : args[nextIndex + 1];
+
+	if (nextIndex !== -1 && (!releaseType || releaseType.startsWith("--"))) {
+		throw new Error("--next requires a release type: major, minor, or patch.");
+	}
+
+	if (!releaseType) {
+		const explicitVersion = args.find((arg) => !arg.startsWith("--"));
+		return explicitVersion ?? rootVersion;
+	}
+
+	// A merged release pull request leaves the repository ahead of the tags until
+	// tagging succeeds, so bumping from the tag alone would walk the version back.
+	const base =
+		latestReleasedVersion &&
+		compareVersions(latestReleasedVersion, rootVersion) > 0
+			? latestReleasedVersion
+			: rootVersion;
+
+	return bumpVersion(base, releaseType);
+}
+
 export function latestVersionFromTags(tags) {
 	const versions = tags
 		.map((tag) => tag.trim())

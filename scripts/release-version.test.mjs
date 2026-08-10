@@ -5,6 +5,7 @@ import {
 	compareVersions,
 	latestVersionFromTags,
 	parseVersion,
+	resolveVersion,
 } from "./release-version.mjs";
 
 test("compares stable versions numerically", () => {
@@ -31,4 +32,96 @@ test("finds the latest stable release and ignores other tags", () => {
 		"0.10.0",
 	);
 	assert.equal(latestVersionFromTags([]), null);
+});
+
+test("uses an explicit version argument over the repository version", () => {
+	assert.equal(
+		resolveVersion({
+			args: ["9.9.9"],
+			rootVersion: "0.4.1",
+			latestReleasedVersion: "0.4.1",
+		}),
+		"9.9.9",
+	);
+	assert.equal(
+		resolveVersion({
+			args: ["--check", "9.9.9"],
+			rootVersion: "0.4.1",
+			latestReleasedVersion: "0.4.1",
+		}),
+		"9.9.9",
+	);
+});
+
+test("falls back to the repository version with no arguments", () => {
+	assert.equal(
+		resolveVersion({
+			args: ["--check", "--check-history"],
+			rootVersion: "0.4.1",
+			latestReleasedVersion: "0.4.1",
+		}),
+		"0.4.1",
+	);
+});
+
+test("never bumps below the repository version when tagging lagged", () => {
+	assert.equal(
+		resolveVersion({
+			args: ["--next", "patch"],
+			rootVersion: "0.5.0",
+			latestReleasedVersion: "0.4.1",
+		}),
+		"0.5.1",
+	);
+	assert.equal(
+		resolveVersion({
+			args: ["--next", "minor"],
+			rootVersion: "0.5.0",
+			latestReleasedVersion: "0.4.1",
+		}),
+		"0.6.0",
+	);
+});
+
+test("bumps from release history when the repository lags behind", () => {
+	assert.equal(
+		resolveVersion({
+			args: ["--next", "patch"],
+			rootVersion: "0.3.0",
+			latestReleasedVersion: "0.4.1",
+		}),
+		"0.4.2",
+	);
+	assert.equal(
+		resolveVersion({
+			args: ["--next", "patch"],
+			rootVersion: "0.4.1",
+			latestReleasedVersion: null,
+		}),
+		"0.4.2",
+	);
+});
+
+test("rejects --next without a release type", () => {
+	for (const args of [["--next"], ["--next", "--check"]]) {
+		assert.throws(
+			() =>
+				resolveVersion({
+					args,
+					rootVersion: "0.4.1",
+					latestReleasedVersion: "0.4.1",
+				}),
+			/--next requires a release type/,
+		);
+	}
+
+	assert.throws(
+		() =>
+			resolveVersion({
+				args: ["--next", "prerelease"],
+				rootVersion: "0.4.1",
+				latestReleasedVersion: "0.4.1",
+			}),
+		/Invalid release type/,
+	);
 });
