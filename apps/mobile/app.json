@@ -2,7 +2,7 @@
 	"expo": {
 		"name": "bittery",
 		"slug": "bittery",
-		"version": "0.5.1",
+		"version": "0.5.2",
 		"orientation": "portrait",
 		"icon": "./assets/ios-light.png",
 		"scheme": "bittery",
