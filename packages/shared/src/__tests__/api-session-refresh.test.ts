@@ -23,6 +23,16 @@ function refreshedSession() {
 	});
 }
 
+function vaultKey(vaultId: string) {
+	return {
+		vaultId,
+		vaultName: vaultId,
+		vaultType: "personal" as const,
+		encryptedVaultKey: `wrapped-${vaultId}`,
+		role: "owner" as const,
+	};
+}
+
 function createSwitchingClient(
 	fetch: (request: Request) => Promise<Response>,
 	options: {
@@ -60,6 +70,174 @@ function createSwitchingClient(
 }
 
 describe("session-refreshing API client account isolation", () => {
+	test("paged reauth keeps its newly issued token despite an expired stored session", async () => {
+		const requests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "https://a.example.test",
+			getAccountSnapshot: async () => ({
+				accountId: "account-a",
+				serverUrl: "https://a.example.test",
+				token: "expired-stored-token",
+				issuedAt: NOW - 60_000,
+				expiresAt: NOW - 1,
+				insecureTransportConfirmed: false,
+			}),
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({
+					items: [vaultKey("vault-2")],
+					nextCursor: null,
+					hasMore: false,
+				});
+			},
+		});
+
+		const result = await client.auth.drainVaultKeys("newly-issued-token", {
+			items: [vaultKey("vault-1")],
+			nextCursor: "page-2",
+			hasMore: true,
+		});
+
+		expect(result.data.map((key) => key.vaultId)).toEqual([
+			"vault-1",
+			"vault-2",
+		]);
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.url).toBe(
+			"https://a.example.test/api/v1/users/me/vault-keys?cursor=page-2",
+		);
+		expect(requests[0]?.headers.get("Authorization")).toBe(
+			"Bearer newly-issued-token",
+		);
+		expect(
+			requests.filter((request) =>
+				request.url.endsWith("/sessions/current/refresh"),
+			),
+		).toHaveLength(0);
+	});
+
+	test("paged reauth stays on its original server when the active account switches", async () => {
+		let activeAccountId = "account-a";
+		const requests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "https://a.example.test",
+			getAccountSnapshot: async () => ({
+				accountId: activeAccountId,
+				serverUrl:
+					activeAccountId === "account-a"
+						? "https://a.example.test"
+						: "https://b.example.test",
+				token: `${activeAccountId}-stored-token`,
+				issuedAt: NOW,
+				expiresAt: NOW + 60_000,
+				insecureTransportConfirmed: false,
+			}),
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({ items: [], nextCursor: null, hasMore: false });
+			},
+		});
+		activeAccountId = "account-b";
+
+		await client.auth.drainVaultKeys("account-a-issued-token", {
+			items: [],
+			nextCursor: "page-2",
+			hasMore: true,
+		});
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.url).toStartWith("https://a.example.test/");
+		expect(requests[0]?.headers.get("Authorization")).toBe(
+			"Bearer account-a-issued-token",
+		);
+	});
+
+	test("does not refresh or retry a rejected request-scoped bearer", async () => {
+		const requests: Request[] = [];
+		let storedSessions = 0;
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "https://a.example.test",
+			getAccountSnapshot: async () => ({
+				accountId: "account-a",
+				serverUrl: "https://a.example.test",
+				token: "stored-token",
+				issuedAt: NOW - 60_000,
+				expiresAt: NOW - 1,
+				insecureTransportConfirmed: false,
+			}),
+			storeRefreshedSession: async () => {
+				storedSessions += 1;
+			},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				return unauthorized();
+			},
+		});
+
+		await expect(
+			client.auth.drainVaultKeys("rejected-issued-token", {
+				items: [],
+				nextCursor: "page-2",
+				hasMore: true,
+			}),
+		).rejects.toEqual(expect.objectContaining({ status: 401 }));
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.headers.get("Authorization")).toBe(
+			"Bearer rejected-issued-token",
+		);
+		expect(storedSessions).toBe(0);
+		expect(
+			requests.filter((request) =>
+				request.url.endsWith("/sessions/current/refresh"),
+			),
+		).toHaveLength(0);
+	});
+
+	test("keeps request-scoped bearers behind remote HTTP operator policy", async () => {
+		const requests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "http://a.example.test",
+			getAccountSnapshot: async () => ({
+				accountId: "account-a",
+				serverUrl: "http://a.example.test",
+				token: "stored-token",
+				issuedAt: NOW,
+				expiresAt: NOW + 60_000,
+				insecureTransportConfirmed: true,
+			}),
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({ capabilities: [] });
+			},
+		});
+
+		await expect(
+			client.auth.drainVaultKeys("issued-token", {
+				items: [],
+				nextCursor: "page-2",
+				hasMore: true,
+			}),
+		).rejects.toThrow("OPERATOR_DISABLED");
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.url).toBe("http://a.example.test/api/meta");
+		expect(requests[0]?.headers.get("Authorization")).toBeNull();
+	});
+
 	test("rechecks operator capability before subsequent bearer requests", async () => {
 		let operatorEnabled = true;
 		const authenticatedRequests: Request[] = [];
@@ -126,6 +304,11 @@ describe("session-refreshing API client account isolation", () => {
 			"Bearer account-a-refreshed",
 		]);
 		expect(storedFor).toEqual(["account-a:account-a-refreshed"]);
+		expect(
+			requests.filter((request) =>
+				request.url.endsWith("/sessions/current/refresh"),
+			),
+		).toHaveLength(1);
 	});
 
 	test("replays a rejected mutation once without changing its body or guards", async () => {

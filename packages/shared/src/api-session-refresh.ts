@@ -4,7 +4,10 @@ import {
 	createApiClient,
 } from "@bittery/api-contract";
 import type { AppApiClient } from "./api-client";
-import { resolveInsecureTransportPolicy } from "./server-transport-policy";
+import {
+	isRemoteHttpServer,
+	resolveInsecureTransportPolicy,
+} from "./server-transport-policy";
 import { normalizeServerUrl } from "./server-url";
 import type { RefreshResult, SessionSnapshot } from "./session-refresh";
 
@@ -167,6 +170,18 @@ export function createSessionRefreshingApiClient(
 	}
 
 	async function accountFetch(request: Request): Promise<Response> {
+		if (request.headers.has("Authorization")) {
+			let accountConfirmed = false;
+			if (isRemoteHttpServer(defaultServerUrl)) {
+				const snapshot = await options.getAccountSnapshot();
+				accountConfirmed =
+					snapshot?.insecureTransportConfirmed === true &&
+					requireServerUrl(snapshot.serverUrl) === defaultServerUrl;
+			}
+			await authorizeServer(defaultServerUrl, accountConfirmed);
+			return fetchImpl(request);
+		}
+
 		const snapshot = await options.getAccountSnapshot();
 		const serverUrl = snapshot
 			? requireServerUrl(snapshot.serverUrl)
