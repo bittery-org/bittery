@@ -17,7 +17,7 @@ async-stream = "0.3"
 async-trait = "0.1"
 axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-cron = "0.12"
+cron = "0.17"
 jsonrpsee = { version = "0.25", features = ["server"] }
 qubit = "0.10.3"
 serde = { version = "1.0", features = ["derive"] }
