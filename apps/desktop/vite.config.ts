@@ -17,6 +17,9 @@ export default defineConfig({
 		tailwindcss(),
 	],
 	clearScreen: false,
+	worker: {
+		format: "es",
+	},
 	server: {
 		port: 3002,
 		strictPort: true,

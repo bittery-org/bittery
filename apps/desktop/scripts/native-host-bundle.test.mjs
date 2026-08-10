@@ -29,6 +29,12 @@ test("desktop bundles the native messaging host at the resource root", async () 
 	}
 });
 
+test("desktop bundles module workers as ES modules", async () => {
+	const viteConfig = await readFile(join(desktopDir, "vite.config.ts"), "utf8");
+
+	assert.match(viteConfig, /worker:\s*\{\s*format:\s*"es",?\s*\}/);
+});
+
 test("the release workflow builds the native host before the desktop bundle", async () => {
 	const workflow = await readFile(
 		join(repositoryDir, ".github", "workflows", "release.yml"),
