@@ -222,7 +222,7 @@ jobs:
         run: node apps/desktop/scripts/prepare-native-host.mjs ${{ matrix.target }}
 
       - name: Build desktop app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BITTERY_EXTENSION_ID: ${{ vars.BITTERY_EXTENSION_ID || 'YOUR_PRODUCTION_EXTENSION_ID_HERE' }}
