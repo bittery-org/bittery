@@ -58,7 +58,7 @@ features = ["linux-native"]
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.55"
+winreg = "0.56"
 # Named pipe security descriptor (SDDL), peer process id and peer executable
 # lookup. Also already in the graph via tauri/tokio.
 windows-sys = { version = "0.61", features = [
