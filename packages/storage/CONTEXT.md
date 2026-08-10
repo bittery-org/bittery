@@ -263,11 +263,14 @@ or a default. `AccountStore` publishes everything it needs as a single JSON docu
   Rust side, no `unwrap_or(true)` for biometric, no `unwrap_or(600000)` for auto-lock.
 - A `NativeKeyRef` carries `{ key, store: "secret" | "plain" }` so Rust never decides where a
   value lives.
-- Record locations are published as fully-resolved `itemsKeyPrefix` / `vaultsKeyPrefix`,
-  built from `PlatformPort.recordKeyPrefix` (`"record:"` on desktop, `""` elsewhere), so the
-  host does a pure prefix scan and concatenates nothing.
+- Each account publishes a plain `itemCacheState` ref to ItemCache's one metadata record.
+  ItemCache writes the active generation and its fully-resolved `nativeView` prefix pair in
+  that same record, using `RecordPort.recordKeyPrefix` (`"record:"` on desktop, `""`
+  elsewhere). The Rust host reads that narrow projection on every snapshot, so it follows a
+  promotion atomically without either sibling depending on the other or reconstructing a
+  record key.
 
-**`NATIVE_VIEW_VERSION` is 2, and bumping it is a coordinated change.** The Rust parser
+**`NATIVE_VIEW_VERSION` is 3, and bumping it is a coordinated change.** The Rust parser
 checks `v` before interpreting any other field. A desktop binary and a JS bundle that
 disagree refuse each other's view and report zero accounts — the intended failure mode, but
 it means both must ship together.
