@@ -16,7 +16,7 @@ import {
 	restoreAfterTravelModeDisabled,
 } from "./travel-mode-sync";
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
-import type { RpcVaultClient } from "./vault-service";
+import type { ApiVaultClient } from "./vault-service";
 
 const ACCOUNT_ID = "account-1";
 
@@ -59,10 +59,10 @@ describe("travel-mode-sync", () => {
 		});
 		const storeVaultKeys = spyOn(storage, "storeVaultKeys");
 
-		const rpcClient = {
-			vault: {
-				list: {
-					query: mock(async () => [
+		const apiClient = {
+			vaults: {
+				list: mock(async () => ({
+					data: [
 						{
 							id: "vault-1",
 							name: "Private",
@@ -72,10 +72,10 @@ describe("travel-mode-sync", () => {
 							encryptedVaultKey: "encrypted",
 							role: "owner",
 						},
-					]),
-				},
+					],
+				})),
 			},
-		} as unknown as RpcVaultClient;
+		} as unknown as ApiVaultClient;
 
 		const coordinator = {
 			syncVaultKeys: mock(async () => undefined),
@@ -88,18 +88,18 @@ describe("travel-mode-sync", () => {
 					{
 						accountId: ACCOUNT_ID,
 						email: "user@example.com",
-						rpcClient,
+						apiClient,
 					},
 				],
 			})),
 		} as unknown as AccountResolver;
 
 		await restoreAfterTravelModeDisabled(ACCOUNT_ID, storage, coordinator, {
-			rpcClient,
+			apiClient,
 			accounts,
 		});
 
-		expect(rpcClient.vault.list.query).toHaveBeenCalled();
+		expect(apiClient.vaults.list).toHaveBeenCalled();
 		expect(storeVaultKeys).toHaveBeenCalledWith(vaultKeys, ACCOUNT_ID);
 		expect(coordinator.syncVaultKeys).toHaveBeenCalledWith(
 			vaultKeys,
@@ -126,10 +126,10 @@ describe("travel-mode-sync", () => {
 			travelModeCache: { enabled: true, hiddenVaultIds: ["vault-1"] },
 		});
 
-		const rpcClient = {
-			vault: {
-				list: {
-					query: mock(async () => [
+		const apiClient = {
+			vaults: {
+				list: mock(async () => ({
+					data: [
 						{
 							id: "vault-1",
 							name: "Private",
@@ -139,10 +139,10 @@ describe("travel-mode-sync", () => {
 							encryptedVaultKey: "encrypted",
 							role: "owner",
 						},
-					]),
-				},
+					],
+				})),
 			},
-		} as unknown as RpcVaultClient;
+		} as unknown as ApiVaultClient;
 
 		const coordinator = {
 			purgeHiddenVaultsForAccount: mock(() => undefined),
@@ -156,7 +156,7 @@ describe("travel-mode-sync", () => {
 					{
 						accountId: ACCOUNT_ID,
 						email: "user@example.com",
-						rpcClient,
+						apiClient,
 					},
 				],
 			})),
@@ -185,7 +185,7 @@ describe("travel-mode-sync", () => {
 			storage,
 			itemCache,
 			coordinator,
-			{ rpcClient, accounts },
+			{ apiClient, accounts },
 		);
 
 		expect(coordinator.purgeHiddenVaultsForAccount).not.toHaveBeenCalled();

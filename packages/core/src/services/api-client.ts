@@ -1,12 +1,12 @@
 /**
- * Single home for building account-scoped RPC clients from stored credentials.
+ * Single home for building account-scoped API clients from stored credentials.
  *
  * Two flavors, both reading auth token + server URL from `storage`:
- * - `createStoredAccountRpcClient` — session-refreshing. Wires up
+ * - `createStoredAccountApiClient` — session-refreshing. Wires up
  *   `getSessionSnapshot`/`getRefreshToken`/`storeRefreshedSession` so the
  *   client can silently refresh an expiring session. Used by any long-lived
  *   flow (item/vault operations, account metadata sync, biometric unlock).
- * - `createStaticStoredAccountRpcClient` — a plain, non-refreshing client.
+ * - `createStaticStoredAccountApiClient` — a plain, non-refreshing client.
  *   Used by quick-unlock flows where a session doesn't exist yet (that's the
  *   whole point of unlocking), so there is nothing to refresh against.
  *
@@ -15,23 +15,23 @@
  */
 
 import {
-	createAccountRpcClient,
-	createRpcClientForServer,
+	createAccountApiClient,
+	createApiClientForServer,
 	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
+} from "@bittery/shared/api-client-factory";
 import type { AccountStore } from "@bittery/storage";
 
-export type DefaultRpcClient = ReturnType<typeof createAccountRpcClient>;
+export type DefaultApiClient = ReturnType<typeof createAccountApiClient>;
 
 /**
- * Builds a session-refreshing RPC client for `accountId` from stored
+ * Builds a session-refreshing API client for `accountId` from stored
  * credentials. Returns `null` when there is no stored auth token.
  */
-export async function createStoredAccountRpcClient(
+export async function createStoredAccountApiClient(
 	storage: AccountStore,
 	accountId: string,
 	clientId?: string,
-): Promise<DefaultRpcClient | null> {
+): Promise<DefaultApiClient | null> {
 	const [authToken, serverUrl] = await Promise.all([
 		storage.getAuthToken(accountId),
 		storage.getServerUrl(accountId),
@@ -42,7 +42,7 @@ export async function createStoredAccountRpcClient(
 	}
 
 	const resolvedServerUrl = serverUrl || getDefaultServerUrl();
-	return createAccountRpcClient(authToken, resolvedServerUrl, clientId, {
+	return createAccountApiClient(authToken, resolvedServerUrl, clientId, {
 		getSessionSnapshot: async () => {
 			const [token, sessionData] = await Promise.all([
 				storage.getAuthToken(accountId),
@@ -67,21 +67,21 @@ export async function createStoredAccountRpcClient(
 }
 
 /**
- * Builds a STATIC (non-refreshing) RPC client for `accountId` from stored
+ * Builds a STATIC (non-refreshing) API client for `accountId` from stored
  * credentials. Used by quick-unlock flows, which run before a session
  * exists. Returns `undefined` when there is no stored auth token.
  */
-export async function createStaticStoredAccountRpcClient(
+export async function createStaticStoredAccountApiClient(
 	storage: AccountStore,
 	accountId: string,
-): Promise<DefaultRpcClient | undefined> {
+): Promise<DefaultApiClient | undefined> {
 	const authToken = await storage.getAuthToken(accountId);
 	if (!authToken) {
 		return undefined;
 	}
 	const serverUrl =
 		(await storage.getServerUrl(accountId)) || getDefaultServerUrl();
-	return createAccountRpcClient(authToken, serverUrl);
+	return createAccountApiClient(authToken, serverUrl);
 }
 
-export { createAccountRpcClient, createRpcClientForServer };
+export { createAccountApiClient, createApiClientForServer };

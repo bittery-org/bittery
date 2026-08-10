@@ -29,7 +29,7 @@ export function useMoveTargetVaults(options: UseMoveTargetVaultsOptions = {}) {
 		queryFn: () => core.accounts.resolveUnlockedAccounts(),
 		enabled,
 		staleTime: 0,
-		// AccountInfo carries a live RPC client (a Proxy), which is not
+		// AccountInfo carries a live API client (a Proxy), which is not
 		// JSON-serializable. Disable structural sharing to avoid throwing on it.
 		structuralSharing: false,
 	});

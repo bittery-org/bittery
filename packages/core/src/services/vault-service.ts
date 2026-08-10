@@ -6,7 +6,7 @@ import {
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore } from "@bittery/storage";
 import { resolveUserIdForAccount } from "@bittery/storage/account-id";
-import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
+import type { AccountResolver, DefaultApiClient } from "./account-resolver";
 import type { VaultCrypto } from "./vault-crypto";
 
 /**
@@ -50,28 +50,36 @@ export interface ConvertVaultTypeResult {
 	newType: "personal" | "team";
 }
 
-export type VaultListItem = ServerVaultListEntry;
+export type VaultListItem = Omit<ServerVaultListEntry, "icon" | "imageUrl"> & {
+	icon?: string | null;
+	imageUrl?: string | null;
+};
 
-export interface RpcVaultClient {
-	vault: {
-		list: {
-			query: () => Promise<VaultListItem[]>;
-		};
+export interface ApiVaultClient {
+	vaults: {
+		list: () => Promise<{ data: readonly VaultListItem[] }>;
 	};
 }
-
-export type TRPCVaultClient = RpcVaultClient;
 
 /**
  * Refresh vault keys from server and store in local storage.
  */
 export async function refreshVaultKeys(
-	rpcClient: RpcVaultClient,
+	apiClient: ApiVaultClient,
 	storage: AccountStore,
 	accountId?: string,
 ): Promise<void> {
-	const vaultList = await rpcClient.vault.list.query();
-	await storage.storeVaultKeys(vaultList.map(toVaultKeyEntry), accountId);
+	const { data: vaultList } = await apiClient.vaults.list();
+	await storage.storeVaultKeys(
+		vaultList.map((vault) =>
+			toVaultKeyEntry({
+				...vault,
+				icon: vault.icon ?? null,
+				imageUrl: vault.imageUrl ?? null,
+			}),
+		),
+		accountId,
+	);
 }
 
 interface VaultServiceDeps {
@@ -96,7 +104,7 @@ export class VaultService {
 
 	async createVault(
 		input: CreateVaultInput,
-		defaultClient: DefaultRpcClient,
+		defaultClient: DefaultApiClient,
 	): Promise<CreateVaultResult> {
 		const trimmedName = input.name.trim();
 		if (!trimmedName) {
@@ -111,6 +119,7 @@ export class VaultService {
 			defaultClient,
 			accountId,
 		);
+		const vaultId = await this.crypto.generateUuid();
 
 		let imageKey = input.imageKey;
 		if (input.imageFile && !imageKey) {
@@ -122,8 +131,7 @@ export class VaultService {
 				throw new Error("Vault image must be an image file");
 			}
 
-			const upload = await client.vault.createImageUpload.mutate({
-				vaultId: null,
+			const { data: upload } = await client.vaults.createImageUpload(vaultId, {
 				fileName,
 				contentType,
 			});
@@ -158,7 +166,6 @@ export class VaultService {
 			accountId,
 			{ errorMessage: "Session data missing. Please sign in again." },
 		);
-		const vaultId = await this.crypto.generateUuid();
 		const vaultKey = await this.crypto.generateEncryptionKey();
 		try {
 			const encryptedVaultKey = await this.vaultCrypto.wrapVaultKeyForOwner({
@@ -169,14 +176,12 @@ export class VaultService {
 				keyVersion: 1,
 			});
 
-			const result = await client.vault.create.mutate({
-				vaultId,
+			const { data: result } = await client.vaults.create(vaultId, {
 				name: trimmedName,
 				vaultType: input.type,
 				encryptedVaultKey,
 				icon: input.icon,
 				imageKey: imageKey ?? null,
-				clientId: null,
 			});
 
 			return { vaultId: result.vaultId };
@@ -187,7 +192,7 @@ export class VaultService {
 
 	async updateVault(
 		input: UpdateVaultInput,
-		defaultClient: DefaultRpcClient,
+		defaultClient: DefaultApiClient,
 	): Promise<void> {
 		const accountId = input.accountId;
 		const client = await this.accounts.getClientForAccount(
@@ -207,11 +212,13 @@ export class VaultService {
 
 		let imageKey: string | null | undefined;
 		if (input.imageFile) {
-			const upload = await client.vault.createImageUpload.mutate({
-				vaultId: input.vaultId,
-				fileName: input.imageFile.name,
-				contentType: input.imageFile.type,
-			});
+			const { data: upload } = await client.vaults.createImageUpload(
+				input.vaultId,
+				{
+					fileName: input.imageFile.name,
+					contentType: input.imageFile.type,
+				},
+			);
 
 			const uploadResponse = await fetch(upload.uploadUrl, {
 				method: "PUT",
@@ -230,29 +237,29 @@ export class VaultService {
 			imageKey = null;
 		}
 
-		await client.vault.update.mutate({
-			vaultId: input.vaultId,
-			...(input.name !== undefined ? { name: input.name.trim() } : {}),
-			...(input.icon !== undefined ? { icon: input.icon } : {}),
-			...(imageKey !== undefined ? { imageKey } : {}),
-			clientId: null,
-		} as Parameters<typeof client.vault.update.mutate>[0]);
+		await client.vaults.update(
+			input.vaultId,
+			{
+				...(input.name !== undefined ? { name: input.name.trim() } : {}),
+				...(input.icon !== undefined ? { icon: input.icon } : {}),
+				...(imageKey !== undefined ? { imageKey } : {}),
+			},
+			{},
+		);
 	}
 
 	async convertVaultType(
 		input: ConvertVaultTypeInput,
-		defaultClient: DefaultRpcClient,
+		defaultClient: DefaultApiClient,
 	): Promise<ConvertVaultTypeResult> {
 		const accountId = input.accountId;
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
 			accountId,
 		);
-		const result = await client.vault.convertType.mutate({
-			vaultId: input.vaultId,
+		const { data: result } = await client.vaults.convertType(input.vaultId, {
 			targetType: input.targetType,
 			personalEncryptedVaultKey: input.personalEncryptedVaultKey ?? null,
-			clientId: null,
 		});
 
 		if (!result.success) {
@@ -269,18 +276,18 @@ export class VaultService {
 
 	async deleteVault(
 		vaultId: string,
-		defaultClient: DefaultRpcClient,
+		defaultClient: DefaultApiClient,
 		accountId: string,
 	): Promise<void> {
 		const client = await this.accounts.getClientForAccount(
 			defaultClient,
 			accountId,
 		);
-		await client.vault.delete.mutate({ vaultId });
+		await client.vaults.remove(vaultId, {});
 	}
 
 	async refreshVaultKeys(
-		defaultClient: DefaultRpcClient,
+		defaultClient: DefaultApiClient,
 		accountId: string,
 	): Promise<void> {
 		const client = await this.accounts.getClientForAccount(

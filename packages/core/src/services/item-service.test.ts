@@ -151,12 +151,14 @@ describe("ItemService", () => {
 		});
 		let mutation: Record<string, string> | undefined;
 		const service = fixture.service(() => ({
-			vault: {
-				createItem: {
-					mutate: async (input: Record<string, string>) => {
-						mutation = input;
-						return { itemId: input.itemId };
-					},
+			items: {
+				create: async (
+					_vaultId: string,
+					itemId: string,
+					input: Record<string, string>,
+				) => {
+					mutation = input;
+					return { data: { itemId } };
 				},
 			},
 		}));
@@ -250,29 +252,32 @@ describe("ItemService", () => {
 			encryptedData: string;
 			encryptionIv: string;
 			encryptionAlgorithm: string;
-			clientId: null;
 		}> = [];
 		const service = fixture.service((accountId) =>
 			accountId === TARGET.accountId
 				? {
-						vault: {
-							createItem: {
-								mutate: async (input: (typeof createItemCalls)[number]) => {
-									createItemCalls.push(input);
-									return { itemId: input.itemId };
-								},
+						items: {
+							create: async (
+								vaultId: string,
+								itemId: string,
+								input: Omit<
+									(typeof createItemCalls)[number],
+									"itemId" | "vaultId"
+								>,
+							) => {
+								createItemCalls.push({ ...input, itemId, vaultId });
+								return { data: { itemId } };
 							},
 						},
 					}
 				: {
-						vault: {
-							listAttachments: { query: async () => [] },
-							deleteItem: {
-								mutate: async ({ itemId }: { itemId: string }) => {
-									sourceDeletes.push(itemId);
-								},
+						attachments: { list: async () => ({ data: [] }) },
+						items: {
+							get: async () => ({ data: { version: 1 } }),
+							trash: async (itemId: string) => {
+								sourceDeletes.push(itemId);
 							},
-							permanentlyDeleteItem: { mutate: async () => ({}) },
+							deletePermanently: async () => ({ data: {} }),
 						},
 					},
 		);
@@ -301,7 +306,6 @@ describe("ItemService", () => {
 				encryptedData: result._encryptedData.ciphertext,
 				encryptionIv: result._encryptedData.iv,
 				encryptionAlgorithm: result._encryptedData.algorithm,
-				clientId: null,
 			},
 		]);
 		expect(sourceDeletes).toEqual(["item_1"]);
@@ -348,29 +352,27 @@ describe("ItemService", () => {
 			const service = fixture.service((accountId) =>
 				accountId === TARGET.accountId
 					? {
-							vault: {
-								createItem: {
-									mutate: async (input: { itemId: string }) => ({
-										itemId: input.itemId,
-									}),
-								},
-								createAttachmentUpload: {
-									mutate: async () => ({
+							items: {
+								create: async (_vaultId: string, itemId: string) => ({
+									data: { itemId },
+								}),
+							},
+							attachments: {
+								createUpload: async () => ({
+									data: {
 										key: "target_key",
 										uploadUrl: "https://upload.test",
-									}),
-								},
-								createAttachment: {
-									mutate: async () => {
-										events.push("createAttachment");
 									},
+								}),
+								create: async () => {
+									events.push("createAttachment");
 								},
 							},
 						}
 					: {
-							vault: {
-								listAttachments: {
-									query: async () => [
+							attachments: {
+								list: async () => ({
+									data: [
 										{
 											id: "attachment_1",
 											storageKey: "source_key",
@@ -384,16 +386,17 @@ describe("ItemService", () => {
 											uploadedBy: SOURCE.userId,
 										},
 									],
-								},
-								getAttachmentDownloadUrl: {
-									mutate: async () => ({
+								}),
+								createDownloadUrl: async () => ({
+									data: {
 										downloadUrl: "https://download.test",
-									}),
-								},
-								deleteItem: {
-									mutate: async () => events.push("sourceDelete"),
-								},
-								permanentlyDeleteItem: { mutate: async () => ({}) },
+									},
+								}),
+							},
+							items: {
+								get: async () => ({ data: { version: 1 } }),
+								trash: async () => events.push("sourceDelete"),
+								deletePermanently: async () => ({ data: {} }),
 							},
 						},
 			);
@@ -430,42 +433,38 @@ describe("ItemService", () => {
 			const service = fixture.service((accountId) =>
 				accountId === TARGET.accountId
 					? {
-							vault: {
-								createItem: {
-									mutate: async (input: { itemId: string }) => ({
-										itemId: input.itemId,
-									}),
+							items: {
+								create: async (_vaultId: string, itemId: string) => ({
+									data: { itemId },
+								}),
+								trash: async () => {
+									targetDeleted = true;
 								},
-								deleteItem: {
-									mutate: async () => {
-										targetDeleted = true;
-									},
-								},
-								permanentlyDeleteItem: { mutate: async () => ({}) },
+								deletePermanently: async () => ({ data: {} }),
 							},
 						}
 					: {
-							vault: {
-								listAttachments: {
-									query: async () => [
+							attachments: {
+								list: async () => ({
+									data: [
 										{
 											id: "attachment_1",
 											storageKey: "source_key",
 											fileSize: 4,
 										},
 									],
-								},
-								getAttachmentDownloadUrl: {
-									mutate: async () => ({
+								}),
+								createDownloadUrl: async () => ({
+									data: {
 										downloadUrl: "https://download.test",
-									}),
-								},
-								deleteItem: {
-									mutate: async () => {
-										sourceDeleted = true;
 									},
+								}),
+							},
+							items: {
+								trash: async () => {
+									sourceDeleted = true;
 								},
-								permanentlyDeleteItem: { mutate: async () => ({}) },
+								deletePermanently: async () => ({ data: {} }),
 							},
 						},
 			);

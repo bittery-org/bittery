@@ -16,6 +16,7 @@
 		"./hooks/services/autolock-mobile": "./src/services/autolock-mobile.ts",
 		"./services/account-lifecycle": "./src/services/account-lifecycle.ts",
 		"./services/account-resolver": "./src/services/account-resolver.ts",
+		"./services/api-client": "./src/services/api-client.ts",
 		"./services/auth-service": "./src/services/auth-service.ts",
 		"./services/item-service": "./src/services/item-service.ts",
 		"./services/vault-service": "./src/services/vault-service.ts",

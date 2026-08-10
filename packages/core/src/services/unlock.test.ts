@@ -34,7 +34,7 @@ const KDF_PROFILE: KdfProfile = {
 };
 
 /**
- * Unroutable on purpose: every RPC client built below is real, so the travel
+ * Unroutable on purpose: every API client built below is real, so the travel
  * mode fetch has to fail fast and fall back to the locally cached policy — the
  * offline path, which is what these tests are about.
  */

@@ -24,7 +24,7 @@ import {
 	removeAccount as lifecycleRemoveAccount,
 	NO_CREDENTIAL_MIRROR,
 } from "./account-lifecycle";
-import { createStoredAccountRpcClient } from "./rpc-client";
+import { createStoredAccountApiClient } from "./api-client";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 
 export interface AccountSessionManagerOptions {
@@ -106,7 +106,7 @@ export class AccountSessionManager {
 
 			const enforcer = getTravelModeEnforcer(this.storage, this.itemCache);
 			if (!enforcer.isVerified(accountId)) {
-				const client = await createStoredAccountRpcClient(
+				const client = await createStoredAccountApiClient(
 					this.storage,
 					accountId,
 				).catch(() => null);

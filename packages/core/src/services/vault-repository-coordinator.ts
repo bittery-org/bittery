@@ -4,7 +4,7 @@ import type { VaultKeyData } from "@bittery/storage/types";
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import type { AccountInfo } from "./account-resolver";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
-import type { TravelModeRpcClient } from "./travel-mode-service";
+import type { TravelModeApiClient } from "./travel-mode-service";
 import type { VaultCrypto } from "./vault-crypto";
 import {
 	type BootstrapItemsClient,
@@ -198,7 +198,7 @@ export class VaultRepositoryCoordinator {
 		const verification = enforcer
 			.verifyForUnlock(
 				account.accountId,
-				account.rpcClient as unknown as TravelModeRpcClient,
+				account.apiClient as unknown as TravelModeApiClient,
 			)
 			.then(() => undefined)
 			.finally(() => {
@@ -239,7 +239,7 @@ export class VaultRepositoryCoordinator {
 					// Bootstrap only when local cache has no established snapshot yet.
 					if (!repo.hasCacheSnapshot()) {
 						await repo.hydrateFromServer(
-							account.rpcClient as unknown as BootstrapItemsClient,
+							account.apiClient as unknown as BootstrapItemsClient,
 						);
 					}
 				} catch (error) {
@@ -290,7 +290,7 @@ export class VaultRepositoryCoordinator {
 
 					if (!repo.hasCacheSnapshot()) {
 						await repo.hydrateFromServer(
-							account.rpcClient as unknown as BootstrapItemsClient,
+							account.apiClient as unknown as BootstrapItemsClient,
 						);
 					}
 				} catch (error) {
@@ -316,7 +316,7 @@ export class VaultRepositoryCoordinator {
 					account.email,
 				);
 				await repo.hydrateFromServer(
-					account.rpcClient as unknown as BootstrapItemsClient,
+					account.apiClient as unknown as BootstrapItemsClient,
 				);
 			}),
 		);

@@ -1,5 +1,5 @@
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
 	decodeVaultType,
@@ -74,17 +74,13 @@ interface BootstrapItemPage {
 
 export interface BootstrapItemsClient {
 	sync: {
-		bootstrapItems: {
-			query: (input: {
-				cursor?: string;
-				limit?: number;
-			}) => Promise<BootstrapItemPage>;
-		};
+		bootstrap: (input: {
+			cursor?: string;
+			limit?: number;
+		}) => Promise<{ data: BootstrapItemPage }>;
 	};
-	vault?: {
-		list?: {
-			query: () => Promise<Array<ServerVaultListEntry>>;
-		};
+	vaults?: {
+		list?: () => Promise<{ data: Array<ServerVaultListEntry> }>;
 	};
 }
 
@@ -103,7 +99,7 @@ export class VaultRepository {
 
 	/**
 	 * One repo is bound to one account for its whole life: every cache read, write,
-	 * RPC and crypto call below keys off this `accountId` rather than re-resolving.
+	 * API and crypto call below keys off this `accountId` rather than re-resolving.
 	 */
 	constructor(
 		private readonly crypto: CryptoPort,
@@ -569,12 +565,12 @@ export class VaultRepository {
 	private async fetchVaultKeysFromServer(
 		client: BootstrapItemsClient,
 	): Promise<VaultKeyData[] | null> {
-		if (!client.vault?.list?.query) {
+		if (!client.vaults?.list) {
 			return null;
 		}
 
 		try {
-			const vaults = await client.vault.list.query();
+			const { data: vaults } = await client.vaults.list();
 			return vaults.map(toVaultKeyEntry);
 		} catch (error) {
 			console.error("[VaultRepository] Failed to refresh vault keys:", error);
@@ -941,7 +937,7 @@ export class VaultRepository {
 
 		try {
 			while (true) {
-				const page = await client.sync.bootstrapItems.query({
+				const { data: page } = await client.sync.bootstrap({
 					cursor,
 					limit: 500,
 				});

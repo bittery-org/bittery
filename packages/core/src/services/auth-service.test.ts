@@ -26,7 +26,7 @@ import {
 	type UnlockResult,
 } from "./auth-service";
 import { resetTravelModeEnforcerForTests } from "./travel-mode-enforcer";
-import type { TravelModeRpcClient } from "./travel-mode-service";
+import type { TravelModeApiClient } from "./travel-mode-service";
 
 const kdfParams: KdfProfile = {
 	schemaVersion: 1,
@@ -120,36 +120,28 @@ function createAuthClient(
 ): IAuthClient {
 	return {
 		auth: {
-			checkEmail: { query: mock(async () => ({ exists: true })) },
-			startLogin: {
-				mutate: mock(async ({ email }) => {
-					startedEmails.push(email);
-					return {
+			checkEmail: mock(async () => ({ data: { exists: true } })),
+			startLogin: mock(async ({ email }) => {
+				startedEmails.push(email);
+				return {
+					data: {
 						attemptId: "attempt",
 						salt: "srp-salt",
 						serverPublicKey: "server-public",
 						kdfParams,
-					};
-				}),
-			},
-			finishLogin: {
-				mutate: mock(async () => ({
+					},
+				};
+			}),
+			finishLogin: mock(async () => ({
+				data: {
 					token,
 					serverProof: "server-proof",
 					user: { id: "user-new", email: "same@example.com" },
 					expiresAt: new Date(Date.now() + 60_000),
-				})),
-			},
-			logout: { mutate: mock(async () => ({ success: true })) },
-			refreshSession: {
-				mutate: mock(async () => ({
-					token,
-					sessionId: "session",
-					expiresAt: new Date(Date.now() + 60_000),
-				})),
-			},
+				},
+			})),
 		},
-		vault: { list: { query: mock(async () => []) } },
+		vaults: { list: mock(async () => ({ data: [] })) },
 	};
 }
 
@@ -446,16 +438,16 @@ describe("KDF agility on unlock", () => {
 
 		const authClient = {
 			auth: {
-				startLogin: {
-					mutate: mock(async () => ({
+				startLogin: mock(async () => ({
+					data: {
 						attemptId: "attempt",
 						salt: "srp-salt",
 						serverPublicKey: "server-public",
 						kdfParams: { ...pinnedProfile },
-					})),
-				},
+					},
+				})),
 			},
-			vault: { list: { query: mock(async () => []) } },
+			vaults: { list: mock(async () => ({ data: [] })) },
 		} as unknown as IAuthClient;
 
 		await deriveSrpLoginProof(
@@ -491,31 +483,31 @@ describe("storeLoginSession travel mode verification", () => {
 	function travelModeClientForToken(
 		token: string | null,
 		seenTokens: (string | null)[],
-	): TravelModeRpcClient {
+	): TravelModeApiClient {
 		return {
 			travelMode: {
-				getTravelMode: {
-					query: mock(async () => {
-						seenTokens.push(token);
-						if (!token) {
-							throw new Error("UNAUTHORIZED");
-						}
-						return {
+				get: mock(async () => {
+					seenTokens.push(token);
+					if (!token) {
+						throw new Error("UNAUTHORIZED");
+					}
+					return {
+						data: {
 							enabled: false,
 							hiddenVaultIds: [],
 							enabledAt: null,
 							updatedAt: new Date().toISOString(),
-						};
-					}),
-				},
+						},
+					};
+				}),
 			},
-		} as unknown as TravelModeRpcClient;
+		} as unknown as TravelModeApiClient;
 	}
 
 	it("verifies travel mode with the freshly issued login token", async () => {
 		resetTravelModeEnforcerForTests();
 		// A first login into an empty store: nothing is authenticated yet, so any
-		// ambient RPC client reading storage would be unauthenticated.
+		// ambient API client reading storage would be unauthenticated.
 		const { storage } = await makeStore();
 		const storePinnedKdfProfile = spyOn(storage, "storePinnedKdfProfile");
 		const seenTokens: (string | null)[] = [];
@@ -528,7 +520,7 @@ describe("storeLoginSession travel mode verification", () => {
 			"user@example.com",
 			{
 				serverUrl: "https://cloud.example",
-				createTravelModeRpcClient: (token: string | null) =>
+				createTravelModeApiClient: (token: string | null) =>
 					travelModeClientForToken(token, seenTokens),
 			},
 		);
@@ -558,7 +550,7 @@ describe("storeLoginSession travel mode verification", () => {
 			"user@example.com",
 			{
 				serverUrl: "https://cloud.example",
-				createTravelModeRpcClient: (token: string | null) =>
+				createTravelModeApiClient: (token: string | null) =>
 					travelModeClientForToken(token, seenTokens),
 			},
 		);
@@ -577,7 +569,7 @@ describe("storeLoginSession travel mode verification", () => {
 			"user@example.com",
 			{
 				serverUrl: "https://cloud.example",
-				createTravelModeRpcClient: (token: string | null) =>
+				createTravelModeApiClient: (token: string | null) =>
 					travelModeClientForToken(token, seenTokens),
 			},
 		);
@@ -605,7 +597,7 @@ describe("storeLoginSession travel mode verification", () => {
 				"user@example.com",
 				{
 					serverUrl: "https://cloud.example",
-					createTravelModeRpcClient: (token: string | null) =>
+					createTravelModeApiClient: (token: string | null) =>
 						travelModeClientForToken(token, []),
 				},
 			),
@@ -637,7 +629,7 @@ describe("storeLoginSession travel mode verification", () => {
 				"user@example.com",
 				{
 					serverUrl: "https://cloud.example",
-					createTravelModeRpcClient: (token: string | null) =>
+					createTravelModeApiClient: (token: string | null) =>
 						travelModeClientForToken(token, []),
 				},
 			),

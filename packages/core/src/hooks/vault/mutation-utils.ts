@@ -1,4 +1,4 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	useCoreContext,
 	useQueryInvalidator,
@@ -12,7 +12,7 @@ import { refreshRepositoriesFromServer } from "../items/mutation-utils";
 export function useRefreshAfterVaultMutation(): (
 	accountId: string,
 ) => Promise<void> {
-	const defaultClient = useRPCClient();
+	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const invalidator = useQueryInvalidator();
 

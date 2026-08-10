@@ -5,11 +5,11 @@
  * Wraps the core performSRPLogin utility with React Query mutation.
  */
 
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import {
-	createRpcClientForServer,
+	createApiClientForServer,
 	getDefaultServerUrl,
-} from "@bittery/shared/rpc-client-factory";
+} from "@bittery/shared/api-client-factory";
 import { type UseMutationResult, useMutation } from "@tanstack/react-query";
 import {
 	usePlatformCrypto,
@@ -60,7 +60,7 @@ export interface LoginInput extends SRPLoginInput {
 	enableBiometric?: boolean;
 	/**
 	 * Server URL to use for this login request.
-	 * When provided, a dedicated RPC client is created for this server URL
+	 * When provided, a dedicated API client is created for this server URL
 	 * instead of using the default client. Use this when the user can configure
 	 * a custom server URL (e.g. self-hosted instances).
 	 */
@@ -85,7 +85,7 @@ export interface LoginInput extends SRPLoginInput {
 export function useLogin(
 	options: UseLoginOptions = {},
 ): UseMutationResult<LoginResult, Error, LoginInput> {
-	const rpcClient = useRPCClient();
+	const apiClient = useApiClient();
 	const crypto = usePlatformCrypto();
 	const storage = usePlatformStorage();
 	const itemCache = usePlatformItemCache();
@@ -96,9 +96,9 @@ export function useLogin(
 				/\/$/,
 				"",
 			);
-			const rpcClientForRequest = input.serverUrl
-				? createRpcClientForServer(serverUrl)
-				: rpcClient;
+			const apiClientForRequest = input.serverUrl
+				? createApiClientForServer(serverUrl)
+				: apiClient;
 
 			// Perform SRP login
 			const result = await performSRPLogin(
@@ -108,7 +108,7 @@ export function useLogin(
 					secretKey: input.secretKey,
 					serverUrl,
 				},
-				{ crypto, rpcClient: rpcClientForRequest, storage },
+				{ crypto, apiClient: apiClientForRequest, storage },
 			);
 
 			const shouldEnableBiometric =

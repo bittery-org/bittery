@@ -5,7 +5,7 @@
 
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { usePlatformStorage } from "../../context/platform-context";
-import { createStoredAccountRpcClient } from "../../services/rpc-client";
+import { createStoredAccountApiClient } from "../../services/api-client";
 
 const ACCOUNT_METADATA_STALE_TIME_MS = 10 * 60 * 1000;
 const ACCOUNT_METADATA_REFETCH_INTERVAL_MS = 10 * 60 * 1000;
@@ -49,14 +49,14 @@ export function useAccountMetadataSync(
 			if (!accountId) return null;
 
 			try {
-				const rpcClient = await createStoredAccountRpcClient(
+				const apiClient = await createStoredAccountApiClient(
 					storage,
 					accountId,
 				);
-				if (!rpcClient) return null;
+				if (!apiClient) return null;
 
 				// Fetch current user data from server
-				const userData = await rpcClient.auth.me.query();
+				const { data: userData } = await apiClient.auth.me();
 
 				// Get stored account metadata
 				const accounts = await storage.getAccountsList();
@@ -156,7 +156,7 @@ export function useAccountMetadataSyncAll(options: {
 			queryKey: ["account-metadata-sync", accountId],
 			queryFn: async () => {
 				try {
-					const accountClient = await createStoredAccountRpcClient(
+					const accountClient = await createStoredAccountApiClient(
 						storage,
 						accountId,
 					);
@@ -168,7 +168,7 @@ export function useAccountMetadataSyncAll(options: {
 					}
 
 					// Fetch current user data from server using account-specific client
-					const userData = await accountClient.auth.me.query();
+					const { data: userData } = await accountClient.auth.me();
 
 					// Get stored account metadata
 					const accounts = await storage.getAccountsList();

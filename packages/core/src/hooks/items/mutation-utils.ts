@@ -1,4 +1,4 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import type { IPendingMutationQueue } from "@bittery/types";
 import {
@@ -186,7 +186,7 @@ export function extractDecryptedItemData(item: unknown): DecryptedItemData {
 }
 
 export function useItemMutationRuntime() {
-	const defaultClient = useRPCClient();
+	const defaultClient = useApiClient();
 	const core = useCoreContext();
 	const sync = usePlatformSync();
 	const invalidator = useQueryInvalidator();

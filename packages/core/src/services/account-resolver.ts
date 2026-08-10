@@ -1,17 +1,17 @@
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type { ItemContextMetadata } from "@bittery/shared/types";
 import type { AccountStore } from "@bittery/storage";
 import type { ActiveAccountId } from "@bittery/storage/types";
 import {
-	createStoredAccountRpcClient,
-	type DefaultRpcClient,
-} from "./rpc-client";
+	createStoredAccountApiClient,
+	type DefaultApiClient,
+} from "./api-client";
 
-export type { DefaultRpcClient };
-export { createStoredAccountRpcClient };
+export type { DefaultApiClient };
+export { createStoredAccountApiClient };
 
 /**
- * Complete account information including metadata, credentials, and RPC client.
+ * Complete account information including metadata, credentials, and API client.
  */
 export interface AccountInfo {
 	accountId: string;
@@ -22,7 +22,7 @@ export interface AccountInfo {
 	teamAvatarUrl?: string | null;
 	authToken: string;
 	serverUrl: string;
-	rpcClient: DefaultRpcClient;
+	apiClient: DefaultApiClient;
 }
 
 export interface ResolveAccountsResult {
@@ -56,16 +56,16 @@ export function findAccountForItem(
 }
 
 /**
- * Returns an account-specific RPC client when accountId is provided.
+ * Returns an account-specific API client when accountId is provided.
  */
 export async function getClientForAccount(
 	storage: AccountStore,
-	_defaultClient: DefaultRpcClient,
+	_defaultClient: DefaultApiClient,
 	accountId: string,
-): Promise<DefaultRpcClient> {
-	const client = await createStoredAccountRpcClient(storage, accountId);
+): Promise<DefaultApiClient> {
+	const client = await createStoredAccountApiClient(storage, accountId);
 	if (!client) {
-		throw new Error(`No authenticated RPC client for account ${accountId}`);
+		throw new Error(`No authenticated API client for account ${accountId}`);
 	}
 
 	return client;
@@ -131,11 +131,11 @@ export class AccountResolver {
 					}
 
 					const resolvedServerUrl = serverUrl || getDefaultServerUrl();
-					const rpcClient = await createStoredAccountRpcClient(
+					const apiClient = await createStoredAccountApiClient(
 						this.storage,
 						accountId,
 					);
-					if (!rpcClient) {
+					if (!apiClient) {
 						return null;
 					}
 
@@ -148,7 +148,7 @@ export class AccountResolver {
 						teamAvatarUrl: metadata.teamAvatarUrl,
 						authToken,
 						serverUrl: resolvedServerUrl,
-						rpcClient: rpcClient,
+						apiClient: apiClient,
 					};
 				} catch (error) {
 					console.error(
@@ -164,9 +164,9 @@ export class AccountResolver {
 	}
 
 	async getClientForAccount(
-		defaultClient: DefaultRpcClient,
+		defaultClient: DefaultApiClient,
 		accountId?: string,
-	): Promise<DefaultRpcClient> {
+	): Promise<DefaultApiClient> {
 		if (!accountId) return defaultClient;
 		return getClientForAccount(this.storage, defaultClient, accountId);
 	}

@@ -79,7 +79,7 @@ export interface SessionCredentialRef {
 
 /**
  * Copies of key material or bearer tokens this process handed outside
- * `AccountStore` — the Android autofill MUK mirror, the RPC client cache.
+ * `AccountStore` — the Android autofill MUK mirror, the API client cache.
  * May drop more than asked (platforms without per-account granularity), never
  * less.
  */

@@ -3,7 +3,7 @@ import { arrayBufferToBase64 } from "@bittery/shared/crypto";
 import type { DecryptedItem, SharedItemPayload } from "@bittery/shared/types";
 import type { AccountStore } from "@bittery/storage";
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
-import type { AccountResolver, DefaultRpcClient } from "./account-resolver";
+import type { AccountResolver, DefaultApiClient } from "./account-resolver";
 import type { VaultCrypto } from "./vault-crypto";
 
 export const SHARE_EXPIRATION_OPTIONS = [
@@ -109,7 +109,7 @@ export class ShareService {
 
 	async createShare(
 		input: CreateShareInput,
-		defaultClient: DefaultRpcClient,
+		defaultClient: DefaultApiClient,
 	): Promise<CreateShareResult> {
 		const {
 			item,
@@ -155,8 +155,7 @@ export class ShareService {
 					null,
 				);
 
-				const result = await client.share.create.mutate({
-					itemId: item.id,
+				const { data: result } = await client.share.create(item.id, {
 					accessMode,
 					isOneTimeUse,
 					expiresIn,

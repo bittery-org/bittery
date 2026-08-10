@@ -8,7 +8,7 @@
  */
 
 import type { CryptoPort } from "@bittery/crypto-port";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type {
 	AccountStore,
 	BiometricErrorType,
@@ -17,17 +17,17 @@ import type {
 import { findAccountById } from "@bittery/storage/account-id";
 import type { AccountMetadata, ActiveAccountId } from "@bittery/storage/types";
 import { type CredentialMirror, lockAccount } from "./account-lifecycle";
-import { performSRPUnlock, storeUnlockSessionOwned } from "./auth-service";
 import {
-	createStaticStoredAccountRpcClient,
-	createStoredAccountRpcClient,
-} from "./rpc-client";
+	createStaticStoredAccountApiClient,
+	createStoredAccountApiClient,
+} from "./api-client";
+import { performSRPUnlock, storeUnlockSessionOwned } from "./auth-service";
 import { selectActiveAccountAfterUnlock } from "./select-active-account";
 import {
 	getTravelModeEnforcer,
 	TravelModeVerificationError,
 } from "./travel-mode-enforcer";
-import type { TravelModeRpcClient } from "./travel-mode-service";
+import type { TravelModeApiClient } from "./travel-mode-service";
 
 /**
  * Machine-readable codes rather than messages: every consumer only counts
@@ -88,7 +88,7 @@ export interface UnlockOptions {
 /** An account whose secrets are restored, ready for the shared finish step. */
 interface UnlockCandidate {
 	account: AccountMetadata;
-	rpcClient: TravelModeRpcClient | null;
+	apiClient: TravelModeApiClient | null;
 	/**
 	 * Whether the acquire step already verified travel mode. Only the password
 	 * path has, through `storeUnlockSession`; re-verifying would cost a second
@@ -173,11 +173,11 @@ async function acquireWithPassword(
 
 			// Static client: an unlock runs before a session exists, so there is
 			// nothing for a refreshing client to refresh against.
-			const rpcClient = await createStaticStoredAccountRpcClient(
+			const apiClient = await createStaticStoredAccountApiClient(
 				storage,
 				accountId,
 			);
-			if (!rpcClient) {
+			if (!apiClient) {
 				failed.push({ accountId, email, reason: "no_auth_token" });
 				continue;
 			}
@@ -186,7 +186,7 @@ async function acquireWithPassword(
 				(await storage.getServerUrl(accountId)) || getDefaultServerUrl();
 			const result = await performSRPUnlock(
 				{ accountId, password },
-				{ crypto, rpcClient, storage },
+				{ crypto, apiClient, storage },
 			);
 			await storeUnlockSessionOwned(
 				result,
@@ -195,13 +195,13 @@ async function acquireWithPassword(
 				crypto,
 				accountId,
 				{
-					travelModeRpcClient: rpcClient,
+					travelModeApiClient: apiClient,
 					serverUrl,
 					setActive: false,
 				},
 			);
 
-			candidates.push({ account, rpcClient, verified: true });
+			candidates.push({ account, apiClient, verified: true });
 		} catch (error) {
 			// The credential was accepted before travel mode is verified, so a
 			// verification failure must not be reported as a rejected password.
@@ -270,11 +270,11 @@ async function acquireOneWithBiometric(
 	}
 
 	// A missing token is not fatal: the enforcer then verifies offline.
-	const rpcClient = await createStoredAccountRpcClient(
+	const apiClient = await createStoredAccountApiClient(
 		storage,
 		accountId,
 	).catch(() => null);
-	return { candidates: [{ account, rpcClient, verified: false }], failed: [] };
+	return { candidates: [{ account, apiClient, verified: false }], failed: [] };
 }
 
 async function acquireWithBiometric(
@@ -321,11 +321,11 @@ async function acquireWithBiometric(
 		}
 		// Refreshing client: the biometric restore already produced a live session.
 		// A missing token is not fatal here — the enforcer then verifies offline.
-		const rpcClient = await createStoredAccountRpcClient(
+		const apiClient = await createStoredAccountApiClient(
 			storage,
 			accountId,
 		).catch(() => null);
-		candidates.push({ account, rpcClient, verified: false });
+		candidates.push({ account, apiClient, verified: false });
 	}
 
 	return { candidates, failed };
@@ -343,12 +343,12 @@ async function runUnlock(
 ): Promise<UnlockOutcome> {
 	const enforcer = getTravelModeEnforcer(storage, itemCache);
 	const unlocked: string[] = [];
-	for (const { account, rpcClient, verified } of candidates) {
+	for (const { account, apiClient, verified } of candidates) {
 		if (
 			verified ||
 			(await enforcer.verifyOrClear(
 				account.accountId,
-				rpcClient,
+				apiClient,
 				credentialMirror,
 			))
 		) {

@@ -77,13 +77,13 @@ async function createLayers(): Promise<{
 
 /**
  * A bootstrap client shaped exactly like the server's camelCased responses:
- * both `sync.bootstrapItems` and `vault.list` carry `vaultType`, never `type`.
+ * both `sync.bootstrap` and `vaults.list` carry `vaultType`, never `type`.
  */
 function createClient(): BootstrapItemsClient {
 	return {
 		sync: {
-			bootstrapItems: {
-				query: mock(async () => ({
+			bootstrap: mock(async () => ({
+				data: {
 					items: [
 						{
 							id: "item_1",
@@ -108,12 +108,12 @@ function createClient(): BootstrapItemsClient {
 						},
 					],
 					hasMore: false,
-				})),
-			},
+				},
+			})),
 		},
-		vault: {
-			list: {
-				query: mock(async () => [
+		vaults: {
+			list: mock(async () => ({
+				data: [
 					{
 						id: "vault_1",
 						name: "Team Vault",
@@ -123,8 +123,8 @@ function createClient(): BootstrapItemsClient {
 						encryptedVaultKey: "ZW5jcnlwdGVk",
 						role: "owner",
 					},
-				]),
-			},
+				],
+			})),
 		},
 	} as unknown as BootstrapItemsClient;
 }
@@ -227,14 +227,16 @@ describe("VaultRepository.hydrateFromServer", () => {
 		);
 		const client = createClient();
 		let request = 0;
-		client.sync.bootstrapItems.query = mock(async () => {
+		client.sync.bootstrap = mock(async () => {
 			if (request++ === failureAt) {
 				throw new Error("network interrupted bootstrap");
 			}
 			return {
-				items: [],
-				hasMore: true,
-				nextCursor: "next-page",
+				data: {
+					items: [],
+					hasMore: true,
+					nextCursor: "next-page",
+				},
 			};
 		});
 
@@ -311,7 +313,7 @@ describe("VaultRepository hydration on a locked account", () => {
 
 		expect(repo.isHydrated()).toBe(false);
 		expect(repo.getAll()).toEqual([]);
-		expect(client.sync.bootstrapItems.query).not.toHaveBeenCalled();
+		expect(client.sync.bootstrap).not.toHaveBeenCalled();
 	});
 
 	/**

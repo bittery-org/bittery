@@ -11,8 +11,8 @@ import {
 	filterVaultKeys,
 	isVaultHidden,
 	mapTravelModeResponse,
+	type TravelModeApiClient,
 	type TravelModeDisableProof,
-	type TravelModeRpcClient,
 	type TravelModeServerResponse,
 } from "./travel-mode-service";
 import type { VaultRepositoryCoordinator } from "./vault-repository-coordinator";
@@ -179,9 +179,9 @@ export class TravelModeEnforcer {
 
 	async fetchFromServer(
 		accountId: string,
-		rpcClient: TravelModeRpcClient,
+		apiClient: TravelModeApiClient,
 	): Promise<TravelModeConfig> {
-		const response = await rpcClient.travelMode.getTravelMode.query();
+		const { data: response } = await apiClient.travelMode.get();
 		const config = mapTravelModeResponse(response);
 		await this.applyConfig(accountId, config);
 		return config;
@@ -189,11 +189,11 @@ export class TravelModeEnforcer {
 
 	async verifyForUnlock(
 		accountId: string,
-		rpcClient?: TravelModeRpcClient | null,
+		apiClient?: TravelModeApiClient | null,
 	): Promise<TravelModeConfig> {
-		if (rpcClient) {
+		if (apiClient) {
 			try {
-				return await this.fetchFromServer(accountId, rpcClient);
+				return await this.fetchFromServer(accountId, apiClient);
 			} catch (serverError) {
 				try {
 					return await this.hydrateFromStorage(accountId);
@@ -213,11 +213,11 @@ export class TravelModeEnforcer {
 	 */
 	async verifyOrClear(
 		accountId: string,
-		rpcClient: TravelModeRpcClient | null | undefined,
+		apiClient: TravelModeApiClient | null | undefined,
 		credentialMirror: CredentialMirror,
 	): Promise<boolean> {
 		try {
-			await this.verifyForUnlock(accountId, rpcClient);
+			await this.verifyForUnlock(accountId, apiClient);
 			return true;
 		} catch (error) {
 			const outcome = await lockAccount(accountId, {
@@ -238,12 +238,11 @@ export class TravelModeEnforcer {
 	async setHiddenVaults(
 		accountId: string,
 		hiddenVaultIds: string[],
-		rpcClient: TravelModeRpcClient,
+		apiClient: TravelModeApiClient,
 	): Promise<TravelModeConfig> {
-		const response =
-			await rpcClient.travelMode.setTravelModeHiddenVaults.mutate({
-				hiddenVaultIds,
-			});
+		const { data: response } = await apiClient.travelMode.setHiddenVaults({
+			hiddenVaultIds,
+		});
 		const config = mapTravelModeResponse(response);
 		await this.applyConfig(accountId, config);
 		return config;
@@ -252,9 +251,9 @@ export class TravelModeEnforcer {
 	async enable(
 		accountId: string,
 		hiddenVaultIds: string[],
-		rpcClient: TravelModeRpcClient,
+		apiClient: TravelModeApiClient,
 	): Promise<TravelModeConfig> {
-		const response = await rpcClient.travelMode.enableTravelMode.mutate({
+		const { data: response } = await apiClient.travelMode.enable({
 			hiddenVaultIds,
 		});
 		const config = mapTravelModeResponse(response);
@@ -264,10 +263,10 @@ export class TravelModeEnforcer {
 
 	async disable(
 		accountId: string,
-		rpcClient: TravelModeRpcClient,
+		apiClient: TravelModeApiClient,
 		proof: TravelModeDisableProof,
 	): Promise<TravelModeConfig> {
-		const response = await rpcClient.travelMode.disableTravelMode.mutate({
+		const { data: response } = await apiClient.travelMode.disable({
 			attemptId: proof.attemptId,
 			clientPublicKey: proof.clientPublicKey,
 			clientProof: proof.clientProof,

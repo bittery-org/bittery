@@ -50,14 +50,14 @@ async function unlock(
 
 function makeTravelModeClient(hiddenVaultIds: string[] = []) {
 	return {
-		getTravelMode: {
-			query: mock(async () => ({
+		get: mock(async () => ({
+			data: {
 				enabled: hiddenVaultIds.length > 0,
 				hiddenVaultIds,
 				enabledAt: null,
 				updatedAt: new Date(0).toISOString(),
-			})),
-		},
+			},
+		})),
 	};
 }
 
@@ -73,17 +73,17 @@ function makeAccountInfo(
 		userId: `${accountId}-user`,
 		name: accountId,
 		serverUrl,
-		rpcClient: {
+		apiClient: {
 			sync: {
-				bootstrapItems: {
-					query: mock(async () => ({
+				bootstrap: mock(async () => ({
+					data: {
 						items: [],
 						hasMore: false,
 						nextCursor: null,
-					})),
-				},
+					},
+				})),
 			},
-			vault: { list: { query: mock(async () => []) } },
+			vaults: { list: mock(async () => ({ data: [] })) },
 			...(travelMode ? { travelMode } : {}),
 		} as never,
 	} as unknown as AccountInfo;
@@ -262,7 +262,7 @@ describe("VaultRepositoryCoordinator", () => {
 
 			await coordinator.hydrate([account]);
 
-			expect(travelMode.getTravelMode.query).toHaveBeenCalled();
+			expect(travelMode.get).toHaveBeenCalled();
 			expect(
 				getTravelModeEnforcer(storage, itemCache).isVerified("acc-reloaded"),
 			).toBe(true);
@@ -292,7 +292,7 @@ describe("VaultRepositoryCoordinator", () => {
 				coordinator.hydrate([account]),
 			]);
 
-			expect(travelMode.getTravelMode.query).toHaveBeenCalledTimes(1);
+			expect(travelMode.get).toHaveBeenCalledTimes(1);
 		});
 	});
 });
