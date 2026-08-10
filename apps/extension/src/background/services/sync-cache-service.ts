@@ -54,7 +54,10 @@ export interface SyncCacheStorage {
 	storeAuthToken: (token: string, accountId?: string) => Promise<void>;
 	getServerUrl: (accountId?: string) => Promise<string | null>;
 	getVaultKeys: (accountId?: string) => Promise<VaultKeyLike[] | null>;
-	getAccountMetadata: (accountId: string) => Promise<{ email?: string } | null>;
+	getAccountMetadata: (accountId: string) => Promise<{
+		email?: string;
+		insecureTransportConfirmed?: boolean;
+	} | null>;
 }
 
 export interface SyncCacheDesktopClient {
@@ -73,7 +76,11 @@ export interface SyncCacheServiceDeps {
 	itemCache: SyncItemCache;
 	desktopClient: SyncCacheDesktopClient;
 	defaultClient: SyncEventApiClient;
-	createAccountClient: (token: string, serverUrl: string) => SyncEventApiClient;
+	createAccountClient: (
+		token: string,
+		serverUrl: string,
+		insecureTransportConfirmed: boolean,
+	) => SyncEventApiClient;
 	/**
 	 * Mirrors `performDeltaSync` exactly: `(accountScope, serverUrl, accountEmail)`.
 	 */
@@ -99,8 +106,10 @@ const defaultDeps: SyncCacheServiceDeps = {
 	itemCache: core.vaultCoordinator,
 	desktopClient,
 	defaultClient: apiClient,
-	createAccountClient: (token, serverUrl) =>
-		createAccountApiClient(token, serverUrl),
+	createAccountClient: (token, serverUrl, insecureTransportConfirmed) =>
+		createAccountApiClient(token, serverUrl, undefined, undefined, {
+			insecureTransportConfirmed,
+		}),
 	deltaSync: performDeltaSync,
 	handleTravelModeSync: async (event, accountId, accountClient) => {
 		const accounts = new AccountResolver(storage);
@@ -249,8 +258,15 @@ export function createSyncCacheService(
 			return null;
 		}
 
-		const serverUrl = await getServerUrlForAccountId(accountId);
-		return deps.createAccountClient(token, serverUrl);
+		const [serverUrl, account] = await Promise.all([
+			getServerUrlForAccountId(accountId),
+			deps.storage.getAccountMetadata(accountId),
+		]);
+		return deps.createAccountClient(
+			token,
+			serverUrl,
+			account?.insecureTransportConfirmed === true,
+		);
 	}
 
 	async function resolveConnectionContext(): Promise<SyncConnectionContext | null> {

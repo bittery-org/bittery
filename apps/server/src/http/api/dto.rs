@@ -22,18 +22,22 @@ pub struct ApiMetadata {
 }
 
 impl ApiMetadata {
-    pub fn current(registration: RegistrationMetadata) -> Self {
+    pub fn current(registration: RegistrationMetadata, insecure_http_enabled: bool) -> Self {
+        let mut capabilities = vec![
+            "attachments".to_string(),
+            "sync-sse".to_string(),
+            "travel-mode".to_string(),
+        ];
+        if insecure_http_enabled {
+            capabilities.push("insecure-http".to_string());
+        }
         Self {
             server_release: env!("CARGO_PKG_VERSION").to_string(),
             api: ApiVersionMetadata {
                 supported_majors: vec![API_MAJOR],
                 preferred_major: API_MAJOR,
             },
-            capabilities: vec![
-                "attachments".to_string(),
-                "sync-sse".to_string(),
-                "travel-mode".to_string(),
-            ],
+            capabilities,
             limits: ApiLimits {
                 item_ciphertext_bytes: DecimalString::from(ITEM_CIPHERTEXT_BYTES),
                 bulk_import_bytes: DecimalString::from(BULK_IMPORT_BYTES),
@@ -224,7 +228,35 @@ mod tests {
     use serde::Deserialize;
     use serde_json::json;
 
-    use super::{DecimalString, PageRequest, PatchField, ProblemDetails, ProblemFieldError};
+    use super::{
+        ApiMetadata, DecimalString, PageRequest, PatchField, ProblemDetails, ProblemFieldError,
+        RegistrationMetadata,
+    };
+
+    fn registration_metadata() -> RegistrationMetadata {
+        RegistrationMetadata {
+            mode: "self-hosted".to_string(),
+            billing_enabled: false,
+            allow_public_signup: true,
+            requires_email_verification: false,
+            reason: None,
+        }
+    }
+
+    #[test]
+    fn insecure_http_capability_requires_operator_enablement() {
+        let disabled = ApiMetadata::current(registration_metadata(), false);
+        let enabled = ApiMetadata::current(registration_metadata(), true);
+
+        assert!(!disabled
+            .capabilities
+            .iter()
+            .any(|capability| capability == "insecure-http"));
+        assert!(enabled
+            .capabilities
+            .iter()
+            .any(|capability| capability == "insecure-http"));
+    }
 
     #[derive(Debug, Deserialize)]
     #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -1007,6 +1007,79 @@ async fn max_ciphertext_item_pages_stay_byte_bounded_and_continue() {
 }
 
 #[tokio::test]
+async fn large_vault_metadata_pages_stay_byte_bounded_and_continue() {
+    with_api_test_app("large_vault_metadata_page_budget", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        let large_name = "n".repeat(super::VAULT_NAME_MAX_CHARS);
+        let large_key = "k".repeat(super::ENCRYPTED_VAULT_KEY_MAX_BYTES);
+        let expected_ids: Vec<String> = (0..70)
+            .map(|index| format!("vault_metadata_budget_{index:03}"))
+            .collect();
+        for (index, vault_id) in expected_ids.iter().enumerate() {
+            seed_vault(
+                &app.pool,
+                vault_id,
+                &large_name,
+                "personal",
+                &fixture.owner_user_id,
+                None,
+            )
+            .await;
+            seed_vault_key(
+                &app.pool,
+                &format!("vault_key_metadata_budget_{index:03}"),
+                vault_id,
+                &fixture.owner_user_id,
+                &large_key,
+                "owner",
+            )
+            .await;
+        }
+
+        let mut cursor = None;
+        let mut seen_ids = Vec::new();
+        for _ in 0..4 {
+            let query = cursor.as_deref().map_or_else(
+                || "limit=500".to_string(),
+                |cursor| format!("limit=500&cursor={cursor}"),
+            );
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/vaults?{query}"),
+                    None,
+                    headers.clone(),
+                )
+                .await;
+            response.assert_contract_status();
+            assert!(response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES);
+            seen_ids.extend(
+                response.body["items"]
+                    .as_array()
+                    .expect("vault page should contain items")
+                    .iter()
+                    .filter_map(|vault| vault["id"].as_str().map(str::to_string)),
+            );
+            if response.body["hasMore"] == json!(false) {
+                break;
+            }
+            cursor = Some(
+                response.body["nextCursor"]
+                    .as_str()
+                    .expect("continued vault page should have a cursor")
+                    .to_string(),
+            );
+        }
+        for vault_id in expected_ids {
+            assert_eq!(seen_ids.iter().filter(|seen| **seen == vault_id).count(), 1);
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn vault_query_handlers_enforce_access_and_not_found() {
     with_api_test_app(
         "vault_query_handlers_enforce_access_and_not_found",

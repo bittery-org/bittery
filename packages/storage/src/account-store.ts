@@ -158,6 +158,10 @@ export interface AccountStore {
 	getAccountsList(): Promise<AccountMetadata[]>;
 	getAccountMetadata(accountId: string): Promise<AccountMetadata | null>;
 	addAccount(metadata: AccountMetadata): Promise<void>;
+	setInsecureTransportConfirmed(
+		accountId: string,
+		confirmed: boolean,
+	): Promise<void>;
 	removeAccount(accountId: string): Promise<void>;
 
 	// --- session ---
@@ -310,8 +314,11 @@ export interface AccountStore {
 // ============================================================================
 
 interface AccountsListDocument {
+	version?: number;
 	accounts: AccountMetadata[];
 }
+
+const ACCOUNTS_LIST_VERSION = 2;
 
 /**
  * The single session-expiry rule, moved out of `session.ts` so it lives with the only
@@ -753,14 +760,33 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		const parsed = parseJson<AccountsListDocument>(
 			await readGlobal("accounts_list"),
 		);
-		return parsed?.accounts ?? [];
+		const accounts = (parsed?.accounts ?? []).map((account) => ({
+			...account,
+			insecureTransportConfirmed: account.insecureTransportConfirmed === true,
+		}));
+		if (
+			parsed &&
+			(parsed.version !== ACCOUNTS_LIST_VERSION ||
+				parsed.accounts.some(
+					(account) => typeof account.insecureTransportConfirmed !== "boolean",
+				))
+		) {
+			await writeGlobal(
+				"accounts_list",
+				JSON.stringify({ version: ACCOUNTS_LIST_VERSION, accounts }),
+			);
+		}
+		return accounts;
 	}
 
 	/** Every accounts-list write goes through here so the projection stays fresh. */
 	async function writeAccountsList(accounts: AccountMetadata[]): Promise<void> {
 		await writeGlobal(
 			"accounts_list",
-			JSON.stringify({ accounts } satisfies AccountsListDocument),
+			JSON.stringify({
+				version: ACCOUNTS_LIST_VERSION,
+				accounts,
+			} satisfies AccountsListDocument),
 		);
 		await refreshNativeView();
 	}
@@ -1151,7 +1177,12 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				);
 			}
 
-			const next: AccountMetadata = { ...withId, accountId, biometricEnabled };
+			const next: AccountMetadata = {
+				...withId,
+				accountId,
+				biometricEnabled,
+				insecureTransportConfirmed: withId.insecureTransportConfirmed === true,
+			};
 
 			if (existing) {
 				const index = accounts.findIndex((a) => a.accountId === accountId);
@@ -1160,6 +1191,24 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				accounts.push(next);
 			}
 
+			await writeAccountsList(accounts);
+		},
+
+		async setInsecureTransportConfirmed(
+			accountId: string,
+			confirmed: boolean,
+		): Promise<void> {
+			const accounts = await readAccountsList();
+			const index = accounts.findIndex(
+				(account) => account.accountId === accountId,
+			);
+			if (index < 0) {
+				throw new Error("Account not found");
+			}
+			accounts[index] = {
+				...accounts[index],
+				insecureTransportConfirmed: confirmed,
+			} as AccountMetadata;
 			await writeAccountsList(accounts);
 		},
 

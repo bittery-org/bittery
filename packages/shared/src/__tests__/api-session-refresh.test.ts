@@ -43,6 +43,7 @@ function createSwitchingClient(
 				token: `${accountId}-token`,
 				issuedAt: NOW,
 				expiresAt: NOW + 60_000,
+				insecureTransportConfirmed: false,
 			};
 			if (switchAfterSnapshot) activeAccountId = "account-b";
 			return snapshot;
@@ -59,6 +60,44 @@ function createSwitchingClient(
 }
 
 describe("session-refreshing API client account isolation", () => {
+	test("rechecks operator capability before subsequent bearer requests", async () => {
+		let operatorEnabled = true;
+		const authenticatedRequests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "http://server.example",
+			getAccountSnapshot: async () => ({
+				accountId: "account-a",
+				serverUrl: "http://server.example",
+				token: "account-a-token",
+				issuedAt: NOW,
+				expiresAt: NOW + 60_000,
+				insecureTransportConfirmed: true,
+			}),
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				if (request.url === "http://server.example/api/meta") {
+					expect(request.headers.get("Authorization")).toBeNull();
+					return Response.json({
+						capabilities: operatorEnabled ? ["insecure-http"] : [],
+					});
+				}
+				authenticatedRequests.push(request);
+				return Response.json({});
+			},
+		});
+
+		await client.auth.me();
+		operatorEnabled = false;
+		await expect(client.auth.me()).rejects.toThrow("OPERATOR_DISABLED");
+		expect(authenticatedRequests).toHaveLength(1);
+		expect(authenticatedRequests[0]?.headers.get("Authorization")).toBe(
+			"Bearer account-a-token",
+		);
+	});
+
 	test("replays a rejected query once against its immutable account snapshot", async () => {
 		const requests: Request[] = [];
 		const { client, storedFor } = createSwitchingClient(async (request) => {

@@ -78,6 +78,10 @@ pub(crate) fn cloud_billing_enabled() -> bool {
     env_flag("BITTERY_CLOUD_BILLING_ENABLED", true)
 }
 
+pub(crate) fn insecure_http_enabled() -> bool {
+    env_flag("BITTERY_ALLOW_INSECURE_HTTP", false)
+}
+
 pub(crate) fn format_timestamp(value: OffsetDateTime) -> String {
     value
         .format(&time::format_description::well_known::Rfc3339)

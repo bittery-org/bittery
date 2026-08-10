@@ -92,7 +92,16 @@ export function ExtensionAccountSwitcher() {
 					const serverUrl =
 						(await storage.getServerUrl(account.accountId)) ||
 						"http://localhost:3000";
-					const client = createAccountApiClient(authToken, serverUrl);
+					const client = createAccountApiClient(
+						authToken,
+						serverUrl,
+						undefined,
+						undefined,
+						{
+							insecureTransportConfirmed:
+								account.insecureTransportConfirmed === true,
+						},
+					);
 
 					const { data: userData } = await client.auth.me();
 

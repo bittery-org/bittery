@@ -13,6 +13,7 @@ import {
 	storeUnlockSessionOwned,
 } from "@bittery/core/services/auth-service";
 import { unlockAllWithPassword } from "@bittery/core/services/unlock";
+import { createApiClientForServer } from "@bittery/shared/api-client-factory";
 import { crypto } from "../lib/crypto";
 import { itemCache, storage } from "../lib/storage";
 import { apiClient } from "./api-client";
@@ -41,14 +42,25 @@ export async function handleLogin(payload: {
 	password: string;
 	secretKey: string;
 	serverUrl?: string;
+	insecureTransportConfirmed?: boolean;
 }): Promise<MessageResponse> {
 	const { email, password, secretKey } = payload;
 	const serverUrl = payload.serverUrl ?? DEFAULT_SERVER_URL;
 
 	// Perform SRP login using shared utility
+	const loginApiClient = createApiClientForServer(serverUrl, undefined, {
+		clientPlatform: "extension",
+		insecureTransportConfirmed: payload.insecureTransportConfirmed === true,
+	});
 	const result = await performSRPLogin(
-		{ email, password, secretKey, serverUrl },
-		{ apiClient, crypto, storage },
+		{
+			email,
+			password,
+			secretKey,
+			serverUrl,
+			insecureTransportConfirmed: payload.insecureTransportConfirmed === true,
+		},
+		{ apiClient: loginApiClient, crypto, storage },
 	);
 
 	// Store session data using shared utility
@@ -61,6 +73,7 @@ export async function handleLogin(payload: {
 		email,
 		{
 			serverUrl,
+			insecureTransportConfirmed: payload.insecureTransportConfirmed === true,
 			onMasterUnlockKeyTransferred: () => {
 				setMasterUnlockKey(result.masterUnlockKey);
 			},

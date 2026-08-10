@@ -908,6 +908,93 @@ async fn max_ciphertext_bootstrap_pages_stay_byte_bounded_and_continue() {
 }
 
 #[tokio::test]
+async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_vault_metadata_budget", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+            let large_name = "n".repeat(crate::services::vault::VAULT_NAME_MAX_CHARS);
+            let large_key = "k".repeat(crate::services::vault::ENCRYPTED_VAULT_KEY_MAX_BYTES);
+            let expected_ids: Vec<String> = (0..70)
+                .map(|index| format!("sync_metadata_item_{index:03}"))
+                .collect();
+            for (index, item_id) in expected_ids.iter().enumerate() {
+                let vault_id = format!("sync_metadata_vault_{index:03}");
+                seed_vault(
+                    &app.pool,
+                    &vault_id,
+                    &large_name,
+                    "personal",
+                    &fixture.owner_user_id,
+                    None,
+                )
+                .await;
+                seed_vault_key(
+                    &app.pool,
+                    &format!("sync_metadata_key_{index:03}"),
+                    &vault_id,
+                    &fixture.owner_user_id,
+                    &large_key,
+                    "owner",
+                )
+                .await;
+                seed_item(
+                    &app.pool,
+                    item_id,
+                    &vault_id,
+                    "login",
+                    "ciphertext",
+                    "iv",
+                    &fixture.owner_user_id,
+                )
+                .await;
+            }
+
+            let mut cursor = None;
+            let mut seen_ids = Vec::new();
+            for _ in 0..4 {
+                let query = cursor.as_deref().map_or_else(
+                    || "limit=500".to_string(),
+                    |cursor| format!("limit=500&cursor={cursor}"),
+                );
+                let response = app
+                    .api_json(
+                        Method::GET,
+                        &format!("/api/v1/sync/bootstrap?{query}"),
+                        None,
+                        headers.clone(),
+                    )
+                    .await;
+                response.assert_contract_status();
+                assert!(response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES);
+                seen_ids.extend(
+                    response.body["items"]
+                        .as_array()
+                        .expect("bootstrap page should contain items")
+                        .iter()
+                        .filter_map(|item| item["id"].as_str().map(str::to_string)),
+                );
+                if response.body["hasMore"] == json!(false) {
+                    break;
+                }
+                cursor = Some(
+                    response.body["nextCursor"]
+                        .as_str()
+                        .expect("continued bootstrap page should have a cursor")
+                        .to_string(),
+                );
+            }
+            for item_id in expected_ids {
+                assert_eq!(seen_ids.iter().filter(|seen| **seen == item_id).count(), 1);
+            }
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn sync_sse_route_covers_auth_and_revocation_paths() {
     with_sync_test_app("sync_http_routes_paths", |app| async move {
         let fixture = build_sync_router_fixture(&app.pool).await;

@@ -72,10 +72,12 @@ pub struct GetEventsSinceResponse {
 #[serde(rename_all = "camelCase")]
 pub struct BootstrapVaultSummary {
     pub id: String,
+    #[schema(max_length = 200)]
     pub name: String,
     pub vault_type: String,
     pub icon: Option<String>,
     pub image_url: Option<String>,
+    #[schema(max_length = 65536)]
     pub encrypted_vault_key: String,
     pub role: String,
 }
@@ -218,27 +220,7 @@ pub(crate) async fn bootstrap_items(
         return Err(AppError::bad_request("Invalid params"));
     }
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
-    let user_vaults = query_as::<_, DbBootstrapVaultAccessRow>(
-		"SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY vk.created_at ASC",
-	)
-	.bind(user_id)
-	.fetch_all(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load user vaults"); AppError::internal("Failed to load user vaults") })?;
-    if user_vaults.is_empty() {
-        return Ok(BootstrapItemsResponse {
-            items: Vec::new(),
-            next_cursor: None,
-            has_more: false,
-        });
-    }
-
-    let vault_ids: Vec<String> = user_vaults
-        .iter()
-        .map(|vault| vault.vault_id.clone())
-        .collect();
-    let paged_items =
-        fetch_bootstrap_items(pool, user_id, &vault_ids, input.cursor.as_deref(), limit).await?;
+    let paged_items = fetch_bootstrap_items(pool, user_id, input.cursor.as_deref(), limit).await?;
     let count_has_more = paged_items.rows.len() > limit as usize;
     let has_more = paged_items.has_more || count_has_more;
     let paged_items = paged_items.rows;
@@ -260,6 +242,24 @@ pub(crate) async fn bootstrap_items(
         load_bootstrap_attachments(pool, &result_items).await?
     } else {
         std::collections::HashMap::new()
+    };
+    let mut selected_vault_ids: Vec<String> = result_items
+        .iter()
+        .map(|item| item.vault_id.clone())
+        .collect();
+    selected_vault_ids.sort_unstable();
+    selected_vault_ids.dedup();
+    let user_vaults = if selected_vault_ids.is_empty() {
+        Vec::new()
+    } else {
+        query_as::<_, DbBootstrapVaultAccessRow>(
+            "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2)",
+        )
+        .bind(user_id)
+        .bind(&selected_vault_ids)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| { tracing::error!(error = %e, "Failed to load bounded bootstrap vault summaries"); AppError::internal("Failed to load user vaults") })?
     };
     let vault_map: std::collections::HashMap<String, BootstrapVaultSummary> = user_vaults
         .into_iter()

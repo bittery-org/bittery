@@ -103,10 +103,11 @@ const apiClient = createSessionRefreshingApiClient({
 		await initializeStorage();
 		const accountId = await storage.getActiveAccount();
 		if (!accountId) return null;
-		const [token, sessionData, serverUrl] = await Promise.all([
+		const [token, sessionData, serverUrl, account] = await Promise.all([
 			storage.getAuthToken(accountId),
 			storage.getStoredSessionData(accountId),
 			storage.getServerUrl(accountId),
+			storage.getAccountMetadata(accountId),
 		]);
 		return {
 			accountId,
@@ -114,6 +115,7 @@ const apiClient = createSessionRefreshingApiClient({
 			token,
 			issuedAt: sessionData?.createdAt ?? null,
 			expiresAt: sessionData?.serverExpiresAt ?? sessionData?.expiresAt ?? null,
+			insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
 		};
 	},
 	storeRefreshedSession: async (snapshot, { token, sessionId, expiresAt }) => {

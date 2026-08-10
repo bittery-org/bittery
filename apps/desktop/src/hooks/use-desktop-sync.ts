@@ -195,9 +195,10 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 
 	const getClientForAccount = useCallback(
 		async (accountId: string): Promise<OutboundQueueApiClient> => {
-			const [accountToken, accountServerUrl] = await Promise.all([
+			const [accountToken, accountServerUrl, account] = await Promise.all([
 				storage.getAuthToken(accountId),
 				storage.getServerUrl(accountId),
+				storage.getAccountMetadata(accountId),
 			]);
 			if (accountToken) {
 				const client = await createStoredAccountApiClient(
@@ -211,6 +212,12 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				return createAccountApiClient(
 					accountToken,
 					accountServerUrl || serverUrl || "http://localhost:3000",
+					undefined,
+					undefined,
+					{
+						insecureTransportConfirmed:
+							account?.insecureTransportConfirmed === true,
+					},
 				) as unknown as OutboundQueueApiClient;
 			}
 
@@ -310,7 +317,10 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				}
 
 				try {
-					await createAccountApiClient(token, url).auth.me();
+					await createAccountApiClient(token, url, undefined, undefined, {
+						insecureTransportConfirmed:
+							account.insecureTransportConfirmed === true,
+					}).auth.me();
 				} catch (error) {
 					if (!isUnauthorizedApiError(error)) {
 						continue;

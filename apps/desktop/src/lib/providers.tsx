@@ -9,10 +9,12 @@ import { lifecycleDeps } from "@/lib/lifecycle";
 import { storage } from "@/lib/storage";
 import { getOrCreateDesktopSyncClientId } from "@/lib/sync-client-id";
 
+const discoveryPolicy = { operatorEnabled: true, accountConfirmed: true };
+
 function resolveFallbackServerUrl(): string {
 	const configured = import.meta.env.VITE_SERVER_URL;
 	if (!configured?.trim()) return "http://localhost:3000";
-	const normalized = normalizeServerUrl(configured);
+	const normalized = normalizeServerUrl(configured, discoveryPolicy);
 	if (normalized) return normalized;
 	throw new TypeError(
 		"Configured server URL is invalid or remote HTTP transport is not authorized.",
@@ -94,7 +96,7 @@ async function resolveDesktopServerUrl(): Promise<string> {
 		: null;
 	const activeAuthServerUrl = await resolveActiveAuthServerUrl();
 	return (
-		normalizeServerUrl(accountServerUrl ?? "") ??
+		normalizeServerUrl(accountServerUrl ?? "", discoveryPolicy) ??
 		activeAuthServerUrl ??
 		fallbackServerUrl
 	);
@@ -110,13 +112,19 @@ export async function createDesktopApiClient() {
 			const activeAccount = await storage.getActiveAccount();
 			if (!activeAccount) return null;
 
-			const [token, sessionData, accountServerUrl] = await Promise.all([
-				storage.getAuthToken(activeAccount),
-				storage.getStoredSessionData(activeAccount),
-				storage.getServerUrl(activeAccount),
-			]);
+			const [token, sessionData, accountServerUrl, account] = await Promise.all(
+				[
+					storage.getAuthToken(activeAccount),
+					storage.getStoredSessionData(activeAccount),
+					storage.getServerUrl(activeAccount),
+					storage.getAccountMetadata(activeAccount),
+				],
+			);
 			const normalizedAccountServerUrl = accountServerUrl
-				? normalizeServerUrl(accountServerUrl)
+				? normalizeServerUrl(accountServerUrl, {
+						operatorEnabled: true,
+						accountConfirmed: true,
+					})
 				: null;
 			if (accountServerUrl && !normalizedAccountServerUrl) {
 				throw new TypeError(
@@ -130,6 +138,8 @@ export async function createDesktopApiClient() {
 				token,
 				issuedAt: sessionData?.createdAt ?? null,
 				expiresAt: sessionData?.expiresAt ?? null,
+				insecureTransportConfirmed:
+					account?.insecureTransportConfirmed === true,
 			};
 		},
 		storeRefreshedSession: async (

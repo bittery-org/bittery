@@ -20,6 +20,9 @@ use crate::{
 };
 
 const ITEM_PAGE_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
+const VAULT_PAGE_QUERY_BYTES: i64 = ITEM_PAGE_QUERY_BYTES;
+pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
+pub(crate) const ENCRYPTED_VAULT_KEY_MAX_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub(crate) struct ByteBoundedPage<T> {
@@ -35,14 +38,16 @@ struct ItemPageWeight {
     cumulative_bytes: i64,
 }
 
-fn bounded_item_ids(weights: Vec<ItemPageWeight>) -> Result<(Vec<String>, bool), AppError> {
+fn bounded_page_ids(
+    weights: Vec<ItemPageWeight>,
+    budget: i64,
+    oversized_message: &'static str,
+) -> Result<(Vec<String>, bool), AppError> {
     let Some(first) = weights.first() else {
         return Ok((Vec::new(), false));
     };
-    if first.cumulative_bytes > ITEM_PAGE_QUERY_BYTES {
-        return Err(AppError::payload_too_large(
-            "A single item exceeds the response page byte budget.",
-        ));
+    if first.cumulative_bytes > budget {
+        return Err(AppError::payload_too_large(oversized_message));
     }
     let has_more = weights
         .last()
@@ -320,6 +325,7 @@ pub struct VaultItemResponse {
 #[serde(rename_all = "camelCase")]
 pub struct VaultListEntryResponse {
     pub id: String,
+    #[schema(max_length = 200)]
     pub name: String,
     pub vault_type: String,
     pub icon: Option<String>,
@@ -327,6 +333,7 @@ pub struct VaultListEntryResponse {
     pub role: String,
     #[schema(pattern = r"^(0|[1-9][0-9]*)$")]
     pub item_count: String,
+    #[schema(max_length = 65536)]
     pub encrypted_vault_key: String,
     pub created_by_id: String,
 }
@@ -567,14 +574,53 @@ struct AttachmentActor {
     attachment_storage_bytes: Option<i64>,
 }
 
-async fn fetch_vault_summaries(
-    user_id: &str,
+pub(crate) async fn list_vaults_page(
     pool: &PgPool,
-) -> Result<Vec<VaultListEntryResponse>, AppError> {
-    let vault_rows = query_as::<_, DbVaultListRow>(
-        "SELECT v.id, v.name, v.type::text AS vault_type, v.icon, v.image_key, vk.role::text AS role, vk.encrypted_vault_key, v.created_by_id, (SELECT COUNT(*)::bigint FROM item i WHERE i.vault_id = v.id AND i.deleted_at IS NULL) AS item_count FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY v.created_at ASC, v.id ASC",
+    user_id: &str,
+    cursor_id: Option<&str>,
+    limit: i64,
+) -> Result<ByteBoundedPage<VaultListEntryResponse>, AppError> {
+    let cursor_created_at = if let Some(cursor_id) = cursor_id {
+        let created_at = query_scalar::<_, OffsetDateTime>(
+            "SELECT v.created_at FROM vault v JOIN vault_key vk ON vk.vault_id = v.id WHERE vk.user_id = $1 AND v.id = $2",
+        )
+        .bind(user_id)
+        .bind(cursor_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to resolve vault page cursor");
+            AppError::internal("Failed to load vaults")
+        })?
+        .ok_or_else(|| AppError::bad_request("Invalid cursor"))?;
+        Some(created_at)
+    } else {
+        None
+    };
+    let weights = query_as::<_, ItemPageWeight>(
+        r#"WITH candidates AS (
+            SELECT v.id, ROW_NUMBER() OVER (ORDER BY v.created_at, v.id)::bigint AS position,
+                   (8192 + octet_length(v.id) + octet_length(v.name) + octet_length(v.type::text)
+                    + coalesce(octet_length(v.icon), 0) + coalesce(octet_length(v.image_key), 0)
+                    + octet_length(vk.role::text) + octet_length(vk.encrypted_vault_key)
+                    + octet_length(v.created_by_id))::bigint AS estimated_bytes
+            FROM vault_key vk JOIN vault v ON v.id = vk.vault_id
+            WHERE vk.user_id = $1
+              AND ($2::timestamptz IS NULL OR (v.created_at, v.id) > ($2, $3))
+            ORDER BY v.created_at, v.id LIMIT $4
+        ), weighted AS (
+            SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
     )
     .bind(user_id)
+    .bind(cursor_created_at)
+    .bind(cursor_id)
+    .bind(limit)
+    .bind(VAULT_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
     .map_err(|e| {
@@ -582,7 +628,26 @@ async fn fetch_vault_summaries(
         AppError::internal("Failed to load vaults")
     })?;
 
-    Ok(vault_rows
+    let (vault_ids, has_more) = bounded_page_ids(
+        weights,
+        VAULT_PAGE_QUERY_BYTES,
+        "A single vault exceeds the response page byte budget.",
+    )?;
+    if vault_ids.is_empty() {
+        return Ok(ByteBoundedPage {
+            values: Vec::new(),
+            has_more: false,
+        });
+    }
+    let vault_rows = query_as::<_, DbVaultListRow>(
+        "SELECT v.id, v.name, v.type::text AS vault_type, v.icon, v.image_key, vk.role::text AS role, vk.encrypted_vault_key, v.created_by_id, (SELECT COUNT(*)::bigint FROM item i WHERE i.vault_id = v.id AND i.deleted_at IS NULL) AS item_count FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND v.id = ANY($2) ORDER BY array_position($2::text[], v.id)",
+    )
+    .bind(user_id)
+    .bind(&vault_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| { tracing::error!(error = %e, "Failed to materialize bounded vault page"); AppError::internal("Failed to load vaults") })?;
+    let values = vault_rows
         .into_iter()
         .map(|vault| VaultListEntryResponse {
             id: vault.id.clone(),
@@ -598,14 +663,8 @@ async fn fetch_vault_summaries(
             encrypted_vault_key: vault.encrypted_vault_key,
             created_by_id: vault.created_by_id,
         })
-        .collect())
-}
-
-pub(crate) async fn list_vaults(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<Vec<VaultListEntryResponse>, AppError> {
-    fetch_vault_summaries(user_id, pool).await
+        .collect();
+    Ok(ByteBoundedPage { values, has_more })
 }
 
 pub(crate) async fn get_vault(
@@ -1032,7 +1091,11 @@ pub(crate) async fn create_vault(
     request_client_id: Option<&str>,
     input: CreateVaultInput,
 ) -> Result<CreateVaultResponse, AppError> {
-    if input.name.trim().is_empty() || input.encrypted_vault_key.trim().is_empty() {
+    if input.name.trim().is_empty()
+        || input.name.chars().count() > VAULT_NAME_MAX_CHARS
+        || input.encrypted_vault_key.trim().is_empty()
+        || input.encrypted_vault_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES
+    {
         return Err(AppError::bad_request("Invalid params"));
     }
     if input.vault_type != "personal" && input.vault_type != "team" {
@@ -1150,7 +1213,7 @@ pub(crate) async fn update_vault(
     input: UpdateVaultInput,
 ) -> Result<UpdateVaultResponse, AppError> {
     if let Some(name) = input.name.as_deref() {
-        if name.trim().is_empty() {
+        if name.trim().is_empty() || name.chars().count() > VAULT_NAME_MAX_CHARS {
             return Err(AppError::bad_request("Invalid params"));
         }
     }
@@ -1358,6 +1421,9 @@ pub(crate) async fn convert_vault_type(
 			.await
 			.map_err(|e| { tracing::error!(error = %e, "Failed to convert vault to personal"); AppError::internal("Failed to convert vault to personal") })?;
         if let Some(personal_key) = input.personal_encrypted_vault_key.as_deref() {
+            if personal_key.is_empty() || personal_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES {
+                return Err(AppError::bad_request("Invalid params"));
+            }
             query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
 				.bind(personal_key)
 				.bind(&input.vault_id)
@@ -1551,7 +1617,11 @@ pub(crate) async fn list_vault_items_page(
         tracing::error!(error = %e, "Failed to load vault item page");
         AppError::internal("Failed to load vault items")
     })?;
-    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    let (item_ids, source_has_more) = bounded_page_ids(
+        weights,
+        ITEM_PAGE_QUERY_BYTES,
+        "A single item exceeds the response page byte budget.",
+    )?;
     if item_ids.is_empty() {
         return Ok(ByteBoundedPage {
             values: Vec::new(),
@@ -1597,17 +1667,6 @@ pub(crate) async fn list_all_vault_items_page(
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
 ) -> Result<ByteBoundedPage<VaultItemWithVaultResponse>, AppError> {
-    let user_vaults = load_user_vault_summaries(pool, user_id).await?;
-    if user_vaults.is_empty() {
-        return Ok(ByteBoundedPage {
-            values: Vec::new(),
-            has_more: false,
-        });
-    }
-    let vault_ids: Vec<String> = user_vaults
-        .iter()
-        .map(|vault| vault.vault_id.clone())
-        .collect();
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
     let weights = query_as::<_, ItemPageWeight>(
@@ -1627,21 +1686,21 @@ pub(crate) async fn list_all_vault_items_page(
                         + coalesce(octet_length(v.image_key), 0) + octet_length(v.type::text)
                         + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text)
                       FROM vault v JOIN vault_key vk ON vk.vault_id = v.id
-                      WHERE v.id = i.vault_id AND vk.user_id = $2 LIMIT 1), 4096))::bigint AS estimated_bytes
+                      WHERE v.id = i.vault_id AND vk.user_id = $1 LIMIT 1), 4096))::bigint AS estimated_bytes
             FROM item i
-            WHERE i.vault_id = ANY($1) AND i.deleted_at IS NULL
-              AND ($3::timestamptz IS NULL OR (i.updated_at, i.id) < ($3, $4))
+            WHERE EXISTS (SELECT 1 FROM vault_key access WHERE access.vault_id = i.vault_id AND access.user_id = $1)
+              AND i.deleted_at IS NULL
+              AND ($2::timestamptz IS NULL OR (i.updated_at, i.id) < ($2, $3))
             ORDER BY i.updated_at DESC, i.id DESC
-            LIMIT $5
+            LIMIT $4
         ), weighted AS (
             SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
                    sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
             FROM candidates
         )
         SELECT id, position, candidate_count, cumulative_bytes FROM weighted
-        WHERE cumulative_bytes <= $6 OR position = 1 ORDER BY position"#,
+        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
     )
-    .bind(&vault_ids)
     .bind(user_id)
     .bind(cursor_timestamp)
     .bind(cursor_id)
@@ -1653,7 +1712,11 @@ pub(crate) async fn list_all_vault_items_page(
         tracing::error!(error = %e, "Failed to load item page");
         AppError::internal("Failed to load items")
     })?;
-    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    let (item_ids, source_has_more) = bounded_page_ids(
+        weights,
+        ITEM_PAGE_QUERY_BYTES,
+        "A single item exceeds the response page byte budget.",
+    )?;
     if item_ids.is_empty() {
         return Ok(ByteBoundedPage {
             values: Vec::new(),
@@ -1676,7 +1739,10 @@ pub(crate) async fn list_all_vault_items_page(
     } else {
         HashMap::new()
     };
-    let vault_map = build_vault_summary_map(user_vaults);
+    let selected_vault_ids = distinct_item_vault_ids(&item_rows);
+    let vault_map = build_vault_summary_map(
+        load_user_vault_summaries(pool, user_id, &selected_vault_ids).await?,
+    );
 
     let values = item_rows
         .into_iter()
@@ -1712,17 +1778,6 @@ pub(crate) async fn list_all_deleted_vault_items_page(
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
 ) -> Result<ByteBoundedPage<DeletedVaultItemWithVaultResponse>, AppError> {
-    let user_vaults = load_user_vault_summaries(pool, user_id).await?;
-    if user_vaults.is_empty() {
-        return Ok(ByteBoundedPage {
-            values: Vec::new(),
-            has_more: false,
-        });
-    }
-    let vault_ids: Vec<String> = user_vaults
-        .iter()
-        .map(|vault| vault.vault_id.clone())
-        .collect();
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
     let weights = query_as::<_, ItemPageWeight>(
@@ -1736,21 +1791,21 @@ pub(crate) async fn list_all_deleted_vault_items_page(
                         + coalesce(octet_length(v.image_key), 0) + octet_length(v.type::text)
                         + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text)
                       FROM vault v JOIN vault_key vk ON vk.vault_id = v.id
-                      WHERE v.id = i.vault_id AND vk.user_id = $2 LIMIT 1), 4096))::bigint AS estimated_bytes
+                      WHERE v.id = i.vault_id AND vk.user_id = $1 LIMIT 1), 4096))::bigint AS estimated_bytes
             FROM item i
-            WHERE i.vault_id = ANY($1) AND i.deleted_at IS NOT NULL
-              AND ($3::timestamptz IS NULL OR (i.deleted_at, i.id) < ($3, $4))
+            WHERE EXISTS (SELECT 1 FROM vault_key access WHERE access.vault_id = i.vault_id AND access.user_id = $1)
+              AND i.deleted_at IS NOT NULL
+              AND ($2::timestamptz IS NULL OR (i.deleted_at, i.id) < ($2, $3))
             ORDER BY i.deleted_at DESC, i.id DESC
-            LIMIT $5
+            LIMIT $4
         ), weighted AS (
             SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
                    sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
             FROM candidates
         )
         SELECT id, position, candidate_count, cumulative_bytes FROM weighted
-        WHERE cumulative_bytes <= $6 OR position = 1 ORDER BY position"#,
+        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
     )
-    .bind(&vault_ids)
     .bind(user_id)
     .bind(cursor_timestamp)
     .bind(cursor_id)
@@ -1762,7 +1817,11 @@ pub(crate) async fn list_all_deleted_vault_items_page(
         tracing::error!(error = %e, "Failed to load deleted item page");
         AppError::internal("Failed to load deleted items")
     })?;
-    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    let (item_ids, source_has_more) = bounded_page_ids(
+        weights,
+        ITEM_PAGE_QUERY_BYTES,
+        "A single item exceeds the response page byte budget.",
+    )?;
     if item_ids.is_empty() {
         return Ok(ByteBoundedPage {
             values: Vec::new(),
@@ -1779,7 +1838,10 @@ pub(crate) async fn list_all_deleted_vault_items_page(
         tracing::error!(error = %e, "Failed to materialize bounded deleted item page");
         AppError::internal("Failed to load deleted items")
     })?;
-    let vault_map = build_vault_summary_map(user_vaults);
+    let selected_vault_ids = distinct_item_vault_ids(&item_rows);
+    let vault_map = build_vault_summary_map(
+        load_user_vault_summaries(pool, user_id, &selected_vault_ids).await?,
+    );
 
     let values = item_rows
         .into_iter()
@@ -2189,7 +2251,11 @@ pub(crate) async fn list_deleted_vault_items_page(
         AppError::internal("Failed to load deleted items")
     })?;
 
-    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    let (item_ids, source_has_more) = bounded_page_ids(
+        weights,
+        ITEM_PAGE_QUERY_BYTES,
+        "A single item exceeds the response page byte budget.",
+    )?;
     if item_ids.is_empty() {
         return Ok(ByteBoundedPage {
             values: Vec::new(),
@@ -2551,6 +2617,11 @@ pub(crate) mod member_handlers {
         request_client_id: Option<&str>,
         input: AddVaultMemberInput,
     ) -> Result<SuccessResponse, AppError> {
+        if input.encrypted_vault_key.is_empty()
+            || input.encrypted_vault_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES
+        {
+            return Err(AppError::bad_request("Invalid params"));
+        }
         let role = validate_vault_member_role(&input.role)?;
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         let target_user = query_as::<_, DbVaultLookupUserRow>(
@@ -2686,6 +2757,12 @@ pub(crate) mod member_handlers {
         request_client_id: Option<&str>,
         input: RemoveVaultMemberInput,
     ) -> Result<RemoveVaultMemberResponse, AppError> {
+        if input.key_rotation.member_keys.iter().any(|key| {
+            key.encrypted_vault_key.is_empty()
+                || key.encrypted_vault_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES
+        }) {
+            return Err(AppError::bad_request("Invalid params"));
+        }
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         if input.user_id == user_id {
             return Err(AppError::bad_request("Cannot remove yourself"));
@@ -3713,17 +3790,29 @@ async fn load_vault_access(
 async fn load_user_vault_summaries(
     pool: &PgPool,
     user_id: &str,
+    vault_ids: &[String],
 ) -> Result<Vec<DbBootstrapVaultAccessRow>, AppError> {
+    if vault_ids.is_empty() {
+        return Ok(Vec::new());
+    }
     query_as::<_, DbBootstrapVaultAccessRow>(
-        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 ORDER BY vk.created_at ASC",
+        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2)",
     )
     .bind(user_id)
+    .bind(vault_ids)
     .fetch_all(pool)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load user vaults");
         AppError::internal("Failed to load user vaults")
     })
+}
+
+fn distinct_item_vault_ids(items: &[DbBootstrapItemRow]) -> Vec<String> {
+    let mut vault_ids: Vec<String> = items.iter().map(|item| item.vault_id.clone()).collect();
+    vault_ids.sort_unstable();
+    vault_ids.dedup();
+    vault_ids
 }
 
 #[cfg(test)]

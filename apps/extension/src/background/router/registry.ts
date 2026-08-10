@@ -80,8 +80,13 @@ const didUnlock = (response: MessageResponse) =>
 export const routeRegistry: RouteRegistry = {
 	// Authentication
 	LOGIN: {
-		handle: (payload: { email: string; password: string; secretKey: string }) =>
-			handleLogin(payload),
+		handle: (payload: {
+			email: string;
+			password: string;
+			secretKey: string;
+			serverUrl?: string;
+			insecureTransportConfirmed?: boolean;
+		}) => handleLogin(payload),
 		syncInitOnSuccess: true,
 	},
 

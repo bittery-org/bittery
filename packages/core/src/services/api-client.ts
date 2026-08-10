@@ -62,6 +62,9 @@ export async function createStoredAccountApiClient(
 				expiresAt,
 			});
 		},
+		getInsecureTransportConfirmed: async () =>
+			(await storage.getAccountMetadata(accountId))
+				?.insecureTransportConfirmed === true,
 		appPlatform: storage.platform,
 	});
 }
@@ -75,13 +78,18 @@ export async function createStaticStoredAccountApiClient(
 	storage: AccountStore,
 	accountId: string,
 ): Promise<DefaultApiClient | undefined> {
-	const authToken = await storage.getAuthToken(accountId);
+	const [authToken, account] = await Promise.all([
+		storage.getAuthToken(accountId),
+		storage.getAccountMetadata(accountId),
+	]);
 	if (!authToken) {
 		return undefined;
 	}
 	const serverUrl =
 		(await storage.getServerUrl(accountId)) || getDefaultServerUrl();
-	return createAccountApiClient(authToken, serverUrl);
+	return createAccountApiClient(authToken, serverUrl, undefined, undefined, {
+		insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
+	});
 }
 
 export { createAccountApiClient, createApiClientForServer };

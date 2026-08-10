@@ -68,13 +68,16 @@ struct ApiDoc;
 )]
 async fn get_meta(State(state): State<AppState>) -> Result<Json<ApiMetadata>, ApiError> {
     let registration = crate::services::auth::registration_status(&state).await?;
-    Ok(Json(ApiMetadata::current(RegistrationMetadata {
-        mode: registration.mode,
-        billing_enabled: registration.billing_enabled,
-        allow_public_signup: registration.allow_public_signup,
-        requires_email_verification: registration.requires_email_verification,
-        reason: registration.reason,
-    })))
+    Ok(Json(ApiMetadata::current(
+        RegistrationMetadata {
+            mode: registration.mode,
+            billing_enabled: registration.billing_enabled,
+            allow_public_signup: registration.allow_public_signup,
+            requires_email_verification: registration.requires_email_verification,
+            reason: registration.reason,
+        },
+        crate::config::insecure_http_enabled(),
+    )))
 }
 
 fn openapi_router() -> OpenApiRouter<AppState> {

@@ -199,7 +199,6 @@ pub async fn fetch_visible_events_since(
 pub async fn fetch_bootstrap_items(
     pool: &PgPool,
     user_id: &str,
-    vault_ids: &[String],
     cursor: Option<&str>,
     limit: i32,
 ) -> Result<BoundedBootstrapRows, AppError> {
@@ -219,19 +218,19 @@ pub async fn fetch_bootstrap_items(
                         + coalesce(octet_length(v.icon), 0) + coalesce(octet_length(v.image_key), 0)
                         + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text)
                       FROM vault v JOIN vault_key vk ON vk.vault_id = v.id
-                      WHERE v.id = i.vault_id AND vk.user_id = $2 LIMIT 1), 4096))::bigint AS estimated_bytes
+                      WHERE v.id = i.vault_id AND vk.user_id = $1 LIMIT 1), 4096))::bigint AS estimated_bytes
             FROM item i
-            WHERE i.vault_id = ANY($1) AND ($3::text IS NULL OR i.id > $3)
-            ORDER BY i.id ASC LIMIT $4
+            WHERE EXISTS (SELECT 1 FROM vault_key access WHERE access.vault_id = i.vault_id AND access.user_id = $1)
+              AND ($2::text IS NULL OR i.id > $2)
+            ORDER BY i.id ASC LIMIT $3
         ), weighted AS (
             SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
                    sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
             FROM candidates
         )
         SELECT id, position, candidate_count, cumulative_bytes FROM weighted
-        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
+        WHERE cumulative_bytes <= $4 OR position = 1 ORDER BY position"#,
     )
-    .bind(vault_ids)
     .bind(user_id)
     .bind(cursor)
     .bind(limit + 1)

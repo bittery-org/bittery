@@ -2,21 +2,20 @@ import {
 	type ApiClientMetadata,
 	type ApiClientPlatform,
 	createApiClient,
-	type InsecureTransportPolicy,
 } from "@bittery/api-contract";
 import type { AppApiClient } from "./api-client";
+import { resolveInsecureTransportPolicy } from "./server-transport-policy";
 import { normalizeServerUrl } from "./server-url";
 import type { RefreshResult, SessionSnapshot } from "./session-refresh";
 
 export interface AccountSessionSnapshot extends SessionSnapshot {
 	accountId: string;
 	serverUrl: string;
-	insecureTransport?: InsecureTransportPolicy;
+	insecureTransportConfirmed: boolean;
 }
 
 export interface SessionRefreshingApiClientOptions {
 	defaultServerUrl: string;
-	insecureTransport?: InsecureTransportPolicy;
 	getAccountSnapshot: () => Promise<AccountSessionSnapshot | null>;
 	storeRefreshedSession: (
 		snapshot: AccountSessionSnapshot,
@@ -35,11 +34,16 @@ interface SessionTiming {
 	expiresAt: number | null;
 }
 
-function requireServerUrl(
-	value: string,
-	insecureTransport?: InsecureTransportPolicy,
-): string {
-	const normalized = normalizeServerUrl(value, insecureTransport);
+const ROUTED_REQUEST_POLICY = {
+	operatorEnabled: true,
+	accountConfirmed: true,
+} as const;
+
+function requireServerUrl(value: string): string {
+	const normalized = normalizeServerUrl(value, {
+		operatorEnabled: true,
+		accountConfirmed: true,
+	});
 	if (!normalized) {
 		throw new TypeError(
 			"Server URL is invalid or remote HTTP transport is not authorized.",
@@ -96,14 +100,19 @@ export function createSessionRefreshingApiClient(
 ): AppApiClient {
 	const supportedApiMajors = options.supportedApiMajors ?? [1];
 	const thresholdRatio = options.thresholdRatio ?? 0.75;
-	const defaultServerUrl = requireServerUrl(
-		options.defaultServerUrl,
-		options.insecureTransport,
-	);
+	const defaultServerUrl = requireServerUrl(options.defaultServerUrl);
 	const fetchImpl =
 		options.fetch ?? ((request: Request) => globalThis.fetch(request));
 	const timingByAccount = new Map<string, SessionTiming>();
 	const refreshByAccount = new Map<string, Promise<string>>();
+
+	async function authorizeServer(serverUrl: string, accountConfirmed: boolean) {
+		return resolveInsecureTransportPolicy({
+			serverUrl,
+			accountConfirmed,
+			fetch: fetchImpl,
+		});
+	}
 
 	function shouldRefresh(snapshot: AccountSessionSnapshot): boolean {
 		if (!snapshot.token) return false;
@@ -128,13 +137,11 @@ export function createSessionRefreshingApiClient(
 
 		const refresh = (async () => {
 			try {
-				const serverUrl = requireServerUrl(
-					snapshot.serverUrl,
-					snapshot.insecureTransport,
-				);
+				const serverUrl = requireServerUrl(snapshot.serverUrl);
 				const refreshClient = createApiClient({
 					serverUrl,
-					insecureTransport: snapshot.insecureTransport,
+					authorizeInsecureTransport: () =>
+						authorizeServer(serverUrl, snapshot.insecureTransportConfirmed),
 					supportedApiMajors,
 					getAccessToken: () => snapshot.token,
 					getClientMetadata: metadata(options),
@@ -162,8 +169,12 @@ export function createSessionRefreshingApiClient(
 	async function accountFetch(request: Request): Promise<Response> {
 		const snapshot = await options.getAccountSnapshot();
 		const serverUrl = snapshot
-			? requireServerUrl(snapshot.serverUrl, snapshot.insecureTransport)
+			? requireServerUrl(snapshot.serverUrl)
 			: defaultServerUrl;
+		await authorizeServer(
+			serverUrl,
+			snapshot?.insecureTransportConfirmed === true,
+		);
 		const token = snapshot ? await refreshSnapshot(snapshot, false) : null;
 		const routed = rewriteRequest(request, defaultServerUrl, serverUrl);
 		const retrySource = routed.clone();
@@ -204,7 +215,8 @@ export function createSessionRefreshingApiClient(
 
 	return createApiClient({
 		serverUrl: defaultServerUrl,
-		insecureTransport: options.insecureTransport,
+		// accountFetch gates the routed account URL before it attaches or sends a bearer.
+		insecureTransport: ROUTED_REQUEST_POLICY,
 		supportedApiMajors,
 		getClientMetadata: metadata(options),
 		fetch: accountFetch,

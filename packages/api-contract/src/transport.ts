@@ -23,10 +23,14 @@ export type ApiAccessTokenProvider = () =>
 export type ApiClientMetadataProvider = () =>
 	| ApiClientMetadata
 	| Promise<ApiClientMetadata>;
+export type InsecureTransportAuthorizer = (
+	serverUrl: string,
+) => Promise<InsecureTransportPolicy | undefined>;
 
 export interface ApiTransportOptions {
 	baseUrl: string;
 	insecureTransport?: InsecureTransportPolicy;
+	authorizeInsecureTransport?: InsecureTransportAuthorizer;
 	fetch?: (request: Request) => Promise<Response>;
 	getAccessToken?: ApiAccessTokenProvider;
 	getClientMetadata: ApiClientMetadataProvider;
@@ -104,9 +108,23 @@ function normalizeBaseUrl(
 }
 
 export function createApiTransport(options: ApiTransportOptions): ApiTransport {
-	const baseUrl = normalizeBaseUrl(options.baseUrl, options.insecureTransport);
-	const fetchImplementation =
+	const baseUrl = normalizeBaseUrl(
+		options.baseUrl,
+		options.authorizeInsecureTransport
+			? { operatorEnabled: true, accountConfirmed: true }
+			: options.insecureTransport,
+	);
+	const rawFetch =
 		options.fetch ?? ((request: Request) => globalThis.fetch(request));
+	const fetchImplementation = async (request: Request): Promise<Response> => {
+		if (options.authorizeInsecureTransport) {
+			const requestUrl = new URL(request.url);
+			const serverUrl = `${requestUrl.protocol}//${requestUrl.host}`;
+			const policy = await options.authorizeInsecureTransport(serverUrl);
+			normalizeBaseUrl(serverUrl, policy);
+		}
+		return rawFetch(request);
+	};
 	const client = createClient<paths>({
 		baseUrl,
 		fetch: fetchImplementation,

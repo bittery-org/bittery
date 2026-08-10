@@ -43,6 +43,7 @@ export interface StoreAuthSessionOptions {
 		serverUrl: string,
 	) => TravelModeApiClient;
 	serverUrl?: string;
+	insecureTransportConfirmed?: boolean;
 	/**
 	 * Whether this session should claim the active account. Defaults to `true`;
 	 * multi-account loops pass `false` so the last account unlocked cannot
@@ -97,10 +98,9 @@ function resolveTravelModeApiClientForToken(
 	if (factory) {
 		return factory(token, serverUrl);
 	}
-	return createAccountApiClient(
-		token,
-		serverUrl,
-	) as unknown as TravelModeApiClient;
+	return createAccountApiClient(token, serverUrl, undefined, undefined, {
+		insecureTransportConfirmed: options?.insecureTransportConfirmed === true,
+	}) as unknown as TravelModeApiClient;
 }
 
 /**
@@ -111,6 +111,7 @@ export interface SRPLoginInput {
 	password: string;
 	secretKey: string;
 	serverUrl: string;
+	insecureTransportConfirmed?: boolean;
 }
 
 /**
@@ -461,6 +462,12 @@ export async function performSRPLogin(
 			: (createAccountApiClient(
 					finishResult.token,
 					serverUrl,
+					undefined,
+					undefined,
+					{
+						insecureTransportConfirmed:
+							input.insecureTransportConfirmed === true,
+					},
 				) as unknown as IAuthClient);
 		const vaultKeys = await fetchVaultKeys(authenticatedClient);
 
@@ -558,6 +565,7 @@ export async function storeLoginSession(
 		lastActiveAt: Date.now(),
 		secretKeyHint: `${secretKey.slice(0, 4)}••••`,
 		biometricEnabled: await storage.isBiometricEnabled(accountId),
+		insecureTransportConfirmed: options?.insecureTransportConfirmed === true,
 	});
 
 	await storage.setActiveAccount(accountId);
@@ -749,21 +757,25 @@ export async function performSRPUnlock(
 			masterUnlockKey,
 		});
 
-		const [storedSessionData, storedToken, storedVaultKeys, storedPrivateKey] =
-			await Promise.all([
-				storage.getStoredSessionData(accountId),
-				storage.getAuthToken(accountId),
-				storage.getVaultKeys(accountId),
-				storage.getEncryptedPrivateKey(accountId),
-			]);
+		const [
+			storedSessionData,
+			storedToken,
+			storedVaultKeys,
+			storedPrivateKey,
+			accountMetadata,
+		] = await Promise.all([
+			storage.getStoredSessionData(accountId),
+			storage.getAuthToken(accountId),
+			storage.getVaultKeys(accountId),
+			storage.getEncryptedPrivateKey(accountId),
+			storage.getAccountMetadata(accountId),
+		]);
 
 		if (
 			storedSessionData &&
 			storedToken &&
 			(await storage.isSessionValid(accountId))
 		) {
-			const accountMetadata = await storage.getAccountMetadata(accountId);
-
 			return {
 				mode: "local",
 				token: storedToken,
@@ -826,6 +838,12 @@ export async function performSRPUnlock(
 			: (createAccountApiClient(
 					finishResult.token,
 					serverUrl,
+					undefined,
+					undefined,
+					{
+						insecureTransportConfirmed:
+							accountMetadata?.insecureTransportConfirmed === true,
+					},
 				) as unknown as IAuthClient);
 		const vaultKeys = await fetchVaultKeys(authenticatedClient);
 

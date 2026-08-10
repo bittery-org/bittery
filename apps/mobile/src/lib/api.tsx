@@ -81,11 +81,13 @@ export function ApiProvider({ children }: ApiProviderProps) {
 				getAccountSnapshot: async () => {
 					const activeAccount = await storage.getActiveAccount();
 					if (!activeAccount) return null;
-					const [token, sessionData, accountServerUrl] = await Promise.all([
-						storage.getAuthToken(activeAccount),
-						storage.getStoredSessionData(activeAccount),
-						storage.getServerUrl(activeAccount),
-					]);
+					const [token, sessionData, accountServerUrl, account] =
+						await Promise.all([
+							storage.getAuthToken(activeAccount),
+							storage.getStoredSessionData(activeAccount),
+							storage.getServerUrl(activeAccount),
+							storage.getAccountMetadata(activeAccount),
+						]);
 
 					return {
 						accountId: activeAccount,
@@ -93,6 +95,8 @@ export function ApiProvider({ children }: ApiProviderProps) {
 						token,
 						issuedAt: sessionData?.createdAt ?? null,
 						expiresAt: sessionData?.expiresAt ?? null,
+						insecureTransportConfirmed:
+							account?.insecureTransportConfirmed === true,
 					};
 				},
 				storeRefreshedSession: async (

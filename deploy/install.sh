@@ -169,6 +169,7 @@ DB_PASSWORD=${DB_PASSWORD}
 # Optional hardening
 # CORS_ORIGIN must be a comma-separated list of bare origins.
 # TRUST_PROXY_MODE can be none, cloudflare, or forwarded.
+# BITTERY_ALLOW_INSECURE_HTTP defaults to false; enabling it still requires confirmation per client account.
 # MINIO_ROOT_PASSWORD must be set before enabling the storage profile.
 EOF
 

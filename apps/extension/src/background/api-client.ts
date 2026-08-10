@@ -57,10 +57,11 @@ export const apiClient = createSessionRefreshingApiClient({
 	getAccountSnapshot: async () => {
 		const activeAccount = await storage.getActiveAccount();
 		if (!activeAccount) return null;
-		const [token, sessionData, serverUrl] = await Promise.all([
+		const [token, sessionData, serverUrl, account] = await Promise.all([
 			getAuthToken(activeAccount),
 			storage.getStoredSessionData(activeAccount),
 			storage.getServerUrl(activeAccount),
+			storage.getAccountMetadata(activeAccount),
 		]);
 
 		return {
@@ -69,6 +70,7 @@ export const apiClient = createSessionRefreshingApiClient({
 			token,
 			issuedAt: sessionData?.createdAt ?? null,
 			expiresAt: sessionData?.expiresAt ?? null,
+			insecureTransportConfirmed: account?.insecureTransportConfirmed === true,
 		};
 	},
 	storeRefreshedSession: async (snapshot, { token, sessionId, expiresAt }) => {

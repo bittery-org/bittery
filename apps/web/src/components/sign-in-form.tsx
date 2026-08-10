@@ -8,10 +8,14 @@ import {
 	storeLoginSessionOwned,
 } from "@bittery/core/services/auth-service";
 import { useApiClient } from "@bittery/shared/api";
-import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
+import {
+	createApiClientForServer,
+	getDefaultServerUrl,
+} from "@bittery/shared/api-client-factory";
 import { apiQueries } from "@bittery/shared/api-query";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
-import { Button, Input, Label, toast } from "@bittery/ui";
+import { Button, Checkbox, Input, Label, toast } from "@bittery/ui";
 import {
 	IconClock as Clock,
 	IconEye as Eye,
@@ -142,11 +146,14 @@ function SignInFormContent({
 }) {
 	const { m } = useI18n();
 	const navigate = useNavigate();
-	const apiClient = useApiClient();
 	const crypto = usePlatformCrypto();
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
+	const serverUrl = getDefaultServerUrl();
+	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
 	const { data: emailCheck } = useCheckEmail(email);
 
 	const loginMutation = useMutation({
@@ -156,10 +163,23 @@ function SignInFormContent({
 			secretKey: string;
 		}) => {
 			const normalizedEmail = input.email.trim().toLowerCase();
-			const serverUrl = getDefaultServerUrl();
+			if (
+				requiresInsecureTransportConfirmation &&
+				!insecureTransportConfirmed
+			) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
+			const loginApiClient = createApiClientForServer(serverUrl, undefined, {
+				insecureTransportConfirmed,
+			});
 			const result = await performSRPLogin(
-				{ ...input, email: normalizedEmail, serverUrl },
-				{ crypto, apiClient, storage },
+				{
+					...input,
+					email: normalizedEmail,
+					serverUrl,
+					insecureTransportConfirmed,
+				},
+				{ crypto, apiClient: loginApiClient, storage },
 			);
 			await storeLoginSessionOwned(
 				result,
@@ -168,7 +188,7 @@ function SignInFormContent({
 				itemCache,
 				crypto,
 				normalizedEmail,
-				{ serverUrl },
+				{ serverUrl, insecureTransportConfirmed },
 			);
 			// `storeLoginSession` sets the master unlock key before it moves the
 			// active-account pointer, so the unlock notification alone would publish the
@@ -358,6 +378,27 @@ function SignInFormContent({
 					)}
 				</form.Field>
 			</div>
+
+			{requiresInsecureTransportConfirmation ? (
+				<Label
+					htmlFor="insecure-http-confirmation"
+					className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+				>
+					<Checkbox
+						id="insecure-http-confirmation"
+						checked={insecureTransportConfirmed}
+						onCheckedChange={(checked) =>
+							setInsecureTransportConfirmed(checked === true)
+						}
+					/>
+					<span className="grid gap-0.5">
+						<span>{m.auth_insecure_http_confirmation_label()}</span>
+						<span className="text-muted-foreground text-xs">
+							{m.auth_insecure_http_confirmation_description()}
+						</span>
+					</span>
+				</Label>
+			) : null}
 
 			<Button
 				type="submit"

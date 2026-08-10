@@ -1,6 +1,7 @@
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
-import { Button, toast } from "@bittery/ui";
+import { Button, Checkbox, toast } from "@bittery/ui";
 import {
 	IconArrowLeft,
 	IconChevronRight,
@@ -32,6 +33,8 @@ export function LoginPage() {
 	const { addingAccount } = useSearch({ from: "/login" });
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
 
 	const defaultServerUrl = getDefaultServerUrl();
 
@@ -46,6 +49,13 @@ export function LoginPage() {
 		null,
 	);
 	const serverUrl = serverUrlOverride ?? storedServerUrl ?? defaultServerUrl;
+	const normalizedCandidate = normalizeServerUrl(serverUrl, {
+		operatorEnabled: true,
+		accountConfirmed: true,
+	});
+	const requiresInsecureTransportConfirmation = normalizedCandidate
+		? isRemoteHttpServer(normalizedCandidate)
+		: false;
 
 	// The self-hosted disclosure auto-expands whenever an active non-default
 	// server URL is present, so we never hide a value the user relies on.
@@ -55,9 +65,13 @@ export function LoginPage() {
 	const advOpen = advOpenOverride ?? hasCustomServer;
 
 	const persistServerUrl = async () => {
-		const normalized = normalizeServerUrl(serverUrl);
+		const normalized = normalizedCandidate;
 		if (!normalized) {
 			toast.error(m.ext_login_toast_invalid_server_url());
+			return null;
+		}
+		if (requiresInsecureTransportConfirmation && !insecureTransportConfirmed) {
+			toast.error(m.auth_insecure_http_confirmation_required());
 			return null;
 		}
 		if (normalized !== serverUrl) {
@@ -77,7 +91,11 @@ export function LoginPage() {
 			if (!persisted) {
 				return;
 			}
-			await loginMutation.mutateAsync({ ...value, serverUrl: persisted });
+			await loginMutation.mutateAsync({
+				...value,
+				serverUrl: persisted,
+				insecureTransportConfirmed,
+			});
 		},
 	});
 
@@ -87,6 +105,7 @@ export function LoginPage() {
 			password: string;
 			secretKey: string;
 			serverUrl: string;
+			insecureTransportConfirmed: boolean;
 		}) => {
 			// Send to background worker for crypto operations
 			const response = await chrome.runtime.sendMessage({
@@ -307,6 +326,29 @@ export function LoginPage() {
 							</p>
 						</div>
 					)}
+
+					{requiresInsecureTransportConfirmation ? (
+						<label
+							htmlFor="insecure-http-confirmation"
+							className="mb-3 flex cursor-pointer items-start gap-2.5 rounded-lg border bg-foreground/3 px-3 py-2.5 text-xs transition-colors hover:bg-foreground/5"
+						>
+							<Checkbox
+								id="insecure-http-confirmation"
+								checked={insecureTransportConfirmed}
+								onCheckedChange={(checked) =>
+									setInsecureTransportConfirmed(checked === true)
+								}
+							/>
+							<span>
+								<span className="block font-medium">
+									{m.auth_insecure_http_confirmation_label()}
+								</span>
+								<span className="mt-0.5 block text-[11px] text-muted-foreground">
+									{m.auth_insecure_http_confirmation_description()}
+								</span>
+							</span>
+						</label>
+					) : null}
 
 					<Button
 						type="submit"

@@ -1,9 +1,7 @@
-import type {
-	ApiClientPlatform,
-	InsecureTransportPolicy,
-} from "@bittery/api-contract";
+import type { ApiClientPlatform } from "@bittery/api-contract";
 import { type AppApiClient, createAppApiClient } from "./api-client";
 import { createSessionRefreshingApiClient } from "./api-session-refresh";
+import { resolveInsecureTransportPolicy } from "./server-transport-policy";
 import { normalizeServerUrl } from "./server-url";
 import type { RefreshResult, SessionSnapshot } from "./session-refresh";
 
@@ -11,12 +9,15 @@ interface AccountStoreLike {
 	getUnlockedAccounts(): Promise<string[]>;
 	getAuthToken(email: string): Promise<string | null>;
 	getServerUrl(email: string): Promise<string | null>;
+	getAccountMetadata(email: string): Promise<{
+		insecureTransportConfirmed?: boolean;
+	} | null>;
 }
 
 export interface AccountApiClientMetadataOptions {
 	clientPlatform?: string;
 	clientVersion?: string;
-	insecureTransport?: InsecureTransportPolicy;
+	insecureTransportConfirmed?: boolean;
 }
 
 export interface AccountSessionRefreshOptions {
@@ -25,6 +26,7 @@ export interface AccountSessionRefreshOptions {
 	storeRefreshedSession: (session: RefreshResult) => Promise<void>;
 	thresholdRatio?: number;
 	appPlatform?: string;
+	getInsecureTransportConfirmed?: () => Promise<boolean>;
 }
 
 const clientCache = new Map<string, AppApiClient>();
@@ -98,12 +100,12 @@ export function getDefaultServerUrl(): string {
 	return normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 }
 
-function resolveServerUrl(
-	serverUrl?: string | null,
-	insecureTransport?: InsecureTransportPolicy,
-): string {
+function resolveServerUrl(serverUrl?: string | null): string {
 	if (!serverUrl) return getDefaultServerUrl();
-	const normalized = normalizeServerUrl(serverUrl, insecureTransport);
+	const normalized = normalizeServerUrl(serverUrl, {
+		operatorEnabled: true,
+		accountConfirmed: true,
+	});
 	if (!normalized) {
 		throw new TypeError(
 			"Server URL is invalid or remote HTTP transport is not authorized.",
@@ -117,9 +119,9 @@ function cacheKey(
 	serverUrl: string,
 	clientId: string,
 	mode: "static" | "session-refresh",
-	insecureTransport?: InsecureTransportPolicy,
+	insecureTransportConfirmed?: boolean,
 ): string {
-	return `${serverUrl}:${authToken ?? ""}:${clientId}:${mode}:${insecureTransport?.operatorEnabled === true}:${insecureTransport?.accountConfirmed === true}`;
+	return `${serverUrl}:${authToken ?? ""}:${clientId}:${mode}:${insecureTransportConfirmed === true}`;
 }
 
 export function createAccountApiClient(
@@ -129,8 +131,9 @@ export function createAccountApiClient(
 	sessionRefresh?: AccountSessionRefreshOptions,
 	metadata?: AccountApiClientMetadataOptions,
 ): AppApiClient {
-	const insecureTransport = metadata?.insecureTransport;
-	const resolvedServerUrl = resolveServerUrl(serverUrl, insecureTransport);
+	const insecureTransportConfirmed =
+		metadata?.insecureTransportConfirmed === true;
+	const resolvedServerUrl = resolveServerUrl(serverUrl);
 	const resolvedClientId = resolveClientId(clientId);
 	const clientPlatform = normalizePlatform(
 		metadata?.clientPlatform ?? sessionRefresh?.appPlatform,
@@ -142,7 +145,7 @@ export function createAccountApiClient(
 		resolvedServerUrl,
 		resolvedClientId,
 		mode,
-		insecureTransport,
+		insecureTransportConfirmed,
 	);
 	const cached = clientCache.get(key);
 	if (cached) return cached;
@@ -150,13 +153,14 @@ export function createAccountApiClient(
 	const client = sessionRefresh
 		? createSessionRefreshingApiClient({
 				defaultServerUrl: resolvedServerUrl,
-				insecureTransport,
 				getAccountSnapshot: async () => ({
 					...(await sessionRefresh.getSessionSnapshot()),
 					accountId:
 						sessionRefresh.accountId ?? `${resolvedServerUrl}:${authToken}`,
 					serverUrl: resolvedServerUrl,
-					insecureTransport,
+					insecureTransportConfirmed:
+						(await sessionRefresh.getInsecureTransportConfirmed?.()) ??
+						insecureTransportConfirmed,
 				}),
 				storeRefreshedSession: (_snapshot, session) =>
 					sessionRefresh.storeRefreshedSession(session),
@@ -166,7 +170,11 @@ export function createAccountApiClient(
 			})
 		: createAppApiClient({
 				serverUrl: resolvedServerUrl,
-				insecureTransport,
+				authorizeInsecureTransport: () =>
+					resolveInsecureTransportPolicy({
+						serverUrl: resolvedServerUrl,
+						accountConfirmed: insecureTransportConfirmed,
+					}),
 				supportedApiMajors: [1],
 				getAccessToken: () => authToken,
 				getClientMetadata: () => ({
@@ -186,8 +194,9 @@ export function clearAccountApiClient(
 	clientId?: string,
 	metadata?: AccountApiClientMetadataOptions,
 ) {
-	const insecureTransport = metadata?.insecureTransport;
-	const resolvedServerUrl = resolveServerUrl(serverUrl, insecureTransport);
+	const insecureTransportConfirmed =
+		metadata?.insecureTransportConfirmed === true;
+	const resolvedServerUrl = resolveServerUrl(serverUrl);
 	const resolvedClientId = resolveClientId(clientId);
 	clientCache.delete(
 		cacheKey(
@@ -195,7 +204,7 @@ export function clearAccountApiClient(
 			resolvedServerUrl,
 			resolvedClientId,
 			"static",
-			insecureTransport,
+			insecureTransportConfirmed,
 		),
 	);
 	clientCache.delete(
@@ -204,7 +213,7 @@ export function clearAccountApiClient(
 			resolvedServerUrl,
 			resolvedClientId,
 			"session-refresh",
-			insecureTransport,
+			insecureTransportConfirmed,
 		),
 	);
 }
@@ -218,22 +227,27 @@ export function createApiClientForServer(
 	clientId?: string,
 	metadata?: AccountApiClientMetadataOptions,
 ): AppApiClient {
-	const insecureTransport = metadata?.insecureTransport;
-	const resolvedServerUrl = resolveServerUrl(serverUrl, insecureTransport);
+	const insecureTransportConfirmed =
+		metadata?.insecureTransportConfirmed === true;
+	const resolvedServerUrl = resolveServerUrl(serverUrl);
 	const resolvedClientId = resolveClientId(clientId);
 	const key = cacheKey(
 		null,
 		resolvedServerUrl,
 		resolvedClientId,
 		"static",
-		insecureTransport,
+		insecureTransportConfirmed,
 	);
 	const cached = clientCache.get(key);
 	if (cached) return cached;
 
 	const client = createAppApiClient({
 		serverUrl: resolvedServerUrl,
-		insecureTransport,
+		authorizeInsecureTransport: () =>
+			resolveInsecureTransportPolicy({
+				serverUrl: resolvedServerUrl,
+				accountConfirmed: insecureTransportConfirmed,
+			}),
 		supportedApiMajors: [1],
 		getClientMetadata: () => ({
 			id: resolvedClientId,
@@ -253,7 +267,10 @@ export async function createAllAccountApiClients(
 	const clients = new Map<string, AppApiClient>();
 
 	for (const accountId of accountIds) {
-		const authToken = await storage.getAuthToken(accountId);
+		const [authToken, account] = await Promise.all([
+			storage.getAuthToken(accountId),
+			storage.getAccountMetadata(accountId),
+		]);
 		if (!authToken) continue;
 		clients.set(
 			accountId,
@@ -261,6 +278,11 @@ export async function createAllAccountApiClients(
 				authToken,
 				await storage.getServerUrl(accountId),
 				clientId,
+				undefined,
+				{
+					insecureTransportConfirmed:
+						account?.insecureTransportConfirmed === true,
+				},
 			),
 		);
 	}

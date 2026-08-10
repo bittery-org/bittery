@@ -97,7 +97,10 @@ export function useLogin(
 				"",
 			);
 			const apiClientForRequest = input.serverUrl
-				? createApiClientForServer(serverUrl)
+				? createApiClientForServer(serverUrl, undefined, {
+						insecureTransportConfirmed:
+							input.insecureTransportConfirmed === true,
+					})
 				: apiClient;
 
 			// Perform SRP login
@@ -107,6 +110,7 @@ export function useLogin(
 					password: input.password,
 					secretKey: input.secretKey,
 					serverUrl,
+					insecureTransportConfirmed: input.insecureTransportConfirmed === true,
 				},
 				{ crypto, apiClient: apiClientForRequest, storage },
 			);
@@ -124,6 +128,7 @@ export function useLogin(
 				input.email,
 				{
 					serverUrl,
+					insecureTransportConfirmed: input.insecureTransportConfirmed === true,
 				},
 			);
 

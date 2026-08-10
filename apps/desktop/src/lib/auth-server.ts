@@ -6,10 +6,17 @@ const ACTIVE_AUTH_SERVER_STORAGE_KEY = "bittery_active_auth_server";
 const MAX_KNOWN_AUTH_SERVERS = 10;
 const activeAuthServerListeners = new Set<(serverUrl: string) => void>();
 
+function normalizeAuthServerUrl(value: string): string | null {
+	return normalizeServerUrl(value, {
+		operatorEnabled: true,
+		accountConfirmed: true,
+	});
+}
+
 function getFallbackServerUrl(): string {
 	const configured = import.meta.env.VITE_SERVER_URL;
 	if (!configured?.trim()) return "http://localhost:3000";
-	const normalized = normalizeServerUrl(configured);
+	const normalized = normalizeAuthServerUrl(configured);
 	if (!normalized) {
 		throw new TypeError(
 			"Configured server URL is invalid or remote HTTP transport is not authorized.",
@@ -29,7 +36,7 @@ function normalizeServerList(value: unknown): string[] {
 			continue;
 		}
 
-		const normalized = normalizeServerUrl(item);
+		const normalized = normalizeAuthServerUrl(item);
 		if (normalized) {
 			uniqueServers.add(normalized);
 		}
@@ -78,7 +85,7 @@ function readStoredActiveServerUrl(): string | null {
 		return null;
 	}
 
-	return normalizeServerUrl(stored);
+	return normalizeAuthServerUrl(stored);
 }
 
 export function subscribeActiveAuthServerUrl(
@@ -112,7 +119,7 @@ export function readKnownServerUrls(): string[] {
 }
 
 export function rememberServerUrl(serverUrl: string): string[] {
-	const normalized = normalizeServerUrl(serverUrl);
+	const normalized = normalizeAuthServerUrl(serverUrl);
 	if (!normalized) {
 		return readKnownServerUrls();
 	}
@@ -126,7 +133,7 @@ export function rememberServerUrl(serverUrl: string): string[] {
 export async function setActiveAuthServerUrl(
 	serverUrl: string,
 ): Promise<string | null> {
-	const normalized = normalizeServerUrl(serverUrl);
+	const normalized = normalizeAuthServerUrl(serverUrl);
 	if (!normalized) {
 		return null;
 	}
@@ -144,7 +151,7 @@ export async function setActiveAuthServerUrl(
 export async function resolveActiveAuthServerUrl(): Promise<string> {
 	const activeAccount = await storage.getActiveAccount();
 	if (activeAccount) {
-		const activeAccountServerUrl = normalizeServerUrl(
+		const activeAccountServerUrl = normalizeAuthServerUrl(
 			(await storage.getServerUrl(activeAccount)) ?? "",
 		);
 
@@ -165,7 +172,7 @@ export async function resolveActiveAuthServerUrl(): Promise<string> {
 	// sign-out), fall back to the first account that has a server URL rather than jumping
 	// to the build default.
 	for (const account of await storage.getAccountsList()) {
-		const accountServerUrl = normalizeServerUrl(
+		const accountServerUrl = normalizeAuthServerUrl(
 			(await storage.getServerUrl(account.accountId)) ?? "",
 		);
 		if (accountServerUrl) {

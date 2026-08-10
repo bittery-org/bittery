@@ -68,6 +68,8 @@ export interface AccountMetadata {
 	addedAt: number;
 	lastActiveAt: number;
 	biometricEnabled: boolean;
+	/** Explicit consent for this account to send credentials over remote HTTP. */
+	insecureTransportConfirmed?: boolean;
 }
 
 /**

@@ -200,9 +200,10 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 			if (!syncAccountId || event.type !== "travel_mode_updated") {
 				return;
 			}
-			const [token, accountServerUrl] = await Promise.all([
+			const [token, accountServerUrl, account] = await Promise.all([
 				storage.getAuthToken(syncAccountId),
 				storage.getServerUrl(syncAccountId),
+				storage.getAccountMetadata(syncAccountId),
 			]);
 			if (!token) {
 				return;
@@ -210,6 +211,12 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 			const apiClient = createAccountApiClient(
 				token,
 				accountServerUrl || serverUrl || "http://localhost:3000",
+				undefined,
+				undefined,
+				{
+					insecureTransportConfirmed:
+						account?.insecureTransportConfirmed === true,
+				},
 			);
 			const accounts = new AccountResolver(storage);
 			await handleTravelModeSyncEvent(

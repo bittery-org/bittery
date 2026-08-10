@@ -11,7 +11,7 @@ import {
 	NATIVE_VIEW_VERSION,
 	type NativeHostView,
 } from "./account-store";
-import { accountKey, metaCollection } from "./keys";
+import { accountKey, globalKey, metaCollection } from "./keys";
 import {
 	createInMemoryPlatformPort,
 	type InMemoryPlatformPort,
@@ -119,6 +119,30 @@ const bytes = (key: Uint8Array): number[] => Array.from(key);
 // ============================================================================
 
 describe("AccountStore — accountId namespacing", () => {
+	it("migrates legacy account metadata to denied insecure transport", async () => {
+		const port = createInMemoryPlatformPort();
+		const legacyAccount = metadataFor("legacy");
+		await port.kvSet(
+			globalKey("accounts_list"),
+			JSON.stringify({ accounts: [legacyAccount] }),
+			"device",
+		);
+		const store = createAccountStore({
+			port,
+			crypto: createInMemoryCryptoPort(),
+		});
+		await store.initialize();
+
+		expect((await store.getAccountsList())[0]?.insecureTransportConfirmed).toBe(
+			false,
+		);
+		const persisted = JSON.parse(
+			port.snapshot().device[globalKey("accounts_list")] ?? "null",
+		) as { version: number; accounts: AccountMetadata[] };
+		expect(persisted.version).toBe(2);
+		expect(persisted.accounts[0]?.insecureTransportConfirmed).toBe(false);
+	});
+
 	it("never lets two accounts see each other's values", async () => {
 		const { store } = await makeStore();
 		await seedAccount(store, "a");

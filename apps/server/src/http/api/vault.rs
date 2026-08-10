@@ -155,8 +155,11 @@ where
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateVaultBody {
+    #[schema(max_length = 200)]
     name: String,
+    #[schema(max_length = 16)]
     vault_type: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
     icon: Option<String>,
     image_key: Option<String>,
@@ -166,7 +169,7 @@ struct CreateVaultBody {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct UpdateVaultBody {
     #[serde(default)]
-    #[schema(value_type = Option<String>, nullable = true)]
+    #[schema(value_type = Option<String>, nullable = true, max_length = 200)]
     name: PatchField<String>,
     #[serde(default)]
     #[schema(value_type = Option<String>, nullable = true)]
@@ -179,7 +182,9 @@ struct UpdateVaultBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ConvertVaultBody {
+    #[schema(max_length = 16)]
     target_type: String,
+    #[schema(max_length = 65536)]
     personal_encrypted_vault_key: Option<String>,
 }
 
@@ -400,7 +405,9 @@ struct UpdateAttachmentBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AddVaultMemberBody {
+    #[schema(max_length = 16)]
     role: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
 }
 
@@ -420,6 +427,7 @@ struct RemoveVaultMemberBody {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RotationMemberKeyInput {
     user_id: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
 }
 
@@ -1247,10 +1255,19 @@ async fn list_vaults(
     ApiPageQuery(page): ApiPageQuery,
 ) -> Result<Json<CursorPage<VaultListEntryResponse>>, ApiError> {
     let pool = db_pool(&state)?;
-    let values = vault::list_vaults(pool, &auth.session.user_id).await?;
-    let values: Vec<VaultListEntryResponse> = values.into_iter().map(Into::into).collect();
-    Ok(Json(page_values(
+    let cursor = decode_page_key(&page, &auth.session.user_id, "vaults", "")?;
+    let values = vault::list_vaults_page(
+        pool,
+        &auth.session.user_id,
+        cursor.as_deref(),
+        query_limit(&page)?,
+    )
+    .await?;
+    let source_has_more = values.has_more;
+    let values: Vec<VaultListEntryResponse> = values.values.into_iter().map(Into::into).collect();
+    Ok(Json(page_prefetched_with_more(
         values,
+        source_has_more,
         &page,
         &auth.session.user_id,
         "vaults",

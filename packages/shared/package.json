@@ -28,6 +28,7 @@
 		"./crypto": "./src/crypto.ts",
 		"./kdf-policy": "./src/kdf-policy.ts",
 		"./server-url": "./src/server-url.ts",
+		"./server-transport-policy": "./src/server-transport-policy.ts",
 		"./session-refresh": "./src/session-refresh.ts",
 		"./session-refresh-fetch": "./src/session-refresh-fetch.ts",
 		"./types": "./src/types.ts",

@@ -12489,10 +12489,12 @@
         ],
         "properties": {
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "role": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 16
           }
         },
         "additionalProperties": false
@@ -13369,10 +13371,12 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 65536
           },
           "targetType": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 16
           }
         },
         "additionalProperties": false
@@ -13587,7 +13591,8 @@
         ],
         "properties": {
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "icon": {
             "type": [
@@ -13602,10 +13607,12 @@
             ]
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 200
           },
           "vaultType": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 16
           }
         },
         "additionalProperties": false
@@ -16111,7 +16118,8 @@
         ],
         "properties": {
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "userId": {
             "type": "string"
@@ -17270,7 +17278,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 200
           }
         },
         "additionalProperties": false
