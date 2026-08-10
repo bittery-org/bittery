@@ -168,13 +168,43 @@ export function useSignupForm({
 		mutationFn: async (input: SignupMutationInput) => {
 			if (isInvitationSignup) {
 				return (
-					await apiClient.auth.signUp({
-						invitationToken: input.token || "",
+					await apiClient.auth.signUp(
+						{
+							invitationToken: input.token || "",
+							userId: input.userId ?? null,
+							vaultId: input.vaultId ?? null,
+							email: input.email,
+							signupVerificationToken: input.signupVerificationToken,
+							name: input.name,
+							secretKeyHint: input.secretKeyHint,
+							srpSalt: input.srpSalt,
+							srpVerifier: input.srpVerifier,
+							publicKey: input.publicKey,
+							encryptedPrivateKey: input.encryptedPrivateKey,
+							encryptedMasterKey: input.encryptedMasterKey,
+							recoveryKeyHint: input.recoveryKeyHint,
+							encryptedVaultKey: input.encryptedVaultKey,
+							kdfParams: input.kdfProfile,
+						},
+						{
+							kind: "authCeremony",
+							serverUrl: getDefaultServerUrl(),
+							insecureTransportConfirmed: false,
+						},
+					)
+				).data;
+			}
+
+			return (
+				await apiClient.auth.signUp(
+					{
 						userId: input.userId ?? null,
 						vaultId: input.vaultId ?? null,
 						email: input.email,
 						signupVerificationToken: input.signupVerificationToken,
 						name: input.name,
+						plan: input.plan ?? null,
+						organizationName: input.organizationName ?? null,
 						secretKeyHint: input.secretKeyHint,
 						srpSalt: input.srpSalt,
 						srpVerifier: input.srpVerifier,
@@ -184,29 +214,13 @@ export function useSignupForm({
 						recoveryKeyHint: input.recoveryKeyHint,
 						encryptedVaultKey: input.encryptedVaultKey,
 						kdfParams: input.kdfProfile,
-					})
-				).data;
-			}
-
-			return (
-				await apiClient.auth.signUp({
-					userId: input.userId ?? null,
-					vaultId: input.vaultId ?? null,
-					email: input.email,
-					signupVerificationToken: input.signupVerificationToken,
-					name: input.name,
-					plan: input.plan ?? null,
-					organizationName: input.organizationName ?? null,
-					secretKeyHint: input.secretKeyHint,
-					srpSalt: input.srpSalt,
-					srpVerifier: input.srpVerifier,
-					publicKey: input.publicKey,
-					encryptedPrivateKey: input.encryptedPrivateKey,
-					encryptedMasterKey: input.encryptedMasterKey,
-					recoveryKeyHint: input.recoveryKeyHint,
-					encryptedVaultKey: input.encryptedVaultKey,
-					kdfParams: input.kdfProfile,
-				})
+					},
+					{
+						kind: "authCeremony",
+						serverUrl: getDefaultServerUrl(),
+						insecureTransportConfirmed: false,
+					},
+				)
 			).data;
 		},
 		onError: (error: any) => {

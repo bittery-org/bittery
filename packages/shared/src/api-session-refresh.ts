@@ -1,6 +1,8 @@
 import {
 	type ApiClientMetadata,
 	type ApiClientPlatform,
+	type ApiFetch,
+	type ApiRequestOrigin,
 	createApiClient,
 } from "@bittery/api-contract";
 import type { AppApiClient } from "./api-client";
@@ -19,7 +21,9 @@ export interface AccountSessionSnapshot extends SessionSnapshot {
 
 export interface SessionRefreshingApiClientOptions {
 	defaultServerUrl: string;
-	getAccountSnapshot: () => Promise<AccountSessionSnapshot | null>;
+	getAccountSnapshot: (
+		accountId?: string,
+	) => Promise<AccountSessionSnapshot | null>;
 	storeRefreshedSession: (
 		snapshot: AccountSessionSnapshot,
 		session: RefreshResult,
@@ -29,7 +33,7 @@ export interface SessionRefreshingApiClientOptions {
 	clientVersion: string;
 	supportedApiMajors?: readonly number[];
 	thresholdRatio?: number;
-	fetch?: (request: Request) => Promise<Response>;
+	fetch?: ApiFetch;
 }
 
 interface SessionTiming {
@@ -169,14 +173,33 @@ export function createSessionRefreshingApiClient(
 		return refresh;
 	}
 
-	async function accountFetch(request: Request): Promise<Response> {
+	async function accountFetch(
+		request: Request,
+		requestOrigin?: ApiRequestOrigin,
+	): Promise<Response> {
 		if (request.headers.has("Authorization")) {
 			let accountConfirmed = false;
 			if (isRemoteHttpServer(defaultServerUrl)) {
-				const snapshot = await options.getAccountSnapshot();
-				accountConfirmed =
-					snapshot?.insecureTransportConfirmed === true &&
-					requireServerUrl(snapshot.serverUrl) === defaultServerUrl;
+				const originServerUrl = requestOrigin
+					? requireServerUrl(requestOrigin.serverUrl)
+					: null;
+				if (
+					requestOrigin?.kind === "persistedAccount" &&
+					originServerUrl === defaultServerUrl
+				) {
+					const snapshot = await options.getAccountSnapshot(
+						requestOrigin.accountId,
+					);
+					accountConfirmed =
+						snapshot?.accountId === requestOrigin.accountId &&
+						snapshot.insecureTransportConfirmed === true &&
+						requireServerUrl(snapshot.serverUrl) === originServerUrl;
+				} else if (
+					requestOrigin?.kind === "authCeremony" &&
+					originServerUrl === defaultServerUrl
+				) {
+					accountConfirmed = requestOrigin.insecureTransportConfirmed;
+				}
 			}
 			await authorizeServer(defaultServerUrl, accountConfirmed);
 			return fetchImpl(request);

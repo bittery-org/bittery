@@ -59,19 +59,27 @@ describe("Bittery API facade", () => {
 			},
 		});
 
-		const result = await client.auth.drainVaultKeys("just-issued", {
-			items: [
-				{
-					vaultId: "vault-1",
-					vaultName: "First",
-					vaultType: "personal",
-					encryptedVaultKey: "wrapped-1",
-					role: "owner",
-				},
-			],
-			nextCursor: "page-2",
-			hasMore: true,
-		});
+		const result = await client.auth.drainVaultKeys(
+			"just-issued",
+			{
+				items: [
+					{
+						vaultId: "vault-1",
+						vaultName: "First",
+						vaultType: "personal",
+						encryptedVaultKey: "wrapped-1",
+						role: "owner",
+					},
+				],
+				nextCursor: "page-2",
+				hasMore: true,
+			},
+			{
+				kind: "authCeremony",
+				serverUrl: "https://api.example.test",
+				insecureTransportConfirmed: false,
+			},
+		);
 
 		expect(result.data.map((key) => key.vaultId)).toEqual([
 			"vault-1",
@@ -80,6 +88,7 @@ describe("Bittery API facade", () => {
 		expect(requests[0]?.headers.get("Authorization")).toBe(
 			"Bearer just-issued",
 		);
+		expect(requests[0]?.headers.get("Bittery-Local-Request-Origin")).toBeNull();
 		expect(providerCalls).toBe(1);
 	});
 

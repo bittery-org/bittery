@@ -153,15 +153,20 @@ export function createAccountApiClient(
 	const client = sessionRefresh
 		? createSessionRefreshingApiClient({
 				defaultServerUrl: resolvedServerUrl,
-				getAccountSnapshot: async () => ({
-					...(await sessionRefresh.getSessionSnapshot()),
-					accountId:
-						sessionRefresh.accountId ?? `${resolvedServerUrl}:${authToken}`,
-					serverUrl: resolvedServerUrl,
-					insecureTransportConfirmed:
-						(await sessionRefresh.getInsecureTransportConfirmed?.()) ??
-						insecureTransportConfirmed,
-				}),
+				getAccountSnapshot: async (originAccountId) => {
+					if (originAccountId && originAccountId !== sessionRefresh.accountId) {
+						return null;
+					}
+					return {
+						...(await sessionRefresh.getSessionSnapshot()),
+						accountId:
+							sessionRefresh.accountId ?? `${resolvedServerUrl}:${authToken}`,
+						serverUrl: resolvedServerUrl,
+						insecureTransportConfirmed:
+							(await sessionRefresh.getInsecureTransportConfirmed?.()) ??
+							insecureTransportConfirmed,
+					};
+				},
 				storeRefreshedSession: (_snapshot, session) =>
 					sessionRefresh.storeRefreshedSession(session),
 				getClientId: async () => resolvedClientId,

@@ -16,6 +16,23 @@ export interface ApiClientMetadata {
 	version: string;
 }
 
+export type ApiRequestOrigin =
+	| {
+			kind: "persistedAccount";
+			accountId: string;
+			serverUrl: string;
+	  }
+	| {
+			kind: "authCeremony";
+			serverUrl: string;
+			insecureTransportConfirmed: boolean;
+	  };
+
+export type ApiFetch = (
+	request: Request,
+	requestOrigin?: ApiRequestOrigin,
+) => Promise<Response>;
+
 export type ApiAccessTokenProvider = () =>
 	| string
 	| null
@@ -31,12 +48,58 @@ export interface ApiTransportOptions {
 	baseUrl: string;
 	insecureTransport?: InsecureTransportPolicy;
 	authorizeInsecureTransport?: InsecureTransportAuthorizer;
-	fetch?: (request: Request) => Promise<Response>;
+	fetch?: ApiFetch;
 	getAccessToken?: ApiAccessTokenProvider;
 	getClientMetadata: ApiClientMetadataProvider;
 	onSessionExpires?: (expiresAt: string) => void | Promise<void>;
 	/** Invoked after an authenticated request is rejected, so the owner may refresh session state. */
 	onSessionRefreshRequired?: () => void | Promise<void>;
+}
+
+const LOCAL_REQUEST_ORIGIN_HEADER = "Bittery-Local-Request-Origin";
+
+export function requestOriginHeaders(origin: ApiRequestOrigin): Headers {
+	return new Headers({
+		[LOCAL_REQUEST_ORIGIN_HEADER]: encodeURIComponent(JSON.stringify(origin)),
+	});
+}
+
+function takeRequestOrigin(request: Request): {
+	request: Request;
+	origin?: ApiRequestOrigin;
+} {
+	const headers = new Headers(request.headers);
+	const serialized = headers.get(LOCAL_REQUEST_ORIGIN_HEADER);
+	if (!serialized) return { request };
+
+	headers.delete(LOCAL_REQUEST_ORIGIN_HEADER);
+	let candidate: unknown;
+	try {
+		candidate = JSON.parse(decodeURIComponent(serialized));
+	} catch {
+		throw new TypeError("Local request origin is invalid.");
+	}
+	if (!candidate || typeof candidate !== "object") {
+		throw new TypeError("Local request origin is invalid.");
+	}
+	const origin = candidate as Partial<ApiRequestOrigin>;
+	const hasServerUrl =
+		typeof origin.serverUrl === "string" && origin.serverUrl.length > 0;
+	if (
+		(origin.kind === "persistedAccount" &&
+			typeof origin.accountId === "string" &&
+			origin.accountId.length > 0 &&
+			hasServerUrl) ||
+		(origin.kind === "authCeremony" &&
+			typeof origin.insecureTransportConfirmed === "boolean" &&
+			hasServerUrl)
+	) {
+		return {
+			request: new Request(request, { headers }),
+			origin: origin as ApiRequestOrigin,
+		};
+	}
+	throw new TypeError("Local request origin is invalid.");
 }
 
 export interface ApiTransportRequest {
@@ -117,13 +180,14 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 	const rawFetch =
 		options.fetch ?? ((request: Request) => globalThis.fetch(request));
 	const fetchImplementation = async (request: Request): Promise<Response> => {
+		const localRequest = takeRequestOrigin(request);
 		if (options.authorizeInsecureTransport) {
-			const requestUrl = new URL(request.url);
+			const requestUrl = new URL(localRequest.request.url);
 			const serverUrl = `${requestUrl.protocol}//${requestUrl.host}`;
 			const policy = await options.authorizeInsecureTransport(serverUrl);
 			normalizeBaseUrl(serverUrl, policy);
 		}
-		return rawFetch(request);
+		return rawFetch(localRequest.request, localRequest.origin);
 	};
 	const client = createClient<paths>({
 		baseUrl,

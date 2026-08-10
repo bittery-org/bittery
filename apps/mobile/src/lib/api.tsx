@@ -78,8 +78,9 @@ export function ApiProvider({ children }: ApiProviderProps) {
 		() =>
 			createSessionRefreshingApiClient({
 				defaultServerUrl: serverUrl ?? DEFAULT_SERVER_URL,
-				getAccountSnapshot: async () => {
-					const activeAccount = await storage.getActiveAccount();
+				getAccountSnapshot: async (originAccountId) => {
+					const activeAccount =
+						originAccountId ?? (await storage.getActiveAccount());
 					if (!activeAccount) return null;
 					const [token, sessionData, accountServerUrl, account] =
 						await Promise.all([

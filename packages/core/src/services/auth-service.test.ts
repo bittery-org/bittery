@@ -280,6 +280,47 @@ describe("account-routed authentication", () => {
 		}
 	});
 
+	it("binds pre-persistence vault-key paging to the login ceremony confirmation", async () => {
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore([], crypto);
+		const drainedOrigins: unknown[] = [];
+		const handshakeClient = createAuthClient([], "ceremony-token");
+		handshakeClient.auth.finishLogin = mock(async () => ({
+			data: {
+				token: "ceremony-token",
+				serverProof: SERVER_PROOF,
+				user: { id: "new-user", email: "new@example.com" },
+				expiresAt: new Date(Date.now() + 60_000),
+				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
+			},
+		}));
+		handshakeClient.auth.drainVaultKeys = mock(
+			async (_token, _initialPage, requestOrigin) => {
+				drainedOrigins.push(requestOrigin);
+				return { data: [] };
+			},
+		);
+
+		await performSRPLogin(
+			{
+				email: "new@example.com",
+				password: "password",
+				secretKey: SECRET_KEY,
+				serverUrl: "http://server.example/",
+				insecureTransportConfirmed: true,
+			},
+			{ crypto, storage, authClient: handshakeClient },
+		);
+
+		expect(drainedOrigins).toEqual([
+			{
+				kind: "authCeremony",
+				serverUrl: "http://server.example",
+				insecureTransportConfirmed: true,
+			},
+		]);
+	});
+
 	it("validates full login against the pin selected by normalized server and email", async () => {
 		const { crypto, derivations } = createRecordingCryptoPort();
 		const { storage } = await makeStore(
@@ -425,6 +466,52 @@ describe("KDF agility on unlock", () => {
 			),
 		).rejects.toThrow("sign in again");
 		expect(derivations).toHaveLength(0);
+	});
+
+	it("binds reauthentication vault-key paging to the persisted account", async () => {
+		const { crypto } = createRecordingCryptoPort();
+		const { storage } = await makeStore(
+			[account("acct", "user", "http://server.example")],
+			crypto,
+		);
+		await storage.storeSecretKey("secret", "acct");
+		await storage.storeServerUrl("http://server.example", "acct");
+		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
+		const drainedOrigins: unknown[] = [];
+		const authClient = createAuthClient([], "reauth-token");
+		authClient.auth.finishLogin = mock(async () => ({
+			data: {
+				token: "reauth-token",
+				serverProof: SERVER_PROOF,
+				user: { id: "user", email: "same@example.com" },
+				expiresAt: new Date(Date.now() + 60_000),
+				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
+			},
+		}));
+		authClient.auth.drainVaultKeys = mock(
+			async (_token, _initialPage, requestOrigin) => {
+				drainedOrigins.push(requestOrigin);
+				return { data: [] };
+			},
+		);
+
+		const result = await performSRPUnlock(
+			{ accountId: "acct", password: "password" },
+			{
+				crypto,
+				storage,
+				createAuthClientForAccount: async () => authClient,
+			},
+		);
+
+		expect(result.mode).toBe("reauth");
+		expect(drainedOrigins).toEqual([
+			{
+				kind: "persistedAccount",
+				accountId: "acct",
+				serverUrl: "http://server.example",
+			},
+		]);
 	});
 
 	it("derives SRP login proofs with the negotiated server KDF params, not the current default", async () => {

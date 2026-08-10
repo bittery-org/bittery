@@ -234,6 +234,18 @@ export interface FinishLoginResponse {
 	};
 }
 
+type AuthRequestOrigin =
+	| {
+			kind: "persistedAccount";
+			accountId: string;
+			serverUrl: string;
+	  }
+	| {
+			kind: "authCeremony";
+			serverUrl: string;
+			insecureTransportConfirmed: boolean;
+	  };
+
 type VaultListEntry = Omit<ServerVaultListEntry, "icon" | "imageUrl"> & {
 	icon?: string | null;
 	imageUrl?: string | null;
@@ -261,6 +273,7 @@ export interface IAuthClient {
 		drainVaultKeys?(
 			accessToken: string,
 			initialPage: NonNullable<FinishLoginResponse["vaultKeys"]>,
+			requestOrigin: AuthRequestOrigin,
 		): Promise<ApiResponse<readonly ServerAuthVaultKeyEntry[]>>;
 	};
 	vaults: {
@@ -343,11 +356,13 @@ async function fetchIssuedVaultKeys(
 	accessToken: string,
 	initialPage: FinishLoginResponse["vaultKeys"],
 	fallbackClient: IAuthClient,
+	requestOrigin: AuthRequestOrigin,
 ): Promise<VaultKeyData[]> {
 	if (authClient.auth.drainVaultKeys && initialPage) {
 		const { data } = await authClient.auth.drainVaultKeys(
 			accessToken,
 			initialPage,
+			requestOrigin,
 		);
 		return data.map(toAuthVaultKeyEntry);
 	}
@@ -501,6 +516,11 @@ export async function performSRPLogin(
 			finishResult.token,
 			finishResult.vaultKeys,
 			authenticatedClient,
+			{
+				kind: "authCeremony",
+				serverUrl,
+				insecureTransportConfirmed: input.insecureTransportConfirmed === true,
+			},
 		);
 
 		return {
@@ -882,6 +902,7 @@ export async function performSRPUnlock(
 			finishResult.token,
 			finishResult.vaultKeys,
 			authenticatedClient,
+			{ kind: "persistedAccount", accountId, serverUrl },
 		);
 
 		return {

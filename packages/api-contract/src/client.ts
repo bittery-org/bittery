@@ -103,11 +103,14 @@ import {
 	type ApiClientMetadata,
 	type ApiClientMetadataProvider,
 	type ApiClientPlatform,
+	type ApiFetch,
 	type ApiHttpMethod,
+	type ApiRequestOrigin,
 	type ApiTransportRequest,
 	createApiTransport,
 	type InsecureTransportAuthorizer,
 	type InsecureTransportPolicy,
+	requestOriginHeaders,
 } from "./transport.ts";
 import { parseDecimalString, parseRfc3339Utc } from "./value-codecs.ts";
 
@@ -116,6 +119,8 @@ export type {
 	ApiClientMetadata,
 	ApiClientMetadataProvider,
 	ApiClientPlatform,
+	ApiFetch,
+	ApiRequestOrigin,
 	InsecureTransportPolicy,
 	InsecureTransportAuthorizer,
 };
@@ -125,7 +130,7 @@ export interface ApiClientOptions {
 	insecureTransport?: InsecureTransportPolicy;
 	authorizeInsecureTransport?: InsecureTransportAuthorizer;
 	supportedApiMajors: readonly number[];
-	fetch?: (request: Request) => Promise<Response>;
+	fetch?: ApiFetch;
 	getAccessToken?: ApiAccessTokenProvider;
 	getClientMetadata: ApiClientMetadataProvider;
 	onSessionExpires?: (expiresAt: string) => void | Promise<void>;
@@ -148,6 +153,7 @@ export interface ApiClient {
 		drainVaultKeys(
 			accessToken: string,
 			initialPage: ApiPage<AuthVaultKey>,
+			requestOrigin: ApiRequestOrigin,
 		): Promise<ApiResult<readonly AuthVaultKey[]>>;
 		recoveryData(input: RecoverySessionInput): Promise<ApiResult<RecoveryData>>;
 		resetPassword(
@@ -166,7 +172,10 @@ export interface ApiClient {
 		verifySignupVerification(
 			input: VerifySignupVerificationInput,
 		): Promise<ApiResult<VerifySignupVerificationResponse>>;
-		signUp(input: SignupInput): Promise<ApiResult<SignupResponse>>;
+		signUp(
+			input: SignupInput,
+			requestOrigin: ApiRequestOrigin,
+		): Promise<ApiResult<SignupResponse>>;
 		me(): Promise<ApiResult<AuthUser>>;
 		deleteAccount(
 			input: DeleteAccountInput,
@@ -750,6 +759,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 	async function drainIssuedVaultKeys(
 		accessToken: string,
 		initialPage: ApiPage<AuthVaultKey>,
+		requestOrigin: ApiRequestOrigin,
 	): Promise<ApiResult<readonly AuthVaultKey[]>> {
 		const items = [...initialPage.items];
 		let cursor = initialPage.hasMore
@@ -773,7 +783,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				"GET",
 				"/api/v1/users/me/vault-keys",
 				{
-					headers: { Authorization: `Bearer ${accessToken}` },
+					headers: new Headers({
+						...Object.fromEntries(requestOriginHeaders(requestOrigin)),
+						Authorization: `Bearer ${accessToken}`,
+					}),
 					params: { query: { cursor } },
 				},
 			);
@@ -870,7 +883,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				call("POST", "/api/v1/auth/signup-verifications/verify", {
 					body: input,
 				}),
-			async signUp(input) {
+			async signUp(input, requestOrigin) {
 				const result = await call<unknown>("POST", "/api/v1/auth/signups", {
 					body: input,
 				});
@@ -880,7 +893,11 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					signup.vaultKeys,
 					"/signup/vaultKeys",
 				);
-				const vaultKeys = await drainIssuedVaultKeys(token, initialPage);
+				const vaultKeys = await drainIssuedVaultKeys(
+					token,
+					initialPage,
+					requestOrigin,
+				);
 				return {
 					...result,
 					data: { ...signup, vaultKeys: vaultKeys.data } as SignupResponse,

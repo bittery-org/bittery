@@ -33,6 +33,10 @@ function vaultKey(vaultId: string) {
 	};
 }
 
+function persistedOrigin(accountId: string, serverUrl: string) {
+	return { kind: "persistedAccount" as const, accountId, serverUrl };
+}
+
 function createSwitchingClient(
 	fetch: (request: Request) => Promise<Response>,
 	options: {
@@ -96,11 +100,15 @@ describe("session-refreshing API client account isolation", () => {
 			},
 		});
 
-		const result = await client.auth.drainVaultKeys("newly-issued-token", {
-			items: [vaultKey("vault-1")],
-			nextCursor: "page-2",
-			hasMore: true,
-		});
+		const result = await client.auth.drainVaultKeys(
+			"newly-issued-token",
+			{
+				items: [vaultKey("vault-1")],
+				nextCursor: "page-2",
+				hasMore: true,
+			},
+			persistedOrigin("account-a", "https://a.example.test"),
+		);
 
 		expect(result.data.map((key) => key.vaultId)).toEqual([
 			"vault-1",
@@ -147,11 +155,15 @@ describe("session-refreshing API client account isolation", () => {
 		});
 		activeAccountId = "account-b";
 
-		await client.auth.drainVaultKeys("account-a-issued-token", {
-			items: [],
-			nextCursor: "page-2",
-			hasMore: true,
-		});
+		await client.auth.drainVaultKeys(
+			"account-a-issued-token",
+			{
+				items: [],
+				nextCursor: "page-2",
+				hasMore: true,
+			},
+			persistedOrigin("account-a", "https://a.example.test"),
+		);
 
 		expect(requests).toHaveLength(1);
 		expect(requests[0]?.url).toStartWith("https://a.example.test/");
@@ -186,11 +198,15 @@ describe("session-refreshing API client account isolation", () => {
 		});
 
 		await expect(
-			client.auth.drainVaultKeys("rejected-issued-token", {
-				items: [],
-				nextCursor: "page-2",
-				hasMore: true,
-			}),
+			client.auth.drainVaultKeys(
+				"rejected-issued-token",
+				{
+					items: [],
+					nextCursor: "page-2",
+					hasMore: true,
+				},
+				persistedOrigin("account-a", "https://a.example.test"),
+			),
 		).rejects.toEqual(expect.objectContaining({ status: 401 }));
 		expect(requests).toHaveLength(1);
 		expect(requests[0]?.headers.get("Authorization")).toBe(
@@ -227,15 +243,159 @@ describe("session-refreshing API client account isolation", () => {
 		});
 
 		await expect(
-			client.auth.drainVaultKeys("issued-token", {
-				items: [],
-				nextCursor: "page-2",
-				hasMore: true,
-			}),
+			client.auth.drainVaultKeys(
+				"issued-token",
+				{
+					items: [],
+					nextCursor: "page-2",
+					hasMore: true,
+				},
+				persistedOrigin("account-a", "http://a.example.test"),
+			),
 		).rejects.toThrow("OPERATOR_DISABLED");
 		expect(requests).toHaveLength(1);
 		expect(requests[0]?.url).toBe("http://a.example.test/api/meta");
 		expect(requests[0]?.headers.get("Authorization")).toBeNull();
+	});
+
+	test("blocks a revoked origin account when another account on the server is confirmed", async () => {
+		const requests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "http://shared.example.test",
+			getAccountSnapshot: async (accountId) => ({
+				accountId: accountId ?? "account-b",
+				serverUrl: "http://shared.example.test",
+				token: `${accountId ?? "account-b"}-stored-token`,
+				issuedAt: NOW,
+				expiresAt: NOW + 60_000,
+				insecureTransportConfirmed: accountId !== "account-a",
+			}),
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({ capabilities: ["insecure-http"] });
+			},
+		});
+
+		await expect(
+			client.auth.drainVaultKeys(
+				"account-a-issued-token",
+				{ items: [], nextCursor: "page-2", hasMore: true },
+				persistedOrigin("account-a", "http://shared.example.test"),
+			),
+		).rejects.toThrow("ACCOUNT_CONFIRMATION_REQUIRED");
+		expect(requests).toHaveLength(0);
+	});
+
+	test("uses the confirmed origin account even when another same-server account is active", async () => {
+		const requests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "http://shared.example.test",
+			getAccountSnapshot: async (accountId) => ({
+				accountId: accountId ?? "account-b",
+				serverUrl: "http://shared.example.test",
+				token: `${accountId ?? "account-b"}-stored-token`,
+				issuedAt: NOW,
+				expiresAt: NOW + 60_000,
+				insecureTransportConfirmed: accountId === "account-a",
+			}),
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				if (request.url.endsWith("/api/meta")) {
+					return Response.json({ capabilities: ["insecure-http"] });
+				}
+				return Response.json({ items: [], nextCursor: null, hasMore: false });
+			},
+		});
+
+		await client.auth.drainVaultKeys(
+			"account-a-issued-token",
+			{ items: [], nextCursor: "page-2", hasMore: true },
+			persistedOrigin("account-a", "http://shared.example.test"),
+		);
+
+		expect(requests).toHaveLength(2);
+		expect(requests[0]?.url).toBe("http://shared.example.test/api/meta");
+		expect(requests[0]?.headers.get("Authorization")).toBeNull();
+		expect(requests[1]?.headers.get("Authorization")).toBe(
+			"Bearer account-a-issued-token",
+		);
+		for (const request of requests) {
+			expect(request.headers.get("Bittery-Local-Request-Origin")).toBeNull();
+		}
+	});
+
+	test("uses the confirmation captured by an unpersisted auth ceremony", async () => {
+		const requests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "http://signup.example.test",
+			getAccountSnapshot: async () => {
+				throw new Error("Auth ceremony read persisted account state");
+			},
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "web",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				if (request.url.endsWith("/api/meta")) {
+					return Response.json({ capabilities: ["insecure-http"] });
+				}
+				return Response.json({ items: [], nextCursor: null, hasMore: false });
+			},
+		});
+
+		await client.auth.drainVaultKeys(
+			"signup-token",
+			{ items: [], nextCursor: "page-2", hasMore: true },
+			{
+				kind: "authCeremony",
+				serverUrl: "http://signup.example.test",
+				insecureTransportConfirmed: true,
+			},
+		);
+
+		expect(requests).toHaveLength(2);
+		expect(requests[1]?.headers.get("Authorization")).toBe(
+			"Bearer signup-token",
+		);
+	});
+
+	test("keeps HTTPS request-scoped bearers independent of stored account state", async () => {
+		const requests: Request[] = [];
+		const client = createSessionRefreshingApiClient({
+			defaultServerUrl: "https://secure.example.test",
+			getAccountSnapshot: async () => {
+				throw new Error("HTTPS request-scoped bearer read account state");
+			},
+			storeRefreshedSession: async () => {},
+			getClientId: async () => "client-1",
+			clientPlatform: "desktop",
+			clientVersion: "0.5.0",
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({ items: [], nextCursor: null, hasMore: false });
+			},
+		});
+
+		await client.auth.drainVaultKeys(
+			"issued-token",
+			{ items: [], nextCursor: "page-2", hasMore: true },
+			persistedOrigin("account-a", "https://secure.example.test"),
+		);
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.headers.get("Authorization")).toBe(
+			"Bearer issued-token",
+		);
+		expect(requests[0]?.headers.get("Bittery-Local-Request-Origin")).toBeNull();
 	});
 
 	test("rechecks operator capability before subsequent bearer requests", async () => {

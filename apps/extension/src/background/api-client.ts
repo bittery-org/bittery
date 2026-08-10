@@ -54,8 +54,8 @@ async function getAuthToken(accountId: string): Promise<string | null> {
 
 export const apiClient = createSessionRefreshingApiClient({
 	defaultServerUrl: fallbackServerUrl,
-	getAccountSnapshot: async () => {
-		const activeAccount = await storage.getActiveAccount();
+	getAccountSnapshot: async (originAccountId) => {
+		const activeAccount = originAccountId ?? (await storage.getActiveAccount());
 		if (!activeAccount) return null;
 		const [token, sessionData, serverUrl, account] = await Promise.all([
 			getAuthToken(activeAccount),

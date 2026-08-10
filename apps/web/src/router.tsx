@@ -99,9 +99,9 @@ async function getApiClientId(): Promise<string> {
 
 const apiClient = createSessionRefreshingApiClient({
 	defaultServerUrl: getServerUrl(),
-	getAccountSnapshot: async () => {
+	getAccountSnapshot: async (originAccountId) => {
 		await initializeStorage();
-		const accountId = await storage.getActiveAccount();
+		const accountId = originAccountId ?? (await storage.getActiveAccount());
 		if (!accountId) return null;
 		const [token, sessionData, serverUrl, account] = await Promise.all([
 			storage.getAuthToken(accountId),

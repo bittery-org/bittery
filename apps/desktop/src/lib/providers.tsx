@@ -108,8 +108,9 @@ export async function createDesktopApiClient() {
 		defaultServerUrl: serverUrl,
 		clientPlatform: "desktop",
 		clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
-		getAccountSnapshot: async () => {
-			const activeAccount = await storage.getActiveAccount();
+		getAccountSnapshot: async (originAccountId) => {
+			const activeAccount =
+				originAccountId ?? (await storage.getActiveAccount());
 			if (!activeAccount) return null;
 
 			const [token, sessionData, accountServerUrl, account] = await Promise.all(

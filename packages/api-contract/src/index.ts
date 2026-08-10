@@ -15,6 +15,8 @@ export {
 	type ApiClientMetadataProvider,
 	type ApiClientOptions,
 	type ApiClientPlatform,
+	type ApiFetch,
+	type ApiRequestOrigin,
 	createApiClient,
 	type InsecureTransportPolicy,
 } from "./client.ts";
