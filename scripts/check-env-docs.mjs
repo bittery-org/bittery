@@ -30,6 +30,10 @@ const RATE_LIMIT_DOC_FILES = ["configuration.mdx", "docker-compose.mdx"];
 
 // Documented, but deliberately not read by the Rust server.
 const DOCS_ONLY_VARS = new Map([
+	[
+		"BITTERY_RELEASE",
+		"consumed by Compose to pin the coordinated server and web image pair",
+	],
 	["DOMAIN", "consumed by Caddy and Compose for TLS; never reaches the server"],
 	["COMPOSE_PROFILES", "a docker compose flag, not an application variable"],
 	["MINIO_ROOT_PASSWORD", "read by the bundled MinIO image, not by the server"],

@@ -53,3 +53,7 @@ Bittery uses zero-knowledge encryption — your server never sees plaintext vaul
 <Callout type="warning">
 Always run Bittery behind HTTPS. The included Caddy configuration handles this automatically with Let's Encrypt certificates.
 </Callout>
+
+Non-loopback HTTP is disabled by default. Supporting it requires an explicit operator capability
+and separate confirmation for every affected client account. Recommended deployments keep HTTPS
+enabled and pin the server and web containers to one matching release.

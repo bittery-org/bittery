@@ -4,7 +4,7 @@
 
 ## About Hosting bittery
 
-Hosting Bittery means running a **Caddy reverse proxy**, a **Rust API server**, and a **web vault** (static SPA behind nginx), backed by **PostgreSQL**. Railway terminates TLS at the edge; Caddy listens on `$PORT` and routes API traffic (`/rpc`, `/sync`, `/cdn`, etc.) to the server and everything else to the web app over **private networking** (`server.railway.internal`, `web.railway.internal`). The server handles authentication (SRP), encrypted vault sync, teams, and share links; it does not decrypt user data. Database migrations run automatically on server startup. The Railway template pre-wires `DATABASE_URL`, object-storage bucket variables, and Caddy upstream reference variables—only **caddy** needs a public domain. **Redis/Valkey** is optional for cross-instance SSE sync and distributed rate limiting. Official images: `ghcr.io/bittery-org/bittery-server:latest`, `ghcr.io/bittery-org/bittery-web:latest`, and a custom Caddy build from [`deploy/railway`](https://github.com/bittery-org/bittery/tree/main/deploy/railway).
+Hosting Bittery means running a **Caddy reverse proxy**, a **Rust API server**, and a **web vault** (static SPA behind nginx), backed by **PostgreSQL**. Railway terminates TLS at the edge; Caddy listens on `$PORT` and routes `/api/*`, `/cdn/*`, and other server-owned paths to the server, with `/api/v1/sync/events` kept unbuffered for SSE. Everything else reaches the web app over **private networking** (`server.railway.internal`, `web.railway.internal`). The server handles authentication (SRP), encrypted vault sync, teams, and share links; it does not decrypt user data. Database migrations run automatically on server startup. The Railway template pre-wires `DATABASE_URL`, object-storage bucket variables, and Caddy upstream reference variables—only **caddy** needs a public domain. **Redis/Valkey** is optional for cross-instance SSE sync and distributed rate limiting. Pin `ghcr.io/bittery-org/bittery-server` and `ghcr.io/bittery-org/bittery-web` to the same exact release; `latest` is only suitable for disposable evaluation.
 
 ## Common Use Cases
 
@@ -39,7 +39,7 @@ Hosting Bittery means running a **Caddy reverse proxy**, a **Rust API server**, 
 Docker Compose uses short hostnames like `server:3000` because Compose provides internal DNS. Railway uses `servicename.railway.internal` instead. The Railway Caddyfile proxies to:
 
 ```text
-server.railway.internal:3000   # API (RPC, sync, CDN, …)
+server.railway.internal:3000   # Versioned API, SSE, CDN, …
 web.railway.internal:8080      # web vault SPA
 ```
 
@@ -69,11 +69,11 @@ CORS_ORIGIN=https://your-app.up.railway.app
 BITTERY_MODE=self-hosted
 ```
 
-`VITE_SERVER_URL` is **not** required. With Caddy serving both the web app and API on the same domain, the web app uses the current page origin for RPC and sync requests.
+`VITE_SERVER_URL` is **not** required. With Caddy serving both the web app and API on the same domain, the web app uses the current page origin for API and sync requests.
 
 **Optional server vars:** `REDIS_URL` (cross-instance sync), `SHARE_LINK_DAILY_LIMIT` (default `50`).
 
-Updates: redeploy each service to pull the latest `latest` image tags; migrations apply on server boot.
+Updates: set server and web to the same exact target release, then redeploy them together. Migrations apply on server boot. Railway's public edge must remain HTTPS; a non-loopback HTTP exception requires both operator enablement and per-account client confirmation.
 
 ## Why Deploy bittery on Railway?
 
