@@ -4,16 +4,11 @@ use axum::{
     response::Response,
     Extension, Json,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::{
-    config::db_pool,
-    http::sync_sse,
-    services::sync::{self, BootstrapItemsInput, BootstrapItemsResponse, GetEventsSinceInput},
-    AppState,
-};
+use crate::{config::db_pool, http::sync_sse, services::sync, AppState};
 
 use super::{
     dto::{DecimalString, ProblemDetails, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE},
@@ -53,6 +48,15 @@ fn default_bootstrap_limit() -> u16 {
     MAX_PAGE_SIZE
 }
 
+impl From<BootstrapQuery> for sync::BootstrapItemsInput {
+    fn from(value: BootstrapQuery) -> Self {
+        Self {
+            cursor: value.cursor,
+            limit: Some(i32::from(value.limit)),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[into_params(parameter_in = Query, rename_all = "camelCase")]
@@ -67,6 +71,7 @@ struct ChangesQuery {
     limit: u16,
 }
 
+#[derive(Debug)]
 struct ChangesApiQuery(ChangesQuery);
 
 impl<S> FromRequestParts<S> for ChangesApiQuery
@@ -125,7 +130,137 @@ fn default_changes_limit() -> u16 {
     DEFAULT_PAGE_SIZE
 }
 
-#[derive(Debug, serde::Serialize, ToSchema)]
+impl From<ChangesQuery> for sync::GetEventsSinceInput {
+    fn from(value: ChangesQuery) -> Self {
+        Self {
+            since_id: value.since_id,
+            vault_ids: value.vault_ids,
+            limit: Some(i32::from(value.limit)),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapVaultSummary {
+    id: String,
+    name: String,
+    vault_type: String,
+    icon: Option<String>,
+    image_url: Option<String>,
+    encrypted_vault_key: String,
+    role: String,
+}
+
+impl From<sync::BootstrapVaultSummary> for BootstrapVaultSummary {
+    fn from(value: sync::BootstrapVaultSummary) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            vault_type: value.vault_type,
+            icon: value.icon,
+            image_url: value.image_url,
+            encrypted_vault_key: value.encrypted_vault_key,
+            role: value.role,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapAttachmentResponse {
+    id: String,
+    item_id: String,
+    vault_id: String,
+    storage_key: String,
+    encrypted_name: String,
+    encrypted_content_type: String,
+    encryption_iv: String,
+    encrypted_content_type_iv: Option<String>,
+    encryption_algorithm: String,
+    file_size: i32,
+    uploaded_by: Option<String>,
+    created_at: String,
+}
+
+impl From<sync::BootstrapAttachmentResponse> for BootstrapAttachmentResponse {
+    fn from(value: sync::BootstrapAttachmentResponse) -> Self {
+        Self {
+            id: value.id,
+            item_id: value.item_id,
+            vault_id: value.vault_id,
+            storage_key: value.storage_key,
+            encrypted_name: value.encrypted_name,
+            encrypted_content_type: value.encrypted_content_type,
+            encryption_iv: value.encryption_iv,
+            encrypted_content_type_iv: value.encrypted_content_type_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            file_size: value.file_size,
+            uploaded_by: value.uploaded_by,
+            created_at: value.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapItemResponse {
+    id: String,
+    vault_id: String,
+    category: String,
+    favorite: bool,
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: String,
+    version: i32,
+    last_modified_by: Option<String>,
+    created_at: String,
+    updated_at: String,
+    deleted_at: Option<String>,
+    attachments: Vec<BootstrapAttachmentResponse>,
+    vault: Option<BootstrapVaultSummary>,
+}
+
+impl From<sync::BootstrapItemResponse> for BootstrapItemResponse {
+    fn from(value: sync::BootstrapItemResponse) -> Self {
+        Self {
+            id: value.id,
+            vault_id: value.vault_id,
+            category: value.category,
+            favorite: value.favorite,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            version: value.version,
+            last_modified_by: value.last_modified_by,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+            attachments: value.attachments.into_iter().map(Into::into).collect(),
+            vault: value.vault.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct BootstrapItemsResponse {
+    items: Vec<BootstrapItemResponse>,
+    next_cursor: Option<String>,
+    has_more: bool,
+}
+
+impl From<sync::BootstrapItemsResponse> for BootstrapItemsResponse {
+    fn from(value: sync::BootstrapItemsResponse) -> Self {
+        Self {
+            items: value.items.into_iter().map(Into::into).collect(),
+            next_cursor: value.next_cursor,
+            has_more: value.has_more,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct SyncEventResponse {
     id: String,
@@ -141,13 +276,13 @@ struct SyncEventResponse {
     timestamp: DecimalString,
 }
 
-#[derive(Debug, serde::Serialize, ToSchema)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct SyncCursorResponse {
     id: String,
 }
 
-#[derive(Debug, serde::Serialize, ToSchema)]
+#[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct SyncChangesResponse {
     #[schema(max_items = 500)]
@@ -204,15 +339,10 @@ async fn bootstrap(
     ApiQuery(query): ApiQuery<BootstrapQuery>,
 ) -> Result<Json<BootstrapItemsResponse>, ApiError> {
     let pool = db_pool(&state)?;
-    let mut response = sync::bootstrap_items(
-        pool,
-        &auth.session.user_id,
-        BootstrapItemsInput {
-            cursor: query.cursor,
-            limit: Some(i32::from(query.limit)),
-        },
-    )
-    .await?;
+    let mut response: BootstrapItemsResponse =
+        sync::bootstrap_items(pool, &auth.session.user_id, query.into())
+            .await?
+            .into();
     if truncate_serialized(&mut response.items, RESPONSE_PAGE_BYTES)? {
         response.has_more = true;
         response.next_cursor = response.items.last().map(|item| item.id.clone());
@@ -239,17 +369,10 @@ async fn changes(
     ChangesApiQuery(query): ChangesApiQuery,
 ) -> Result<Json<SyncChangesResponse>, ApiError> {
     let pool = db_pool(&state)?;
-    let mut response: SyncChangesResponse = sync::get_events_since(
-        pool,
-        &auth.session.user_id,
-        GetEventsSinceInput {
-            since_id: query.since_id,
-            vault_ids: query.vault_ids,
-            limit: Some(i32::from(query.limit)),
-        },
-    )
-    .await?
-    .into();
+    let mut response: SyncChangesResponse =
+        sync::get_events_since(pool, &auth.session.user_id, query.into())
+            .await?
+            .into();
     if truncate_serialized(&mut response.events, RESPONSE_PAGE_BYTES)? {
         response.has_more = true;
         response.cursor = response.events.last().map(|event| SyncCursorResponse {
@@ -267,7 +390,7 @@ async fn changes(
     responses(
         (status = 200, description = "Authenticated sync hint stream", content_type = "text/event-stream"),
         (status = 401, description = "Authentication required", body = ProblemDetails, content_type = "application/problem+json"),
-        (status = 503, description = "Sync unavailable", body = ProblemDetails, content_type = "application/problem+json")
+        (status = 503, description = "Sync unavailable", body = ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))
     )
 )]
 async fn events(State(state): State<AppState>, auth: AuthenticatedRequest) -> Response {
@@ -286,8 +409,87 @@ mod tests {
     use axum::{extract::FromRequestParts, http::Request};
     use serde_json::json;
 
-    use super::{router, ChangesApiQuery, SyncChangesResponse};
-    use crate::services::sync::{GetEventsSinceResponse, SyncCursorResponse, SyncEventDto};
+    use super::{
+        router, BootstrapItemsResponse, BootstrapQuery, ChangesApiQuery, ChangesQuery,
+        SyncChangesResponse,
+    };
+    use crate::services::sync::{
+        BootstrapAttachmentResponse as ServiceBootstrapAttachmentResponse,
+        BootstrapItemResponse as ServiceBootstrapItemResponse,
+        BootstrapItemsResponse as ServiceBootstrapItemsResponse,
+        BootstrapVaultSummary as ServiceBootstrapVaultSummary, GetEventsSinceResponse,
+        SyncCursorResponse, SyncEventDto,
+    };
+
+    #[test]
+    fn bootstrap_wire_mapping_preserves_camel_case_and_nullable_fields() {
+        let response: BootstrapItemsResponse = ServiceBootstrapItemsResponse {
+            items: vec![ServiceBootstrapItemResponse {
+                id: "item_test".to_string(),
+                vault_id: "vault_test".to_string(),
+                category: "login".to_string(),
+                favorite: true,
+                encrypted_data: "ciphertext".to_string(),
+                encryption_iv: "item-iv".to_string(),
+                encryption_algorithm: "aes-256-gcm".to_string(),
+                version: 3,
+                last_modified_by: None,
+                created_at: "2026-08-10T10:00:00Z".to_string(),
+                updated_at: "2026-08-10T11:00:00Z".to_string(),
+                deleted_at: None,
+                attachments: vec![ServiceBootstrapAttachmentResponse {
+                    id: "attachment_test".to_string(),
+                    item_id: "item_test".to_string(),
+                    vault_id: "vault_test".to_string(),
+                    storage_key: "attachments/test".to_string(),
+                    encrypted_name: "encrypted-name".to_string(),
+                    encrypted_content_type: "encrypted-type".to_string(),
+                    encryption_iv: "attachment-iv".to_string(),
+                    encrypted_content_type_iv: None,
+                    encryption_algorithm: "aes-256-gcm".to_string(),
+                    file_size: 42,
+                    uploaded_by: None,
+                    created_at: "2026-08-10T10:30:00Z".to_string(),
+                }],
+                vault: Some(ServiceBootstrapVaultSummary {
+                    id: "vault_test".to_string(),
+                    name: "encrypted-vault-name".to_string(),
+                    vault_type: "personal".to_string(),
+                    icon: None,
+                    image_url: None,
+                    encrypted_vault_key: "wrapped-key".to_string(),
+                    role: "owner".to_string(),
+                }),
+            }],
+            next_cursor: Some("item_test".to_string()),
+            has_more: true,
+        }
+        .into();
+
+        let json = serde_json::to_value(response).expect("bootstrap response should serialize");
+        assert_eq!(json["nextCursor"], json!("item_test"));
+        assert_eq!(json["items"][0]["lastModifiedBy"], json!(null));
+        assert_eq!(json["items"][0]["attachments"][0]["fileSize"], json!(42));
+        assert_eq!(
+            json["items"][0]["attachments"][0]["encryptedContentTypeIv"],
+            json!(null)
+        );
+        assert_eq!(json["items"][0]["vault"]["vaultType"], json!("personal"));
+    }
+
+    #[test]
+    fn sync_query_dtos_reject_unknown_fields() {
+        assert!(serde_json::from_value::<BootstrapQuery>(json!({
+            "limit": 100,
+            "unknown": true
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<ChangesQuery>(json!({
+            "limit": 100,
+            "unknown": true
+        }))
+        .is_err());
+    }
 
     #[test]
     fn sync_timestamps_are_decimal_strings() {
@@ -332,6 +534,41 @@ mod tests {
             Some(vec!["vault_a".into(), "vault_b".into()])
         );
         assert_eq!(query.limit, 25);
+    }
+
+    #[tokio::test]
+    async fn changes_query_rejects_unknown_fields() {
+        let (mut parts, _) = Request::builder()
+            .uri("/sync/changes?unknown=true")
+            .body(())
+            .unwrap()
+            .into_parts();
+
+        let rejection = ChangesApiQuery::from_request_parts(&mut parts, &())
+            .await
+            .expect_err("unknown query fields should be rejected");
+        assert_eq!(rejection.code(), "INVALID_QUERY");
+    }
+
+    #[test]
+    fn sync_openapi_uses_transport_owned_bootstrap_schemas() {
+        let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
+        assert_eq!(
+            openapi["paths"]["/sync/bootstrap"]["get"]["responses"]["200"]["content"]
+                ["application/json"]["schema"]["$ref"],
+            "#/components/schemas/BootstrapItemsResponse"
+        );
+        assert_eq!(
+            openapi["components"]["schemas"]["BootstrapAttachmentResponse"]["properties"]
+                ["fileSize"]["format"],
+            "int32"
+        );
+        assert!(
+            !openapi["components"]["schemas"]["BootstrapItemResponse"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("lastModifiedBy"))
+        );
     }
 
     #[test]

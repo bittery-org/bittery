@@ -234,6 +234,25 @@ fn validate_openapi_response(method: &Method, uri: &str, response: &ApiTestRespo
         .unwrap_or_else(|| {
             panic!("{method} {path_template} does not declare response status {status}")
         });
+    if matches!(
+        response.status,
+        StatusCode::TOO_MANY_REQUESTS | StatusCode::SERVICE_UNAVAILABLE
+    ) {
+        let retry_after = response
+            .headers
+            .get("retry-after")
+            .unwrap_or_else(|| {
+                panic!("{method} {path_template} status {status} requires Retry-After")
+            })
+            .to_str()
+            .expect("Retry-After should contain visible ASCII")
+            .parse::<u32>()
+            .expect("Retry-After should use delta-seconds");
+        assert!(
+            (1..=crate::http::api::error::MAX_RETRY_AFTER_SECONDS).contains(&retry_after),
+            "{method} {path_template} status {status} Retry-After must be bounded"
+        );
+    }
     let content = declared.get("content").and_then(Value::as_object);
     if response.body.is_null() && content.is_none_or(serde_json::Map::is_empty) {
         return;

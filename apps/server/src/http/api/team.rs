@@ -515,7 +515,8 @@ enum TeamErrorResponses {
     #[response(
         status = 429,
         description = "Rate limited",
-        content_type = "application/problem+json"
+        content_type = "application/problem+json",
+        headers(("Retry-After" = String, description = "Seconds before retrying"))
     )]
     RateLimited(ProblemDetails),
     #[response(

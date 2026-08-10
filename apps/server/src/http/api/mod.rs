@@ -248,6 +248,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_retryable_overload_response_declares_retry_after() {
+        let (_, document) = super::openapi_router().split_for_parts();
+        let value = serde_json::to_value(document).expect("OpenAPI should serialize");
+        let retryable_responses = value["paths"]
+            .as_object()
+            .expect("OpenAPI paths should be an object")
+            .values()
+            .flat_map(|path| {
+                path.as_object()
+                    .expect("OpenAPI path item should be an object")
+                    .values()
+            })
+            .filter_map(|operation| operation.get("responses"))
+            .flat_map(|responses| {
+                ["429", "503"]
+                    .into_iter()
+                    .filter_map(|status| responses.get(status).map(|response| (status, response)))
+            })
+            .collect::<Vec<_>>();
+
+        assert!(!retryable_responses.is_empty());
+        for (status, response) in retryable_responses {
+            assert_eq!(
+                response["headers"]["Retry-After"]["schema"]["type"], "string",
+                "status {status} must declare a delta-seconds Retry-After header"
+            );
+        }
+    }
+
     async fn assert_api_problem(
         method: Method,
         uri: &str,

@@ -347,7 +347,7 @@ async fn registration_status(
     }))
 }
 
-#[utoipa::path(post, path = "/auth/signup-verifications", request_body = SignupVerificationRequest, responses((status = 202, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/signup-verifications", request_body = SignupVerificationRequest, responses((status = 202, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn request_signup_verification(
     State(state): State<AppState>,
     request: PublicRequest,
@@ -370,7 +370,7 @@ async fn request_signup_verification(
     ))
 }
 
-#[utoipa::path(post, path = "/auth/signup-verifications/verify", request_body = VerifySignupVerificationRequest, responses((status = 200, body = VerifySignupVerificationResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/signup-verifications/verify", request_body = VerifySignupVerificationRequest, responses((status = 200, body = VerifySignupVerificationResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn verify_signup_verification(
     State(state): State<AppState>,
     request: PublicRequest,
@@ -392,7 +392,7 @@ async fn verify_signup_verification(
     }))
 }
 
-#[utoipa::path(post, path = "/auth/signups", request_body = SignupRequest, responses((status = 201, body = SignupResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, description = "Signup verification token is missing or invalid", body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "Signup rate limit exceeded", body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/signups", request_body = SignupRequest, responses((status = 201, body = SignupResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, description = "Signup verification token is missing or invalid", body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "Signup rate limit exceeded", body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn signup(
     State(state): State<AppState>,
     request: PublicRequest,
@@ -449,7 +449,7 @@ async fn signup(
     Ok((axum::http::StatusCode::CREATED, Json(response.into())))
 }
 
-#[utoipa::path(post, path = "/auth/login-attempts", request_body = StartLoginRequest, responses((status = 201, body = LoginAttemptResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/login-attempts", request_body = StartLoginRequest, responses((status = 201, body = LoginAttemptResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn start_login(
     State(state): State<AppState>,
     request: PublicRequest,
@@ -467,7 +467,7 @@ async fn start_login(
     Ok((axum::http::StatusCode::CREATED, Json(response.into())))
 }
 
-#[utoipa::path(post, path = "/auth/login-attempts/{attemptId}/finish", params(("attemptId" = String, Path)), request_body = FinishLoginRequest, responses((status = 200, body = FinishLoginResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/login-attempts/{attemptId}/finish", params(("attemptId" = String, Path)), request_body = FinishLoginRequest, responses((status = 200, body = FinishLoginResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn finish_login(
     State(state): State<AppState>,
     request: PublicRequest,
@@ -487,7 +487,7 @@ async fn finish_login(
     Ok(Json(response.into()))
 }
 
-#[utoipa::path(post, path = "/auth/recovery-verifications", request_body = RecoveryVerificationRequest, responses((status = 202, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/recovery-verifications", request_body = RecoveryVerificationRequest, responses((status = 202, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn request_recovery_verification(
     State(state): State<AppState>,
     request: PublicRequest,
@@ -507,7 +507,7 @@ async fn request_recovery_verification(
     ))
 }
 
-#[utoipa::path(post, path = "/auth/recovery-verifications/verify", request_body = VerifyRecoveryRequest, responses((status = 200, body = VerifyRecoveryResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/recovery-verifications/verify", request_body = VerifyRecoveryRequest, responses((status = 200, body = VerifyRecoveryResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
 async fn verify_recovery(
     State(state): State<AppState>,
     request: PublicRequest,

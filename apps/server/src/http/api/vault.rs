@@ -16,7 +16,7 @@ use crate::{
     config::db_pool,
     error::{AppError, AppErrorCode},
     integrations::storage::PresignedUploadResult,
-    services::vault::{self, *},
+    services::vault,
     AppState, NotifySyncExt,
 };
 
@@ -167,6 +167,31 @@ struct BulkImportBody {
     items: Vec<BulkImportItemInput>,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BulkImportItemInput {
+    item_id: String,
+    category: String,
+    favorite: Option<bool>,
+    #[schema(max_length = 1048576)]
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: Option<String>,
+}
+
+impl From<BulkImportItemInput> for vault::BulkImportItemInput {
+    fn from(value: BulkImportItemInput) -> Self {
+        Self {
+            item_id: value.item_id,
+            category: value.category,
+            favorite: value.favorite,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 #[into_params(parameter_in = Query, rename_all = "camelCase")]
@@ -211,8 +236,8 @@ struct AllItemResponse {
     vault: Option<VaultSummaryResponse>,
 }
 
-impl From<CursorPage<VaultItemWithVaultResponse>> for AllItemsResponse {
-    fn from(page: CursorPage<VaultItemWithVaultResponse>) -> Self {
+impl From<CursorPage<vault::VaultItemWithVaultResponse>> for AllItemsResponse {
+    fn from(page: CursorPage<vault::VaultItemWithVaultResponse>) -> Self {
         Self {
             items: page.items.into_iter().map(AllItemResponse::from).collect(),
             next_cursor: page.next_cursor,
@@ -221,8 +246,8 @@ impl From<CursorPage<VaultItemWithVaultResponse>> for AllItemsResponse {
     }
 }
 
-impl From<CursorPage<DeletedVaultItemWithVaultResponse>> for AllItemsResponse {
-    fn from(page: CursorPage<DeletedVaultItemWithVaultResponse>) -> Self {
+impl From<CursorPage<vault::DeletedVaultItemWithVaultResponse>> for AllItemsResponse {
+    fn from(page: CursorPage<vault::DeletedVaultItemWithVaultResponse>) -> Self {
         Self {
             items: page.items.into_iter().map(AllItemResponse::from).collect(),
             next_cursor: page.next_cursor,
@@ -231,8 +256,8 @@ impl From<CursorPage<DeletedVaultItemWithVaultResponse>> for AllItemsResponse {
     }
 }
 
-impl From<VaultItemWithVaultResponse> for AllItemResponse {
-    fn from(value: VaultItemWithVaultResponse) -> Self {
+impl From<vault::VaultItemWithVaultResponse> for AllItemResponse {
+    fn from(value: vault::VaultItemWithVaultResponse) -> Self {
         Self {
             id: value.id,
             vault_id: value.vault_id,
@@ -246,14 +271,14 @@ impl From<VaultItemWithVaultResponse> for AllItemResponse {
             created_at: value.created_at,
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
-            attachments: Some(value.attachments),
-            vault: value.vault,
+            attachments: Some(value.attachments.into_iter().map(Into::into).collect()),
+            vault: value.vault.map(Into::into),
         }
     }
 }
 
-impl From<DeletedVaultItemWithVaultResponse> for AllItemResponse {
-    fn from(value: DeletedVaultItemWithVaultResponse) -> Self {
+impl From<vault::DeletedVaultItemWithVaultResponse> for AllItemResponse {
+    fn from(value: vault::DeletedVaultItemWithVaultResponse) -> Self {
         Self {
             id: value.id,
             vault_id: value.vault_id,
@@ -268,7 +293,7 @@ impl From<DeletedVaultItemWithVaultResponse> for AllItemResponse {
             updated_at: value.updated_at,
             deleted_at: value.deleted_at,
             attachments: None,
-            vault: value.vault,
+            vault: value.vault.map(Into::into),
         }
     }
 }
@@ -351,6 +376,553 @@ struct RemoveVaultMemberBody {
     key_rotation: VaultKeyRotationInput,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RotationMemberKeyInput {
+    user_id: String,
+    encrypted_vault_key: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RotationReEncryptedItemInput {
+    item_id: String,
+    encrypted_data: String,
+    encryption_iv: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct VaultKeyRotationInput {
+    #[schema(max_items = 100)]
+    member_keys: Vec<RotationMemberKeyInput>,
+    #[schema(max_items = 100)]
+    re_encrypted_items: Vec<RotationReEncryptedItemInput>,
+}
+
+impl From<VaultKeyRotationInput> for vault::VaultKeyRotationInput {
+    fn from(value: VaultKeyRotationInput) -> Self {
+        Self {
+            member_keys: value
+                .member_keys
+                .into_iter()
+                .map(|key| vault::RotationMemberKeyInput {
+                    user_id: key.user_id,
+                    encrypted_vault_key: key.encrypted_vault_key,
+                })
+                .collect(),
+            re_encrypted_items: value
+                .re_encrypted_items
+                .into_iter()
+                .map(|item| vault::RotationReEncryptedItemInput {
+                    item_id: item.item_id,
+                    encrypted_data: item.encrypted_data,
+                    encryption_iv: item.encryption_iv,
+                })
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct SuccessResponse {
+    success: bool,
+}
+
+impl From<vault::SuccessResponse> for SuccessResponse {
+    fn from(value: vault::SuccessResponse) -> Self {
+        Self {
+            success: value.success,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct CreateVaultResponse {
+    vault_id: String,
+}
+
+impl From<vault::CreateVaultResponse> for CreateVaultResponse {
+    fn from(value: vault::CreateVaultResponse) -> Self {
+        Self {
+            vault_id: value.vault_id,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct UpdateVaultResponse {
+    id: String,
+    name: String,
+    icon: Option<String>,
+    image_url: Option<String>,
+}
+
+impl From<vault::UpdateVaultResponse> for UpdateVaultResponse {
+    fn from(value: vault::UpdateVaultResponse) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            icon: value.icon,
+            image_url: value.image_url,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct ConvertVaultTypeResponse {
+    success: bool,
+    vault_id: String,
+    previous_type: String,
+    new_type: String,
+}
+
+impl From<vault::ConvertVaultTypeResponse> for ConvertVaultTypeResponse {
+    fn from(value: vault::ConvertVaultTypeResponse) -> Self {
+        Self {
+            success: value.success,
+            vault_id: value.vault_id,
+            previous_type: value.previous_type,
+            new_type: value.new_type,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct CreateItemResponse {
+    item_id: String,
+    id: String,
+}
+
+impl From<vault::CreateItemResponse> for CreateItemResponse {
+    fn from(value: vault::CreateItemResponse) -> Self {
+        Self {
+            item_id: value.item_id,
+            id: value.id,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct BulkImportItemsResponse {
+    success: bool,
+    imported_count: usize,
+    item_ids: Vec<String>,
+}
+
+impl From<vault::BulkImportItemsResponse> for BulkImportItemsResponse {
+    fn from(value: vault::BulkImportItemsResponse) -> Self {
+        Self {
+            success: value.success,
+            imported_count: value.imported_count,
+            item_ids: value.item_ids,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct UpdateItemResponse {
+    success: bool,
+    version: i32,
+}
+
+impl From<vault::UpdateItemResponse> for UpdateItemResponse {
+    fn from(value: vault::UpdateItemResponse) -> Self {
+        Self {
+            success: value.success,
+            version: value.version,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct CreateAttachmentResponse {
+    attachment_id: String,
+}
+
+impl From<vault::CreateAttachmentResponse> for CreateAttachmentResponse {
+    fn from(value: vault::CreateAttachmentResponse) -> Self {
+        Self {
+            attachment_id: value.attachment_id,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultListEntryResponse {
+    id: String,
+    name: String,
+    vault_type: String,
+    icon: Option<String>,
+    image_url: Option<String>,
+    role: String,
+    #[schema(pattern = r"^(0|[1-9][0-9]*)$")]
+    item_count: String,
+    encrypted_vault_key: String,
+    created_by_id: String,
+}
+
+impl From<vault::VaultListEntryResponse> for VaultListEntryResponse {
+    fn from(value: vault::VaultListEntryResponse) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            vault_type: value.vault_type,
+            icon: value.icon,
+            image_url: value.image_url,
+            role: value.role,
+            item_count: value.item_count,
+            encrypted_vault_key: value.encrypted_vault_key,
+            created_by_id: value.created_by_id,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultAttachmentResponse {
+    id: String,
+    item_id: String,
+    vault_id: String,
+    storage_key: String,
+    encrypted_name: String,
+    encrypted_content_type: String,
+    encryption_iv: String,
+    encrypted_content_type_iv: Option<String>,
+    encryption_algorithm: String,
+    file_size: i32,
+    uploaded_by: Option<String>,
+    created_at: String,
+}
+
+impl From<vault::VaultAttachmentResponse> for VaultAttachmentResponse {
+    fn from(value: vault::VaultAttachmentResponse) -> Self {
+        Self {
+            id: value.id,
+            item_id: value.item_id,
+            vault_id: value.vault_id,
+            storage_key: value.storage_key,
+            encrypted_name: value.encrypted_name,
+            encrypted_content_type: value.encrypted_content_type,
+            encryption_iv: value.encryption_iv,
+            encrypted_content_type_iv: value.encrypted_content_type_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            file_size: value.file_size,
+            uploaded_by: value.uploaded_by,
+            created_at: value.created_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultSummaryResponse {
+    id: String,
+    name: String,
+    vault_type: String,
+    icon: Option<String>,
+    image_url: Option<String>,
+    encrypted_vault_key: String,
+    role: String,
+}
+
+impl From<vault::VaultSummaryResponse> for VaultSummaryResponse {
+    fn from(value: vault::VaultSummaryResponse) -> Self {
+        Self {
+            id: value.id,
+            name: value.name,
+            vault_type: value.vault_type,
+            icon: value.icon,
+            image_url: value.image_url,
+            encrypted_vault_key: value.encrypted_vault_key,
+            role: value.role,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultItemResponse {
+    id: String,
+    vault_id: String,
+    category: String,
+    favorite: bool,
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: String,
+    version: i32,
+    last_modified_by: Option<String>,
+    created_at: String,
+    updated_at: String,
+    deleted_at: Option<String>,
+}
+
+impl From<vault::VaultItemResponse> for VaultItemResponse {
+    fn from(value: vault::VaultItemResponse) -> Self {
+        Self {
+            id: value.id,
+            vault_id: value.vault_id,
+            category: value.category,
+            favorite: value.favorite,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            version: value.version,
+            last_modified_by: value.last_modified_by,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultItemDetailsResponse {
+    id: String,
+    vault_id: String,
+    category: String,
+    favorite: bool,
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: String,
+    version: i32,
+    last_modified_by: Option<String>,
+    created_at: String,
+    updated_at: String,
+    deleted_at: Option<String>,
+    attachments: Vec<VaultAttachmentResponse>,
+}
+
+impl From<vault::VaultItemDetailsResponse> for VaultItemDetailsResponse {
+    fn from(value: vault::VaultItemDetailsResponse) -> Self {
+        Self {
+            id: value.id,
+            vault_id: value.vault_id,
+            category: value.category,
+            favorite: value.favorite,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            version: value.version,
+            last_modified_by: value.last_modified_by,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+            attachments: value.attachments.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct DeletedVaultItemWithVaultResponse {
+    id: String,
+    vault_id: String,
+    category: String,
+    favorite: bool,
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: String,
+    version: i32,
+    last_modified_by: Option<String>,
+    created_at: String,
+    updated_at: String,
+    deleted_at: Option<String>,
+    vault: Option<VaultSummaryResponse>,
+}
+
+impl From<vault::DeletedVaultItemWithVaultResponse> for DeletedVaultItemWithVaultResponse {
+    fn from(value: vault::DeletedVaultItemWithVaultResponse) -> Self {
+        Self {
+            id: value.id,
+            vault_id: value.vault_id,
+            category: value.category,
+            favorite: value.favorite,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            version: value.version,
+            last_modified_by: value.last_modified_by,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+            vault: value.vault.map(Into::into),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultMemberResponse {
+    user_id: String,
+    name: String,
+    email: String,
+    role: String,
+}
+
+impl From<vault::VaultMemberResponse> for VaultMemberResponse {
+    fn from(value: vault::VaultMemberResponse) -> Self {
+        Self {
+            user_id: value.user_id,
+            name: value.name,
+            email: value.email,
+            role: value.role,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultAvailableMemberResponse {
+    user_id: String,
+    name: String,
+    email: String,
+    public_key: String,
+}
+
+impl From<vault::VaultAvailableMemberResponse> for VaultAvailableMemberResponse {
+    fn from(value: vault::VaultAvailableMemberResponse) -> Self {
+        Self {
+            user_id: value.user_id,
+            name: value.name,
+            email: value.email,
+            public_key: value.public_key,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultRotationMemberResponse {
+    user_id: String,
+    public_key: String,
+    role: String,
+}
+
+impl From<vault::VaultRotationMemberResponse> for VaultRotationMemberResponse {
+    fn from(value: vault::VaultRotationMemberResponse) -> Self {
+        Self {
+            user_id: value.user_id,
+            public_key: value.public_key,
+            role: value.role,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultRotationItemResponse {
+    id: String,
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: String,
+    version: i32,
+    last_modified_by: Option<String>,
+}
+
+impl From<vault::VaultRotationItemResponse> for VaultRotationItemResponse {
+    fn from(value: vault::VaultRotationItemResponse) -> Self {
+        Self {
+            id: value.id,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            version: value.version,
+            last_modified_by: value.last_modified_by,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultRotationDataResponse {
+    key_version: i32,
+    members: Vec<VaultRotationMemberResponse>,
+    items: Vec<VaultRotationItemResponse>,
+}
+
+impl From<vault::VaultRotationDataResponse> for VaultRotationDataResponse {
+    fn from(value: vault::VaultRotationDataResponse) -> Self {
+        Self {
+            key_version: value.key_version,
+            members: value.members.into_iter().map(Into::into).collect(),
+            items: value.items.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct VaultKeyRotationSummaryResponse {
+    id: String,
+    new_key_version: i32,
+    items_re_encrypted: usize,
+    members_updated: usize,
+}
+
+impl From<vault::VaultKeyRotationSummaryResponse> for VaultKeyRotationSummaryResponse {
+    fn from(value: vault::VaultKeyRotationSummaryResponse) -> Self {
+        Self {
+            id: value.id,
+            new_key_version: value.new_key_version,
+            items_re_encrypted: value.items_re_encrypted,
+            members_updated: value.members_updated,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct RemoveVaultMemberResponse {
+    success: bool,
+    key_rotation: VaultKeyRotationSummaryResponse,
+}
+
+impl From<vault::RemoveVaultMemberResponse> for RemoveVaultMemberResponse {
+    fn from(value: vault::RemoveVaultMemberResponse) -> Self {
+        Self {
+            success: value.success,
+            key_rotation: value.key_rotation.into(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentDownloadResponse {
+    download_url: String,
+    encrypted_name: String,
+    encrypted_content_type: String,
+    encryption_iv: String,
+    encrypted_content_type_iv: String,
+    encryption_algorithm: String,
+    file_size: i32,
+}
+
+impl From<vault::AttachmentDownloadResponse> for AttachmentDownloadResponse {
+    fn from(value: vault::AttachmentDownloadResponse) -> Self {
+        Self {
+            download_url: value.download_url,
+            encrypted_name: value.encrypted_name,
+            encrypted_content_type: value.encrypted_content_type,
+            encryption_iv: value.encryption_iv,
+            encrypted_content_type_iv: value.encrypted_content_type_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            file_size: value.file_size,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 struct PresignedUploadResponse {
@@ -383,8 +955,8 @@ struct VaultDetailsResponseDto {
     created_at: String,
 }
 
-impl From<VaultDetailsResponse> for VaultDetailsResponseDto {
-    fn from(value: VaultDetailsResponse) -> Self {
+impl From<vault::VaultDetailsResponse> for VaultDetailsResponseDto {
+    fn from(value: vault::VaultDetailsResponse) -> Self {
         Self {
             id: value.id,
             name: value.name,
@@ -407,8 +979,8 @@ struct VaultStatsResponseDto {
     item_count: DecimalString,
 }
 
-impl From<VaultStatsResponse> for VaultStatsResponseDto {
-    fn from(value: VaultStatsResponse) -> Self {
+impl From<vault::VaultStatsResponse> for VaultStatsResponseDto {
+    fn from(value: vault::VaultStatsResponse) -> Self {
         Self {
             team_count: value.team_count,
             vault_count: value.vault_count.into(),
@@ -434,8 +1006,8 @@ struct ItemResponseDto {
     deleted_at: Option<String>,
 }
 
-impl From<VaultItemDetailsResponse> for ItemResponseDto {
-    fn from(value: VaultItemDetailsResponse) -> Self {
+impl From<vault::VaultItemDetailsResponse> for ItemResponseDto {
+    fn from(value: vault::VaultItemDetailsResponse) -> Self {
         Self {
             id: value.id,
             vault_id: value.vault_id,
@@ -636,6 +1208,7 @@ async fn list_vaults(
 ) -> Result<Json<CursorPage<VaultListEntryResponse>>, ApiError> {
     let pool = db_pool(&state)?;
     let values = vault::list_vaults(pool, &auth.session.user_id).await?;
+    let values: Vec<VaultListEntryResponse> = values.into_iter().map(Into::into).collect();
     Ok(Json(page_values(
         values,
         &page,
@@ -654,9 +1227,13 @@ async fn get_vault(
 ) -> Result<Json<VaultDetailsResponseDto>, ApiError> {
     let pool = db_pool(&state)?;
     Ok(Json(
-        vault::get_vault(pool, &auth.session.user_id, VaultIdInput { vault_id })
-            .await?
-            .into(),
+        vault::get_vault(
+            pool,
+            &auth.session.user_id,
+            vault::VaultIdInput { vault_id },
+        )
+        .await?
+        .into(),
     ))
 }
 
@@ -672,7 +1249,7 @@ async fn create_vault(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        CreateVaultInput {
+        vault::CreateVaultInput {
             vault_id: Some(vault_id),
             name: body.name,
             vault_type: body.vault_type,
@@ -684,7 +1261,7 @@ async fn create_vault(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(patch, path = "/vaults/{vaultId}", operation_id = "updateVault", tag = "vaults", params(("vaultId" = String, Path)), request_body = UpdateVaultBody, responses((status = 200, description = "Success", body = UpdateVaultResponse), VaultErrorResponses))]
@@ -702,7 +1279,7 @@ async fn update_vault(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        UpdateVaultInput {
+        vault::UpdateVaultInput {
             vault_id,
             name,
             icon,
@@ -712,7 +1289,7 @@ async fn update_vault(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(post, path = "/vaults/{vaultId}/type-conversions", operation_id = "convertVaultType", tag = "vaults", params(("vaultId" = String, Path)), request_body = ConvertVaultBody, responses((status = 200, description = "Success", body = ConvertVaultTypeResponse), VaultErrorResponses))]
@@ -727,7 +1304,7 @@ async fn convert_vault(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        ConvertVaultTypeInput {
+        vault::ConvertVaultTypeInput {
             vault_id,
             target_type: body.target_type,
             personal_encrypted_vault_key: body.personal_encrypted_vault_key,
@@ -736,7 +1313,7 @@ async fn convert_vault(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(delete, path = "/vaults/{vaultId}", operation_id = "deleteVault", tag = "vaults", params(("vaultId" = String, Path)), responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
@@ -750,11 +1327,11 @@ async fn delete_vault(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        VaultIdInput { vault_id },
+        vault::VaultIdInput { vault_id },
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(post, path = "/vaults/{vaultId}/image-uploads", operation_id = "createVaultImageUpload", tag = "vaults", params(("vaultId" = String, Path)), request_body = ImageUploadBody, responses((status = 200, description = "Success", body = PresignedUploadResponse), VaultErrorResponses))]
@@ -769,7 +1346,7 @@ async fn create_image_upload(
         vault::create_vault_image_upload(
             pool,
             &auth.session.user_id,
-            CreateVaultImageUploadInput {
+            vault::CreateVaultImageUploadInput {
                 vault_id: Some(vault_id),
                 file_name: body.file_name,
                 content_type: body.content_type,
@@ -795,13 +1372,14 @@ async fn list_items(
     let values = vault::list_vault_items_page(
         pool,
         &auth.session.user_id,
-        VaultIdInput {
+        vault::VaultIdInput {
             vault_id: vault_id.clone(),
         },
         cursor,
         limit,
     )
     .await?;
+    let values: Vec<VaultItemDetailsResponse> = values.into_iter().map(Into::into).collect();
     Ok(Json(page_prefetched(
         values,
         &page,
@@ -900,6 +1478,8 @@ async fn list_all_trashed_items(
         query_limit(&page)?,
     )
     .await?;
+    let values: Vec<DeletedVaultItemWithVaultResponse> =
+        values.into_iter().map(Into::into).collect();
     Ok(Json(page_prefetched(
         values,
         &page,
@@ -931,13 +1511,14 @@ async fn list_deleted_items(
     let values = vault::list_deleted_vault_items_page(
         pool,
         &auth.session.user_id,
-        VaultIdInput {
+        vault::VaultIdInput {
             vault_id: vault_id.clone(),
         },
         cursor,
         query_limit(&page)?,
     )
     .await?;
+    let values: Vec<VaultItemResponse> = values.into_iter().map(Into::into).collect();
     Ok(Json(page_prefetched(
         values,
         &page,
@@ -962,7 +1543,7 @@ async fn get_item(
 ) -> Result<Response, ApiError> {
     let pool = db_pool(&state)?;
     let item: ItemResponseDto =
-        vault::get_vault_item(pool, &auth.session.user_id, ItemIdInput { item_id })
+        vault::get_vault_item(pool, &auth.session.user_id, vault::ItemIdInput { item_id })
             .await?
             .into();
     let version = item.version;
@@ -981,7 +1562,7 @@ async fn create_item(
     let result = vault::create_vault_item(
         pool,
         &auth.session.user_id,
-        CreateItemInput {
+        vault::CreateItemInput {
             item_id: Some(item_id),
             vault_id,
             category: body.category,
@@ -993,7 +1574,7 @@ async fn create_item(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(post, path = "/vaults/{vaultId}/item-imports", operation_id = "bulkImportItems", tag = "items", params(("vaultId" = String, Path)), request_body = BulkImportBody, responses((status = 200, description = "Success", body = BulkImportItemsResponse), VaultErrorResponses))]
@@ -1008,15 +1589,15 @@ async fn bulk_import_items(
     let result = vault::bulk_import_vault_items(
         pool,
         &auth.session.user_id,
-        BulkImportItemsInput {
+        vault::BulkImportItemsInput {
             vault_id,
             client_id: request_client_id(&auth),
-            items: body.items,
+            items: body.items.into_iter().map(Into::into).collect(),
         },
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body = UpdateItemBody, responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
@@ -1052,7 +1633,7 @@ async fn update_item(
             let result = vault::update_vault_item(
                 &operation_pool,
                 &operation_principal_id,
-                UpdateItemInput {
+                vault::UpdateItemInput {
                     item_id,
                     encrypted_data,
                     encryption_iv,
@@ -1065,7 +1646,7 @@ async fn update_item(
             .notify_sync(&state)
             .map_err(item_mutation_error)?;
             let version = result.version;
-            versioned_json(result, version)
+            versioned_json(UpdateItemResponse::from(result), version)
         },
     )
     .await
@@ -1096,7 +1677,7 @@ async fn set_favorite(
             let result = vault::toggle_vault_favorite(
                 &operation_pool,
                 &operation_principal_id,
-                ToggleFavoriteInput {
+                vault::ToggleFavoriteInput {
                     item_id,
                     favorite: body.favorite,
                     expected_version: Some(expected_version),
@@ -1105,7 +1686,7 @@ async fn set_favorite(
             .await
             .notify_sync(&state)
             .map_err(item_mutation_error)?;
-            versioned_json(result, expected_version + 1)
+            versioned_json(SuccessResponse::from(result), expected_version + 1)
         },
     )
     .await
@@ -1123,7 +1704,7 @@ async fn delete_item(
     let result = vault::delete_vault_item(
         pool,
         &auth.session.user_id,
-        ItemClientInput {
+        vault::ItemClientInput {
             item_id,
             expected_version: Some(expected_version),
             client_id: request_client_id(&auth),
@@ -1132,7 +1713,7 @@ async fn delete_item(
     .await
     .notify_sync(&state)
     .map_err(item_mutation_error)?;
-    versioned_json(result, expected_version + 1)
+    versioned_json(SuccessResponse::from(result), expected_version + 1)
 }
 
 #[utoipa::path(post, path = "/items/{itemId}/restore", operation_id = "restoreItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when preconditions match")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
@@ -1160,7 +1741,7 @@ async fn restore_item(
             let result = vault::restore_vault_item(
                 &operation_pool,
                 &operation_principal_id,
-                ItemClientInput {
+                vault::ItemClientInput {
                     item_id,
                     expected_version: Some(expected_version),
                     client_id,
@@ -1169,7 +1750,7 @@ async fn restore_item(
             .await
             .notify_sync(&state)
             .map_err(item_mutation_error)?;
-            versioned_json(result, expected_version + 1)
+            versioned_json(SuccessResponse::from(result), expected_version + 1)
         },
     )
     .await
@@ -1202,7 +1783,7 @@ async fn move_item(
             let result = vault::move_vault_item(
                 &operation_pool,
                 &operation_principal_id,
-                MoveItemInput {
+                vault::MoveItemInput {
                     item_id,
                     source_vault_id: body.source_vault_id,
                     target_vault_id: body.target_vault_id,
@@ -1217,7 +1798,7 @@ async fn move_item(
             .notify_sync(&state)
             .map_err(item_mutation_error)?;
             let version = result.version;
-            versioned_json(result, version)
+            versioned_json(UpdateItemResponse::from(result), version)
         },
     )
     .await
@@ -1235,7 +1816,7 @@ async fn permanently_delete_item(
     let result = vault::permanently_delete_vault_item(
         pool,
         &auth.session.user_id,
-        ItemClientInput {
+        vault::ItemClientInput {
             item_id,
             expected_version: Some(expected_version),
             client_id: request_client_id(&auth),
@@ -1244,7 +1825,7 @@ async fn permanently_delete_item(
     .await
     .notify_sync(&state)
     .map_err(item_mutation_error)?;
-    versioned_json(result, expected_version + 1)
+    versioned_json(SuccessResponse::from(result), expected_version + 1)
 }
 
 #[utoipa::path(get, path = "/vault-stats", operation_id = "getVaultStats", tag = "vaults", responses((status = 200, description = "Success", body = VaultStatsResponseDto), VaultErrorResponses))]
@@ -1272,7 +1853,7 @@ async fn create_attachment_upload(
         vault::create_vault_attachment_upload(
             pool,
             &auth.session.user_id,
-            CreateAttachmentUploadInput {
+            vault::CreateAttachmentUploadInput {
                 item_id,
                 file_name: body.file_name,
                 content_type: body.content_type,
@@ -1296,7 +1877,7 @@ async fn create_attachment(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        CreateAttachmentInput {
+        vault::CreateAttachmentInput {
             item_id,
             storage_key: body.storage_key,
             encrypted_name: body.encrypted_name,
@@ -1309,7 +1890,7 @@ async fn create_attachment(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(get, path = "/items/{itemId}/attachments", operation_id = "listAttachments", tag = "attachments", params(("itemId" = String, Path), PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultAttachmentResponse>), VaultErrorResponses))]
@@ -1326,13 +1907,14 @@ async fn list_attachments(
     let values = vault::list_vault_attachments_page(
         pool,
         &auth.session.user_id,
-        ItemIdInput {
+        vault::ItemIdInput {
             item_id: item_id.clone(),
         },
         cursor,
         query_limit(&page)?,
     )
     .await?;
+    let values: Vec<VaultAttachmentResponse> = values.into_iter().map(Into::into).collect();
     Ok(Json(page_prefetched(
         values,
         &page,
@@ -1354,9 +1936,10 @@ async fn create_attachment_download_url(
         vault::get_attachment_download_url(
             pool,
             &auth.session.user_id,
-            AttachmentIdInput { attachment_id },
+            vault::AttachmentIdInput { attachment_id },
         )
-        .await?,
+        .await?
+        .into(),
     ))
 }
 
@@ -1372,7 +1955,7 @@ async fn update_attachment(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        UpdateAttachmentInput {
+        vault::UpdateAttachmentInput {
             attachment_id,
             encrypted_name: body.encrypted_name,
             encryption_iv: body.encryption_iv,
@@ -1381,7 +1964,7 @@ async fn update_attachment(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(delete, path = "/attachments/{attachmentId}", operation_id = "deleteAttachment", tag = "attachments", params(("attachmentId" = String, Path)), responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
@@ -1395,11 +1978,11 @@ async fn delete_attachment(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        AttachmentIdInput { attachment_id },
+        vault::AttachmentIdInput { attachment_id },
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(get, path = "/vaults/{vaultId}/members", operation_id = "listVaultMembers", tag = "vault-members", params(("vaultId" = String, Path), PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultMemberResponse>), VaultErrorResponses))]
@@ -1413,11 +1996,12 @@ async fn list_members(
     let values = vault::member_handlers::list_vault_members(
         pool,
         &auth.session.user_id,
-        VaultIdInput {
+        vault::VaultIdInput {
             vault_id: vault_id.clone(),
         },
     )
     .await?;
+    let values: Vec<VaultMemberResponse> = values.into_iter().map(Into::into).collect();
     Ok(Json(page_values(
         values,
         &page,
@@ -1439,11 +2023,12 @@ async fn available_team_members(
     let values = vault::member_handlers::available_team_members(
         pool,
         &auth.session.user_id,
-        VaultIdInput {
+        vault::VaultIdInput {
             vault_id: vault_id.clone(),
         },
     )
     .await?;
+    let values: Vec<VaultAvailableMemberResponse> = values.into_iter().map(Into::into).collect();
     Ok(Json(page_values(
         values,
         &page,
@@ -1466,7 +2051,7 @@ async fn add_member(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        AddVaultMemberInput {
+        vault::AddVaultMemberInput {
             vault_id,
             user_id,
             role: body.role,
@@ -1476,7 +2061,7 @@ async fn add_member(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(patch, path = "/vaults/{vaultId}/members/{userId}", operation_id = "updateVaultMemberRole", tag = "vault-members", params(("vaultId" = String, Path), ("userId" = String, Path)), request_body = UpdateVaultMemberRoleBody, responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
@@ -1490,7 +2075,7 @@ async fn update_member_role(
     let result = vault::member_handlers::update_vault_member_role(
         pool,
         &auth.session.user_id,
-        UpdateVaultMemberRoleInput {
+        vault::UpdateVaultMemberRoleInput {
             vault_id,
             user_id,
             role: body.role,
@@ -1498,7 +2083,7 @@ async fn update_member_role(
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 #[utoipa::path(get, path = "/vaults/{vaultId}/members/{userId}/removal-rotation-data", operation_id = "getVaultMemberRemovalRotationData", tag = "vault-members", params(("vaultId" = String, Path), ("userId" = String, Path)), responses((status = 200, description = "Success", body = VaultRotationDataResponse), VaultErrorResponses))]
@@ -1512,12 +2097,13 @@ async fn get_rotation_data(
         vault::member_handlers::get_vault_rotation_data(
             pool,
             &auth.session.user_id,
-            GetVaultRotationDataInput {
+            vault::GetVaultRotationDataInput {
                 vault_id,
                 exclude_user_id: user_id,
             },
         )
-        .await?,
+        .await?
+        .into(),
     ))
 }
 
@@ -1533,16 +2119,16 @@ async fn remove_member(
         pool,
         &auth.session.user_id,
         request_client_id(&auth).as_deref(),
-        RemoveVaultMemberInput {
+        vault::RemoveVaultMemberInput {
             vault_id,
             user_id,
-            key_rotation: body.key_rotation,
+            key_rotation: body.key_rotation.into(),
             client_id: request_client_id(&auth),
         },
     )
     .await
     .notify_sync(&state)?;
-    Ok(Json(result))
+    Ok(Json(result.into()))
 }
 
 pub(crate) fn router() -> OpenApiRouter<AppState> {
@@ -1599,16 +2185,17 @@ mod tests {
         response::IntoResponse,
     };
     use serde_json::json;
+    use utoipa::PartialSchema;
 
     use super::{
         check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
-        ApiJsonBytes, BulkImportBody, FavoriteBody, UpdateVaultBody, VaultStatsResponseDto,
+        ApiJsonBytes, BulkImportBody, BulkImportItemInput, FavoriteBody, RemoveVaultMemberBody,
+        UpdateVaultBody, VaultItemDetailsResponse, VaultStatsResponseDto,
     };
     use crate::{
         http::api::dto::{CursorPage, PatchField},
         services::vault::{
-            BulkImportItemInput, DeletedVaultItemWithVaultResponse, VaultItemWithVaultResponse,
-            VaultStatsResponse,
+            DeletedVaultItemWithVaultResponse, VaultItemWithVaultResponse, VaultStatsResponse,
         },
     };
 
@@ -1668,6 +2255,72 @@ mod tests {
             items: vec![item("a".repeat(1_048_577))],
         })
         .is_err());
+    }
+
+    #[test]
+    fn vault_request_dtos_reject_unknown_nested_fields() {
+        assert!(serde_json::from_value::<BulkImportBody>(json!({
+            "items": [{
+                "itemId": "item_test",
+                "category": "login",
+                "encryptedData": "ciphertext",
+                "encryptionIv": "iv",
+                "unknown": true
+            }]
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<RemoveVaultMemberBody>(json!({
+            "keyRotation": {
+                "memberKeys": [{
+                    "userId": "user_test",
+                    "encryptedVaultKey": "wrapped",
+                    "unknown": true
+                }],
+                "reEncryptedItems": []
+            }
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn vault_item_wire_dto_preserves_service_serialization_and_schema() {
+        let service = crate::services::vault::VaultItemDetailsResponse {
+            id: "item_test".to_string(),
+            vault_id: "vault_test".to_string(),
+            category: "login".to_string(),
+            favorite: true,
+            encrypted_data: "ciphertext".to_string(),
+            encryption_iv: "iv".to_string(),
+            encryption_algorithm: "aes-gcm".to_string(),
+            version: 7,
+            last_modified_by: Some("user_test".to_string()),
+            created_at: "2026-08-10T00:00:00Z".to_string(),
+            updated_at: "2026-08-10T00:01:00Z".to_string(),
+            deleted_at: None,
+            attachments: vec![crate::services::vault::VaultAttachmentResponse {
+                id: "attachment_test".to_string(),
+                item_id: "item_test".to_string(),
+                vault_id: "vault_test".to_string(),
+                storage_key: "attachments/test".to_string(),
+                encrypted_name: "name".to_string(),
+                encrypted_content_type: "type".to_string(),
+                encryption_iv: "attachment-iv".to_string(),
+                encrypted_content_type_iv: Some("content-type-iv".to_string()),
+                encryption_algorithm: "aes-gcm".to_string(),
+                file_size: 128,
+                uploaded_by: Some("user_test".to_string()),
+                created_at: "2026-08-10T00:00:00Z".to_string(),
+            }],
+        };
+        let expected_json = serde_json::to_value(&service).unwrap();
+        let wire = VaultItemDetailsResponse::from(service);
+
+        assert_eq!(serde_json::to_value(wire).unwrap(), expected_json);
+        assert_eq!(
+            serde_json::to_value(VaultItemDetailsResponse::schema()).unwrap(),
+            serde_json::to_value(crate::services::vault::VaultItemDetailsResponse::schema())
+                .unwrap()
+        );
     }
 
     #[test]

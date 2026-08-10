@@ -2578,10 +2578,7 @@ export interface components {
             readonly encryptionIv: string;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
-            /**
-             * Format: int32
-             * @description The client rebuilds this item's AAD from these; rotation does not change either.
-             */
+            /** Format: int32 */
             readonly version: number;
         };
         readonly VaultRotationMemberResponse: {
@@ -3202,6 +3199,8 @@ export interface operations {
             };
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -3251,6 +3250,8 @@ export interface operations {
             };
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -3392,6 +3393,8 @@ export interface operations {
             };
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -3439,6 +3442,8 @@ export interface operations {
             };
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -3515,6 +3520,8 @@ export interface operations {
             };
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -3562,6 +3569,8 @@ export interface operations {
             };
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -3635,6 +3644,8 @@ export interface operations {
             /** @description Signup rate limit exceeded */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5772,6 +5783,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5872,6 +5885,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5965,6 +5980,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6058,6 +6075,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6155,6 +6174,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6252,6 +6273,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6345,6 +6368,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6438,6 +6463,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6531,6 +6558,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6816,6 +6845,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6909,6 +6940,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7058,6 +7091,8 @@ export interface operations {
             /** @description Sync unavailable */
             readonly 503: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7144,6 +7179,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7235,6 +7272,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7328,6 +7367,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7421,6 +7462,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7518,6 +7561,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7615,6 +7660,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7711,6 +7758,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7811,6 +7860,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -7905,6 +7956,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8002,6 +8055,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8099,6 +8154,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8192,6 +8249,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8288,6 +8347,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8386,6 +8447,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8480,6 +8543,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8574,6 +8639,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8670,6 +8737,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9294,6 +9363,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9387,6 +9458,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9480,6 +9553,8 @@ export interface operations {
             /** @description Rate limited */
             readonly 429: {
                 headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {

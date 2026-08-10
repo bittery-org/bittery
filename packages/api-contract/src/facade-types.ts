@@ -88,8 +88,7 @@ export type ConvertVaultResponse = Schema<"ConvertVaultTypeResponse">;
 export type BulkImportInput = Schema<"BulkImportBody">;
 export type BulkImportResponse = Schema<"BulkImportItemsResponse">;
 
-export type VaultItem =
-	Schema<"CursorPage_VaultItemWithVaultResponse">["items"][number];
+export type VaultItem = Schema<"AllItemsResponse">["items"][number];
 export type VaultItemDetails = Schema<"VaultItemDetailsResponse">;
 export type DeletedVaultItem = Schema<"DeletedVaultItemWithVaultResponse">;
 export type CreateItemInput = Schema<"CreateItemBody">;

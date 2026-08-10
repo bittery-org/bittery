@@ -8,10 +8,33 @@ use crate::error::{AppError, AppErrorCode};
 
 use super::dto::ProblemDetails;
 
+const RATE_LIMIT_RETRY_AFTER_SECONDS: u32 = 60;
+const TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS: u32 = 1;
+pub(crate) const MAX_RETRY_AFTER_SECONDS: u32 = 86_400;
+
+#[derive(Clone, Copy, Debug)]
+struct RetryAfter {
+    seconds: u32,
+}
+
+impl RetryAfter {
+    fn seconds(seconds: u32) -> Self {
+        Self {
+            seconds: seconds.clamp(1, MAX_RETRY_AFTER_SECONDS),
+        }
+    }
+
+    fn header_value(self) -> HeaderValue {
+        HeaderValue::from_str(&self.seconds.to_string())
+            .expect("bounded retry delay should always be a valid header value")
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct ApiError {
     status: StatusCode,
     problem: ProblemDetails,
+    retry_after: Option<RetryAfter>,
 }
 
 impl ApiError {
@@ -95,6 +118,9 @@ impl ApiError {
             detail,
             true,
         )
+        .with_retry_after(RetryAfter::seconds(
+            TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS,
+        ))
     }
 
     pub(crate) fn unauthorized(detail: impl Into<String>) -> Self {
@@ -137,6 +163,7 @@ impl ApiError {
         let request_id = uuid::Uuid::new_v4().to_string();
         Self {
             status,
+            retry_after: None,
             problem: ProblemDetails {
                 problem_type: format!(
                     "https://bittery.com/problems/{}",
@@ -152,6 +179,11 @@ impl ApiError {
                 errors: Vec::new(),
             },
         }
+    }
+
+    fn with_retry_after(mut self, retry_after: RetryAfter) -> Self {
+        self.retry_after = Some(retry_after);
+        self
     }
 }
 
@@ -212,7 +244,12 @@ impl From<AppError> for ApiError {
             ),
         };
 
-        Self::new(status, code, title, detail, retryable)
+        let api_error = Self::new(status, code, title, detail, retryable);
+        if status == StatusCode::TOO_MANY_REQUESTS {
+            api_error.with_retry_after(RetryAfter::seconds(RATE_LIMIT_RETRY_AFTER_SECONDS))
+        } else {
+            api_error
+        }
     }
 }
 
@@ -227,10 +264,10 @@ impl IntoResponse for ApiError {
         if let Ok(value) = HeaderValue::from_str(&request_id) {
             response.headers_mut().insert("bittery-request-id", value);
         }
-        if self.status == StatusCode::SERVICE_UNAVAILABLE {
+        if let Some(retry_after) = self.retry_after {
             response
                 .headers_mut()
-                .insert("retry-after", HeaderValue::from_static("1"));
+                .insert("retry-after", retry_after.header_value());
         }
         response
     }
@@ -238,7 +275,11 @@ impl IntoResponse for ApiError {
 
 #[cfg(test)]
 mod tests {
-    use axum::{body::to_bytes, http::header::CONTENT_TYPE, response::IntoResponse};
+    use axum::{
+        body::to_bytes,
+        http::{header::CONTENT_TYPE, StatusCode},
+        response::IntoResponse,
+    };
     use serde_json::Value;
 
     use crate::error::AppError;
@@ -262,5 +303,40 @@ mod tests {
         .expect("problem body should be JSON");
         assert_eq!(body["code"], "INTERNAL_ERROR");
         assert!(!body.to_string().contains("database password"));
+    }
+
+    #[test]
+    fn rate_limits_and_temporary_unavailability_have_typed_retry_delays() {
+        let rate_limited =
+            super::ApiError::from(AppError::too_many_requests("slow down")).into_response();
+        assert_eq!(rate_limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(
+            rate_limited.headers()["retry-after"]
+                .to_str()
+                .unwrap()
+                .parse::<u32>()
+                .unwrap(),
+            super::RATE_LIMIT_RETRY_AFTER_SECONDS
+        );
+
+        let unavailable = super::ApiError::service_unavailable("BUSY", "try again").into_response();
+        assert_eq!(unavailable.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            unavailable.headers()["retry-after"]
+                .to_str()
+                .unwrap()
+                .parse::<u32>()
+                .unwrap(),
+            super::TEMPORARY_UNAVAILABLE_RETRY_AFTER_SECONDS
+        );
+    }
+
+    #[test]
+    fn retry_delays_are_bounded_for_safe_delta_seconds_headers() {
+        let minimum = super::RetryAfter::seconds(0);
+        let maximum = super::RetryAfter::seconds(u32::MAX);
+
+        assert_eq!(minimum.seconds, 1);
+        assert_eq!(maximum.seconds, super::MAX_RETRY_AFTER_SECONDS);
     }
 }
