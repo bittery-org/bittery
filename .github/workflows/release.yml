@@ -138,10 +138,13 @@ jobs:
         include:
           - platform: macos-latest
             target: aarch64-apple-darwin
+            bundle_config: bundle.macos.conf.json
           - platform: windows-latest
             target: x86_64-pc-windows-msvc
+            bundle_config: bundle.windows.conf.json
           - platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
+            bundle_config: bundle.linux.conf.json
     runs-on: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@v7
@@ -197,6 +200,9 @@ jobs:
           BITTERY_EXTENSION_ID=${{ vars.BITTERY_EXTENSION_ID || 'YOUR_PRODUCTION_EXTENSION_ID_HERE' }}
           EOF
 
+      - name: Build desktop native host
+        run: node apps/desktop/scripts/prepare-native-host.mjs ${{ matrix.target }}
+
       - name: Build desktop app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -204,7 +210,7 @@ jobs:
           BITTERY_EXTENSION_ID: ${{ vars.BITTERY_EXTENSION_ID || 'YOUR_PRODUCTION_EXTENSION_ID_HERE' }}
         with:
           projectPath: apps/desktop
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --config src-tauri/${{ matrix.bundle_config }}
 
       - name: Archive desktop artifacts
         shell: bash

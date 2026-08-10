@@ -5,13 +5,14 @@
 	"type": "module",
 	"scripts": {
 		"check-types": "tsc --noEmit",
+		"test": "node --test scripts/*.test.mjs",
 		"dev": "tauri dev",
 		"dev:vite": "vite",
 		"build:native-host:dev": "cd src-tauri && cargo build --bin bittery-native-host",
-		"build:app": "tsc && vite build && tauri build",
-		"build:pre": "cd src-tauri && cargo build --release --bin bittery-native-host",
+		"build:app": "node scripts/build-desktop.mjs",
+		"build:pre": "node scripts/prepare-native-host.mjs",
 		"build:prod": "BITTERY_EXTENSION_ID=$({ grep -h BITTERY_EXTENSION_ID .env.production 2>/dev/null || grep -h BITTERY_EXTENSION_ID .env.production.example; } | cut -d '=' -f2) pnpm build",
-		"build:release": "pnpm build:pre && pnpm build:app",
+		"build:release": "pnpm build:app",
 		"preview": "vite preview",
 		"tauri": "tauri"
 	},
