@@ -19,7 +19,7 @@ import {
 	useBiometricAuth,
 } from "../src/contexts/biometric-auth-context";
 import { useCredentialProviderSync } from "../src/hooks/use-credential-provider-sync";
-import { RpcProvider } from "../src/lib/rpc";
+import { ApiProvider } from "../src/lib/api";
 import { I18nProvider } from "../src/providers/i18n-provider";
 import { MobilePlatformProvider } from "../src/providers/platform-provider";
 import { initializeStorage } from "../src/services/storage";
@@ -117,7 +117,7 @@ export default function RootLayout() {
 		<GestureHandlerRootView style={{ flex: 1 }}>
 			<HeroUINativeProvider>
 				<SafeAreaProvider>
-					<RpcProvider>
+					<ApiProvider>
 						<I18nProvider>
 							<MobilePlatformProvider>
 								<AccountProvider>
@@ -127,7 +127,7 @@ export default function RootLayout() {
 								</AccountProvider>
 							</MobilePlatformProvider>
 						</I18nProvider>
-					</RpcProvider>
+					</ApiProvider>
 				</SafeAreaProvider>
 			</HeroUINativeProvider>
 		</GestureHandlerRootView>

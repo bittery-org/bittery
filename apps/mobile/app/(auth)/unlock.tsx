@@ -44,9 +44,9 @@ import {
 	useBottomInset,
 } from "@/components/ui";
 import { useAccount } from "@/contexts/account-context";
+import { useServerUrl } from "@/lib/api";
 import { resolveBiometricErrorMessage } from "@/lib/biometric-error-message";
 import { useBiometricType } from "@/lib/biometric-type";
-import { useServerUrl } from "@/lib/rpc";
 import { useI18n } from "@/providers/i18n-provider";
 import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/services/credential-provider-master-unlock-key";
 import { lifecycleDeps } from "@/services/lifecycle";

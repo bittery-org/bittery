@@ -1,5 +1,6 @@
 import "./styles.css";
-import { RpcProvider } from "@bittery/shared/rpc";
+import { ApiProvider } from "@bittery/shared/api";
+import type { AppApiClient } from "@bittery/shared/api-client";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { ThemeProvider } from "next-themes";
@@ -11,7 +12,7 @@ import {
 	peekViewItemIntent,
 } from "./lib/create-item-intent";
 import { setupMacOSResetMenu } from "./lib/macos-reset-menu";
-import { queryClient, rpc, rpcClient } from "./lib/providers";
+import { createDesktopApiClient, queryClient } from "./lib/providers";
 import { initializeStorage } from "./lib/storage";
 import { I18nProvider } from "./providers/i18n-provider";
 import { DesktopPlatformProvider } from "./providers/platform-provider";
@@ -21,12 +22,17 @@ import { ThemeSync } from "./providers/theme-sync";
 import { routeTree } from "./routeTree.gen";
 
 // Create a new router instance
-const router = createRouter({
-	routeTree,
-	scrollRestoration: true,
-	defaultPreloadStaleTime: 0,
-	context: { rpc, queryClient },
-});
+function createDesktopRouter(apiClient: AppApiClient) {
+	return createRouter({
+		routeTree,
+		scrollRestoration: true,
+		defaultPreloadStaleTime: 0,
+		context: { apiClient, queryClient },
+	});
+}
+
+type DesktopRouter = ReturnType<typeof createDesktopRouter>;
+let router: DesktopRouter;
 
 // Register the router instance for type safety
 declare module "@tanstack/react-router" {
@@ -38,6 +44,8 @@ declare module "@tanstack/react-router" {
 async function initializeApp() {
 	// Initialize storage adapter (loads Tauri plugins)
 	await initializeStorage();
+	const apiClient = await createDesktopApiClient();
+	router = createDesktopRouter(apiClient);
 	await setupMacOSResetMenu();
 	await initCreateItemIntentBridge(() => {
 		const viewIntent = peekViewItemIntent();
@@ -62,7 +70,7 @@ async function initializeApp() {
 				<ThemeSync />
 				<I18nProvider>
 					<QueryClientProvider client={queryClient}>
-						<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
+						<ApiProvider apiClient={apiClient}>
 							<DesktopSyncProvider queryClient={queryClient}>
 								<DesktopPlatformProvider>
 									<AccountProvider router={router}>
@@ -70,7 +78,7 @@ async function initializeApp() {
 									</AccountProvider>
 								</DesktopPlatformProvider>
 							</DesktopSyncProvider>
-						</RpcProvider>
+						</ApiProvider>
 					</QueryClientProvider>
 				</I18nProvider>
 			</ThemeProvider>

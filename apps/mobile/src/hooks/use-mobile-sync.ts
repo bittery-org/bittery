@@ -1,13 +1,13 @@
 import {
 	AccountResolver,
-	createStoredAccountRpcClient,
+	createStoredAccountApiClient,
 } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { RpcVaultClient } from "@bittery/core/services/vault-service";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
-import type { OutboundQueueClient, SyncStorage } from "@bittery/sync";
+import type { ApiVaultClient } from "@bittery/core/services/vault-service";
+import { createAccountApiClient } from "@bittery/shared/api-client-factory";
+import type { OutboundQueueApiClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { fetch as expoFetch } from "expo/fetch";
@@ -164,13 +164,13 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 	}, [syncAccountId]);
 	const getClientForAccount = useCallback(
 		async (accountId: string) => {
-			const client = await createStoredAccountRpcClient(
+			const client = await createStoredAccountApiClient(
 				storage,
 				accountId,
 				clientId,
 			);
-			if (!client) throw new Error(`No RPC client for account ${accountId}`);
-			return client as unknown as OutboundQueueClient;
+			if (!client) throw new Error(`No API client for account ${accountId}`);
+			return client as unknown as OutboundQueueApiClient;
 		},
 		[clientId],
 	);
@@ -207,7 +207,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 			if (!token) {
 				return;
 			}
-			const rpcClient = createAccountRpcClient(
+			const apiClient = createAccountApiClient(
 				token,
 				accountServerUrl || serverUrl || "http://localhost:3000",
 			);
@@ -219,7 +219,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 				itemCache,
 				vaultCoordinator,
 				{
-					rpcClient: rpcClient as unknown as RpcVaultClient,
+					apiClient: apiClient as unknown as ApiVaultClient,
 					accounts,
 				},
 			);

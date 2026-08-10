@@ -4,16 +4,15 @@ import {
 } from "@bittery/core/services/account-lifecycle";
 import {
 	AccountResolver,
-	createStoredAccountRpcClient,
+	createStoredAccountApiClient,
 } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { RpcVaultClient } from "@bittery/core/services/vault-service";
-import { isUnauthorizedRpcError } from "@bittery/shared/rpc-client";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import type { ApiVaultClient } from "@bittery/core/services/vault-service";
+import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type {
-	OutboundQueueClient,
+	OutboundQueueApiClient,
 	SyncSource,
 	SyncStorage,
 } from "@bittery/sync";
@@ -36,7 +35,7 @@ interface SyncConnectionContext {
 	accountId: string;
 	email: string | null;
 	serverUrl: string;
-	rpcClient: SyncSource["rpcClient"];
+	apiClient: SyncSource["apiClient"];
 }
 
 function areSyncContextsEquivalent(
@@ -82,19 +81,19 @@ async function resolveDesktopSyncContexts(
 		]);
 		if (token && url) {
 			const email = accountById.get(accountId)?.email ?? null;
-			const rpcClient = await createStoredAccountRpcClient(
+			const apiClient = await createStoredAccountApiClient(
 				storage,
 				accountId,
 				clientId,
 			);
-			if (!rpcClient) {
+			if (!apiClient) {
 				continue;
 			}
 			contexts.push({
 				accountId,
 				email,
 				serverUrl: url,
-				rpcClient: rpcClient as unknown as SyncSource["rpcClient"],
+				apiClient: apiClient as unknown as SyncSource["apiClient"],
 			});
 		}
 	}
@@ -133,6 +132,15 @@ class TauriSyncStorage implements SyncStorage {
 }
 
 const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
+
+function isUnauthorizedApiError(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"status" in error &&
+		(error as { status?: unknown }).status === 401
+	);
+}
 
 /**
  * Desktop-specific sync hook that integrates with Tauri storage
@@ -186,24 +194,24 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 	}, [syncContexts]);
 
 	const getClientForAccount = useCallback(
-		async (accountId: string): Promise<OutboundQueueClient> => {
+		async (accountId: string): Promise<OutboundQueueApiClient> => {
 			const [accountToken, accountServerUrl] = await Promise.all([
 				storage.getAuthToken(accountId),
 				storage.getServerUrl(accountId),
 			]);
 			if (accountToken) {
-				const client = await createStoredAccountRpcClient(
+				const client = await createStoredAccountApiClient(
 					storage,
 					accountId,
 					clientId,
 				);
 				if (client) {
-					return client as unknown as OutboundQueueClient;
+					return client as unknown as OutboundQueueApiClient;
 				}
-				return createAccountRpcClient(
+				return createAccountApiClient(
 					accountToken,
 					accountServerUrl || serverUrl || "http://localhost:3000",
-				) as unknown as OutboundQueueClient;
+				) as unknown as OutboundQueueApiClient;
 			}
 
 			throw new Error(
@@ -302,9 +310,9 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				}
 
 				try {
-					await createAccountRpcClient(token, url).auth.me.query();
+					await createAccountApiClient(token, url).auth.me();
 				} catch (error) {
-					if (!isUnauthorizedRpcError(error)) {
+					if (!isUnauthorizedApiError(error)) {
 						continue;
 					}
 
@@ -352,7 +360,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 			if (!accountId || !accountEmail || event.type !== "travel_mode_updated") {
 				return;
 			}
-			const rpcClient = await getClientForAccount(accountId);
+			const apiClient = await getClientForAccount(accountId);
 			const accounts = new AccountResolver(storage);
 			await handleTravelModeSyncEvent(
 				event,
@@ -361,7 +369,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				itemCache,
 				vaultCoordinator,
 				{
-					rpcClient: rpcClient as unknown as RpcVaultClient,
+					apiClient: apiClient as unknown as ApiVaultClient,
 					accounts,
 				},
 			);
@@ -375,7 +383,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				id: context.accountId,
 				serverUrl: context.serverUrl,
 				getAuthToken: () => storage.getAuthToken(context.accountId),
-				rpcClient: context.rpcClient,
+				apiClient: context.apiClient,
 				itemCacheAccountId: context.accountId,
 				itemCacheAccountEmail: context.email,
 				itemCacheServerUrl: context.serverUrl,

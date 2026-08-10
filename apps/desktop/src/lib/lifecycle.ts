@@ -10,21 +10,21 @@ import type {
 	CredentialMirror,
 	LifecycleDeps,
 } from "@bittery/core/services/account-lifecycle";
-import { clearAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import { clearAccountApiClient } from "@bittery/shared/api-client-factory";
 import { itemCache, storage } from "./storage";
 
 /**
- * Desktop keeps no MUK mirror, but the shared RPC client cache holds live clients
+ * Desktop keeps no MUK mirror, but the shared API client cache holds live clients
  * bound to the bearer token — dropping the token without dropping the client leaves
  * a cached client still sending a revoked credential.
  */
-const rpcClientCacheMirror: CredentialMirror = {
+const apiClientCacheMirror: CredentialMirror = {
 	async purge(refs) {
 		for (const ref of refs) {
 			if (!ref.authToken) {
 				continue;
 			}
-			clearAccountRpcClient(ref.authToken, ref.serverUrl);
+			clearAccountApiClient(ref.authToken, ref.serverUrl);
 		}
 	},
 };
@@ -32,5 +32,5 @@ const rpcClientCacheMirror: CredentialMirror = {
 export const lifecycleDeps: LifecycleDeps = {
 	storage,
 	itemCache,
-	credentialMirror: rpcClientCacheMirror,
+	credentialMirror: apiClientCacheMirror,
 };

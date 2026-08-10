@@ -1,10 +1,6 @@
 import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
-import {
-	createAppRpcOptionsProxy,
-	isUnauthorizedRpcError,
-} from "@bittery/shared/rpc-client";
-import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";
 import { MutationCache, QueryCache, QueryClient } from "@tanstack/react-query";
@@ -18,6 +14,15 @@ const fallbackServerUrl =
 	"http://localhost:3000";
 
 let isHandlingAuthError = false;
+
+function isUnauthorizedApiError(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"status" in error &&
+		(error as { status?: unknown }).status === 401
+	);
+}
 
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
@@ -51,7 +56,7 @@ function handleUnauthorizedError() {
 const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 				return;
 			}
@@ -67,7 +72,7 @@ const queryClient = new QueryClient({
 	}),
 	mutationCache: new MutationCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 			}
 		},
@@ -88,47 +93,49 @@ async function resolveDesktopServerUrl(): Promise<string> {
 	);
 }
 
-const rpcClient = createSessionRefreshingRpcClient({
-	defaultServerUrl: fallbackServerUrl,
-	getServerUrl: resolveDesktopServerUrl,
-	appPlatform: "desktop",
-	getSessionSnapshot: async () => {
-		const activeAccount = await storage.getActiveAccount();
-		if (!activeAccount) {
-			return { token: null, issuedAt: null, expiresAt: null };
-		}
+export async function createDesktopApiClient() {
+	const serverUrl = await resolveDesktopServerUrl();
+	return createSessionRefreshingApiClient({
+		defaultServerUrl: serverUrl,
+		getServerUrl: resolveDesktopServerUrl,
+		clientPlatform: "desktop",
+		clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
+		getSessionSnapshot: async () => {
+			const activeAccount = await storage.getActiveAccount();
+			if (!activeAccount) {
+				return { token: null, issuedAt: null, expiresAt: null };
+			}
 
-		const [token, sessionData] = await Promise.all([
-			storage.getAuthToken(activeAccount),
-			storage.getStoredSessionData(activeAccount),
-		]);
+			const [token, sessionData] = await Promise.all([
+				storage.getAuthToken(activeAccount),
+				storage.getStoredSessionData(activeAccount),
+			]);
 
-		return {
-			token,
-			issuedAt: sessionData?.createdAt ?? null,
-			expiresAt: sessionData?.expiresAt ?? null,
-		};
-	},
-	getRefreshToken: async () => {
-		const activeAccount = await storage.getActiveAccount();
-		if (!activeAccount) {
-			return null;
-		}
-		return storage.getAuthToken(activeAccount);
-	},
-	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
-		const activeAccount = await storage.getActiveAccount();
-		if (activeAccount) {
-			await storage.storeAuthToken(token, activeAccount);
-			await storage.updateStoredSessionMetadata(activeAccount, {
-				sessionId,
-				expiresAt,
-			});
-		}
-	},
-	getClientId: async () => getOrCreateDesktopSyncClientId(),
-});
+			return {
+				token,
+				issuedAt: sessionData?.createdAt ?? null,
+				expiresAt: sessionData?.expiresAt ?? null,
+			};
+		},
+		getRefreshToken: async () => {
+			const activeAccount = await storage.getActiveAccount();
+			if (!activeAccount) {
+				return null;
+			}
+			return storage.getAuthToken(activeAccount);
+		},
+		storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
+			const activeAccount = await storage.getActiveAccount();
+			if (activeAccount) {
+				await storage.storeAuthToken(token, activeAccount);
+				await storage.updateStoredSessionMetadata(activeAccount, {
+					sessionId,
+					expiresAt,
+				});
+			}
+		},
+		getClientId: async () => getOrCreateDesktopSyncClientId(),
+	});
+}
 
-const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
-
-export { rpc, rpcClient, queryClient };
+export { queryClient };

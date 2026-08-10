@@ -566,26 +566,32 @@ export function useCredentialProviderSync(
 
 			try {
 				if (mutation.operation === "update_item") {
-					await account.rpcClient.vault.updateItem.mutate({
-						itemId: mutation.itemId,
-						encryptedData: mutation.encryptedData,
-						encryptionIv: mutation.encryptionIv,
-						encryptionAlgorithm:
-							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
-						expectedVersion: null,
-						clientId: null,
-					});
+					const current = await account.apiClient.items.get(mutation.itemId);
+					if (!current.etag) {
+						throw new Error("Missing item version for credential update");
+					}
+					await account.apiClient.items.update(
+						mutation.itemId,
+						{
+							encryptedData: mutation.encryptedData,
+							encryptionIv: mutation.encryptionIv,
+							encryptionAlgorithm:
+								mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
+						},
+						{ etag: current.etag },
+					);
 				} else if (mutation.operation === "create_item") {
-					await account.rpcClient.vault.createItem.mutate({
-						itemId: mutation.itemId,
-						vaultId: mutation.vaultId,
-						category: "login",
-						encryptedData: mutation.encryptedData,
-						encryptionIv: mutation.encryptionIv,
-						encryptionAlgorithm:
-							mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
-						clientId: null,
-					});
+					await account.apiClient.items.create(
+						mutation.vaultId,
+						mutation.itemId,
+						{
+							category: "login",
+							encryptedData: mutation.encryptedData,
+							encryptionIv: mutation.encryptionIv,
+							encryptionAlgorithm:
+								mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
+						},
+					);
 				} else {
 					throw new Error(
 						`Unsupported passkey mutation operation: ${mutation.operation}`,

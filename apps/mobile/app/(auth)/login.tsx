@@ -51,8 +51,8 @@ import {
 } from "@/components/ui";
 import { defaultServerUrl } from "@/constants/server-url";
 import { useAccount } from "@/contexts/account-context";
+import { useServerUrl } from "@/lib/api";
 import { useBiometricType } from "@/lib/biometric-type";
-import { useServerUrl } from "@/lib/rpc";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
 import { mirrorBorrowedMasterUnlockKeysToCredentialProvider } from "@/services/credential-provider-master-unlock-key";
