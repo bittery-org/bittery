@@ -62,7 +62,7 @@
 		"env:check": "node ./scripts/check-env-docs.mjs"
 	},
 	"dependencies": {
-		"dotenv": "^17.2.2",
+		"dotenv": "^17.4.2",
 		"zod": "^4.1.13"
 	},
 	"devDependencies": {
