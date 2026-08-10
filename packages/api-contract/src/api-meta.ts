@@ -1,5 +1,6 @@
 export interface ApiLimits {
 	itemCiphertextBytes: string;
+	encryptedVaultKeyBytes: string;
 	bulkImportBytes: string;
 	bulkImportItems: number;
 }
@@ -142,6 +143,10 @@ export function parseApiMeta(value: unknown): ApiMeta {
 			itemCiphertextBytes: positiveDecimalString(
 				limits.itemCiphertextBytes,
 				"/limits/itemCiphertextBytes",
+			),
+			encryptedVaultKeyBytes: positiveDecimalString(
+				limits.encryptedVaultKeyBytes,
+				"/limits/encryptedVaultKeyBytes",
 			),
 			bulkImportBytes: positiveDecimalString(
 				limits.bulkImportBytes,

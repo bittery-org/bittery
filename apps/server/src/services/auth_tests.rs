@@ -596,7 +596,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                     )
                     .await;
                 signup.assert_contract_status();
-                assert!(signup.body["vaultKeys"]
+                assert!(signup.body["vaultKeys"]["items"]
                     .as_array()
                     .expect("vault keys should be an array")
                     .iter()
@@ -700,6 +700,32 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .any(|entry| entry["vaultId"] == json!(fixture.vault_id)));
 
                 let next_crypto = build_auth_crypto_fixture("recovery-reset", "reset-password-123");
+                let rejected_reset = app
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/reset-password",
+                        Some(json!({
+                            "recoveryToken": verified.body["recoveryToken"],
+                            "srpSalt": next_crypto.srp_salt,
+                            "srpVerifier": next_crypto.srp_verifier,
+                            "encryptedPrivateKey": next_crypto.encrypted_private_key,
+                            "encryptedMasterKey": next_crypto.encrypted_master_key,
+                            "recoveryKeyHint": next_crypto.recovery_key_hint,
+                            "secretKeyHint": next_crypto.secret_key_hint,
+                            "encryptedVaultKeys": [{
+                                "vaultId": fixture.vault_id,
+                                "encryptedVaultKey": "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1)
+                            }],
+                            "kdfParams": floor_kdf_params_json(),
+                        })),
+                        unauthenticated_json_headers(),
+                    )
+                    .await;
+                assert_handler_error(
+                    &rejected_reset.body,
+                    "BAD_REQUEST",
+                    "Invalid encrypted vault key",
+                );
                 let reset = app
                     .api_json(
                         Method::POST,
@@ -835,6 +861,27 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let change_session = app.issue_session(&fixture.user_id).await;
             let change_crypto =
                 build_auth_crypto_fixture("change-password", "change-password-pass");
+            let oversized_key =
+                "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1);
+            let rejected_password_rotation = app
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/password-changes",
+                    Some(json!({
+                        "srpSalt": change_crypto.srp_salt,
+                        "srpVerifier": change_crypto.srp_verifier,
+                        "encryptedPrivateKey": change_crypto.encrypted_private_key,
+                        "encryptedVaultKeys": [{ "vaultId": fixture.vault_id, "encryptedVaultKey": oversized_key }],
+                        "kdfParams": floor_kdf_params_json(),
+                    })),
+                    authenticated_json_headers(&change_session.token),
+                )
+                .await;
+            assert_handler_error(
+                &rejected_password_rotation.body,
+                "BAD_REQUEST",
+                "Invalid encrypted vault key",
+            );
             let change_password = app
                 .api_json(
                     Method::POST,
@@ -865,6 +912,26 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let other_session = app.issue_session(&fixture.user_id).await;
             let regenerate_crypto =
                 build_auth_crypto_fixture("regen-secret-key", "regen-secret-pass");
+            let rejected_secret_rotation = app
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/secret-key-rotations",
+                    Some(json!({
+                        "secretKeyHint": regenerate_crypto.secret_key_hint,
+                        "srpSalt": regenerate_crypto.srp_salt,
+                        "srpVerifier": regenerate_crypto.srp_verifier,
+                        "encryptedPrivateKey": regenerate_crypto.encrypted_private_key,
+                        "encryptedVaultKeys": [{ "vaultId": fixture.vault_id, "encryptedVaultKey": oversized_key }],
+                        "kdfParams": floor_kdf_params_json(),
+                    })),
+                    authenticated_json_headers(&current_session.token),
+                )
+                .await;
+            assert_handler_error(
+                &rejected_secret_rotation.body,
+                "BAD_REQUEST",
+                "Invalid encrypted vault key",
+            );
             let regenerate = app
                 .api_json(
                     Method::POST,
@@ -1189,6 +1256,117 @@ fn pending_vault_key_parser_rejects_invalid_entries_and_duplicates() {
 				.message,
 			"Duplicate vault IDs are not allowed in pendingVaultKeys",
 		);
+}
+
+#[test]
+fn every_auth_vault_key_input_rejects_oversized_values() {
+    let oversized = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1);
+    let entries = vec![super::EncryptedVaultKeyInput {
+        vault_id: "vault_auth_limit".to_string(),
+        encrypted_vault_key: oversized.clone(),
+    }];
+    assert!(super::validate_encrypted_vault_keys(&entries).is_err());
+    let pending = serde_json::to_string(&vec![json!({
+        "vaultId": "vault_auth_limit",
+        "encryptedVaultKey": oversized,
+    })])
+    .expect("pending keys should serialize");
+    assert!(parse_pending_vault_keys(Some(&pending)).is_err());
+}
+
+#[tokio::test]
+async fn auth_vault_key_pages_are_bounded_continuous_and_principal_bound() {
+    with_api_test_app("auth_vault_key_page_budget", |app| async move {
+        let user_id = "user_auth_key_page";
+        let other_user_id = "user_auth_key_other";
+        seed_user(&app.pool, user_id, "Key Page", "key-page@example.com").await;
+        seed_user(
+            &app.pool,
+            other_user_id,
+            "Other",
+            "other-key-page@example.com",
+        )
+        .await;
+        let large_key = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES);
+        let expected_ids: Vec<String> = (0..70)
+            .map(|index| format!("vault_auth_key_page_{index:03}"))
+            .collect();
+        for (index, vault_id) in expected_ids.iter().enumerate() {
+            seed_vault(&app.pool, vault_id, "n", "personal", user_id, None).await;
+            seed_vault_key(
+                &app.pool,
+                &format!("key_auth_page_{index:03}"),
+                vault_id,
+                user_id,
+                &large_key,
+                "owner",
+            )
+            .await;
+        }
+        query("UPDATE vault SET created_at = $1 WHERE id = ANY($2)")
+            .bind(OffsetDateTime::UNIX_EPOCH)
+            .bind(&expected_ids)
+            .execute(&app.pool)
+            .await
+            .expect("vault timestamps should align");
+        let session = app.issue_session(user_id).await;
+        let other_session = app.issue_session(other_user_id).await;
+        let mut cursor = None;
+        let mut first_cursor = None;
+        let mut seen_ids = Vec::new();
+        for _ in 0..4 {
+            let query = cursor.as_deref().map_or_else(
+                || "limit=500".to_string(),
+                |cursor| format!("limit=500&cursor={cursor}"),
+            );
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/users/me/vault-keys?{query}"),
+                    None,
+                    authenticated_json_headers(&session.token),
+                )
+                .await;
+            response.assert_contract_status();
+            assert!(response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES);
+            seen_ids.extend(
+                response.body["items"]
+                    .as_array()
+                    .expect("vault key page should contain items")
+                    .iter()
+                    .filter_map(|item| item["vaultId"].as_str().map(str::to_string)),
+            );
+            if response.body["hasMore"] == json!(false) {
+                break;
+            }
+            let next = response.body["nextCursor"]
+                .as_str()
+                .expect("continued vault key page should have a cursor")
+                .to_string();
+            first_cursor.get_or_insert_with(|| next.clone());
+            cursor = Some(next);
+        }
+        for vault_id in expected_ids {
+            assert_eq!(seen_ids.iter().filter(|seen| **seen == vault_id).count(), 1);
+        }
+        let cursor = first_cursor.expect("large keys should require continuation");
+        for (token, candidate) in [
+            (&other_session.token, cursor.clone()),
+            (&session.token, format!("{cursor}x")),
+        ] {
+            let rejected = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/users/me/vault-keys?limit=500&cursor={candidate}"),
+                    None,
+                    authenticated_json_headers(token),
+                )
+                .await;
+            assert_eq!(rejected.status, axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(rejected.body["code"], json!("INVALID_CURSOR"));
+        }
+    })
+    .await;
 }
 
 #[test]

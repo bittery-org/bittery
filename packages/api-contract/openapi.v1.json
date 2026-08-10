@@ -9311,6 +9311,91 @@
         ]
       }
     },
+    "/api/v1/users/me/vault-keys": {
+      "get": {
+        "tags": [
+          "auth"
+        ],
+        "operationId": "listCurrentUserVaultKeys",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CursorPage_AuthVaultKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/vault-stats": {
       "get": {
         "tags": [
@@ -12626,6 +12711,7 @@
         "type": "object",
         "required": [
           "itemCiphertextBytes",
+          "encryptedVaultKeyBytes",
           "bulkImportBytes",
           "bulkImportItems"
         ],
@@ -12637,6 +12723,9 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          },
+          "encryptedVaultKeyBytes": {
+            "$ref": "#/components/schemas/DecimalString"
           },
           "itemCiphertextBytes": {
             "$ref": "#/components/schemas/DecimalString"
@@ -12886,7 +12975,8 @@
         ],
         "properties": {
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "role": {
             "type": "string"
@@ -13628,6 +13718,72 @@
           }
         }
       },
+      "CursorPage_AuthVaultKeyResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "vaultId",
+                "vaultName",
+                "vaultType",
+                "encryptedVaultKey",
+                "role"
+              ],
+              "properties": {
+                "encryptedVaultKey": {
+                  "type": "string",
+                  "maxLength": 65536
+                },
+                "role": {
+                  "type": "string"
+                },
+                "vaultIcon": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "vaultId": {
+                  "type": "string"
+                },
+                "vaultImageUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "vaultName": {
+                  "type": "string"
+                },
+                "vaultType": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
       "CursorPage_DeletedVaultItemWithVaultResponse": {
         "type": "object",
         "required": [
@@ -14076,7 +14232,8 @@
                   "type": [
                     "string",
                     "null"
-                  ]
+                  ],
+                  "maxLength": 65536
                 },
                 "id": {
                   "type": "string"
@@ -14761,7 +14918,8 @@
         ],
         "properties": {
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "vaultId": {
             "type": "string"
@@ -14856,7 +15014,8 @@
           "sessionId",
           "expiresAt",
           "serverProof",
-          "user"
+          "user",
+          "vaultKeys"
         ],
         "properties": {
           "expiresAt": {
@@ -14873,6 +15032,9 @@
           },
           "user": {
             "$ref": "#/components/schemas/LoginUserResponse"
+          },
+          "vaultKeys": {
+            "$ref": "#/components/schemas/CursorPage_AuthVaultKeyResponse"
           }
         }
       },
@@ -15545,7 +15707,8 @@
         ],
         "properties": {
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "vaultId": {
             "type": "string"
@@ -15783,7 +15946,8 @@
             "type": "string"
           },
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "vaultId": {
             "type": "string"
@@ -16135,7 +16299,8 @@
         ],
         "properties": {
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "userId": {
             "type": "string"
@@ -16546,7 +16711,8 @@
             "type": "string"
           },
           "encryptedVaultKey": {
-            "type": "string"
+            "type": "string",
+            "maxLength": 65536
           },
           "invitationToken": {
             "type": [
@@ -16636,11 +16802,7 @@
             "type": "string"
           },
           "vaultKeys": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/AuthVaultKeyResponse"
-            },
-            "maxItems": 500
+            "$ref": "#/components/schemas/CursorPage_AuthVaultKeyResponse"
           }
         }
       },
@@ -17119,7 +17281,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "maxLength": 65536
           },
           "id": {
             "type": "string"

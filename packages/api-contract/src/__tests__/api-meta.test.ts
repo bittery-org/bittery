@@ -16,6 +16,7 @@ function metadata() {
 		capabilities: ["attachments", "sync-sse"],
 		limits: {
 			itemCiphertextBytes: "1048576",
+			encryptedVaultKeyBytes: "65536",
 			bulkImportBytes: "16777216",
 			bulkImportItems: 200,
 		},

@@ -1013,7 +1013,7 @@ async fn large_vault_metadata_pages_stay_byte_bounded_and_continue() {
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
         let large_name = "n".repeat(super::VAULT_NAME_MAX_CHARS);
-        let large_key = "k".repeat(super::ENCRYPTED_VAULT_KEY_MAX_BYTES);
+        let large_key = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES);
         let expected_ids: Vec<String> = (0..70)
             .map(|index| format!("vault_metadata_budget_{index:03}"))
             .collect();
@@ -2400,6 +2400,59 @@ async fn vault_management_handlers_enforce_access_and_validation() {
 			);
 		})
 		.await;
+}
+
+#[tokio::test]
+async fn vault_key_write_routes_reject_oversized_keys() {
+    with_api_test_app("vault_key_write_limits", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        let oversized =
+            "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1);
+        let requests = [
+            (
+                Method::PUT,
+                "/api/v1/vaults/vault_oversized_key".to_string(),
+                json!({ "name": "Oversized", "vaultType": "personal", "encryptedVaultKey": oversized.clone() }),
+            ),
+            (
+                Method::PUT,
+                format!(
+                    "/api/v1/vaults/{}/members/{}",
+                    fixture.main_vault_id, fixture.addable_user_id
+                ),
+                json!({ "role": "member", "encryptedVaultKey": oversized.clone() }),
+            ),
+            (
+                Method::POST,
+                format!(
+                    "/api/v1/vaults/{}/type-conversions",
+                    fixture.main_vault_id
+                ),
+                json!({ "targetType": "personal", "personalEncryptedVaultKey": oversized.clone() }),
+            ),
+            (
+                Method::DELETE,
+                format!(
+                    "/api/v1/vaults/{}/members/{}",
+                    fixture.main_vault_id, fixture.member_user_id
+                ),
+                json!({ "keyRotation": {
+                    "memberKeys": [{ "userId": fixture.owner_user_id, "encryptedVaultKey": oversized }],
+                    "reEncryptedItems": []
+                } }),
+            ),
+        ];
+        for (method, path, body) in requests {
+            let response = app
+                .api_json(method, &path, Some(body), headers.clone())
+                .await;
+            assert_eq!(response.status, axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(response.body["code"], json!("BAD_REQUEST"));
+        }
+    })
+    .await;
 }
 
 #[tokio::test]

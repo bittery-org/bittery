@@ -36,7 +36,10 @@ export type RegistrationStatus = Schema<"RegistrationStatusResponse">;
 export type StartLoginInput = Schema<"StartLoginRequest">;
 export type LoginAttempt = Schema<"LoginAttemptResponse">;
 export type FinishLoginInput = Schema<"FinishLoginRequest">;
-export type FinishLoginResponse = Schema<"FinishLoginResponse">;
+type WireFinishLoginResponse = Schema<"FinishLoginResponse">;
+export type FinishLoginResponse = Omit<WireFinishLoginResponse, "vaultKeys"> & {
+	vaultKeys: ApiPage<AuthVaultKey>;
+};
 export type RecoverySessionInput = Schema<"RecoverySessionRequest">;
 export type RecoveryData = Schema<"RecoveryDataResponse">;
 export type ResetPasswordInput = Schema<"ResetPasswordRequest">;
@@ -51,7 +54,10 @@ export type VerifySignupVerificationInput =
 export type VerifySignupVerificationResponse =
 	Schema<"VerifySignupVerificationResponse">;
 export type SignupInput = Schema<"SignupRequest">;
-export type SignupResponse = Schema<"SignupResponse">;
+type WireSignupResponse = Schema<"SignupResponse">;
+export type SignupResponse = Omit<WireSignupResponse, "vaultKeys"> & {
+	vaultKeys: readonly AuthVaultKey[];
+};
 export type AuthUser = Schema<"MeResponse">;
 export type DeleteAccountInput = Schema<"DeleteAccountRequest">;
 export type EmailChangeInput = Schema<"EmailChangeRequest">;

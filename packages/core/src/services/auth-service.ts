@@ -12,7 +12,9 @@ import {
 } from "@bittery/shared/api-client-factory";
 import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
 import {
+	type ServerAuthVaultKeyEntry,
 	type ServerVaultListEntry,
+	toAuthVaultKeyEntry,
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore, ItemCache, VaultKeyData } from "@bittery/storage";
@@ -225,6 +227,11 @@ export interface FinishLoginResponse {
 	user: LoginUserData;
 	sessionId?: string;
 	expiresAt: string | Date;
+	vaultKeys?: {
+		items: readonly ServerAuthVaultKeyEntry[];
+		nextCursor?: string | null;
+		hasMore: boolean;
+	};
 }
 
 type VaultListEntry = Omit<ServerVaultListEntry, "icon" | "imageUrl"> & {
@@ -251,6 +258,10 @@ export interface IAuthClient {
 				clientProof: string;
 			},
 		): Promise<ApiResponse<FinishLoginResponse>>;
+		drainVaultKeys?(
+			accessToken: string,
+			initialPage: NonNullable<FinishLoginResponse["vaultKeys"]>,
+		): Promise<ApiResponse<readonly ServerAuthVaultKeyEntry[]>>;
 	};
 	vaults: {
 		list(): Promise<ApiResponse<readonly VaultListEntry[]>>;
@@ -325,6 +336,22 @@ async function fetchVaultKeys(
 			imageUrl: vault.imageUrl ?? null,
 		}),
 	);
+}
+
+async function fetchIssuedVaultKeys(
+	authClient: IAuthClient,
+	accessToken: string,
+	initialPage: FinishLoginResponse["vaultKeys"],
+	fallbackClient: IAuthClient,
+): Promise<VaultKeyData[]> {
+	if (authClient.auth.drainVaultKeys && initialPage) {
+		const { data } = await authClient.auth.drainVaultKeys(
+			accessToken,
+			initialPage,
+		);
+		return data.map(toAuthVaultKeyEntry);
+	}
+	return fetchVaultKeys(fallbackClient);
 }
 
 /**
@@ -469,7 +496,12 @@ export async function performSRPLogin(
 							input.insecureTransportConfirmed === true,
 					},
 				) as unknown as IAuthClient);
-		const vaultKeys = await fetchVaultKeys(authenticatedClient);
+		const vaultKeys = await fetchIssuedVaultKeys(
+			authClient,
+			finishResult.token,
+			finishResult.vaultKeys,
+			authenticatedClient,
+		);
 
 		return {
 			token: finishResult.token,
@@ -845,7 +877,12 @@ export async function performSRPUnlock(
 							accountMetadata?.insecureTransportConfirmed === true,
 					},
 				) as unknown as IAuthClient);
-		const vaultKeys = await fetchVaultKeys(authenticatedClient);
+		const vaultKeys = await fetchIssuedVaultKeys(
+			authClient,
+			finishResult.token,
+			finishResult.vaultKeys,
+			authenticatedClient,
+		);
 
 		return {
 			mode: "reauth",

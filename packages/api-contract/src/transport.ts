@@ -136,7 +136,7 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 			options.getClientMetadata(),
 		]);
 		const next = new Headers(headers);
-		if (accessToken) {
+		if (accessToken && !next.has("Authorization")) {
 			next.set(
 				"Authorization",
 				`Bearer ${nonEmptyHeaderValue(accessToken, "Access token")}`,

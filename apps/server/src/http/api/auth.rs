@@ -3,6 +3,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use time::format_description::well_known::Rfc3339;
 use utoipa::ToSchema;
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -18,7 +19,10 @@ use super::{
     dto::{CursorPage, PageRequest},
     error::ApiError,
     extract::{ApiJson, ApiMergePatch, AuthenticatedRequest, PublicRequest},
-    pagination::{page_values, ApiPageQuery},
+    pagination::{
+        decode_page_key, page_prefetched_with_more, page_values, query_limit, timestamp_cursor_key,
+        ApiPageQuery,
+    },
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
@@ -73,6 +77,7 @@ request_dto!(SignupRequest {
     encrypted_private_key: String,
     encrypted_master_key: String,
     recovery_key_hint: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
     kdf_params: KdfParamsRequest,
 });
@@ -94,6 +99,7 @@ request_dto!(RecoverySessionRequest {
 });
 request_dto!(EncryptedVaultKeyRequest {
     vault_id: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
 });
 request_dto!(ResetPasswordRequest {
@@ -188,6 +194,7 @@ response_dto!(FinishLoginResponse {
     expires_at: String,
     server_proof: String,
     user: LoginUserResponse,
+    vault_keys: CursorPage<AuthVaultKeyResponse>,
 });
 response_dto!(VerifyRecoveryResponse {
     success: bool,
@@ -196,6 +203,7 @@ response_dto!(VerifyRecoveryResponse {
 });
 response_dto!(RecoveryVaultKeyResponse {
     vault_id: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
     created_by_id: String,
 });
@@ -241,8 +249,12 @@ response_dto!(AuthVaultKeyResponse {
     vault_icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     vault_image_url: Option<String>,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
     role: String,
+    #[serde(skip)]
+    #[schema(ignore)]
+    cursor_key: String,
 });
 response_dto!(SignupResponse {
     success: bool,
@@ -251,8 +263,7 @@ response_dto!(SignupResponse {
     session_id: String,
     expires_at: String,
     user: AuthUserResponse,
-    #[schema(max_items = 500)]
-    vault_keys: Vec<AuthVaultKeyResponse>,
+    vault_keys: CursorPage<AuthVaultKeyResponse>,
 });
 response_dto!(MeResponse {
     id: String,
@@ -446,7 +457,10 @@ async fn signup(
         )
         .await?
     };
-    Ok((axum::http::StatusCode::CREATED, Json(response.into())))
+    Ok((
+        axum::http::StatusCode::CREATED,
+        Json(map_signup_response(response)?),
+    ))
 }
 
 #[utoipa::path(post, path = "/auth/login-attempts", request_body = StartLoginRequest, responses((status = 201, body = LoginAttemptResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
@@ -484,7 +498,37 @@ async fn finish_login(
         },
     )
     .await?;
-    Ok(Json(response.into()))
+    Ok(Json(map_finish_login_response(response)?))
+}
+
+#[utoipa::path(get, path = "/users/me/vault-keys", operation_id = "listCurrentUserVaultKeys", tag = "auth", params(PageRequest), responses((status = 200, body = CursorPage<AuthVaultKeyResponse>), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 413, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+async fn list_vault_keys(
+    State(state): State<AppState>,
+    request: AuthenticatedRequest,
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<AuthVaultKeyResponse>>, ApiError> {
+    let cursor_key = decode_page_key(
+        &page,
+        &request.session.user_id,
+        "current-user-vault-keys",
+        "",
+    )?;
+    let cursor = cursor_key
+        .as_deref()
+        .map(timestamp_cursor_key)
+        .transpose()?;
+    let service_page = auth::load_auth_vault_keys_page(
+        crate::config::db_pool(&state)?,
+        &request.session.user_id,
+        cursor,
+        query_limit(&page)?,
+    )
+    .await?;
+    Ok(Json(map_vault_key_page(
+        service_page,
+        &page,
+        &request.session.user_id,
+    )?))
 }
 
 #[utoipa::path(post, path = "/auth/recovery-verifications", request_body = RecoveryVerificationRequest, responses((status = 202, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, body = super::dto::ProblemDetails, content_type = "application/problem+json", headers(("Retry-After" = String, description = "Seconds before retrying")))))]
@@ -764,6 +808,7 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(signup))
         .routes(routes!(start_login))
         .routes(routes!(finish_login))
+        .routes(routes!(list_vault_keys))
         .routes(routes!(request_recovery_verification))
         .routes(routes!(verify_recovery))
         .routes(routes!(recovery_data))
@@ -796,23 +841,76 @@ impl From<auth::StartLoginResponse> for LoginAttemptResponse {
     }
 }
 
-impl From<auth::FinishLoginResponse> for FinishLoginResponse {
-    fn from(value: auth::FinishLoginResponse) -> Self {
-        Self {
-            token: value.token,
-            session_id: value.session_id,
-            expires_at: value.expires_at,
-            server_proof: value.server_proof,
-            user: LoginUserResponse {
-                id: value.user.id,
-                email: value.user.email,
-                name: value.user.name,
-                secret_key_hint: value.user.secret_key_hint,
-                public_key: value.user.public_key,
-                encrypted_private_key: value.user.encrypted_private_key,
-            },
-        }
-    }
+fn map_auth_vault_key(value: auth::AuthVaultKeyResponse) -> Result<AuthVaultKeyResponse, ApiError> {
+    let created_at = value
+        .created_at
+        .format(&Rfc3339)
+        .map_err(|_| ApiError::internal())?;
+    Ok(AuthVaultKeyResponse {
+        cursor_key: format!("{created_at}\0{}", value.vault_id),
+        vault_id: value.vault_id,
+        vault_name: value.vault_name,
+        vault_type: value.vault_type,
+        vault_icon: value.vault_icon,
+        vault_image_url: value.vault_image_url,
+        encrypted_vault_key: value.encrypted_vault_key,
+        role: value.role,
+    })
+}
+
+fn map_vault_key_page(
+    value: auth::AuthVaultKeyPage,
+    request: &PageRequest,
+    user_id: &str,
+) -> Result<CursorPage<AuthVaultKeyResponse>, ApiError> {
+    page_prefetched_with_more(
+        value
+            .items
+            .into_iter()
+            .map(map_auth_vault_key)
+            .collect::<Result<Vec<_>, _>>()?,
+        value.has_more,
+        request,
+        user_id,
+        "current-user-vault-keys",
+        "",
+        |key| key.cursor_key.clone(),
+    )
+}
+
+fn initial_vault_key_page(
+    value: auth::AuthVaultKeyPage,
+    user_id: &str,
+) -> Result<CursorPage<AuthVaultKeyResponse>, ApiError> {
+    map_vault_key_page(
+        value,
+        &PageRequest {
+            cursor: None,
+            limit: super::dto::DEFAULT_PAGE_SIZE,
+        },
+        user_id,
+    )
+}
+
+fn map_finish_login_response(
+    value: auth::FinishLoginResponse,
+) -> Result<FinishLoginResponse, ApiError> {
+    let user_id = value.user.id.clone();
+    Ok(FinishLoginResponse {
+        token: value.token,
+        session_id: value.session_id,
+        expires_at: value.expires_at,
+        server_proof: value.server_proof,
+        user: LoginUserResponse {
+            id: value.user.id,
+            email: value.user.email,
+            name: value.user.name,
+            secret_key_hint: value.user.secret_key_hint,
+            public_key: value.user.public_key,
+            encrypted_private_key: value.user.encrypted_private_key,
+        },
+        vault_keys: initial_vault_key_page(value.vault_keys, &user_id)?,
+    })
 }
 
 impl From<auth::GetRecoveryDataResponse> for RecoveryDataResponse {
@@ -847,42 +945,29 @@ impl From<auth::ResetPasswordResponse> for ResetPasswordResponse {
     }
 }
 
-impl From<auth::SignupResponse> for SignupResponse {
-    fn from(value: auth::SignupResponse) -> Self {
-        Self {
-            success: value.success,
-            user_id: value.user_id,
-            token: value.token,
-            session_id: value.session_id,
-            expires_at: value.expires_at,
-            user: AuthUserResponse {
-                id: value.user.id,
-                email: value.user.email,
-                name: value.user.name,
-                secret_key_hint: value.user.secret_key_hint,
-                public_key: value.user.public_key,
-                encrypted_private_key: value.user.encrypted_private_key,
-                team_id: value.user.team_id,
-                team_name: value.user.team_name,
-                team_type: value.user.team_type,
-                team_avatar_url: value.user.team_avatar_url,
-                role: value.user.role,
-            },
-            vault_keys: value
-                .vault_keys
-                .into_iter()
-                .map(|key| AuthVaultKeyResponse {
-                    vault_id: key.vault_id,
-                    vault_name: key.vault_name,
-                    vault_type: key.vault_type,
-                    vault_icon: key.vault_icon,
-                    vault_image_url: key.vault_image_url,
-                    encrypted_vault_key: key.encrypted_vault_key,
-                    role: key.role,
-                })
-                .collect(),
-        }
-    }
+fn map_signup_response(value: auth::SignupResponse) -> Result<SignupResponse, ApiError> {
+    let user_id = value.user.id.clone();
+    Ok(SignupResponse {
+        success: value.success,
+        user_id: value.user_id,
+        token: value.token,
+        session_id: value.session_id,
+        expires_at: value.expires_at,
+        user: AuthUserResponse {
+            id: value.user.id,
+            email: value.user.email,
+            name: value.user.name,
+            secret_key_hint: value.user.secret_key_hint,
+            public_key: value.user.public_key,
+            encrypted_private_key: value.user.encrypted_private_key,
+            team_id: value.user.team_id,
+            team_name: value.user.team_name,
+            team_type: value.user.team_type,
+            team_avatar_url: value.user.team_avatar_url,
+            role: value.user.role,
+        },
+        vault_keys: initial_vault_key_page(value.vault_keys, &user_id)?,
+    })
 }
 
 impl From<auth::MeResponse> for MeResponse {
@@ -956,6 +1041,7 @@ mod tests {
             ("/auth/signups", "post"),
             ("/auth/login-attempts", "post"),
             ("/auth/login-attempts/{attemptId}/finish", "post"),
+            ("/users/me/vault-keys", "get"),
             ("/auth/recovery-verifications", "post"),
             ("/auth/recovery-verifications/verify", "post"),
             ("/auth/recovery-sessions/data", "post"),

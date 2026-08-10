@@ -17,6 +17,7 @@ import type {
 	AttachmentDownload,
 	AttachmentUploadInput,
 	AuthUser,
+	AuthVaultKey,
 	AvailableTeamMember,
 	BulkImportInput,
 	BulkImportResponse,
@@ -144,6 +145,10 @@ export interface ApiClient {
 			attemptId: string,
 			input: FinishLoginInput,
 		): Promise<ApiResult<FinishLoginResponse>>;
+		drainVaultKeys(
+			accessToken: string,
+			initialPage: ApiPage<AuthVaultKey>,
+		): Promise<ApiResult<readonly AuthVaultKey[]>>;
 		recoveryData(input: RecoverySessionInput): Promise<ApiResult<RecoveryData>>;
 		resetPassword(
 			input: ResetPasswordInput,
@@ -528,7 +533,23 @@ function validateFinishLogin(value: unknown): FinishLoginResponse {
 	parseRfc3339Utc(login.expiresAt, "/finishLogin/expiresAt");
 	string(login.serverProof, "/finishLogin/serverProof");
 	object(login.user, "/finishLogin/user");
+	validateVaultKeyPage(login.vaultKeys, "/finishLogin/vaultKeys");
 	return value as FinishLoginResponse;
+}
+
+function validateVaultKeyPage(
+	value: unknown,
+	path: string,
+): ApiPage<AuthVaultKey> {
+	const page = object(value, path);
+	if (!Array.isArray(page.items)) {
+		throw new TypeError(`${path}/items must be an array.`);
+	}
+	boolean(page.hasMore, `${path}/hasMore`);
+	if (page.nextCursor !== undefined && page.nextCursor !== null) {
+		string(page.nextCursor, `${path}/nextCursor`);
+	}
+	return value as ApiPage<AuthVaultKey>;
 }
 
 function validateBootstrap(value: unknown): SyncBootstrapPage {
@@ -726,6 +747,52 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		};
 	}
 
+	async function drainIssuedVaultKeys(
+		accessToken: string,
+		initialPage: ApiPage<AuthVaultKey>,
+	): Promise<ApiResult<readonly AuthVaultKey[]>> {
+		const items = [...initialPage.items];
+		let cursor = initialPage.hasMore
+			? (initialPage.nextCursor ?? undefined)
+			: undefined;
+		if (initialPage.hasMore && !cursor) {
+			throw new TypeError(
+				"/finishLogin/vaultKeys returned hasMore without a nextCursor.",
+			);
+		}
+		const seenCursors = new Set<string>();
+		let latest: ApiResult<ApiPage<AuthVaultKey>> | undefined;
+		while (cursor) {
+			if (seenCursors.has(cursor)) {
+				throw new TypeError(
+					"/api/v1/users/me/vault-keys returned a repeated nextCursor.",
+				);
+			}
+			seenCursors.add(cursor);
+			latest = await call<ApiPage<AuthVaultKey>>(
+				"GET",
+				"/api/v1/users/me/vault-keys",
+				{
+					headers: { Authorization: `Bearer ${accessToken}` },
+					params: { query: { cursor } },
+				},
+			);
+			const page = validateVaultKeyPage(latest.data, "/users/me/vault-keys");
+			items.push(...page.items);
+			cursor = page.hasMore ? (page.nextCursor ?? undefined) : undefined;
+			if (page.hasMore && !cursor) {
+				throw new TypeError(
+					"/api/v1/users/me/vault-keys returned hasMore without a nextCursor.",
+				);
+			}
+		}
+		return {
+			data: items,
+			etag: latest?.etag ?? null,
+			requestId: latest?.requestId ?? null,
+		};
+	}
+
 	type WireActiveItem = Omit<VaultItem, "attachments"> & {
 		attachments?: readonly Attachment[] | null;
 	};
@@ -783,6 +850,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				);
 				return { ...result, data: validateFinishLogin(result.data) };
 			},
+			drainVaultKeys: drainIssuedVaultKeys,
 			recoveryData: (input) =>
 				call("POST", "/api/v1/auth/recovery-sessions/data", { body: input }),
 			resetPassword: (input, write) =>
@@ -802,7 +870,22 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				call("POST", "/api/v1/auth/signup-verifications/verify", {
 					body: input,
 				}),
-			signUp: (input) => call("POST", "/api/v1/auth/signups", { body: input }),
+			async signUp(input) {
+				const result = await call<unknown>("POST", "/api/v1/auth/signups", {
+					body: input,
+				});
+				const signup = object(result.data, "/signup");
+				const token = string(signup.token, "/signup/token");
+				const initialPage = validateVaultKeyPage(
+					signup.vaultKeys,
+					"/signup/vaultKeys",
+				);
+				const vaultKeys = await drainIssuedVaultKeys(token, initialPage);
+				return {
+					...result,
+					data: { ...signup, vaultKeys: vaultKeys.data } as SignupResponse,
+				};
+			},
 			me: () => call("GET", "/api/v1/users/me"),
 			deleteAccount: (input, write) =>
 				call("DELETE", "/api/v1/users/me", {

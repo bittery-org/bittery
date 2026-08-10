@@ -1156,6 +1156,22 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/users/me/vault-keys": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["listCurrentUserVaultKeys"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/vault-stats": {
         readonly parameters: {
             readonly query?: never;
@@ -1406,6 +1422,7 @@ export interface components {
             readonly bulkImportBytes: components["schemas"]["DecimalString"];
             /** Format: int32 */
             readonly bulkImportItems: number;
+            readonly encryptedVaultKeyBytes: components["schemas"]["DecimalString"];
             readonly itemCiphertextBytes: components["schemas"]["DecimalString"];
         };
         readonly ApiMetadata: {
@@ -1635,6 +1652,19 @@ export interface components {
         };
         readonly CreateVaultResponse: {
             readonly vaultId: string;
+        };
+        readonly CursorPage_AuthVaultKeyResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly encryptedVaultKey: string;
+                readonly role: string;
+                readonly vaultIcon?: string | null;
+                readonly vaultId: string;
+                readonly vaultImageUrl?: string | null;
+                readonly vaultName: string;
+                readonly vaultType: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
         };
         readonly CursorPage_DeletedVaultItemWithVaultResponse: {
             readonly hasMore: boolean;
@@ -1901,6 +1931,7 @@ export interface components {
             readonly sessionId: string;
             readonly token: string;
             readonly user: components["schemas"]["LoginUserResponse"];
+            readonly vaultKeys: components["schemas"]["CursorPage_AuthVaultKeyResponse"];
         };
         readonly HiddenVaultsRequest: {
             readonly hiddenVaultIds: readonly string[];
@@ -2322,7 +2353,7 @@ export interface components {
             readonly token: string;
             readonly user: components["schemas"]["AuthUserResponse"];
             readonly userId: string;
-            readonly vaultKeys: readonly components["schemas"]["AuthVaultKeyResponse"][];
+            readonly vaultKeys: components["schemas"]["CursorPage_AuthVaultKeyResponse"];
         };
         readonly SignupVerificationRequest: {
             readonly email: string;
@@ -9549,6 +9580,60 @@ export interface operations {
                 };
             };
             /** @description Internal error */
+            readonly 500: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+        };
+    };
+    readonly listCurrentUserVaultKeys: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["CursorPage_AuthVaultKeyResponse"];
+                };
+            };
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            readonly 413: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             readonly 500: {
                 headers: {
                     readonly [name: string]: unknown;

@@ -17,5 +17,6 @@ pub(crate) mod team_admin;
 pub(crate) mod team_billing;
 pub(crate) mod travel_mode;
 pub(crate) mod vault;
+pub(crate) mod vault_key;
 pub(crate) mod verification_code;
 pub(crate) mod waitlist;

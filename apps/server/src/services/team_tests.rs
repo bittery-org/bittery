@@ -598,6 +598,29 @@ fn validate_rotation_vault_inputs_rejects_too_many_reencrypted_items() {
 }
 
 #[test]
+fn team_invitation_and_rotation_reject_oversized_vault_keys() {
+    let oversized = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1);
+    assert!(
+        normalize_pending_vault_keys(Some(vec![PendingVaultKeyEntry {
+            vault_id: "vault_pending_limit".to_string(),
+            encrypted_vault_key: oversized.clone(),
+        }]))
+        .is_err()
+    );
+    assert!(validate_rotation_vault_inputs(&[RotationVaultInput {
+        vault_id: "vault_rotation_limit".to_string(),
+        key_rotation: VaultKeyRotationInput {
+            member_keys: vec![RotationMemberKeyInput {
+                user_id: "user_rotation_limit".to_string(),
+                encrypted_vault_key: oversized,
+            }],
+            re_encrypted_items: Vec::new(),
+        },
+    }])
+    .is_err());
+}
+
+#[test]
 fn ensure_exact_rotation_vault_set_rejects_duplicates() {
     let expected = HashSet::from(["vault_1".to_string()]);
     let error = ensure_exact_rotation_vault_set(

@@ -17,12 +17,12 @@ use crate::{
         resolve_vault_sharing_entitlement as shared_resolve_vault_sharing_entitlement,
         VaultSharingEntitlement,
     },
+    services::vault_key::validate_encrypted_vault_key,
 };
 
 const ITEM_PAGE_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
 const VAULT_PAGE_QUERY_BYTES: i64 = ITEM_PAGE_QUERY_BYTES;
 pub(crate) const VAULT_NAME_MAX_CHARS: usize = 200;
-pub(crate) const ENCRYPTED_VAULT_KEY_MAX_BYTES: usize = 64 * 1024;
 
 #[derive(Debug)]
 pub(crate) struct ByteBoundedPage<T> {
@@ -1093,8 +1093,7 @@ pub(crate) async fn create_vault(
 ) -> Result<CreateVaultResponse, AppError> {
     if input.name.trim().is_empty()
         || input.name.chars().count() > VAULT_NAME_MAX_CHARS
-        || input.encrypted_vault_key.trim().is_empty()
-        || input.encrypted_vault_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES
+        || validate_encrypted_vault_key(&input.encrypted_vault_key).is_err()
     {
         return Err(AppError::bad_request("Invalid params"));
     }
@@ -1299,6 +1298,9 @@ pub(crate) async fn convert_vault_type(
     if input.target_type != "personal" && input.target_type != "team" {
         return Err(AppError::bad_request("Invalid params"));
     }
+    if let Some(personal_key) = input.personal_encrypted_vault_key.as_deref() {
+        validate_encrypted_vault_key(personal_key)?;
+    }
     let Some(owner_vault) = query_as::<_, DbVaultOwnerAccessRow>(
 		"SELECT vk.user_id, v.id AS vault_id, v.type::text AS vault_type, v.team_id, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON vk.vault_id = v.id WHERE vk.vault_id = $1 AND vk.user_id = $2 LIMIT 1",
 	)
@@ -1421,9 +1423,6 @@ pub(crate) async fn convert_vault_type(
 			.await
 			.map_err(|e| { tracing::error!(error = %e, "Failed to convert vault to personal"); AppError::internal("Failed to convert vault to personal") })?;
         if let Some(personal_key) = input.personal_encrypted_vault_key.as_deref() {
-            if personal_key.is_empty() || personal_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES {
-                return Err(AppError::bad_request("Invalid params"));
-            }
             query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
 				.bind(personal_key)
 				.bind(&input.vault_id)
@@ -2617,11 +2616,7 @@ pub(crate) mod member_handlers {
         request_client_id: Option<&str>,
         input: AddVaultMemberInput,
     ) -> Result<SuccessResponse, AppError> {
-        if input.encrypted_vault_key.is_empty()
-            || input.encrypted_vault_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES
-        {
-            return Err(AppError::bad_request("Invalid params"));
-        }
+        validate_encrypted_vault_key(&input.encrypted_vault_key)?;
         let role = validate_vault_member_role(&input.role)?;
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         let target_user = query_as::<_, DbVaultLookupUserRow>(
@@ -2757,11 +2752,8 @@ pub(crate) mod member_handlers {
         request_client_id: Option<&str>,
         input: RemoveVaultMemberInput,
     ) -> Result<RemoveVaultMemberResponse, AppError> {
-        if input.key_rotation.member_keys.iter().any(|key| {
-            key.encrypted_vault_key.is_empty()
-                || key.encrypted_vault_key.len() > ENCRYPTED_VAULT_KEY_MAX_BYTES
-        }) {
-            return Err(AppError::bad_request("Invalid params"));
+        for key in &input.key_rotation.member_keys {
+            validate_encrypted_vault_key(&key.encrypted_vault_key)?;
         }
         let actor = load_managed_team_vault_actor(pool, &input.vault_id, user_id).await?;
         if input.user_id == user_id {
@@ -3565,6 +3557,7 @@ async fn insert_vault_key(
     user_id: &str,
     encrypted_vault_key: &str,
 ) -> Result<(), AppError> {
+    validate_encrypted_vault_key(encrypted_vault_key)?;
     query(
 		"INSERT INTO vault_key (id, vault_id, user_id, encrypted_vault_key, role, created_at) VALUES ($1, $2, $3, $4, 'owner', $5)",
 	)

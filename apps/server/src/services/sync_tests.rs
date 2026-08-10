@@ -915,7 +915,7 @@ async fn large_vault_metadata_bootstrap_pages_stay_bounded_and_continue() {
             let session = app.issue_session(&fixture.owner_user_id).await;
             let headers = authenticated_json_headers(&session.token);
             let large_name = "n".repeat(crate::services::vault::VAULT_NAME_MAX_CHARS);
-            let large_key = "k".repeat(crate::services::vault::ENCRYPTED_VAULT_KEY_MAX_BYTES);
+            let large_key = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES);
             let expected_ids: Vec<String> = (0..70)
                 .map(|index| format!("sync_metadata_item_{index:03}"))
                 .collect();

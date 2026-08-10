@@ -24,6 +24,7 @@ const OPERATION_SECURITY: &[(&str, OperationSecurity)] = &[
     ("check_email", OperationSecurity::Public),
     ("start_login", OperationSecurity::Public),
     ("finish_login", OperationSecurity::Public),
+    ("listCurrentUserVaultKeys", OperationSecurity::Bearer),
     ("recovery_data", OperationSecurity::Public),
     ("reset_password", OperationSecurity::Public),
     ("request_recovery_verification", OperationSecurity::Public),

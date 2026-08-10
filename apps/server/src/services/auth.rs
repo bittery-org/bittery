@@ -40,6 +40,7 @@ use crate::{
         SessionIdInput, VerifiedSession,
     },
     services::session_control::record_session_revocations,
+    services::vault_key::validate_encrypted_vault_key,
     services::verification_code::{
         LockoutVerificationCodeOutcome, VerificationCodeService, VerificationPurpose,
     },
@@ -105,6 +106,15 @@ struct DbAuthVaultKeyRow {
     vault_image_key: Option<String>,
     encrypted_vault_key: String,
     role: String,
+    created_at: OffsetDateTime,
+}
+
+#[derive(Clone, Debug, FromRow)]
+struct AuthVaultKeyPageWeight {
+    vault_id: String,
+    position: i64,
+    candidate_count: i64,
+    cumulative_bytes: i64,
 }
 
 #[allow(dead_code)]
@@ -325,6 +335,15 @@ pub struct AuthVaultKeyResponse {
     pub vault_image_url: Option<String>,
     pub encrypted_vault_key: String,
     pub role: String,
+    #[serde(skip)]
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthVaultKeyPage {
+    pub items: Vec<AuthVaultKeyResponse>,
+    pub has_more: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -336,7 +355,7 @@ pub struct SignupResponse {
     pub session_id: String,
     pub expires_at: String,
     pub user: AuthSessionUserResponse,
-    pub vault_keys: Vec<AuthVaultKeyResponse>,
+    pub vault_keys: AuthVaultKeyPage,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -392,6 +411,7 @@ pub struct FinishLoginResponse {
     pub expires_at: String,
     pub server_proof: String,
     pub user: LoginUserResponse,
+    pub vault_keys: AuthVaultKeyPage,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -857,7 +877,7 @@ pub(crate) async fn signup(
     })?;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
-    let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
+    let vault_keys = load_auth_vault_keys_page(pool, &user_id, None, 101).await?;
 
     Ok(SignupResponse {
         success: true,
@@ -991,6 +1011,7 @@ pub(crate) async fn signup_with_invitation(
     .await?;
 
     for pending_key in &pending_keys {
+        validate_encrypted_vault_key(&pending_key.encrypted_vault_key)?;
         query(
 			"INSERT INTO vault_key (id, vault_id, user_id, encrypted_vault_key, role) VALUES ($1, $2, $3, $4, $5::vault_role)",
 		)
@@ -1022,7 +1043,7 @@ pub(crate) async fn signup_with_invitation(
     sync_team_seats_best_effort(pool, &invitation.team_id, &invitation.billing_plan).await;
 
     let session = app_state.sessions.create_session(&user_id, request).await?;
-    let vault_keys = load_auth_vault_keys(pool, &user_id).await?;
+    let vault_keys = load_auth_vault_keys_page(pool, &user_id, None, 101).await?;
 
     Ok(SignupResponse {
         success: true,
@@ -1233,6 +1254,7 @@ pub(crate) async fn finish_login(
         .sessions
         .create_session(&verified.user.id, request)
         .await?;
+    let vault_keys = load_auth_vault_keys_page(pool, &verified.user.id, None, 101).await?;
 
     Ok(FinishLoginResponse {
         token: session.token,
@@ -1247,6 +1269,7 @@ pub(crate) async fn finish_login(
             public_key: verified.user.public_key,
             encrypted_private_key: verified.user.encrypted_private_key,
         },
+        vault_keys,
     })
 }
 
@@ -1427,6 +1450,7 @@ pub(crate) async fn reset_password(
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
     let kdf_profile = ValidatedKdfProfile::try_from(&input.kdf_params)?;
+    validate_encrypted_vault_keys(&input.encrypted_vault_keys)?;
     let pool = db_pool(app_state)?;
     enforce_window_limit(
         app_state.rate_limiter.as_ref(),
@@ -2402,6 +2426,7 @@ async fn reset_user_password_with_recovery(
     })?;
 
     for vault_key in &input.encrypted_vault_keys {
+        validate_encrypted_vault_key(&vault_key.encrypted_vault_key)?;
         query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
             .bind(&vault_key.encrypted_vault_key)
             .bind(&vault_key.vault_id)
@@ -2442,9 +2467,7 @@ fn validate_encrypted_vault_keys(
 ) -> Result<(), AppError> {
     for entry in encrypted_vault_keys {
         validate_resource_id(&entry.vault_id)?;
-        if entry.encrypted_vault_key.trim().is_empty() {
-            return Err(bad_request_handler_error("Invalid encrypted vault key"));
-        }
+        validate_encrypted_vault_key(&entry.encrypted_vault_key)?;
     }
     Ok(())
 }
@@ -2590,6 +2613,7 @@ async fn apply_encrypted_vault_key_updates(
     encrypted_vault_keys: &[EncryptedVaultKeyInput],
 ) -> Result<(), AppError> {
     for vault_key in encrypted_vault_keys {
+        validate_encrypted_vault_key(&vault_key.encrypted_vault_key)?;
         query("UPDATE vault_key SET encrypted_vault_key = $1 WHERE vault_id = $2 AND user_id = $3")
             .bind(&vault_key.encrypted_vault_key)
             .bind(&vault_key.vault_id)
@@ -2757,6 +2781,7 @@ async fn insert_personal_vault(
     user_id: &str,
     encrypted_vault_key: &str,
 ) -> Result<(), AppError> {
+    validate_encrypted_vault_key(encrypted_vault_key)?;
     query(
         "INSERT INTO vault (id, name, type, icon, created_by_id) VALUES ($1, 'Personal', 'personal'::vault_type, 'lock', $2)",
     )
@@ -2785,14 +2810,66 @@ async fn insert_personal_vault(
     Ok(())
 }
 
-async fn load_auth_vault_keys(
+pub(crate) async fn load_auth_vault_keys_page(
     pool: &PgPool,
     user_id: &str,
-) -> Result<Vec<AuthVaultKeyResponse>, AppError> {
-    let rows = query_as::<_, DbAuthVaultKeyRow>(
-        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role FROM vault_key vk INNER JOIN vault v ON v.id = vk.vault_id WHERE vk.user_id = $1 ORDER BY v.created_at ASC",
+    cursor: Option<(OffsetDateTime, String)>,
+    limit: i64,
+) -> Result<AuthVaultKeyPage, AppError> {
+    const PAGE_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
+    let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
+    let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
+    let weights = query_as::<_, AuthVaultKeyPageWeight>(
+        r#"WITH candidates AS (
+            SELECT vk.vault_id,
+                   ROW_NUMBER() OVER (ORDER BY v.created_at, vk.vault_id)::bigint AS position,
+                   (8192 + octet_length(vk.vault_id) + octet_length(v.name)
+                    + octet_length(v.type::text) + coalesce(octet_length(v.icon), 0)
+                    + coalesce(octet_length(v.image_key), 0) + octet_length(vk.encrypted_vault_key)
+                    + octet_length(vk.role::text))::bigint AS estimated_bytes
+            FROM vault_key vk JOIN vault v ON v.id = vk.vault_id
+            WHERE vk.user_id = $1
+              AND ($2::timestamptz IS NULL OR (v.created_at, vk.vault_id) > ($2, $3))
+            ORDER BY v.created_at, vk.vault_id LIMIT $4
+        ), weighted AS (
+            SELECT vault_id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT vault_id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
     )
     .bind(user_id)
+    .bind(cursor_timestamp)
+    .bind(cursor_id)
+    .bind(limit)
+    .bind(PAGE_BYTES)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to size vault key page");
+        AppError::internal("Failed to load vault keys")
+    })?;
+    let Some(first) = weights.first() else {
+        return Ok(AuthVaultKeyPage {
+            items: Vec::new(),
+            has_more: false,
+        });
+    };
+    if first.cumulative_bytes > PAGE_BYTES {
+        return Err(AppError::payload_too_large(
+            "A single vault key exceeds the response page byte budget.",
+        ));
+    }
+    let has_more = weights
+        .last()
+        .is_some_and(|last| last.position < last.candidate_count);
+    let vault_ids: Vec<String> = weights.into_iter().map(|row| row.vault_id).collect();
+    let rows = query_as::<_, DbAuthVaultKeyRow>(
+        "SELECT vk.vault_id, v.name AS vault_name, v.type::text AS vault_type, v.icon AS vault_icon, v.image_key AS vault_image_key, vk.encrypted_vault_key, vk.role::text AS role, v.created_at FROM vault_key vk INNER JOIN vault v ON v.id = vk.vault_id WHERE vk.user_id = $1 AND vk.vault_id = ANY($2) ORDER BY array_position($2::text[], vk.vault_id)",
+    )
+    .bind(user_id)
+    .bind(&vault_ids)
     .fetch_all(pool)
     .await
     .map_err(|e| {
@@ -2800,7 +2877,7 @@ async fn load_auth_vault_keys(
         AppError::internal("Failed to load vault keys")
     })?;
 
-    Ok(rows
+    let items = rows
         .into_iter()
         .map(|row| AuthVaultKeyResponse {
             vault_id: row.vault_id,
@@ -2813,8 +2890,10 @@ async fn load_auth_vault_keys(
                 .and_then(storage::public_asset_url),
             encrypted_vault_key: row.encrypted_vault_key,
             role: row.role,
+            created_at: row.created_at,
         })
-        .collect())
+        .collect();
+    Ok(AuthVaultKeyPage { items, has_more })
 }
 
 fn normalize_signup_plan(plan: Option<&str>) -> Result<&'static str, AppError> {
@@ -2875,6 +2954,7 @@ fn validate_signup_input(input: &SignupInput) -> Result<ValidatedKdfProfile, App
     }
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_encrypted_vault_key(&input.encrypted_vault_key)?;
     ValidatedKdfProfile::try_from(&input.kdf_params)
 }
 
@@ -2890,6 +2970,7 @@ fn validate_signup_with_invitation_input(
     }
     validate_hex_string(&input.srp_salt, "Invalid SRP salt")?;
     validate_hex_string(&input.srp_verifier, "Invalid SRP verifier")?;
+    validate_encrypted_vault_key(&input.encrypted_vault_key)?;
     ValidatedKdfProfile::try_from(&input.kdf_params)
 }
 
@@ -2953,7 +3034,9 @@ fn parse_pending_vault_keys(
         .map_err(|_| bad_request_handler_error("Invalid pendingVaultKeys payload"))?;
     let mut seen_vault_ids = std::collections::HashSet::with_capacity(parsed.len());
     for (index, entry) in parsed.iter().enumerate() {
-        if entry.vault_id.trim().is_empty() || entry.encrypted_vault_key.trim().is_empty() {
+        if entry.vault_id.trim().is_empty()
+            || validate_encrypted_vault_key(&entry.encrypted_vault_key).is_err()
+        {
             return Err(bad_request_handler_error(&format!(
                 "Invalid pendingVaultKeys entry at index {index}",
             )));

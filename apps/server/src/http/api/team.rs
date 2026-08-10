@@ -70,6 +70,7 @@ request_dto!(ImageUploadRequest {
 });
 request_dto!(PendingVaultKeyRequest {
     vault_id: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
 });
 request_dto!(SendInvitationRequest {
@@ -81,6 +82,7 @@ request_dto!(SendInvitationRequest {
 });
 request_dto!(RotationMemberKeyRequest {
     user_id: String,
+    #[schema(max_length = 65536)]
     encrypted_vault_key: String,
 });
 request_dto!(RotationItemRequest {
@@ -181,6 +183,7 @@ response_dto!(TeamVaultResponse from team::TeamVaultResponse {
     id: String,
     name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(max_length = 65536)]
     encrypted_vault_key: Option<String>,
 });
 response_dto!(TeamMemberResponse from team::TeamMemberResponse {

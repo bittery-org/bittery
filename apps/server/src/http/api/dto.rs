@@ -40,6 +40,9 @@ impl ApiMetadata {
             capabilities,
             limits: ApiLimits {
                 item_ciphertext_bytes: DecimalString::from(ITEM_CIPHERTEXT_BYTES),
+                encrypted_vault_key_bytes: DecimalString::from(
+                    crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES as u64,
+                ),
                 bulk_import_bytes: DecimalString::from(BULK_IMPORT_BYTES),
                 bulk_import_items: BULK_IMPORT_ITEMS,
             },
@@ -71,6 +74,7 @@ pub struct ApiVersionMetadata {
 #[serde(rename_all = "camelCase")]
 pub struct ApiLimits {
     pub item_ciphertext_bytes: DecimalString,
+    pub encrypted_vault_key_bytes: DecimalString,
     pub bulk_import_bytes: DecimalString,
     pub bulk_import_items: u16,
 }

@@ -15,6 +15,7 @@ function metadata() {
 		capabilities: ["attachments", "sync-sse"],
 		limits: {
 			itemCiphertextBytes: "1048576",
+			encryptedVaultKeyBytes: "65536",
 			bulkImportBytes: "16777216",
 			bulkImportItems: 200,
 		},
@@ -22,6 +23,66 @@ function metadata() {
 }
 
 describe("Bittery API facade", () => {
+	test("drains issued vault-key pages with a request-scoped bearer token", async () => {
+		const requests: Request[] = [];
+		let providerCalls = 0;
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getAccessToken: () => {
+				providerCalls += 1;
+				return null;
+			},
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async (request) => {
+				requests.push(request);
+				return new Response(
+					JSON.stringify({
+						items: [
+							{
+								vaultId: "vault-2",
+								vaultName: "Second",
+								vaultType: "personal",
+								encryptedVaultKey: "wrapped-2",
+								role: "owner",
+							},
+						],
+						nextCursor: null,
+						hasMore: false,
+					}),
+					{ headers: { "Content-Type": "application/json" } },
+				);
+			},
+		});
+
+		const result = await client.auth.drainVaultKeys("just-issued", {
+			items: [
+				{
+					vaultId: "vault-1",
+					vaultName: "First",
+					vaultType: "personal",
+					encryptedVaultKey: "wrapped-1",
+					role: "owner",
+				},
+			],
+			nextCursor: "page-2",
+			hasMore: true,
+		});
+
+		expect(result.data.map((key) => key.vaultId)).toEqual([
+			"vault-1",
+			"vault-2",
+		]);
+		expect(requests[0]?.headers.get("Authorization")).toBe(
+			"Bearer just-issued",
+		);
+		expect(providerCalls).toBe(1);
+	});
+
 	test("rejects remote HTTP unless both insecure transport approvals are explicit", () => {
 		const options = {
 			serverUrl: "http://192.0.2.10:3000",

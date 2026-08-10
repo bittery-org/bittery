@@ -163,6 +163,7 @@ mock.module("@bittery/core/services/account-session-manager", () => ({
 
 mock.module("@bittery/shared/api-client-factory", () => ({
 	createAccountApiClient: () => ({}),
+	createApiClientForServer: () => ({}),
 	// The lifecycle `CredentialMirror` drops cached clients holding a revoked token.
 	clearAccountApiClient: () => {},
 }));

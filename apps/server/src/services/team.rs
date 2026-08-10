@@ -14,6 +14,7 @@ use crate::{
     services::billing::sync_team_seats_best_effort,
     services::session_control::{load_user_session_ids, record_session_revocations},
     services::team_billing::team_management_enabled as shared_team_management_enabled,
+    services::vault_key::validate_encrypted_vault_key,
 };
 
 const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
@@ -1184,6 +1185,7 @@ async fn accept_loaded_invitation(
         })?;
 
     for pending_key in pending_keys {
+        validate_encrypted_vault_key(&pending_key.encrypted_vault_key)?;
         let existing_key = query_scalar::<_, bool>(
             "SELECT EXISTS(SELECT 1 FROM vault_key WHERE vault_id = $1 AND user_id = $2)",
         )
@@ -1753,6 +1755,10 @@ fn validate_rotation_vault_inputs(vault_rotations: &[RotationVaultInput]) -> Res
                 "Too many re-encrypted items provided for a vault.",
             ));
         }
+        for member_key in &vault_rotation.key_rotation.member_keys {
+            validate_encrypted_vault_key(&member_key.encrypted_vault_key)?;
+            validate_encrypted_vault_key(&member_key.encrypted_vault_key)?;
+        }
     }
 
     Ok(())
@@ -1800,7 +1806,7 @@ fn normalize_pending_vault_keys(
     for (index, entry) in entries.into_iter().enumerate() {
         let vault_id = entry.vault_id.trim().to_string();
         let encrypted_vault_key = entry.encrypted_vault_key.trim().to_string();
-        if vault_id.is_empty() || encrypted_vault_key.is_empty() {
+        if vault_id.is_empty() || validate_encrypted_vault_key(&encrypted_vault_key).is_err() {
             return Err(AppError::bad_request(format!(
                 "Invalid pendingVaultKeys entry at index {index}",
             )));
