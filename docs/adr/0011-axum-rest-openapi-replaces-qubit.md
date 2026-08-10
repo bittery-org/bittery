@@ -69,8 +69,9 @@ limits. `/api/v1` is additive and independent of the product release number. Fut
 deprecation uses standard `Deprecation` and `Sunset` headers.
 
 All authenticated and authentication-related responses use `Cache-Control: no-store`.
-Public asset caching remains explicitly allowlisted. Tracing uses W3C Trace Context plus a
-server-generated Bittery request ID.
+`GET /api/meta` also uses `no-store` so compatibility and capability decisions cannot use stale
+deployment metadata. Public asset caching remains explicitly allowlisted. Tracing uses W3C Trace
+Context plus a server-generated Bittery request ID.
 
 Non-loopback HTTP is rejected by default. Self-hosted operators may explicitly enable
 insecure transport, and each affected client account must confirm it. Recommended
