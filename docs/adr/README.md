@@ -16,3 +16,4 @@ those rather than restating them.
 ## Records
 
 - [0010 — Desktop renderer crypto runs in a WASM worker](0010-desktop-renderer-crypto-runs-in-a-wasm-worker.md)
+- [0011 — Axum REST and OpenAPI replace Qubit JSON-RPC](0011-axum-rest-openapi-replaces-qubit.md)
