@@ -1,5 +1,6 @@
 use axum::{
     extract::{DefaultBodyLimit, Path, State},
+    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -12,7 +13,7 @@ use super::{
     dto::ProblemDetails,
     error::ApiError,
     extract::{ApiJson, AuthenticatedRequest},
-    ORDINARY_API_BODY_LIMIT_BYTES,
+    idempotency, ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -276,6 +277,12 @@ enum ShareErrorResponses {
     )]
     BadRequest(ProblemDetails),
     #[response(
+        status = 422,
+        description = "Idempotency is not allowed for one-time-secret responses",
+        content_type = "application/problem+json"
+    )]
+    Unprocessable(ProblemDetails),
+    #[response(
         status = 401,
         description = "Authentication required",
         content_type = "application/problem+json"
@@ -318,13 +325,15 @@ fn validate_email_length(email: &str) -> Result<(), ApiError> {
     }
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/share-links", operation_id = "createShareLink", tag = "share-links", params(("itemId" = String, Path)), request_body = CreateShareLinkRequest, responses((status = 201, body = CreateShareLinkResponse), ShareErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/share-links", operation_id = "createShareLink", tag = "share-links", params(("itemId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), request_body = CreateShareLinkRequest, responses((status = 201, body = CreateShareLinkResponse), ShareErrorResponses))]
 async fn create_share_link(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
+    headers: HeaderMap,
     Path(item_id): Path<String>,
     ApiJson(body): ApiJson<CreateShareLinkRequest>,
 ) -> Result<(axum::http::StatusCode, Json<CreateShareLinkResponse>), ApiError> {
+    idempotency::reject_one_time_secret(&headers)?;
     if let Some(emails) = &body.allowed_emails {
         for email in emails {
             validate_email_length(&email.0)?;

@@ -19,6 +19,12 @@ export interface ApiPageRequest {
 	limit?: number;
 }
 
+export interface ApiPage<T> {
+	items: readonly T[];
+	nextCursor?: string | null;
+	hasMore: boolean;
+}
+
 export interface ApiReadOptions<T> {
 	queryKey: readonly unknown[];
 	queryFn: () => Promise<T>;
@@ -82,7 +88,8 @@ export type ConvertVaultResponse = Schema<"ConvertVaultTypeResponse">;
 export type BulkImportInput = Schema<"BulkImportBody">;
 export type BulkImportResponse = Schema<"BulkImportItemsResponse">;
 
-export type VaultItem = Schema<"VaultItemWithVaultResponse">;
+export type VaultItem =
+	Schema<"CursorPage_VaultItemWithVaultResponse">["items"][number];
 export type VaultItemDetails = Schema<"VaultItemDetailsResponse">;
 export type DeletedVaultItem = Schema<"DeletedVaultItemWithVaultResponse">;
 export type CreateItemInput = Schema<"CreateItemBody">;

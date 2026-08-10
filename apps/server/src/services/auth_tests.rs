@@ -969,7 +969,8 @@ async fn auth_session_management_and_account_deletion_flow() {
             assert_eq!(
                 devices
                     .body
-                    .as_array()
+                    .get("items")
+                    .and_then(|value| value.as_array())
                     .expect("devices should be an array")
                     .len(),
                 2,

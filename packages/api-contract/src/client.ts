@@ -8,6 +8,7 @@ import type * as Final from "./facade-types.ts";
 import type {
 	AcceptTeamInvitationResponse,
 	AddVaultMemberInput,
+	ApiPage,
 	ApiPageRequest,
 	ApiReadOptions,
 	ApiResult,
@@ -684,6 +685,45 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		};
 	}
 
+	async function drainPages<T>(
+		path: string,
+		request?: ApiTransportRequest,
+	): Promise<ApiResult<readonly T[]>> {
+		const query = (request?.params?.query ?? {}) as Record<string, unknown>;
+		let cursor = typeof query.cursor === "string" ? query.cursor : undefined;
+		let latest: ApiResult<ApiPage<T>> | undefined;
+		const items: T[] = [];
+		const seenCursors = new Set<string>();
+
+		do {
+			latest = await call<ApiPage<T>>("GET", path, {
+				...request,
+				params: {
+					...request?.params,
+					query: { ...query, cursor },
+				},
+			});
+			items.push(...latest.data.items);
+			const nextCursor = latest.data.nextCursor ?? undefined;
+			if (latest.data.hasMore && !nextCursor) {
+				throw new TypeError(`${path} returned hasMore without a nextCursor.`);
+			}
+			if (nextCursor && seenCursors.has(nextCursor)) {
+				throw new TypeError(`${path} returned a repeated nextCursor.`);
+			}
+			if (nextCursor) {
+				seenCursors.add(nextCursor);
+			}
+			cursor = latest.data.hasMore ? nextCursor : undefined;
+		} while (cursor);
+
+		return {
+			data: items,
+			etag: latest?.etag ?? null,
+			requestId: latest?.requestId ?? null,
+		};
+	}
+
 	async function getMetadata(): Promise<ApiMeta> {
 		const result = await transport.getApiMetadata();
 		return parseApiMeta(result.data);
@@ -767,7 +807,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			sessions: {
 				async list() {
-					const result = await call<unknown>("GET", "/api/v1/sessions");
+					const result = await drainPages<unknown>("/api/v1/sessions");
 					return { ...result, data: validateSessions(result.data) };
 				},
 				refresh: () => call("POST", "/api/v1/sessions/current/refresh"),
@@ -783,7 +823,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			},
 		},
 		vaults: {
-			list: () => call("GET", "/api/v1/vaults"),
+			list: () => drainPages<Vault>("/api/v1/vaults"),
 			get: (vaultId) =>
 				call("GET", "/api/v1/vaults/{vaultId}", {
 					params: { path: { vaultId } },
@@ -828,7 +868,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			members: {
 				list: (vaultId) =>
-					call("GET", "/api/v1/vaults/{vaultId}/members", {
+					drainPages<VaultMember>("/api/v1/vaults/{vaultId}/members", {
 						params: { path: { vaultId } },
 					}),
 				add: (vaultId, userId, input, write) =>
@@ -858,14 +898,14 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 			},
 		},
 		items: {
-			list: () => call("GET", "/api/v1/items"),
-			listTrashed: () => call("GET", "/api/v1/items/trashed"),
+			list: () => drainPages<VaultItem>("/api/v1/items"),
+			listTrashed: () => drainPages<DeletedVaultItem>("/api/v1/items/trashed"),
 			listInVault: (vaultId, page) =>
-				call("GET", "/api/v1/vaults/{vaultId}/items", {
+				drainPages<VaultItem>("/api/v1/vaults/{vaultId}/items", {
 					params: { path: { vaultId }, query: page },
 				}),
 			listTrashedInVault: (vaultId, page) =>
-				call("GET", "/api/v1/vaults/{vaultId}/items/trashed", {
+				drainPages<DeletedVaultItem>("/api/v1/vaults/{vaultId}/items/trashed", {
 					params: { path: { vaultId }, query: page },
 				}),
 			get: (itemId) =>
@@ -883,7 +923,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					headers: writeHeaders(write),
 				}),
 			setFavorite: (itemId, input, write) =>
-				call("PUT", "/api/v1/items/{itemId}/favorite", {
+				call("PATCH", "/api/v1/items/{itemId}/favorite", {
 					params: { path: { itemId } },
 					body: input,
 					headers: writeHeaders(write),
@@ -912,7 +952,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		},
 		attachments: {
 			list: (itemId) =>
-				call("GET", "/api/v1/items/{itemId}/attachments", {
+				drainPages<Attachment>("/api/v1/items/{itemId}/attachments", {
 					params: { path: { itemId } },
 				}),
 			create: (itemId, input, write) =>
@@ -970,12 +1010,13 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					body: input,
 				}),
 			availableMembersForVault: (vaultId) =>
-				call("GET", "/api/v1/vaults/{vaultId}/available-team-members", {
-					params: { path: { vaultId } },
-				}),
+				drainPages<AvailableTeamMember>(
+					"/api/v1/vaults/{vaultId}/available-team-members",
+					{ params: { path: { vaultId } } },
+				),
 			invitations: {
 				list: (teamId) =>
-					call("GET", "/api/v1/teams/{teamId}/invitations", {
+					drainPages<TeamInvitation>("/api/v1/teams/{teamId}/invitations", {
 						params: { path: { teamId } },
 					}),
 				send: (teamId, input, write) =>
@@ -998,7 +1039,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 							headers: writeHeaders(write),
 						},
 					),
-				mine: () => call("GET", "/api/v1/users/me/team-invitations"),
+				mine: () =>
+					drainPages<PendingTeamInvitation>(
+						"/api/v1/users/me/team-invitations",
+					),
 				acceptMine: (invitationId) =>
 					call(
 						"POST",
@@ -1042,7 +1086,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				}),
 			members: {
 				list: (teamId) =>
-					call("GET", "/api/v1/teams/{teamId}/members", {
+					drainPages<TeamMember>("/api/v1/teams/{teamId}/members", {
 						params: { path: { teamId } },
 					}),
 				remove: (teamId, userId, input, write) =>
@@ -1065,7 +1109,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					),
 			},
 			vaults: (teamId) =>
-				call("GET", "/api/v1/teams/{teamId}/vaults", {
+				drainPages<TeamVault>("/api/v1/teams/{teamId}/vaults", {
 					params: { path: { teamId } },
 				}),
 		},

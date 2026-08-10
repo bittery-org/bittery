@@ -55,6 +55,7 @@ pub struct DbVaultListRow {
     pub role: String,
     pub encrypted_vault_key: String,
     pub created_by_id: String,
+    pub item_count: i64,
 }
 
 #[derive(Clone, Debug, FromRow)]

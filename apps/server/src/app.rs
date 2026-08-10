@@ -259,7 +259,9 @@ mod tests {
         let body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("panic response body should read");
-        assert!(String::from_utf8_lossy(&body).contains("Internal Server Error"));
+        let problem: serde_json::Value =
+            serde_json::from_slice(&body).expect("panic response should use problem JSON");
+        assert_eq!(problem["code"], "INTERNAL_ERROR");
         assert!(!String::from_utf8_lossy(&body).contains("rate limiter panic"));
     }
 }

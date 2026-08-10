@@ -37,18 +37,22 @@ test("recovered account bootstrap uses the newly issued session", async () => {
 							hasRecoveryKey: true,
 							createdAt: "2026-08-02T00:00:00Z",
 						}
-					: [
-							{
-								id: "vault-1",
-								name: "Personal",
-								vaultType: "personal",
-								icon: null,
-								imageUrl: null,
-								encryptedVaultKey: "encrypted-vault-key",
-								role: "owner",
-								createdById: "user-1",
-							},
-						];
+					: {
+							items: [
+								{
+									id: "vault-1",
+									name: "Personal",
+									vaultType: "personal",
+									icon: null,
+									imageUrl: null,
+									encryptedVaultKey: "encrypted-vault-key",
+									role: "owner",
+									createdById: "user-1",
+									itemCount: "0",
+								},
+							],
+							hasMore: false,
+						};
 
 			return Response.json(result);
 		},

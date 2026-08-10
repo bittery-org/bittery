@@ -428,12 +428,12 @@ export interface paths {
             readonly cookie?: never;
         };
         readonly get?: never;
-        readonly put: operations["setItemFavorite"];
+        readonly put?: never;
         readonly post?: never;
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
-        readonly patch?: never;
+        readonly patch: operations["setItemFavorite"];
         readonly trace?: never;
     };
     readonly "/api/v1/items/{itemId}/moves": {
@@ -1376,7 +1376,7 @@ export interface components {
             readonly encryptedVaultKey: string;
             readonly role: string;
         };
-        readonly AllItemsResponse: readonly components["schemas"]["VaultItemWithVaultResponse"][] | readonly components["schemas"]["DeletedVaultItemWithVaultResponse"][];
+        readonly AllItemsResponse: components["schemas"]["CursorPage_VaultItemWithVaultResponse"] | components["schemas"]["CursorPage_DeletedVaultItemWithVaultResponse"];
         readonly AllowedEmailResponse: {
             readonly email: string;
             readonly verified: boolean;
@@ -1614,6 +1614,202 @@ export interface components {
         };
         readonly CreateVaultResponse: {
             readonly vaultId: string;
+        };
+        readonly CursorPage_DeletedVaultItemWithVaultResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly category: string;
+                readonly createdAt: string;
+                readonly deletedAt?: string | null;
+                readonly encryptedData: string;
+                readonly encryptionAlgorithm: string;
+                readonly encryptionIv: string;
+                readonly favorite: boolean;
+                readonly id: string;
+                readonly lastModifiedBy?: string | null;
+                readonly updatedAt: string;
+                readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
+                readonly vaultId: string;
+                /** Format: int32 */
+                readonly version: number;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_InvitationListResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly createdAt: string;
+                readonly email: string;
+                readonly expiresAt: string;
+                readonly id: string;
+                readonly invitedBy: string;
+                readonly role: string;
+                readonly status: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_PendingInvitationResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly expiresAt: string;
+                readonly id: string;
+                readonly invitedBy: string;
+                readonly role: string;
+                readonly teamId: string;
+                readonly teamName: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_SessionResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly browserName?: string | null;
+                readonly browserVersion?: string | null;
+                readonly createdAt: string;
+                readonly deviceName?: string | null;
+                readonly id: string;
+                readonly ipAddress?: string | null;
+                readonly isCurrentSession: boolean;
+                readonly lastActiveAt: string;
+                readonly osName?: string | null;
+                readonly osVersion?: string | null;
+                readonly platform: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_TeamMemberResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly email: string;
+                readonly joinedAt: string;
+                readonly name: string;
+                readonly role: string;
+                readonly userId: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_TeamVaultResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly encryptedVaultKey?: string | null;
+                readonly id: string;
+                readonly name: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_VaultAttachmentResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly createdAt: string;
+                readonly encryptedContentType: string;
+                readonly encryptedContentTypeIv?: string | null;
+                readonly encryptedName: string;
+                readonly encryptionAlgorithm: string;
+                readonly encryptionIv: string;
+                /** Format: int32 */
+                readonly fileSize: number;
+                readonly id: string;
+                readonly itemId: string;
+                readonly storageKey: string;
+                readonly uploadedBy?: string | null;
+                readonly vaultId: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_VaultAvailableMemberResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly email: string;
+                readonly name: string;
+                readonly publicKey: string;
+                readonly userId: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_VaultItemDetailsResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly attachments: readonly components["schemas"]["VaultAttachmentResponse"][];
+                readonly category: string;
+                readonly createdAt: string;
+                readonly deletedAt?: string | null;
+                readonly encryptedData: string;
+                readonly encryptionAlgorithm: string;
+                readonly encryptionIv: string;
+                readonly favorite: boolean;
+                readonly id: string;
+                readonly lastModifiedBy?: string | null;
+                readonly updatedAt: string;
+                readonly vaultId: string;
+                /** Format: int32 */
+                readonly version: number;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_VaultItemResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly category: string;
+                readonly createdAt: string;
+                readonly deletedAt?: string | null;
+                readonly encryptedData: string;
+                readonly encryptionAlgorithm: string;
+                readonly encryptionIv: string;
+                readonly favorite: boolean;
+                readonly id: string;
+                readonly lastModifiedBy?: string | null;
+                readonly updatedAt: string;
+                readonly vaultId: string;
+                /** Format: int32 */
+                readonly version: number;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_VaultItemWithVaultResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly attachments: readonly components["schemas"]["VaultAttachmentResponse"][];
+                readonly category: string;
+                readonly createdAt: string;
+                readonly deletedAt?: string | null;
+                readonly encryptedData: string;
+                readonly encryptionAlgorithm: string;
+                readonly encryptionIv: string;
+                readonly favorite: boolean;
+                readonly id: string;
+                readonly lastModifiedBy?: string | null;
+                readonly updatedAt: string;
+                readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
+                readonly vaultId: string;
+                /** Format: int32 */
+                readonly version: number;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_VaultListEntryResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly createdById: string;
+                readonly encryptedVaultKey: string;
+                readonly icon?: string | null;
+                readonly id: string;
+                readonly imageUrl?: string | null;
+                readonly itemCount: string;
+                readonly name: string;
+                readonly role: string;
+                readonly vaultType: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
+        readonly CursorPage_VaultMemberResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly email: string;
+                readonly name: string;
+                readonly role: string;
+                readonly userId: string;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
         };
         readonly DecimalString: string;
         readonly DeleteAccountRequest: {
@@ -2338,23 +2534,6 @@ export interface components {
             /** Format: int32 */
             readonly version: number;
         };
-        readonly VaultItemWithVaultResponse: {
-            readonly attachments: readonly components["schemas"]["VaultAttachmentResponse"][];
-            readonly category: string;
-            readonly createdAt: string;
-            readonly deletedAt?: string | null;
-            readonly encryptedData: string;
-            readonly encryptionAlgorithm: string;
-            readonly encryptionIv: string;
-            readonly favorite: boolean;
-            readonly id: string;
-            readonly lastModifiedBy?: string | null;
-            readonly updatedAt: string;
-            readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
-            readonly vaultId: string;
-            /** Format: int32 */
-            readonly version: number;
-        };
         readonly VaultKeyRotationInput: {
             readonly memberKeys: readonly components["schemas"]["RotationMemberKeyInput"][];
             readonly reEncryptedItems: readonly components["schemas"]["RotationReEncryptedItemInput"][];
@@ -2376,7 +2555,7 @@ export interface components {
             readonly icon?: string | null;
             readonly id: string;
             readonly imageUrl?: string | null;
-            readonly items: readonly components["schemas"]["VaultItemResponse"][];
+            readonly itemCount: string;
             readonly name: string;
             readonly role: string;
             readonly vaultType: string;
@@ -2563,6 +2742,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -2575,6 +2772,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -2670,6 +2878,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -2682,6 +2908,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -2773,6 +3010,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -2785,6 +3040,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -3749,6 +4015,8 @@ export interface operations {
         readonly parameters: {
             readonly query?: {
                 readonly state?: string;
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
             };
             readonly header?: never;
             readonly path?: never;
@@ -3828,6 +4096,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -3846,11 +4132,25 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly listAllTrashedItems: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path?: never;
             readonly cookie?: never;
@@ -3863,7 +4163,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["DeletedVaultItemWithVaultResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_DeletedVaultItemWithVaultResponse"];
                 };
             };
             /** @description Bad request */
@@ -3929,6 +4229,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -3941,6 +4259,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4034,6 +4363,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4046,6 +4393,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4142,6 +4500,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4160,6 +4536,17 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly updateItem: {
@@ -4168,6 +4555,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
+                /** @description Replays the same outcome for 24 hours when request bytes and preconditions match */
+                readonly "Idempotency-Key"?: string | null;
             };
             readonly path: {
                 readonly itemId: string;
@@ -4185,6 +4574,8 @@ export interface operations {
                 headers: {
                     /** @description Updated strong item version validator */
                     readonly ETag?: string;
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4254,6 +4645,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4266,6 +4675,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4361,6 +4781,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4379,11 +4817,25 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly listAttachments: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly itemId: string;
@@ -4398,7 +4850,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["VaultAttachmentResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_VaultAttachmentResponse"];
                 };
             };
             /** @description Bad request */
@@ -4464,6 +4916,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4476,6 +4946,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4571,6 +5052,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4589,6 +5088,17 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly setItemFavorite: {
@@ -4597,6 +5107,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
+                /** @description Replays the same outcome for 24 hours when request bytes and preconditions match */
+                readonly "Idempotency-Key"?: string | null;
             };
             readonly path: {
                 readonly itemId: string;
@@ -4614,6 +5126,8 @@ export interface operations {
                 headers: {
                     /** @description Updated strong item version validator */
                     readonly ETag?: string;
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4683,6 +5197,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4701,6 +5233,17 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly moveItem: {
@@ -4709,6 +5252,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
+                /** @description Replays the same outcome for 24 hours when request bytes and preconditions match */
+                readonly "Idempotency-Key"?: string | null;
             };
             readonly path: {
                 readonly itemId: string;
@@ -4726,6 +5271,8 @@ export interface operations {
                 headers: {
                     /** @description Updated strong item version validator */
                     readonly ETag?: string;
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4795,6 +5342,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4807,6 +5372,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -4903,6 +5479,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -4921,6 +5515,17 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly restoreItem: {
@@ -4929,6 +5534,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
+                /** @description Replays the same outcome for 24 hours when preconditions match */
+                readonly "Idempotency-Key"?: string | null;
             };
             readonly path: {
                 readonly itemId: string;
@@ -4942,6 +5549,8 @@ export interface operations {
                 headers: {
                     /** @description Updated strong item version validator */
                     readonly ETag?: string;
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5011,6 +5620,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -5023,6 +5650,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5086,6 +5724,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -5109,7 +5756,10 @@ export interface operations {
     readonly createShareLink: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: never;
+            readonly header?: {
+                /** @description Not accepted because this operation returns a one-time secret */
+                readonly "Idempotency-Key"?: string | null;
+            };
             readonly path: {
                 readonly itemId: string;
             };
@@ -5158,6 +5808,15 @@ export interface operations {
             };
             /** @description Not found */
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5240,6 +5899,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -5308,6 +5976,15 @@ export interface operations {
             };
             /** @description Not found */
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5394,6 +6071,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -5466,6 +6152,15 @@ export interface operations {
             };
             /** @description Not found */
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5557,6 +6252,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -5634,6 +6338,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5725,6 +6438,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -5747,7 +6469,10 @@ export interface operations {
     };
     readonly list_sessions: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path?: never;
             readonly cookie?: never;
@@ -5759,7 +6484,15 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["SessionResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_SessionResponse"];
+                };
+            };
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
             readonly 401: {
@@ -5972,6 +6705,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6040,6 +6782,15 @@ export interface operations {
             };
             /** @description Not found */
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6273,6 +7024,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6348,6 +7108,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6439,6 +7208,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6516,6 +7294,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6611,6 +7398,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6699,6 +7495,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6721,7 +7526,10 @@ export interface operations {
     };
     readonly listTeamInvitations: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly teamId: string;
@@ -6735,7 +7543,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["InvitationListResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_InvitationListResponse"];
                 };
             };
             /** @description Bad request */
@@ -6783,6 +7591,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6806,7 +7623,10 @@ export interface operations {
     readonly sendTeamInvitation: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: never;
+            readonly header?: {
+                /** @description Not accepted because this operation returns a one-time secret */
+                readonly "Idempotency-Key"?: string | null;
+            };
             readonly path: {
                 readonly teamId: string;
             };
@@ -6864,6 +7684,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6956,6 +7785,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -6979,7 +7817,10 @@ export interface operations {
     readonly resendTeamInvitation: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: never;
+            readonly header?: {
+                /** @description Not accepted because this operation returns a one-time secret */
+                readonly "Idempotency-Key"?: string | null;
+            };
             readonly path: {
                 readonly teamId: string;
                 readonly invitationId: string;
@@ -7034,6 +7875,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7129,6 +7979,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -7213,6 +8072,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -7235,7 +8103,10 @@ export interface operations {
     };
     readonly listTeamMembers: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly teamId: string;
@@ -7249,7 +8120,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["TeamMemberResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_TeamMemberResponse"];
                 };
             };
             /** @description Bad request */
@@ -7290,6 +8161,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7386,6 +8266,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -7464,6 +8353,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -7556,6 +8454,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -7578,7 +8485,10 @@ export interface operations {
     };
     readonly listTeamVaults: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly teamId: string;
@@ -7592,7 +8502,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["TeamVaultResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_TeamVaultResponse"];
                 };
             };
             /** @description Bad request */
@@ -7633,6 +8543,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8184,7 +9103,10 @@ export interface operations {
     };
     readonly listMyTeamInvitations: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path?: never;
             readonly cookie?: never;
@@ -8196,7 +9118,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["PendingInvitationResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_PendingInvitationResponse"];
                 };
             };
             /** @description Bad request */
@@ -8237,6 +9159,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8328,6 +9259,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Rate limited */
             readonly 429: {
                 headers: {
@@ -8405,6 +9345,15 @@ export interface operations {
             };
             /** @description Conflict */
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency is not allowed for one-time-secret responses */
+            readonly 422: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -8513,6 +9462,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -8531,11 +9498,25 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly listVaults: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path?: never;
             readonly cookie?: never;
@@ -8548,7 +9529,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["VaultListEntryResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_VaultListEntryResponse"];
                 };
             };
             /** @description Bad request */
@@ -8614,6 +9595,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -8626,6 +9625,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8717,6 +9727,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -8729,6 +9757,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8824,6 +9863,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -8836,6 +9893,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -8927,6 +9995,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -8939,6 +10025,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9034,6 +10131,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9052,11 +10167,25 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly listAvailableTeamMembers: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly vaultId: string;
@@ -9071,7 +10200,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["VaultAvailableMemberResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_VaultAvailableMemberResponse"];
                 };
             };
             /** @description Bad request */
@@ -9137,6 +10266,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9149,6 +10296,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9244,6 +10402,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9256,6 +10432,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9351,6 +10538,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9363,6 +10568,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9373,7 +10589,10 @@ export interface operations {
     };
     readonly listVaultItems: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly vaultId: string;
@@ -9388,7 +10607,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["VaultItemDetailsResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_VaultItemDetailsResponse"];
                 };
             };
             /** @description Bad request */
@@ -9454,6 +10673,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9466,6 +10703,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9476,7 +10724,10 @@ export interface operations {
     };
     readonly listTrashedVaultItems: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly vaultId: string;
@@ -9491,7 +10742,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["VaultItemResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_VaultItemResponse"];
                 };
             };
             /** @description Bad request */
@@ -9557,6 +10808,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9569,6 +10838,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9665,6 +10945,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9683,11 +10981,25 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
         };
     };
     readonly listVaultMembers: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly vaultId: string;
@@ -9702,7 +11014,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["VaultMemberResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_VaultMemberResponse"];
                 };
             };
             /** @description Bad request */
@@ -9768,6 +11080,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9780,6 +11110,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9876,6 +11217,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9888,6 +11247,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -9984,6 +11354,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -9996,6 +11384,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -10092,6 +11491,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -10104,6 +11521,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -10196,6 +11624,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -10208,6 +11654,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -10303,6 +11760,24 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Idempotency key was reused with a different request */
+            readonly 422: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description If-Match is required */
             readonly 428: {
                 headers: {
@@ -10315,6 +11790,17 @@ export interface operations {
             /** @description Internal error */
             readonly 500: {
                 headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description An identical idempotent request is still pending */
+            readonly 503: {
+                headers: {
+                    /** @description Seconds before retrying */
+                    readonly "Retry-After"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {

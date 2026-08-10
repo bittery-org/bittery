@@ -140,7 +140,11 @@ describe("session-refreshing API client account isolation", () => {
 			}
 			return request.headers.get("Authorization") ===
 				"Bearer account-a-refreshed"
-				? Response.json({})
+				? Response.json(
+						request.url.endsWith("/vaults")
+							? { items: [], hasMore: false }
+							: {},
+					)
 				: unauthorized();
 		}, false);
 

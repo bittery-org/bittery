@@ -836,7 +836,10 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             )
             .await;
         list_response.assert_contract_status();
-        assert_eq!(list_response.body[0]["id"], json!(invitation_id.clone()));
+        assert_eq!(
+            list_response.body["items"][0]["id"],
+            json!(invitation_id.clone())
+        );
 
         let invitee_session = app.issue_session(&fixture.invitee_user_id).await;
         let pending_response = app
@@ -849,8 +852,11 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         pending_response.assert_contract_status();
         // The pending list addresses the invitation by id: the raw token is no
         // longer readable back out of the database.
-        assert_eq!(pending_response.body[0]["id"], json!(invitation_id.clone()));
-        assert!(pending_response.body[0]["token"].is_null());
+        assert_eq!(
+            pending_response.body["items"][0]["id"],
+            json!(invitation_id.clone())
+        );
+        assert!(pending_response.body["items"][0]["token"].is_null());
 
         let public_lookup = app
             .call_operation(
@@ -1192,13 +1198,14 @@ async fn team_vaults_members_and_leave_rotation_queries() {
         assert_eq!(
             vaults_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("vaults should be an array")
                 .len(),
             3
         );
         assert_eq!(
-            vaults_response.body[0]["encryptedVaultKey"],
+            vaults_response.body["items"][0]["encryptedVaultKey"],
             json!("owner-accessible-key")
         );
 
@@ -1227,7 +1234,8 @@ async fn team_vaults_members_and_leave_rotation_queries() {
         members_response.assert_contract_status();
         let members = members_response
             .body
-            .as_array()
+            .get("items")
+            .and_then(Value::as_array)
             .expect("members should be an array");
         assert_eq!(members.len(), 4);
         assert!(members

@@ -136,6 +136,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -148,6 +168,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -264,6 +302,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -276,6 +334,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -384,6 +460,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -396,6 +492,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1643,6 +1757,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -1726,6 +1858,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -1745,6 +1897,24 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -1755,16 +1925,33 @@
           "items"
         ],
         "operationId": "listAllTrashedItems",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "All accessible trashed items",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/DeletedVaultItemWithVaultResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_DeletedVaultItemWithVaultResponse"
                 }
               }
             }
@@ -1839,6 +2026,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -1851,6 +2058,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1967,6 +2192,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -1979,6 +2224,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2102,6 +2365,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -2114,6 +2397,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2146,6 +2447,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -2167,6 +2480,12 @@
                   "type": "string"
                 },
                 "description": "Updated strong item version validator"
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a stored replay"
               }
             },
             "content": {
@@ -2247,6 +2566,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -2259,6 +2598,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2377,6 +2734,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -2389,6 +2766,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2414,6 +2809,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -2422,10 +2835,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultAttachmentResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_VaultAttachmentResponse"
                 }
               }
             }
@@ -2500,6 +2910,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -2512,6 +2942,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2628,6 +3076,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -2647,12 +3115,30 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
     },
     "/api/v1/items/{itemId}/favorite": {
-      "put": {
+      "patch": {
         "tags": [
           "items"
         ],
@@ -2673,6 +3159,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -2695,6 +3193,12 @@
                   "type": "string"
                 },
                 "description": "Updated strong item version validator"
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a stored replay"
               }
             },
             "content": {
@@ -2775,6 +3279,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -2787,6 +3311,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -2821,6 +3363,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the same outcome for 24 hours when request bytes and preconditions match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -2842,6 +3396,12 @@
                   "type": "string"
                 },
                 "description": "Updated strong item version validator"
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a stored replay"
               }
             },
             "content": {
@@ -2922,6 +3482,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -2934,6 +3514,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3059,6 +3657,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -3071,6 +3689,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3105,6 +3741,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the same outcome for 24 hours when preconditions match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -3116,6 +3764,12 @@
                   "type": "string"
                 },
                 "description": "Updated strong item version validator"
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a stored replay"
               }
             },
             "content": {
@@ -3196,6 +3850,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -3208,6 +3882,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3286,6 +3978,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -3320,6 +4022,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Not accepted because this operation returns a one-time secret",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -3376,6 +4090,16 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3474,6 +4198,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -3556,6 +4290,16 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3664,6 +4408,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -3756,6 +4510,16 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -3864,6 +4628,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -3956,6 +4730,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4064,6 +4848,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -4090,16 +4884,43 @@
     "/api/v1/sessions": {
       "get": {
         "operationId": "list_sessions",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SessionResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -4363,6 +5184,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -4448,6 +5279,16 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4746,6 +5587,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -4828,6 +5679,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4936,6 +5797,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -5026,6 +5897,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5134,6 +6015,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5252,6 +6143,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -5289,6 +6190,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -5297,10 +6216,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/InvitationListResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_InvitationListResponse"
                 }
               }
             }
@@ -5355,6 +6271,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -5389,6 +6315,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Not accepted because this operation returns a one-time secret",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -5455,6 +6393,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5571,6 +6519,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -5615,6 +6573,18 @@
             "required": true,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Not accepted because this operation returns a one-time secret",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
             }
           }
         ],
@@ -5671,6 +6641,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -5789,6 +6769,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -5889,6 +6879,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -5926,6 +6926,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -5934,10 +6952,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TeamMemberResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_TeamMemberResponse"
                 }
               }
             }
@@ -5984,6 +6999,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6110,6 +7135,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -6210,6 +7245,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6326,6 +7371,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -6363,6 +7418,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -6371,10 +7444,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TeamVaultResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_TeamVaultResponse"
                 }
               }
             }
@@ -6421,6 +7491,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7068,16 +8148,33 @@
           "team-invitations"
         ],
         "operationId": "listMyTeamInvitations",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/PendingInvitationResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_PendingInvitationResponse"
                 }
               }
             }
@@ -7124,6 +8221,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7232,6 +8339,16 @@
               }
             }
           },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Rate limited",
             "content": {
@@ -7324,6 +8441,16 @@
           },
           "409": {
             "description": "Conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7442,6 +8569,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -7461,6 +8608,24 @@
                 }
               }
             }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
         }
       }
@@ -7471,16 +8636,33 @@
           "vaults"
         ],
         "operationId": "listVaults",
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Success",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultListEntryResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_VaultListEntryResponse"
                 }
               }
             }
@@ -7555,6 +8737,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -7567,6 +8769,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7675,6 +8895,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -7687,6 +8927,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7803,6 +9061,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -7815,6 +9093,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -7921,6 +9217,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -7933,6 +9249,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8049,6 +9383,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8061,6 +9415,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8086,6 +9458,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -8094,10 +9484,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultAvailableMemberResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_VaultAvailableMemberResponse"
                 }
               }
             }
@@ -8172,6 +9559,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8184,6 +9591,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8302,6 +9727,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8314,6 +9759,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8432,6 +9895,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8444,6 +9927,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8469,6 +9970,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -8477,10 +9996,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultItemDetailsResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_VaultItemDetailsResponse"
                 }
               }
             }
@@ -8555,6 +10071,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8567,6 +10103,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8592,6 +10146,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -8600,10 +10172,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultItemResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_VaultItemResponse"
                 }
               }
             }
@@ -8678,6 +10247,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8690,6 +10279,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8816,6 +10423,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8828,6 +10455,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -8853,6 +10498,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -8861,10 +10524,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultMemberResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_VaultMemberResponse"
                 }
               }
             }
@@ -8939,6 +10599,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -8951,6 +10631,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9077,6 +10775,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -9089,6 +10807,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9213,6 +10949,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -9225,6 +10981,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9349,6 +11123,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -9361,6 +11155,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9477,6 +11289,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -9489,6 +11321,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9607,6 +11457,26 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Idempotency key was reused with a different request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "428": {
             "description": "If-Match is required",
             "content": {
@@ -9619,6 +11489,24 @@
           },
           "500": {
             "description": "Internal error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "An identical idempotent request is still pending",
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Seconds before retrying"
+              }
+            },
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -9667,16 +11555,10 @@
       "AllItemsResponse": {
         "oneOf": [
           {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VaultItemWithVaultResponse"
-            }
+            "$ref": "#/components/schemas/CursorPage_VaultItemWithVaultResponse"
           },
           {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DeletedVaultItemWithVaultResponse"
-            }
+            "$ref": "#/components/schemas/CursorPage_DeletedVaultItemWithVaultResponse"
           }
         ]
       },
@@ -10692,6 +12574,949 @@
         "properties": {
           "vaultId": {
             "type": "string"
+          }
+        }
+      },
+      "CursorPage_DeletedVaultItemWithVaultResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "vaultId",
+                "category",
+                "favorite",
+                "encryptedData",
+                "encryptionIv",
+                "encryptionAlgorithm",
+                "version",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "deletedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "encryptedData": {
+                  "type": "string"
+                },
+                "encryptionAlgorithm": {
+                  "type": "string"
+                },
+                "encryptionIv": {
+                  "type": "string"
+                },
+                "favorite": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastModifiedBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "vault": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/VaultSummaryResponse"
+                    }
+                  ]
+                },
+                "vaultId": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int32"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_InvitationListResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "email",
+                "role",
+                "status",
+                "invitedBy",
+                "createdAt",
+                "expiresAt"
+              ],
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "email": {
+                  "type": "string"
+                },
+                "expiresAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "invitedBy": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_PendingInvitationResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "teamId",
+                "teamName",
+                "role",
+                "invitedBy",
+                "expiresAt"
+              ],
+              "properties": {
+                "expiresAt": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "invitedBy": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "teamId": {
+                  "type": "string"
+                },
+                "teamName": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_SessionResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "platform",
+                "lastActiveAt",
+                "createdAt",
+                "isCurrentSession"
+              ],
+              "properties": {
+                "browserName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "browserVersion": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "deviceName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "ipAddress": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "isCurrentSession": {
+                  "type": "boolean"
+                },
+                "lastActiveAt": {
+                  "type": "string"
+                },
+                "osName": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "osVersion": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "platform": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_TeamMemberResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "userId",
+                "name",
+                "email",
+                "role",
+                "joinedAt"
+              ],
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "joinedAt": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "userId": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_TeamVaultResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name"
+              ],
+              "properties": {
+                "encryptedVaultKey": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_VaultAttachmentResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "itemId",
+                "vaultId",
+                "storageKey",
+                "encryptedName",
+                "encryptedContentType",
+                "encryptionIv",
+                "encryptionAlgorithm",
+                "fileSize",
+                "createdAt"
+              ],
+              "properties": {
+                "createdAt": {
+                  "type": "string"
+                },
+                "encryptedContentType": {
+                  "type": "string"
+                },
+                "encryptedContentTypeIv": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "encryptedName": {
+                  "type": "string"
+                },
+                "encryptionAlgorithm": {
+                  "type": "string"
+                },
+                "encryptionIv": {
+                  "type": "string"
+                },
+                "fileSize": {
+                  "type": "integer",
+                  "format": "int32"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "itemId": {
+                  "type": "string"
+                },
+                "storageKey": {
+                  "type": "string"
+                },
+                "uploadedBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "vaultId": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_VaultAvailableMemberResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "userId",
+                "name",
+                "email",
+                "publicKey"
+              ],
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "publicKey": {
+                  "type": "string"
+                },
+                "userId": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_VaultItemDetailsResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "vaultId",
+                "category",
+                "favorite",
+                "encryptedData",
+                "encryptionIv",
+                "encryptionAlgorithm",
+                "version",
+                "createdAt",
+                "updatedAt",
+                "attachments"
+              ],
+              "properties": {
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VaultAttachmentResponse"
+                  }
+                },
+                "category": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "deletedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "encryptedData": {
+                  "type": "string"
+                },
+                "encryptionAlgorithm": {
+                  "type": "string"
+                },
+                "encryptionIv": {
+                  "type": "string"
+                },
+                "favorite": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastModifiedBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "vaultId": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int32"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_VaultItemResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "vaultId",
+                "category",
+                "favorite",
+                "encryptedData",
+                "encryptionIv",
+                "encryptionAlgorithm",
+                "version",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "category": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "deletedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "encryptedData": {
+                  "type": "string"
+                },
+                "encryptionAlgorithm": {
+                  "type": "string"
+                },
+                "encryptionIv": {
+                  "type": "string"
+                },
+                "favorite": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastModifiedBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "vaultId": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int32"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_VaultItemWithVaultResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "vaultId",
+                "category",
+                "favorite",
+                "encryptedData",
+                "encryptionIv",
+                "encryptionAlgorithm",
+                "version",
+                "createdAt",
+                "updatedAt",
+                "attachments"
+              ],
+              "properties": {
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VaultAttachmentResponse"
+                  }
+                },
+                "category": {
+                  "type": "string"
+                },
+                "createdAt": {
+                  "type": "string"
+                },
+                "deletedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "encryptedData": {
+                  "type": "string"
+                },
+                "encryptionAlgorithm": {
+                  "type": "string"
+                },
+                "encryptionIv": {
+                  "type": "string"
+                },
+                "favorite": {
+                  "type": "boolean"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "lastModifiedBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "updatedAt": {
+                  "type": "string"
+                },
+                "vault": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "$ref": "#/components/schemas/VaultSummaryResponse"
+                    }
+                  ]
+                },
+                "vaultId": {
+                  "type": "string"
+                },
+                "version": {
+                  "type": "integer",
+                  "format": "int32"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_VaultListEntryResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "vaultType",
+                "role",
+                "itemCount",
+                "encryptedVaultKey",
+                "createdById"
+              ],
+              "properties": {
+                "createdById": {
+                  "type": "string"
+                },
+                "encryptedVaultKey": {
+                  "type": "string"
+                },
+                "icon": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "imageUrl": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "itemCount": {
+                  "type": "string",
+                  "pattern": "^(0|[1-9][0-9]*)$"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "vaultType": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_VaultMemberResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "userId",
+                "name",
+                "email",
+                "role"
+              ],
+              "properties": {
+                "email": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "userId": {
+                  "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
           }
         }
       },
@@ -13736,83 +16561,6 @@
           }
         }
       },
-      "VaultItemWithVaultResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "vaultId",
-          "category",
-          "favorite",
-          "encryptedData",
-          "encryptionIv",
-          "encryptionAlgorithm",
-          "version",
-          "createdAt",
-          "updatedAt",
-          "attachments"
-        ],
-        "properties": {
-          "attachments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VaultAttachmentResponse"
-            }
-          },
-          "category": {
-            "type": "string"
-          },
-          "createdAt": {
-            "type": "string"
-          },
-          "deletedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "encryptedData": {
-            "type": "string"
-          },
-          "encryptionAlgorithm": {
-            "type": "string"
-          },
-          "encryptionIv": {
-            "type": "string"
-          },
-          "favorite": {
-            "type": "boolean"
-          },
-          "id": {
-            "type": "string"
-          },
-          "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "updatedAt": {
-            "type": "string"
-          },
-          "vault": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/VaultSummaryResponse"
-              }
-            ]
-          },
-          "vaultId": {
-            "type": "string"
-          },
-          "version": {
-            "type": "integer",
-            "format": "int32"
-          }
-        }
-      },
       "VaultKeyRotationInput": {
         "type": "object",
         "required": [
@@ -13892,7 +16640,7 @@
           "name",
           "vaultType",
           "role",
-          "items",
+          "itemCount",
           "encryptedVaultKey",
           "createdById"
         ],
@@ -13918,11 +16666,9 @@
               "null"
             ]
           },
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/VaultItemResponse"
-            }
+          "itemCount": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)$"
           },
           "name": {
             "type": "string"

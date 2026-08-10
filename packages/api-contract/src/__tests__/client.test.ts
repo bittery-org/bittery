@@ -413,4 +413,55 @@ describe("Bittery API facade", () => {
 		expect(usage.data.committedStorageBytes).toBe(9_007_199_254_740_993n);
 		expect(usage.data.quotaBytes).toBe(10_000_000_000_000_000n);
 	});
+
+	test("drains cursor pages for exhaustive collection methods", async () => {
+		const requests: Request[] = [];
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async (request) => {
+				requests.push(request);
+				const cursor = new URL(request.url).searchParams.get("cursor");
+				return Response.json(
+					cursor
+						? { items: [{ id: "item-2" }], hasMore: false }
+						: {
+								items: [{ id: "item-1" }],
+								hasMore: true,
+								nextCursor: "cursor-2",
+							},
+				);
+			},
+		});
+
+		const result = await client.items.list();
+
+		expect(result.data.map((item) => item.id)).toEqual(["item-1", "item-2"]);
+		expect(requests.map((request) => request.url)).toEqual([
+			"https://api.example.test/api/v1/items",
+			"https://api.example.test/api/v1/items?cursor=cursor-2",
+		]);
+	});
+
+	test("rejects malformed collection continuation metadata", async () => {
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async () => Response.json({ items: [], hasMore: true }),
+		});
+
+		expect(client.vaults.list()).rejects.toThrow(
+			"/api/v1/vaults returned hasMore without a nextCursor.",
+		);
+	});
 });

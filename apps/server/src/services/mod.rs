@@ -4,6 +4,7 @@ pub(crate) mod auth;
 pub(crate) mod auth_email;
 pub(crate) mod billing;
 pub(crate) mod connection_registry;
+pub(crate) mod idempotency;
 pub(crate) mod rate_limit;
 pub(crate) mod redis;
 pub(crate) mod session;

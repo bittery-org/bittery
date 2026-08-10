@@ -1,6 +1,10 @@
 use axum::{
+    body::to_bytes,
     extract::{DefaultBodyLimit, FromRequest, Path, Query, State},
-    http::{header::ETAG, HeaderMap, HeaderValue, Request, StatusCode},
+    http::{
+        header::{CONTENT_TYPE, ETAG},
+        HeaderMap, HeaderValue, Request, StatusCode,
+    },
     response::{IntoResponse, Response},
     Json,
 };
@@ -18,17 +22,28 @@ use crate::{
 
 use super::{
     dto::{
-        DecimalString, PatchField, ProblemDetails, BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS,
-        ITEM_CIPHERTEXT_BYTES,
+        CursorPage, DecimalString, PageCursor, PageRequest, PatchField, ProblemDetails,
+        BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_PAGE_SIZE, ITEM_CIPHERTEXT_BYTES,
     },
     error::ApiError,
     extract::AuthenticatedRequest,
+    idempotency,
+    pagination::{
+        decode_page_key, page_prefetched, page_values, query_limit, timestamp_cursor_key,
+        ApiPageQuery,
+    },
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
 const ITEM_BODY_LIMIT_BYTES: usize = ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024;
 
 struct ApiJson<T>(T);
+
+#[derive(Debug)]
+struct ApiJsonBytes<T> {
+    value: T,
+    bytes: Vec<u8>,
+}
 
 impl<S, T> FromRequest<S> for ApiJson<T>
 where
@@ -45,13 +60,55 @@ where
         Json::<T>::from_request(request, state)
             .await
             .map(|Json(value)| Self(value))
-            .map_err(|error| {
-                if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
-                    ApiError::payload_too_large("The request body exceeds this route's byte limit.")
-                } else {
-                    ApiError::bad_request("INVALID_JSON", error.body_text())
+            .map_err(|error| match error.status() {
+                StatusCode::UNSUPPORTED_MEDIA_TYPE => {
+                    ApiError::unsupported_media_type(error.body_text())
                 }
+                StatusCode::PAYLOAD_TOO_LARGE => {
+                    ApiError::payload_too_large("The request body exceeds this route's byte limit.")
+                }
+                _ => ApiError::bad_request("INVALID_JSON", error.body_text()),
             })
+    }
+}
+
+impl<S, T> FromRequest<S> for ApiJsonBytes<T>
+where
+    S: Send + Sync,
+    T: DeserializeOwned,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(
+        request: Request<axum::body::Body>,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let content_type = request
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim);
+        if !matches!(
+            content_type,
+            Some("application/json" | "application/merge-patch+json")
+        ) && !content_type.is_some_and(|value| value.ends_with("+json"))
+        {
+            return Err(ApiError::unsupported_media_type(
+                "Expected a JSON request content type.",
+            ));
+        }
+        let bytes = to_bytes(request.into_body(), ITEM_BODY_LIMIT_BYTES)
+            .await
+            .map_err(|_| {
+                ApiError::payload_too_large("The request body exceeds this route's byte limit.")
+            })?;
+        let Json(value) = Json::<T>::from_bytes(&bytes)
+            .map_err(|error| ApiError::bad_request("INVALID_JSON", error.body_text()))?;
+        Ok(Self {
+            value,
+            bytes: bytes.to_vec(),
+        })
     }
 }
 
@@ -115,13 +172,21 @@ struct BulkImportBody {
 #[into_params(parameter_in = Query, rename_all = "camelCase")]
 struct AllItemsQuery {
     state: Option<String>,
+    cursor: Option<PageCursor>,
+    #[serde(default = "default_page_limit")]
+    #[schema(minimum = 1, maximum = 500, default = 100)]
+    limit: u16,
+}
+
+fn default_page_limit() -> u16 {
+    DEFAULT_PAGE_SIZE
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(untagged)]
 enum AllItemsResponse {
-    Active(Vec<VaultItemWithVaultResponse>),
-    Trashed(Vec<DeletedVaultItemWithVaultResponse>),
+    Active(CursorPage<VaultItemWithVaultResponse>),
+    Trashed(CursorPage<DeletedVaultItemWithVaultResponse>),
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -453,6 +518,25 @@ enum VaultErrorResponses {
     )]
     PayloadTooLarge(ProblemDetails),
     #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
+    #[response(
+        status = 422,
+        description = "Idempotency key was reused with a different request",
+        content_type = "application/problem+json"
+    )]
+    Unprocessable(ProblemDetails),
+    #[response(
+        status = 503,
+        description = "An identical idempotent request is still pending",
+        content_type = "application/problem+json",
+        headers(("Retry-After" = String, description = "Seconds before retrying"))
+    )]
+    ServiceUnavailable(ProblemDetails),
+    #[response(
         status = 500,
         description = "Internal error",
         content_type = "application/problem+json"
@@ -460,13 +544,22 @@ enum VaultErrorResponses {
     Internal(ProblemDetails),
 }
 
-#[utoipa::path(get, path = "/vaults", operation_id = "listVaults", tag = "vaults", responses((status = 200, description = "Success", body = Vec<VaultListEntryResponse>), VaultErrorResponses))]
+#[utoipa::path(get, path = "/vaults", operation_id = "listVaults", tag = "vaults", params(PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultListEntryResponse>), VaultErrorResponses))]
 async fn list_vaults(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
-) -> Result<Json<Vec<VaultListEntryResponse>>, ApiError> {
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<VaultListEntryResponse>>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(vault::list_vaults(pool, &auth.session.user_id).await?))
+    let values = vault::list_vaults(pool, &auth.session.user_id).await?;
+    Ok(Json(page_values(
+        values,
+        &page,
+        &auth.session.user_id,
+        "vaults",
+        "",
+        |vault| vault.id.clone(),
+    )?))
 }
 
 #[utoipa::path(get, path = "/vaults/{vaultId}", operation_id = "getVault", tag = "vaults", params(("vaultId" = String, Path)), responses((status = 200, description = "Success", body = VaultDetailsResponseDto), VaultErrorResponses))]
@@ -603,16 +696,36 @@ async fn create_image_upload(
     ))
 }
 
-#[utoipa::path(get, path = "/vaults/{vaultId}/items", operation_id = "listVaultItems", tag = "items", params(("vaultId" = String, Path)), responses((status = 200, description = "Success", body = Vec<VaultItemDetailsResponse>), VaultErrorResponses))]
+#[utoipa::path(get, path = "/vaults/{vaultId}/items", operation_id = "listVaultItems", tag = "items", params(("vaultId" = String, Path), PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultItemDetailsResponse>), VaultErrorResponses))]
 async fn list_items(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(vault_id): Path<String>,
-) -> Result<Json<Vec<VaultItemDetailsResponse>>, ApiError> {
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<VaultItemDetailsResponse>>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        vault::list_vault_items(pool, &auth.session.user_id, VaultIdInput { vault_id }).await?,
-    ))
+    let cursor = decode_page_key(&page, &auth.session.user_id, "vault-items", &vault_id)?
+        .map(|key| timestamp_cursor_key(&key))
+        .transpose()?;
+    let limit = query_limit(&page)?;
+    let values = vault::list_vault_items_page(
+        pool,
+        &auth.session.user_id,
+        VaultIdInput {
+            vault_id: vault_id.clone(),
+        },
+        cursor,
+        limit,
+    )
+    .await?;
+    Ok(Json(page_prefetched(
+        values,
+        &page,
+        &auth.session.user_id,
+        "vault-items",
+        &vault_id,
+        |item| format!("{}\0{}", item.updated_at, item.id),
+    )?))
 }
 
 #[utoipa::path(get, path = "/items", operation_id = "listAllItems", tag = "items", params(AllItemsQuery), responses((status = 200, description = "Accessible active or trashed items", body = AllItemsResponse), VaultErrorResponses))]
@@ -622,13 +735,58 @@ async fn list_all_items(
     Query(query): Query<AllItemsQuery>,
 ) -> Result<Json<AllItemsResponse>, ApiError> {
     let pool = db_pool(&state)?;
-    match query.state.as_deref().unwrap_or("active") {
-        "active" => Ok(Json(AllItemsResponse::Active(
-            vault::list_all_vault_items(pool, &auth.session.user_id).await?,
-        ))),
-        "trashed" => Ok(Json(AllItemsResponse::Trashed(
-            vault::list_all_deleted_vault_items(pool, &auth.session.user_id).await?,
-        ))),
+    let state_filter = query.state.as_deref().unwrap_or("active");
+    let page = PageRequest {
+        cursor: query.cursor,
+        limit: query.limit,
+    };
+    match state_filter {
+        "active" => {
+            let cursor = decode_page_key(&page, &auth.session.user_id, "items", state_filter)?
+                .map(|key| timestamp_cursor_key(&key))
+                .transpose()?;
+            let values = vault::list_all_vault_items_page(
+                pool,
+                &auth.session.user_id,
+                cursor,
+                query_limit(&page)?,
+            )
+            .await?;
+            Ok(Json(AllItemsResponse::Active(page_prefetched(
+                values,
+                &page,
+                &auth.session.user_id,
+                "items",
+                state_filter,
+                |item| format!("{}\0{}", item.updated_at, item.id),
+            )?)))
+        }
+        "trashed" => {
+            let cursor = decode_page_key(&page, &auth.session.user_id, "items", state_filter)?
+                .map(|key| timestamp_cursor_key(&key))
+                .transpose()?;
+            let values = vault::list_all_deleted_vault_items_page(
+                pool,
+                &auth.session.user_id,
+                cursor,
+                query_limit(&page)?,
+            )
+            .await?;
+            Ok(Json(AllItemsResponse::Trashed(page_prefetched(
+                values,
+                &page,
+                &auth.session.user_id,
+                "items",
+                state_filter,
+                |item| {
+                    format!(
+                        "{}\0{}",
+                        item.deleted_at.as_deref().unwrap_or_default(),
+                        item.id
+                    )
+                },
+            )?)))
+        }
         _ => Err(ApiError::bad_request(
             "INVALID_ITEM_STATE",
             "state must be either active or trashed.",
@@ -636,27 +794,74 @@ async fn list_all_items(
     }
 }
 
-#[utoipa::path(get, path = "/items/trashed", operation_id = "listAllTrashedItems", tag = "items", responses((status = 200, description = "All accessible trashed items", body = Vec<DeletedVaultItemWithVaultResponse>), VaultErrorResponses))]
+#[utoipa::path(get, path = "/items/trashed", operation_id = "listAllTrashedItems", tag = "items", params(PageRequest), responses((status = 200, description = "All accessible trashed items", body = CursorPage<DeletedVaultItemWithVaultResponse>), VaultErrorResponses))]
 async fn list_all_trashed_items(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
-) -> Result<Json<Vec<DeletedVaultItemWithVaultResponse>>, ApiError> {
-    Ok(Json(
-        vault::list_all_deleted_vault_items(db_pool(&state)?, &auth.session.user_id).await?,
-    ))
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<DeletedVaultItemWithVaultResponse>>, ApiError> {
+    let cursor = decode_page_key(&page, &auth.session.user_id, "items", "trashed")?
+        .map(|key| timestamp_cursor_key(&key))
+        .transpose()?;
+    let values = vault::list_all_deleted_vault_items_page(
+        db_pool(&state)?,
+        &auth.session.user_id,
+        cursor,
+        query_limit(&page)?,
+    )
+    .await?;
+    Ok(Json(page_prefetched(
+        values,
+        &page,
+        &auth.session.user_id,
+        "items",
+        "trashed",
+        |item| {
+            format!(
+                "{}\0{}",
+                item.deleted_at.as_deref().unwrap_or_default(),
+                item.id
+            )
+        },
+    )?))
 }
 
-#[utoipa::path(get, path = "/vaults/{vaultId}/items/trashed", operation_id = "listTrashedVaultItems", tag = "items", params(("vaultId" = String, Path)), responses((status = 200, description = "Success", body = Vec<VaultItemResponse>), VaultErrorResponses))]
+#[utoipa::path(get, path = "/vaults/{vaultId}/items/trashed", operation_id = "listTrashedVaultItems", tag = "items", params(("vaultId" = String, Path), PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultItemResponse>), VaultErrorResponses))]
 async fn list_deleted_items(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(vault_id): Path<String>,
-) -> Result<Json<Vec<VaultItemResponse>>, ApiError> {
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<VaultItemResponse>>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        vault::list_deleted_vault_items(pool, &auth.session.user_id, VaultIdInput { vault_id })
-            .await?,
-    ))
+    let filter = format!("{vault_id}:trashed");
+    let cursor = decode_page_key(&page, &auth.session.user_id, "vault-items", &filter)?
+        .map(|key| timestamp_cursor_key(&key))
+        .transpose()?;
+    let values = vault::list_deleted_vault_items_page(
+        pool,
+        &auth.session.user_id,
+        VaultIdInput {
+            vault_id: vault_id.clone(),
+        },
+        cursor,
+        query_limit(&page)?,
+    )
+    .await?;
+    Ok(Json(page_prefetched(
+        values,
+        &page,
+        &auth.session.user_id,
+        "vault-items",
+        &filter,
+        |item| {
+            format!(
+                "{}\0{}",
+                item.deleted_at.as_deref().unwrap_or_default(),
+                item.id
+            )
+        },
+    )?))
 }
 
 #[utoipa::path(get, path = "/items/{itemId}", operation_id = "getItem", tag = "items", params(("itemId" = String, Path)), responses((status = 200, description = "Success", body = ItemResponseDto, headers(("ETag" = String, description = "Strong item version validator"))), VaultErrorResponses))]
@@ -724,13 +929,13 @@ async fn bulk_import_items(
     Ok(Json(result))
 }
 
-#[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag")), request_body = UpdateItemBody, responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"))), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/items/{itemId}", operation_id = "updateItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body = UpdateItemBody, responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
 async fn update_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiJson(body): ApiJson<UpdateItemBody>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<UpdateItemBody>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let encrypted_data = optional_patch_value(body.encrypted_data, "/encryptedData")?;
@@ -740,49 +945,80 @@ async fn update_item(
     if let Some(value) = encrypted_data.as_deref() {
         check_ciphertext(value)?;
     }
-    let pool = db_pool(&state)?;
-    let result = vault::update_vault_item(
-        pool,
-        &auth.session.user_id,
-        UpdateItemInput {
-            item_id,
-            encrypted_data,
-            encryption_iv,
-            encryption_algorithm,
-            expected_version: Some(expected_version),
-            client_id: request_client_id(&auth),
+    let pool = db_pool(&state)?.clone();
+    let operation_pool = pool.clone();
+    let principal_id = auth.session.user_id.clone();
+    let operation_principal_id = principal_id.clone();
+    let client_id = request_client_id(&auth);
+    let route_target = format!("/api/v1/items/{item_id}");
+    idempotency::execute(
+        &pool,
+        &headers,
+        &principal_id,
+        "PATCH",
+        &route_target,
+        &bytes,
+        || async move {
+            let result = vault::update_vault_item(
+                &operation_pool,
+                &operation_principal_id,
+                UpdateItemInput {
+                    item_id,
+                    encrypted_data,
+                    encryption_iv,
+                    encryption_algorithm,
+                    expected_version: Some(expected_version),
+                    client_id,
+                },
+            )
+            .await
+            .notify_sync(&state)
+            .map_err(item_mutation_error)?;
+            let version = result.version;
+            versioned_json(result, version)
         },
     )
     .await
-    .notify_sync(&state)
-    .map_err(item_mutation_error)?;
-    let version = result.version;
-    versioned_json(result, version)
 }
 
-#[utoipa::path(put, path = "/items/{itemId}/favorite", operation_id = "setItemFavorite", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag")), request_body = FavoriteBody, responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"))), VaultErrorResponses))]
+#[utoipa::path(patch, path = "/items/{itemId}/favorite", operation_id = "setItemFavorite", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body = FavoriteBody, responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
 async fn set_favorite(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiJson(body): ApiJson<FavoriteBody>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<FavoriteBody>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = db_pool(&state)?;
-    let result = vault::toggle_vault_favorite(
-        pool,
-        &auth.session.user_id,
-        ToggleFavoriteInput {
-            item_id,
-            favorite: body.favorite,
-            expected_version: Some(expected_version),
+    let pool = db_pool(&state)?.clone();
+    let operation_pool = pool.clone();
+    let principal_id = auth.session.user_id.clone();
+    let operation_principal_id = principal_id.clone();
+    let route_target = format!("/api/v1/items/{item_id}/favorite");
+    idempotency::execute(
+        &pool,
+        &headers,
+        &principal_id,
+        "PATCH",
+        &route_target,
+        &bytes,
+        || async move {
+            let result = vault::toggle_vault_favorite(
+                &operation_pool,
+                &operation_principal_id,
+                ToggleFavoriteInput {
+                    item_id,
+                    favorite: body.favorite,
+                    expected_version: Some(expected_version),
+                },
+            )
+            .await
+            .notify_sync(&state)
+            .map_err(item_mutation_error)?;
+            versioned_json(result, expected_version + 1)
         },
     )
     .await
-    .notify_sync(&state)
-    .map_err(item_mutation_error)?;
-    versioned_json(result, expected_version + 1)
 }
 
 #[utoipa::path(delete, path = "/items/{itemId}", operation_id = "trashItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"))), VaultErrorResponses))]
@@ -809,7 +1045,7 @@ async fn delete_item(
     versioned_json(result, expected_version + 1)
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/restore", operation_id = "restoreItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"))), VaultErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/restore", operation_id = "restoreItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when preconditions match")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
 async fn restore_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
@@ -817,52 +1053,84 @@ async fn restore_item(
     Path(item_id): Path<String>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
-    let pool = db_pool(&state)?;
-    let result = vault::restore_vault_item(
-        pool,
-        &auth.session.user_id,
-        ItemClientInput {
-            item_id,
-            expected_version: Some(expected_version),
-            client_id: request_client_id(&auth),
+    let pool = db_pool(&state)?.clone();
+    let operation_pool = pool.clone();
+    let principal_id = auth.session.user_id.clone();
+    let operation_principal_id = principal_id.clone();
+    let client_id = request_client_id(&auth);
+    let route_target = format!("/api/v1/items/{item_id}/restore");
+    idempotency::execute(
+        &pool,
+        &headers,
+        &principal_id,
+        "POST",
+        &route_target,
+        &[],
+        || async move {
+            let result = vault::restore_vault_item(
+                &operation_pool,
+                &operation_principal_id,
+                ItemClientInput {
+                    item_id,
+                    expected_version: Some(expected_version),
+                    client_id,
+                },
+            )
+            .await
+            .notify_sync(&state)
+            .map_err(item_mutation_error)?;
+            versioned_json(result, expected_version + 1)
         },
     )
     .await
-    .notify_sync(&state)
-    .map_err(item_mutation_error)?;
-    versioned_json(result, expected_version + 1)
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/moves", operation_id = "moveItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag")), request_body = MoveItemBody, responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"))), VaultErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/moves", operation_id = "moveItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag"), ("Idempotency-Key" = Option<String>, Header, description = "Replays the same outcome for 24 hours when request bytes and preconditions match")), request_body = MoveItemBody, responses((status = 200, description = "Success", body = UpdateItemResponse, headers(("ETag" = String, description = "Updated strong item version validator"), ("Idempotency-Replayed" = String, description = "true when this is a stored replay"))), VaultErrorResponses))]
 async fn move_item(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiJson(body): ApiJson<MoveItemBody>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<MoveItemBody>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     check_ciphertext(&body.encrypted_data)?;
-    let pool = db_pool(&state)?;
-    let result = vault::move_vault_item(
-        pool,
-        &auth.session.user_id,
-        MoveItemInput {
-            item_id,
-            source_vault_id: body.source_vault_id,
-            target_vault_id: body.target_vault_id,
-            encrypted_data: body.encrypted_data,
-            encryption_iv: body.encryption_iv,
-            encryption_algorithm: body.encryption_algorithm,
-            expected_version: Some(expected_version),
-            client_id: request_client_id(&auth),
+    let pool = db_pool(&state)?.clone();
+    let operation_pool = pool.clone();
+    let principal_id = auth.session.user_id.clone();
+    let operation_principal_id = principal_id.clone();
+    let client_id = request_client_id(&auth);
+    let route_target = format!("/api/v1/items/{item_id}/moves");
+    idempotency::execute(
+        &pool,
+        &headers,
+        &principal_id,
+        "POST",
+        &route_target,
+        &bytes,
+        || async move {
+            let result = vault::move_vault_item(
+                &operation_pool,
+                &operation_principal_id,
+                MoveItemInput {
+                    item_id,
+                    source_vault_id: body.source_vault_id,
+                    target_vault_id: body.target_vault_id,
+                    encrypted_data: body.encrypted_data,
+                    encryption_iv: body.encryption_iv,
+                    encryption_algorithm: body.encryption_algorithm,
+                    expected_version: Some(expected_version),
+                    client_id,
+                },
+            )
+            .await
+            .notify_sync(&state)
+            .map_err(item_mutation_error)?;
+            let version = result.version;
+            versioned_json(result, version)
         },
     )
     .await
-    .notify_sync(&state)
-    .map_err(item_mutation_error)?;
-    let version = result.version;
-    versioned_json(result, version)
 }
 
 #[utoipa::path(delete, path = "/items/{itemId}/permanent", operation_id = "permanentlyDeleteItem", tag = "items", params(("itemId" = String, Path), ("If-Match" = String, Header, description = "Strong item version ETag")), responses((status = 200, description = "Success", body = SuccessResponse, headers(("ETag" = String, description = "Updated strong item version validator"))), VaultErrorResponses))]
@@ -954,16 +1222,35 @@ async fn create_attachment(
     Ok(Json(result))
 }
 
-#[utoipa::path(get, path = "/items/{itemId}/attachments", operation_id = "listAttachments", tag = "attachments", params(("itemId" = String, Path)), responses((status = 200, description = "Success", body = Vec<VaultAttachmentResponse>), VaultErrorResponses))]
+#[utoipa::path(get, path = "/items/{itemId}/attachments", operation_id = "listAttachments", tag = "attachments", params(("itemId" = String, Path), PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultAttachmentResponse>), VaultErrorResponses))]
 async fn list_attachments(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(item_id): Path<String>,
-) -> Result<Json<Vec<VaultAttachmentResponse>>, ApiError> {
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<VaultAttachmentResponse>>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        vault::list_vault_attachments(pool, &auth.session.user_id, ItemIdInput { item_id }).await?,
-    ))
+    let cursor = decode_page_key(&page, &auth.session.user_id, "attachments", &item_id)?
+        .map(|key| timestamp_cursor_key(&key))
+        .transpose()?;
+    let values = vault::list_vault_attachments_page(
+        pool,
+        &auth.session.user_id,
+        ItemIdInput {
+            item_id: item_id.clone(),
+        },
+        cursor,
+        query_limit(&page)?,
+    )
+    .await?;
+    Ok(Json(page_prefetched(
+        values,
+        &page,
+        &auth.session.user_id,
+        "attachments",
+        &item_id,
+        |attachment| format!("{}\0{}", attachment.created_at, attachment.id),
+    )?))
 }
 
 #[utoipa::path(post, path = "/attachments/{attachmentId}/download-urls", operation_id = "createAttachmentDownloadUrl", tag = "attachments", params(("attachmentId" = String, Path)), responses((status = 200, description = "Success", body = AttachmentDownloadResponse), VaultErrorResponses))]
@@ -1025,38 +1312,56 @@ async fn delete_attachment(
     Ok(Json(result))
 }
 
-#[utoipa::path(get, path = "/vaults/{vaultId}/members", operation_id = "listVaultMembers", tag = "vault-members", params(("vaultId" = String, Path)), responses((status = 200, description = "Success", body = Vec<VaultMemberResponse>), VaultErrorResponses))]
+#[utoipa::path(get, path = "/vaults/{vaultId}/members", operation_id = "listVaultMembers", tag = "vault-members", params(("vaultId" = String, Path), PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultMemberResponse>), VaultErrorResponses))]
 async fn list_members(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(vault_id): Path<String>,
-) -> Result<Json<Vec<VaultMemberResponse>>, ApiError> {
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<VaultMemberResponse>>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        vault::member_handlers::list_vault_members(
-            pool,
-            &auth.session.user_id,
-            VaultIdInput { vault_id },
-        )
-        .await?,
-    ))
+    let values = vault::member_handlers::list_vault_members(
+        pool,
+        &auth.session.user_id,
+        VaultIdInput {
+            vault_id: vault_id.clone(),
+        },
+    )
+    .await?;
+    Ok(Json(page_values(
+        values,
+        &page,
+        &auth.session.user_id,
+        "vault-members",
+        &vault_id,
+        |member| member.user_id.clone(),
+    )?))
 }
 
-#[utoipa::path(get, path = "/vaults/{vaultId}/available-team-members", operation_id = "listAvailableTeamMembers", tag = "vault-members", params(("vaultId" = String, Path)), responses((status = 200, description = "Success", body = Vec<VaultAvailableMemberResponse>), VaultErrorResponses))]
+#[utoipa::path(get, path = "/vaults/{vaultId}/available-team-members", operation_id = "listAvailableTeamMembers", tag = "vault-members", params(("vaultId" = String, Path), PageRequest), responses((status = 200, description = "Success", body = CursorPage<VaultAvailableMemberResponse>), VaultErrorResponses))]
 async fn available_team_members(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(vault_id): Path<String>,
-) -> Result<Json<Vec<VaultAvailableMemberResponse>>, ApiError> {
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<VaultAvailableMemberResponse>>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        vault::member_handlers::available_team_members(
-            pool,
-            &auth.session.user_id,
-            VaultIdInput { vault_id },
-        )
-        .await?,
-    ))
+    let values = vault::member_handlers::available_team_members(
+        pool,
+        &auth.session.user_id,
+        VaultIdInput {
+            vault_id: vault_id.clone(),
+        },
+    )
+    .await?;
+    Ok(Json(page_values(
+        values,
+        &page,
+        &auth.session.user_id,
+        "available-vault-members",
+        &vault_id,
+        |member| member.user_id.clone(),
+    )?))
 }
 
 #[utoipa::path(put, path = "/vaults/{vaultId}/members/{userId}", operation_id = "addVaultMember", tag = "vault-members", params(("vaultId" = String, Path), ("userId" = String, Path)), request_body = AddVaultMemberBody, responses((status = 200, description = "Success", body = SuccessResponse), VaultErrorResponses))]
@@ -1197,11 +1502,17 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
 
 #[cfg(test)]
 mod tests {
+    use axum::{
+        body::{to_bytes, Body},
+        extract::FromRequest,
+        http::{Request, StatusCode},
+        response::IntoResponse,
+    };
     use serde_json::json;
 
     use super::{
-        check_bulk_import, check_ciphertext, nullable_patch_value, router, BulkImportBody,
-        UpdateVaultBody, VaultStatsResponseDto,
+        check_bulk_import, check_ciphertext, nullable_patch_value, router, ApiJsonBytes,
+        BulkImportBody, FavoriteBody, UpdateVaultBody, VaultStatsResponseDto,
     };
     use crate::{
         http::api::dto::PatchField,
@@ -1225,6 +1536,26 @@ mod tests {
         assert!(check_ciphertext(&"a".repeat(1_048_577)).is_err());
         assert!(check_ciphertext(&"é".repeat(524_288)).is_ok());
         assert!(check_ciphertext(&format!("{}a", "é".repeat(524_288))).is_err());
+    }
+
+    #[tokio::test]
+    async fn idempotent_item_json_preserves_unsupported_media_type() {
+        let request = Request::builder()
+            .header("content-type", "text/plain")
+            .body(Body::from(r#"{"favorite":true}"#))
+            .expect("request should build");
+        let error = ApiJsonBytes::<FavoriteBody>::from_request(request, &())
+            .await
+            .expect_err("plain text must not be accepted as item JSON");
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        let body: serde_json::Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("problem body should load"),
+        )
+        .expect("problem body should be JSON");
+        assert_eq!(body["code"], "UNSUPPORTED_MEDIA_TYPE");
     }
 
     #[test]

@@ -117,6 +117,19 @@ fn unauthenticated_json_headers() -> HeaderMap {
     headers
 }
 
+fn idempotent_item_headers(token: &str, version: i32, key: &str) -> HeaderMap {
+    let mut headers = authenticated_json_headers(token);
+    headers.insert(
+        IF_MATCH,
+        HeaderValue::from_str(&format!("\"{version}\"")).expect("version ETag should be valid"),
+    );
+    headers.insert(
+        "idempotency-key",
+        HeaderValue::from_str(key).expect("idempotency key should be valid"),
+    );
+    headers
+}
+
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
     assert_eq!(body["detail"], json!(message));
     assert_eq!(body["code"], json!(code));
@@ -690,13 +703,14 @@ async fn vault_query_handlers_return_expected_results() {
             list_response.assert_contract_status();
             let listed_vaults = list_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("vault.list should return an array");
             assert_eq!(listed_vaults.len(), 3);
             let main_vault = find_entry_by_id(listed_vaults, &fixture.main_vault_id);
             assert_eq!(main_vault["role"], json!("owner"));
             assert_eq!(main_vault["encryptedVaultKey"], json!("main-owner-key"));
-            assert_eq!(main_vault["items"].as_array().unwrap().len(), 3);
+            assert_eq!(main_vault["itemCount"], json!("2"));
 
             let get_response = app
                 .call_operation(
@@ -720,7 +734,8 @@ async fn vault_query_handlers_return_expected_results() {
             list_items_response.assert_contract_status();
             let list_items = list_items_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("vault.listItems should return an array");
             assert_eq!(list_items.len(), 2);
             let active_item = find_entry_by_id(list_items, &fixture.active_item_id);
@@ -730,13 +745,65 @@ async fn vault_query_handlers_return_expected_results() {
                 json!(fixture.attachment_id)
             );
 
+            query("UPDATE item SET updated_at = $1 WHERE vault_id = $2 AND deleted_at IS NULL")
+                .bind(OffsetDateTime::from_unix_timestamp(1_710_000_000).unwrap())
+                .bind(&fixture.main_vault_id)
+                .execute(&app.pool)
+                .await
+                .expect("equal item timestamps should be set");
+            let first_page = app
+                .call_operation(
+                    "vault.listItems",
+                    json!([{ "vaultId": fixture.main_vault_id, "limit": 1 }]),
+                    owner_headers.clone(),
+                )
+                .await;
+            first_page.assert_contract_status();
+            assert_eq!(first_page.body["items"].as_array().unwrap().len(), 1);
+            assert_eq!(first_page.body["hasMore"], json!(true));
+            let cursor = first_page.body["nextCursor"]
+                .as_str()
+                .expect("continued page should include a cursor");
+            let second_page = app
+                .call_operation(
+                    "vault.listItems",
+                    json!([{
+                        "vaultId": fixture.main_vault_id,
+                        "cursor": cursor,
+                        "limit": 1
+                    }]),
+                    owner_headers.clone(),
+                )
+                .await;
+            second_page.assert_contract_status();
+            assert_ne!(
+                first_page.body["items"][0]["id"],
+                second_page.body["items"][0]["id"]
+            );
+            assert_eq!(second_page.body["hasMore"], json!(false));
+
+            let tampered_page = app
+                .call_operation(
+                    "vault.listItems",
+                    json!([{
+                        "vaultId": fixture.main_vault_id,
+                        "cursor": format!("{cursor}x"),
+                        "limit": 1
+                    }]),
+                    owner_headers.clone(),
+                )
+                .await;
+            assert_eq!(tampered_page.status, StatusCode::BAD_REQUEST);
+            assert_eq!(tampered_page.body["code"], json!("INVALID_CURSOR"));
+
             let list_all_items_response = app
                 .call_operation("vault.listAllItems", json!([]), owner_headers.clone())
                 .await;
             list_all_items_response.assert_contract_status();
             let all_items = list_all_items_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("vault.listAllItems should return an array");
             assert_eq!(all_items.len(), 3);
             let personal_item = find_entry_by_id(all_items, &fixture.personal_item_id);
@@ -755,7 +822,8 @@ async fn vault_query_handlers_return_expected_results() {
             list_all_deleted_response.assert_contract_status();
             let all_deleted_items = list_all_deleted_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("vault.listAllDeletedItems should return an array");
             assert_eq!(all_deleted_items.len(), 1);
             assert_eq!(all_deleted_items[0]["id"], json!(fixture.deleted_item_id));
@@ -770,7 +838,8 @@ async fn vault_query_handlers_return_expected_results() {
             list_deleted_response.assert_contract_status();
             let deleted_items = list_deleted_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("vault.listDeletedItems should return an array");
             assert_eq!(deleted_items.len(), 1);
             assert_eq!(deleted_items[0]["id"], json!(fixture.deleted_item_id));
@@ -1120,7 +1189,7 @@ async fn rest_item_mutations_require_and_advance_strong_versions() {
             favorite_headers.insert(IF_MATCH, HeaderValue::from_static("\"2\""));
             let favorite = app
                 .api_json(
-                    Method::PUT,
+                    Method::PATCH,
                     &format!("{item_uri}/favorite"),
                     Some(json!({ "favorite": true })),
                     favorite_headers,
@@ -1244,6 +1313,267 @@ async fn move_item_requires_source_vault_write_access() {
             assert_eq!(vault_id, fixture.main_vault_id);
         },
     )
+    .await;
+}
+
+#[tokio::test]
+async fn item_update_idempotency_replays_without_a_second_mutation() {
+    with_api_test_app(
+        "item_update_idempotency_replay",
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let body = json!({
+                "encryptedData": "idempotent-encrypted-data",
+                "encryptionIv": "idempotent-iv"
+            });
+
+            let first = app
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/items/{}", fixture.active_item_id),
+                    Some(body.clone()),
+                    idempotent_item_headers(&session.token, 1, "update-replay-key"),
+                )
+                .await;
+            let replay = app
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/items/{}", fixture.active_item_id),
+                    Some(body),
+                    idempotent_item_headers(&session.token, 1, "update-replay-key"),
+                )
+                .await;
+
+            assert_eq!(first.status, StatusCode::OK);
+            assert_eq!(replay.status, first.status);
+            assert_eq!(replay.body, first.body);
+            assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
+            assert_eq!(
+                replay.headers.get("idempotency-replayed"),
+                Some(&HeaderValue::from_static("true")),
+            );
+            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
+                .bind(&fixture.active_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("item version should load");
+            let events: i64 = query_scalar(
+                "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_updated'::sync_event_type",
+            )
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("sync event count should load");
+            assert_eq!(version, 2);
+            assert_eq!(events, 1);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_item_update_idempotency_executes_once() {
+    with_api_test_app("concurrent_item_update_idempotency", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
+        let body = json!({
+            "encryptedData": "concurrent-encrypted-data",
+            "encryptionIv": "concurrent-iv"
+        });
+        let request_a = app.api_json(
+            Method::PATCH,
+            &uri,
+            Some(body.clone()),
+            idempotent_item_headers(&session.token, 1, "concurrent-update-key"),
+        );
+        let request_b = app.api_json(
+            Method::PATCH,
+            &uri,
+            Some(body),
+            idempotent_item_headers(&session.token, 1, "concurrent-update-key"),
+        );
+
+        let (first, second) = tokio::join!(request_a, request_b);
+        assert!(matches!(
+            first.status,
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(matches!(
+            second.status,
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(first.status == StatusCode::OK || second.status == StatusCode::OK);
+        let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("item version should load");
+        assert_eq!(version, 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn item_update_idempotency_rejects_body_mismatch() {
+    with_api_test_app("item_update_idempotency_mismatch", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
+        let headers = || idempotent_item_headers(&session.token, 1, "mismatch-key");
+        let first = app
+            .api_json(
+                Method::PATCH,
+                &uri,
+                Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
+                headers(),
+            )
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+
+        let mismatch = app
+            .api_json(
+                Method::PATCH,
+                &uri,
+                Some(json!({ "encryptedData": "second", "encryptionIv": "iv" })),
+                headers(),
+            )
+            .await;
+        assert_eq!(mismatch.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_handler_error(
+            &mismatch.body,
+            "IDEMPOTENCY_KEY_REUSED",
+            "The idempotency key was already used for a different request.",
+        );
+
+        let precondition_mismatch = app
+            .api_json(
+                Method::PATCH,
+                &uri,
+                Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
+                idempotent_item_headers(&session.token, 2, "mismatch-key"),
+            )
+            .await;
+        assert_eq!(
+            precondition_mismatch.status,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            precondition_mismatch.body["code"],
+            json!("IDEMPOTENCY_KEY_REUSED")
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn completed_item_idempotency_records_expire_after_twenty_four_hours() {
+    with_api_test_app(
+        "completed_item_idempotency_expiry",
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let uri = format!("/api/v1/items/{}", fixture.active_item_id);
+            let first = app
+                .api_json(
+                    Method::PATCH,
+                    &uri,
+                    Some(json!({ "encryptedData": "first", "encryptionIv": "iv" })),
+                    idempotent_item_headers(&session.token, 1, "expiry-key"),
+                )
+                .await;
+            assert_eq!(first.status, StatusCode::OK);
+            query("UPDATE idempotency_record SET expires_at = NOW() - INTERVAL '1 second' WHERE idempotency_key = $1")
+                .bind("expiry-key")
+                .execute(&app.pool)
+                .await
+                .expect("idempotency record should expire");
+
+            let after_expiry = app
+                .api_json(
+                    Method::PATCH,
+                    &uri,
+                    Some(json!({ "encryptedData": "second", "encryptionIv": "iv-2" })),
+                    idempotent_item_headers(&session.token, 2, "expiry-key"),
+                )
+                .await;
+            assert_eq!(after_expiry.status, StatusCode::OK);
+            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
+                .bind(&fixture.active_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("item version should load");
+            assert_eq!(version, 3);
+        },
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn restore_move_and_favorite_commands_replay_idempotently() {
+    with_api_test_app("restore_move_favorite_idempotency", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        let restore_uri = format!("/api/v1/items/{}/restore", fixture.deleted_item_id);
+        for _ in 0..2 {
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &restore_uri,
+                    None,
+                    idempotent_item_headers(&session.token, 1, "restore-command-key"),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK);
+        }
+
+        let favorite_uri = format!("/api/v1/items/{}/favorite", fixture.active_item_id);
+        for _ in 0..2 {
+            let response = app
+                .api_json(
+                    Method::PATCH,
+                    &favorite_uri,
+                    Some(json!({ "favorite": true })),
+                    idempotent_item_headers(&session.token, 1, "favorite-command-key"),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK);
+        }
+
+        let move_uri = format!("/api/v1/items/{}/moves", fixture.movable_item_id);
+        let move_body = json!({
+            "sourceVaultId": fixture.main_vault_id,
+            "targetVaultId": fixture.target_vault_id,
+            "encryptedData": "moved-idempotently",
+            "encryptionIv": "moved-iv"
+        });
+        for _ in 0..2 {
+            let response = app
+                .api_json(
+                    Method::POST,
+                    &move_uri,
+                    Some(move_body.clone()),
+                    idempotent_item_headers(&session.token, 1, "move-command-key"),
+                )
+                .await;
+            assert_eq!(response.status, StatusCode::OK);
+        }
+
+        for item_id in [
+            fixture.deleted_item_id,
+            fixture.active_item_id,
+            fixture.movable_item_id,
+        ] {
+            let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
+                .bind(item_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("item version should load");
+            assert_eq!(version, 2);
+        }
+    })
     .await;
 }
 
@@ -1821,7 +2151,8 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 					.await;
 				list_attachments_response.assert_contract_status();
 				let attachments = list_attachments_response.body
-					.as_array()
+					.get("items")
+					.and_then(Value::as_array)
 					.expect("attachments should be returned");
 				assert_eq!(attachments.len(), 1);
 				assert_eq!(attachments[0]["id"], json!(fixture.attachment_id));
@@ -1911,7 +2242,8 @@ async fn vault_member_handlers_manage_members_and_rotation() {
             members_response.assert_contract_status();
             let members = members_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("members should be returned");
             assert_eq!(members.len(), 4);
             assert!(members
@@ -1928,7 +2260,8 @@ async fn vault_member_handlers_manage_members_and_rotation() {
             available_members_response.assert_contract_status();
             let available_members = available_members_response
                 .body
-                .as_array()
+                .get("items")
+                .and_then(Value::as_array)
                 .expect("available members should be returned");
             assert!(available_members
                 .iter()

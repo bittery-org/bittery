@@ -15,8 +15,10 @@ use crate::{
 };
 
 use super::{
+    dto::{CursorPage, PageRequest},
     error::ApiError,
     extract::{ApiJson, AuthenticatedRequest, PublicRequest},
+    pagination::{page_values, ApiPageQuery},
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
@@ -576,18 +578,25 @@ async fn me(
     Ok(Json(auth::get_me(&state, &request.session).await?.into()))
 }
 
-#[utoipa::path(get, path = "/sessions", responses((status = 200, body = [SessionResponse]), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(get, path = "/sessions", params(PageRequest), responses((status = 200, body = CursorPage<SessionResponse>), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
 async fn list_sessions(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
-) -> Result<Json<Vec<SessionResponse>>, ApiError> {
-    Ok(Json(
-        auth::list_devices(&state, &request.session)
-            .await?
-            .into_iter()
-            .map(Into::into)
-            .collect(),
-    ))
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<SessionResponse>>, ApiError> {
+    let values: Vec<SessionResponse> = auth::list_devices(&state, &request.session)
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    Ok(Json(page_values(
+        values,
+        &page,
+        &request.session.user_id,
+        "sessions",
+        "",
+        |session| session.id.clone(),
+    )?))
 }
 
 #[utoipa::path(post, path = "/users/me/email-changes", request_body = EmailChangeRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
@@ -993,7 +1002,7 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "application/problem+json"

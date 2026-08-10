@@ -40,10 +40,10 @@ export function VaultsCard() {
 							<div className="min-w-0 flex-1">
 								<p className="truncate font-medium text-sm">{vault.name}</p>
 								<p className="mt-0.5 text-muted-foreground text-xs">
-									{vault.items.length === 1
+									{Number(vault.itemCount) === 1
 										? m.dashboard_home_items_count_single({ count: 1 })
 										: m.dashboard_home_items_count_plural({
-												count: vault.items.length,
+												count: Number(vault.itemCount),
 											})}
 								</p>
 							</div>

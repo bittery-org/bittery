@@ -1,7 +1,7 @@
 use std::fmt;
 
 use serde::{de, Deserialize, Deserializer, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 pub const API_MAJOR: u16 = 1;
 pub const ITEM_CIPHERTEXT_BYTES: u64 = 1_048_576;
@@ -71,8 +71,9 @@ pub struct ApiLimits {
     pub bulk_import_items: u16,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[into_params(parameter_in = Query, rename_all = "camelCase")]
 pub struct PageRequest {
     #[serde(default)]
     pub cursor: Option<PageCursor>,
@@ -98,6 +99,16 @@ pub struct CursorPage<T> {
 #[serde(transparent)]
 #[schema(value_type = String, pattern = r"^.+$")]
 pub struct PageCursor(String);
+
+impl PageCursor {
+    pub(crate) fn new(value: String) -> Self {
+        Self(value)
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        &self.0
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(transparent)]

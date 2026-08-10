@@ -1,5 +1,6 @@
 use axum::{
     extract::{DefaultBodyLimit, Path, State},
+    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -17,9 +18,11 @@ use crate::{
 };
 
 use super::{
-    dto::{DecimalString, PatchField, ProblemDetails},
+    dto::{CursorPage, DecimalString, PageRequest, PatchField, ProblemDetails},
     error::ApiError,
     extract::{ApiJson, AuthenticatedRequest},
+    idempotency,
+    pagination::{page_values, ApiPageQuery},
     ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
@@ -480,6 +483,12 @@ enum TeamErrorResponses {
     )]
     BadRequest(ProblemDetails),
     #[response(
+        status = 422,
+        description = "Idempotency is not allowed for one-time-secret responses",
+        content_type = "application/problem+json"
+    )]
+    Unprocessable(ProblemDetails),
+    #[response(
         status = 401,
         description = "Authentication required",
         content_type = "application/problem+json"
@@ -588,23 +597,32 @@ async fn get_team(
     ))
 }
 
-#[utoipa::path(get, path = "/teams/{teamId}/vaults", operation_id = "listTeamVaults", tag = "teams", params(("teamId" = String, Path)), responses((status = 200, body = [TeamVaultResponse]), TeamErrorResponses))]
+#[utoipa::path(get, path = "/teams/{teamId}/vaults", operation_id = "listTeamVaults", tag = "teams", params(("teamId" = String, Path), PageRequest), responses((status = 200, body = CursorPage<TeamVaultResponse>), TeamErrorResponses))]
 async fn list_team_vaults(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
     Path(team_id): Path<String>,
-) -> Result<Json<Vec<TeamVaultResponse>>, ApiError> {
-    Ok(Json(
-        team::get_team_vaults(
-            db_pool(&state)?,
-            &request.session.user_id,
-            team::TeamIdInput { team_id },
-        )
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect(),
-    ))
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<TeamVaultResponse>>, ApiError> {
+    let values: Vec<TeamVaultResponse> = team::get_team_vaults(
+        db_pool(&state)?,
+        &request.session.user_id,
+        team::TeamIdInput {
+            team_id: team_id.clone(),
+        },
+    )
+    .await?
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    Ok(Json(page_values(
+        values,
+        &page,
+        &request.session.user_id,
+        "team-vaults",
+        &team_id,
+        |vault| vault.id.clone(),
+    )?))
 }
 
 #[utoipa::path(post, path = "/teams", operation_id = "createTeam", tag = "teams", request_body = CreateTeamRequest, responses((status = 200, body = SuccessResponse), TeamErrorResponses))]
@@ -754,46 +772,65 @@ async fn invitation_by_token(
     ))
 }
 
-#[utoipa::path(get, path = "/users/me/team-invitations", operation_id = "listMyTeamInvitations", tag = "team-invitations", responses((status = 200, body = [PendingInvitationResponse]), TeamErrorResponses))]
+#[utoipa::path(get, path = "/users/me/team-invitations", operation_id = "listMyTeamInvitations", tag = "team-invitations", params(PageRequest), responses((status = 200, body = CursorPage<PendingInvitationResponse>), TeamErrorResponses))]
 async fn pending_invitations(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
-) -> Result<Json<Vec<PendingInvitationResponse>>, ApiError> {
-    Ok(Json(
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<PendingInvitationResponse>>, ApiError> {
+    let values: Vec<PendingInvitationResponse> =
         team::get_pending_invitations(db_pool(&state)?, &request.session.user_id)
             .await?
             .into_iter()
             .map(Into::into)
-            .collect(),
-    ))
+            .collect();
+    Ok(Json(page_values(
+        values,
+        &page,
+        &request.session.user_id,
+        "pending-invitations",
+        "",
+        |invitation| invitation.id.clone(),
+    )?))
 }
 
-#[utoipa::path(get, path = "/teams/{teamId}/invitations", operation_id = "listTeamInvitations", tag = "team-invitations", params(("teamId" = String, Path)), responses((status = 200, body = [InvitationListResponse]), TeamErrorResponses))]
+#[utoipa::path(get, path = "/teams/{teamId}/invitations", operation_id = "listTeamInvitations", tag = "team-invitations", params(("teamId" = String, Path), PageRequest), responses((status = 200, body = CursorPage<InvitationListResponse>), TeamErrorResponses))]
 async fn list_invitations(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
     Path(team_id): Path<String>,
-) -> Result<Json<Vec<InvitationListResponse>>, ApiError> {
-    Ok(Json(
-        invitation_handlers::list_team_invitations(
-            db_pool(&state)?,
-            &request.session.user_id,
-            team::TeamIdInput { team_id },
-        )
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect(),
-    ))
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<InvitationListResponse>>, ApiError> {
+    let values: Vec<InvitationListResponse> = invitation_handlers::list_team_invitations(
+        db_pool(&state)?,
+        &request.session.user_id,
+        team::TeamIdInput {
+            team_id: team_id.clone(),
+        },
+    )
+    .await?
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    Ok(Json(page_values(
+        values,
+        &page,
+        &request.session.user_id,
+        "team-invitations",
+        &team_id,
+        |invitation| invitation.id.clone(),
+    )?))
 }
 
-#[utoipa::path(post, path = "/teams/{teamId}/invitations", operation_id = "sendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path)), request_body = SendInvitationRequest, responses((status = 200, body = SendInvitationResponse), TeamErrorResponses))]
+#[utoipa::path(post, path = "/teams/{teamId}/invitations", operation_id = "sendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), request_body = SendInvitationRequest, responses((status = 200, body = SendInvitationResponse), TeamErrorResponses))]
 async fn send_invitation(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
+    headers: HeaderMap,
     Path(team_id): Path<String>,
     ApiJson(body): ApiJson<SendInvitationRequest>,
 ) -> Result<Json<SendInvitationResponse>, ApiError> {
+    idempotency::reject_one_time_secret(&headers)?;
     let pending_vault_keys = body.pending_vault_keys.map(|entries| {
         entries
             .into_iter()
@@ -904,12 +941,14 @@ async fn cancel_invitation(
     ))
 }
 
-#[utoipa::path(post, path = "/teams/{teamId}/invitations/{invitationId}/resend", operation_id = "resendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path), ("invitationId" = String, Path)), responses((status = 200, body = ResendInvitationResponse), TeamErrorResponses))]
+#[utoipa::path(post, path = "/teams/{teamId}/invitations/{invitationId}/resend", operation_id = "resendTeamInvitation", tag = "team-invitations", params(("teamId" = String, Path), ("invitationId" = String, Path), ("Idempotency-Key" = Option<String>, Header, description = "Not accepted because this operation returns a one-time secret")), responses((status = 200, body = ResendInvitationResponse), TeamErrorResponses))]
 async fn resend_invitation(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
+    headers: HeaderMap,
     Path((_team_id, invitation_id)): Path<(String, String)>,
 ) -> Result<Json<ResendInvitationResponse>, ApiError> {
+    idempotency::reject_one_time_secret(&headers)?;
     Ok(Json(
         team::resend_invitation(
             db_pool(&state)?,
@@ -921,23 +960,32 @@ async fn resend_invitation(
     ))
 }
 
-#[utoipa::path(get, path = "/teams/{teamId}/members", operation_id = "listTeamMembers", tag = "team-members", params(("teamId" = String, Path)), responses((status = 200, body = [TeamMemberResponse]), TeamErrorResponses))]
+#[utoipa::path(get, path = "/teams/{teamId}/members", operation_id = "listTeamMembers", tag = "team-members", params(("teamId" = String, Path), PageRequest), responses((status = 200, body = CursorPage<TeamMemberResponse>), TeamErrorResponses))]
 async fn list_members(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
     Path(team_id): Path<String>,
-) -> Result<Json<Vec<TeamMemberResponse>>, ApiError> {
-    Ok(Json(
-        member_handlers::list_team_members(
-            db_pool(&state)?,
-            &request.session.user_id,
-            team::TeamIdInput { team_id },
-        )
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect(),
-    ))
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<TeamMemberResponse>>, ApiError> {
+    let values: Vec<TeamMemberResponse> = member_handlers::list_team_members(
+        db_pool(&state)?,
+        &request.session.user_id,
+        team::TeamIdInput {
+            team_id: team_id.clone(),
+        },
+    )
+    .await?
+    .into_iter()
+    .map(Into::into)
+    .collect();
+    Ok(Json(page_values(
+        values,
+        &page,
+        &request.session.user_id,
+        "team-members",
+        &team_id,
+        |member| member.user_id.clone(),
+    )?))
 }
 
 #[utoipa::path(get, path = "/teams/{teamId}/members/{userId}/access", operation_id = "getTeamMemberAccess", tag = "team-members", params(("teamId" = String, Path), ("userId" = String, Path)), responses((status = 200, body = MemberAccessResponse), TeamErrorResponses))]

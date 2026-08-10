@@ -1460,6 +1460,53 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 }
 
 #[tokio::test]
+async fn create_share_rejects_idempotency_keys_before_disclosing_a_secret() {
+    with_api_test_app("share_create_rejects_idempotency", |app| async move {
+        let fixture = build_share_actor_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.user_id).await;
+        let mut headers = authenticated_json_headers(&session.token);
+        headers.insert(
+            "idempotency-key",
+            HeaderValue::from_static("share-secret-key"),
+        );
+
+        let response = app
+            .call_operation(
+                "share.create",
+                json!([{
+                    "itemId": fixture.item_id,
+                    "accessMode": "anyone",
+                    "isOneTimeUse": true,
+                    "expiresIn": "1day",
+                    "encryptedItemData": "encrypted-item-data",
+                    "encryptionIv": "item-iv",
+                    "encryptedShareKey": "encrypted-share-key",
+                    "shareKeyIv": "share-key-iv"
+                }]),
+                headers,
+            )
+            .await;
+
+        assert_eq!(response.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_handler_error(
+            &response.body,
+            "IDEMPOTENCY_NOT_ALLOWED",
+            "Idempotency keys are not accepted for operations that return one-time secrets.",
+        );
+        let created: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM share_link WHERE item_id = $1 AND created_by_id = $2",
+        )
+        .bind(&fixture.item_id)
+        .bind(&fixture.user_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("share link count should load");
+        assert_eq!(created, 0);
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn create_share_via_api_rejects_invalid_access_mode() {
     with_api_test_app("share_create_invalid_access_mode", |app| async move {
         let fixture = build_share_actor_fixture(&app.pool).await;
@@ -1513,8 +1560,8 @@ async fn api_content_type_rejects_non_json_share_requests() {
             )
             .await;
 
-        assert_eq!(response.status, StatusCode::BAD_REQUEST);
-        assert_eq!(response.body["code"], json!("INVALID_REQUEST"));
+        assert_eq!(response.status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+        assert_eq!(response.body["code"], json!("UNSUPPORTED_MEDIA_TYPE"));
     })
     .await;
 }

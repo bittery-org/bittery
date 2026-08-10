@@ -19,6 +19,7 @@ use super::{
     dto::{DecimalString, ProblemDetails, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE},
     error::ApiError,
     extract::AuthenticatedRequest,
+    pagination::{truncate_serialized, RESPONSE_PAGE_BYTES},
 };
 
 struct ApiQuery<T>(T);
@@ -203,17 +204,20 @@ async fn bootstrap(
     ApiQuery(query): ApiQuery<BootstrapQuery>,
 ) -> Result<Json<BootstrapItemsResponse>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        sync::bootstrap_items(
-            pool,
-            &auth.session.user_id,
-            BootstrapItemsInput {
-                cursor: query.cursor,
-                limit: Some(i32::from(query.limit)),
-            },
-        )
-        .await?,
-    ))
+    let mut response = sync::bootstrap_items(
+        pool,
+        &auth.session.user_id,
+        BootstrapItemsInput {
+            cursor: query.cursor,
+            limit: Some(i32::from(query.limit)),
+        },
+    )
+    .await?;
+    if truncate_serialized(&mut response.items, RESPONSE_PAGE_BYTES)? {
+        response.has_more = true;
+        response.next_cursor = response.items.last().map(|item| item.id.clone());
+    }
+    Ok(Json(response))
 }
 
 #[utoipa::path(
@@ -235,19 +239,24 @@ async fn changes(
     ChangesApiQuery(query): ChangesApiQuery,
 ) -> Result<Json<SyncChangesResponse>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        sync::get_events_since(
-            pool,
-            &auth.session.user_id,
-            GetEventsSinceInput {
-                since_id: query.since_id,
-                vault_ids: query.vault_ids,
-                limit: Some(i32::from(query.limit)),
-            },
-        )
-        .await?
-        .into(),
-    ))
+    let mut response: SyncChangesResponse = sync::get_events_since(
+        pool,
+        &auth.session.user_id,
+        GetEventsSinceInput {
+            since_id: query.since_id,
+            vault_ids: query.vault_ids,
+            limit: Some(i32::from(query.limit)),
+        },
+    )
+    .await?
+    .into();
+    if truncate_serialized(&mut response.events, RESPONSE_PAGE_BYTES)? {
+        response.has_more = true;
+        response.cursor = response.events.last().map(|event| SyncCursorResponse {
+            id: event.id.clone(),
+        });
+    }
+    Ok(Json(response))
 }
 
 #[utoipa::path(

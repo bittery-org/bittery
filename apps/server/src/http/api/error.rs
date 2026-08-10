@@ -15,6 +15,14 @@ pub(crate) struct ApiError {
 }
 
 impl ApiError {
+    pub(crate) fn internal() -> Self {
+        AppError::internal("API contract processing failed").into()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn code(&self) -> &str {
+        &self.problem.code
+    }
     pub(crate) fn invalid_request(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::BAD_REQUEST,
@@ -39,6 +47,16 @@ impl ApiError {
         )
     }
 
+    pub(crate) fn unsupported_media_type(detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "UNSUPPORTED_MEDIA_TYPE",
+            "Unsupported media type",
+            detail,
+            false,
+        )
+    }
+
     pub(crate) fn precondition_required(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::PRECONDITION_REQUIRED,
@@ -56,6 +74,26 @@ impl ApiError {
             "Version conflict",
             detail,
             false,
+        )
+    }
+
+    pub(crate) fn unprocessable(code: &str, detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            code,
+            "Unprocessable request",
+            detail,
+            false,
+        )
+    }
+
+    pub(crate) fn service_unavailable(code: &str, detail: impl Into<String>) -> Self {
+        Self::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            code,
+            "Service unavailable",
+            detail,
+            true,
         )
     }
 
@@ -168,6 +206,11 @@ impl IntoResponse for ApiError {
         );
         if let Ok(value) = HeaderValue::from_str(&request_id) {
             response.headers_mut().insert("bittery-request-id", value);
+        }
+        if self.status == StatusCode::SERVICE_UNAVAILABLE {
+            response
+                .headers_mut()
+                .insert("retry-after", HeaderValue::from_static("1"));
         }
         response
     }
