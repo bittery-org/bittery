@@ -1698,6 +1698,19 @@ export interface components {
             }[];
             readonly nextCursor?: null | components["schemas"]["PageCursor"];
         };
+        readonly CursorPage_ShareAccessLogResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly {
+                readonly accessedAt: string;
+                readonly accessedByEmail?: string | null;
+                readonly failureReason?: string | null;
+                readonly id: string;
+                readonly ipAddress?: string | null;
+                readonly success: boolean;
+                readonly userAgent?: string | null;
+            }[];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
         readonly CursorPage_TeamMemberResponse: {
             readonly hasMore: boolean;
             readonly items: readonly {
@@ -4456,6 +4469,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
+                /** @description Replays the same queued mutation outcome for 24 hours when preconditions match */
+                readonly "Idempotency-Key"?: string | null;
             };
             readonly path: {
                 readonly itemId: string;
@@ -4469,6 +4484,8 @@ export interface operations {
                 headers: {
                     /** @description Updated strong item version validator */
                     readonly ETag?: string;
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -5435,6 +5452,8 @@ export interface operations {
             readonly header: {
                 /** @description Strong item version ETag */
                 readonly "If-Match": string;
+                /** @description Replays the same queued mutation outcome for 24 hours when preconditions match */
+                readonly "Idempotency-Key"?: string | null;
             };
             readonly path: {
                 readonly itemId: string;
@@ -5446,8 +5465,10 @@ export interface operations {
             /** @description Success */
             readonly 200: {
                 headers: {
-                    /** @description Updated strong item version validator */
+                    /** @description Final strong item version validator */
                     readonly ETag?: string;
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
@@ -6820,7 +6841,10 @@ export interface operations {
     };
     readonly listShareAccessLogs: {
         readonly parameters: {
-            readonly query?: never;
+            readonly query?: {
+                readonly cursor?: components["schemas"]["PageCursor"];
+                readonly limit?: number;
+            };
             readonly header?: never;
             readonly path: {
                 readonly linkId: string;
@@ -6834,7 +6858,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": readonly components["schemas"]["ShareAccessLogResponse"][];
+                    readonly "application/json": components["schemas"]["CursorPage_ShareAccessLogResponse"];
                 };
             };
             /** @description Bad request */
@@ -11014,7 +11038,10 @@ export interface operations {
     readonly createItem: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: never;
+            readonly header?: {
+                /** @description Replays the same queued mutation outcome for 24 hours when request bytes match */
+                readonly "Idempotency-Key"?: string | null;
+            };
             readonly path: {
                 readonly vaultId: string;
                 readonly itemId: string;
@@ -11030,6 +11057,10 @@ export interface operations {
             /** @description Success */
             readonly 200: {
                 headers: {
+                    /** @description Created strong item version validator */
+                    readonly ETag?: string;
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {

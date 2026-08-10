@@ -14,7 +14,7 @@ use super::{
     dto::{DecimalString, ProblemDetails, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE},
     error::ApiError,
     extract::AuthenticatedRequest,
-    pagination::{truncate_serialized, RESPONSE_PAGE_BYTES},
+    pagination::{truncate_serialized, RESPONSE_PAGE_ITEMS_BYTES},
 };
 
 struct ApiQuery<T>(T);
@@ -343,7 +343,7 @@ async fn bootstrap(
         sync::bootstrap_items(pool, &auth.session.user_id, query.into())
             .await?
             .into();
-    if truncate_serialized(&mut response.items, RESPONSE_PAGE_BYTES)? {
+    if truncate_serialized(&mut response.items, RESPONSE_PAGE_ITEMS_BYTES)? {
         response.has_more = true;
         response.next_cursor = response.items.last().map(|item| item.id.clone());
     }
@@ -373,7 +373,7 @@ async fn changes(
         sync::get_events_since(pool, &auth.session.user_id, query.into())
             .await?
             .into();
-    if truncate_serialized(&mut response.events, RESPONSE_PAGE_BYTES)? {
+    if truncate_serialized(&mut response.events, RESPONSE_PAGE_ITEMS_BYTES)? {
         response.has_more = true;
         response.cursor = response.events.last().map(|event| SyncCursorResponse {
             id: event.id.clone(),

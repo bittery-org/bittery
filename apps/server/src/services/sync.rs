@@ -178,11 +178,16 @@ pub(crate) async fn get_events_since(
 
     let events =
         fetch_visible_events_since(pool, user_id, &target_vault_ids, cursor_seq, limit).await?;
-    let has_more = events.len() > limit as usize;
-    let result_events = if has_more {
-        events.into_iter().take(limit as usize).collect::<Vec<_>>()
-    } else {
+    let count_has_more = events.rows.len() > limit as usize;
+    let has_more = events.has_more || count_has_more;
+    let result_events = if count_has_more {
         events
+            .rows
+            .into_iter()
+            .take(limit as usize)
+            .collect::<Vec<_>>()
+    } else {
+        events.rows
     };
     let cursor = result_events.last().map(|event| SyncCursorResponse {
         id: event.id.clone(),
@@ -233,8 +238,10 @@ pub(crate) async fn bootstrap_items(
         .map(|vault| vault.vault_id.clone())
         .collect();
     let paged_items =
-        fetch_bootstrap_items(pool, &vault_ids, input.cursor.as_deref(), limit).await?;
-    let has_more = paged_items.len() > limit as usize;
+        fetch_bootstrap_items(pool, user_id, &vault_ids, input.cursor.as_deref(), limit).await?;
+    let count_has_more = paged_items.rows.len() > limit as usize;
+    let has_more = paged_items.has_more || count_has_more;
+    let paged_items = paged_items.rows;
     let result_items = if has_more {
         paged_items
             .into_iter()

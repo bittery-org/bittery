@@ -49,6 +49,10 @@ where
             "IDEMPOTENCY_REQUEST_IN_PROGRESS",
             "A request with this idempotency key is still in progress.",
         )),
+        Claim::Indeterminate => Err(ApiError::conflict(
+            "IDEMPOTENCY_OUTCOME_INDETERMINATE",
+            "The previous request outcome is unknown and must be verified before operator recovery.",
+        )),
         Claim::Execute => {
             let response = operation()
                 .await

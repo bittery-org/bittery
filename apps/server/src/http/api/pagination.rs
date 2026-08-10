@@ -19,6 +19,7 @@ use super::{
 type HmacSha256 = Hmac<Sha256>;
 
 pub(crate) const RESPONSE_PAGE_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const RESPONSE_PAGE_ITEMS_BYTES: usize = RESPONSE_PAGE_BYTES - 16 * 1024;
 
 pub(crate) fn truncate_serialized<T: Serialize>(
     values: &mut Vec<T>,
@@ -31,7 +32,12 @@ pub(crate) fn truncate_serialized<T: Serialize>(
             .map_err(|_| ApiError::internal())?
             .len()
             + usize::from(keep > 0);
-        if keep > 0 && serialized_bytes + item_bytes > maximum_bytes {
+        if serialized_bytes + item_bytes > maximum_bytes {
+            if keep == 0 {
+                return Err(ApiError::payload_too_large(
+                    "A single response item exceeds the page byte budget.",
+                ));
+            }
             break;
         }
         serialized_bytes += item_bytes;
@@ -175,7 +181,23 @@ pub(crate) fn query_limit(request: &PageRequest) -> Result<i64, ApiError> {
 }
 
 pub(crate) fn page_prefetched<T, F>(
+    values: Vec<T>,
+    request: &PageRequest,
+    principal: &str,
+    scope: &str,
+    filters: &str,
+    key: F,
+) -> Result<CursorPage<T>, ApiError>
+where
+    T: Serialize,
+    F: Fn(&T) -> String,
+{
+    page_prefetched_with_more(values, false, request, principal, scope, filters, key)
+}
+
+pub(crate) fn page_prefetched_with_more<T, F>(
     mut values: Vec<T>,
+    source_has_more: bool,
     request: &PageRequest,
     principal: &str,
     scope: &str,
@@ -189,8 +211,8 @@ where
     validate_page_request(request)?;
     let count_truncated = values.len() > usize::from(request.limit);
     values.truncate(usize::from(request.limit));
-    let bytes_truncated = truncate_serialized(&mut values, RESPONSE_PAGE_BYTES)?;
-    let has_more = count_truncated || bytes_truncated;
+    let bytes_truncated = truncate_serialized(&mut values, RESPONSE_PAGE_ITEMS_BYTES)?;
+    let has_more = source_has_more || count_truncated || bytes_truncated;
     let next_cursor = if has_more {
         values
             .last()
@@ -252,7 +274,12 @@ where
             .map_err(|_| ApiError::internal())?
             .len()
             + usize::from(!items.is_empty());
-        if !items.is_empty() && serialized_bytes + item_bytes > RESPONSE_PAGE_BYTES {
+        if serialized_bytes + item_bytes > RESPONSE_PAGE_ITEMS_BYTES {
+            if items.is_empty() {
+                return Err(ApiError::payload_too_large(
+                    "A single response item exceeds the page byte budget.",
+                ));
+            }
             break;
         }
         serialized_bytes += item_bytes;
@@ -406,5 +433,40 @@ mod tests {
         .unwrap();
         assert_eq!(page.items.len(), 1);
         assert!(page.has_more);
+    }
+
+    #[test]
+    fn page_rejects_a_first_item_larger_than_the_serialized_byte_budget() {
+        let error = page_values(
+            vec![Row {
+                timestamp: "same",
+                id: "oversized",
+                payload: "x".repeat(RESPONSE_PAGE_BYTES),
+            }],
+            &PageRequest {
+                cursor: None,
+                limit: 1,
+            },
+            "user-a",
+            "items",
+            "active",
+            key,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code(), "PAYLOAD_TOO_LARGE");
+    }
+
+    #[test]
+    fn truncation_rejects_a_first_item_larger_than_the_requested_budget() {
+        let mut values = vec![Row {
+            timestamp: "same",
+            id: "oversized",
+            payload: "x".repeat(32),
+        }];
+
+        let error = truncate_serialized(&mut values, 16).unwrap_err();
+
+        assert_eq!(error.code(), "PAYLOAD_TOO_LARGE");
     }
 }

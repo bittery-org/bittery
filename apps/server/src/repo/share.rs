@@ -132,12 +132,17 @@ pub async fn count_active_share_links(
 pub async fn load_share_access_logs(
     pool: &PgPool,
     share_link_id: &str,
-    limit: i32,
+    cursor: Option<(time::OffsetDateTime, String)>,
+    limit: i64,
 ) -> Result<Vec<DbShareAccessLogRow>, AppError> {
+    let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
+    let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
     query_as::<_, DbShareAccessLogRow>(
-		"SELECT id, accessed_by_email, ip_address, user_agent, success, failure_reason, accessed_at FROM share_access_log WHERE share_link_id = $1 ORDER BY accessed_at DESC LIMIT $2",
+		"SELECT id, accessed_by_email, ip_address, user_agent, success, failure_reason, accessed_at FROM share_access_log WHERE share_link_id = $1 AND ($2::timestamptz IS NULL OR (accessed_at, id) < ($2, $3)) ORDER BY accessed_at DESC, id DESC LIMIT $4",
 	)
 	.bind(share_link_id)
+	.bind(cursor_timestamp)
+	.bind(cursor_id)
 	.bind(limit)
 	.fetch_all(pool)
 	.await

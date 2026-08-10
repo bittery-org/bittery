@@ -2461,6 +2461,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the same queued mutation outcome for 24 hours when preconditions match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -2472,6 +2484,12 @@
                   "type": "string"
                 },
                 "description": "Updated strong item version validator"
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a stored replay"
               }
             },
             "content": {
@@ -3788,6 +3806,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the same queued mutation outcome for 24 hours when preconditions match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "responses": {
@@ -3798,7 +3828,13 @@
                 "schema": {
                   "type": "string"
                 },
-                "description": "Updated strong item version validator"
+                "description": "Final strong item version validator"
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a stored replay"
               }
             },
             "content": {
@@ -5633,6 +5669,24 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PageCursor"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
           }
         ],
         "responses": {
@@ -5641,10 +5695,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ShareAccessLogResponse"
-                  }
+                  "$ref": "#/components/schemas/CursorPage_ShareAccessLogResponse"
                 }
               }
             }
@@ -11163,6 +11214,18 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Replays the same queued mutation outcome for 24 hours when request bytes match",
+            "required": false,
+            "schema": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
           }
         ],
         "requestBody": {
@@ -11178,6 +11241,20 @@
         "responses": {
           "200": {
             "description": "Success",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Created strong item version validator"
+              },
+              "Idempotency-Replayed": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "true when this is a stored replay"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -13830,6 +13907,75 @@
                 },
                 "platform": {
                   "type": "string"
+                }
+              }
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
+      },
+      "CursorPage_ShareAccessLogResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "success",
+                "accessedAt"
+              ],
+              "properties": {
+                "accessedAt": {
+                  "type": "string"
+                },
+                "accessedByEmail": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "failureReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "type": "string"
+                },
+                "ipAddress": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "success": {
+                  "type": "boolean"
+                },
+                "userAgent": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 }
               }
             },

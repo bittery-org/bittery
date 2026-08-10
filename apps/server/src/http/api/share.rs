@@ -10,10 +10,14 @@ use utoipa_axum::{router::OpenApiRouter, routes};
 use crate::{config::db_pool, services::share, AppState};
 
 use super::{
-    dto::ProblemDetails,
+    dto::{CursorPage, PageRequest, ProblemDetails},
     error::ApiError,
     extract::{ApiJson, AuthenticatedRequest},
-    idempotency, ORDINARY_API_BODY_LIMIT_BYTES,
+    idempotency,
+    pagination::{
+        decode_page_key, page_prefetched, query_limit, timestamp_cursor_key, ApiPageQuery,
+    },
+    ORDINARY_API_BODY_LIMIT_BYTES,
 };
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -395,23 +399,40 @@ async fn revoke_share_link(
     }))
 }
 
-#[utoipa::path(get, path = "/share-links/{linkId}/access-logs", operation_id = "listShareAccessLogs", tag = "share-links", params(("linkId" = String, Path)), responses((status = 200, body = [ShareAccessLogResponse]), ShareErrorResponses))]
+#[utoipa::path(get, path = "/share-links/{linkId}/access-logs", operation_id = "listShareAccessLogs", tag = "share-links", params(("linkId" = String, Path), PageRequest), responses((status = 200, body = CursorPage<ShareAccessLogResponse>), ShareErrorResponses))]
 async fn access_logs(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
     Path(link_id): Path<String>,
-) -> Result<Json<Vec<ShareAccessLogResponse>>, ApiError> {
-    Ok(Json(
-        share::get_share_access_logs(
-            db_pool(&state)?,
-            &request.session.user_id,
-            share::LinkIdInput { link_id },
-        )
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect(),
-    ))
+    ApiPageQuery(page): ApiPageQuery,
+) -> Result<Json<CursorPage<ShareAccessLogResponse>>, ApiError> {
+    let cursor = decode_page_key(
+        &page,
+        &request.session.user_id,
+        "share-access-logs",
+        &link_id,
+    )?
+    .map(|key| timestamp_cursor_key(&key))
+    .transpose()?;
+    let values = share::get_share_access_logs(
+        db_pool(&state)?,
+        &request.session.user_id,
+        share::LinkIdInput {
+            link_id: link_id.clone(),
+        },
+        cursor,
+        query_limit(&page)?,
+    )
+    .await?;
+    let values: Vec<ShareAccessLogResponse> = values.into_iter().map(Into::into).collect();
+    Ok(Json(page_prefetched(
+        values,
+        &page,
+        &request.session.user_id,
+        "share-access-logs",
+        &link_id,
+        |entry| format!("{}\0{}", entry.accessed_at, entry.id),
+    )?))
 }
 
 #[utoipa::path(get, path = "/public/share-links/{token}", operation_id = "getPublicShareInfo", tag = "public-share-links", params(("token" = ShareToken, Path)), responses((status = 200, body = PublicShareInfoResponse), ShareErrorResponses))]

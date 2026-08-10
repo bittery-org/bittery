@@ -409,6 +409,8 @@ pub(crate) async fn get_share_access_logs(
     pool: &PgPool,
     user_id: &str,
     input: LinkIdInput,
+    cursor: Option<(time::OffsetDateTime, String)>,
+    limit: i64,
 ) -> Result<Vec<ShareAccessLogResponse>, AppError> {
     assert_share_links_entitlement(pool, user_id).await?;
 
@@ -417,7 +419,7 @@ pub(crate) async fn get_share_access_logs(
         return Err(AppError::not_found("Share link not found"));
     }
 
-    let logs = load_share_access_logs(pool, &input.link_id, 100).await?;
+    let logs = load_share_access_logs(pool, &input.link_id, cursor, limit).await?;
 
     Ok(logs
         .into_iter()

@@ -233,6 +233,7 @@ impl SyncHttpTestApp {
 struct SyncRouterFixture {
     owner_user_id: String,
     _outsider_user_id: String,
+    primary_vault_id: String,
     secondary_vault_id: String,
     hidden_vault_id: String,
     primary_item_id: String,
@@ -449,6 +450,7 @@ async fn build_sync_router_fixture(pool: &PgPool) -> SyncRouterFixture {
     SyncRouterFixture {
         owner_user_id,
         _outsider_user_id: outsider_user_id,
+        primary_vault_id,
         secondary_vault_id,
         hidden_vault_id,
         primary_item_id,
@@ -671,6 +673,82 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
 }
 
 #[tokio::test]
+async fn large_sync_event_pages_stay_byte_bounded_and_continue() {
+    with_sync_test_app("sync_changes_byte_budget", |app| async move {
+        let fixture = build_sync_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        let metadata = format!(r#"{{"payload":"{}"}}"#, "x".repeat(1_048_000));
+        let expected_ids: Vec<String> = (0..6)
+            .map(|index| format!("sync_budget_event_{index}"))
+            .collect();
+        for (index, event_id) in expected_ids.iter().enumerate() {
+            seed_sync_event(
+                &app.pool,
+                event_id,
+                "item_updated",
+                &fixture.primary_item_id,
+                "item",
+                Some(&fixture.primary_vault_id),
+                &fixture.owner_user_id,
+                index as i32 + 10,
+                Some("budget-client"),
+                Some(&metadata),
+                datetime!(2025-05-02 10:00 UTC),
+            )
+            .await;
+        }
+
+        let mut since_id = fixture.secondary_event_id.clone();
+        let mut seen_ids = Vec::new();
+        for _ in 0..3 {
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/sync/changes?limit=500&sinceId={since_id}"),
+                    None,
+                    headers.clone(),
+                )
+                .await;
+            response.assert_contract_status();
+            assert!(
+                response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES,
+                "serialized sync page was {} bytes",
+                response.body_bytes
+            );
+            let events = response.body["events"]
+                .as_array()
+                .expect("bounded sync page should contain events");
+            assert!(
+                events.len() <= 3,
+                "pre-budget query materialized too many maximum-size events"
+            );
+            seen_ids.extend(
+                events
+                    .iter()
+                    .filter_map(|event| event["id"].as_str().map(str::to_string)),
+            );
+            if response.body["hasMore"] == json!(false) {
+                break;
+            }
+            since_id = response.body["cursor"]["id"]
+                .as_str()
+                .expect("continued sync page should have a cursor")
+                .to_string();
+        }
+
+        for event_id in expected_ids {
+            assert_eq!(
+                seen_ids.iter().filter(|seen| **seen == event_id).count(),
+                1,
+                "sync event {event_id} should occur exactly once"
+            );
+        }
+    })
+    .await;
+}
+
+#[tokio::test]
 async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachments() {
     with_bittery_mode_async(Some("self-hosted"), async {
         with_sync_test_app("sync_bootstrap_items_success", |app| async move {
@@ -734,6 +812,95 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
             );
             assert_eq!(second_page.body["hasMore"], json!(false));
             assert_eq!(second_page.body["nextCursor"], Value::Null);
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn max_ciphertext_bootstrap_pages_stay_byte_bounded_and_continue() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_byte_budget", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+            let ciphertext = "x".repeat(1_048_576);
+            let expected_ids: Vec<String> = (0..6)
+                .map(|index| format!("zz_sync_budget_{index}"))
+                .collect();
+            for item_id in &expected_ids {
+                seed_item(
+                    &app.pool,
+                    item_id,
+                    &fixture.primary_vault_id,
+                    "login",
+                    &ciphertext,
+                    "budget-iv",
+                    &fixture.owner_user_id,
+                )
+                .await;
+            }
+
+            let mut cursor = None;
+            let mut seen_ids = Vec::new();
+            for _ in 0..4 {
+                let query = cursor.as_deref().map_or_else(
+                    || "limit=500".to_string(),
+                    |cursor| format!("limit=500&cursor={cursor}"),
+                );
+                let response = app
+                    .api_json(
+                        Method::GET,
+                        &format!("/api/v1/sync/bootstrap?{query}"),
+                        None,
+                        headers.clone(),
+                    )
+                    .await;
+                response.assert_contract_status();
+                assert!(
+                    response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES,
+                    "serialized bootstrap page was {} bytes",
+                    response.body_bytes
+                );
+                let items = response.body["items"]
+                    .as_array()
+                    .expect("bounded bootstrap page should contain items");
+                assert!(
+                    items
+                        .iter()
+                        .filter(|item| {
+                            item["encryptedData"]
+                                .as_str()
+                                .is_some_and(|value| value.len() >= 1_048_576)
+                        })
+                        .count()
+                        <= 3,
+                    "pre-budget query materialized too many maximum-size rows"
+                );
+                seen_ids.extend(
+                    items
+                        .iter()
+                        .filter_map(|item| item["id"].as_str().map(str::to_string)),
+                );
+                if response.body["hasMore"] == json!(false) {
+                    break;
+                }
+                cursor = Some(
+                    response.body["nextCursor"]
+                        .as_str()
+                        .expect("continued bootstrap page should have a cursor")
+                        .to_string(),
+                );
+            }
+
+            for item_id in expected_ids {
+                assert_eq!(
+                    seen_ids.iter().filter(|seen| **seen == item_id).count(),
+                    1,
+                    "bootstrap item {item_id} should occur exactly once"
+                );
+            }
         })
         .await;
     })

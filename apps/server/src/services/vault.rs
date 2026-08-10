@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{query, query_as, query_scalar, PgPool, Postgres, Transaction};
+use sqlx::{query, query_as, query_scalar, FromRow, PgPool, Postgres, Transaction};
 use time::OffsetDateTime;
 use utoipa::ToSchema;
 
@@ -18,6 +18,40 @@ use crate::{
         VaultSharingEntitlement,
     },
 };
+
+const ITEM_PAGE_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
+
+#[derive(Debug)]
+pub(crate) struct ByteBoundedPage<T> {
+    pub(crate) values: Vec<T>,
+    pub(crate) has_more: bool,
+}
+
+#[derive(Debug, FromRow)]
+struct ItemPageWeight {
+    id: String,
+    position: i64,
+    candidate_count: i64,
+    cumulative_bytes: i64,
+}
+
+fn bounded_item_ids(weights: Vec<ItemPageWeight>) -> Result<(Vec<String>, bool), AppError> {
+    let Some(first) = weights.first() else {
+        return Ok((Vec::new(), false));
+    };
+    if first.cumulative_bytes > ITEM_PAGE_QUERY_BYTES {
+        return Err(AppError::payload_too_large(
+            "A single item exceeds the response page byte budget.",
+        ));
+    }
+    let has_more = weights
+        .last()
+        .is_some_and(|last| last.position < last.candidate_count);
+    Ok((
+        weights.into_iter().map(|weight| weight.id).collect(),
+        has_more,
+    ))
+}
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -1463,7 +1497,7 @@ pub(crate) async fn list_vault_items_page(
     input: VaultIdInput,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
-) -> Result<Vec<VaultItemDetailsResponse>, AppError> {
+) -> Result<ByteBoundedPage<VaultItemDetailsResponse>, AppError> {
     let vault_access = query_as::<_, DbItemVaultAccessRow>(
         "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
     )
@@ -1480,17 +1514,58 @@ pub(crate) async fn list_vault_items_page(
     }
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = $1 AND deleted_at IS NULL AND ($2::timestamptz IS NULL OR (updated_at, id) < ($2, $3)) ORDER BY updated_at DESC, id DESC LIMIT $4",
+    let weights = query_as::<_, ItemPageWeight>(
+        r#"WITH candidates AS (
+            SELECT i.id,
+                   ROW_NUMBER() OVER (ORDER BY i.updated_at DESC, i.id DESC)::bigint AS position,
+                   (16384 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
+                    + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
+                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0)
+                    + coalesce((SELECT sum(1024 + octet_length(a.id) + octet_length(a.item_id)
+                        + octet_length(a.vault_id) + octet_length(a.storage_key) + octet_length(a.encrypted_name)
+                        + octet_length(a.encrypted_content_type) + octet_length(a.encryption_iv)
+                        + coalesce(octet_length(a.encrypted_content_type_iv), 0)
+                        + octet_length(a.encryption_algorithm) + coalesce(octet_length(a.uploaded_by), 0))
+                      FROM item_attachment a WHERE a.item_id = i.id), 0))::bigint AS estimated_bytes
+            FROM item i
+            WHERE i.vault_id = $1 AND i.deleted_at IS NULL
+              AND ($2::timestamptz IS NULL OR (i.updated_at, i.id) < ($2, $3))
+            ORDER BY i.updated_at DESC, i.id DESC
+            LIMIT $4
+        ), weighted AS (
+            SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
     )
     .bind(&input.vault_id)
     .bind(cursor_timestamp)
     .bind(cursor_id)
     .bind(limit)
+    .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load vault item page");
+        AppError::internal("Failed to load vault items")
+    })?;
+    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    if item_ids.is_empty() {
+        return Ok(ByteBoundedPage {
+            values: Vec::new(),
+            has_more: false,
+        });
+    }
+    let item_rows = query_as::<_, DbBootstrapItemRow>(
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+    )
+    .bind(&item_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to materialize bounded vault item page");
         AppError::internal("Failed to load vault items")
     })?;
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
@@ -1500,7 +1575,7 @@ pub(crate) async fn list_vault_items_page(
         HashMap::new()
     };
 
-    Ok(item_rows
+    let values = item_rows
         .into_iter()
         .map(|item| VaultItemDetailsResponse {
             attachments: attachments_by_item
@@ -1509,7 +1584,11 @@ pub(crate) async fn list_vault_items_page(
                 .unwrap_or_default(),
             ..map_item_details(item)
         })
-        .collect())
+        .collect();
+    Ok(ByteBoundedPage {
+        values,
+        has_more: source_has_more,
+    })
 }
 
 pub(crate) async fn list_all_vault_items_page(
@@ -1517,10 +1596,13 @@ pub(crate) async fn list_all_vault_items_page(
     user_id: &str,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
-) -> Result<Vec<VaultItemWithVaultResponse>, AppError> {
+) -> Result<ByteBoundedPage<VaultItemWithVaultResponse>, AppError> {
     let user_vaults = load_user_vault_summaries(pool, user_id).await?;
     if user_vaults.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ByteBoundedPage {
+            values: Vec::new(),
+            has_more: false,
+        });
     }
     let vault_ids: Vec<String> = user_vaults
         .iter()
@@ -1528,17 +1610,64 @@ pub(crate) async fn list_all_vault_items_page(
         .collect();
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) AND deleted_at IS NULL AND ($2::timestamptz IS NULL OR (updated_at, id) < ($2, $3)) ORDER BY updated_at DESC, id DESC LIMIT $4",
+    let weights = query_as::<_, ItemPageWeight>(
+        r#"WITH candidates AS (
+            SELECT i.id,
+                   ROW_NUMBER() OVER (ORDER BY i.updated_at DESC, i.id DESC)::bigint AS position,
+                   (20480 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
+                    + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
+                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0)
+                    + coalesce((SELECT sum(1024 + octet_length(a.id) + octet_length(a.item_id)
+                        + octet_length(a.vault_id) + octet_length(a.storage_key) + octet_length(a.encrypted_name)
+                        + octet_length(a.encrypted_content_type) + octet_length(a.encryption_iv)
+                        + coalesce(octet_length(a.encrypted_content_type_iv), 0)
+                        + octet_length(a.encryption_algorithm) + coalesce(octet_length(a.uploaded_by), 0))
+                      FROM item_attachment a WHERE a.item_id = i.id), 0)
+                    + coalesce((SELECT octet_length(v.name) + coalesce(octet_length(v.icon), 0)
+                        + coalesce(octet_length(v.image_key), 0) + octet_length(v.type::text)
+                        + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text)
+                      FROM vault v JOIN vault_key vk ON vk.vault_id = v.id
+                      WHERE v.id = i.vault_id AND vk.user_id = $2 LIMIT 1), 4096))::bigint AS estimated_bytes
+            FROM item i
+            WHERE i.vault_id = ANY($1) AND i.deleted_at IS NULL
+              AND ($3::timestamptz IS NULL OR (i.updated_at, i.id) < ($3, $4))
+            ORDER BY i.updated_at DESC, i.id DESC
+            LIMIT $5
+        ), weighted AS (
+            SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $6 OR position = 1 ORDER BY position"#,
     )
     .bind(&vault_ids)
+    .bind(user_id)
     .bind(cursor_timestamp)
     .bind(cursor_id)
     .bind(limit)
+    .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load item page");
+        AppError::internal("Failed to load items")
+    })?;
+    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    if item_ids.is_empty() {
+        return Ok(ByteBoundedPage {
+            values: Vec::new(),
+            has_more: false,
+        });
+    }
+    let item_rows = query_as::<_, DbBootstrapItemRow>(
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+    )
+    .bind(&item_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to materialize bounded item page");
         AppError::internal("Failed to load items")
     })?;
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
@@ -1549,7 +1678,7 @@ pub(crate) async fn list_all_vault_items_page(
     };
     let vault_map = build_vault_summary_map(user_vaults);
 
-    Ok(item_rows
+    let values = item_rows
         .into_iter()
         .map(|item| VaultItemWithVaultResponse {
             id: item.id.clone(),
@@ -1570,7 +1699,11 @@ pub(crate) async fn list_all_vault_items_page(
                 .unwrap_or_default(),
             vault: vault_map.get(&item.vault_id).cloned(),
         })
-        .collect())
+        .collect();
+    Ok(ByteBoundedPage {
+        values,
+        has_more: source_has_more,
+    })
 }
 
 pub(crate) async fn list_all_deleted_vault_items_page(
@@ -1578,10 +1711,13 @@ pub(crate) async fn list_all_deleted_vault_items_page(
     user_id: &str,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
-) -> Result<Vec<DeletedVaultItemWithVaultResponse>, AppError> {
+) -> Result<ByteBoundedPage<DeletedVaultItemWithVaultResponse>, AppError> {
     let user_vaults = load_user_vault_summaries(pool, user_id).await?;
     if user_vaults.is_empty() {
-        return Ok(Vec::new());
+        return Ok(ByteBoundedPage {
+            values: Vec::new(),
+            has_more: false,
+        });
     }
     let vault_ids: Vec<String> = user_vaults
         .iter()
@@ -1589,22 +1725,63 @@ pub(crate) async fn list_all_deleted_vault_items_page(
         .collect();
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = ANY($1) AND deleted_at IS NOT NULL AND ($2::timestamptz IS NULL OR (deleted_at, id) < ($2, $3)) ORDER BY deleted_at DESC, id DESC LIMIT $4",
+    let weights = query_as::<_, ItemPageWeight>(
+        r#"WITH candidates AS (
+            SELECT i.id,
+                   ROW_NUMBER() OVER (ORDER BY i.deleted_at DESC, i.id DESC)::bigint AS position,
+                   (20480 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
+                    + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
+                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0)
+                    + coalesce((SELECT octet_length(v.name) + coalesce(octet_length(v.icon), 0)
+                        + coalesce(octet_length(v.image_key), 0) + octet_length(v.type::text)
+                        + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text)
+                      FROM vault v JOIN vault_key vk ON vk.vault_id = v.id
+                      WHERE v.id = i.vault_id AND vk.user_id = $2 LIMIT 1), 4096))::bigint AS estimated_bytes
+            FROM item i
+            WHERE i.vault_id = ANY($1) AND i.deleted_at IS NOT NULL
+              AND ($3::timestamptz IS NULL OR (i.deleted_at, i.id) < ($3, $4))
+            ORDER BY i.deleted_at DESC, i.id DESC
+            LIMIT $5
+        ), weighted AS (
+            SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $6 OR position = 1 ORDER BY position"#,
     )
     .bind(&vault_ids)
+    .bind(user_id)
     .bind(cursor_timestamp)
     .bind(cursor_id)
     .bind(limit)
+    .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
     .map_err(|e| {
         tracing::error!(error = %e, "Failed to load deleted item page");
         AppError::internal("Failed to load deleted items")
     })?;
+    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    if item_ids.is_empty() {
+        return Ok(ByteBoundedPage {
+            values: Vec::new(),
+            has_more: false,
+        });
+    }
+    let item_rows = query_as::<_, DbBootstrapItemRow>(
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+    )
+    .bind(&item_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to materialize bounded deleted item page");
+        AppError::internal("Failed to load deleted items")
+    })?;
     let vault_map = build_vault_summary_map(user_vaults);
 
-    Ok(item_rows
+    let values = item_rows
         .into_iter()
         .map(|item| DeletedVaultItemWithVaultResponse {
             id: item.id.clone(),
@@ -1621,7 +1798,11 @@ pub(crate) async fn list_all_deleted_vault_items_page(
             deleted_at: item.deleted_at.map(format_timestamp),
             vault: vault_map.get(&item.vault_id).cloned(),
         })
-        .collect())
+        .collect();
+    Ok(ByteBoundedPage {
+        values,
+        has_more: source_has_more,
+    })
 }
 
 pub(crate) async fn get_vault_item(
@@ -1972,17 +2153,35 @@ pub(crate) async fn list_deleted_vault_items_page(
     input: VaultIdInput,
     cursor: Option<(OffsetDateTime, String)>,
     limit: i64,
-) -> Result<Vec<VaultItemResponse>, AppError> {
+) -> Result<ByteBoundedPage<VaultItemResponse>, AppError> {
     let _access = load_vault_access(pool, &input.vault_id, user_id).await?;
     let cursor_timestamp = cursor.as_ref().map(|(timestamp, _)| *timestamp);
     let cursor_id = cursor.as_ref().map(|(_, id)| id.as_str());
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE vault_id = $1 AND deleted_at IS NOT NULL AND ($2::timestamptz IS NULL OR (deleted_at, id) < ($2, $3)) ORDER BY deleted_at DESC, id DESC LIMIT $4",
+    let weights = query_as::<_, ItemPageWeight>(
+        r#"WITH candidates AS (
+            SELECT i.id,
+                   ROW_NUMBER() OVER (ORDER BY i.deleted_at DESC, i.id DESC)::bigint AS position,
+                   (16384 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
+                    + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
+                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0))::bigint AS estimated_bytes
+            FROM item i
+            WHERE i.vault_id = $1 AND i.deleted_at IS NOT NULL
+              AND ($2::timestamptz IS NULL OR (i.deleted_at, i.id) < ($2, $3))
+            ORDER BY i.deleted_at DESC, i.id DESC
+            LIMIT $4
+        ), weighted AS (
+            SELECT id, position, count(*) OVER ()::bigint AS candidate_count,
+                   sum(estimated_bytes) OVER (ORDER BY position)::bigint AS cumulative_bytes
+            FROM candidates
+        )
+        SELECT id, position, candidate_count, cumulative_bytes FROM weighted
+        WHERE cumulative_bytes <= $5 OR position = 1 ORDER BY position"#,
     )
     .bind(&input.vault_id)
     .bind(cursor_timestamp)
     .bind(cursor_id)
     .bind(limit)
+    .bind(ITEM_PAGE_QUERY_BYTES)
     .fetch_all(pool)
     .await
     .map_err(|e| {
@@ -1990,7 +2189,28 @@ pub(crate) async fn list_deleted_vault_items_page(
         AppError::internal("Failed to load deleted items")
     })?;
 
-    Ok(item_rows.into_iter().map(map_item).collect())
+    let (item_ids, source_has_more) = bounded_item_ids(weights)?;
+    if item_ids.is_empty() {
+        return Ok(ByteBoundedPage {
+            values: Vec::new(),
+            has_more: false,
+        });
+    }
+    let item_rows = query_as::<_, DbBootstrapItemRow>(
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+    )
+    .bind(&item_ids)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to materialize bounded deleted vault item page");
+        AppError::internal("Failed to load deleted items")
+    })?;
+
+    Ok(ByteBoundedPage {
+        values: item_rows.into_iter().map(map_item).collect(),
+        has_more: source_has_more,
+    })
 }
 
 pub(crate) async fn restore_vault_item(

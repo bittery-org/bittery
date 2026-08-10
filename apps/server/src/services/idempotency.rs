@@ -23,10 +23,12 @@ pub(crate) enum Claim {
     Replay(StoredResponse),
     FingerprintMismatch,
     InProgress,
+    Indeterminate,
 }
 
 // Claims commit before domain services run because those services own their transactions.
-// A stranded pending claim therefore fails closed instead of risking a duplicate mutation.
+// An expired claim becomes terminally indeterminate instead of risking a duplicate mutation.
+// Operators may delete it only after verifying the domain outcome from audit/resource state.
 
 #[derive(sqlx::FromRow)]
 struct IdempotencyRow {
@@ -43,8 +45,9 @@ pub(crate) async fn claim(
     scope: &RequestScope<'_>,
     fingerprint: &[u8; 32],
 ) -> Result<Claim, AppError> {
+    maintain_records(pool).await?;
     let inserted = query(
-        "INSERT INTO idempotency_record (principal_id, method, route_target, idempotency_key, request_fingerprint) VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+        "INSERT INTO idempotency_record (principal_id, method, route_target, idempotency_key, request_fingerprint, claim_expires_at) VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '5 minutes') ON CONFLICT DO NOTHING",
     )
     .bind(scope.principal_id)
     .bind(scope.method)
@@ -61,7 +64,7 @@ pub(crate) async fn claim(
     }
 
     let reclaimed = query(
-        "UPDATE idempotency_record SET request_fingerprint = $5, state = 'pending', response_status = NULL, response_content_type = NULL, response_body = NULL, response_etag = NULL, created_at = NOW(), expires_at = NOW() + INTERVAL '24 hours' WHERE principal_id = $1 AND method = $2 AND route_target = $3 AND idempotency_key = $4 AND state = 'completed' AND expires_at <= NOW()",
+        "UPDATE idempotency_record SET request_fingerprint = $5, state = 'pending', response_status = NULL, response_content_type = NULL, response_body = NULL, response_etag = NULL, claim_expires_at = NOW() + INTERVAL '5 minutes', terminal_reason = NULL, created_at = NOW(), expires_at = NOW() + INTERVAL '24 hours' WHERE principal_id = $1 AND method = $2 AND route_target = $3 AND idempotency_key = $4 AND state = 'completed' AND expires_at <= NOW()",
     )
     .bind(scope.principal_id)
     .bind(scope.method)
@@ -94,6 +97,9 @@ pub(crate) async fn claim(
     if row.state == "pending" {
         return Ok(Claim::InProgress);
     }
+    if row.state == "indeterminate" {
+        return Ok(Claim::Indeterminate);
+    }
 
     let status = row
         .response_status
@@ -124,7 +130,7 @@ pub(crate) async fn complete(
     let status = i16::try_from(response.status)
         .map_err(|_| AppError::internal("Invalid idempotent response status"))?;
     let updated = query(
-        "UPDATE idempotency_record SET state = 'completed', response_status = $6, response_content_type = $7, response_body = $8, response_etag = $9, expires_at = NOW() + INTERVAL '24 hours' WHERE principal_id = $1 AND method = $2 AND route_target = $3 AND idempotency_key = $4 AND request_fingerprint = $5 AND state = 'pending'",
+        "UPDATE idempotency_record SET state = 'completed', response_status = $6, response_content_type = $7, response_body = $8, response_etag = $9, claim_expires_at = NULL, expires_at = NOW() + INTERVAL '24 hours' WHERE principal_id = $1 AND method = $2 AND route_target = $3 AND idempotency_key = $4 AND request_fingerprint = $5 AND state = 'pending' AND claim_expires_at > NOW()",
     )
     .bind(scope.principal_id)
     .bind(scope.method)
@@ -144,6 +150,22 @@ pub(crate) async fn complete(
             "Idempotency claim was lost before completion",
         ));
     }
+    Ok(())
+}
+
+async fn maintain_records(pool: &PgPool) -> Result<(), AppError> {
+    query(
+        "WITH expired AS (SELECT ctid FROM idempotency_record WHERE state = 'completed' AND expires_at <= NOW() ORDER BY expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) DELETE FROM idempotency_record record USING expired WHERE record.ctid = expired.ctid",
+    )
+    .execute(pool)
+    .await
+    .map_err(database_error)?;
+    query(
+        "WITH stale AS (SELECT ctid FROM idempotency_record WHERE state = 'pending' AND claim_expires_at <= NOW() ORDER BY claim_expires_at LIMIT 100 FOR UPDATE SKIP LOCKED) UPDATE idempotency_record record SET state = 'indeterminate', claim_expires_at = NULL, terminal_reason = 'OUTCOME_UNKNOWN_AFTER_CLAIM_TIMEOUT' FROM stale WHERE record.ctid = stale.ctid",
+    )
+    .execute(pool)
+    .await
+    .map_err(database_error)?;
     Ok(())
 }
 

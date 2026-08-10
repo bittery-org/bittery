@@ -36,6 +36,7 @@ pub(crate) struct ApiTestResponse {
     #[allow(dead_code)]
     pub headers: HeaderMap,
     pub body: Value,
+    pub body_bytes: usize,
 }
 
 impl ApiTestResponse {
@@ -111,6 +112,7 @@ impl ApiTestApp {
             status,
             headers,
             body,
+            body_bytes: bytes.len(),
         };
         validate_openapi_response(&method, uri, &response);
         response
@@ -158,6 +160,7 @@ impl ApiTestApp {
             status,
             headers,
             body,
+            body_bytes: bytes.len(),
         };
         validate_openapi_response(&method, uri, &response);
         response
@@ -212,6 +215,7 @@ impl ApiTestApp {
             status,
             headers,
             body,
+            body_bytes: bytes.len(),
         }
     }
 }

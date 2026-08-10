@@ -55,6 +55,13 @@ IDs. Optimistic concurrency uses ETag and If-Match. Generic batching is removed.
 non-idempotent commands may use a documented `Idempotency-Key` contract, except operations
 returning one-time secrets.
 
+Queued item creation, trash and permanent deletion also persist idempotency outcomes. Although
+their HTTP methods are normally idempotent, replaying a lost success against version checks can
+otherwise wedge the outbound queue. A claim that outlives its five-minute execution lease is
+terminally marked indeterminate and is never executed automatically again. This fail-closed
+choice avoids duplicating a mutation that may have committed immediately before a server crash;
+operator recovery follows `docs/idempotency-recovery.md`.
+
 All collections are cursor-paginated and bounded by record count and serialized bytes.
 Encrypted item ciphertext is capped at 1 MiB. Bulk import is capped at 200 items and 16 MiB.
 Attachments continue using authorized presigned storage transfers.

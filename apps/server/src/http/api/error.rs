@@ -100,6 +100,10 @@ impl ApiError {
         )
     }
 
+    pub(crate) fn conflict(code: &str, detail: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, code, "Conflict", detail, false)
+    }
+
     pub(crate) fn service_unavailable(code: &str, detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::SERVICE_UNAVAILABLE,
@@ -231,6 +235,13 @@ impl From<AppError> for ApiError {
                 "Too many requests",
                 error.message,
                 true,
+            ),
+            AppErrorCode::PayloadTooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "PAYLOAD_TOO_LARGE",
+                "Payload too large",
+                error.message,
+                false,
             ),
         };
 

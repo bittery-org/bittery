@@ -1,10 +1,13 @@
 use axum::{
-    extract::{rejection::JsonRejection, FromRequest, FromRequestParts, Request},
+    extract::{
+        rejection::{JsonRejection, QueryRejection},
+        FromRequest, FromRequestParts, Query, Request,
+    },
     http::{header::CONTENT_TYPE, request::Parts, HeaderValue, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize};
 
 use crate::services::session::{RequestMetadata, VerifiedSession};
 
@@ -12,6 +15,26 @@ use super::{dto::ProblemDetails, error::ApiError};
 
 #[derive(Debug)]
 pub(crate) struct ApiJson<T>(pub(crate) T);
+
+#[derive(Debug)]
+pub(crate) struct ApiQuery<T>(pub(crate) T);
+
+impl<S, T> FromRequestParts<S> for ApiQuery<T>
+where
+    S: Send + Sync,
+    T: for<'de> Deserialize<'de>,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Query::<T>::from_request_parts(parts, state)
+            .await
+            .map(|Query(value)| Self(value))
+            .map_err(|error: QueryRejection| {
+                ApiError::bad_request("INVALID_QUERY", error.body_text())
+            })
+    }
+}
 
 impl<S, T> FromRequest<S> for ApiJson<T>
 where

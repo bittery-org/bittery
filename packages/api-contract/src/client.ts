@@ -1161,9 +1161,12 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					params: { path: { linkId } },
 				}),
 			accessLogs: (linkId) =>
-				call("GET", "/api/v1/share-links/{linkId}/access-logs", {
-					params: { path: { linkId } },
-				}),
+				drainPages<Final.ShareAccessLog>(
+					"/api/v1/share-links/{linkId}/access-logs",
+					{
+						params: { path: { linkId } },
+					},
+				),
 			public: (token) =>
 				call("GET", "/api/v1/public/share-links/{token}", {
 					params: { path: { token } },

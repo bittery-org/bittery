@@ -589,7 +589,7 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
             .api_json(
                 Method::GET,
                 &format!(
-                    "/api/v1/share-links/{}/access-logs",
+                    "/api/v1/share-links/{}/access-logs?limit=1",
                     fixture.owner_link_id.clone()
                 ),
                 None,
@@ -599,12 +599,35 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
         success_response.assert_contract_status();
         let logs = success_response
             .body
-            .as_array()
-            .expect("share access logs should be an array");
-        assert_eq!(logs.len(), 2);
+            .get("items")
+            .and_then(serde_json::Value::as_array)
+            .expect("share access log page should contain items");
+        assert_eq!(logs.len(), 1);
         assert_eq!(logs[0]["accessedByEmail"], json!("viewer@example.com"));
         assert_eq!(logs[0]["success"], json!(true));
-        assert_eq!(logs[1]["failureReason"], json!("Invalid code"));
+        assert_eq!(success_response.body["hasMore"], json!(true));
+        let cursor = success_response.body["nextCursor"]
+            .as_str()
+            .expect("first access log page should have a cursor");
+
+        let second_response = app
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/share-links/{}/access-logs?limit=1&cursor={cursor}",
+                    fixture.owner_link_id
+                ),
+                None,
+                authenticated_json_headers(&owner_session.token),
+            )
+            .await;
+        second_response.assert_contract_status();
+        let second_logs = second_response.body["items"]
+            .as_array()
+            .expect("second access log page should contain items");
+        assert_eq!(second_logs.len(), 1);
+        assert_eq!(second_logs[0]["failureReason"], json!("Invalid code"));
+        assert_eq!(second_response.body["hasMore"], json!(false));
 
         let hidden_response = app
             .api_json(

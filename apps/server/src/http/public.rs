@@ -78,6 +78,7 @@ async fn join_waitlist(
             let status = match error.code {
                 crate::error::AppErrorCode::BadRequest => StatusCode::BAD_REQUEST,
                 crate::error::AppErrorCode::TooManyRequests => StatusCode::TOO_MANY_REQUESTS,
+                crate::error::AppErrorCode::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
                 _ => StatusCode::INTERNAL_SERVER_ERROR,
             };
             json_error(status, &error.message)

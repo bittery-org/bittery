@@ -139,6 +139,15 @@ fn idempotent_item_headers(token: &str, version: i32, key: &str) -> HeaderMap {
     headers
 }
 
+fn idempotency_headers(token: &str, key: &str) -> HeaderMap {
+    let mut headers = authenticated_json_headers(token);
+    headers.insert(
+        "idempotency-key",
+        HeaderValue::from_str(key).expect("idempotency key should be valid"),
+    );
+    headers
+}
+
 fn assert_transport_error(body: &Value, code: &str, message: &str) {
     assert_eq!(body["detail"], json!(message));
     assert_eq!(body["code"], json!(code));
@@ -839,6 +848,21 @@ async fn vault_query_handlers_return_expected_results() {
                 json!(fixture.owner_personal_vault_id)
             );
 
+            let invalid_query = app
+                .api_json(
+                    Method::GET,
+                    "/api/v1/items?unknown=true",
+                    None,
+                    owner_headers.clone(),
+                )
+                .await;
+            assert_eq!(invalid_query.status, StatusCode::BAD_REQUEST);
+            assert_eq!(invalid_query.body["code"], json!("INVALID_QUERY"));
+            assert_eq!(
+                invalid_query.headers.get(CONTENT_TYPE),
+                Some(&HeaderValue::from_static("application/problem+json"))
+            );
+
             let list_all_deleted_response = app
                 .api_json(
                     Method::GET,
@@ -893,6 +917,92 @@ async fn vault_query_handlers_return_expected_results() {
             assert_eq!(stats_response.body["itemCount"], json!("3"));
         },
     )
+    .await;
+}
+
+#[tokio::test]
+async fn max_ciphertext_item_pages_stay_byte_bounded_and_continue() {
+    with_api_test_app("max_ciphertext_item_page_budget", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let headers = authenticated_json_headers(&session.token);
+        let ciphertext = "x".repeat(1_048_576);
+        let expected_ids: Vec<String> = (0..6)
+            .map(|index| format!("zz_item_budget_{index}"))
+            .collect();
+        for item_id in &expected_ids {
+            seed_item(
+                &app.pool,
+                item_id,
+                &fixture.main_vault_id,
+                "login",
+                &ciphertext,
+                "budget-iv",
+                &fixture.owner_user_id,
+            )
+            .await;
+        }
+
+        let mut cursor = None;
+        let mut seen_ids = Vec::new();
+        for _ in 0..4 {
+            let query = cursor.as_deref().map_or_else(
+                || "limit=500".to_string(),
+                |cursor| format!("limit=500&cursor={cursor}"),
+            );
+            let response = app
+                .api_json(
+                    Method::GET,
+                    &format!("/api/v1/vaults/{}/items?{query}", fixture.main_vault_id),
+                    None,
+                    headers.clone(),
+                )
+                .await;
+            response.assert_contract_status();
+            assert!(
+                response.body_bytes <= crate::http::api::pagination::RESPONSE_PAGE_BYTES,
+                "serialized page was {} bytes",
+                response.body_bytes
+            );
+            let items = response.body["items"]
+                .as_array()
+                .expect("bounded item page should contain items");
+            assert!(
+                items
+                    .iter()
+                    .filter(|item| {
+                        item["encryptedData"]
+                            .as_str()
+                            .is_some_and(|value| value.len() >= 1_048_576)
+                    })
+                    .count()
+                    <= 3,
+                "pre-budget query materialized too many maximum-size rows"
+            );
+            seen_ids.extend(
+                items
+                    .iter()
+                    .filter_map(|item| item["id"].as_str().map(str::to_string)),
+            );
+            if response.body["hasMore"] == json!(false) {
+                break;
+            }
+            cursor = Some(
+                response.body["nextCursor"]
+                    .as_str()
+                    .expect("continued item page should have a cursor")
+                    .to_string(),
+            );
+        }
+
+        for item_id in expected_ids {
+            assert_eq!(
+                seen_ids.iter().filter(|seen| **seen == item_id).count(),
+                1,
+                "item {item_id} should occur exactly once across pages"
+            );
+        }
+    })
     .await;
 }
 
@@ -1337,6 +1447,353 @@ async fn item_update_idempotency_replays_without_a_second_mutation() {
             assert_eq!(events, 1);
         },
     )
+    .await;
+}
+
+#[tokio::test]
+async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effects() {
+    with_api_test_app("queued_item_create_replay", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let item_id = "item_queued_create_replay";
+        let uri = format!(
+            "/api/v1/vaults/{}/items/{item_id}",
+            fixture.main_vault_id
+        );
+        let body = json!({
+            "category": "login",
+            "encryptedData": "queued-create-ciphertext",
+            "encryptionIv": "queued-create-iv"
+        });
+
+        let first = app
+            .api_json(
+                Method::PUT,
+                &uri,
+                Some(body.clone()),
+                idempotency_headers(&session.token, "queued-create-key"),
+            )
+            .await;
+        let replay = app
+            .api_json(
+                Method::PUT,
+                &uri,
+                Some(body),
+                idempotency_headers(&session.token, "queued-create-key"),
+            )
+            .await;
+
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(replay.status, first.status);
+        assert_eq!(replay.body, first.body);
+        assert_eq!(first.headers.get(ETAG), Some(&HeaderValue::from_static("\"1\"")));
+        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
+        assert_eq!(
+            replay.headers.get("idempotency-replayed"),
+            Some(&HeaderValue::from_static("true")),
+        );
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("created item count should load");
+        let event_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_created'::sync_event_type",
+        )
+        .bind(item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("created event count should load");
+        assert_eq!(item_count, 1);
+        assert_eq!(event_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn queued_item_trash_replays_a_lost_success_without_advancing_twice() {
+    with_api_test_app("queued_item_trash_replay", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let uri = format!("/api/v1/items/{}", fixture.active_item_id);
+        let headers = || idempotent_item_headers(&session.token, 1, "queued-trash-key");
+
+        let first = app.api_json(Method::DELETE, &uri, None, headers()).await;
+        let replay = app.api_json(Method::DELETE, &uri, None, headers()).await;
+
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(replay.status, first.status);
+        assert_eq!(replay.body, first.body);
+        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
+        assert_eq!(
+            replay.headers.get("idempotency-replayed"),
+            Some(&HeaderValue::from_static("true")),
+        );
+        let version: i32 = query_scalar("SELECT version FROM item WHERE id = $1")
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("trashed item version should load");
+        let events: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_deleted'::sync_event_type",
+        )
+        .bind(&fixture.active_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("trash event count should load");
+        assert_eq!(version, 2);
+        assert_eq!(events, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn queued_item_permanent_delete_replays_a_lost_success_without_second_delete() {
+    with_api_test_app("queued_item_permanent_delete_replay", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let uri = format!(
+            "/api/v1/items/{}/permanent",
+            fixture.deleted_item_id
+        );
+        let headers = || {
+            idempotent_item_headers(&session.token, 1, "queued-permanent-delete-key")
+        };
+
+        let first = app.api_json(Method::DELETE, &uri, None, headers()).await;
+        let replay = app.api_json(Method::DELETE, &uri, None, headers()).await;
+
+        assert_eq!(first.status, StatusCode::OK);
+        assert_eq!(replay.status, first.status);
+        assert_eq!(replay.body, first.body);
+        assert_eq!(replay.headers.get(ETAG), first.headers.get(ETAG));
+        assert_eq!(
+            replay.headers.get("idempotency-replayed"),
+            Some(&HeaderValue::from_static("true")),
+        );
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(&fixture.deleted_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("permanently deleted item count should load");
+        let events: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_permanently_deleted'::sync_event_type",
+        )
+        .bind(&fixture.deleted_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("permanent delete event count should load");
+        assert_eq!(item_count, 0);
+        assert_eq!(events, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn queued_item_idempotency_rejects_changed_bodies_and_preconditions() {
+    with_api_test_app("queued_item_idempotency_mismatch", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let create_uri = format!(
+            "/api/v1/vaults/{}/items/item_queued_mismatch",
+            fixture.main_vault_id
+        );
+        let create_headers = || idempotency_headers(&session.token, "queued-create-mismatch");
+        let first = app
+            .api_json(
+                Method::PUT,
+                &create_uri,
+                Some(json!({
+                    "category": "login",
+                    "encryptedData": "first",
+                    "encryptionIv": "iv"
+                })),
+                create_headers(),
+            )
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+        let body_mismatch = app
+            .api_json(
+                Method::PUT,
+                &create_uri,
+                Some(json!({
+                    "category": "login",
+                    "encryptedData": "second",
+                    "encryptionIv": "iv"
+                })),
+                create_headers(),
+            )
+            .await;
+        assert_eq!(body_mismatch.status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(body_mismatch.body["code"], json!("IDEMPOTENCY_KEY_REUSED"));
+
+        let trash_uri = format!("/api/v1/items/{}", fixture.active_item_id);
+        let first = app
+            .api_json(
+                Method::DELETE,
+                &trash_uri,
+                None,
+                idempotent_item_headers(&session.token, 1, "queued-trash-mismatch"),
+            )
+            .await;
+        assert_eq!(first.status, StatusCode::OK);
+        let precondition_mismatch = app
+            .api_json(
+                Method::DELETE,
+                &trash_uri,
+                None,
+                idempotent_item_headers(&session.token, 2, "queued-trash-mismatch"),
+            )
+            .await;
+        assert_eq!(
+            precondition_mismatch.status,
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(
+            precondition_mismatch.body["code"],
+            json!("IDEMPOTENCY_KEY_REUSED")
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn concurrent_queued_item_create_executes_once_and_then_replays() {
+    with_api_test_app("concurrent_queued_item_create", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let item_id = "item_concurrent_queued_create";
+        let uri = format!(
+            "/api/v1/vaults/{}/items/{item_id}",
+            fixture.main_vault_id
+        );
+        let body = json!({
+            "category": "login",
+            "encryptedData": "concurrent-create",
+            "encryptionIv": "concurrent-iv"
+        });
+        let first = app.api_json(
+            Method::PUT,
+            &uri,
+            Some(body.clone()),
+            idempotency_headers(&session.token, "concurrent-create-key"),
+        );
+        let second = app.api_json(
+            Method::PUT,
+            &uri,
+            Some(body.clone()),
+            idempotency_headers(&session.token, "concurrent-create-key"),
+        );
+        let (first, second) = tokio::join!(first, second);
+        assert!(matches!(
+            first.status,
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(matches!(
+            second.status,
+            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+        ));
+        assert!(first.status == StatusCode::OK || second.status == StatusCode::OK);
+
+        let replay = app
+            .api_json(
+                Method::PUT,
+                &uri,
+                Some(body),
+                idempotency_headers(&session.token, "concurrent-create-key"),
+            )
+            .await;
+        assert_eq!(replay.status, StatusCode::OK);
+        assert_eq!(
+            replay.headers.get("idempotency-replayed"),
+            Some(&HeaderValue::from_static("true"))
+        );
+        let item_count: i64 = query_scalar("SELECT COUNT(*)::bigint FROM item WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("created item count should load");
+        let event_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM sync_event WHERE entity_id = $1 AND event_type = 'item_created'::sync_event_type",
+        )
+        .bind(item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("created event count should load");
+        assert_eq!(item_count, 1);
+        assert_eq!(event_count, 1);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn stale_idempotency_claims_fail_closed_and_completed_records_are_cleaned() {
+    use crate::services::idempotency::{claim, Claim, RequestScope};
+
+    with_api_test_app("idempotency_claim_lifecycle", |app| async move {
+        let fingerprint = [7_u8; 32];
+        let scope = RequestScope {
+            principal_id: "user_idempotency_lifecycle",
+            method: "DELETE",
+            route_target: "/api/v1/items/item_stale",
+            key: "stale-key",
+        };
+        assert!(matches!(
+            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
+            Claim::Execute
+        ));
+        query(
+            "UPDATE idempotency_record SET claim_expires_at = NOW() - INTERVAL '1 second' WHERE idempotency_key = $1",
+        )
+        .bind(scope.key)
+        .execute(&app.pool)
+        .await
+        .expect("claim should become stale");
+        assert!(matches!(
+            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
+            Claim::Indeterminate
+        ));
+        assert!(matches!(
+            claim(&app.pool, &scope, &fingerprint).await.unwrap(),
+            Claim::Indeterminate
+        ));
+
+        query(
+            "INSERT INTO idempotency_record (principal_id, method, route_target, idempotency_key, request_fingerprint, state, response_status, response_content_type, response_body, expires_at) VALUES ($1, 'PATCH', '/api/v1/items/expired', 'expired-key', $2, 'completed', 200, 'application/json', $3, NOW() - INTERVAL '1 second')",
+        )
+        .bind(scope.principal_id)
+        .bind(fingerprint.as_slice())
+        .bind(b"{}".as_slice())
+        .execute(&app.pool)
+        .await
+        .expect("expired completed record should insert");
+        let maintenance_scope = RequestScope {
+            principal_id: scope.principal_id,
+            method: "POST",
+            route_target: "/api/v1/items/maintenance",
+            key: "maintenance-key",
+        };
+        assert!(matches!(
+            claim(&app.pool, &maintenance_scope, &[8_u8; 32])
+                .await
+                .unwrap(),
+            Claim::Execute
+        ));
+        let expired_count: i64 = query_scalar(
+            "SELECT COUNT(*)::bigint FROM idempotency_record WHERE idempotency_key = 'expired-key'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("expired record count should load");
+        let stale_state: String = query_scalar(
+            "SELECT state FROM idempotency_record WHERE idempotency_key = 'stale-key'",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .expect("stale record should remain terminal");
+        assert_eq!(expired_count, 0);
+        assert_eq!(stale_state, "indeterminate");
+    })
     .await;
 }
 

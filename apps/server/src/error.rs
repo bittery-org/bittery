@@ -16,6 +16,8 @@ pub enum AppErrorCode {
     Conflict,
     #[serde(rename = "TOO_MANY_REQUESTS")]
     TooManyRequests,
+    #[serde(rename = "PAYLOAD_TOO_LARGE")]
+    PayloadTooLarge,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -70,6 +72,13 @@ impl AppError {
     pub fn too_many_requests(message: impl Into<String>) -> Self {
         Self {
             code: AppErrorCode::TooManyRequests,
+            message: message.into(),
+        }
+    }
+
+    pub fn payload_too_large(message: impl Into<String>) -> Self {
+        Self {
+            code: AppErrorCode::PayloadTooLarge,
             message: message.into(),
         }
     }
