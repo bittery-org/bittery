@@ -2,7 +2,7 @@ import {
 	type AccountDeletionDeps,
 	deleteAccountEverywhere,
 } from "@bittery/core/services/account-lifecycle";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -34,7 +34,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 	const [open, setOpen] = useState(false);
 	const [confirmEmail, setConfirmEmail] = useState("");
 	const [confirmText, setConfirmText] = useState("");
-	const rpcClient = useRPCClient();
+	const apiClient = useApiClient();
 	const navigate = useNavigate();
 	const confirmPhrase = m.settings_delete_account_dialog_confirm_phrase();
 
@@ -42,7 +42,7 @@ export function DeleteAccountDialog({ userEmail }: { userEmail: string }) {
 		...lifecycleDeps,
 		server: {
 			deleteAccount: async (input) => {
-				await rpcClient.auth.deleteAccount.mutate(input);
+				await apiClient.auth.deleteAccount(input);
 			},
 		},
 	};

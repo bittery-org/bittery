@@ -39,7 +39,7 @@ test.describe.configure({ mode: "serial" });
 
 /** Mirrors the `self-hosted` project's `webServer` in `playwright.config.ts`. */
 const SELF_HOSTED_DATABASE = "bittery_e2e_selfhosted";
-const SELF_HOSTED_RPC_URL = "http://localhost:3020/rpc";
+const SELF_HOSTED_SIGNUP_URL = "http://localhost:3020/api/v1/auth/signups";
 
 /** The refusal `has_any_registered_user` raises in `services/auth.rs`. */
 const PUBLIC_SIGNUP_REFUSED =
@@ -51,7 +51,7 @@ const SIGNUP_BUDGET_MS = 240000;
 /** What one step of the signup flow gets, key generation included. */
 const SIGNUP_FLOW_TIMEOUT_MS = 120000;
 
-/** No key derivation at all: a page load, a wall, and one RPC call. */
+/** No key derivation at all: a page load, a wall, and one API call. */
 const TEST_BUDGET_MS = 120000;
 
 /**
@@ -86,7 +86,7 @@ function resetSelfHostedServer(): void {
 }
 
 /**
- * The single KDF profile a verifier-producing RPC accepts
+ * The single KDF profile the verifier-producing API accepts
  * (`ValidatedKdfProfile::try_from` in `services/auth.rs`).
  *
  * Read off disk the way `../fixtures/messages` reads the message catalogue:
@@ -221,15 +221,10 @@ test("a second public signup is refused once the server has an administrator", a
 	await expect(page.getByTestId("signup-form")).toHaveCount(0);
 
 	// The wall is only the client's half. `has_any_registered_user` is what
-	// refuses the write, so call the endpoint the way the app's RPC client would:
+	// refuses the write, so call the endpoint the way the app's API facade would:
 	// a second account is impossible even for a caller that never loaded the form.
-	const response = await request.post(SELF_HOSTED_RPC_URL, {
-		data: {
-			jsonrpc: "2.0",
-			id: 1,
-			method: "auth.signup",
-			params: [syntheticSignupPayload(generateTestUser())],
-		},
+	const response = await request.post(SELF_HOSTED_SIGNUP_URL, {
+		data: syntheticSignupPayload(generateTestUser()),
 	});
 	expect(await response.text()).toContain(PUBLIC_SIGNUP_REFUSED);
 });

@@ -1,10 +1,6 @@
 import { m } from "@bittery/i18n/paraglide/messages";
-import { RpcProvider } from "@bittery/shared/rpc";
-import {
-	createAppRpcOptionsProxy,
-	isUnauthorizedRpcError,
-} from "@bittery/shared/rpc-client";
-import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+import { ApiProvider } from "@bittery/shared/api";
+import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
 import { createRouter as createTanStackRouter } from "@tanstack/react-router";
@@ -25,6 +21,15 @@ import { SyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
+
+function isUnauthorizedApiError(error: unknown): boolean {
+	return (
+		typeof error === "object" &&
+		error !== null &&
+		"status" in error &&
+		error.status === 401
+	);
+}
 
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;
@@ -52,7 +57,7 @@ function handleUnauthorizedError() {
 export const queryClient = new QueryClient({
 	queryCache: new QueryCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 				return;
 			}
@@ -68,7 +73,7 @@ export const queryClient = new QueryClient({
 	}),
 	mutationCache: new MutationCache({
 		onError: (error) => {
-			if (isUnauthorizedRpcError(error)) {
+			if (isUnauthorizedApiError(error)) {
 				handleUnauthorizedError();
 			}
 		},
@@ -88,9 +93,12 @@ async function getSyncClientIdHeader(): Promise<string | null> {
 	}
 }
 
-const rpcClient = createSessionRefreshingRpcClient({
+async function getApiClientId(): Promise<string> {
+	return (await getSyncClientIdHeader()) ?? crypto.randomUUID();
+}
+
+const apiClient = createSessionRefreshingApiClient({
 	defaultServerUrl: getServerUrl(),
-	// Resolve at request time — prerender evaluates defaultServerUrl without `window`.
 	getServerUrl: async () => getServerUrl(),
 	getSessionSnapshot: async () => {
 		await initializeStorage();
@@ -111,19 +119,17 @@ const rpcClient = createSessionRefreshingRpcClient({
 	storeRefreshedSession: async ({ token, sessionId, expiresAt }) => {
 		await initializeStorage();
 		const accountId = await storage.getActiveAccount();
-		if (!accountId) {
-			return;
-		}
+		if (!accountId) return;
 		await storage.storeAuthToken(token, accountId);
 		await storage.updateStoredSessionMetadata(accountId, {
 			sessionId,
 			expiresAt,
 		});
 	},
-	getClientId: getSyncClientIdHeader,
+	getClientId: getApiClientId,
+	clientPlatform: "web",
+	clientVersion: import.meta.env.VITE_APP_VERSION ?? "0.0.0",
 });
-
-const rpc = createAppRpcOptionsProxy(rpcClient, queryClient);
 
 export const getRouter = () => {
 	const router = createTanStackRouter({
@@ -132,17 +138,17 @@ export const getRouter = () => {
 		scrollToTopSelectors: ["#auth-scroll-area", "#app-scroll-area"],
 		defaultPreloadStaleTime: 0,
 		defaultPendingMinMs: 350,
-		context: { rpc, queryClient },
+		context: { api: apiClient, queryClient },
 		defaultPendingComponent: PendingLoader,
 		defaultNotFoundComponent: () => <div>Not Found</div>,
 		Wrap: ({ children }) => (
 			<I18nProvider>
 				<QueryClientProvider client={queryClient}>
-					<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
+					<ApiProvider apiClient={apiClient}>
 						<SyncProvider queryClient={queryClient}>
 							<WebPlatformProvider>{children}</WebPlatformProvider>
 						</SyncProvider>
-					</RpcProvider>
+					</ApiProvider>
 				</QueryClientProvider>
 			</I18nProvider>
 		),

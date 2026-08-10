@@ -1,7 +1,8 @@
 import { usePlatformCrypto } from "@bittery/core/hooks";
 import { readShareKeyFromUrl } from "@bittery/core/services/share-service";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { base64ToArrayBuffer } from "@bittery/shared/crypto";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import type { SharedItemPayload } from "@bittery/shared/types";
 import {
 	Button,
@@ -56,8 +57,7 @@ export const Route = createFileRoute("/share/$token")({
 
 function ShareAccessPage() {
 	const { token } = Route.useParams();
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { m } = useI18n();
 
@@ -74,14 +74,12 @@ function ShareAccessPage() {
 	);
 
 	// Get share link info
-	const linkInfoQuery = useQuery(
-		rpc.share.getPublicInfo.queryOptions({ token }),
-	);
+	const linkInfoQuery = useQuery(apiQueries.shares.public(api, token));
 
 	// Request email verification
 	const requestVerificationMutation = useMutation({
 		mutationFn: () =>
-			rpcClient.share.requestEmailVerification.mutate({ token, email }),
+			api.share.verifyEmail(token, { email }).then((r) => r.data),
 		onSuccess: () => {
 			setEmailSent(true);
 			toast.success("Verification code sent to your email!");
@@ -94,11 +92,12 @@ function ShareAccessPage() {
 	// Verify email and access
 	const verifyAndAccessMutation = useMutation({
 		mutationFn: () =>
-			rpcClient.share.verifyEmailAndAccess.mutate({
-				token,
-				email,
-				code: verificationCode,
-			}),
+			api.share
+				.emailAccess(token, {
+					email,
+					code: verificationCode,
+				})
+				.then((r) => r.data),
 		onSuccess: async (data) => {
 			try {
 				setDecryptionError(null);
@@ -148,7 +147,7 @@ function ShareAccessPage() {
 	// firing it on mount would let a plain refresh burn a one-time link.
 	const revealMutation = useMutation({
 		mutationFn: async () => {
-			const data = await rpcClient.share.accessPublic.mutate({ token });
+			const data = (await api.share.access(token)).data;
 			return await decryptSharedItem(data);
 		},
 		onSuccess: (item) => {

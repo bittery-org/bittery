@@ -1,6 +1,7 @@
 import { useQueryInvalidator } from "@bittery/core/hooks";
 import { useI18n } from "@bittery/i18n/react";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	IconCalendar,
 	IconCircleAlert,
@@ -92,14 +93,13 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	const [showAccessLogs, setShowAccessLogs] = useState(false);
 	const [linkToRevoke, setLinkToRevoke] = useState<string | null>(null);
 
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
 
-	const linksQuery = useQuery(rpc.share.listByItem.queryOptions({ itemId }));
+	const linksQuery = useQuery(apiQueries.shares.list(api, itemId));
 
 	const revokeMutation = useMutation({
-		mutationFn: (linkId: string) => rpcClient.share.revoke.mutate({ linkId }),
+		mutationFn: (linkId: string) => api.share.remove(linkId),
 		onSuccess: async () => {
 			toast.success(m.sharing_links_list_toast_revoke_success());
 			await invalidator.invalidateShare(itemId);
@@ -111,9 +111,11 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 	});
 
 	const accessLogsQuery = useQuery({
-		...rpc.share.getAccessLogs.queryOptions({
-			linkId: selectedLink?.id || "",
-		}),
+		...apiQueries.shares.accessLogs(api, selectedLink?.id || ""),
+		queryFn: async () => {
+			if (!selectedLink) return [];
+			return (await api.share.accessLogs(selectedLink.id)).data;
+		},
 		enabled: !!selectedLink && showAccessLogs,
 	});
 
@@ -202,11 +204,11 @@ export function ShareLinksList({ itemId }: ShareLinksListProps) {
 		accessMode: normalizeShareLinkAccessMode(link.accessMode),
 		isOneTimeUse: link.isOneTimeUse,
 		accessCount: link.accessCount,
-		maxAccessCount: link.maxAccessCount,
-		allowedEmails: link.allowedEmails,
+		maxAccessCount: link.maxAccessCount ?? null,
+		allowedEmails: [...link.allowedEmails],
 		expiresAt: link.expiresAt,
 		createdAt: link.createdAt,
-		lastAccessedAt: link.lastAccessedAt,
+		lastAccessedAt: link.lastAccessedAt ?? null,
 	}));
 
 	if (links.length === 0) {

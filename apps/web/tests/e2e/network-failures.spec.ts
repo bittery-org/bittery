@@ -44,6 +44,10 @@ const API_ORIGIN = "http://localhost:3010";
 /** Every request the app makes to the API. */
 const API_URL_PATTERN = `${API_ORIGIN}/**`;
 
+function isApiDataRequest(url: string): boolean {
+	return new URL(url).pathname.startsWith("/api/v1/");
+}
+
 /** Signup, WASM key generation, the seed item and one SRP sign-in. */
 const SETUP_BUDGET_MS = 420000;
 
@@ -97,10 +101,7 @@ const RETRY_ACTION_LABEL = "retry";
 /**
  * What the user is actually shown when the transport fails, whatever the cause.
  *
- * The RPC client resolves a failed or non-JSON-RPC response to `null`
- * (`packages/rust-rpc/src/http-batch.ts`), and the qubit client turns that into
- * this one message - so an unreachable server, a 500 and a 429 are all
- * indistinguishable in the UI. Asserting the string is what records that.
+ * The API facade normalizes transport failures into the same UI error surface.
  */
 const TRANSPORT_ERROR_MESSAGE = "malformed response from the API";
 
@@ -176,7 +177,7 @@ test("a slow API delays the route but never fails it", async () => {
 	await expect(itemRow(page, seedTitle)).toBeVisible();
 
 	// The delay was really applied: the route could not have rendered before its
-	// first RPC round trip came back.
+	// first API round trip came back.
 	expect(Date.now() - started).toBeGreaterThanOrEqual(2000);
 	// Latency is not an error, so nothing is reported as one.
 	await expect(errorToast(page)).toHaveCount(0);
@@ -194,7 +195,7 @@ test("an intermittent drop is reported but does not cost the route its data, and
 	let abortedRequests = 0;
 	await page.route(API_URL_PATTERN, async (route) => {
 		if (
-			route.request().method() === "POST" &&
+			isApiDataRequest(route.request().url()) &&
 			abortedRequests < DROPPED_REQUEST_BURST
 		) {
 			abortedRequests += 1;
@@ -261,7 +262,7 @@ for (const failure of [
 test("a request that never answers is not left hanging: it times out into the same error surface", async () => {
 	test.setTimeout(SETUP_BUDGET_MS);
 	const stallMs = 2000;
-	await simulator.simulateProcedureTimeout("vault.list", stallMs);
+	await simulator.simulateEndpointTimeout("/api/v1/vaults", stallMs);
 
 	const started = Date.now();
 	await gotoRoute(page, `/vaults/${vaultId}`, errorToast(page));

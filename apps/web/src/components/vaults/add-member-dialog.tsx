@@ -1,5 +1,6 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Avatar,
 	AvatarFallback,
@@ -46,8 +47,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 		Record<string, "admin" | "member" | "read-only">
 	>({});
 
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
@@ -55,7 +55,7 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 
 	// Fetch available team members (not already in vault)
 	const availableQuery = useQuery({
-		...rpc.vault.members.availableTeamMembers.queryOptions({ vaultId }),
+		...apiQueries.vaults.availableMembers(api, vaultId),
 		enabled: open,
 	});
 
@@ -75,7 +75,11 @@ export function AddMemberDialog({ vaultId }: AddMemberDialogProps) {
 			userId: string;
 			role: "admin" | "member" | "read-only";
 			encryptedVaultKey: string;
-		}) => rpcClient.vault.members.add.mutate({ ...input, clientId: null }),
+		}) =>
+			api.vaults.members.add(input.vaultId, input.userId, {
+				encryptedVaultKey: input.encryptedVaultKey,
+				role: input.role,
+			}),
 		onSuccess: async (_data, variables) => {
 			setAddedUserIds((prev) => new Set([...prev, variables.userId]));
 			setAddingUserId(null);

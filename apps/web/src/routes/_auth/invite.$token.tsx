@@ -1,5 +1,5 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import { Button, toast } from "@bittery/ui";
 import {
 	IconCircleAlert as AlertCircle,
@@ -62,8 +62,7 @@ function getInvitationStatusLabel(
 function InvitationPage() {
 	const { token } = Route.useParams();
 	const navigate = useNavigate();
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const { m } = useI18n();
 	const [view, setView] = useState<"signup" | "signin">("signup");
 	const authenticatedQuery = useQuery({
@@ -73,13 +72,15 @@ function InvitationPage() {
 	const authenticated = authenticatedQuery.data ?? null;
 
 	// Get invitation details
-	const invitationQuery = useQuery(
-		rpc.team.invitations.getByToken.queryOptions({ token }),
-	);
+	const invitationQuery = useQuery({
+		queryKey: ["api", "v1", "public", "invitations", token],
+		queryFn: async () => (await api.teams.invitations.public(token)).data,
+	});
 
 	// Accept mutation
 	const acceptMutation = useMutation({
-		mutationFn: () => rpcClient.team.invitations.accept.mutate({ token }),
+		mutationFn: () =>
+			api.teams.invitations.acceptPublic(token).then((r) => r.data),
 		onSuccess: (data) => {
 			toast.success(m.auth_invite_toast_joined({ teamName: data.teamName }));
 			navigate({ to: "/team" });
@@ -91,7 +92,7 @@ function InvitationPage() {
 
 	// Decline mutation
 	const declineMutation = useMutation({
-		mutationFn: () => rpcClient.team.invitations.decline.mutate({ token }),
+		mutationFn: () => api.teams.invitations.declinePublic(token),
 		onSuccess: () => {
 			toast.success(m.auth_invite_toast_declined());
 			navigate({ to: "/team" });

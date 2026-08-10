@@ -1,4 +1,5 @@
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Avatar,
 	AvatarFallback,
@@ -33,7 +34,7 @@ import {
 	normalizeDeploymentMode,
 	normalizeEntitlements,
 	normalizeTeamRole,
-} from "@/lib/rpc-normalizers";
+} from "@/lib/api-normalizers";
 import { clearActiveAccountData } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
 
@@ -59,12 +60,12 @@ function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 }
 
 function UserNav() {
-	const rpc = useRPC();
+	const api = useApiClient();
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
 	const navigate = useNavigate();
 	const { isMobile, setOpenMobile } = useSidebar();
-	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const userQuery = useQuery(apiQueries.auth.me(api));
 	const user = userQuery.data;
 	const initials = user?.name
 		? user.name
@@ -145,7 +146,7 @@ function UserNav() {
 }
 
 export function AppSidebar() {
-	const rpc = useRPC();
+	const api = useApiClient();
 	const { m } = useI18n();
 	const routerState = useRouterState();
 	const currentPath = routerState.location.pathname;
@@ -154,8 +155,8 @@ export function AppSidebar() {
 	const handleMobileLinkClick = () => {
 		if (isMobile) setOpenMobile(false);
 	};
-	const entitlementQuery = useQuery(rpc.billing.entitlements.queryOptions());
-	const meQuery = useQuery(rpc.auth.me.queryOptions());
+	const entitlementQuery = useQuery(apiQueries.billing.entitlements(api));
+	const meQuery = useQuery(apiQueries.auth.me(api));
 	const navItems = filterNavItems(appNavItems, {
 		mode: normalizeDeploymentMode(entitlementQuery.data?.mode),
 		billingEnabled: entitlementQuery.data?.billingEnabled === true,

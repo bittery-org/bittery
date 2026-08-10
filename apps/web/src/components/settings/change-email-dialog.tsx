@@ -4,7 +4,8 @@ import {
 	InvalidAccountPasswordError,
 	LocalKeyAdoptionError,
 } from "@bittery/core/services/vault-crypto";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import {
 	Button,
@@ -38,13 +39,12 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 	const [currentPassword, setCurrentPassword] = useState("");
 	const [showPassword, setShowPassword] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
-	const rpcClient = useRPCClient();
-	const rpc = useRPC();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const navigate = useNavigate();
 
-	const userQuery = useQuery(rpc.auth.me.queryOptions());
-	const vaultListQuery = useQuery(rpc.vault.list.queryOptions());
+	const userQuery = useQuery(apiQueries.auth.me(api));
+	const vaultListQuery = useQuery(apiQueries.vaults.list(api));
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
@@ -95,12 +95,19 @@ export function ChangeEmailDialog({ currentEmail }: { currentEmail: string }) {
 					currentPassword,
 					secretKey,
 					encryptedPrivateKey: userQuery.data.encryptedPrivateKey,
-					vaultKeys: vaultListQuery.data.map(toVaultKeyEntry),
+					vaultKeys: vaultListQuery.data.map((vault) =>
+						toVaultKeyEntry({
+							...vault,
+							icon: vault.icon ?? null,
+							imageUrl: vault.imageUrl ?? null,
+						}),
+					),
 				},
 				{
 					crypto,
 					storage,
-					commit: (payload) => rpcClient.auth.updateEmail.mutate(payload),
+					commit: (payload) =>
+						api.auth.changeEmail(payload).then((r) => r.data),
 				},
 			);
 

@@ -1,4 +1,4 @@
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import { Badge, Button, cn, copyWithToast, toast } from "@bittery/ui";
 import {
 	IconClock as Clock,
@@ -25,13 +25,15 @@ interface Invitation {
 interface PendingInvitationsListProps {
 	invitations: Invitation[];
 	canManage: boolean;
+	teamId: string;
 }
 
 export function PendingInvitationsList({
 	invitations,
 	canManage,
+	teamId,
 }: PendingInvitationsListProps) {
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const invalidator = useQueryInvalidator();
 	const { m } = useI18n();
 	// Resending rotates the token, so the server hands back a brand new link that
@@ -56,7 +58,7 @@ export function PendingInvitationsList({
 
 	const cancelMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			rpcClient.team.invitations.cancel.mutate(input),
+			api.teams.invitations.cancel(teamId, input.invitationId),
 		onSuccess: async () => {
 			toast.success(m.team_invitations_toast_cancelled());
 			await invalidator.invalidateTeam();
@@ -68,7 +70,9 @@ export function PendingInvitationsList({
 
 	const resendMutation = useMutation({
 		mutationFn: (input: { invitationId: string }) =>
-			rpcClient.team.invitations.resend.mutate(input),
+			api.teams.invitations
+				.resend(teamId, input.invitationId)
+				.then((r) => r.data),
 		onSuccess: async (data) => {
 			setResentLink({
 				invitationId: data.invitationId,

@@ -1,4 +1,5 @@
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	AlertDialog,
 	AlertDialogCancel,
@@ -153,11 +154,13 @@ function RenameDeviceDialog({
 	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
 	const [deviceName, setDeviceName] = useState(session.deviceName || "");
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 
 	const renameMutation = useMutation({
 		mutationFn: (input: { sessionId: string; deviceName: string }) =>
-			rpcClient.auth.renameDevice.mutate(input),
+			api.auth.sessions.rename(input.sessionId, {
+				deviceName: input.deviceName,
+			}),
 		onSuccess: () => {
 			toast.success(m.settings_devices_toast_rename_success());
 			setOpen(false);
@@ -239,11 +242,10 @@ function RevokeDeviceDialog({
 }) {
 	const { m } = useI18n();
 	const [open, setOpen] = useState(false);
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 
 	const revokeMutation = useMutation({
-		mutationFn: (sessionId: string) =>
-			rpcClient.auth.revokeDevice.mutate({ sessionId }),
+		mutationFn: (sessionId: string) => api.auth.sessions.revoke(sessionId),
 		onSuccess: () => {
 			toast.success(m.settings_devices_toast_revoke_success());
 			setOpen(false);
@@ -372,9 +374,9 @@ function DeviceListSkeleton() {
 
 export function DeviceManagement() {
 	const { m } = useI18n();
-	const rpc = useRPC();
+	const api = useApiClient();
 
-	const devicesQuery = useQuery(rpc.auth.listDevices.queryOptions());
+	const devicesQuery = useQuery(apiQueries.auth.sessions(api));
 
 	const handleUpdate = () => {
 		devicesQuery.refetch();
@@ -416,7 +418,16 @@ export function DeviceManagement() {
 			{sortedDevices.map((session) => (
 				<DeviceCard
 					key={session.id}
-					session={session}
+					session={{
+						...session,
+						deviceName: session.deviceName ?? null,
+						platform: session.platform ?? null,
+						browserName: session.browserName ?? null,
+						browserVersion: session.browserVersion ?? null,
+						osName: session.osName ?? null,
+						osVersion: session.osVersion ?? null,
+						ipAddress: session.ipAddress ?? null,
+					}}
 					onUpdate={handleUpdate}
 				/>
 			))}

@@ -7,8 +7,9 @@ import {
 	performSRPLogin,
 	storeLoginSessionOwned,
 } from "@bittery/core/services/auth-service";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { useApiClient } from "@bittery/shared/api";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
+import { apiQueries } from "@bittery/shared/api-query";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Input, Label, toast } from "@bittery/ui";
 import {
@@ -37,7 +38,7 @@ export default function SignInForm({
 	redirectTo?: string;
 }) {
 	const { m } = useI18n();
-	const rpc = useRPC();
+	const api = useApiClient();
 
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
 	const isQuickUnlock = Boolean(
@@ -49,7 +50,7 @@ export default function SignInForm({
 		queryFn: () => storage.getStoredSecretKey(),
 	});
 	const registrationStatusQuery = useQuery(
-		rpc.auth.registrationStatus.queryOptions(),
+		apiQueries.auth.registrationStatus(api),
 	);
 	const isCloudMode = registrationStatusQuery.data?.mode !== "self-hosted";
 	const allowPublicSignup =
@@ -141,7 +142,7 @@ function SignInFormContent({
 }) {
 	const { m } = useI18n();
 	const navigate = useNavigate();
-	const rpcClient = useRPCClient();
+	const apiClient = useApiClient();
 	const crypto = usePlatformCrypto();
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
@@ -158,7 +159,7 @@ function SignInFormContent({
 			const serverUrl = getDefaultServerUrl();
 			const result = await performSRPLogin(
 				{ ...input, email: normalizedEmail, serverUrl },
-				{ crypto, rpcClient, storage },
+				{ crypto, apiClient, storage },
 			);
 			await storeLoginSessionOwned(
 				result,

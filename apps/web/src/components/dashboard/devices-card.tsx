@@ -1,4 +1,5 @@
-import { useRPC } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import { Button } from "@bittery/ui";
 import {
 	IconNetwork as Extension,
@@ -27,8 +28,8 @@ function getPlatformIcon(platform?: string | null) {
 }
 
 export function DevicesCard() {
-	const rpc = useRPC();
-	const devicesQuery = useQuery(rpc.auth.listDevices.queryOptions());
+	const api = useApiClient();
+	const devicesQuery = useQuery(apiQueries.auth.sessions(api));
 	const { m, locale } = useI18n();
 	const dateLocale = locale === "de" ? dateFnsDe : dateFnsEnUS;
 	const devices = devicesQuery.data ?? [];

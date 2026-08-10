@@ -1,4 +1,4 @@
-import type { AppRpcOptionsProxy } from "@bittery/shared/rpc-client";
+import type { AppApiClient } from "@bittery/shared/api-client";
 import { Toaster } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
@@ -15,7 +15,7 @@ import { initializeStorage } from "../lib/storage";
 import { useI18n } from "../providers/i18n-provider";
 
 export interface RouterAppContext {
-	rpc: AppRpcOptionsProxy;
+	api: AppApiClient;
 	queryClient: QueryClient;
 }
 

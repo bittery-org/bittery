@@ -2,8 +2,9 @@ import { usePlatformCrypto } from "@bittery/core/hooks";
 import { storeLoginSessionOwned } from "@bittery/core/services/auth-service";
 import { createAccountKeys } from "@bittery/core/services/vault-crypto";
 import { m } from "@bittery/i18n/paraglide/messages";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { useApiClient } from "@bittery/shared/api";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
+import { apiQueries } from "@bittery/shared/api-query";
 import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import type { KdfProfile } from "@bittery/types";
@@ -61,8 +62,7 @@ export function useSignupForm({
 	onVerificationRequested?: () => void;
 }) {
 	const navigate = useNavigate();
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const apiClient = useApiClient();
 	const crypto = usePlatformCrypto();
 	const [keyMaterialQueryId] = useState(() => globalThis.crypto.randomUUID());
 	const keyMaterialQuery = useQuery({
@@ -96,13 +96,19 @@ export function useSignupForm({
 
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
-		...rpc.team.invitations.getByToken.queryOptions({
-			token: invitationToken || "",
-		}),
+		queryKey: [
+			"api",
+			"v1",
+			"public",
+			"team-invitations",
+			invitationToken || "",
+		],
+		queryFn: async () =>
+			(await apiClient.teams.invitations.public(invitationToken || "")).data,
 		enabled: !!invitationToken,
 	});
 	const registrationStatusQuery = useQuery(
-		rpc.auth.registrationStatus.queryOptions(),
+		apiQueries.auth.registrationStatus(apiClient),
 	);
 
 	const invitation = invitationQuery.data;
@@ -133,10 +139,12 @@ export function useSignupForm({
 
 	const requestSignupVerificationMutation = useMutation({
 		mutationFn: async (input: { email: string }) =>
-			rpcClient.auth.requestSignupVerification.mutate({
-				email: input.email,
-				invitationToken: invitationToken ?? null,
-			}),
+			(
+				await apiClient.auth.requestSignupVerification({
+					email: input.email,
+					invitationToken: invitationToken ?? null,
+				})
+			).data,
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to send verification code");
 		},
@@ -144,11 +152,13 @@ export function useSignupForm({
 
 	const verifySignupVerificationMutation = useMutation({
 		mutationFn: async (input: { email: string; code: string }) =>
-			rpcClient.auth.verifySignupVerification.mutate({
-				email: input.email,
-				code: input.code,
-				invitationToken: invitationToken ?? null,
-			}),
+			(
+				await apiClient.auth.verifySignupVerification({
+					email: input.email,
+					code: input.code,
+					invitationToken: invitationToken ?? null,
+				})
+			).data,
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to verify code");
 		},
@@ -157,13 +167,36 @@ export function useSignupForm({
 	const signupMutation = useMutation({
 		mutationFn: async (input: SignupMutationInput) => {
 			if (isInvitationSignup) {
-				return rpcClient.auth.signupWithInvitation.mutate({
-					token: input.token || "",
+				return (
+					await apiClient.auth.signUp({
+						invitationToken: input.token || "",
+						userId: input.userId ?? null,
+						vaultId: input.vaultId ?? null,
+						email: input.email,
+						signupVerificationToken: input.signupVerificationToken,
+						name: input.name,
+						secretKeyHint: input.secretKeyHint,
+						srpSalt: input.srpSalt,
+						srpVerifier: input.srpVerifier,
+						publicKey: input.publicKey,
+						encryptedPrivateKey: input.encryptedPrivateKey,
+						encryptedMasterKey: input.encryptedMasterKey,
+						recoveryKeyHint: input.recoveryKeyHint,
+						encryptedVaultKey: input.encryptedVaultKey,
+						kdfParams: input.kdfProfile,
+					})
+				).data;
+			}
+
+			return (
+				await apiClient.auth.signUp({
 					userId: input.userId ?? null,
 					vaultId: input.vaultId ?? null,
 					email: input.email,
 					signupVerificationToken: input.signupVerificationToken,
 					name: input.name,
+					plan: input.plan ?? null,
+					organizationName: input.organizationName ?? null,
 					secretKeyHint: input.secretKeyHint,
 					srpSalt: input.srpSalt,
 					srpVerifier: input.srpVerifier,
@@ -173,27 +206,8 @@ export function useSignupForm({
 					recoveryKeyHint: input.recoveryKeyHint,
 					encryptedVaultKey: input.encryptedVaultKey,
 					kdfParams: input.kdfProfile,
-				});
-			}
-
-			return rpcClient.auth.signup.mutate({
-				userId: input.userId ?? null,
-				vaultId: input.vaultId ?? null,
-				email: input.email,
-				signupVerificationToken: input.signupVerificationToken,
-				name: input.name,
-				plan: input.plan ?? null,
-				organizationName: input.organizationName ?? null,
-				secretKeyHint: input.secretKeyHint,
-				srpSalt: input.srpSalt,
-				srpVerifier: input.srpVerifier,
-				publicKey: input.publicKey,
-				encryptedPrivateKey: input.encryptedPrivateKey,
-				encryptedMasterKey: input.encryptedMasterKey,
-				recoveryKeyHint: input.recoveryKeyHint,
-				encryptedVaultKey: input.encryptedVaultKey,
-				kdfParams: input.kdfProfile,
-			});
+				})
+			).data;
 		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to create account");
@@ -210,9 +224,11 @@ export function useSignupForm({
 			value.plan !== "free"
 		) {
 			try {
-				const checkout = await rpcClient.billing.createCheckoutSession.mutate({
-					plan: value.plan,
-				});
+				const checkout = (
+					await apiClient.billing.checkout({
+						plan: value.plan,
+					})
+				).data;
 				if (checkout.url) {
 					window.location.href = checkout.url;
 					return;
@@ -296,7 +312,13 @@ export function useSignupForm({
 						teamAvatarUrl: result.user.teamAvatarUrl,
 						encryptedPrivateKey: keys.encryptedPrivateKey,
 					},
-					vaultKeys: result.vaultKeys.map(toAuthVaultKeyEntry),
+					vaultKeys: result.vaultKeys.map((vault) =>
+						toAuthVaultKeyEntry({
+							...vault,
+							vaultIcon: vault.vaultIcon ?? null,
+							vaultImageUrl: vault.vaultImageUrl ?? null,
+						}),
+					),
 					masterUnlockKey: keys.masterUnlockKey,
 					kdfParams: keys.kdfProfile,
 					serverUrl,

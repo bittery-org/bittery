@@ -4,7 +4,8 @@ import {
 	type PreparedRecoveryKey,
 	prepareRecoveryKey,
 } from "@bittery/core/services/vault-crypto";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Button,
 	copyWithToast,
@@ -46,11 +47,10 @@ export function RegenerateRecoveryKeyDialog({
 	const [hasAcknowledged, setHasAcknowledged] = useState(false);
 	const [isProcessing, setIsProcessing] = useState(false);
 
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const queryClient = useQueryClient();
-	const userQuery = useQuery(rpc.auth.me.queryOptions());
+	const userQuery = useQuery(apiQueries.auth.me(api));
 
 	// Shown in the emergency kit and in the dialog; nothing else reads it.
 	const recoveryKey = prepared?.recoveryKey ?? "";
@@ -59,7 +59,7 @@ export function RegenerateRecoveryKeyDialog({
 		mutationFn: (input: {
 			encryptedMasterKey: string;
 			recoveryKeyHint: string;
-		}) => rpcClient.auth.storeRecoveryKey.mutate(input),
+		}) => api.auth.storeRecoveryKey(input),
 		onSuccess: async () => {
 			await queryClient.invalidateQueries();
 			toast.success(m.settings_recovery_key_regenerate_toast_regenerated());

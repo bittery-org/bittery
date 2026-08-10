@@ -12,25 +12,19 @@ import type { Page, Request, Route } from "@playwright/test";
 
 type RouteMatcher = string | RegExp;
 
-const RPC_ROUTE_PATTERN = /\/rpc(?:\/|\?|$)/;
+const API_ROUTE_PATTERN = /\/api(?:\/|\?|$)/;
 
-const API_ROUTE_PATTERNS: readonly RegExp[] = [RPC_ROUTE_PATTERN];
+const API_ROUTE_PATTERNS: readonly RegExp[] = [API_ROUTE_PATTERN];
 
 function isApiRequestUrl(url: string): boolean {
 	return API_ROUTE_PATTERNS.some((pattern) => pattern.test(url));
 }
 
-function requestMatchesProcedure(
+function requestMatchesEndpoint(
 	request: Pick<Request, "url" | "postData">,
-	procedureName: string,
+	endpointPath: string,
 ): boolean {
-	const url = request.url();
-	if (!RPC_ROUTE_PATTERN.test(url)) {
-		return false;
-	}
-
-	const postData = request.postData();
-	return typeof postData === "string" && postData.includes(procedureName);
+	return new URL(request.url()).pathname === endpointPath;
 }
 
 /**
@@ -122,15 +116,15 @@ export class NetworkSimulator {
 		}
 	}
 
-	private async routeProcedureRequests(
-		procedureName: string,
+	private async routeEndpointRequests(
+		endpointPath: string,
 		handler: (route: Route) => Promise<void> | void,
 	): Promise<void> {
-		const routePattern = RPC_ROUTE_PATTERN;
+		const routePattern = API_ROUTE_PATTERN;
 		this.interceptedRoutes.add(routePattern);
 
 		await this.page.route(routePattern, async (route) => {
-			if (!requestMatchesProcedure(route.request(), procedureName)) {
+			if (!requestMatchesEndpoint(route.request(), endpointPath)) {
 				await route.continue();
 				return;
 			}
@@ -195,28 +189,6 @@ export class NetworkSimulator {
 	}
 
 	/**
-	 * Simulate RPC endpoint failure for a specific procedure.
-	 */
-	async simulateRpcFailure(
-		procedureName: string,
-		error: keyof typeof ApiErrors = "INTERNAL_SERVER_ERROR",
-	) {
-		await this.routeProcedureRequests(procedureName, async (route) => {
-			const errorResponse = ApiErrors[error];
-			await route.fulfill({
-				status: errorResponse.status,
-				contentType: "application/json",
-				body: JSON.stringify({
-					error: {
-						message: errorResponse.body.error,
-						code: error,
-					},
-				}),
-			});
-		});
-	}
-
-	/**
 	 * Simulate network timeout
 	 */
 	async simulateTimeout(endpointPattern: string, timeoutMs = 30000) {
@@ -228,10 +200,10 @@ export class NetworkSimulator {
 	}
 
 	/**
-	 * Simulate network timeout for a specific RPC procedure.
+	 * Simulate network timeout for a specific API endpoint.
 	 */
-	async simulateProcedureTimeout(procedureName: string, timeoutMs = 30000) {
-		await this.routeProcedureRequests(procedureName, async (route) => {
+	async simulateEndpointTimeout(endpointPath: string, timeoutMs = 30000) {
+		await this.routeEndpointRequests(endpointPath, async (route) => {
 			await settleAfterDelay(timeoutMs, () => route.abort("timedout"));
 		});
 	}
@@ -289,9 +261,9 @@ export class NetworkSimulator {
 	/**
 	 * Wait for specific API call
 	 */
-	async waitForApiCall(procedureName: string, timeout = 10000): Promise<void> {
+	async waitForApiCall(endpointPath: string, timeout = 10000): Promise<void> {
 		await this.page.waitForResponse(
-			(response) => requestMatchesProcedure(response.request(), procedureName),
+			(response) => requestMatchesEndpoint(response.request(), endpointPath),
 			{ timeout },
 		);
 	}
@@ -325,15 +297,6 @@ export class NetworkSimulator {
 		this.interceptedRoutes.add(endpointPattern);
 
 		await this.page.route(endpointPattern, async (route) => {
-			await route.abort("connectionreset");
-		});
-	}
-
-	/**
-	 * Simulate connection reset for a specific RPC procedure.
-	 */
-	async simulateProcedureConnectionReset(procedureName: string) {
-		await this.routeProcedureRequests(procedureName, async (route) => {
 			await route.abort("connectionreset");
 		});
 	}

@@ -1,31 +1,27 @@
 import { afterEach, expect, test } from "bun:test";
-import { clearRpcClientCache } from "@bittery/shared/rpc-client-factory";
+import { clearApiClientCache } from "@bittery/shared/api-client-factory";
 import { loadRecoveredAccountBootstrap } from "./recovery-session";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
 	globalThis.fetch = originalFetch;
-	clearRpcClientCache();
+	clearApiClientCache();
 });
 
 test("recovered account bootstrap uses the newly issued session", async () => {
 	// Bun's global fetch carries a `preconnect` method, so a bare function does
 	// not satisfy `typeof fetch` — forward the real one alongside the stub.
 	globalThis.fetch = Object.assign(
-		async (_input: string | URL | Request, init?: RequestInit) => {
-			const request = JSON.parse(String(init?.body));
-			const authorization = new Headers(init?.headers).get("Authorization");
+		async (input: string | URL | Request) => {
+			const request = new Request(input);
+			const authorization = request.headers.get("Authorization");
 			if (authorization !== "Bearer recovery-session-token") {
-				return Response.json({
-					jsonrpc: "2.0",
-					id: request.id,
-					error: { code: 401, message: "Authentication required" },
-				});
+				return new Response(null, { status: 401 });
 			}
 
 			const result =
-				request.method === "auth.me"
+				new URL(request.url).pathname === "/api/v1/users/me"
 					? {
 							id: "user-1",
 							email: "recovered@example.com",
@@ -54,11 +50,7 @@ test("recovered account bootstrap uses the newly issued session", async () => {
 							},
 						];
 
-			return Response.json({
-				jsonrpc: "2.0",
-				id: request.id,
-				result: { Ok: result },
-			});
+			return Response.json(result);
 		},
 		{ preconnect: originalFetch.preconnect },
 	);

@@ -5,8 +5,8 @@ import {
 	recoverAccount,
 } from "@bittery/core/services/vault-crypto";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useRPCClient } from "@bittery/shared/rpc";
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { useApiClient } from "@bittery/shared/api";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { Button, cn, Input, Label, toast } from "@bittery/ui";
 import {
@@ -92,7 +92,7 @@ export const Route = createFileRoute("/_auth/recover")({
 
 function RecoverRouteComponent() {
 	const navigate = useNavigate();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { m } = useI18n();
 
@@ -135,7 +135,7 @@ function RecoverRouteComponent() {
 
 		setIsSubmitting(true);
 		try {
-			await rpcClient.auth.requestRecoveryVerification.mutate({
+			await api.auth.requestRecoveryVerification({
 				email: email.trim(),
 			});
 			toast.success(m.auth_recover_toast_code_requested());
@@ -162,10 +162,12 @@ function RecoverRouteComponent() {
 
 		setIsSubmitting(true);
 		try {
-			const result = await rpcClient.auth.verifyRecoveryCode.mutate({
-				email: email.trim(),
-				code: code.trim(),
-			});
+			const result = (
+				await api.auth.verifyRecovery({
+					email: email.trim(),
+					code: code.trim(),
+				})
+			).data;
 
 			if (!result.success || !result.recoveryToken) {
 				toast.error(m.auth_recover_toast_code_invalid_or_expired());
@@ -235,9 +237,11 @@ function RecoverRouteComponent() {
 				{
 					crypto,
 					loadRecoveryData: async () => {
-						const data = await rpcClient.auth.getRecoveryData.query({
-							recoveryToken,
-						});
+						const data = (
+							await api.auth.recoveryData({
+								recoveryToken,
+							})
+						).data;
 						return {
 							userId: data.userId,
 							encryptedMasterKey: assertEncryptedData(data.encryptedMasterKey),
@@ -248,7 +252,9 @@ function RecoverRouteComponent() {
 						};
 					},
 					commit: (payload) =>
-						rpcClient.auth.resetPassword.mutate({ recoveryToken, ...payload }),
+						api.auth
+							.resetPassword({ recoveryToken, ...payload })
+							.then((r) => r.data),
 				},
 			);
 
@@ -276,7 +282,13 @@ function RecoverRouteComponent() {
 							teamAvatarUrl: bootstrap.user.teamAvatarUrl,
 							encryptedPrivateKey: recovered.encryptedPrivateKey,
 						},
-						vaultKeys: bootstrap.vaults.map(toVaultKeyEntry),
+						vaultKeys: bootstrap.vaults.map((vault) =>
+							toVaultKeyEntry({
+								...vault,
+								icon: vault.icon ?? null,
+								imageUrl: vault.imageUrl ?? null,
+							}),
+						),
 						masterUnlockKey: recovered.masterUnlockKey,
 						kdfParams: recovered.kdfProfile,
 						serverUrl,

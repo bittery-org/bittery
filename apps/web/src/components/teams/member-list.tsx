@@ -1,6 +1,6 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -48,7 +48,7 @@ export function MemberList({
 	canManageMembers,
 	isSelfHostedMode = false,
 }: MemberListProps) {
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
@@ -83,11 +83,9 @@ export function MemberList({
 			}
 
 			// Step 2: Fetch team rotation data from server
-			const teamRotationData =
-				await rpcClient.team.members.getTeamRotationData.query({
-					teamId,
-					excludeUserId: userId,
-				});
+			const teamRotationData = (
+				await api.teams.members.removalRotationData(teamId, userId)
+			).data;
 
 			// Step 3: Perform key rotation for each team vault
 			const vaultRotations: Array<{
@@ -156,12 +154,16 @@ export function MemberList({
 			}
 
 			// Step 4: Submit to server
-			const result = await rpcClient.team.members.remove.mutate({
-				teamId,
-				userId,
-				vaultRotations,
-				clientId: null,
-			});
+			const result = (
+				await api.teams.members.remove(
+					teamId,
+					userId,
+					{
+						vaultRotations,
+					},
+					{},
+				)
+			).data;
 
 			// Step 5: Update local vault keys in storage
 			const vaultKeys = await storage.getVaultKeys();

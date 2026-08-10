@@ -303,9 +303,7 @@ test("an invitation can be resent for a fresh link and then cancelled", async ({
 		toastWithText(page, uiText("team_invitations_toast_cancelled")),
 	).toBeVisible();
 
-	// Reloaded rather than re-read in place: `invalidateTeam` invalidates
-	// `["team", ...]` while the RPC queries are keyed `["rpc", "team", ...]`, so
-	// nothing it does can match. Reported as a product bug for this step.
+	// Reloading also verifies that cancellation survived beyond the query cache.
 	await openTeamPage(page);
 	await openTeamTab(page, "team_page_tab_invitations");
 	await expect(

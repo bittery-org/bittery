@@ -1,6 +1,6 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
 import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import type { KeyRotationResult } from "@bittery/types";
 import {
 	AlertDialog,
@@ -53,7 +53,7 @@ export function VaultMemberList({
 	members,
 	userRole,
 }: VaultMemberListProps) {
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 	const invalidator = useQueryInvalidator();
@@ -67,7 +67,15 @@ export function VaultMemberList({
 			vaultId: string;
 			userId: string;
 			role: "admin" | "member" | "read-only";
-		}) => rpcClient.vault.members.updateRole.mutate(input),
+		}) =>
+			api.vaults.members.updateRole(
+				input.vaultId,
+				input.userId,
+				{
+					role: input.role,
+				},
+				{},
+			),
 		onSuccess: async () => {
 			toast.success(m.vaults_member_list_toast_role_updated());
 			await invalidator.invalidateVaultMembers(vaultId);
@@ -109,10 +117,9 @@ export function VaultMemberList({
 				throw new Error("session_data_missing");
 			}
 
-			const rotationData = await rpcClient.vault.members.getRotationData.query({
-				vaultId,
-				excludeUserId: userId,
-			});
+			const rotationData = (
+				await api.vaults.members.removalRotationData(vaultId, userId)
+			).data;
 
 			const currentVaultKey = await vaultCrypto.getVaultKey({ vaultId });
 			if (!currentVaultKey) {
@@ -151,15 +158,19 @@ export function VaultMemberList({
 			}
 
 			// Step 4: Submit to server
-			const result = await rpcClient.vault.members.remove.mutate({
-				vaultId,
-				userId,
-				keyRotation: {
-					memberKeys: rotationResult.memberEncryptedKeys,
-					reEncryptedItems: rotationResult.reEncryptedItems,
-				},
-				clientId: null,
-			});
+			const result = (
+				await api.vaults.members.remove(
+					vaultId,
+					userId,
+					{
+						keyRotation: {
+							memberKeys: rotationResult.memberEncryptedKeys,
+							reEncryptedItems: rotationResult.reEncryptedItems,
+						},
+					},
+					{},
+				)
+			).data;
 
 			// Step 5: Update local session storage with new vault key
 			const vaultKeys = await storage.getVaultKeys();

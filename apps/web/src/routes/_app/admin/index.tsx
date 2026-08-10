@@ -1,5 +1,6 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Avatar,
 	AvatarFallback,
@@ -42,11 +43,11 @@ import {
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { formatDate, formatDateTime } from "@/lib/i18n-format";
 import {
 	normalizeDeploymentMode,
 	normalizeEntitlements,
-} from "@/lib/rpc-normalizers";
+} from "@/lib/api-normalizers";
+import { formatDate, formatDateTime } from "@/lib/i18n-format";
 import { useI18n } from "@/providers/i18n-provider";
 
 type ActionGroup =
@@ -223,7 +224,7 @@ export const Route = createFileRoute("/_app/admin/")({
 	}),
 	beforeLoad: async ({ context }) => {
 		const access = await context.queryClient.ensureQueryData(
-			context.rpc.billing.entitlements.queryOptions(),
+			apiQueries.billing.entitlements(context.api),
 		);
 		const mode = normalizeDeploymentMode(access.mode);
 		const entitlements = normalizeEntitlements(access.entitlements);
@@ -234,7 +235,7 @@ export const Route = createFileRoute("/_app/admin/")({
 			throw redirect({ to: "/billing" });
 		}
 		const me = await context.queryClient.ensureQueryData(
-			context.rpc.auth.me.queryOptions(),
+			apiQueries.auth.me(context.api),
 		);
 		if (me.role !== "owner" && me.role !== "admin") {
 			throw redirect({ to: "/team" });
@@ -245,34 +246,36 @@ export const Route = createFileRoute("/_app/admin/")({
 });
 
 function TeamAdminConsolePage() {
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const { m } = useI18n();
 	const navigate = useNavigate({ from: Route.fullPath });
 	const { tab } = Route.useSearch();
 	const [filters, setFilters] = useState<Filters>(defaultFilters);
 	const [selectedEvent, setSelectedEvent] = useState<TeamEvent | null>(null);
 
-	const teamQuery = useQuery(rpc.team.list.queryOptions());
+	const teamQuery = useQuery(apiQueries.teams.current(api));
 	const teamId = teamQuery.data?.id;
 	const membersQuery = useQuery({
-		...rpc.team.members.list.queryOptions({ teamId: teamId || "" }),
+		...apiQueries.teams.members(api, teamId || ""),
 		enabled: !!teamId,
 	});
 	const eventsQuery = useInfiniteQuery({
 		queryKey: ["admin-team-events", filters],
 		initialPageParam: undefined as string | undefined,
-		queryFn: ({ pageParam }) =>
-			rpcClient.audit.teamEvents.query({
-				limit: DEFAULT_LIMIT,
-				cursor: pageParam ?? null,
-				actionGroup: filters.actionGroup,
-				result: filters.result,
-				actorUserId: filters.actorUserId !== "all" ? filters.actorUserId : null,
-				search: filters.search.trim() || null,
-				from: toIso(filters.from),
-				to: toIso(filters.to),
-			}),
+		queryFn: async ({ pageParam }) =>
+			(
+				await api.audit.list({
+					limit: DEFAULT_LIMIT,
+					cursor: pageParam,
+					actionGroup: filters.actionGroup,
+					result: filters.result,
+					actorUserId:
+						filters.actorUserId !== "all" ? filters.actorUserId : undefined,
+					search: filters.search.trim() || undefined,
+					from: toIso(filters.from) ?? undefined,
+					to: toIso(filters.to) ?? undefined,
+				})
+			).data,
 		getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
 	});
 
@@ -323,6 +326,7 @@ function TeamAdminConsolePage() {
 						isLoadingMembers={membersQuery.isLoading || teamQuery.isLoading}
 						m={m}
 						members={members}
+						teamId={teamId ?? ""}
 						onSelectEvent={setSelectedEvent}
 					/>
 				</TabsContent>
@@ -364,6 +368,7 @@ interface PeopleTabProps {
 	isLoadingMembers: boolean;
 	m: AdminMessageCatalog;
 	members: TeamMember[];
+	teamId: string;
 	onSelectEvent: (event: TeamEvent) => void;
 }
 
@@ -372,9 +377,10 @@ function PeopleTab({
 	isLoadingMembers,
 	m,
 	members,
+	teamId,
 	onSelectEvent,
 }: PeopleTabProps) {
-	const rpc = useRPC();
+	const api = useApiClient();
 	const [search, setSearch] = useState("");
 	const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
@@ -394,9 +400,7 @@ function PeopleTab({
 		visibleMembers[0];
 
 	const accessQuery = useQuery({
-		...rpc.team.members.access.queryOptions({
-			userId: selectedMember?.userId ?? "",
-		}),
+		...apiQueries.teams.memberAccess(api, teamId, selectedMember?.userId ?? ""),
 		enabled: !!selectedMember?.userId,
 	});
 	const access = accessQuery.data;

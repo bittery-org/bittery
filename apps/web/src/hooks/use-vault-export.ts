@@ -11,11 +11,11 @@ import type {
 	ExportedVault,
 	VaultExportPayload,
 } from "@bittery/shared";
-import { useRPCClient } from "@bittery/shared/rpc";
+import { useApiClient } from "@bittery/shared/api";
 import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
-import { normalizeItemCategory } from "@/lib/rpc-normalizers";
+import { normalizeItemCategory } from "@/lib/api-normalizers";
 import { storage } from "@/lib/storage";
 
 function normalizeVersion(version: number): number {
@@ -54,7 +54,7 @@ function createEmptyProgress(): ExportProgress {
 }
 
 export function useVaultExport() {
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { vaultCrypto } = useCoreContext();
 
@@ -87,8 +87,8 @@ export function useVaultExport() {
 				processedAttachments: 0,
 			});
 
-			const allItems = await rpcClient.vault.listAllItems.query();
-			const me = await rpcClient.auth.me.query();
+			const allItems = (await api.items.list()).data;
+			const me = (await api.auth.me()).data;
 
 			// Collect unique vaults
 			const vaultMap = new Map<
@@ -104,7 +104,11 @@ export function useVaultExport() {
 				if (!vaultMap.has(item.vaultId)) {
 					const vaultRecord = item.vault;
 					const vault = vaultRecord
-						? toCachedVaultFields(vaultRecord)
+						? toCachedVaultFields({
+								...vaultRecord,
+								icon: vaultRecord.icon ?? null,
+								imageUrl: vaultRecord.imageUrl ?? null,
+							})
 						: undefined;
 					vaultMap.set(item.vaultId, {
 						id: vault?.id ?? item.vaultId,
@@ -245,9 +249,7 @@ export function useVaultExport() {
 							encryptedName,
 							encryptedContentType,
 							encryptedContentTypeIv,
-						} = await rpcClient.vault.getAttachmentDownloadUrl.mutate({
-							attachmentId: attachment.id,
-						});
+						} = (await api.attachments.createDownloadUrl(attachment.id)).data;
 
 						const response = await fetch(downloadUrl);
 						if (!response.ok) {
@@ -358,7 +360,7 @@ export function useVaultExport() {
 				await crypto.destroyKey(key);
 			}
 		}
-	}, [rpcClient, crypto, vaultCrypto]);
+	}, [api, crypto, vaultCrypto]);
 
 	const downloadArchive = useCallback(() => {
 		if (!archiveBlob) return;

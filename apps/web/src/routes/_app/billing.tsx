@@ -1,6 +1,7 @@
 import { m as messages } from "@bittery/i18n/paraglide/messages";
+import { useApiClient } from "@bittery/shared/api";
+import { apiQueries, apiQueryKeys } from "@bittery/shared/api-query";
 import { type CloudPlanId, planMemberLimits } from "@bittery/shared/billing";
-import { useRPC, useRPCClient } from "@bittery/shared/rpc";
 import {
 	Badge,
 	Button,
@@ -22,24 +23,23 @@ import {
 } from "@bittery/ui/icons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { useEffect } from "react";
 import { z } from "zod";
+import {
+	normalizeCloudPlanId,
+	normalizeEntitlementLimits,
+} from "@/lib/api-normalizers";
 import {
 	formatStorageBytes,
 	formatUsagePercentage,
 	getAttachmentUsageSnapshot,
 } from "@/lib/billing-attachment-usage";
 import { formatDate } from "@/lib/i18n-format";
-import {
-	normalizeCloudPlanId,
-	normalizeEntitlementLimits,
-} from "@/lib/rpc-normalizers";
 import { useI18n } from "@/providers/i18n-provider";
 
 export const Route = createFileRoute("/_app/billing")({
 	beforeLoad: async ({ context }) => {
 		const access = await context.queryClient.ensureQueryData(
-			context.rpc.billing.entitlements.queryOptions(),
+			apiQueries.billing.entitlements(context.api),
 		);
 
 		if (access.mode !== "cloud") {
@@ -50,7 +50,7 @@ export const Route = createFileRoute("/_app/billing")({
 		}
 
 		const me = await context.queryClient.ensureQueryData(
-			context.rpc.auth.me.queryOptions(),
+			apiQueries.auth.me(context.api),
 		);
 		if (me.role !== "owner" && me.role !== "admin") {
 			throw redirect({ to: "/team" });
@@ -254,21 +254,20 @@ function formatEntitlementLabel(key: string, m: BillingMessageCatalog): string {
 }
 
 function BillingRoute() {
-	const rpc = useRPC();
-	const rpcClient = useRPCClient();
+	const api = useApiClient();
 	const queryClient = useQueryClient();
 	const { checkout } = Route.useSearch();
 	const { locale, m } = useI18n();
 
-	const billingQuery = useQuery(rpc.billing.status.queryOptions());
-	const entitlementsQuery = useQuery(rpc.billing.entitlements.queryOptions());
+	const billingQuery = useQuery(apiQueries.billing.status(api));
+	const entitlementsQuery = useQuery(apiQueries.billing.entitlements(api));
 	const attachmentUsageQuery = useQuery(
-		rpc.billing.attachmentUsage.queryOptions(),
+		apiQueries.billing.attachmentUsage(api),
 	);
 
 	const checkoutMutation = useMutation({
 		mutationFn: (plan: (typeof paidPlanIds)[number]) =>
-			rpcClient.billing.createCheckoutSession.mutate({ plan }),
+			api.billing.checkout({ plan }).then((result) => result.data),
 		onSuccess: (result) => {
 			if (result.url) {
 				window.location.href = result.url;
@@ -282,7 +281,7 @@ function BillingRoute() {
 	});
 
 	const portalMutation = useMutation({
-		mutationFn: () => rpcClient.billing.createPortalSession.mutate(),
+		mutationFn: () => api.billing.portal().then((result) => result.data),
 		onSuccess: (result) => {
 			window.location.href = result.url;
 		},
@@ -291,17 +290,25 @@ function BillingRoute() {
 		},
 	});
 
-	useEffect(() => {
-		if (checkout !== "success") return;
-		queryClient.invalidateQueries({ queryKey: rpc.billing.status.queryKey() });
-		queryClient.invalidateQueries({
-			queryKey: rpc.billing.entitlements.queryKey(),
-		});
-		queryClient.invalidateQueries({
-			queryKey: rpc.billing.attachmentUsage.queryKey(),
-		});
-		toast.success(m.billing_toast_checkout_refreshing());
-	}, [checkout, m, queryClient, rpc]);
+	const checkoutRefreshQuery = useQuery({
+		queryKey: ["api", "v1", "billing", "checkout-refresh", checkout],
+		enabled: checkout === "success",
+		staleTime: Number.POSITIVE_INFINITY,
+		queryFn: async () => {
+			await queryClient.invalidateQueries({
+				queryKey: apiQueryKeys.billing.status,
+			});
+			queryClient.invalidateQueries({
+				queryKey: apiQueryKeys.billing.entitlements,
+			});
+			queryClient.invalidateQueries({
+				queryKey: apiQueryKeys.billing.attachmentUsage,
+			});
+			toast.success(m.billing_toast_checkout_refreshing());
+			return true;
+		},
+	});
+	void checkoutRefreshQuery;
 
 	if (billingQuery.isLoading) {
 		return (
@@ -655,7 +662,7 @@ function BillingRoute() {
 						)}
 
 						{/* Seats */}
-						{billing.seatsPurchased !== null && (
+						{billing.seatsPurchased != null && (
 							<div className="rounded-lg border bg-card p-4">
 								<div className="flex items-center gap-3">
 									<div className="flex size-8 shrink-0 items-center justify-center rounded-md border bg-card text-muted-foreground">
