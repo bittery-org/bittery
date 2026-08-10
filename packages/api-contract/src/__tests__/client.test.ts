@@ -204,6 +204,9 @@ describe("Bittery API facade", () => {
 		expect(request?.headers.get("If-Match")).toBe('"version-6"');
 		expect(request?.headers.get("Idempotency-Key")).toBe("request-key-1");
 		expect(request?.headers.get("Authorization")).toBe("Bearer access-token");
+		expect(request?.headers.get("Content-Type")).toBe(
+			"application/merge-patch+json",
+		);
 	});
 
 	test("validates sync response shape and converts decimal event timestamps", async () => {
@@ -354,6 +357,47 @@ describe("Bittery API facade", () => {
 		expect(requests[2]?.url).toBe(
 			"https://api.example.test/api/v1/audit-events?actionGroup=share&limit=10",
 		);
+	});
+
+	test("never exposes idempotency headers on one-time invitation secrets", async () => {
+		const requests: Request[] = [];
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json(
+					request.url.endsWith("/resend")
+						? { invitationId: "invitation-1", token: "resend-token" }
+						: {
+								invitationId: "invitation-1",
+								token: "send-token",
+								existingUserPublicKey: null,
+							},
+				);
+			},
+		});
+
+		const sent = await client.teams.invitations.send("team-1", {
+			email: "invitee@example.test",
+			role: "member",
+			pendingVaultKeys: null,
+		});
+		const resent = await client.teams.invitations.resend(
+			"team-1",
+			"invitation-1",
+		);
+
+		expect(sent.data.token).toBe("send-token");
+		expect(resent.data.token).toBe("resend-token");
+		expect(
+			requests.map((request) => request.headers.get("Idempotency-Key")),
+		).toEqual([null, null]);
 	});
 
 	test("converts billing decimal strings before exposing entitlement limits", async () => {

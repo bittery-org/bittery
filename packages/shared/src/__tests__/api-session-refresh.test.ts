@@ -25,17 +25,21 @@ function refreshedSession() {
 
 function createSwitchingClient(
 	fetch: (request: Request) => Promise<Response>,
-	switchAfterSnapshot = true,
+	options: {
+		switchAfterSnapshot?: boolean;
+		serverPath?: string;
+	} = {},
 ) {
+	const { switchAfterSnapshot = true, serverPath = "" } = options;
 	let activeAccountId = "account-a";
 	const storedFor: string[] = [];
 	const client = createSessionRefreshingApiClient({
-		defaultServerUrl: "https://a.example.test",
+		defaultServerUrl: `https://a.example.test${serverPath}`,
 		getAccountSnapshot: async () => {
 			const accountId = activeAccountId;
 			const snapshot = {
 				accountId,
-				serverUrl: `https://${accountId === "account-a" ? "a" : "b"}.example.test`,
+				serverUrl: `https://${accountId === "account-a" ? "a" : "b"}.example.test${serverPath}`,
 				token: `${accountId}-token`,
 				issuedAt: NOW,
 				expiresAt: NOW + 60_000,
@@ -132,21 +136,24 @@ describe("session-refreshing API client account isolation", () => {
 		const refreshBarrier = new Promise<void>((resolve) => {
 			releaseRefresh = resolve;
 		});
-		const { client, storedFor } = createSwitchingClient(async (request) => {
-			requests.push(request);
-			if (request.url.endsWith("/sessions/current/refresh")) {
-				await refreshBarrier;
-				return refreshedSession();
-			}
-			return request.headers.get("Authorization") ===
-				"Bearer account-a-refreshed"
-				? Response.json(
-						request.url.endsWith("/vaults")
-							? { items: [], hasMore: false }
-							: {},
-					)
-				: unauthorized();
-		}, false);
+		const { client, storedFor } = createSwitchingClient(
+			async (request) => {
+				requests.push(request);
+				if (request.url.endsWith("/sessions/current/refresh")) {
+					await refreshBarrier;
+					return refreshedSession();
+				}
+				return request.headers.get("Authorization") ===
+					"Bearer account-a-refreshed"
+					? Response.json(
+							request.url.endsWith("/vaults")
+								? { items: [], hasMore: false }
+								: {},
+						)
+					: unauthorized();
+			},
+			{ switchAfterSnapshot: false },
+		);
 
 		const calls = Promise.all([client.auth.me(), client.vaults.list()]);
 		await Promise.resolve();
@@ -165,5 +172,30 @@ describe("session-refreshing API client account isolation", () => {
 			),
 		).toHaveLength(2);
 		expect(storedFor).toEqual(["account-a:account-a-refreshed"]);
+	});
+
+	test("preserves a configured server path and query while the active account switches", async () => {
+		const requests: Request[] = [];
+		const { client } = createSwitchingClient(
+			async (request) => {
+				requests.push(request);
+				if (request.url.endsWith("/sessions/current/refresh")) {
+					return refreshedSession();
+				}
+				return request.headers.get("Authorization") ===
+					"Bearer account-a-refreshed"
+					? Response.json({ events: [], hasMore: false })
+					: unauthorized();
+			},
+			{ serverPath: "/custom/prefix" },
+		);
+
+		await client.audit.list({ actionGroup: "share", limit: 10 });
+
+		expect(requests.map((request) => request.url)).toEqual([
+			"https://a.example.test/custom/prefix/api/v1/audit-events?actionGroup=share&limit=10",
+			"https://a.example.test/custom/prefix/api/v1/sessions/current/refresh",
+			"https://a.example.test/custom/prefix/api/v1/audit-events?actionGroup=share&limit=10",
+		]);
 	});
 });

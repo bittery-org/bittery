@@ -346,7 +346,6 @@ export interface ApiClient {
 			send(
 				teamId: string,
 				input: SendTeamInvitationInput,
-				options?: ApiWriteOptions,
 			): Promise<ApiResult<SendTeamInvitationResponse>>;
 			cancel(
 				teamId: string,
@@ -356,7 +355,6 @@ export interface ApiClient {
 			resend(
 				teamId: string,
 				invitationId: string,
-				options?: ApiWriteOptions,
 			): Promise<ApiResult<ResendTeamInvitationResponse>>;
 			mine(): Promise<ApiResult<readonly PendingTeamInvitation[]>>;
 			acceptMine(
@@ -1041,24 +1039,22 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 					drainPages<TeamInvitation>("/api/v1/teams/{teamId}/invitations", {
 						params: { path: { teamId } },
 					}),
-				send: (teamId, input, write) =>
+				send: (teamId, input) =>
 					call("POST", "/api/v1/teams/{teamId}/invitations", {
 						params: { path: { teamId } },
 						body: input,
-						headers: writeHeaders(write),
 					}),
 				cancel: (teamId, invitationId, write) =>
 					call("DELETE", "/api/v1/teams/{teamId}/invitations/{invitationId}", {
 						params: { path: { teamId, invitationId } },
 						headers: writeHeaders(write),
 					}),
-				resend: (teamId, invitationId, write) =>
+				resend: (teamId, invitationId) =>
 					call(
 						"POST",
 						"/api/v1/teams/{teamId}/invitations/{invitationId}/resend",
 						{
 							params: { path: { teamId, invitationId } },
-							headers: writeHeaders(write),
 						},
 					),
 				mine: () =>

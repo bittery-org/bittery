@@ -58,13 +58,28 @@ function parseExpiry(value: string | Date): number | null {
 	return Number.isFinite(parsed) ? parsed : null;
 }
 
-function rewriteRequest(request: Request, serverUrl: string): Request {
+function pathWithoutBase(pathname: string, basePathname: string): string {
+	const basePath = basePathname.replace(/\/+$/, "");
+	if (!basePath || basePath === "/") return pathname;
+	if (pathname === basePath) return "/";
+	return pathname.startsWith(`${basePath}/`)
+		? pathname.slice(basePath.length)
+		: pathname;
+}
+
+function rewriteRequest(
+	request: Request,
+	fromServerUrl: string,
+	toServerUrl: string,
+): Request {
 	const target = new URL(request.url);
-	const server = new URL(serverUrl);
-	const serverPath = server.pathname.replace(/\/$/, "");
-	target.protocol = server.protocol;
-	target.host = server.host;
-	target.pathname = `${serverPath}${target.pathname}`;
+	const sourceServer = new URL(fromServerUrl);
+	const destinationServer = new URL(toServerUrl);
+	const relativePath = pathWithoutBase(target.pathname, sourceServer.pathname);
+	const serverPath = destinationServer.pathname.replace(/\/+$/, "");
+	target.protocol = destinationServer.protocol;
+	target.host = destinationServer.host;
+	target.pathname = `${serverPath}${relativePath}`;
 	return new Request(target, request);
 }
 
@@ -150,7 +165,7 @@ export function createSessionRefreshingApiClient(
 			? requireServerUrl(snapshot.serverUrl, snapshot.insecureTransport)
 			: defaultServerUrl;
 		const token = snapshot ? await refreshSnapshot(snapshot, false) : null;
-		const routed = rewriteRequest(request, serverUrl);
+		const routed = rewriteRequest(request, defaultServerUrl, serverUrl);
 		const retrySource = routed.clone();
 		const headers = new Headers(routed.headers);
 		if (token) {
