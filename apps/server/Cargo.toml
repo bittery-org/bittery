@@ -19,7 +19,8 @@ axum = "0.8"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cron = "0.17"
 jsonrpsee = { version = "0.26", features = ["server"] }
-qubit = "0.10.3"
+jsonrpsee-qubit = { package = "jsonrpsee", version = "0.25", features = ["server"] }
+qubit = "1.0.0-beta.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sqlx = { version = "0.8", features = ["postgres", "runtime-tokio-rustls", "time"] }
@@ -28,7 +29,7 @@ tower-http = { version = "0.7", features = ["catch-panic", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 time = { version = "0.3", features = ["formatting", "macros", "parsing"] }
-ts-rs = { version = "10.1.0", features = ["serde-json-impl"] }
+ts-rs = { version = "12.0.1", features = ["serde-json-impl"] }
 fred = { version = "10", features = ["subscriber-client", "i-hashes", "i-keys", "i-scripts", "i-pubsub", "sha-1"] }
 dotenvy = "0.15"
 base64 = "0.23"

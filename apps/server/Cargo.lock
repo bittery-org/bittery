@@ -253,6 +253,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac 0.13.0",
+ "jsonrpsee 0.25.1",
  "jsonrpsee 0.26.0",
  "jsonwebtoken",
  "parking_lot",
@@ -603,6 +604,27 @@ name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+
+[[package]]
+name = "derive_more"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d751e9e49156b02b44f9c1815bcb94b984cdcc4396ecc32521c739452808b134"
+dependencies = [
+ "derive_more-impl",
+]
+
+[[package]]
+name = "derive_more-impl"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "799a97264921d8623a957f6c3b9011f3b5492f557bbb7a5a19b7fa6d06ba8dcb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "rustc_version",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "digest"
@@ -1424,7 +1446,7 @@ dependencies = [
  "rustc-hash",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
  "tokio",
  "tower",
  "tracing",
@@ -1474,7 +1496,7 @@ dependencies = [
  "serde",
  "serde_json",
  "soketto",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
  "tokio-util",
@@ -1530,7 +1552,7 @@ dependencies = [
  "http",
  "serde",
  "serde_json",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -1589,6 +1611,26 @@ checksum = "2e99fb7a497b1e3339bc746195567ed8d3e24945ecd636e3619d20b9de9e9149"
 dependencies = [
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "linkme"
+version = "0.3.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3045e122bd98aef8ec3ad58ce84f0791f64e70163d1a02710af4aa11a4d54cc5"
+dependencies = [
+ "linkme-impl",
+]
+
+[[package]]
+name = "linkme-impl"
+version = "0.3.37"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77060ebe535362c3da75682cd17b0431017b6e7c5661e714fc69a7ad017d1301"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -2039,19 +2081,23 @@ dependencies = [
 
 [[package]]
 name = "qubit"
-version = "0.10.3"
+version = "1.0.0-beta.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08389f595711df9fc4b5fb4ee015f05f5c9370e6294cd3fed959d4ae26d9ca51"
+checksum = "94681c273248407cdf513e5a683685d1841ca9245ac31d92c151beef1cc39455"
 dependencies = [
  "axum",
+ "derive_more",
  "futures",
  "http",
  "hyper",
  "jsonrpsee 0.25.1",
+ "lazy_static",
+ "linkme",
  "qubit-macros",
  "serde",
  "serde_json",
  "serde_qs",
+ "thiserror 2.0.20",
  "tokio",
  "tower",
  "trait-variant",
@@ -2061,14 +2107,15 @@ dependencies = [
 
 [[package]]
 name = "qubit-macros"
-version = "0.6.5"
+version = "1.0.0-beta.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ed7f93e65101ae8c44f564d0133ce8daba73a35a7881bd6c0a1ca815a5dd401"
+checksum = "890f7050dbff17d8586487f305a261cd08f8535de5771f76dec47357936e444d"
 dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
- "ts-rs",
+ "thiserror 2.0.20",
+ "ts-rs-macros 11.1.0",
 ]
 
 [[package]]
@@ -2378,6 +2425,15 @@ name = "rustc-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94300abf3f1ae2e2b8ffb7b58043de3d399c73fa6f4b73826402a5c457614dbe"
+
+[[package]]
+name = "rustc_version"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
+dependencies = [
+ "semver",
+]
 
 [[package]]
 name = "rustls"
@@ -3307,21 +3363,31 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "ts-rs"
-version = "10.1.0"
+version = "12.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e640d9b0964e9d39df633548591090ab92f7a4567bc31d3891af23471a3365c6"
+checksum = "756050066659291d47a554a9f558125db17428b073c5ffce1daf5dcb0f7231d8"
 dependencies = [
- "lazy_static",
  "serde_json",
  "thiserror 2.0.20",
- "ts-rs-macros",
+ "ts-rs-macros 12.0.1",
 ]
 
 [[package]]
 name = "ts-rs-macros"
-version = "10.1.0"
+version = "11.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e9d8656589772eeec2cf7a8264d9cda40fb28b9bc53118ceb9e8c07f8f38730"
+checksum = "ee6ff59666c9cbaec3533964505d39154dc4e0a56151fdea30a09ed0301f62e2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "ts-rs-macros"
+version = "12.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38d90eea51bc7988ef9e674bf80a85ba6804739e535e9cab48e4bb34a8b652aa"
 dependencies = [
  "proc-macro2",
  "quote",
