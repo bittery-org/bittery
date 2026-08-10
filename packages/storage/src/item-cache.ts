@@ -23,6 +23,7 @@ import {
 	metaCollection,
 	stagedItemBaselineCollection,
 	stagedItemsCollection,
+	stagedVaultBaselineCollection,
 	stagedVaultsCollection,
 	vaultsCollection,
 } from "./keys";
@@ -524,6 +525,10 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 			const items = stagedItemsCollection(accountId, generation);
 			const vaults = stagedVaultsCollection(accountId, generation);
 			const itemBaseline = stagedItemBaselineCollection(accountId, generation);
+			const vaultBaseline = stagedVaultBaselineCollection(
+				accountId,
+				generation,
+			);
 			let settled = false;
 
 			await withAccountLock(accountId, async () => {
@@ -531,13 +536,20 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 				const activeItems = await port.recordList(
 					itemCollectionFor(accountId, state.activeGeneration),
 				);
+				const activeVaults = await port.recordList(
+					vaultCollectionFor(accountId, state.activeGeneration),
+				);
 				await Promise.all([
 					port.recordClear(items),
 					port.recordClear(vaults),
 					port.recordClear(itemBaseline),
+					port.recordClear(vaultBaseline),
 				]);
 				for (const record of activeItems) {
 					await port.recordPut(itemBaseline, record.id, record.value);
+				}
+				for (const record of activeVaults) {
+					await port.recordPut(vaultBaseline, record.id, record.value);
 				}
 			});
 
@@ -568,6 +580,16 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 							accountId,
 							previous.activeGeneration,
 						);
+						const previousVaults = vaultCollectionFor(
+							accountId,
+							previous.activeGeneration,
+						);
+
+						for (const record of await port.recordList(itemBaseline)) {
+							if ((await port.recordGet(previousItems, record.id)) === null) {
+								await port.recordDelete(items, record.id);
+							}
+						}
 
 						for (const record of await port.recordList(previousItems)) {
 							const baseline = await port.recordGet(itemBaseline, record.id);
@@ -593,6 +615,35 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 							}
 						}
 
+						const deletedVaultIds = new Set<string>();
+						for (const record of await port.recordList(vaultBaseline)) {
+							if ((await port.recordGet(previousVaults, record.id)) === null) {
+								deletedVaultIds.add(record.id);
+								await port.recordDelete(vaults, record.id);
+							}
+						}
+						if (deletedVaultIds.size > 0) {
+							for (const record of await port.recordList(items)) {
+								const stagedItem = parseRecord<CachedEncryptedItem>(
+									record,
+									"item",
+								);
+								if (
+									stagedItem !== null &&
+									deletedVaultIds.has(stagedItem.vaultId)
+								) {
+									await port.recordDelete(items, record.id);
+								}
+							}
+						}
+
+						for (const record of await port.recordList(previousVaults)) {
+							const baseline = await port.recordGet(vaultBaseline, record.id);
+							if (baseline !== record.value) {
+								await port.recordPut(vaults, record.id, record.value);
+							}
+						}
+
 						const itemCount = (await port.recordList(items)).length;
 						await writeState(accountId, {
 							v: ITEM_CACHE_STATE_VERSION,
@@ -607,12 +658,13 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 						if (previous.activeGeneration !== null) {
 							await Promise.all([
 								port.recordClear(previousItems),
-								port.recordClear(
-									vaultCollectionFor(accountId, previous.activeGeneration),
-								),
+								port.recordClear(previousVaults),
 							]);
 						}
-						await port.recordClear(itemBaseline);
+						await Promise.all([
+							port.recordClear(itemBaseline),
+							port.recordClear(vaultBaseline),
+						]);
 					});
 				},
 				async discard(): Promise<void> {
@@ -624,6 +676,7 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 						port.recordClear(items),
 						port.recordClear(vaults),
 						port.recordClear(itemBaseline),
+						port.recordClear(vaultBaseline),
 					]);
 				},
 			};

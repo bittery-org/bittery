@@ -217,6 +217,120 @@ describe("VaultRepository.hydrateFromServer", () => {
 		expect(cached?.name).toBe("Team Vault");
 	});
 
+	it("keeps hidden vaults out of every promoted bootstrap layer", async () => {
+		const { repo, storage, itemCache } = await setup();
+		const enforcer = getTravelModeEnforcer(storage, itemCache);
+		await enforcer.applyConfig(ACCOUNT_ID, {
+			enabled: true,
+			hiddenVaultIds: ["vault_hidden"],
+		});
+
+		const visibleKeys = (await storage.getVaultKeys(ACCOUNT_ID)) ?? [];
+		await storage.storeVaultKeys(
+			[
+				...visibleKeys,
+				{
+					vaultId: "vault_hidden",
+					vaultName: "Hidden Vault",
+					vaultType: "personal",
+					vaultIcon: null,
+					vaultImageUrl: null,
+					encryptedVaultKey: "hidden-key",
+					role: "owner",
+				},
+			],
+			ACCOUNT_ID,
+		);
+		await itemCache.setCachedVaults(
+			[
+				{
+					id: "vault_hidden",
+					name: "Previously Cached Hidden Vault",
+					type: "personal",
+					icon: null,
+					imageUrl: null,
+				},
+			],
+			ACCOUNT_ID,
+		);
+		await itemCache.setCachedItems(
+			[
+				{
+					id: "previous_hidden_item",
+					vaultId: "vault_hidden",
+					category: "login",
+					favorite: false,
+					encryptedData: "hidden-data",
+					encryptionIv: "hidden-iv",
+					encryptionAlgorithm: "AES-GCM",
+					version: 1,
+					lastModifiedBy: null,
+					createdAt: "2026-08-01T00:00:00.000Z",
+					updatedAt: "2026-08-01T00:00:00.000Z",
+					deletedAt: null,
+				},
+			],
+			ACCOUNT_ID,
+		);
+
+		const client = createClient();
+		const visibleItem = (await client.sync.bootstrap({ limit: 500 })).data
+			.items[0];
+		if (!visibleItem) throw new Error("Missing visible bootstrap item");
+		const hiddenItem = {
+			...visibleItem,
+			id: "hidden_item_1",
+			vaultId: "vault_hidden",
+			vault: {
+				...visibleItem.vault,
+				id: "vault_hidden",
+				name: "Hidden Vault",
+				vaultType: "personal",
+			},
+		};
+		client.sync.bootstrap = mock(async ({ cursor }) => ({
+			data:
+				cursor === "page-2"
+					? {
+							items: [{ ...hiddenItem, id: "hidden_item_2" }],
+							hasMore: false,
+						}
+					: {
+							items: [visibleItem, hiddenItem],
+							hasMore: true,
+							nextCursor: "page-2",
+						},
+		}));
+		const visibleVault = (await client.vaults?.list?.())?.data[0];
+		if (!client.vaults || !visibleVault) {
+			throw new Error("Missing visible vault client fixture");
+		}
+		client.vaults.list = mock(async () => ({
+			data: [
+				visibleVault,
+				{
+					...visibleVault,
+					id: "vault_hidden",
+					name: "Hidden Vault",
+					vaultType: "personal",
+					encryptedVaultKey: "hidden-key",
+				},
+			],
+		}));
+
+		await repo.hydrateFromServer(client);
+
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["item_1"]);
+		expect(
+			(await itemCache.getCachedVaults(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["vault_1"]);
+		expect(
+			(await storage.getVaultKeys(ACCOUNT_ID))?.map(({ vaultId }) => vaultId),
+		).toEqual(["vault_1"]);
+	});
+
 	it.each([
 		0, 1,
 	])("keeps the previous cache when bootstrap fails at page boundary %i", async (failureAt) => {

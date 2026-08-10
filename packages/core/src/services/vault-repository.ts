@@ -926,9 +926,8 @@ export class VaultRepository {
 			return;
 		}
 
-		getTravelModeEnforcer(this.storage, this.itemCache).assertVerified(
-			this.accountId,
-		);
+		const travelMode = getTravelModeEnforcer(this.storage, this.itemCache);
+		travelMode.assertVerified(this.accountId);
 		await this.ensureServerUrl();
 
 		let cursor: string | undefined;
@@ -942,7 +941,10 @@ export class VaultRepository {
 					limit: 500,
 				});
 
-				for (const rawItem of page.items) {
+				for (const rawItem of travelMode.filterItems(
+					this.accountId,
+					page.items,
+				)) {
 					const cachedItem: CachedEncryptedItem = {
 						id: rawItem.id,
 						vaultId: rawItem.vaultId,
@@ -977,7 +979,10 @@ export class VaultRepository {
 				cursor = page.nextCursor;
 			}
 
-			refreshedVaultKeys = await this.fetchVaultKeysFromServer(client);
+			const fetchedVaultKeys = await this.fetchVaultKeysFromServer(client);
+			refreshedVaultKeys = fetchedVaultKeys
+				? travelMode.filterVaultKeys(this.accountId, fetchedVaultKeys)
+				: null;
 			await staging.promote({
 				lastFullSyncAt: Date.now(),
 				cacheVersion: 1,

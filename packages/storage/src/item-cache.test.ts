@@ -356,6 +356,61 @@ describe("ItemCache staged generations", () => {
 		expect(ids(await cache.getCachedItems("a"))).toEqual(["delta", "snapshot"]);
 	});
 
+	it("does not resurrect an item deleted after staging began", async () => {
+		const { cache } = makeCache();
+		await cache.setCachedItems(
+			[
+				item("deleted", "v1", { version: 1 }),
+				item("updated", "v1", { version: 1 }),
+			],
+			"a",
+		);
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedItem(item("deleted", "v1", { version: 1 }));
+		await stage.upsertCachedItem(item("updated", "v1", { version: 2 }));
+
+		await cache.removeCachedItem("deleted", "a");
+		await cache.upsertCachedItem(item("added", "v1", { version: 1 }), "a");
+		await cache.upsertCachedItem(item("updated", "v1", { version: 3 }), "a");
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		expect(ids(await cache.getCachedItems("a"))).toEqual(["added", "updated"]);
+		expect(
+			(await cache.getCachedItems("a"))?.find(({ id }) => id === "updated")
+				?.version,
+		).toBe(3);
+	});
+
+	it("does not resurrect a deleted vault or its staged items", async () => {
+		const { cache } = makeCache();
+		await cache.setCachedVaults(
+			[vault("deleted-vault", "Old"), vault("updated-vault", "Old")],
+			"a",
+		);
+		await cache.setCachedItems([item("active-item", "deleted-vault")], "a");
+		const stage = await cache.beginStagedGeneration("a");
+		await stage.upsertCachedVault(vault("deleted-vault", "Snapshot"));
+		await stage.upsertCachedVault(vault("updated-vault", "Snapshot"));
+		await stage.upsertCachedItem(item("active-item", "deleted-vault"));
+		await stage.upsertCachedItem(item("snapshot-item", "deleted-vault"));
+
+		await cache.removeCachedVault("deleted-vault", "a");
+		await cache.upsertCachedVault(vault("added-vault", "Added"), "a");
+		await cache.upsertCachedVault(vault("updated-vault", "Updated"), "a");
+		await stage.promote({ lastFullSyncAt: 42, cacheVersion: 1 });
+
+		expect(ids(await cache.getCachedVaults("a"))).toEqual([
+			"added-vault",
+			"updated-vault",
+		]);
+		expect(
+			(await cache.getCachedVaults("a"))?.find(
+				({ id }) => id === "updated-vault",
+			)?.name,
+		).toBe("Updated");
+		expect(await cache.getCachedItems("a")).toEqual([]);
+	});
+
 	it("does not cross account staging generations", async () => {
 		const { cache } = makeCache();
 		await cache.setCachedItems([item("a-old", "v1")], "a");

@@ -107,3 +107,11 @@ export function stagedItemBaselineCollection(
 ): string {
 	return `item-cache-stage:${accountId}:${generation}:item-baseline`;
 }
+
+/** Snapshot of the active vaults when a staged bootstrap starts. */
+export function stagedVaultBaselineCollection(
+	accountId: string,
+	generation: string,
+): string {
+	return `item-cache-stage:${accountId}:${generation}:vault-baseline`;
+}
