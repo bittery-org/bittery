@@ -1,4 +1,4 @@
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, StatusCode};
 use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow};
 
@@ -359,9 +359,9 @@ async fn protected_share_handlers_require_authentication() {
 
         let protected_calls = vec![
             (
-                "share.create",
-                json!([{
-                    "itemId": fixture.item_id.clone(),
+                Method::POST,
+                format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(json!({
                     "accessMode": "anyone",
                     "isOneTimeUse": false,
                     "expiresIn": "1day",
@@ -370,25 +370,28 @@ async fn protected_share_handlers_require_authentication() {
                     "encryptionIv": FIXTURE_ENCRYPTION_IV,
                     "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
                     "shareKeyIv": FIXTURE_SHARE_KEY_IV
-                }]),
+                })),
             ),
             (
-                "share.listByItem",
-                json!([{ "itemId": fixture.item_id.clone() }]),
+                Method::GET,
+                format!("/api/v1/items/{}/share-links", fixture.item_id),
+                None,
             ),
             (
-                "share.revoke",
-                json!([{ "linkId": fixture.owner_link_id.clone() }]),
+                Method::DELETE,
+                format!("/api/v1/share-links/{}", fixture.owner_link_id),
+                None,
             ),
             (
-                "share.getAccessLogs",
-                json!([{ "linkId": fixture.owner_link_id.clone() }]),
+                Method::GET,
+                format!("/api/v1/share-links/{}/access-logs", fixture.owner_link_id),
+                None,
             ),
         ];
 
-        for (method, params) in protected_calls {
+        for (method, path, payload) in protected_calls {
             let response = app
-                .call_operation(method, params, unauthenticated_json_headers())
+                .api_json(method, &path, payload, unauthenticated_json_headers())
                 .await;
             response.assert_contract_status();
             assert_transport_error(
@@ -407,13 +410,16 @@ async fn share_handlers_reject_malformed_params() {
         let fixture = build_share_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
-        let malformed_calls = vec![("share.create", json!([{ "itemId": fixture.item_id }]))];
-
-        for (method, params) in malformed_calls {
-            let response = app.call_operation(method, params, headers.clone()).await;
-            response.assert_contract_status();
-            assert_invalid_params_error(&response.body);
-        }
+        let response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(json!({ "accessMode": "anyone" })),
+                headers,
+            )
+            .await;
+        response.assert_contract_status();
+        assert_invalid_params_error(&response.body);
     })
     .await;
 }
@@ -425,10 +431,11 @@ async fn create_share_via_api_rejects_read_only_users() {
         let session = app.issue_session(&fixture.read_only_user_id).await;
 
         let response = app
-            .call_operation(
-                "share.create",
-                json!([{
-                    "itemId": fixture.item_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(json!({
+
                     "accessMode": "anyone",
                     "isOneTimeUse": false,
                     "expiresIn": "1day",
@@ -437,7 +444,7 @@ async fn create_share_via_api_rejects_read_only_users() {
                     "encryptionIv": FIXTURE_ENCRYPTION_IV,
                     "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
                     "shareKeyIv": FIXTURE_SHARE_KEY_IV
-                }]),
+                })),
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -470,9 +477,10 @@ async fn list_by_item_returns_visible_links_for_owners_and_members() {
         let member_session = app.issue_session(&fixture.member_user_id).await;
 
         let owner_response = app
-            .call_operation(
-                "share.listByItem",
-                json!([{ "itemId": fixture.item_id.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id.clone()),
+                None,
                 authenticated_json_headers(&owner_session.token),
             )
             .await;
@@ -496,9 +504,10 @@ async fn list_by_item_returns_visible_links_for_owners_and_members() {
         }
 
         let member_response = app
-            .call_operation(
-                "share.listByItem",
-                json!([{ "itemId": fixture.item_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                None,
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -523,9 +532,10 @@ async fn list_by_item_returns_not_found_for_inaccessible_items() {
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
 
         let response = app
-            .call_operation(
-                "share.listByItem",
-                json!([{ "itemId": fixture.item_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                None,
                 authenticated_json_headers(&outsider_session.token),
             )
             .await;
@@ -545,9 +555,10 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
 
         let forbidden_response = app
-            .call_operation(
-                "share.revoke",
-                json!([{ "linkId": fixture.owner_link_id.clone() }]),
+            .api_json(
+                Method::DELETE,
+                &format!("/api/v1/share-links/{}", fixture.owner_link_id.clone()),
+                None,
                 authenticated_json_headers(&admin_session.token),
             )
             .await;
@@ -559,9 +570,10 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
         );
 
         let success_response = app
-            .call_operation(
-                "share.revoke",
-                json!([{ "linkId": fixture.member_link_id.clone() }]),
+            .api_json(
+                Method::DELETE,
+                &format!("/api/v1/share-links/{}", fixture.member_link_id.clone()),
+                None,
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -578,9 +590,10 @@ async fn revoke_share_link_enforces_role_rules_and_updates_status() {
         assert_eq!(status, "revoked");
 
         let hidden_response = app
-            .call_operation(
-                "share.revoke",
-                json!([{ "linkId": fixture.owner_link_id }]),
+            .api_json(
+                Method::DELETE,
+                &format!("/api/v1/share-links/{}", fixture.owner_link_id),
+                None,
                 authenticated_json_headers(&outsider_session.token),
             )
             .await;
@@ -598,9 +611,13 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
         let member_session = app.issue_session(&fixture.member_user_id).await;
 
         let success_response = app
-            .call_operation(
-                "share.getAccessLogs",
-                json!([{ "linkId": fixture.owner_link_id.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/share-links/{}/access-logs",
+                    fixture.owner_link_id.clone()
+                ),
+                None,
                 authenticated_json_headers(&owner_session.token),
             )
             .await;
@@ -615,9 +632,10 @@ async fn get_access_logs_returns_entries_and_not_found_for_hidden_links() {
         assert_eq!(logs[1]["failureReason"], json!("Invalid code"));
 
         let hidden_response = app
-            .call_operation(
-                "share.getAccessLogs",
-                json!([{ "linkId": fixture.owner_link_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/share-links/{}/access-logs", fixture.owner_link_id),
+                None,
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -633,9 +651,13 @@ async fn get_public_info_returns_valid_and_invalid_states() {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let valid_response = app
-            .call_operation(
-                "share.getPublicInfo",
-                json!([{ "token": fixture.one_time_token.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/public/share-links/{}",
+                    fixture.one_time_token.clone()
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -646,9 +668,13 @@ async fn get_public_info_returns_valid_and_invalid_states() {
         assert!(valid_response.body["expiresAt"].is_string());
 
         let revoked_response = app
-            .call_operation(
-                "share.getPublicInfo",
-                json!([{ "token": fixture.revoked_token.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/public/share-links/{}",
+                    fixture.revoked_token.clone()
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -658,9 +684,10 @@ async fn get_public_info_returns_valid_and_invalid_states() {
         assert_eq!(revoked_response.body["isOneTimeUse"], Value::Null);
 
         let missing_response = app
-            .call_operation(
-                "share.getPublicInfo",
-                json!([{ "token": share_token('9') }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/share-links/{}", share_token('9')),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -680,11 +707,7 @@ async fn access_public_returns_payload_and_exhausts_one_time_links() {
 			let fixture = build_share_router_fixture(&app.pool).await;
 
 			let success_response = app
-				.call_operation(
-					"share.accessPublic",
-					json!([{ "token": fixture.one_time_token.clone() }]),
-					unauthenticated_json_headers(),
-				)
+				.api_json(Method::POST, &format!("/api/v1/public/share-links/{}/accesses", fixture.one_time_token.clone()), None, unauthenticated_json_headers())
 				.await;
 			success_response.assert_contract_status();
 			assert_eq!(
@@ -710,11 +733,7 @@ async fn access_public_returns_payload_and_exhausts_one_time_links() {
 			assert!(link_state.last_accessed_at.is_some());
 
 			let exhausted_response = app
-				.call_operation(
-					"share.accessPublic",
-					json!([{ "token": fixture.one_time_token.clone() }]),
-					unauthenticated_json_headers(),
-				)
+				.api_json(Method::POST, &format!("/api/v1/public/share-links/{}/accesses", fixture.one_time_token.clone()), None, unauthenticated_json_headers())
 				.await;
 			exhausted_response.assert_contract_status();
 			assert_handler_error(
@@ -741,9 +760,13 @@ async fn access_public_rejects_non_public_and_revoked_links() {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let email_restricted_response = app
-            .call_operation(
-                "share.accessPublic",
-                json!([{ "token": fixture.email_link_token.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/share-links/{}/accesses",
+                    fixture.email_link_token.clone()
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -755,9 +778,13 @@ async fn access_public_rejects_non_public_and_revoked_links() {
         );
 
         let revoked_response = app
-            .call_operation(
-                "share.accessPublic",
-                json!([{ "token": fixture.revoked_token }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/share-links/{}/accesses",
+                    fixture.revoked_token
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -784,12 +811,16 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let success_response = app
-            .call_operation(
-                "share.requestEmailVerification",
-                json!([{
-                    "token": fixture.email_link_token.clone(),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/share-links/{}/email-verifications",
+                    fixture.email_link_token.clone()
+                ),
+                Some(json!({
+
                     "email": fixture.request_email.clone()
-                }]),
+                })),
                 unauthenticated_json_headers(),
             )
             .await;
@@ -811,12 +842,16 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
         assert_eq!(verification_count, 1);
 
         let forbidden_response = app
-            .call_operation(
-                "share.requestEmailVerification",
-                json!([{
-                    "token": fixture.email_link_token.clone(),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/share-links/{}/email-verifications",
+                    fixture.email_link_token.clone()
+                ),
+                Some(json!({
+
                     "email": "intruder@example.com"
-                }]),
+                })),
                 unauthenticated_json_headers(),
             )
             .await;
@@ -828,12 +863,16 @@ async fn request_email_verification_persists_codes_for_allowed_emails_and_reject
         );
 
         let not_found_response = app
-            .call_operation(
-                "share.requestEmailVerification",
-                json!([{
-                    "token": fixture.one_time_token,
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/share-links/{}/email-verifications",
+                    fixture.one_time_token
+                ),
+                Some(json!({
+
                     "email": fixture.request_email
-                }]),
+                })),
                 unauthenticated_json_headers(),
             )
             .await;
@@ -864,12 +903,16 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
             let fixture = build_share_router_fixture(&app.pool).await;
 
             let requested = app
-                .call_operation(
-                    "share.requestEmailVerification",
-                    json!([{
-                        "token": fixture.email_link_token.clone(),
+                .api_json(
+                    Method::POST,
+                    &format!(
+                        "/api/v1/public/share-links/{}/email-verifications",
+                        fixture.email_link_token.clone()
+                    ),
+                    Some(json!({
+
                         "email": fixture.request_email.clone()
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -883,13 +926,17 @@ async fn request_email_verification_delivers_a_code_the_recipient_can_use() {
             .expect("share email verification code should have been emailed");
 
             let accessed = app
-                .call_operation(
-                    "share.verifyEmailAndAccess",
-                    json!([{
-                        "token": fixture.email_link_token.clone(),
+                .api_json(
+                    Method::POST,
+                    &format!(
+                        "/api/v1/public/share-links/{}/email-accesses",
+                        fixture.email_link_token.clone()
+                    ),
+                    Some(json!({
+
                         "email": fixture.request_email.clone(),
                         "code": code
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -932,14 +979,10 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // A server-generated code is persisted the same way.
         let requested = app
-            .call_operation(
-                "share.requestEmailVerification",
-                json!([{
-                    "token": fixture.email_link_token.clone(),
+            .api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-verifications", fixture.email_link_token.clone()), Some(json!({
+
                     "email": fixture.request_email.clone()
-                }]),
-                unauthenticated_json_headers(),
-            )
+                })), unauthenticated_json_headers())
             .await;
         assert_eq!(requested.body["success"], json!(true));
         let generated = query_scalar::<_, String>(
@@ -955,15 +998,11 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // Replaying the stored digest as the code is rejected.
         let replayed = app
-            .call_operation(
-                "share.verifyEmailAndAccess",
-                json!([{
-                    "token": fixture.email_link_token.clone(),
+            .api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-accesses", fixture.email_link_token.clone()), Some(json!({
+
                     "email": fixture.allowed_email.clone(),
                     "code": seeded
-                }]),
-                unauthenticated_json_headers(),
-            )
+                })), unauthenticated_json_headers())
             .await;
         assert_handler_error(
             &replayed.body,
@@ -973,15 +1012,11 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // A wrong 6-digit code is still rejected.
         let wrong = app
-            .call_operation(
-                "share.verifyEmailAndAccess",
-                json!([{
-                    "token": fixture.email_link_token.clone(),
+            .api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-accesses", fixture.email_link_token.clone()), Some(json!({
+
                     "email": fixture.allowed_email.clone(),
                     "code": "000000"
-                }]),
-                unauthenticated_json_headers(),
-            )
+                })), unauthenticated_json_headers())
             .await;
         assert_handler_error(
             &wrong.body,
@@ -991,15 +1026,11 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
 
         // The raw code still resolves the hashed row.
         let verified = app
-            .call_operation(
-                "share.verifyEmailAndAccess",
-                json!([{
-                    "token": fixture.email_link_token.clone(),
+            .api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-accesses", fixture.email_link_token.clone()), Some(json!({
+
                     "email": fixture.allowed_email.clone(),
                     "code": fixture.verification_code.clone()
-                }]),
-                unauthenticated_json_headers(),
-            )
+                })), unauthenticated_json_headers())
             .await;
         assert_eq!(
             verified.body["encryptedItemData"],
@@ -1009,9 +1040,8 @@ async fn share_email_verification_code_is_stored_hashed_and_still_verifies() {
     .await;
 }
 
-fn sample_create_share_params(item_id: &str) -> Value {
-    json!([{
-        "itemId": item_id,
+fn sample_create_share_params() -> Value {
+    json!({
         "accessMode": "anyone",
         "isOneTimeUse": false,
         "expiresIn": "1day",
@@ -1020,7 +1050,7 @@ fn sample_create_share_params(item_id: &str) -> Value {
         "encryptionIv": FIXTURE_ENCRYPTION_IV,
         "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
         "shareKeyIv": FIXTURE_SHARE_KEY_IV
-    }])
+    })
 }
 
 /// Finding 5d: `share_link.token_hash` must never hold the share token. Both a
@@ -1045,9 +1075,10 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
         // A server-generated token is persisted the same way.
         let session = app.issue_session(&fixture.owner_user_id).await;
         let created = app
-            .call_operation(
-                "share.create",
-                sample_create_share_params(&fixture.item_id),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(sample_create_share_params()),
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -1075,9 +1106,10 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
 
         // The raw token still resolves the hashed row, end to end.
         let info = app
-            .call_operation(
-                "share.getPublicInfo",
-                json!([{ "token": created_token.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/share-links/{}", created_token.clone()),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1086,9 +1118,13 @@ async fn share_link_token_is_stored_hashed_and_still_resolves() {
         assert_eq!(info.body["accessMode"], json!("anyone"));
 
         let accessed = app
-            .call_operation(
-                "share.accessPublic",
-                json!([{ "token": created_token.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/share-links/{}/accesses",
+                    created_token.clone()
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1116,11 +1152,12 @@ async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
                 .expect("seeded share link should load");
         assert_eq!(stored.len(), 64);
 
-        for method in ["share.getPublicInfo", "share.accessPublic"] {
+        for (method, suffix) in [(Method::GET, ""), (Method::POST, "/accesses")] {
             let response = app
-                .call_operation(
+                .api_json(
                     method,
-                    json!([{ "token": stored.clone() }]),
+                    &format!("/api/v1/public/share-links/{stored}{suffix}"),
+                    None,
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -1139,12 +1176,16 @@ async fn share_link_token_hash_cannot_be_replayed_as_a_token() {
                 .await
                 .expect("seeded email-restricted share link should load");
         let requested = app
-            .call_operation(
-                "share.requestEmailVerification",
-                json!([{
-                    "token": email_stored,
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/share-links/{}/email-verifications",
+                    email_stored
+                ),
+                Some(json!({
+
                     "email": fixture.allowed_email.clone()
-                }]),
+                })),
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1166,9 +1207,10 @@ async fn list_by_item_and_get_do_not_expose_share_tokens() {
         let session = app.issue_session(&fixture.owner_user_id).await;
 
         let listed = app
-            .call_operation(
-                "share.listByItem",
-                json!([{ "itemId": fixture.item_id.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id.clone()),
+                None,
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -1180,7 +1222,7 @@ async fn list_by_item_and_get_do_not_expose_share_tokens() {
         for link in links {
             assert!(
                 link["token"].is_null(),
-                "share.listByItem must not expose a token: {link}",
+                "the item share-link list must not expose a token: {link}",
             );
         }
     })
@@ -1196,9 +1238,10 @@ async fn create_share_returns_token_exactly_once() {
         let session = app.issue_session(&fixture.owner_user_id).await;
 
         let created = app
-            .call_operation(
-                "share.create",
-                sample_create_share_params(&fixture.item_id),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(sample_create_share_params()),
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -1230,15 +1273,11 @@ async fn verify_email_and_access_returns_payload_and_marks_email_verified() {
 			let fixture = build_share_router_fixture(&app.pool).await;
 
 			let response = app
-				.call_operation(
-					"share.verifyEmailAndAccess",
-					json!([{
-						"token": fixture.email_link_token.clone(),
+				.api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-accesses", fixture.email_link_token.clone()), Some(json!({
+
 						"email": fixture.allowed_email.clone(),
 						"code": fixture.verification_code.clone()
-					}]),
-					unauthenticated_json_headers(),
-				)
+					})), unauthenticated_json_headers())
 				.await;
 
 			response.assert_contract_status();
@@ -1292,15 +1331,11 @@ async fn verify_email_and_access_rejects_invalid_codes_and_increments_attempts()
 			let fixture = build_share_router_fixture(&app.pool).await;
 
 			let response = app
-				.call_operation(
-					"share.verifyEmailAndAccess",
-					json!([{
-						"token": fixture.email_link_token.clone(),
+				.api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-accesses", fixture.email_link_token.clone()), Some(json!({
+
 						"email": fixture.allowed_email.clone(),
 						"code": "000000"
-					}]),
-					unauthenticated_json_headers(),
-				)
+					})), unauthenticated_json_headers())
 				.await;
 
 			response.assert_contract_status();
@@ -1336,15 +1371,11 @@ async fn share_email_verification_lockout_burns_pending_code() {
         let fixture = build_share_router_fixture(&app.pool).await;
 
         let wrong = || async {
-            app.call_operation(
-                "share.verifyEmailAndAccess",
-                json!([{
-                    "token": fixture.email_link_token.clone(),
+            app.api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-accesses", fixture.email_link_token.clone()), Some(json!({
+
                     "email": fixture.allowed_email.clone(),
                     "code": "000000"
-                }]),
-                unauthenticated_json_headers(),
-            )
+                })), unauthenticated_json_headers())
             .await
         };
 
@@ -1374,15 +1405,11 @@ async fn share_email_verification_lockout_burns_pending_code() {
         assert!(state.used_at.is_some());
 
         let correct = app
-            .call_operation(
-                "share.verifyEmailAndAccess",
-                json!([{
-                    "token": fixture.email_link_token,
+            .api_json(Method::POST, &format!("/api/v1/public/share-links/{}/email-accesses", fixture.email_link_token), Some(json!({
+
                     "email": fixture.allowed_email,
                     "code": fixture.verification_code
-                }]),
-                unauthenticated_json_headers(),
-            )
+                })), unauthenticated_json_headers())
             .await;
         assert_handler_error(
             &correct.body,
@@ -1408,10 +1435,8 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 			);
 
 			let response = app
-				.call_operation(
-					"share.create",
-					json!([{
-						"itemId": fixture.item_id,
+				.api_json(Method::POST, &format!("/api/v1/items/{}/share-links", fixture.item_id), Some(json!({
+
 						"accessMode": "email-restricted",
 						"isOneTimeUse": true,
 						"expiresIn": "1day",
@@ -1420,9 +1445,7 @@ async fn create_share_via_api_persists_link_and_allowed_emails() {
 						"encryptionIv": "item-iv",
 						"encryptedShareKey": "encrypted-share-key",
 						"shareKeyIv": "share-key-iv"
-					}]),
-					authenticated_json_headers(&session.token),
-				)
+					})), authenticated_json_headers(&session.token))
 				.await;
 
 			response.assert_contract_status();
@@ -1471,10 +1494,11 @@ async fn create_share_rejects_idempotency_keys_before_disclosing_a_secret() {
         );
 
         let response = app
-            .call_operation(
-                "share.create",
-                json!([{
-                    "itemId": fixture.item_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(json!({
+
                     "accessMode": "anyone",
                     "isOneTimeUse": true,
                     "expiresIn": "1day",
@@ -1482,7 +1506,7 @@ async fn create_share_rejects_idempotency_keys_before_disclosing_a_secret() {
                     "encryptionIv": "item-iv",
                     "encryptedShareKey": "encrypted-share-key",
                     "shareKeyIv": "share-key-iv"
-                }]),
+                })),
                 headers,
             )
             .await;
@@ -1513,10 +1537,11 @@ async fn create_share_via_api_rejects_invalid_access_mode() {
         let session = app.issue_session(&fixture.user_id).await;
 
         let response = app
-            .call_operation(
-                "share.create",
-                json!([{
-                    "itemId": fixture.item_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(json!({
+
                     "accessMode": "invalid-mode",
                     "isOneTimeUse": false,
                     "expiresIn": "1day",
@@ -1525,7 +1550,7 @@ async fn create_share_via_api_rejects_invalid_access_mode() {
                     "encryptionIv": "item-iv",
                     "encryptedShareKey": "encrypted-share-key",
                     "shareKeyIv": "share-key-iv"
-                }]),
+                })),
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -2063,8 +2088,7 @@ async fn create_share_via_api_is_daily_rate_limited() {
         let session = app.issue_session(&fixture.owner_user_id).await;
         let headers = authenticated_json_headers(&session.token);
 
-        let params = json!([{
-            "itemId": fixture.item_id,
+        let params = json!({
             "accessMode": "anyone",
             "isOneTimeUse": false,
             "expiresIn": "1day",
@@ -2073,18 +2097,28 @@ async fn create_share_via_api_is_daily_rate_limited() {
             "encryptionIv": FIXTURE_ENCRYPTION_IV,
             "encryptedShareKey": FIXTURE_ENCRYPTED_SHARE_KEY,
             "shareKeyIv": FIXTURE_SHARE_KEY_IV
-        }]);
+        });
 
         for _ in 0..2 {
             let response = app
-                .call_operation("share.create", params.clone(), headers.clone())
+                .api_json(
+                    Method::POST,
+                    &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                    Some(params.clone()),
+                    headers.clone(),
+                )
                 .await;
             response.assert_contract_status();
             assert!(response.body.is_object());
         }
 
         let blocked = app
-            .call_operation("share.create", params.clone(), headers.clone())
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/items/{}/share-links", fixture.item_id),
+                Some(params.clone()),
+                headers.clone(),
+            )
             .await;
         blocked.assert_contract_status();
         assert_handler_error(

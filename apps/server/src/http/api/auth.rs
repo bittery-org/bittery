@@ -392,7 +392,7 @@ async fn verify_signup_verification(
     }))
 }
 
-#[utoipa::path(post, path = "/auth/signups", request_body = SignupRequest, responses((status = 201, body = SignupResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/auth/signups", request_body = SignupRequest, responses((status = 201, body = SignupResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, description = "Signup verification token is missing or invalid", body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 409, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 429, description = "Signup rate limit exceeded", body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
 async fn signup(
     State(state): State<AppState>,
     request: PublicRequest,
@@ -623,7 +623,7 @@ async fn update_email(
     }))
 }
 
-#[utoipa::path(post, path = "/users/me/password-changes", request_body = PasswordChangeRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/users/me/password-changes", request_body = PasswordChangeRequest, responses((status = 200, body = SuccessResponse), (status = 400, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
 async fn change_password(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -709,7 +709,7 @@ async fn delete_account(
     }))
 }
 
-#[utoipa::path(delete, path = "/sessions/{sessionId}", params(("sessionId" = String, Path)), responses((status = 200, body = SuccessResponse), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+#[utoipa::path(delete, path = "/sessions/{sessionId}", params(("sessionId" = String, Path)), responses((status = 200, body = SuccessResponse), (status = 400, description = "The current session cannot revoke itself", body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 401, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 403, body = super::dto::ProblemDetails, content_type = "application/problem+json"), (status = 404, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
 async fn revoke_session(
     State(state): State<AppState>,
     request: AuthenticatedRequest,
@@ -987,6 +987,20 @@ mod tests {
         );
         assert!(!document.to_string().contains("heartbeat"));
         assert!(!document.to_string().contains("logout"));
+
+        for (path, method, status) in [
+            ("/auth/signups", "post", "401"),
+            ("/auth/signups", "post", "429"),
+            ("/users/me/password-changes", "post", "500"),
+            ("/sessions/{sessionId}", "delete", "400"),
+        ] {
+            assert_eq!(
+                document["paths"][path][method]["responses"][status]["content"]
+                    ["application/problem+json"]["schema"]["$ref"],
+                "#/components/schemas/ProblemDetails",
+                "missing problem contract for {method} {path} status {status}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -183,10 +183,94 @@ fn default_page_limit() -> u16 {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-#[serde(untagged)]
-enum AllItemsResponse {
-    Active(CursorPage<VaultItemWithVaultResponse>),
-    Trashed(CursorPage<DeletedVaultItemWithVaultResponse>),
+#[serde(rename_all = "camelCase")]
+struct AllItemsResponse {
+    #[schema(max_items = 500)]
+    items: Vec<AllItemResponse>,
+    next_cursor: Option<PageCursor>,
+    has_more: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AllItemResponse {
+    id: String,
+    vault_id: String,
+    category: String,
+    favorite: bool,
+    encrypted_data: String,
+    encryption_iv: String,
+    encryption_algorithm: String,
+    version: i32,
+    last_modified_by: Option<String>,
+    created_at: String,
+    updated_at: String,
+    deleted_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    attachments: Option<Vec<VaultAttachmentResponse>>,
+    vault: Option<VaultSummaryResponse>,
+}
+
+impl From<CursorPage<VaultItemWithVaultResponse>> for AllItemsResponse {
+    fn from(page: CursorPage<VaultItemWithVaultResponse>) -> Self {
+        Self {
+            items: page.items.into_iter().map(AllItemResponse::from).collect(),
+            next_cursor: page.next_cursor,
+            has_more: page.has_more,
+        }
+    }
+}
+
+impl From<CursorPage<DeletedVaultItemWithVaultResponse>> for AllItemsResponse {
+    fn from(page: CursorPage<DeletedVaultItemWithVaultResponse>) -> Self {
+        Self {
+            items: page.items.into_iter().map(AllItemResponse::from).collect(),
+            next_cursor: page.next_cursor,
+            has_more: page.has_more,
+        }
+    }
+}
+
+impl From<VaultItemWithVaultResponse> for AllItemResponse {
+    fn from(value: VaultItemWithVaultResponse) -> Self {
+        Self {
+            id: value.id,
+            vault_id: value.vault_id,
+            category: value.category,
+            favorite: value.favorite,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            version: value.version,
+            last_modified_by: value.last_modified_by,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+            attachments: Some(value.attachments),
+            vault: value.vault,
+        }
+    }
+}
+
+impl From<DeletedVaultItemWithVaultResponse> for AllItemResponse {
+    fn from(value: DeletedVaultItemWithVaultResponse) -> Self {
+        Self {
+            id: value.id,
+            vault_id: value.vault_id,
+            category: value.category,
+            favorite: value.favorite,
+            encrypted_data: value.encrypted_data,
+            encryption_iv: value.encryption_iv,
+            encryption_algorithm: value.encryption_algorithm,
+            version: value.version,
+            last_modified_by: value.last_modified_by,
+            created_at: value.created_at,
+            updated_at: value.updated_at,
+            deleted_at: value.deleted_at,
+            attachments: None,
+            vault: value.vault,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -752,14 +836,17 @@ async fn list_all_items(
                 query_limit(&page)?,
             )
             .await?;
-            Ok(Json(AllItemsResponse::Active(page_prefetched(
-                values,
-                &page,
-                &auth.session.user_id,
-                "items",
-                state_filter,
-                |item| format!("{}\0{}", item.updated_at, item.id),
-            )?)))
+            Ok(Json(
+                page_prefetched(
+                    values,
+                    &page,
+                    &auth.session.user_id,
+                    "items",
+                    state_filter,
+                    |item| format!("{}\0{}", item.updated_at, item.id),
+                )?
+                .into(),
+            ))
         }
         "trashed" => {
             let cursor = decode_page_key(&page, &auth.session.user_id, "items", state_filter)?
@@ -772,20 +859,23 @@ async fn list_all_items(
                 query_limit(&page)?,
             )
             .await?;
-            Ok(Json(AllItemsResponse::Trashed(page_prefetched(
-                values,
-                &page,
-                &auth.session.user_id,
-                "items",
-                state_filter,
-                |item| {
-                    format!(
-                        "{}\0{}",
-                        item.deleted_at.as_deref().unwrap_or_default(),
-                        item.id
-                    )
-                },
-            )?)))
+            Ok(Json(
+                page_prefetched(
+                    values,
+                    &page,
+                    &auth.session.user_id,
+                    "items",
+                    state_filter,
+                    |item| {
+                        format!(
+                            "{}\0{}",
+                            item.deleted_at.as_deref().unwrap_or_default(),
+                            item.id
+                        )
+                    },
+                )?
+                .into(),
+            ))
         }
         _ => Err(ApiError::bad_request(
             "INVALID_ITEM_STATE",
@@ -1511,12 +1601,15 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        check_bulk_import, check_ciphertext, nullable_patch_value, router, ApiJsonBytes,
-        BulkImportBody, FavoriteBody, UpdateVaultBody, VaultStatsResponseDto,
+        check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
+        ApiJsonBytes, BulkImportBody, FavoriteBody, UpdateVaultBody, VaultStatsResponseDto,
     };
     use crate::{
-        http::api::dto::PatchField,
-        services::vault::{BulkImportItemInput, VaultStatsResponse},
+        http::api::dto::{CursorPage, PatchField},
+        services::vault::{
+            BulkImportItemInput, DeletedVaultItemWithVaultResponse, VaultItemWithVaultResponse,
+            VaultStatsResponse,
+        },
     };
 
     fn item(ciphertext: String) -> BulkImportItemInput {
@@ -1609,6 +1702,71 @@ mod tests {
                 "itemCount": (i64::MAX - 1).to_string(),
             })
         );
+    }
+
+    #[test]
+    fn all_items_transport_preserves_active_and_trashed_wire_shapes() {
+        let active = CursorPage {
+            items: vec![VaultItemWithVaultResponse {
+                id: "active-item".to_string(),
+                vault_id: "vault".to_string(),
+                category: "login".to_string(),
+                favorite: false,
+                encrypted_data: "ciphertext".to_string(),
+                encryption_iv: "iv".to_string(),
+                encryption_algorithm: "aes-gcm".to_string(),
+                version: 1,
+                last_modified_by: None,
+                created_at: "2026-08-10T00:00:00Z".to_string(),
+                updated_at: "2026-08-10T00:00:00Z".to_string(),
+                deleted_at: None,
+                attachments: Vec::new(),
+                vault: None,
+            }],
+            next_cursor: None,
+            has_more: false,
+        };
+        let expected_active = serde_json::to_value(&active).unwrap();
+        assert_eq!(
+            serde_json::to_value(AllItemsResponse::from(active)).unwrap(),
+            expected_active
+        );
+
+        let trashed = CursorPage {
+            items: vec![DeletedVaultItemWithVaultResponse {
+                id: "trashed-item".to_string(),
+                vault_id: "vault".to_string(),
+                category: "login".to_string(),
+                favorite: false,
+                encrypted_data: "ciphertext".to_string(),
+                encryption_iv: "iv".to_string(),
+                encryption_algorithm: "aes-gcm".to_string(),
+                version: 2,
+                last_modified_by: None,
+                created_at: "2026-08-10T00:00:00Z".to_string(),
+                updated_at: "2026-08-10T00:00:00Z".to_string(),
+                deleted_at: Some("2026-08-10T00:01:00Z".to_string()),
+                vault: None,
+            }],
+            next_cursor: None,
+            has_more: false,
+        };
+        let expected_trashed = serde_json::to_value(&trashed).unwrap();
+        assert_eq!(
+            serde_json::to_value(AllItemsResponse::from(trashed)).unwrap(),
+            expected_trashed
+        );
+    }
+
+    #[test]
+    fn all_items_openapi_uses_one_non_overlapping_page_schema() {
+        let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
+        let schema = &openapi["components"]["schemas"]["AllItemsResponse"];
+
+        assert_eq!(schema["type"], "object");
+        assert!(schema.get("oneOf").is_none());
+        assert!(schema.get("anyOf").is_none());
+        assert_eq!(schema["properties"]["items"]["maxItems"], 500);
     }
 
     #[test]

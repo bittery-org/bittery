@@ -107,6 +107,26 @@ impl ApiError {
         )
     }
 
+    pub(crate) fn api_route_not_found() -> Self {
+        Self::new(
+            StatusCode::NOT_FOUND,
+            "API_ROUTE_NOT_FOUND",
+            "API route not found",
+            "The requested API route does not exist.",
+            false,
+        )
+    }
+
+    pub(crate) fn method_not_allowed() -> Self {
+        Self::new(
+            StatusCode::METHOD_NOT_ALLOWED,
+            "METHOD_NOT_ALLOWED",
+            "Method not allowed",
+            "The requested method is not supported for this API route.",
+            false,
+        )
+    }
+
     fn new(
         status: StatusCode,
         code: &str,

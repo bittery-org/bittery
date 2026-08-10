@@ -301,6 +301,12 @@ enum ShareErrorResponses {
     )]
     NotFound(ProblemDetails),
     #[response(
+        status = 415,
+        description = "Unsupported media type",
+        content_type = "application/problem+json"
+    )]
+    UnsupportedMediaType(ProblemDetails),
+    #[response(
         status = 429,
         description = "Rate limited",
         content_type = "application/problem+json"
@@ -520,6 +526,11 @@ mod tests {
             .unwrap()
             .get("patch")
             .is_none());
+        assert_eq!(
+            paths["/items/{itemId}/share-links"]["post"]["responses"]["415"]["content"]
+                ["application/problem+json"]["schema"]["$ref"],
+            "#/components/schemas/ProblemDetails"
+        );
     }
 
     #[test]

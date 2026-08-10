@@ -6,6 +6,7 @@ pub(crate) mod error;
 pub(crate) mod extract;
 pub(crate) mod idempotency;
 pub(crate) mod pagination;
+mod security;
 pub(crate) mod share;
 pub(crate) mod sync;
 pub(crate) mod team;
@@ -18,7 +19,7 @@ use axum::{
     extract::{Request, State},
     http::HeaderValue,
     middleware::Next,
-    response::Response,
+    response::{IntoResponse, Response},
     Json, Router,
 };
 use utoipa::OpenApi;
@@ -77,7 +78,7 @@ async fn get_meta(State(state): State<AppState>) -> Result<Json<ApiMetadata>, Ap
 }
 
 fn openapi_router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::with_openapi(ApiDoc::openapi()).nest(
+    let mut router = OpenApiRouter::with_openapi(ApiDoc::openapi()).nest(
         "/api",
         OpenApiRouter::new().routes(routes!(get_meta)).nest(
             "/v1",
@@ -90,11 +91,25 @@ fn openapi_router() -> OpenApiRouter<AppState> {
                 .merge(travel_mode::router())
                 .merge(audit::router()),
         ),
-    )
+    );
+    security::apply_security_contract(router.get_openapi_mut());
+    router
 }
 
 pub(crate) fn create_api_router() -> Router<AppState> {
-    openapi_router().split_for_parts().0
+    openapi_router()
+        .split_for_parts()
+        .0
+        .method_not_allowed_fallback(api_method_not_allowed)
+        .nest("/api", Router::new().fallback(api_route_not_found))
+}
+
+async fn api_route_not_found() -> Response {
+    ApiError::api_route_not_found().into_response()
+}
+
+async fn api_method_not_allowed() -> Response {
+    ApiError::method_not_allowed().into_response()
 }
 
 pub(crate) async fn response_headers(request: Request, next: Next) -> Response {
@@ -121,6 +136,15 @@ pub fn openapi_json() -> String {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+
+    use axum::{
+        body::{to_bytes, Body},
+        http::{header, Method, Request, StatusCode},
+    };
+    use serde_json::{json, Value};
+    use tower::util::ServiceExt;
+
+    use crate::AppState;
 
     #[test]
     fn openapi_generation_is_deterministic_and_current() {
@@ -158,5 +182,152 @@ mod tests {
 
         assert_eq!(paths.len(), 85);
         assert_eq!(operation_count, 100);
+    }
+
+    #[test]
+    fn every_operation_has_exactly_one_explicit_security_classification() {
+        let (_, document) = super::openapi_router().split_for_parts();
+        let value = serde_json::to_value(document).expect("OpenAPI should serialize");
+        assert_eq!(
+            value["components"]["securitySchemes"]["bearerAuth"],
+            json!({
+                "type": "http",
+                "scheme": "bearer",
+                "bearerFormat": "opaque session token",
+                "description": "Device-session bearer token. Client metadata headers are not credentials."
+            })
+        );
+        assert!(value.get("security").is_none());
+
+        let operations = value["paths"]
+            .as_object()
+            .unwrap()
+            .values()
+            .flat_map(|path| path.as_object().unwrap().values())
+            .filter(|operation| operation.get("operationId").is_some())
+            .collect::<Vec<_>>();
+        let public = operations
+            .iter()
+            .filter(|operation| operation["security"] == json!([{}]))
+            .count();
+        let bearer = operations
+            .iter()
+            .filter(|operation| operation["security"] == json!([{ "bearerAuth": [] }]))
+            .count();
+
+        assert_eq!(public, 17);
+        assert_eq!(bearer, 83);
+        assert_eq!(public + bearer, operations.len());
+
+        for operation_id in [
+            "getApiMetadata",
+            "getRegistrationStatus",
+            "start_login",
+            "getPublicShareInfo",
+            "accessPublicShare",
+            "getTeamInvitation",
+        ] {
+            let operation = operations
+                .iter()
+                .find(|operation| operation["operationId"] == operation_id)
+                .unwrap_or_else(|| panic!("missing operation {operation_id}"));
+            assert_eq!(operation["security"], json!([{}]));
+        }
+        for operation_id in [
+            "me",
+            "listVaults",
+            "streamSyncEvents",
+            "acceptTeamInvitation",
+            "declineTeamInvitation",
+        ] {
+            let operation = operations
+                .iter()
+                .find(|operation| operation["operationId"] == operation_id)
+                .unwrap_or_else(|| panic!("missing operation {operation_id}"));
+            assert_eq!(operation["security"], json!([{ "bearerAuth": [] }]));
+        }
+    }
+
+    async fn assert_api_problem(
+        method: Method,
+        uri: &str,
+        expected_status: StatusCode,
+        expected_code: &str,
+    ) -> axum::http::HeaderMap {
+        let response = super::create_api_router()
+            .with_state(AppState::default())
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .expect("API fallback should respond");
+        assert_eq!(response.status(), expected_status);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/problem+json"
+        );
+        let headers = response.headers().clone();
+        let request_id = headers
+            .get("bittery-request-id")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        let body: Value = serde_json::from_slice(
+            &to_bytes(response.into_body(), usize::MAX)
+                .await
+                .expect("problem body should be readable"),
+        )
+        .expect("problem body should be JSON");
+        assert_eq!(body["status"], expected_status.as_u16());
+        assert_eq!(body["code"], expected_code);
+        assert_eq!(body["requestId"], request_id);
+        headers
+    }
+
+    #[tokio::test]
+    async fn unknown_api_routes_use_problem_details_without_changing_non_api_fallbacks() {
+        assert_api_problem(
+            Method::GET,
+            "/api/v1/does-not-exist",
+            StatusCode::NOT_FOUND,
+            "API_ROUTE_NOT_FOUND",
+        )
+        .await;
+
+        let response = super::create_api_router()
+            .with_state(AppState::default())
+            .oneshot(
+                Request::builder()
+                    .uri("/does-not-exist")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        assert_ne!(
+            response.headers().get(header::CONTENT_TYPE),
+            Some(&header::HeaderValue::from_static(
+                "application/problem+json"
+            ))
+        );
+    }
+
+    #[tokio::test]
+    async fn unsupported_api_methods_keep_allow_and_use_problem_details() {
+        let headers = assert_api_problem(
+            Method::POST,
+            "/api/meta",
+            StatusCode::METHOD_NOT_ALLOWED,
+            "METHOD_NOT_ALLOWED",
+        )
+        .await;
+
+        assert_eq!(headers.get(header::ALLOW).unwrap(), "GET,HEAD");
     }
 }

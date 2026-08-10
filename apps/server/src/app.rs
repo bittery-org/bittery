@@ -73,11 +73,32 @@ mod tests {
             .expect("app request should resolve");
         let status = response.status();
         let mut headers = response.headers().clone();
+        let request_id = headers
+            .get("bittery-request-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
         headers.remove("bittery-request-id");
-        let body = to_bytes(response.into_body(), usize::MAX)
+        let mut body = to_bytes(response.into_body(), usize::MAX)
             .await
             .expect("app response body should read")
             .to_vec();
+        if headers.get(header::CONTENT_TYPE).is_some_and(|value| {
+            value
+                .to_str()
+                .is_ok_and(|value| value.starts_with("application/problem+json"))
+        }) {
+            let mut problem: serde_json::Value =
+                serde_json::from_slice(&body).expect("problem response should be JSON");
+            let request_id = request_id.expect("problem response should carry a request ID");
+            assert_eq!(problem["requestId"], request_id);
+            assert_eq!(
+                problem["instance"],
+                format!("urn:bittery:request:{request_id}")
+            );
+            problem["requestId"] = json!("normalized-request-id");
+            problem["instance"] = json!("urn:bittery:request:normalized-request-id");
+            body = serde_json::to_vec(&problem).expect("normalized problem should serialize");
+        }
 
         ResponseSignature {
             status,

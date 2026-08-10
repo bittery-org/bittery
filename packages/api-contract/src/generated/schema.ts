@@ -1376,7 +1376,28 @@ export interface components {
             readonly encryptedVaultKey: string;
             readonly role: string;
         };
-        readonly AllItemsResponse: components["schemas"]["CursorPage_VaultItemWithVaultResponse"] | components["schemas"]["CursorPage_DeletedVaultItemWithVaultResponse"];
+        readonly AllItemResponse: {
+            readonly attachments?: readonly components["schemas"]["VaultAttachmentResponse"][] | null;
+            readonly category: string;
+            readonly createdAt: string;
+            readonly deletedAt?: string | null;
+            readonly encryptedData: string;
+            readonly encryptionAlgorithm: string;
+            readonly encryptionIv: string;
+            readonly favorite: boolean;
+            readonly id: string;
+            readonly lastModifiedBy?: string | null;
+            readonly updatedAt: string;
+            readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
+            readonly vaultId: string;
+            /** Format: int32 */
+            readonly version: number;
+        };
+        readonly AllItemsResponse: {
+            readonly hasMore: boolean;
+            readonly items: readonly components["schemas"]["AllItemResponse"][];
+            readonly nextCursor?: null | components["schemas"]["PageCursor"];
+        };
         readonly AllowedEmailResponse: {
             readonly email: string;
             readonly verified: boolean;
@@ -1759,27 +1780,6 @@ export interface components {
                 readonly id: string;
                 readonly lastModifiedBy?: string | null;
                 readonly updatedAt: string;
-                readonly vaultId: string;
-                /** Format: int32 */
-                readonly version: number;
-            }[];
-            readonly nextCursor?: null | components["schemas"]["PageCursor"];
-        };
-        readonly CursorPage_VaultItemWithVaultResponse: {
-            readonly hasMore: boolean;
-            readonly items: readonly {
-                readonly attachments: readonly components["schemas"]["VaultAttachmentResponse"][];
-                readonly category: string;
-                readonly createdAt: string;
-                readonly deletedAt?: string | null;
-                readonly encryptedData: string;
-                readonly encryptionAlgorithm: string;
-                readonly encryptionIv: string;
-                readonly favorite: boolean;
-                readonly id: string;
-                readonly lastModifiedBy?: string | null;
-                readonly updatedAt: string;
-                readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
                 readonly vaultId: string;
                 /** Format: int32 */
                 readonly version: number;
@@ -3112,6 +3112,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Current team not found */
+            readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Internal error */
             readonly 500: {
                 headers: {
@@ -3590,6 +3599,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Signup verification token is missing or invalid */
+            readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             readonly 403: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -3607,6 +3625,15 @@ export interface operations {
                 };
             };
             readonly 409: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Signup rate limit exceeded */
+            readonly 429: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -5724,6 +5751,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Idempotency is not allowed for one-time-secret responses */
             readonly 422: {
                 headers: {
@@ -5815,6 +5851,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Idempotency is not allowed for one-time-secret responses */
             readonly 422: {
                 headers: {
@@ -5899,6 +5944,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Idempotency is not allowed for one-time-secret responses */
             readonly 422: {
                 headers: {
@@ -5976,6 +6030,15 @@ export interface operations {
             };
             /** @description Not found */
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6071,6 +6134,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Idempotency is not allowed for one-time-secret responses */
             readonly 422: {
                 headers: {
@@ -6152,6 +6224,15 @@ export interface operations {
             };
             /** @description Not found */
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -6567,6 +6648,15 @@ export interface operations {
                     readonly "application/json": components["schemas"]["SuccessResponse"];
                 };
             };
+            /** @description The current session cannot revoke itself */
+            readonly 400: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             readonly 401: {
                 headers: {
                     readonly [name: string]: unknown;
@@ -6705,6 +6795,15 @@ export interface operations {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
             };
+            /** @description Unsupported media type */
+            readonly 415: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
             /** @description Idempotency is not allowed for one-time-secret responses */
             readonly 422: {
                 headers: {
@@ -6782,6 +6881,15 @@ export interface operations {
             };
             /** @description Not found */
             readonly 404: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            /** @description Unsupported media type */
+            readonly 415: {
                 headers: {
                     readonly [name: string]: unknown;
                 };
@@ -9014,6 +9122,14 @@ export interface operations {
                 };
             };
             readonly 401: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                };
+            };
+            readonly 500: {
                 headers: {
                     readonly [name: string]: unknown;
                 };

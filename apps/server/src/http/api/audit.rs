@@ -274,6 +274,12 @@ enum AuditErrorResponses {
     )]
     Forbidden(ProblemDetails),
     #[response(
+        status = 404,
+        description = "Current team not found",
+        content_type = "application/problem+json"
+    )]
+    NotFound(ProblemDetails),
+    #[response(
         status = 500,
         description = "Internal error",
         content_type = "application/problem+json"
@@ -345,6 +351,11 @@ mod tests {
     fn router_registers_the_used_audit_operation() {
         let document = serde_json::to_value(router().split_for_parts().1).unwrap();
         assert_eq!(document.to_string().matches("operationId").count(), 1);
+        assert_eq!(
+            document["paths"]["/audit-events"]["get"]["responses"]["404"]["content"]
+                ["application/problem+json"]["schema"]["$ref"],
+            "#/components/schemas/ProblemDetails"
+        );
     }
 
     #[test]

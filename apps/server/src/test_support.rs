@@ -22,7 +22,7 @@ use axum::{
 };
 use futures_util::FutureExt;
 use serde_json::{json, Value};
-use sqlx::{query, query_scalar, PgPool};
+use sqlx::{query, PgPool};
 use tower::util::ServiceExt;
 use url::Url;
 
@@ -82,7 +82,7 @@ impl ApiTestApp {
         body: Vec<u8>,
         headers: HeaderMap,
     ) -> ApiTestResponse {
-        let mut builder = Request::builder().method(method).uri(uri);
+        let mut builder = Request::builder().method(method.clone()).uri(uri);
         for (name, value) in &headers {
             builder = builder.header(name, value);
         }
@@ -107,11 +107,13 @@ impl ApiTestApp {
             serde_json::from_slice(&bytes)
                 .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
         };
-        ApiTestResponse {
+        let response = ApiTestResponse {
             status,
             headers,
             body,
-        }
+        };
+        validate_openapi_response(&method, uri, &response);
+        response
     }
 
     pub(crate) async fn api_json(
@@ -121,7 +123,7 @@ impl ApiTestApp {
         payload: Option<Value>,
         headers: HeaderMap,
     ) -> ApiTestResponse {
-        let mut builder = Request::builder().method(method).uri(uri);
+        let mut builder = Request::builder().method(method.clone()).uri(uri);
         for (name, value) in &headers {
             builder = builder.header(name, value);
         }
@@ -146,11 +148,13 @@ impl ApiTestApp {
                 .unwrap_or_else(|_| json!({ "raw": String::from_utf8_lossy(&bytes) }))
         };
 
-        ApiTestResponse {
+        let response = ApiTestResponse {
             status,
             headers,
             body,
-        }
+        };
+        validate_openapi_response(&method, uri, &response);
+        response
     }
 
     pub(crate) async fn issue_session(
@@ -162,93 +166,6 @@ impl ApiTestApp {
             .sessions
             .issue_session_for_tests(user_id, "desktop", Some(client_id.as_str()))
             .await
-    }
-
-    pub(crate) async fn call_operation(
-        &self,
-        operation: &str,
-        params: Value,
-        mut headers: HeaderMap,
-    ) -> ApiTestResponse {
-        let operation_id = rest_operation_id(operation)
-            .unwrap_or_else(|| panic!("{operation} was deliberately removed from the API"));
-        let (method, path_template) = openapi_operation(operation_id);
-        let mut body = params
-            .as_array()
-            .and_then(|values| values.first())
-            .cloned()
-            .unwrap_or_else(|| json!({}));
-        let object = body
-            .as_object_mut()
-            .expect("named API operation parameters should be an object");
-        if operation == "auth.signupWithInvitation" {
-            if let Some(token) = object.remove("token") {
-                object.insert("invitationToken".to_string(), token);
-            }
-        }
-        let item_id = object
-            .get("itemId")
-            .and_then(Value::as_str)
-            .map(str::to_string);
-        let mut path = path_template;
-        while let Some(start) = path.find('{') {
-            let end = path[start..]
-                .find('}')
-                .map(|offset| start + offset)
-                .expect("OpenAPI path parameter should close");
-            let name = &path[start + 1..end];
-            let value = object
-                .remove(name)
-                .or_else(|| path_parameter_alias(name, object))
-                .unwrap_or_else(|| Value::String(format!("test-{name}-{}", next_test_client_id())));
-            let value = value
-                .as_str()
-                .unwrap_or_else(|| panic!("{name} should be a string path parameter"));
-            path.replace_range(start..=end, value);
-        }
-
-        if let Some(version) = object
-            .remove("expectedVersion")
-            .and_then(|value| value.as_i64())
-        {
-            headers.insert(
-                "if-match",
-                HeaderValue::from_str(&format!("\"{version}\""))
-                    .expect("version ETag should be valid"),
-            );
-        } else if matches!(
-            operation,
-            "vault.toggleFavorite"
-                | "vault.deleteItem"
-                | "vault.restoreItem"
-                | "vault.moveItem"
-                | "vault.permanentlyDeleteItem"
-        ) {
-            if let Some(item_id) = item_id {
-                if let Ok(version) =
-                    query_scalar::<_, i32>("SELECT version FROM item WHERE id = $1")
-                        .bind(item_id)
-                        .fetch_one(&self.pool)
-                        .await
-                {
-                    headers.insert(
-                        "if-match",
-                        HeaderValue::from_str(&format!("\"{version}\""))
-                            .expect("version ETag should be valid"),
-                    );
-                }
-            }
-        }
-
-        let payload = if method == Method::GET {
-            path.push_str(&query_string(object));
-            None
-        } else if object.is_empty() {
-            None
-        } else {
-            Some(body)
-        };
-        self.api_json(method, &path, payload, headers).await
     }
 
     pub(crate) async fn post_public_json(
@@ -293,165 +210,254 @@ impl ApiTestApp {
     }
 }
 
-fn rest_operation_id(name: &str) -> Option<&'static str> {
-    Some(match name {
-        "audit.teamEvents" => "listAuditEvents",
-        "auth.changePassword" => "change_password",
-        "auth.checkEmail" => "check_email",
-        "auth.deleteAccount" => "delete_account",
-        "auth.finishLogin" => "finish_login",
-        "auth.getRecoveryData" => "recovery_data",
-        "auth.listDevices" => "list_sessions",
-        "auth.me" => "me",
-        "auth.refreshSession" => "refresh_session",
-        "auth.regenerateSecretKey" => "regenerate_secret_key",
-        "auth.registrationStatus" => "getApiMetadata",
-        "auth.renameDevice" => "rename_session",
-        "auth.requestRecoveryVerification" => "request_recovery_verification",
-        "auth.requestSignupVerification" => "request_signup_verification",
-        "auth.resetPassword" => "reset_password",
-        "auth.revokeDevice" => "revoke_session",
-        "auth.signup" | "auth.signupWithInvitation" => "signup",
-        "auth.startLogin" => "start_login",
-        "auth.storeRecoveryKey" => "store_recovery_key",
-        "auth.updateEmail" => "update_email",
-        "auth.verifyRecoveryCode" => "verify_recovery",
-        "auth.verifySignupVerification" => "verify_signup_verification",
-        "billing.attachmentUsage" => "getAttachmentUsage",
-        "billing.createCheckoutSession" => "createBillingCheckoutSession",
-        "billing.createPortalSession" => "createBillingPortalSession",
-        "billing.entitlements" => "getBillingEntitlements",
-        "billing.previewAdditionalTeamSeat" => "previewAdditionalTeamSeat",
-        "billing.status" => "getBillingStatus",
-        "share.accessPublic" => "accessPublicShare",
-        "share.create" => "createShareLink",
-        "share.getAccessLogs" => "listShareAccessLogs",
-        "share.getPublicInfo" => "getPublicShareInfo",
-        "share.listByItem" => "listItemShareLinks",
-        "share.requestEmailVerification" => "requestShareEmailVerification",
-        "share.revoke" => "revokeShareLink",
-        "share.verifyEmailAndAccess" => "verifyShareEmailAndAccess",
-        "sync.bootstrapItems" => "bootstrapSync",
-        "sync.getEventsSince" => "getSyncChanges",
-        "team.create" => "createTeam",
-        "team.createImageUpload" => "createTeamImageUpload",
-        "team.delete" => "deleteTeam",
-        "team.get" => "getTeam",
-        "team.getLeaveRotationData" => "getTeamLeaveRotationData",
-        "team.invitations.accept" => "acceptTeamInvitation",
-        "team.invitations.acceptById" => "acceptTeamInvitationById",
-        "team.invitations.cancel" => "cancelTeamInvitation",
-        "team.invitations.decline" => "declineTeamInvitation",
-        "team.invitations.declineById" => "declineTeamInvitationById",
-        "team.invitations.getByToken" => "getTeamInvitation",
-        "team.invitations.list" => "listTeamInvitations",
-        "team.invitations.pending" => "listMyTeamInvitations",
-        "team.invitations.resend" => "resendTeamInvitation",
-        "team.invitations.send" => "sendTeamInvitation",
-        "team.leave" => "leaveTeam",
-        "team.list" => "getCurrentTeam",
-        "team.members.getTeamRotationData" => "getTeamMemberRemovalRotationData",
-        "team.members.list" => "listTeamMembers",
-        "team.members.remove" => "removeTeamMember",
-        "team.update" => "updateTeam",
-        "team.vaults" => "listTeamVaults",
-        "vault.bulkImportItems" => "bulkImportItems",
-        "vault.convertType" => "convertVaultType",
-        "vault.create" => "createVault",
-        "vault.createAttachment" => "createAttachment",
-        "vault.createAttachmentUpload" => "createAttachmentUpload",
-        "vault.createImageUpload" => "createVaultImageUpload",
-        "vault.createItem" => "createItem",
-        "vault.delete" => "deleteVault",
-        "vault.deleteAttachment" => "deleteAttachment",
-        "vault.deleteItem" => "trashItem",
-        "vault.get" => "getVault",
-        "vault.getAttachmentDownloadUrl" => "createAttachmentDownloadUrl",
-        "vault.getItem" => "getItem",
-        "vault.list" => "listVaults",
-        "vault.listAllDeletedItems" => "listAllTrashedItems",
-        "vault.listAllItems" => "listAllItems",
-        "vault.listAttachments" => "listAttachments",
-        "vault.listDeletedItems" => "listTrashedVaultItems",
-        "vault.listItems" => "listVaultItems",
-        "vault.members.add" => "addVaultMember",
-        "vault.members.availableTeamMembers" => "listAvailableTeamMembers",
-        "vault.members.getRotationData" => "getVaultMemberRemovalRotationData",
-        "vault.members.list" => "listVaultMembers",
-        "vault.members.remove" => "removeVaultMember",
-        "vault.members.updateRole" => "updateVaultMemberRole",
-        "vault.moveItem" => "moveItem",
-        "vault.permanentlyDeleteItem" => "permanentlyDeleteItem",
-        "vault.restoreItem" => "restoreItem",
-        "vault.stats" => "getVaultStats",
-        "vault.toggleFavorite" => "setItemFavorite",
-        "vault.update" => "updateVault",
-        "vault.updateAttachment" => "updateAttachment",
-        "vault.updateItem" => "updateItem",
-        _ => return None,
-    })
-}
-
-fn openapi_operation(operation_id: &str) -> (Method, String) {
-    let document: Value = serde_json::from_str(crate::openapi_json().as_str())
-        .expect("generated OpenAPI should be valid JSON");
-    for (path, methods) in document["paths"]
-        .as_object()
-        .expect("OpenAPI paths should be an object")
-    {
-        for (method, operation) in methods
-            .as_object()
-            .expect("OpenAPI path item should be an object")
-        {
-            if operation["operationId"] == operation_id {
-                return (
-                    Method::from_bytes(method.to_ascii_uppercase().as_bytes())
-                        .expect("OpenAPI method should be valid"),
-                    path.clone(),
-                );
-            }
-        }
-    }
-    panic!("OpenAPI operation {operation_id} should exist");
-}
-
-fn path_parameter_alias(name: &str, object: &mut serde_json::Map<String, Value>) -> Option<Value> {
-    if name == "userId" {
-        if let Some(value) = object.remove("excludeUserId") {
-            return Some(value);
-        }
-    }
-    let alias = match name {
-        "attachmentId" | "invitationId" | "itemId" | "linkId" | "sessionId" | "teamId"
-        | "userId" | "vaultId" => "id",
-        _ => return None,
+fn validate_openapi_response(method: &Method, uri: &str, response: &ApiTestResponse) {
+    static DOCUMENT: OnceLock<Value> = OnceLock::new();
+    let document = DOCUMENT.get_or_init(|| {
+        serde_json::from_str(crate::openapi_json().as_str())
+            .expect("generated OpenAPI should be valid JSON")
+    });
+    let request_path = uri
+        .split('?')
+        .next()
+        .expect("request URI should have a path");
+    let Some((path_template, operation)) = matching_operation(document, method, request_path)
+    else {
+        return;
     };
-    object.remove(alias)
-}
-
-fn query_string(object: &serde_json::Map<String, Value>) -> String {
-    let mut serializer = url::form_urlencoded::Serializer::new(String::new());
-    for (name, value) in object {
-        match value {
-            Value::Null => {}
-            Value::Array(values) => {
-                for value in values {
-                    serializer.append_pair(name, value.as_str().unwrap_or(&value.to_string()));
+    let status = response.status.as_u16().to_string();
+    let responses = operation["responses"]
+        .as_object()
+        .expect("OpenAPI responses should be an object");
+    let declared = responses
+        .get(&status)
+        .or_else(|| responses.get("default"))
+        .unwrap_or_else(|| {
+            panic!("{method} {path_template} does not declare response status {status}")
+        });
+    let content = declared.get("content").and_then(Value::as_object);
+    if response.body.is_null() && content.is_none_or(serde_json::Map::is_empty) {
+        return;
+    }
+    let actual_content_type = response
+        .headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .expect("a response with a contract body requires Content-Type");
+    let media = content
+        .and_then(|content| content.get(actual_content_type))
+        .unwrap_or_else(|| {
+            panic!(
+                "{method} {path_template} status {status} does not declare {actual_content_type}"
+            )
+        });
+    if let Some(schema) = media.get("schema") {
+        if let Err(error) = validate_schema(document, schema, &response.body, "$") {
+            panic!("{method} {path_template} status {status} response violates OpenAPI: {error}");
+        }
+    }
+    if let Some(headers) = declared.get("headers").and_then(Value::as_object) {
+        for name in headers
+            .keys()
+            .filter(|name| name.as_str() != "Idempotency-Replayed")
+        {
+            let value = response.headers.get(name).unwrap_or_else(|| {
+                panic!("{method} {path_template} status {status} requires response header {name}")
+            });
+            if let Some(schema) = headers[name].get("schema") {
+                let value = Value::String(
+                    value
+                        .to_str()
+                        .expect("contract response headers should be visible ASCII")
+                        .to_string(),
+                );
+                if let Err(error) = validate_schema(document, schema, &value, name) {
+                    panic!(
+                        "{method} {path_template} status {status} header violates OpenAPI: {error}"
+                    );
                 }
             }
-            Value::String(value) => {
-                serializer.append_pair(name, value);
+        }
+    }
+}
+
+fn matching_operation<'a>(
+    document: &'a Value,
+    method: &Method,
+    request_path: &str,
+) -> Option<(&'a str, &'a Value)> {
+    let method = method.as_str().to_ascii_lowercase();
+    document["paths"]
+        .as_object()?
+        .iter()
+        .filter(|(template, _)| path_matches(template, request_path))
+        .filter_map(|(template, item)| {
+            item.get(&method).map(|operation| {
+                let literal_segments = template
+                    .split('/')
+                    .filter(|segment| !segment.starts_with('{'))
+                    .count();
+                (literal_segments, template.as_str(), operation)
+            })
+        })
+        .max_by_key(|(literal_segments, _, _)| *literal_segments)
+        .map(|(_, template, operation)| (template, operation))
+}
+
+fn path_matches(template: &str, request_path: &str) -> bool {
+    let template = template.trim_matches('/').split('/').collect::<Vec<_>>();
+    let request = request_path
+        .trim_matches('/')
+        .split('/')
+        .collect::<Vec<_>>();
+    template.len() == request.len()
+        && template.iter().zip(request).all(|(expected, actual)| {
+            (!actual.is_empty() && expected.starts_with('{') && expected.ends_with('}'))
+                || *expected == actual
+        })
+}
+
+fn validate_schema(
+    document: &Value,
+    schema: &Value,
+    instance: &Value,
+    pointer: &str,
+) -> Result<(), String> {
+    if let Some(reference) = schema.get("$ref").and_then(Value::as_str) {
+        let target = document
+            .pointer(reference.strip_prefix('#').ok_or_else(|| {
+                format!("{pointer}: external schema reference is unsupported: {reference}")
+            })?)
+            .ok_or_else(|| format!("{pointer}: unresolved schema reference {reference}"))?;
+        return validate_schema(document, target, instance, pointer);
+    }
+    if let Some(options) = schema.get("oneOf").and_then(Value::as_array) {
+        let matches = options
+            .iter()
+            .filter(|option| validate_schema(document, option, instance, pointer).is_ok())
+            .count();
+        if matches != 1 {
+            return Err(format!(
+                "{pointer}: expected exactly one oneOf schema, matched {matches}"
+            ));
+        }
+    }
+    if let Some(values) = schema.get("enum").and_then(Value::as_array) {
+        if !values.contains(instance) {
+            return Err(format!(
+                "{pointer}: value {instance} is outside enum {values:?}"
+            ));
+        }
+    }
+    if let Some(schema_type) = schema.get("type") {
+        let accepts = match schema_type {
+            Value::String(kind) => instance_has_type(instance, kind),
+            Value::Array(kinds) => kinds
+                .iter()
+                .filter_map(Value::as_str)
+                .any(|kind| instance_has_type(instance, kind)),
+            _ => true,
+        };
+        if !accepts {
+            return Err(format!(
+                "{pointer}: {instance} does not match type {schema_type}"
+            ));
+        }
+    }
+    if let Some(object) = instance.as_object() {
+        if let Some(required) = schema.get("required").and_then(Value::as_array) {
+            for name in required.iter().filter_map(Value::as_str) {
+                if !object.contains_key(name) {
+                    return Err(format!("{pointer}: missing required property {name}"));
+                }
             }
-            value => {
-                serializer.append_pair(name, &value.to_string());
+        }
+        if let Some(properties) = schema.get("properties").and_then(Value::as_object) {
+            for (name, value) in object {
+                if let Some(property_schema) = properties.get(name) {
+                    validate_schema(
+                        document,
+                        property_schema,
+                        value,
+                        &format!("{pointer}/{name}"),
+                    )?;
+                } else if schema.get("additionalProperties") == Some(&Value::Bool(false)) {
+                    return Err(format!("{pointer}: unexpected property {name}"));
+                } else if let Some(additional_schema) = schema
+                    .get("additionalProperties")
+                    .filter(|value| value.is_object())
+                {
+                    validate_schema(
+                        document,
+                        additional_schema,
+                        value,
+                        &format!("{pointer}/{name}"),
+                    )?;
+                }
             }
         }
     }
-    let query = serializer.finish();
-    if query.is_empty() {
-        query
-    } else {
-        format!("?{query}")
+    if let Some(array) = instance.as_array() {
+        if let Some(minimum) = schema.get("minItems").and_then(Value::as_u64) {
+            if array.len() < minimum as usize {
+                return Err(format!("{pointer}: array is shorter than {minimum}"));
+            }
+        }
+        if let Some(maximum) = schema.get("maxItems").and_then(Value::as_u64) {
+            if array.len() > maximum as usize {
+                return Err(format!("{pointer}: array is longer than {maximum}"));
+            }
+        }
+        if let Some(item_schema) = schema.get("items") {
+            for (index, value) in array.iter().enumerate() {
+                validate_schema(document, item_schema, value, &format!("{pointer}/{index}"))?;
+            }
+        }
+    }
+    if let Some(value) = instance.as_str() {
+        if let Some(minimum) = schema.get("minLength").and_then(Value::as_u64) {
+            if value.chars().count() < minimum as usize {
+                return Err(format!("{pointer}: string is shorter than {minimum}"));
+            }
+        }
+        if let Some(maximum) = schema.get("maxLength").and_then(Value::as_u64) {
+            if value.chars().count() > maximum as usize {
+                return Err(format!("{pointer}: string is longer than {maximum}"));
+            }
+        }
+        if let Some(pattern) = schema.get("pattern").and_then(Value::as_str) {
+            let pattern = regex::Regex::new(pattern)
+                .map_err(|error| format!("{pointer}: invalid contract pattern: {error}"))?;
+            if !pattern.is_match(value) {
+                return Err(format!("{pointer}: string does not match {pattern}"));
+            }
+        }
+    }
+    if let Some(value) = instance.as_f64() {
+        if let Some(minimum) = schema.get("minimum").and_then(Value::as_f64) {
+            if value < minimum {
+                return Err(format!("{pointer}: number is less than {minimum}"));
+            }
+        }
+        if let Some(maximum) = schema.get("maximum").and_then(Value::as_f64) {
+            if value > maximum {
+                return Err(format!("{pointer}: number is greater than {maximum}"));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn instance_has_type(instance: &Value, schema_type: &str) -> bool {
+    match schema_type {
+        "null" => instance.is_null(),
+        "boolean" => instance.is_boolean(),
+        "integer" => instance.as_i64().is_some() || instance.as_u64().is_some(),
+        "number" => instance.is_number(),
+        "string" => instance.is_string(),
+        "array" => instance.is_array(),
+        "object" => instance.is_object(),
+        _ => true,
     }
 }
 
@@ -817,6 +823,60 @@ mod tests {
     use sqlx::query_scalar;
 
     use super::*;
+
+    #[test]
+    fn openapi_path_matching_requires_real_nonempty_path_segments() {
+        assert!(path_matches(
+            "/api/v1/vaults/{vaultId}/items/{itemId}",
+            "/api/v1/vaults/vault_fixture/items/item_fixture"
+        ));
+        assert!(!path_matches(
+            "/api/v1/vaults/{vaultId}/items/{itemId}",
+            "/api/v1/vaults//items/item_fixture"
+        ));
+        assert!(!path_matches(
+            "/api/v1/vaults/{vaultId}/items/{itemId}",
+            "/api/v1/vaults/vault_fixture/items"
+        ));
+    }
+
+    #[test]
+    fn response_schema_validation_resolves_refs_and_required_properties() {
+        let document = json!({
+            "components": { "schemas": {
+                "Response": {
+                    "type": "object",
+                    "required": ["id"],
+                    "properties": { "id": { "type": "string", "minLength": 1 } },
+                    "additionalProperties": false
+                }
+            }}
+        });
+        let schema = json!({ "$ref": "#/components/schemas/Response" });
+
+        assert!(validate_schema(&document, &schema, &json!({ "id": "item_1" }), "$").is_ok());
+        assert!(validate_schema(&document, &schema, &json!({}), "$").is_err());
+        assert!(validate_schema(
+            &document,
+            &schema,
+            &json!({ "id": "item_1", "unknown": true }),
+            "$"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn response_schema_validation_keeps_one_of_exclusive() {
+        let document = json!({});
+        let schema = json!({
+            "oneOf": [
+                { "type": "object" },
+                { "type": "object" }
+            ]
+        });
+
+        assert!(validate_schema(&document, &schema, &json!({}), "$").is_err());
+    }
 
     #[tokio::test]
     async fn with_api_test_app_drops_database_after_panic() {

@@ -2,7 +2,7 @@ use axum::{
     body::Body,
     http::{
         header::{AUTHORIZATION, CONTENT_TYPE},
-        HeaderMap, HeaderValue, Request, StatusCode,
+        HeaderMap, HeaderValue, Method, Request,
     },
 };
 use bittery_crypto_core::srp6a::SrpClient;
@@ -85,11 +85,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 let crypto = build_auth_crypto_fixture("public-signup", "signup-password-123");
 
                 let registration = app
-                    .call_operation(
-                        "auth.registrationStatus",
-                        json!([]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::GET, "/api/meta", None, unauthenticated_json_headers())
                     .await;
                 registration.assert_contract_status();
                 assert_eq!(registration.body["registration"]["mode"], json!("cloud"));
@@ -103,11 +99,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let unknown_email = app
-                    .call_operation(
-                        "auth.checkEmail",
-                        json!([{ "email": email }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/email-checks", Some(json!({ "email": email })), unauthenticated_json_headers())
                     .await;
                 unknown_email.assert_contract_status();
                 assert_eq!(unknown_email.body["exists"], json!(true));
@@ -117,11 +109,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let request_verification = app
-                    .call_operation(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": email, "invitationToken": null }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), unauthenticated_json_headers())
                     .await;
                 request_verification.assert_contract_status();
                 assert_eq!(request_verification.body["success"], json!(true));
@@ -129,22 +117,14 @@ async fn auth_public_signup_login_and_logout_flow() {
                 let code = latest_signup_verification_code(email, None);
 
                 let wrong_code = app
-                    .call_operation(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), unauthenticated_json_headers())
                     .await;
                 wrong_code.assert_contract_status();
                 assert_eq!(wrong_code.body["success"], json!(false));
                 assert_eq!(wrong_code.body["signupVerificationToken"], json!(null));
 
                 let verify = app
-                    .call_operation(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": code, "invitationToken": null }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), unauthenticated_json_headers())
                     .await;
                 verify.assert_contract_status();
                 assert_eq!(verify.body["success"], json!(true));
@@ -154,9 +134,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                     .to_string();
 
                 let signup = app
-                    .call_operation(
-                        "auth.signup",
-                        json!([{
+                    .api_json(Method::POST, "/api/v1/auth/signups", Some(json!({
                             "email": email,
                             "signupVerificationToken": signup_verification_token,
                             "name": "Auth Public User",
@@ -171,9 +149,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                             "recoveryKeyHint": crypto.recovery_key_hint,
                             "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
-                        unauthenticated_json_headers(),
-                    )
+                        })), unauthenticated_json_headers())
                     .await;
                 signup.assert_contract_status();
                 assert_eq!(signup.body["success"], json!(true));
@@ -185,22 +161,14 @@ async fn auth_public_signup_login_and_logout_flow() {
                     .to_string();
 
                 let me = app
-                    .call_operation(
-                        "auth.me",
-                        json!([]),
-                        authenticated_json_headers(&signup_token),
-                    )
+                    .api_json(Method::GET, "/api/v1/users/me", None, authenticated_json_headers(&signup_token))
                     .await;
                 me.assert_contract_status();
                 assert_eq!(me.body["email"], json!(normalized_email));
                 assert_eq!(me.body["hasRecoveryKey"], json!(true));
 
                 let existing_email = app
-                    .call_operation(
-                        "auth.checkEmail",
-                        json!([{ "email": normalized_email }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/email-checks", Some(json!({ "email": normalized_email })), unauthenticated_json_headers())
                     .await;
                 existing_email.assert_contract_status();
                 assert_eq!(
@@ -209,11 +177,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                 );
 
                 let malformed_start = app
-                    .call_operation(
-                        "auth.startLogin",
-                        json!([{ "email": normalized_email, "clientPublicKey": "not-hex" }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": normalized_email, "clientPublicKey": "not-hex" })), unauthenticated_json_headers())
                     .await;
                 malformed_start.assert_contract_status();
                 assert_handler_error(
@@ -224,11 +188,7 @@ async fn auth_public_signup_login_and_logout_flow() {
 
                 let ephemeral = build_login_ephemeral_fixture();
                 let start_login = app
-					.call_operation(
-						"auth.startLogin",
-						json!([{ "email": normalized_email, "clientPublicKey": ephemeral.public_key }]),
-						unauthenticated_json_headers(),
-					)
+					.api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": normalized_email, "clientPublicKey": ephemeral.public_key })), unauthenticated_json_headers())
 					.await;
                 start_login.assert_contract_status();
                 let start_ok = &start_login.body;
@@ -243,17 +203,16 @@ async fn auth_public_signup_login_and_logout_flow() {
                     &crypto.auth_password,
                     TEST_SRP_ITERATIONS,
                 );
+                let attempt_id = start_ok["attemptId"]
+                    .as_str()
+                    .expect("login attempt ID should be returned");
 
                 let finish_login = app
-                    .call_operation(
-                        "auth.finishLogin",
-                        json!([{
-                            "attemptId": start_ok["attemptId"],
+                    .api_json(Method::POST, &format!("/api/v1/auth/login-attempts/{attempt_id}/finish"), Some(json!({
+
                             "clientPublicKey": ephemeral.public_key,
                             "clientProof": client_proof,
-                        }]),
-                        unauthenticated_json_headers(),
-                    )
+                        })), unauthenticated_json_headers())
                     .await;
                 finish_login.assert_contract_status();
                 assert_eq!(finish_login.body["user"]["email"], json!(normalized_email));
@@ -263,11 +222,7 @@ async fn auth_public_signup_login_and_logout_flow() {
                     .to_string();
 
                 let refreshed = app
-                    .call_operation(
-                        "auth.refreshSession",
-                        json!([]),
-                        authenticated_json_headers(&login_token),
-                    )
+                    .api_json(Method::POST, "/api/v1/sessions/current/refresh", None, authenticated_json_headers(&login_token))
                     .await;
                 refreshed.assert_contract_status();
                 let refreshed_token = refreshed.body["token"]
@@ -288,9 +243,10 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
         unsafe { std::env::set_var("BITTERY_CLOUD_PUBLIC_SIGNUP", "false") };
         with_api_test_app("auth_cloud_public_signup_disabled", |app| async move {
             let registration = app
-                .call_operation(
-                    "auth.registrationStatus",
-                    json!([]),
+                .api_json(
+                    Method::GET,
+                    "/api/meta",
+                    None,
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -310,9 +266,10 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
             let signup_verification_token =
                 issue_signup_verification_token(&app, email, None).await;
             let signup = app
-                .call_operation(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": email,
                         "signupVerificationToken": signup_verification_token,
                         "name": "Beta Disabled User",
@@ -327,7 +284,7 @@ async fn auth_cloud_public_signup_can_be_disabled_for_beta() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -358,10 +315,11 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
             .await;
 
             let signup = app
-                .call_operation(
-                    "auth.signupWithInvitation",
-                    json!([{
-                        "token": fixture.invitation_token,
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
+                        "invitationToken": fixture.invitation_token,
                         "email": fixture.invited_email,
                         "signupVerificationToken": signup_verification_token,
                         "name": "Invited Beta User",
@@ -374,7 +332,7 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -389,21 +347,21 @@ async fn auth_cloud_invitation_signup_still_works_when_public_signup_disabled() 
 async fn auth_protected_handlers_require_authentication() {
     with_api_test_app("auth_protected_handlers_require_authentication", |app| async move {
 			let protected_calls = vec![
-				("auth.me", json!([])),
-				("auth.updateEmail", json!([{ "newEmail": "new@example.com", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
-				("auth.changePassword", json!([{ "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
-				("auth.regenerateSecretKey", json!([{ "secretKeyHint": "SK1-TEST", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }])),
-				("auth.storeRecoveryKey", json!([{ "encryptedMasterKey": "master", "recoveryKeyHint": "hint" }])),
-				("auth.deleteAccount", json!([{ "confirmEmail": "user@example.com" }])),
-				("auth.listDevices", json!([])),
-				("auth.revokeDevice", json!([{ "sessionId": "session_target_01" }])),
-				("auth.renameDevice", json!([{ "sessionId": "session_target_01", "deviceName": "Laptop" }])),
-				("auth.refreshSession", json!([])),
+				(Method::GET, "/api/v1/users/me", None),
+				(Method::POST, "/api/v1/users/me/email-changes", Some(json!({ "newEmail": "new@example.com", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }))),
+				(Method::POST, "/api/v1/users/me/password-changes", Some(json!({ "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }))),
+				(Method::POST, "/api/v1/users/me/secret-key-rotations", Some(json!({ "secretKeyHint": "SK1-TEST", "srpSalt": "aa", "srpVerifier": "bb", "encryptedPrivateKey": "cipher", "encryptedVaultKeys": [], "kdfParams": floor_kdf_params_json() }))),
+				(Method::PUT, "/api/v1/users/me/recovery-key", Some(json!({ "encryptedMasterKey": "master", "recoveryKeyHint": "hint" }))),
+				(Method::DELETE, "/api/v1/users/me", Some(json!({ "confirmEmail": "user@example.com" }))),
+				(Method::GET, "/api/v1/sessions", None),
+				(Method::DELETE, "/api/v1/sessions/session_target_01", None),
+				(Method::PATCH, "/api/v1/sessions/session_target_01", Some(json!({ "deviceName": "Laptop" }))),
+				(Method::POST, "/api/v1/sessions/current/refresh", None),
 			];
 
-			for (method, params) in protected_calls {
+			for (method, path, payload) in protected_calls {
 				let response = app
-					.call_operation(method, params, unauthenticated_json_headers())
+					.api_json(method, path, payload, unauthenticated_json_headers())
 					.await;
 				response.assert_contract_status();
 				assert_transport_error(
@@ -431,9 +389,10 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                 .await;
 
                 let registration = app
-                    .call_operation(
-                        "auth.registrationStatus",
-                        json!([]),
+                    .api_json(
+                        Method::GET,
+                        "/api/meta",
+                        None,
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -456,9 +415,10 @@ async fn auth_self_hosted_registration_requires_bootstrap_invite() {
                 );
 
                 let verification = app
-                    .call_operation(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": "new-user@example.com", "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications",
+                        Some(json!({ "email": "new-user@example.com", "invitationToken": null })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -494,9 +454,10 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
             let crypto = build_auth_crypto_fixture("self-hosted-admin", "bootstrap-password");
 
             let registration = app
-                .call_operation(
-                    "auth.registrationStatus",
-                    json!([]),
+                .api_json(
+                    Method::GET,
+                    "/api/meta",
+                    None,
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -511,9 +472,10 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
             );
 
             let request_verification = app
-                .call_operation(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signup-verifications",
+                    Some(json!({ "email": email, "invitationToken": null })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -521,9 +483,10 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
             assert_eq!(request_verification.body["success"], json!(true));
 
             let signup = app
-                .call_operation(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": email,
                         "signupVerificationToken": "",
                         "name": "Self-Hosted Admin",
@@ -538,7 +501,7 @@ async fn auth_self_hosted_bootstrap_signup_skips_email_verification() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -575,10 +538,11 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                     build_auth_crypto_fixture("invitation-missing", "invite-missing-pass");
 
                 let missing = app
-                    .call_operation(
-                        "auth.signupWithInvitation",
-                        json!([{
-                            "token": build_valid_token("missing_invite"),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!({
+                            "invitationToken": build_valid_token("missing_invite"),
                             "email": fixture.invited_email,
                             "signupVerificationToken": "invalid-token",
                             "name": "Invited User",
@@ -591,7 +555,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                             "recoveryKeyHint": missing_crypto.recovery_key_hint,
                             "encryptedVaultKey": missing_crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
+                        })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -611,10 +575,11 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                 let crypto = build_auth_crypto_fixture("invitation-success", "invite-success-pass");
 
                 let signup = app
-                    .call_operation(
-                        "auth.signupWithInvitation",
-                        json!([{
-                            "token": fixture.invitation_token,
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!({
+                            "invitationToken": fixture.invitation_token,
                             "email": fixture.invited_email,
                             "signupVerificationToken": signup_verification_token,
                             "name": "Invited User",
@@ -627,7 +592,7 @@ async fn auth_invited_signup_handles_missing_and_valid_invitations() {
                             "recoveryKeyHint": crypto.recovery_key_hint,
                             "encryptedVaultKey": crypto.encrypted_vault_key,
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
+                        })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -654,9 +619,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 let existing_session = app.issue_session(&fixture.user_id).await;
 
                 let request_recovery = app
-                    .call_operation(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": fixture.email })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -666,9 +632,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 let code = latest_recovery_code(&fixture.email);
 
                 let wrong_code = app
-                    .call_operation(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": "000000" }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications/verify",
+                        Some(json!({ "email": fixture.email, "code": "000000" })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -676,9 +643,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 assert_eq!(wrong_code.body["success"], json!(false));
 
                 let verified = app
-                    .call_operation(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": code }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications/verify",
+                        Some(json!({ "email": fixture.email, "code": code })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -690,9 +658,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                     .to_string();
 
                 let replayed_code = app
-                    .call_operation(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": code }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications/verify",
+                        Some(json!({ "email": fixture.email, "code": code })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -701,9 +670,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 assert!(replayed_code.body["recoveryToken"].is_null());
 
                 let invalid_recovery = app
-                    .call_operation(
-                        "auth.getRecoveryData",
-                        json!([{ "recoveryToken": "invalid-token" }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/data",
+                        Some(json!({ "recoveryToken": "invalid-token" })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -715,9 +685,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 );
 
                 let recovery_data = app
-                    .call_operation(
-                        "auth.getRecoveryData",
-                        json!([{ "recoveryToken": recovery_token.clone() }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/data",
+                        Some(json!({ "recoveryToken": recovery_token.clone() })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -731,9 +702,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
 
                 let next_crypto = build_auth_crypto_fixture("recovery-reset", "reset-password-123");
                 let reset = app
-                    .call_operation(
-                        "auth.resetPassword",
-                        json!([{
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/reset-password",
+                        Some(json!({
                             "recoveryToken": verified.body["recoveryToken"],
                             "srpSalt": next_crypto.srp_salt,
                             "srpVerifier": next_crypto.srp_verifier,
@@ -746,7 +718,7 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                                 "encryptedVaultKey": "rotated-recovery-vault-key"
                             }],
                             "kdfParams": floor_kdf_params_json(),
-                        }]),
+                        })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -754,9 +726,10 @@ async fn auth_recovery_flow_verifies_codes_returns_data_and_resets_password() {
                 assert_eq!(reset.body["userId"], json!(fixture.user_id));
 
                 let reused_recovery = app
-                    .call_operation(
-                        "auth.getRecoveryData",
-                        json!([{ "recoveryToken": recovery_token }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-sessions/data",
+                        Some(json!({ "recoveryToken": recovery_token })),
                         unauthenticated_json_headers(),
                     )
                     .await;
@@ -805,9 +778,10 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let update_crypto = build_auth_crypto_fixture("update-email", "update-email-pass");
 
             let conflict = app
-                .call_operation(
-                    "auth.updateEmail",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/email-changes",
+                    Some(json!({
                         "newEmail": "conflict@example.com",
                         "srpSalt": update_crypto.srp_salt,
                         "srpVerifier": update_crypto.srp_verifier,
@@ -817,7 +791,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "updated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&update_session.token),
                 )
                 .await;
@@ -825,9 +799,10 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             assert_handler_error(&conflict.body, "BAD_REQUEST", "Email already in use");
 
             let update_email = app
-                .call_operation(
-                    "auth.updateEmail",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/email-changes",
+                    Some(json!({
                         "newEmail": "updated-auth@example.com",
                         "srpSalt": update_crypto.srp_salt,
                         "srpVerifier": update_crypto.srp_verifier,
@@ -837,7 +812,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "updated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&update_session.token),
                 )
                 .await;
@@ -862,9 +837,10 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let change_crypto =
                 build_auth_crypto_fixture("change-password", "change-password-pass");
             let change_password = app
-                .call_operation(
-                    "auth.changePassword",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/password-changes",
+                    Some(json!({
                         "srpSalt": change_crypto.srp_salt,
                         "srpVerifier": change_crypto.srp_verifier,
                         "encryptedPrivateKey": change_crypto.encrypted_private_key,
@@ -873,7 +849,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "password-rotated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&change_session.token),
                 )
                 .await;
@@ -891,9 +867,10 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
             let regenerate_crypto =
                 build_auth_crypto_fixture("regen-secret-key", "regen-secret-pass");
             let regenerate = app
-                .call_operation(
-                    "auth.regenerateSecretKey",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/users/me/secret-key-rotations",
+                    Some(json!({
                         "secretKeyHint": regenerate_crypto.secret_key_hint,
                         "srpSalt": regenerate_crypto.srp_salt,
                         "srpVerifier": regenerate_crypto.srp_verifier,
@@ -903,7 +880,7 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
                             "encryptedVaultKey": "secret-key-rotated-vault-key"
                         }],
                         "kdfParams": floor_kdf_params_json(),
-                    }]),
+                    })),
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
@@ -924,12 +901,13 @@ async fn auth_account_mutations_update_credentials_and_revoke_sessions() {
 
             let recovery_session = app.issue_session(&fixture.user_id).await;
             let store_recovery = app
-                .call_operation(
-                    "auth.storeRecoveryKey",
-                    json!([{
+                .api_json(
+                    Method::PUT,
+                    "/api/v1/users/me/recovery-key",
+                    Some(json!({
                         "encryptedMasterKey": "stored-master-key",
                         "recoveryKeyHint": "stored-hint"
-                    }]),
+                    })),
                     authenticated_json_headers(&recovery_session.token),
                 )
                 .await;
@@ -959,9 +937,10 @@ async fn auth_session_management_and_account_deletion_flow() {
             let other_session = app.issue_session(&fixture.user_id).await;
 
             let devices = app
-                .call_operation(
-                    "auth.listDevices",
-                    json!([]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/sessions",
+                    None,
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
@@ -977,9 +956,10 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let invalid_rename = app
-                .call_operation(
-                    "auth.renameDevice",
-                    json!([{ "sessionId": other_session.session_id, "deviceName": "   " }]),
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/sessions/{}", other_session.session_id),
+                    Some(json!({  "deviceName": "   " })),
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
@@ -991,9 +971,10 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let rename = app
-                .call_operation(
-                    "auth.renameDevice",
-                    json!([{ "sessionId": other_session.session_id, "deviceName": "Work Laptop" }]),
+                .api_json(
+                    Method::PATCH,
+                    &format!("/api/v1/sessions/{}", other_session.session_id),
+                    Some(json!({  "deviceName": "Work Laptop" })),
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
@@ -1001,9 +982,10 @@ async fn auth_session_management_and_account_deletion_flow() {
             assert_eq!(rename.body["success"], json!(true));
 
             let current_revoke = app
-                .call_operation(
-                    "auth.revokeDevice",
-                    json!([{ "sessionId": current_session.session_id }]),
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/sessions/{}", current_session.session_id),
+                    None,
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
@@ -1015,9 +997,10 @@ async fn auth_session_management_and_account_deletion_flow() {
             );
 
             let revoke = app
-                .call_operation(
-                    "auth.revokeDevice",
-                    json!([{ "sessionId": other_session.session_id }]),
+                .api_json(
+                    Method::DELETE,
+                    &format!("/api/v1/sessions/{}", other_session.session_id),
+                    None,
                     authenticated_json_headers(&current_session.token),
                 )
                 .await;
@@ -1032,9 +1015,10 @@ async fn auth_session_management_and_account_deletion_flow() {
 
             let delete_session = app.issue_session(&fixture.user_id).await;
             let wrong_confirm = app
-                .call_operation(
-                    "auth.deleteAccount",
-                    json!([{ "confirmEmail": "wrong@example.com" }]),
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": "wrong@example.com" })),
                     authenticated_json_headers(&delete_session.token),
                 )
                 .await;
@@ -1042,9 +1026,10 @@ async fn auth_session_management_and_account_deletion_flow() {
             assert_handler_error(&wrong_confirm.body, "BAD_REQUEST", "Email does not match");
 
             let delete_account = app
-                .call_operation(
-                    "auth.deleteAccount",
-                    json!([{ "confirmEmail": fixture.email }]),
+                .api_json(
+                    Method::DELETE,
+                    "/api/v1/users/me",
+                    Some(json!({ "confirmEmail": fixture.email })),
                     authenticated_json_headers(&delete_session.token),
                 )
                 .await;
@@ -1387,9 +1372,10 @@ async fn issue_signup_verification_token(
     invitation_token: Option<&str>,
 ) -> String {
     let request = app
-        .call_operation(
-            "auth.requestSignupVerification",
-            json!([{ "email": email, "invitationToken": invitation_token }]),
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/signup-verifications",
+            Some(json!({ "email": email, "invitationToken": invitation_token })),
             unauthenticated_json_headers(),
         )
         .await;
@@ -1398,9 +1384,10 @@ async fn issue_signup_verification_token(
 
     let code = latest_signup_verification_code(email, invitation_token);
     let verified = app
-        .call_operation(
-            "auth.verifySignupVerification",
-            json!([{ "email": email, "code": code, "invitationToken": invitation_token }]),
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/signup-verifications/verify",
+            Some(json!({ "email": email, "code": code, "invitationToken": invitation_token })),
             unauthenticated_json_headers(),
         )
         .await;
@@ -1613,11 +1600,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                 let fixture = build_seeded_auth_account_fixture(&app.pool, "rl_recovery").await;
 
                 let request = app
-                    .call_operation(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/recovery-verifications", Some(json!({ "email": fixture.email })), unauthenticated_json_headers())
                     .await;
                 request.assert_contract_status();
                 let code = latest_recovery_code(&fixture.email);
@@ -1625,22 +1608,14 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
                 // Two wrong attempts stay below the threshold.
                 for _ in 0..2 {
                     let wrong = app
-                        .call_operation(
-                            "auth.verifyRecoveryCode",
-                            json!([{ "email": fixture.email, "code": "000000" }]),
-                            unauthenticated_json_headers(),
-                        )
+                        .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": "000000" })), unauthenticated_json_headers())
                         .await;
                     assert_eq!(wrong.body["success"], json!(false));
                 }
 
                 // Third wrong attempt trips the lockout.
                 let tripped = app
-                    .call_operation(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": "000000" }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": "000000" })), unauthenticated_json_headers())
                     .await;
                 assert_handler_error(
                     &tripped.body,
@@ -1650,11 +1625,7 @@ async fn verify_recovery_code_locks_out_after_repeated_failures() {
 
                 // The correct code must still fail while locked.
                 let correct = app
-                    .call_operation(
-                        "auth.verifyRecoveryCode",
-                        json!([{ "email": fixture.email, "code": code }]),
-                        unauthenticated_json_headers(),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": code })), unauthenticated_json_headers())
                     .await;
                 assert_handler_error(
                     &correct.body,
@@ -1707,11 +1678,7 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
             let email = "signup-code-hashed@example.com";
 
             let request = app
-                .call_operation(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), unauthenticated_json_headers())
                 .await;
             assert_eq!(request.body["success"], json!(true));
 
@@ -1730,29 +1697,17 @@ async fn signup_verification_code_is_stored_hashed_and_still_verifies() {
 
             // Replaying the stored column as if it were the code must fail.
             let replayed = app
-                .call_operation(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": stored, "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": stored, "invitationToken": null })), unauthenticated_json_headers())
                 .await;
             assert_eq!(replayed.body["success"], json!(false));
 
             let wrong = app
-                .call_operation(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), unauthenticated_json_headers())
                 .await;
             assert_eq!(wrong.body["success"], json!(false));
 
             let verified = app
-                .call_operation(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": code, "invitationToken": null }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), unauthenticated_json_headers())
                 .await;
             assert_eq!(verified.body["success"], json!(true));
         })
@@ -1769,11 +1724,7 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
             let fixture = build_seeded_auth_account_fixture(&app.pool, "codehash").await;
 
             let request = app
-                .call_operation(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": fixture.email }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/recovery-verifications", Some(json!({ "email": fixture.email })), unauthenticated_json_headers())
                 .await;
             assert_eq!(request.body["success"], json!(true));
 
@@ -1790,20 +1741,12 @@ async fn recovery_verification_code_is_stored_hashed_and_still_verifies() {
             assert_eq!(stored, hash_token(&code));
 
             let replayed = app
-                .call_operation(
-                    "auth.verifyRecoveryCode",
-                    json!([{ "email": fixture.email, "code": stored }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": stored })), unauthenticated_json_headers())
                 .await;
             assert_eq!(replayed.body["success"], json!(false));
 
             let verified = app
-                .call_operation(
-                    "auth.verifyRecoveryCode",
-                    json!([{ "email": fixture.email, "code": code }]),
-                    unauthenticated_json_headers(),
-                )
+                .api_json(Method::POST, "/api/v1/auth/recovery-verifications/verify", Some(json!({ "email": fixture.email, "code": code })), unauthenticated_json_headers())
                 .await;
             assert_eq!(verified.body["success"], json!(true));
         })
@@ -1821,14 +1764,10 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
             let fixture = build_auth_invitation_fixture(&app.pool, "invite_hashed").await;
 
             let request = app
-                .call_operation(
-                    "auth.requestSignupVerification",
-                    json!([{
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({
                         "email": fixture.invited_email,
                         "invitationToken": fixture.invitation_token
-                    }]),
-                    unauthenticated_json_headers(),
-                )
+                    })), unauthenticated_json_headers())
                 .await;
             assert_eq!(request.body["success"], json!(true));
 
@@ -1848,15 +1787,11 @@ async fn signup_verification_invitation_token_is_stored_hashed() {
             let code =
                 latest_signup_verification_code(&fixture.invited_email, Some(&fixture.invitation_token));
             let verified = app
-                .call_operation(
-                    "auth.verifySignupVerification",
-                    json!([{
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({
                         "email": fixture.invited_email,
                         "code": code,
                         "invitationToken": fixture.invitation_token
-                    }]),
-                    unauthenticated_json_headers(),
-                )
+                    })), unauthenticated_json_headers())
                 .await;
             assert_eq!(verified.body["success"], json!(true));
         })
@@ -1883,44 +1818,28 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
             let ip = "198.51.100.20";
 
             let request = app
-                .call_operation(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_eq!(request.body["success"], json!(true));
 
             // Two wrong guesses against the first code stay below the threshold.
             for _ in 0..2 {
                 let wrong = app
-                    .call_operation(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                        headers_with_ip(ip),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), headers_with_ip(ip))
                     .await;
                 assert_eq!(wrong.body["success"], json!(false));
             }
 
             // Requesting a fresh code resets `signup_verification.attempts` to 0.
             let re_request = app
-                .call_operation(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_eq!(re_request.body["success"], json!(true));
             let code = latest_signup_verification_code(email, None);
 
             // The lifetime counter is unaffected, so the very next wrong guess trips it.
             let tripped = app
-                .call_operation(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": "000000", "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": "000000", "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_handler_error(
                 &tripped.body,
@@ -1930,11 +1849,7 @@ async fn verify_signup_verification_locks_out_across_code_re_request() {
 
             // The correct code must still fail while locked.
             let correct = app
-                .call_operation(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": code, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_handler_error(
                 &correct.body,
@@ -1981,9 +1896,10 @@ async fn verify_signup_verification_does_not_lock_email_without_pending_code() {
 
             for _ in 0..4 {
                 let attempt = app
-                    .call_operation(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": "000000", "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications/verify",
+                        Some(json!({ "email": email, "code": "000000", "invitationToken": null })),
                         headers_with_ip(ip),
                     )
                     .await;
@@ -2014,22 +1930,14 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
             let ip = "198.51.100.22";
 
             let request = app
-                .call_operation(
-                    "auth.requestSignupVerification",
-                    json!([{ "email": email, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications", Some(json!({ "email": email, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_eq!(request.body["success"], json!(true));
             let code = latest_signup_verification_code(email, None);
 
             for malformed in ["", "12345", "1234567", "abcdef", "12 456"] {
                 let attempt = app
-                    .call_operation(
-                        "auth.verifySignupVerification",
-                        json!([{ "email": email, "code": malformed, "invitationToken": null }]),
-                        headers_with_ip(ip),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": malformed, "invitationToken": null })), headers_with_ip(ip))
                     .await;
                 assert_eq!(attempt.body["success"], json!(false));
             }
@@ -2045,11 +1953,7 @@ async fn verify_signup_verification_rejects_malformed_codes_without_consuming_at
 
             // The real code is still redeemable.
             let verified = app
-                .call_operation(
-                    "auth.verifySignupVerification",
-                    json!([{ "email": email, "code": code, "invitationToken": null }]),
-                    headers_with_ip(ip),
-                )
+                .api_json(Method::POST, "/api/v1/auth/signup-verifications/verify", Some(json!({ "email": email, "code": code, "invitationToken": null })), headers_with_ip(ip))
                 .await;
             assert_eq!(verified.body["success"], json!(true));
         })
@@ -2070,9 +1974,10 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
 
                 for ip in ["203.0.113.31", "203.0.113.32"] {
                     let response = app
-                        .call_operation(
-                            "auth.requestSignupVerification",
-                            json!([{ "email": email, "invitationToken": null }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signup-verifications",
+                            Some(json!({ "email": email, "invitationToken": null })),
                             headers_with_ip(ip),
                         )
                         .await;
@@ -2080,9 +1985,10 @@ async fn request_signup_verification_limits_one_email_across_rotating_ips() {
                 }
 
                 let blocked = app
-                    .call_operation(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": email, "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications",
+                        Some(json!({ "email": email, "invitationToken": null })),
                         headers_with_ip("203.0.113.33"),
                     )
                     .await;
@@ -2110,9 +2016,10 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
 
                 for email in ["sv-rot-a@example.com", "sv-rot-b@example.com"] {
                     let response = app
-                        .call_operation(
-                            "auth.requestSignupVerification",
-                            json!([{ "email": email, "invitationToken": null }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signup-verifications",
+                            Some(json!({ "email": email, "invitationToken": null })),
                             headers_with_ip(ip),
                         )
                         .await;
@@ -2120,9 +2027,10 @@ async fn request_signup_verification_limits_one_ip_across_rotating_emails() {
                 }
 
                 let blocked = app
-                    .call_operation(
-                        "auth.requestSignupVerification",
-                        json!([{ "email": "sv-rot-c@example.com", "invitationToken": null }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signup-verifications",
+                        Some(json!({ "email": "sv-rot-c@example.com", "invitationToken": null })),
                         headers_with_ip(ip),
                     )
                     .await;
@@ -2151,9 +2059,10 @@ async fn start_login_is_rate_limited_per_ip() {
 
             for _ in 0..3 {
                 let response = app
-                    .call_operation(
-                        "auth.startLogin",
-                        json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/login-attempts",
+                        Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                         headers_with_ip("203.0.113.10"),
                     )
                     .await;
@@ -2161,9 +2070,10 @@ async fn start_login_is_rate_limited_per_ip() {
             }
 
             let blocked = app
-                .call_operation(
-                    "auth.startLogin",
-                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/login-attempts",
+                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                     headers_with_ip("203.0.113.10"),
                 )
                 .await;
@@ -2175,9 +2085,10 @@ async fn start_login_is_rate_limited_per_ip() {
 
             // A different IP is unaffected.
             let other_ip = app
-                .call_operation(
-                    "auth.startLogin",
-                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/login-attempts",
+                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                     headers_with_ip("203.0.113.99"),
                 )
                 .await;
@@ -2205,9 +2116,10 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 
             for index in 0..3 {
                 let response = app
-                    .call_operation(
-                        "auth.startLogin",
-                        json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/login-attempts",
+                        Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                         headers_with_ip(&format!("203.0.113.{index}")),
                     )
                     .await;
@@ -2216,9 +2128,10 @@ async fn start_login_ignores_forwarded_for_when_proxy_is_not_trusted() {
 
             // A fourth forged address does not escape the per-IP window.
             let blocked = app
-                .call_operation(
-                    "auth.startLogin",
-                    json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/login-attempts",
+                    Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
                     headers_with_ip("203.0.113.250"),
                 )
                 .await;
@@ -2248,20 +2161,12 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
             // across different IPs.
             for index in 0..3 {
                 let response = app
-                    .call_operation(
-                        "auth.startLogin",
-                        json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
-                        headers_with_ip(&format!("198.51.100.{index}")),
-                    )
+                    .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": unregistered, "clientPublicKey": ephemeral.public_key })), headers_with_ip(&format!("198.51.100.{index}")))
                     .await;
                 assert!(response.body.is_object());
             }
             let blocked = app
-                .call_operation(
-                    "auth.startLogin",
-                    json!([{ "email": unregistered, "clientPublicKey": ephemeral.public_key }]),
-                    headers_with_ip("198.51.100.200"),
-                )
+                .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": unregistered, "clientPublicKey": ephemeral.public_key })), headers_with_ip("198.51.100.200"))
                 .await;
             assert_handler_error(
                 &blocked.body,
@@ -2281,18 +2186,10 @@ async fn start_login_is_rate_limited_per_email_across_ips_without_enumeration() 
                 .await
                 .expect("registered account SRP fixture should update");
             let registered = app
-                .call_operation(
-                    "auth.startLogin",
-                    json!([{ "email": fixture.email, "clientPublicKey": ephemeral.public_key }]),
-                    headers_with_ip("198.51.100.240"),
-                )
+                .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": fixture.email, "clientPublicKey": ephemeral.public_key })), headers_with_ip("198.51.100.240"))
                 .await;
             let fresh_missing = app
-                .call_operation(
-                    "auth.startLogin",
-                    json!([{ "email": "rl-login-fresh-missing@example.com", "clientPublicKey": ephemeral.public_key }]),
-                    headers_with_ip("198.51.100.241"),
-                )
+                .api_json(Method::POST, "/api/v1/auth/login-attempts", Some(json!({ "email": "rl-login-fresh-missing@example.com", "clientPublicKey": ephemeral.public_key })), headers_with_ip("198.51.100.241"))
                 .await;
             assert_eq!(
                 object_keys(&registered.body),
@@ -2318,9 +2215,13 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                 ]);
                 for index in 0..2 {
                     let response = app
-                        .call_operation(
-                            "auth.signup",
-                            signup_params(&crypto, &format!("rl-signup-ip-{index}@example.com")),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signups",
+                            Some(json!(signup_params(
+                                &crypto,
+                                &format!("rl-signup-ip-{index}@example.com")
+                            ))),
                             headers_with_ip("192.0.2.10"),
                         )
                         .await;
@@ -2328,9 +2229,13 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                     assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
-                    .call_operation(
-                        "auth.signup",
-                        signup_params(&crypto, "rl-signup-ip-blocked@example.com"),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!(signup_params(
+                            &crypto,
+                            "rl-signup-ip-blocked@example.com"
+                        ))),
                         headers_with_ip("192.0.2.10"),
                     )
                     .await;
@@ -2346,18 +2251,20 @@ async fn signup_is_rate_limited_per_ip_and_per_email() {
                 let email = "rl-signup-email@example.com";
                 for index in 0..2 {
                     let response = app
-                        .call_operation(
-                            "auth.signup",
-                            signup_params(&crypto, email),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/auth/signups",
+                            Some(json!(signup_params(&crypto, email))),
                             headers_with_ip(&format!("192.0.2.{}", 100 + index)),
                         )
                         .await;
                     assert!(response.body["code"] != json!(RATE_LIMITED_CODE));
                 }
                 let blocked = app
-                    .call_operation(
-                        "auth.signup",
-                        signup_params(&crypto, email),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/signups",
+                        Some(json!(signup_params(&crypto, email))),
                         headers_with_ip("192.0.2.200"),
                     )
                     .await;
@@ -2378,9 +2285,10 @@ async fn request_recovery_verification_is_rate_limited() {
 
             for _ in 0..2 {
                 let response = app
-                    .call_operation(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": fixture.email })),
                         headers_with_ip("192.0.2.55"),
                     )
                     .await;
@@ -2388,9 +2296,10 @@ async fn request_recovery_verification_is_rate_limited() {
             }
 
             let blocked = app
-                .call_operation(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": fixture.email }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/recovery-verifications",
+                    Some(json!({ "email": fixture.email })),
                     headers_with_ip("192.0.2.55"),
                 )
                 .await;
@@ -2416,9 +2325,10 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 
             for ip in ["198.51.100.1", "198.51.100.2"] {
                 let response = app
-                    .call_operation(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": fixture.email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": fixture.email })),
                         headers_with_ip(ip),
                     )
                     .await;
@@ -2427,9 +2337,10 @@ async fn request_recovery_verification_limits_one_email_across_rotating_ips() {
 
             // A third, previously unseen IP still hits the per-email counter.
             let blocked = app
-                .call_operation(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": fixture.email }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/recovery-verifications",
+                    Some(json!({ "email": fixture.email })),
                     headers_with_ip("198.51.100.3"),
                 )
                 .await;
@@ -2457,9 +2368,10 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
 
             for email in [&first.email, &second.email] {
                 let response = app
-                    .call_operation(
-                        "auth.requestRecoveryVerification",
-                        json!([{ "email": email }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/auth/recovery-verifications",
+                        Some(json!({ "email": email })),
                         headers_with_ip("203.0.113.9"),
                     )
                     .await;
@@ -2468,9 +2380,10 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
 
             // A third, previously unseen email still hits the per-IP counter.
             let blocked = app
-                .call_operation(
-                    "auth.requestRecoveryVerification",
-                    json!([{ "email": third.email }]),
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/recovery-verifications",
+                    Some(json!({ "email": third.email })),
                     headers_with_ip("203.0.113.9"),
                 )
                 .await;
@@ -2486,7 +2399,7 @@ async fn request_recovery_verification_limits_one_ip_across_rotating_emails() {
 }
 
 fn signup_params(crypto: &AuthCryptoFixture, email: &str) -> serde_json::Value {
-    json!([{
+    json!({
         "email": email,
         "signupVerificationToken": "invalid-token",
         "name": "Rate Limit Signup",
@@ -2501,7 +2414,7 @@ fn signup_params(crypto: &AuthCryptoFixture, email: &str) -> serde_json::Value {
         "recoveryKeyHint": crypto.recovery_key_hint,
         "encryptedVaultKey": crypto.encrypted_vault_key,
         "kdfParams": floor_kdf_params_json(),
-    }])
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -2537,9 +2450,10 @@ async fn insert_kdf_login_user(
 async fn start_login_ok(app: &ApiTestApp, email: &str) -> serde_json::Value {
     let ephemeral = build_login_ephemeral_fixture();
     let response = app
-        .call_operation(
-            "auth.startLogin",
-            json!([{ "email": email, "clientPublicKey": ephemeral.public_key }]),
+        .api_json(
+            Method::POST,
+            "/api/v1/auth/login-attempts",
+            Some(json!({ "email": email, "clientPublicKey": ephemeral.public_key })),
             unauthenticated_json_headers(),
         )
         .await;
@@ -2609,9 +2523,10 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
                 issue_signup_verification_token(&app, email, None).await;
 
             let signup = app
-                .call_operation(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": email,
                         "signupVerificationToken": signup_verification_token,
                         "name": "KDF Signup User",
@@ -2626,7 +2541,7 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                         "kdfParams": kdf_params_json(CURRENT_KDF_ITERATIONS),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -2651,9 +2566,10 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
 
             // Below-floor submission is rejected before the account is created.
             let below_floor = app
-                .call_operation(
-                    "auth.signup",
-                    json!([{
+                .api_json(
+                    Method::POST,
+                    "/api/v1/auth/signups",
+                    Some(json!({
                         "email": "kdf-weak@example.com",
                         "signupVerificationToken": "unused",
                         "name": "Weak KDF User",
@@ -2668,7 +2584,7 @@ async fn signup_persists_only_the_exact_current_kdf_profile() {
                         "recoveryKeyHint": crypto.recovery_key_hint,
                         "encryptedVaultKey": crypto.encrypted_vault_key,
                         "kdfParams": kdf_params_json(310_000),
-                    }]),
+                    })),
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -2696,15 +2612,16 @@ async fn change_password_rewrites_kdf_params_alongside_verifier() {
 
         let next = build_auth_crypto_fixture("kdf-change-next", "next-pass");
         let change = app
-            .call_operation(
-                "auth.changePassword",
-                json!([{
+            .api_json(
+                Method::POST,
+                "/api/v1/users/me/password-changes",
+                Some(json!({
                     "srpSalt": next.srp_salt,
                     "srpVerifier": next.srp_verifier,
                     "encryptedPrivateKey": next.encrypted_private_key,
                     "encryptedVaultKeys": [],
                     "kdfParams": kdf_params_json(600_000),
-                }]),
+                })),
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -2755,7 +2672,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
         for profile in invalid_profiles {
             let mutations = [
                 (
-                    "auth.updateEmail",
+                    "/api/v1/users/me/email-changes",
                     json!({
                         "newEmail": "kdf-policy-new@example.com",
                         "srpSalt": "aa",
@@ -2766,7 +2683,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
                     }),
                 ),
                 (
-                    "auth.changePassword",
+                    "/api/v1/users/me/password-changes",
                     json!({
                         "srpSalt": "aa",
                         "srpVerifier": "bb",
@@ -2776,7 +2693,7 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
                     }),
                 ),
                 (
-                    "auth.regenerateSecretKey",
+                    "/api/v1/users/me/secret-key-rotations",
                     json!({
                         "secretKeyHint": "SK1-TEST",
                         "srpSalt": "aa",
@@ -2788,11 +2705,12 @@ async fn verifier_mutations_reject_every_noncurrent_kdf_profile() {
                 ),
             ];
 
-            for (method, payload) in mutations {
+            for (path, payload) in mutations {
                 let response = app
-                    .call_operation(
-                        method,
-                        json!([payload]),
+                    .api_json(
+                        Method::POST,
+                        path,
+                        Some(payload),
                         authenticated_json_headers(&session.token),
                     )
                     .await;
@@ -2856,9 +2774,7 @@ async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failur
         let session = app.issue_session("kdf_rollback_user").await;
         let next = build_auth_crypto_fixture("kdf-rollback-next", "next-pass");
         let response = app
-            .call_operation(
-                "auth.changePassword",
-                json!([{
+            .api_json(Method::POST, "/api/v1/users/me/password-changes", Some(json!({
                     "srpSalt": next.srp_salt,
                     "srpVerifier": next.srp_verifier,
                     "encryptedPrivateKey": next.encrypted_private_key,
@@ -2867,9 +2783,7 @@ async fn change_password_rolls_back_credentials_and_vault_keys_after_late_failur
                         "encryptedVaultKey": "replacement-vault-key",
                     }],
                     "kdfParams": floor_kdf_params_json(),
-                }]),
-                authenticated_json_headers(&session.token),
-            )
+                })), authenticated_json_headers(&session.token))
             .await;
         assert_handler_error(
             &response.body,

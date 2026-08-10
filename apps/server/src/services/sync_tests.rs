@@ -2,12 +2,12 @@ use std::future::Future;
 
 use axum::{
     body::{to_bytes, Body},
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Request, StatusCode},
+    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, Request, StatusCode},
     Router as HttpRouter,
 };
 use rand::random;
 use serde_json::{json, Value};
-use sqlx::{query, query_scalar, PgPool};
+use sqlx::{query, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
@@ -536,14 +536,11 @@ async fn seed_attachment(
 #[tokio::test]
 async fn sync_handlers_require_authentication() {
     with_sync_test_app("sync_handlers_require_authentication", |app| async move {
-        let protected_calls = vec![
-            ("sync.bootstrapItems", json!([{}])),
-            ("sync.getEventsSince", json!([{}])),
-        ];
+        let protected_calls = ["/api/v1/sync/bootstrap", "/api/v1/sync/changes"];
 
-        for (method, params) in protected_calls {
+        for path in protected_calls {
             let response = app
-                .call_operation(method, params, unauthenticated_json_headers())
+                .api_json(Method::GET, path, None, unauthenticated_json_headers())
                 .await;
             response.assert_contract_status();
             assert_transport_error(
@@ -565,23 +562,21 @@ async fn sync_handlers_reject_malformed_request_input() {
             let session = app.issue_session(&fixture.owner_user_id).await;
             let headers = authenticated_json_headers(&session.token);
 
-            let cases = vec![
+            let cases = [
                 (
-                    "sync.bootstrapItems",
-                    json!([{ "limit": 0 }]),
+                    "/api/v1/sync/bootstrap?limit=0",
                     "BAD_REQUEST",
                     "Invalid params",
                 ),
                 (
-                    "sync.getEventsSince",
-                    json!([{ "sinceId": "bad!" }]),
+                    "/api/v1/sync/changes?sinceId=bad!",
                     "BAD_REQUEST",
                     "Invalid resource ID",
                 ),
             ];
 
-            for (method, params, code, message) in cases {
-                let response = app.call_operation(method, params, headers.clone()).await;
+            for (path, code, message) in cases {
+                let response = app.api_json(Method::GET, path, None, headers.clone()).await;
                 response.assert_contract_status();
                 assert_handler_error(&response.body, code, message);
             }
@@ -598,9 +593,10 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
         let headers = authenticated_json_headers(&session.token);
 
         let first_page = app
-            .call_operation(
-                "sync.getEventsSince",
-                json!([{ "limit": 1 }]),
+            .api_json(
+                Method::GET,
+                "/api/v1/sync/changes?limit=1",
+                None,
                 headers.clone(),
             )
             .await;
@@ -626,15 +622,13 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
             json!(fixture.old_primary_event_id)
         );
 
+        let filtered_path = format!(
+            "/api/v1/sync/changes?vaultIds={}&vaultIds={}",
+            fixture.secondary_vault_id, fixture.hidden_vault_id
+        );
         let filtered = app
-				.call_operation(
-					"sync.getEventsSince",
-					json!([{
-						"vaultIds": [fixture.secondary_vault_id.clone(), fixture.hidden_vault_id.clone()]
-					}]),
-					headers.clone(),
-				)
-				.await;
+            .api_json(Method::GET, &filtered_path, None, headers.clone())
+            .await;
         filtered.assert_contract_status();
         assert_eq!(
             filtered.body["events"]
@@ -648,12 +642,12 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
             json!(fixture.secondary_event_id)
         );
 
+        let next_page_path = format!(
+            "/api/v1/sync/changes?sinceId={}",
+            fixture.old_primary_event_id
+        );
         let next_page = app
-            .call_operation(
-                "sync.getEventsSince",
-                json!([{ "sinceId": fixture.old_primary_event_id }]),
-                headers.clone(),
-            )
+            .api_json(Method::GET, &next_page_path, None, headers.clone())
             .await;
         next_page.assert_contract_status();
         assert_eq!(
@@ -673,12 +667,9 @@ async fn get_events_since_paginates_filters_and_requires_full_refresh() {
         );
         assert_eq!(next_page.body["hasMore"], json!(false));
 
+        let full_refresh_path = format!("/api/v1/sync/changes?sinceId={}", fixture.hidden_event_id);
         let full_refresh = app
-            .call_operation(
-                "sync.getEventsSince",
-                json!([{ "sinceId": fixture.hidden_event_id }]),
-                headers,
-            )
+            .api_json(Method::GET, &full_refresh_path, None, headers)
             .await;
         full_refresh.assert_contract_status();
         assert_eq!(full_refresh.body["events"], json!([]));
@@ -700,9 +691,10 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
             let headers = authenticated_json_headers(&session.token);
 
             let first_page = app
-                .call_operation(
-                    "sync.bootstrapItems",
-                    json!([{ "limit": 1 }]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/sync/bootstrap?limit=1",
+                    None,
                     headers.clone(),
                 )
                 .await;
@@ -735,12 +727,10 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
                 json!(fixture.primary_item_id)
             );
 
+            let second_page_path =
+                format!("/api/v1/sync/bootstrap?cursor={}", fixture.primary_item_id);
             let second_page = app
-                .call_operation(
-                    "sync.bootstrapItems",
-                    json!([{ "cursor": fixture.primary_item_id }]),
-                    headers,
-                )
+                .api_json(Method::GET, &second_page_path, None, headers)
                 .await;
             second_page.assert_contract_status();
             assert_eq!(

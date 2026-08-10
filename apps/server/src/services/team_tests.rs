@@ -12,7 +12,7 @@ use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
     seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
 };
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method};
 use serde_json::{json, Value};
 use sqlx::{query, query_scalar, PgPool};
 use std::{collections::HashSet, future::Future};
@@ -701,68 +701,82 @@ fn generate_secure_token_returns_32_url_safe_characters() {
 #[tokio::test]
 async fn team_protected_handlers_require_authentication() {
     with_api_test_app("team_auth_matrix", |app| async move {
-        let valid_token = "A234567890123456789012345678901";
-        for (method, params) in [
-            ("team.list", json!([])),
-            ("team.get", json!([{ "teamId": "team_test" }])),
-            ("team.vaults", json!([{ "teamId": "team_test" }])),
-            ("team.create", json!([{ "name": "Example Team" }])),
+        for (method, path, payload) in [
+            (Method::GET, "/api/v1/teams/current", None),
+            (Method::GET, "/api/v1/teams/team_test", None),
+            (Method::GET, "/api/v1/teams/team_test/vaults", None),
             (
-                "team.update",
-                json!([{ "teamId": "team_test", "name": "Updated Team" }]),
+                Method::POST,
+                "/api/v1/teams",
+                Some(json!({ "name": "Example Team" })),
             ),
             (
-                "team.createImageUpload",
-                json!([{
-                    "teamId": "team_test",
+                Method::PATCH,
+                "/api/v1/teams/team_test",
+                Some(json!({ "name": "Updated Team" })),
+            ),
+            (
+                Method::POST,
+                "/api/v1/teams/team_test/image-uploads",
+                Some(json!({
                     "fileName": "logo.png",
                     "contentType": "image/png"
-                }]),
+                })),
             ),
-            ("team.delete", json!([{ "teamId": "team_test" }])),
+            (Method::DELETE, "/api/v1/teams/team_test", None),
             (
-                "team.leave",
-                json!([{ "teamId": "team_test", "vaultRotations": [] }]),
-            ),
-            (
-                "team.getLeaveRotationData",
-                json!([{ "teamId": "team_test" }]),
-            ),
-            ("team.members.list", json!([{ "teamId": "team_test" }])),
-            (
-                "team.members.getTeamRotationData",
-                json!([{ "teamId": "team_test", "excludeUserId": "user_test" }]),
+                Method::POST,
+                "/api/v1/teams/team_test/leave",
+                Some(json!({ "vaultRotations": [] })),
             ),
             (
-                "team.members.remove",
-                json!([{
-                    "teamId": "team_test",
-                    "userId": "user_test",
+                Method::GET,
+                "/api/v1/teams/team_test/leave-rotation-data",
+                None,
+            ),
+            (Method::GET, "/api/v1/teams/team_test/members", None),
+            (
+                Method::GET,
+                "/api/v1/teams/team_test/members/user_test/removal-rotation-data",
+                None,
+            ),
+            (
+                Method::DELETE,
+                "/api/v1/teams/team_test/members/user_test",
+                Some(json!({
                     "vaultRotations": []
-                }]),
+                })),
             ),
-            ("team.invitations.list", json!([{ "teamId": "team_test" }])),
-            ("team.invitations.pending", json!([])),
+            (Method::GET, "/api/v1/teams/team_test/invitations", None),
+            (Method::GET, "/api/v1/users/me/team-invitations", None),
             (
-                "team.invitations.send",
-                json!([{ "teamId": "team_test", "email": "invitee@example.com" }]),
-            ),
-            ("team.invitations.accept", json!([{ "token": valid_token }])),
-            (
-                "team.invitations.cancel",
-                json!([{ "invitationId": "invitation_test" }]),
+                Method::POST,
+                "/api/v1/teams/team_test/invitations",
+                Some(json!({ "email": "invitee@example.com" })),
             ),
             (
-                "team.invitations.resend",
-                json!([{ "invitationId": "invitation_test" }]),
+                Method::POST,
+                "/api/v1/public/team-invitations/A234567890123456789012345678901/accept",
+                None,
             ),
             (
-                "team.invitations.decline",
-                json!([{ "token": valid_token }]),
+                Method::DELETE,
+                "/api/v1/teams/team_test/invitations/invitation_test",
+                None,
+            ),
+            (
+                Method::POST,
+                "/api/v1/teams/team_test/invitations/invitation_test/resend",
+                None,
+            ),
+            (
+                Method::POST,
+                "/api/v1/public/team-invitations/A234567890123456789012345678901/decline",
+                None,
             ),
         ] {
             let response = app
-                .call_operation(method, params, unauthenticated_json_headers())
+                .api_json(method, path, payload, unauthenticated_json_headers())
                 .await;
 
             response.assert_contract_status();
@@ -779,11 +793,11 @@ async fn team_protected_handlers_require_authentication() {
 #[tokio::test]
 async fn team_handlers_reject_malformed_request_input() {
     with_api_test_app("team_bad_params", |app| async move {
-        let fixture = build_team_router_fixture(&app.pool).await;
         let token_response = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{}]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", "missing-token"),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -801,16 +815,17 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let send_response = app
-            .call_operation(
-                "team.invitations.send",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                Some(json!({
+
                     "email": "team-invitee@example.com",
                     "pendingVaultKeys": [{
                         "vaultId": fixture.accessible_vault_id,
                         "encryptedVaultKey": "invitee-wrapped-key"
                     }]
-                }]),
+                })),
                 owner_headers.clone(),
             )
             .await;
@@ -829,9 +844,10 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             .to_string();
 
         let list_response = app
-            .call_operation(
-                "team.invitations.list",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                None,
                 owner_headers.clone(),
             )
             .await;
@@ -843,9 +859,10 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
         let invitee_session = app.issue_session(&fixture.invitee_user_id).await;
         let pending_response = app
-            .call_operation(
-                "team.invitations.pending",
-                json!([]),
+            .api_json(
+                Method::GET,
+                "/api/v1/users/me/team-invitations",
+                None,
                 authenticated_json_headers(&invitee_session.token),
             )
             .await;
@@ -859,9 +876,13 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         assert!(pending_response.body["items"][0]["token"].is_null());
 
         let public_lookup = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": invitation_token.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/public/team-invitations/{}",
+                    invitation_token.clone()
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -870,9 +891,10 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         assert_eq!(public_lookup.body["teamId"], json!(fixture.team_id.clone()));
 
         let invalid_token_response = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": "short-token" }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", "short-token"),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -881,9 +903,10 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
         let missing_token = "0123456789abcdefghijklmnopqrstuv";
         let missing_response = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": missing_token }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", missing_token),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -903,9 +926,13 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         )
         .await;
         let expired_lookup = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": "ZXCVBNMASDFGHJKLQWERTYUIOP123456" }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/public/team-invitations/{}",
+                    "ZXCVBNMASDFGHJKLQWERTYUIOP123456"
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -914,9 +941,10 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_list = app
-            .call_operation(
-                "team.invitations.list",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                None,
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -934,9 +962,14 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
             .await
             .expect("invitation should update");
         let resend_response = app
-            .call_operation(
-                "team.invitations.resend",
-                json!([{ "invitationId": invitation_id.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/teams/{}/invitations/{}/resend",
+                    fixture.team_id,
+                    invitation_id.clone()
+                ),
+                None,
                 owner_headers.clone(),
             )
             .await;
@@ -959,9 +992,14 @@ async fn team_invitation_lookup_send_list_pending_cancel_and_resend_paths() {
         assert!(resent_expires_at > OffsetDateTime::now_utc());
 
         let cancel_response = app
-            .call_operation(
-                "team.invitations.cancel",
-                json!([{ "invitationId": invitation_id.clone() }]),
+            .api_json(
+                Method::DELETE,
+                &format!(
+                    "/api/v1/teams/{}/invitations/{}",
+                    fixture.team_id,
+                    invitation_id.clone()
+                ),
+                None,
                 owner_headers,
             )
             .await;
@@ -986,7 +1024,12 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let list_response = app
-            .call_operation("team.list", json!([]), owner_headers.clone())
+            .api_json(
+                Method::GET,
+                "/api/v1/teams/current",
+                None,
+                owner_headers.clone(),
+            )
             .await;
         list_response.assert_contract_status();
         assert_eq!(list_response.body["id"], json!(fixture.team_id.clone()));
@@ -994,9 +1037,10 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 
         let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
         let no_team_list = app
-            .call_operation(
-                "team.list",
-                json!([]),
+            .api_json(
+                Method::GET,
+                "/api/v1/teams/current",
+                None,
                 authenticated_json_headers(&no_team_session.token),
             )
             .await;
@@ -1004,9 +1048,10 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         assert_handler_error(&no_team_list.body, "NOT_FOUND", "User has no team");
 
         let get_response = app
-            .call_operation(
-                "team.get",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                None,
                 owner_headers.clone(),
             )
             .await;
@@ -1019,9 +1064,10 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
         let forbidden_get = app
-            .call_operation(
-                "team.get",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                None,
                 authenticated_json_headers(&outsider_session.token),
             )
             .await;
@@ -1033,9 +1079,10 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let create_response = app
-            .call_operation(
-                "team.create",
-                json!([{ "name": "Manual Team" }]),
+            .api_json(
+                Method::POST,
+                "/api/v1/teams",
+                Some(json!({ "name": "Manual Team" })),
                 owner_headers.clone(),
             )
             .await;
@@ -1048,12 +1095,13 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_update = app
-            .call_operation(
-                "team.update",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                Some(json!({
+
                     "name": "Forbidden Rename"
-                }]),
+                })),
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -1065,13 +1113,14 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let update_response = app
-            .call_operation(
-                "team.update",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                Some(json!({
+
                     "name": "Renamed Router Team",
                     "imageKey": "teams/team_router_main/custom-logo.png"
-                }]),
+                })),
                 owner_headers.clone(),
             )
             .await;
@@ -1094,9 +1143,10 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             Some("teams/team_router_main/custom-logo.png".to_string())
         );
 
-        let team_after_update = with_storage_env_async(app.call_operation(
-            "team.get",
-            json!([{ "teamId": fixture.team_id }]),
+        let team_after_update = with_storage_env_async(app.api_json(
+            Method::GET,
+            &format!("/api/v1/teams/{}", fixture.team_id),
+            None,
             owner_headers.clone(),
         ))
         .await;
@@ -1107,13 +1157,14 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let forbidden_upload = app
-            .call_operation(
-                "team.createImageUpload",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/image-uploads", fixture.team_id),
+                Some(json!({
+
                     "fileName": "logo.png",
                     "contentType": "image/png"
-                }]),
+                })),
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -1125,13 +1176,14 @@ async fn team_list_get_create_update_and_image_upload_paths() {
         );
 
         let invalid_upload = app
-            .call_operation(
-                "team.createImageUpload",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/image-uploads", fixture.team_id),
+                Some(json!({
+
                     "fileName": "logo.txt",
                     "contentType": "text/plain"
-                }]),
+                })),
                 owner_headers.clone(),
             )
             .await;
@@ -1142,13 +1194,14 @@ async fn team_list_get_create_update_and_image_upload_paths() {
             "Only image files are allowed",
         );
 
-        let upload_response = with_storage_env_async(app.call_operation(
-            "team.createImageUpload",
-            json!([{
-                "teamId": fixture.team_id,
+        let upload_response = with_storage_env_async(app.api_json(
+            Method::POST,
+            &format!("/api/v1/teams/{}/image-uploads", fixture.team_id),
+            Some(json!({
+
                 "fileName": "logo.png",
                 "contentType": "image/png"
-            }]),
+            })),
             owner_headers,
         ))
         .await;
@@ -1188,9 +1241,10 @@ async fn team_vaults_members_and_leave_rotation_queries() {
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let vaults_response = app
-            .call_operation(
-                "team.vaults",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}/vaults", fixture.team_id),
+                None,
                 owner_headers.clone(),
             )
             .await;
@@ -1211,9 +1265,10 @@ async fn team_vaults_members_and_leave_rotation_queries() {
 
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_vaults = app
-            .call_operation(
-                "team.vaults",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}/vaults", fixture.team_id),
+                None,
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -1225,9 +1280,10 @@ async fn team_vaults_members_and_leave_rotation_queries() {
         );
 
         let members_response = app
-            .call_operation(
-                "team.members.list",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}/members", fixture.team_id),
+                None,
                 owner_headers.clone(),
             )
             .await;
@@ -1250,9 +1306,10 @@ async fn team_vaults_members_and_leave_rotation_queries() {
 
         let outsider_session = app.issue_session(&fixture.outsider_user_id).await;
         let forbidden_members = app
-            .call_operation(
-                "team.members.list",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}/members", fixture.team_id),
+                None,
                 authenticated_json_headers(&outsider_session.token),
             )
             .await;
@@ -1264,9 +1321,10 @@ async fn team_vaults_members_and_leave_rotation_queries() {
         );
 
         let leave_rotation_response = app
-            .call_operation(
-                "team.getLeaveRotationData",
-                json!([{ "teamId": fixture.team_id }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/teams/{}/leave-rotation-data", fixture.team_id),
+                None,
                 authenticated_json_headers(&member_session.token),
             )
             .await;
@@ -1303,12 +1361,13 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let send_response = app
-            .call_operation(
-                "team.invitations.send",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                Some(json!({
+
                     "email": "team-accept@example.com"
-                }]),
+                })),
                 owner_headers,
             )
             .await;
@@ -1334,9 +1393,10 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         // The stored digest is not a bearer token: replaying it must not resolve.
         let replayed = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": stored }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", stored),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1344,9 +1404,13 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         // A well-formed but wrong token still fails.
         let wrong = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": "0123456789abcdefghijklmnopqrstuv" }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/public/team-invitations/{}",
+                    "0123456789abcdefghijklmnopqrstuv"
+                ),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1354,9 +1418,10 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         // The raw token from the emailed link still resolves and accepts.
         let lookup = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": token.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", token.clone()),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1364,9 +1429,10 @@ async fn team_invitation_token_is_stored_hashed_and_still_accepts() {
 
         let accept_session = app.issue_session(&fixture.accept_user_id).await;
         let accepted = app
-            .call_operation(
-                "team.invitations.accept",
-                json!([{ "token": token }]),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/public/team-invitations/{}/accept", token),
+                None,
                 authenticated_json_headers(&accept_session.token),
             )
             .await;
@@ -1387,12 +1453,13 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let send_response = app
-            .call_operation(
-                "team.invitations.send",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                Some(json!({
+
                     "email": "team-accept@example.com"
-                }]),
+                })),
                 owner_headers.clone(),
             )
             .await;
@@ -1414,9 +1481,14 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
                 .expect("invitation should load");
 
         let resend_response = app
-            .call_operation(
-                "team.invitations.resend",
-                json!([{ "invitationId": invitation_id.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/teams/{}/invitations/{}/resend",
+                    fixture.team_id,
+                    invitation_id.clone()
+                ),
+                None,
                 owner_headers,
             )
             .await;
@@ -1452,9 +1524,10 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
 
         // The link handed out before the resend is dead.
         let stale_lookup = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": original_token.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", original_token.clone()),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1462,9 +1535,10 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
 
         let accept_session = app.issue_session(&fixture.accept_user_id).await;
         let stale_accept = app
-            .call_operation(
-                "team.invitations.accept",
-                json!([{ "token": original_token }]),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/public/team-invitations/{}/accept", original_token),
+                None,
                 authenticated_json_headers(&accept_session.token),
             )
             .await;
@@ -1476,18 +1550,20 @@ async fn team_invitation_resend_rotates_token_and_returns_a_working_link() {
 
         // The link built from the resend response works end to end.
         let fresh_lookup = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": rotated_token.clone() }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", rotated_token.clone()),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
         assert_eq!(fresh_lookup.body["status"], json!("pending"));
 
         let accepted = app
-            .call_operation(
-                "team.invitations.accept",
-                json!([{ "token": rotated_token }]),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/public/team-invitations/{}/accept", rotated_token),
+                None,
                 authenticated_json_headers(&accept_session.token),
             )
             .await;
@@ -1525,9 +1601,13 @@ async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() 
 
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let resend_response = app
-            .call_operation(
-                "team.invitations.resend",
-                json!([{ "invitationId": invitation_id }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/teams/{}/invitations/{}/resend",
+                    fixture.team_id, invitation_id
+                ),
+                None,
                 authenticated_json_headers(&owner_session.token),
             )
             .await;
@@ -1548,9 +1628,10 @@ async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() 
         assert_ne!(stored, hash_token(original_token));
 
         let stale_lookup = app
-            .call_operation(
-                "team.invitations.getByToken",
-                json!([{ "token": original_token }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/public/team-invitations/{}", original_token),
+                None,
                 unauthenticated_json_headers(),
             )
             .await;
@@ -1558,9 +1639,10 @@ async fn team_invitation_resend_revives_expired_invitation_with_a_fresh_token() 
 
         let accept_session = app.issue_session(&fixture.accept_user_id).await;
         let accepted = app
-            .call_operation(
-                "team.invitations.accept",
-                json!([{ "token": rotated_token }]),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/public/team-invitations/{}/accept", rotated_token),
+                None,
                 authenticated_json_headers(&accept_session.token),
             )
             .await;
@@ -1579,12 +1661,13 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let accept_invitation = app
-            .call_operation(
-                "team.invitations.send",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                Some(json!({
+
                     "email": "team-accept@example.com"
-                }]),
+                })),
                 owner_headers.clone(),
             )
             .await;
@@ -1596,9 +1679,13 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
         // Someone else's invitation id is not a credential.
         let wrong_user_session = app.issue_session(&fixture.no_team_user_id).await;
         let wrong_user_accept = app
-            .call_operation(
-                "team.invitations.acceptById",
-                json!([{ "invitationId": accept_invitation_id.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/users/me/team-invitations/{}/accept",
+                    accept_invitation_id.clone()
+                ),
+                None,
                 authenticated_json_headers(&wrong_user_session.token),
             )
             .await;
@@ -1609,9 +1696,13 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
         );
 
         let unknown_accept = app
-            .call_operation(
-                "team.invitations.acceptById",
-                json!([{ "invitationId": "team_invitation_missing" }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/users/me/team-invitations/{}/accept",
+                    "team_invitation_missing"
+                ),
+                None,
                 authenticated_json_headers(&wrong_user_session.token),
             )
             .await;
@@ -1623,9 +1714,13 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
 
         let accept_user_session = app.issue_session(&fixture.accept_user_id).await;
         let accepted = app
-            .call_operation(
-                "team.invitations.acceptById",
-                json!([{ "invitationId": accept_invitation_id.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/users/me/team-invitations/{}/accept",
+                    accept_invitation_id.clone()
+                ),
+                None,
                 authenticated_json_headers(&accept_user_session.token),
             )
             .await;
@@ -1639,12 +1734,13 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
         assert_eq!(accepted_status, "accepted");
 
         let decline_invitation = app
-            .call_operation(
-                "team.invitations.send",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                Some(json!({
+
                     "email": "team-decline@example.com"
-                }]),
+                })),
                 owner_headers,
             )
             .await;
@@ -1655,9 +1751,13 @@ async fn team_invitation_accept_and_decline_by_id_paths() {
 
         let decline_user_session = app.issue_session(&fixture.decline_user_id).await;
         let declined = app
-            .call_operation(
-                "team.invitations.declineById",
-                json!([{ "invitationId": decline_invitation_id.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/users/me/team-invitations/{}/decline",
+                    decline_invitation_id.clone()
+                ),
+                None,
                 authenticated_json_headers(&decline_user_session.token),
             )
             .await;
@@ -1681,16 +1781,17 @@ async fn team_invitation_accept_and_decline_paths() {
         let owner_headers = authenticated_json_headers(&owner_session.token);
 
         let accept_invitation = app
-            .call_operation(
-                "team.invitations.send",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                Some(json!({
+
                     "email": "team-accept@example.com",
                     "pendingVaultKeys": [{
                         "vaultId": fixture.accessible_vault_id,
                         "encryptedVaultKey": "accepted-user-key"
                     }]
-                }]),
+                })),
                 owner_headers.clone(),
             )
             .await;
@@ -1706,9 +1807,13 @@ async fn team_invitation_accept_and_decline_paths() {
 
         let wrong_user_session = app.issue_session(&fixture.no_team_user_id).await;
         let wrong_user_accept = app
-            .call_operation(
-                "team.invitations.accept",
-                json!([{ "token": accept_token.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/team-invitations/{}/accept",
+                    accept_token.clone()
+                ),
+                None,
                 authenticated_json_headers(&wrong_user_session.token),
             )
             .await;
@@ -1721,9 +1826,13 @@ async fn team_invitation_accept_and_decline_paths() {
 
         let accept_user_session = app.issue_session(&fixture.accept_user_id).await;
         let accept_response = app
-            .call_operation(
-                "team.invitations.accept",
-                json!([{ "token": accept_token.clone() }]),
+            .api_json(
+                Method::POST,
+                &format!(
+                    "/api/v1/public/team-invitations/{}/accept",
+                    accept_token.clone()
+                ),
+                None,
                 authenticated_json_headers(&accept_user_session.token),
             )
             .await;
@@ -1764,12 +1873,13 @@ async fn team_invitation_accept_and_decline_paths() {
         assert_eq!(accepted_status, "accepted");
 
         let decline_invitation = app
-            .call_operation(
-                "team.invitations.send",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/invitations", fixture.team_id),
+                Some(json!({
+
                     "email": "team-decline@example.com"
-                }]),
+                })),
                 owner_headers,
             )
             .await;
@@ -1785,9 +1895,10 @@ async fn team_invitation_accept_and_decline_paths() {
 
         let decline_user_session = app.issue_session(&fixture.decline_user_id).await;
         let decline_response = app
-            .call_operation(
-                "team.invitations.decline",
-                json!([{ "token": decline_token }]),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/public/team-invitations/{}/decline", decline_token),
+                None,
                 authenticated_json_headers(&decline_user_session.token),
             )
             .await;
@@ -1811,9 +1922,10 @@ async fn team_leave_paths() {
 
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let owner_leave = app
-            .call_operation(
-                "team.leave",
-                json!([{ "teamId": fixture.team_id, "vaultRotations": [] }]),
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/leave", fixture.team_id),
+                Some(json!({  "vaultRotations": [] })),
                 authenticated_json_headers(&owner_session.token),
             )
             .await;
@@ -1827,10 +1939,11 @@ async fn team_leave_paths() {
         let leaving_session = app.issue_session(&fixture.member_user_id).await;
         let additional_session = app.issue_session(&fixture.member_user_id).await;
         let leave_response = app
-            .call_operation(
-                "team.leave",
-                json!([{
-                    "teamId": fixture.team_id,
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/leave", fixture.team_id),
+                Some(json!({
+
                     "vaultRotations": [{
                         "vaultId": fixture.accessible_vault_id,
                         "keyRotation": {
@@ -1855,7 +1968,7 @@ async fn team_leave_paths() {
                             }]
                         }
                     }]
-                }]),
+                })),
                 authenticated_json_headers(&leaving_session.token),
             )
             .await;
@@ -1938,9 +2051,10 @@ async fn team_delete_paths() {
         let member_session = app.issue_session(&fixture.member_user_id).await;
         let forbidden_delete = with_bittery_mode_async(
             Some("cloud"),
-            app.call_operation(
-                "team.delete",
-                json!([{ "teamId": fixture.team_id }]),
+            app.api_json(
+                Method::DELETE,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                None,
                 authenticated_json_headers(&member_session.token),
             ),
         )
@@ -1955,9 +2069,10 @@ async fn team_delete_paths() {
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let self_hosted_delete = with_bittery_mode_async(
             Some("self_hosted"),
-            app.call_operation(
-                "team.delete",
-                json!([{ "teamId": fixture.team_id }]),
+            app.api_json(
+                Method::DELETE,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                None,
                 authenticated_json_headers(&owner_session.token),
             ),
         )
@@ -1971,9 +2086,10 @@ async fn team_delete_paths() {
 
         let members_blocked = with_bittery_mode_async(
             Some("cloud"),
-            app.call_operation(
-                "team.delete",
-                json!([{ "teamId": fixture.team_id }]),
+            app.api_json(
+                Method::DELETE,
+                &format!("/api/v1/teams/{}", fixture.team_id),
+                None,
                 authenticated_json_headers(&owner_session.token),
             ),
         )
@@ -2017,9 +2133,10 @@ async fn team_delete_paths() {
         let vault_owner_session = app.issue_session(vault_owner_id).await;
         let vault_blocked = with_bittery_mode_async(
             Some("cloud"),
-            app.call_operation(
-                "team.delete",
-                json!([{ "teamId": vault_team_id }]),
+            app.api_json(
+                Method::DELETE,
+                &format!("/api/v1/teams/{}", vault_team_id),
+                None,
                 authenticated_json_headers(&vault_owner_session.token),
             ),
         )
@@ -2054,9 +2171,10 @@ async fn team_delete_paths() {
         let success_session = app.issue_session(success_owner_id).await;
         let delete_success = with_bittery_mode_async(
             Some("cloud"),
-            app.call_operation(
-                "team.delete",
-                json!([{ "teamId": success_team_id }]),
+            app.api_json(
+                Method::DELETE,
+                &format!("/api/v1/teams/{}", success_team_id),
+                None,
                 authenticated_json_headers(&success_session.token),
             ),
         )
@@ -2092,14 +2210,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				let owner_session = app.issue_session(&fixture.owner_user_id).await;
 				let owner_headers = authenticated_json_headers(&owner_session.token);
 				let owner_rotation = app
-					.call_operation(
-						"team.members.getTeamRotationData",
-						json!([{
-							"teamId": fixture.team_id,
-							"excludeUserId": fixture.remove_target_user_id
-						}]),
-						owner_headers.clone(),
-					)
+					.api_json(Method::GET, &format!("/api/v1/teams/{}/members/{}/removal-rotation-data", fixture.team_id, fixture.remove_target_user_id), None, owner_headers.clone())
 					.await;
 				owner_rotation.assert_contract_status();
 				let owner_vaults = owner_rotation.body["vaults"]
@@ -2111,14 +2222,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 
 				let admin_session = app.issue_session(&fixture.admin_user_id).await;
 				let admin_rotation = app
-					.call_operation(
-						"team.members.getTeamRotationData",
-						json!([{
-							"teamId": fixture.team_id,
-							"excludeUserId": fixture.remove_target_user_id
-						}]),
-						authenticated_json_headers(&admin_session.token),
-					)
+					.api_json(Method::GET, &format!("/api/v1/teams/{}/members/{}/removal-rotation-data", fixture.team_id, fixture.remove_target_user_id), None, authenticated_json_headers(&admin_session.token))
 					.await;
 				admin_rotation.assert_contract_status();
 				assert_handler_error(
@@ -2129,14 +2233,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 
 				let member_session = app.issue_session(&fixture.member_user_id).await;
 				let member_rotation = app
-					.call_operation(
-						"team.members.getTeamRotationData",
-						json!([{
-							"teamId": fixture.team_id,
-							"excludeUserId": fixture.remove_target_user_id
-						}]),
-						authenticated_json_headers(&member_session.token),
-					)
+					.api_json(Method::GET, &format!("/api/v1/teams/{}/members/{}/removal-rotation-data", fixture.team_id, fixture.remove_target_user_id), None, authenticated_json_headers(&member_session.token))
 					.await;
 				member_rotation.assert_contract_status();
 				assert_handler_error(
@@ -2146,15 +2243,11 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				);
 
 				let missing_target = app
-					.call_operation(
-						"team.members.remove",
-						json!([{
-							"teamId": fixture.team_id,
-							"userId": "missing-user",
+					.api_json(Method::DELETE, &format!("/api/v1/teams/{}/members/{}", fixture.team_id, "missing-user"), Some(json!({
+
+
 							"vaultRotations": []
-						}]),
-						owner_headers.clone(),
-					)
+						})), owner_headers.clone())
 					.await;
 				missing_target.assert_contract_status();
 				assert_handler_error(
@@ -2164,15 +2257,11 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 				);
 
 				let self_remove = app
-					.call_operation(
-						"team.members.remove",
-						json!([{
-							"teamId": fixture.team_id,
-							"userId": fixture.owner_user_id,
+					.api_json(Method::DELETE, &format!("/api/v1/teams/{}/members/{}", fixture.team_id, fixture.owner_user_id), Some(json!({
+
+
 							"vaultRotations": []
-						}]),
-						owner_headers.clone(),
-					)
+						})), owner_headers.clone())
 					.await;
 				self_remove.assert_contract_status();
 				assert_handler_error(
@@ -2183,11 +2272,9 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 
 				let removed_session = app.issue_session(&fixture.remove_target_user_id).await;
 				let remove_response = app
-					.call_operation(
-						"team.members.remove",
-						json!([{
-							"teamId": fixture.team_id,
-							"userId": fixture.remove_target_user_id,
+					.api_json(Method::DELETE, &format!("/api/v1/teams/{}/members/{}", fixture.team_id, fixture.remove_target_user_id), Some(json!({
+
+
 							"vaultRotations": [
 								{
 									"vaultId": fixture.accessible_vault_id,
@@ -2228,9 +2315,7 @@ async fn team_member_rotation_remove_and_delete_account_paths() {
 									}
 								}
 							]
-						}]),
-						owner_headers,
-					)
+						})), owner_headers)
 					.await;
 				remove_response.assert_contract_status();
 				assert_eq!(remove_response.body["success"], json!(true));

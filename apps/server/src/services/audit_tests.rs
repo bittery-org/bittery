@@ -1,6 +1,6 @@
 use std::{collections::HashMap, future::Future};
 
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method};
 use serde_json::json;
 use sqlx::{query, PgPool};
 use time::{macros::datetime, OffsetDateTime};
@@ -456,9 +456,10 @@ async fn team_events_requires_authentication() {
         "audit_team_events_requires_authentication",
         |app| async move {
             let response = app
-                .call_operation(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     unauthenticated_json_headers(),
                 )
                 .await;
@@ -482,9 +483,10 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let member_session = app.issue_session(&fixture.member_user_id).await;
             let member_response = app
-                .call_operation(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&member_session.token),
                 )
                 .await;
@@ -497,9 +499,10 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let personal_session = app.issue_session(&fixture.personal_owner_user_id).await;
             let personal_response = app
-                .call_operation(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&personal_session.token),
                 )
                 .await;
@@ -512,9 +515,10 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let inactive_session = app.issue_session(&fixture.inactive_owner_user_id).await;
             let inactive_response = app
-                .call_operation(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&inactive_session.token),
                 )
                 .await;
@@ -527,9 +531,10 @@ async fn team_events_enforce_access_control_and_team_not_found_paths() {
 
             let no_team_session = app.issue_session(&fixture.no_team_user_id).await;
             let no_team_response = app
-                .call_operation(
-                    "audit.teamEvents",
-                    json!([{}]),
+                .api_json(
+                    Method::GET,
+                    "/api/v1/audit-events",
+                    None,
                     authenticated_json_headers(&no_team_session.token),
                 )
                 .await;
@@ -548,9 +553,10 @@ async fn team_events_allow_self_hosted_admins_without_team_plan() {
         let session = app.issue_session(&fixture.personal_owner_user_id).await;
         let response = with_bittery_mode_async(
             Some("self_hosted"),
-            app.call_operation(
-                "audit.teamEvents",
-                json!([{ "limit": 1 }]),
+            app.api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?limit={}", 1),
+                None,
                 authenticated_json_headers(&session.token),
             ),
         )
@@ -574,12 +580,13 @@ async fn team_events_reject_malformed_request_input() {
         let headers = authenticated_json_headers(&session.token);
 
         let date_response = app
-            .call_operation(
-                "audit.teamEvents",
-                json!([{
-                    "from": "2025-05-03T00:00:00Z",
-                    "to": "2025-05-02T00:00:00Z"
-                }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/audit-events?from={}&to={}",
+                    "2025-05-03T00:00:00Z", "2025-05-02T00:00:00Z"
+                ),
+                None,
                 headers.clone(),
             )
             .await;
@@ -591,9 +598,10 @@ async fn team_events_reject_malformed_request_input() {
         );
 
         let cursor_response = app
-            .call_operation(
-                "audit.teamEvents",
-                json!([{ "cursor": "not-base64" }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?cursor={}", "not-base64"),
+                None,
                 headers,
             )
             .await;
@@ -652,9 +660,10 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
 
         let session = app.issue_session(&fixture.owner_user_id).await;
         let first_page = app
-            .call_operation(
-                "audit.teamEvents",
-                json!([{ "limit": 2 }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?limit={}", 2),
+                None,
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -680,9 +689,10 @@ async fn team_events_return_paginated_merged_results_with_cursor() {
             .to_string();
 
         let second_page = app
-            .call_operation(
-                "audit.teamEvents",
-                json!([{ "cursor": next_cursor }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?cursor={}", next_cursor),
+                None,
                 authenticated_json_headers(&session.token),
             )
             .await;
@@ -764,9 +774,13 @@ async fn team_events_apply_share_other_and_actor_filters() {
         let headers = authenticated_json_headers(&session.token);
 
         let share_failure_response = app
-            .call_operation(
-                "audit.teamEvents",
-                json!([{ "actionGroup": "share", "result": "failure" }]),
+            .api_json(
+                Method::GET,
+                &format!(
+                    "/api/v1/audit-events?actionGroup={}&result={}",
+                    "share", "failure"
+                ),
+                None,
                 headers.clone(),
             )
             .await;
@@ -788,9 +802,10 @@ async fn team_events_apply_share_other_and_actor_filters() {
         );
 
         let other_response = app
-            .call_operation(
-                "audit.teamEvents",
-                json!([{ "actionGroup": "other" }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?actionGroup={}", "other"),
+                None,
                 headers.clone(),
             )
             .await;
@@ -809,9 +824,10 @@ async fn team_events_apply_share_other_and_actor_filters() {
         );
 
         let unknown_actor_response = app
-            .call_operation(
-                "audit.teamEvents",
-                json!([{ "actorUserId": "missing_member" }]),
+            .api_json(
+                Method::GET,
+                &format!("/api/v1/audit-events?actorUserId={}", "missing_member"),
+                None,
                 headers,
             )
             .await;

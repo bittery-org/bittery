@@ -36,7 +36,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/attachments/{attachmentId}": {
@@ -194,7 +197,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -360,7 +368,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/attachments/{attachmentId}/download-urls": {
@@ -518,7 +531,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/audit-events": {
@@ -653,6 +671,16 @@
               }
             }
           },
+          "404": {
+            "description": "Current team not found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Internal error",
             "content": {
@@ -663,7 +691,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/auth/email-checks": {
@@ -700,7 +733,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/login-attempts": {
@@ -757,7 +793,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/login-attempts/{attemptId}/finish": {
@@ -824,7 +863,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/recovery-sessions/data": {
@@ -881,7 +923,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/recovery-sessions/reset-password": {
@@ -938,7 +983,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/recovery-verifications": {
@@ -995,7 +1043,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/recovery-verifications/verify": {
@@ -1052,7 +1103,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/registration-status": {
@@ -1090,7 +1144,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/signup-verifications": {
@@ -1147,7 +1204,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/signup-verifications/verify": {
@@ -1204,7 +1264,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/auth/signups": {
@@ -1233,6 +1296,16 @@
           },
           "400": {
             "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Signup verification token is missing or invalid",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1270,8 +1343,21 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Signup rate limit exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/billing/attachment-usage": {
@@ -1341,7 +1427,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/billing/checkout-sessions": {
@@ -1421,7 +1512,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/billing/entitlements": {
@@ -1491,7 +1587,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/billing/portal-sessions": {
@@ -1561,7 +1662,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/billing/status": {
@@ -1631,7 +1737,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/billing/team-seats/addition-preview": {
@@ -1740,7 +1851,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items": {
@@ -1916,7 +2032,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/trashed": {
@@ -2084,7 +2205,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}": {
@@ -2250,7 +2376,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -2423,7 +2554,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -2624,7 +2760,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}/attachment-uploads": {
@@ -2792,7 +2933,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}/attachments": {
@@ -2968,7 +3114,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -3134,7 +3285,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}/favorite": {
@@ -3337,7 +3493,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}/moves": {
@@ -3540,7 +3701,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}/permanent": {
@@ -3715,7 +3881,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}/restore": {
@@ -3908,7 +4079,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/items/{itemId}/share-links": {
@@ -3978,6 +4154,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -4008,7 +4194,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -4098,6 +4289,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -4128,7 +4329,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/public/share-links/{token}": {
@@ -4198,6 +4404,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -4228,7 +4444,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/public/share-links/{token}/accesses": {
@@ -4298,6 +4517,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -4328,7 +4557,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/public/share-links/{token}/email-accesses": {
@@ -4408,6 +4640,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -4438,7 +4680,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/public/share-links/{token}/email-verifications": {
@@ -4518,6 +4763,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -4548,7 +4803,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/public/team-invitations/{token}": {
@@ -4658,7 +4916,10 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {}
+        ]
       }
     },
     "/api/v1/public/team-invitations/{token}/accept": {
@@ -4768,7 +5029,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/public/team-invitations/{token}/decline": {
@@ -4878,7 +5144,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/sessions": {
@@ -4945,7 +5216,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/sessions/current/refresh": {
@@ -4982,7 +5258,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/sessions/{sessionId}": {
@@ -5005,6 +5286,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The current session cannot revoke itself",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
                 }
               }
             }
@@ -5039,7 +5330,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "patch": {
         "operationId": "rename_session",
@@ -5114,7 +5410,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/share-links/{linkId}": {
@@ -5184,6 +5485,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -5214,7 +5525,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/share-links/{linkId}/access-logs": {
@@ -5287,6 +5603,16 @@
               }
             }
           },
+          "415": {
+            "description": "Unsupported media type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Idempotency is not allowed for one-time-secret responses",
             "content": {
@@ -5317,7 +5643,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/sync/bootstrap": {
@@ -5387,7 +5718,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/sync/changes": {
@@ -5471,7 +5807,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/sync/events": {
@@ -5507,7 +5848,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams": {
@@ -5617,7 +5963,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/current": {
@@ -5717,7 +6068,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}": {
@@ -5827,7 +6183,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -5935,7 +6296,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -6053,7 +6419,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/image-uploads": {
@@ -6173,7 +6544,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/invitations": {
@@ -6301,7 +6677,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "post": {
         "tags": [
@@ -6431,7 +6812,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/invitations/{invitationId}": {
@@ -6549,7 +6935,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/invitations/{invitationId}/resend": {
@@ -6679,7 +7070,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/leave": {
@@ -6799,7 +7195,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/leave-rotation-data": {
@@ -6909,7 +7310,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/members": {
@@ -7037,7 +7443,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/members/{userId}": {
@@ -7165,7 +7576,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/members/{userId}/access": {
@@ -7283,7 +7699,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-data": {
@@ -7401,7 +7822,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/teams/{teamId}/vaults": {
@@ -7529,7 +7955,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/travel-mode": {
@@ -7599,7 +8030,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/travel-mode/disable": {
@@ -7679,7 +8115,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/travel-mode/enable": {
@@ -7759,7 +8200,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/travel-mode/hidden-vaults": {
@@ -7839,7 +8285,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me": {
@@ -7876,7 +8327,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "operationId": "delete_account",
@@ -7941,7 +8397,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me/email-changes": {
@@ -7998,7 +8459,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me/password-changes": {
@@ -8044,8 +8510,23 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me/recovery-key": {
@@ -8092,7 +8573,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me/secret-key-rotations": {
@@ -8139,7 +8625,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me/team-invitations": {
@@ -8259,7 +8750,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me/team-invitations/{invitationId}/accept": {
@@ -8369,7 +8865,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/users/me/team-invitations/{invitationId}/decline": {
@@ -8479,7 +8980,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vault-stats": {
@@ -8627,7 +9133,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults": {
@@ -8795,7 +9306,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}": {
@@ -8953,7 +9469,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -9119,7 +9640,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -9275,7 +9801,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -9441,7 +9972,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/available-team-members": {
@@ -9617,7 +10153,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/image-uploads": {
@@ -9785,7 +10326,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/item-imports": {
@@ -9953,7 +10499,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/items": {
@@ -10129,7 +10680,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/items/trashed": {
@@ -10305,7 +10861,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/items/{itemId}": {
@@ -10481,7 +11042,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/members": {
@@ -10657,7 +11223,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/members/{userId}": {
@@ -10833,7 +11404,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -11007,7 +11583,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -11181,7 +11762,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-data": {
@@ -11347,7 +11933,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/vaults/{vaultId}/type-conversions": {
@@ -11515,7 +12106,12 @@
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
       }
     }
   },
@@ -11552,15 +12148,113 @@
         },
         "additionalProperties": false
       },
-      "AllItemsResponse": {
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/CursorPage_VaultItemWithVaultResponse"
+      "AllItemResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "vaultId",
+          "category",
+          "favorite",
+          "encryptedData",
+          "encryptionIv",
+          "encryptionAlgorithm",
+          "version",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "attachments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/VaultAttachmentResponse"
+            }
           },
-          {
-            "$ref": "#/components/schemas/CursorPage_DeletedVaultItemWithVaultResponse"
+          "category": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "deletedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "encryptedData": {
+            "type": "string"
+          },
+          "encryptionAlgorithm": {
+            "type": "string"
+          },
+          "encryptionIv": {
+            "type": "string"
+          },
+          "favorite": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "lastModifiedBy": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "vault": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/VaultSummaryResponse"
+              }
+            ]
+          },
+          "vaultId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "format": "int32"
           }
-        ]
+        }
+      },
+      "AllItemsResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "hasMore"
+        ],
+        "properties": {
+          "hasMore": {
+            "type": "boolean"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AllItemResponse"
+            },
+            "maxItems": 500
+          },
+          "nextCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/PageCursor"
+              }
+            ]
+          }
+        }
       },
       "AllowedEmailResponse": {
         "type": "object",
@@ -13270,109 +13964,6 @@
                 },
                 "updatedAt": {
                   "type": "string"
-                },
-                "vaultId": {
-                  "type": "string"
-                },
-                "version": {
-                  "type": "integer",
-                  "format": "int32"
-                }
-              }
-            },
-            "maxItems": 500
-          },
-          "nextCursor": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/PageCursor"
-              }
-            ]
-          }
-        }
-      },
-      "CursorPage_VaultItemWithVaultResponse": {
-        "type": "object",
-        "required": [
-          "items",
-          "hasMore"
-        ],
-        "properties": {
-          "hasMore": {
-            "type": "boolean"
-          },
-          "items": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "required": [
-                "id",
-                "vaultId",
-                "category",
-                "favorite",
-                "encryptedData",
-                "encryptionIv",
-                "encryptionAlgorithm",
-                "version",
-                "createdAt",
-                "updatedAt",
-                "attachments"
-              ],
-              "properties": {
-                "attachments": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/VaultAttachmentResponse"
-                  }
-                },
-                "category": {
-                  "type": "string"
-                },
-                "createdAt": {
-                  "type": "string"
-                },
-                "deletedAt": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "encryptedData": {
-                  "type": "string"
-                },
-                "encryptionAlgorithm": {
-                  "type": "string"
-                },
-                "encryptionIv": {
-                  "type": "string"
-                },
-                "favorite": {
-                  "type": "boolean"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "lastModifiedBy": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "updatedAt": {
-                  "type": "string"
-                },
-                "vault": {
-                  "oneOf": [
-                    {
-                      "type": "null"
-                    },
-                    {
-                      "$ref": "#/components/schemas/VaultSummaryResponse"
-                    }
-                  ]
                 },
                 "vaultId": {
                   "type": "string"
@@ -16914,6 +17505,14 @@
             "type": "boolean"
           }
         }
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque session token",
+        "description": "Device-session bearer token. Client metadata headers are not credentials."
       }
     }
   },

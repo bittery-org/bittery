@@ -1,4 +1,4 @@
-use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode};
+use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method, StatusCode};
 use serde_json::{json, Value};
 use sqlx::{query, query_as, query_scalar, FromRow, PgPool};
 use std::future::Future;
@@ -460,17 +460,21 @@ async fn billing_handlers_require_authentication() {
         "billing_handlers_require_authentication",
         |app| async move {
             let protected_calls = vec![
-                ("billing.status", json!([])),
-                ("billing.entitlements", json!([])),
-                ("billing.attachmentUsage", json!([])),
-                ("billing.createCheckoutSession", json!([{}])),
-                ("billing.createPortalSession", json!([])),
-                ("billing.previewAdditionalTeamSeat", json!([])),
+                (Method::GET, "/api/v1/billing/status", None),
+                (Method::GET, "/api/v1/billing/entitlements", None),
+                (Method::GET, "/api/v1/billing/attachment-usage", None),
+                (Method::POST, "/api/v1/billing/checkout-sessions", None),
+                (Method::POST, "/api/v1/billing/portal-sessions", None),
+                (
+                    Method::GET,
+                    "/api/v1/billing/team-seats/addition-preview",
+                    None,
+                ),
             ];
 
-            for (method, params) in protected_calls {
+            for (method, path, payload) in protected_calls {
                 let response = app
-                    .call_operation(method, params, unauthenticated_json_headers())
+                    .api_json(method, path, payload, unauthenticated_json_headers())
                     .await;
                 response.assert_contract_status();
                 assert_transport_error(
@@ -533,7 +537,7 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .call_operation("billing.status", json!([]), headers.clone())
+                    .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
                     .await;
                 status_response.assert_contract_status();
                 assert_eq!(status_response.body["enabled"], json!(true));
@@ -562,7 +566,12 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                 assert_eq!(status_response.body["seatsPurchased"], json!(3));
 
                 let entitlements_response = app
-                    .call_operation("billing.entitlements", json!([]), headers.clone())
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/entitlements",
+                        None,
+                        headers.clone(),
+                    )
                     .await;
                 entitlements_response.assert_contract_status();
                 assert_eq!(entitlements_response.body["mode"], json!("cloud"));
@@ -584,7 +593,12 @@ async fn billing_query_handlers_return_expected_status_entitlements_and_attachme
                 );
 
                 let usage_response = app
-                    .call_operation("billing.attachmentUsage", json!([]), headers)
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/attachment-usage",
+                        None,
+                        headers,
+                    )
                     .await;
                 usage_response.assert_contract_status();
                 assert_eq!(usage_response.body["mode"], json!("cloud"));
@@ -631,7 +645,7 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .call_operation("billing.status", json!([]), headers.clone())
+                    .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
                     .await;
                 status_response.assert_contract_status();
                 assert_eq!(status_response.body["enabled"], json!(false));
@@ -641,7 +655,12 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                 assert_eq!(status_response.body["isStripeConfigured"], json!(false));
 
                 let entitlements_response = app
-                    .call_operation("billing.entitlements", json!([]), headers.clone())
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/entitlements",
+                        None,
+                        headers.clone(),
+                    )
                     .await;
                 entitlements_response.assert_contract_status();
                 assert_eq!(entitlements_response.body["billingEnabled"], json!(false));
@@ -655,12 +674,20 @@ async fn billing_cloud_beta_flag_disables_checkout_portal_and_paid_entitlements(
                     json!(false)
                 );
 
-                for (method, params) in [
-                    ("billing.createCheckoutSession", json!([{ "plan": "team" }])),
-                    ("billing.createPortalSession", json!([])),
-                    ("billing.previewAdditionalTeamSeat", json!([])),
+                for (method, path, payload) in [
+                    (
+                        Method::POST,
+                        "/api/v1/billing/checkout-sessions",
+                        Some(json!({ "plan": "team" })),
+                    ),
+                    (Method::POST, "/api/v1/billing/portal-sessions", None),
+                    (
+                        Method::GET,
+                        "/api/v1/billing/team-seats/addition-preview",
+                        None,
+                    ),
                 ] {
-                    let response = app.call_operation(method, params, headers.clone()).await;
+                    let response = app.api_json(method, path, payload, headers.clone()).await;
                     response.assert_contract_status();
                     assert_handler_error(
                         &response.body,
@@ -746,12 +773,12 @@ async fn billing_cloud_queries_return_team_not_found_without_team() {
             let session = app.issue_session(&fixture.no_team_user_id).await;
             let headers = authenticated_json_headers(&session.token);
 
-            for method in [
-                "billing.status",
-                "billing.entitlements",
-                "billing.attachmentUsage",
+            for path in [
+                "/api/v1/billing/status",
+                "/api/v1/billing/entitlements",
+                "/api/v1/billing/attachment-usage",
             ] {
-                let response = app.call_operation(method, json!([]), headers.clone()).await;
+                let response = app.api_json(Method::GET, path, None, headers.clone()).await;
                 response.assert_contract_status();
                 assert_handler_error(&response.body, "NOT_FOUND", "Team not found");
             }
@@ -775,7 +802,7 @@ async fn billing_self_hosted_queries_use_self_hosted_defaults() {
                 let headers = authenticated_json_headers(&session.token);
 
                 let status_response = app
-                    .call_operation("billing.status", json!([]), headers.clone())
+                    .api_json(Method::GET, "/api/v1/billing/status", None, headers.clone())
                     .await;
                 status_response.assert_contract_status();
                 assert_eq!(status_response.body["enabled"], json!(false));
@@ -783,7 +810,12 @@ async fn billing_self_hosted_queries_use_self_hosted_defaults() {
                 assert_eq!(status_response.body["status"], json!("none"));
 
                 let entitlements_response = app
-                    .call_operation("billing.entitlements", json!([]), headers.clone())
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/entitlements",
+                        None,
+                        headers.clone(),
+                    )
                     .await;
                 entitlements_response.assert_contract_status();
                 assert_eq!(entitlements_response.body["mode"], json!("self-hosted"));
@@ -799,7 +831,12 @@ async fn billing_self_hosted_queries_use_self_hosted_defaults() {
                 );
 
                 let usage_response = app
-                    .call_operation("billing.attachmentUsage", json!([]), headers)
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/billing/attachment-usage",
+                        None,
+                        headers,
+                    )
                     .await;
                 usage_response.assert_contract_status();
                 assert_eq!(usage_response.body["mode"], json!("self-hosted"));
@@ -826,13 +863,21 @@ async fn billing_mutation_handlers_reject_self_hosted_mode() {
                 let session = app.issue_session(&fixture.owner_user_id).await;
                 let headers = authenticated_json_headers(&session.token);
                 let mutation_calls = vec![
-                    ("billing.createCheckoutSession", json!([{ "plan": "team" }])),
-                    ("billing.createPortalSession", json!([])),
-                    ("billing.previewAdditionalTeamSeat", json!([])),
+                    (
+                        Method::POST,
+                        "/api/v1/billing/checkout-sessions",
+                        Some(json!({ "plan": "team" })),
+                    ),
+                    (Method::POST, "/api/v1/billing/portal-sessions", None),
+                    (
+                        Method::GET,
+                        "/api/v1/billing/team-seats/addition-preview",
+                        None,
+                    ),
                 ];
 
-                for (method, params) in mutation_calls {
-                    let response = app.call_operation(method, params, headers.clone()).await;
+                for (method, path, payload) in mutation_calls {
+                    let response = app.api_json(method, path, payload, headers.clone()).await;
                     response.assert_contract_status();
                     assert_handler_error(
                         &response.body,
@@ -863,9 +908,10 @@ async fn billing_create_checkout_session_rejects_invalid_payload_shape() {
                     let session = app.issue_session(&fixture.owner_user_id).await;
 
                     let response = app
-                        .call_operation(
-                            "billing.createCheckoutSession",
-                            json!([{ "plan": 123 }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": 123 })),
                             authenticated_json_headers(&session.token),
                         )
                         .await;
@@ -895,13 +941,19 @@ async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
                     let fixture = build_billing_router_fixture(&app.pool).await;
                     let member_session = app.issue_session(&fixture.member_user_id).await;
                     let forbidden_response = app
-                        .call_operation(
-                            "billing.createCheckoutSession",
-                            json!([{ "plan": "team" }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": "team" })),
                             authenticated_json_headers(&member_session.token),
                         )
                         .await;
-                    forbidden_response.assert_contract_status();
+                    assert_eq!(
+                        forbidden_response.status,
+                        StatusCode::FORBIDDEN,
+                        "unexpected checkout response: {}",
+                        forbidden_response.body
+                    );
                     assert_handler_error(
                         &forbidden_response.body,
                         "FORBIDDEN",
@@ -924,14 +976,15 @@ async fn billing_create_checkout_session_enforces_admin_and_plan_validation() {
                     .await;
                     let owner_session = app.issue_session(&fixture.owner_user_id).await;
                     let bad_request_response = app
-                        .call_operation(
-                            "billing.createCheckoutSession",
-                            json!([{ "plan": "free" }]),
+                        .api_json(
+                            Method::POST,
+                            "/api/v1/billing/checkout-sessions",
+                            Some(json!({ "plan": null })),
                             authenticated_json_headers(&owner_session.token),
                         )
                         .await;
                     bad_request_response.assert_contract_status();
-                    assert_eq!(bad_request_response.body["code"], json!("INVALID_REQUEST"));
+                    assert_eq!(bad_request_response.body["code"], json!("BAD_REQUEST"));
                 },
             )
             .await;
@@ -956,9 +1009,10 @@ async fn billing_create_checkout_session_success_persists_incomplete_state_and_s
                 let session = app.issue_session(&fixture.owner_user_id).await;
 
                 let response = app
-                    .call_operation(
-                        "billing.createCheckoutSession",
-                        json!([{ "plan": "team" }]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/billing/checkout-sessions",
+                        Some(json!({ "plan": "team" })),
                         authenticated_json_headers(&session.token),
                     )
                     .await;
@@ -1022,9 +1076,10 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
                 let session = app.issue_session(&fixture.owner_user_id).await;
 
                 let missing_customer_response = app
-                    .call_operation(
-                        "billing.createPortalSession",
-                        json!([]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/billing/portal-sessions",
+                        None,
                         authenticated_json_headers(&session.token),
                     )
                     .await;
@@ -1050,9 +1105,10 @@ async fn billing_create_portal_session_requires_customer_and_returns_url() {
                 )
                 .await;
                 let success_response = app
-                    .call_operation(
-                        "billing.createPortalSession",
-                        json!([]),
+                    .api_json(
+                        Method::POST,
+                        "/api/v1/billing/portal-sessions",
+                        None,
                         authenticated_json_headers(&session.token),
                     )
                     .await;
@@ -1092,9 +1148,10 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
                     let session = app.issue_session(&fixture.owner_user_id).await;
 
                     let none_response = app
-                        .call_operation(
-                            "billing.previewAdditionalTeamSeat",
-                            json!([]),
+                        .api_json(
+                            Method::GET,
+                            "/api/v1/billing/team-seats/addition-preview",
+                            None,
                             authenticated_json_headers(&session.token),
                         )
                         .await;
@@ -1116,9 +1173,10 @@ async fn billing_preview_additional_team_seat_returns_none_and_maps_preview_resp
                     )
                     .await;
                     let preview_response = app
-                        .call_operation(
-                            "billing.previewAdditionalTeamSeat",
-                            json!([]),
+                        .api_json(
+                            Method::GET,
+                            "/api/v1/billing/team-seats/addition-preview",
+                            None,
                             authenticated_json_headers(&session.token),
                         )
                         .await;
@@ -1196,14 +1254,15 @@ async fn billing_create_portal_and_preview_require_billing_admin() {
                 let fixture = build_billing_router_fixture(&app.pool).await;
                 let member_session = app.issue_session(&fixture.member_user_id).await;
 
-                for method in [
-                    "billing.createPortalSession",
-                    "billing.previewAdditionalTeamSeat",
+                for (method, path) in [
+                    (Method::POST, "/api/v1/billing/portal-sessions"),
+                    (Method::GET, "/api/v1/billing/team-seats/addition-preview"),
                 ] {
                     let response = app
-                        .call_operation(
+                        .api_json(
                             method,
-                            json!([]),
+                            path,
+                            None,
                             authenticated_json_headers(&member_session.token),
                         )
                         .await;
