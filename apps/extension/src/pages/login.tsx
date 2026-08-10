@@ -1,4 +1,4 @@
-import { getDefaultServerUrl } from "@bittery/shared/rpc-client-factory";
+import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Button, toast } from "@bittery/ui";
 import {
@@ -77,7 +77,7 @@ export function LoginPage() {
 			if (!persisted) {
 				return;
 			}
-			await loginMutation.mutateAsync(value);
+			await loginMutation.mutateAsync({ ...value, serverUrl: persisted });
 		},
 	});
 
@@ -86,6 +86,7 @@ export function LoginPage() {
 			email: string;
 			password: string;
 			secretKey: string;
+			serverUrl: string;
 		}) => {
 			// Send to background worker for crypto operations
 			const response = await chrome.runtime.sendMessage({

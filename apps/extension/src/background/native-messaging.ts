@@ -4,7 +4,7 @@
  */
 
 import { lockAccount } from "@bittery/core/services/account-lifecycle";
-import { createStoredAccountRpcClient } from "@bittery/core/services/account-resolver";
+import { createStoredAccountApiClient } from "@bittery/core/services/account-resolver";
 import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { getTravelModeEnforcer } from "@bittery/core/services/travel-mode-enforcer";
 import type { KeyRef } from "@bittery/crypto-port";
@@ -110,7 +110,7 @@ export async function handleNativeBiometricUnlock(): Promise<MessageResponse> {
 			}
 
 			const enforcer = getTravelModeEnforcer(storage, itemCache);
-			const client = await createStoredAccountRpcClient(
+			const client = await createStoredAccountApiClient(
 				storage,
 				activeAccount,
 			).catch(() => null);
@@ -285,7 +285,7 @@ export async function handleNativeBiometricUnlockAll(options?: {
 					}
 
 					const enforcer = getTravelModeEnforcer(storage, itemCache);
-					const client = await createStoredAccountRpcClient(
+					const client = await createStoredAccountApiClient(
 						storage,
 						accountId,
 					).catch(() => null);

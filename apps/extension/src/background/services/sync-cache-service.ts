@@ -12,15 +12,20 @@
 import { AccountResolver } from "@bittery/core/services/account-resolver";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import type { VaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { RpcVaultClient } from "@bittery/core/services/vault-service";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import type { ApiVaultClient } from "@bittery/core/services/vault-service";
+import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { ActiveAccountId } from "@bittery/storage/types";
-import type { DeltaSyncClient, SyncEvent, SyncItemCache } from "@bittery/sync";
+import type {
+	DeltaSyncApiClient,
+	SyncApiClient,
+	SyncEvent,
+	SyncItemCache,
+} from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
+import { apiClient } from "../api-client";
 import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
-import { rpcClient } from "../rpc-client";
 
 const DEFAULT_SERVER_URL = "http://localhost:3000";
 
@@ -57,18 +62,7 @@ export interface SyncCacheDesktopClient {
 	clearCache: () => void;
 }
 
-export interface SyncEventQueryClient extends DeltaSyncClient {
-	sync: {
-		getEventsSince: {
-			query: (input: { sinceId?: string | null; limit?: number }) => Promise<{
-				events: SyncEvent[];
-				hasMore: boolean;
-				requiresFullRefresh: boolean;
-				cursor: { id: string } | null;
-			}>;
-		};
-	};
-}
+export type SyncEventApiClient = SyncApiClient;
 
 export interface SyncCacheServiceDeps {
 	storage: SyncCacheStorage;
@@ -78,16 +72,13 @@ export interface SyncCacheServiceDeps {
 	 */
 	itemCache: SyncItemCache;
 	desktopClient: SyncCacheDesktopClient;
-	defaultClient: SyncEventQueryClient;
-	createAccountClient: (
-		token: string,
-		serverUrl: string,
-	) => SyncEventQueryClient;
+	defaultClient: SyncEventApiClient;
+	createAccountClient: (token: string, serverUrl: string) => SyncEventApiClient;
 	/**
 	 * Mirrors `performDeltaSync` exactly: `(accountScope, serverUrl, accountEmail)`.
 	 */
 	deltaSync: (
-		client: DeltaSyncClient,
+		client: DeltaSyncApiClient,
 		cache: SyncItemCache,
 		event: SyncEvent,
 		accountScope: string,
@@ -97,8 +88,9 @@ export interface SyncCacheServiceDeps {
 	handleTravelModeSync?: (
 		event: SyncEvent,
 		accountId: string,
-		accountClient: SyncEventQueryClient | null,
+		accountClient: SyncEventApiClient | null,
 	) => Promise<void>;
+	refreshFromServer: () => Promise<void>;
 	logger: Pick<Console, "debug" | "info" | "warn" | "error">;
 }
 
@@ -106,9 +98,9 @@ const defaultDeps: SyncCacheServiceDeps = {
 	storage,
 	itemCache: core.vaultCoordinator,
 	desktopClient,
-	defaultClient: rpcClient as unknown as SyncEventQueryClient,
+	defaultClient: apiClient,
 	createAccountClient: (token, serverUrl) =>
-		createAccountRpcClient(token, serverUrl) as unknown as SyncEventQueryClient,
+		createAccountApiClient(token, serverUrl),
 	deltaSync: performDeltaSync,
 	handleTravelModeSync: async (event, accountId, accountClient) => {
 		const accounts = new AccountResolver(storage);
@@ -120,11 +112,17 @@ const defaultDeps: SyncCacheServiceDeps = {
 			core.vaultCoordinator as VaultRepositoryCoordinator,
 			accountClient
 				? {
-						rpcClient: accountClient as unknown as RpcVaultClient,
+						apiClient: accountClient as unknown as ApiVaultClient,
 						accounts,
 					}
 				: undefined,
 		);
+	},
+	refreshFromServer: async () => {
+		const accounts = await new AccountResolver(
+			storage,
+		).resolveUnlockedAccounts();
+		await core.vaultCoordinator.refreshFromServer(accounts);
 	},
 	logger: console,
 };
@@ -158,10 +156,10 @@ function shouldClearDesktopCacheForEvent(event: SyncEvent): boolean {
 
 export interface SyncCacheService {
 	resolveConnectionContext: () => Promise<SyncConnectionContext | null>;
-	getClientForEmail: (email?: string | null) => Promise<SyncEventQueryClient>;
+	getClientForEmail: (email?: string | null) => Promise<SyncEventApiClient>;
 	resolveCandidateAccountIdsForEvent: (event: SyncEvent) => Promise<string[]>;
 	applyDeltaSyncForEvent: (event: SyncEvent) => Promise<void>;
-	clearItemCachesForKnownAccounts: () => Promise<void>;
+	refreshItemCachesForKnownAccounts: () => Promise<void>;
 }
 
 export function createSyncCacheService(
@@ -245,7 +243,7 @@ export function createSyncCacheService(
 
 	async function getAccountClientForAccountId(
 		accountId: string,
-	): Promise<SyncEventQueryClient | null> {
+	): Promise<SyncEventApiClient | null> {
 		const token = await getAuthTokenForAccountId(accountId);
 		if (!token) {
 			return null;
@@ -300,7 +298,7 @@ export function createSyncCacheService(
 
 	async function getClientForEmail(
 		email?: string | null,
-	): Promise<SyncEventQueryClient> {
+	): Promise<SyncEventApiClient> {
 		if (!email) {
 			return deps.defaultClient;
 		}
@@ -489,22 +487,8 @@ export function createSyncCacheService(
 		}
 	}
 
-	async function clearItemCachesForKnownAccounts(): Promise<void> {
-		const activeSingleAccountId = await resolveActiveSingleAccountId();
-		const allAccountIds = await getAllKnownAccountIds();
-		const candidates = buildOrderedCandidates(
-			activeSingleAccountId,
-			allAccountIds,
-		);
-
-		// No known accounts means no collections to clear.
-		if (candidates.length === 0) {
-			return;
-		}
-
-		await Promise.all(
-			candidates.map((accountId) => clearItemCacheForAccountId(accountId)),
-		);
+	async function refreshItemCachesForKnownAccounts(): Promise<void> {
+		await deps.refreshFromServer();
 	}
 
 	return {
@@ -512,7 +496,7 @@ export function createSyncCacheService(
 		getClientForEmail,
 		resolveCandidateAccountIdsForEvent,
 		applyDeltaSyncForEvent,
-		clearItemCachesForKnownAccounts,
+		refreshItemCachesForKnownAccounts,
 	};
 }
 

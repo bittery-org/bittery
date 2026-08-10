@@ -1,7 +1,7 @@
 import "./index.css";
-import { RpcProvider } from "@bittery/shared/rpc";
-import { createAppRpcClient } from "@bittery/shared/rpc-client";
-import { buildRpcUrl, normalizeServerUrl } from "@bittery/shared/server-url";
+import { ApiProvider } from "@bittery/shared/api";
+import { createAppApiClient } from "@bittery/shared/api-client";
+import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { Toaster } from "@bittery/ui";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -36,30 +36,37 @@ const queryClient = new QueryClient({
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 
-// Create RPC client that communicates via background worker.
-const rpcClient = createAppRpcClient({
+async function resolveServerRequest(request: Request): Promise<Response> {
+	const storedServerUrl = await storage.getServerUrl();
+	const server = new URL(storedServerUrl ?? fallbackServerUrl);
+	const target = new URL(request.url);
+	const serverPath = server.pathname.replace(/\/$/, "");
+	target.protocol = server.protocol;
+	target.host = server.host;
+	target.pathname = `${serverPath}${target.pathname}`;
+	return fetch(new Request(target, request));
+}
+
+const apiClient = createAppApiClient({
 	serverUrl: fallbackServerUrl,
-	async headers() {
-		// Get auth token and sync client id from background.
-		const [authResponse, clientIdResponse] = await Promise.all([
-			chrome.runtime.sendMessage({
-				type: "GET_AUTH_TOKEN",
-			}),
-			chrome.runtime.sendMessage({
-				type: "GET_SYNC_CLIENT_ID",
-			}),
-		]);
+	supportedApiMajors: [1],
+	getAccessToken: async () => {
+		const response = await chrome.runtime.sendMessage({
+			type: "GET_AUTH_TOKEN",
+		});
+		return response.token ?? null;
+	},
+	getClientMetadata: async () => {
+		const response = await chrome.runtime.sendMessage({
+			type: "GET_SYNC_CLIENT_ID",
+		});
 		return {
-			authorization: authResponse.token ? `Bearer ${authResponse.token}` : "",
-			"X-Client-Id": clientIdResponse.clientId || "",
+			id: response.clientId || "extension_popup",
+			platform: "extension",
+			version: chrome.runtime.getManifest().version,
 		};
 	},
-	async fetch(url, options) {
-		const storedServerUrl = await storage.getServerUrl();
-		const serverUrl = storedServerUrl ?? fallbackServerUrl;
-		const resolvedUrl = buildRpcUrl(serverUrl, url as string);
-		return fetch(resolvedUrl, options);
-	},
+	fetch: resolveServerRequest,
 });
 
 // Create router with memory history (no URL bar in popup)
@@ -85,8 +92,8 @@ subscribeBackgroundPushes(queryClient, router);
 
 function Popup() {
 	return (
-		<RpcProvider rpcClient={rpcClient} queryClient={queryClient}>
-			<QueryClientProvider client={queryClient}>
+		<QueryClientProvider client={queryClient}>
+			<ApiProvider apiClient={apiClient}>
 				<I18nProvider>
 					<ThemeProvider>
 						<ExtensionSyncProvider queryClient={queryClient}>
@@ -97,8 +104,8 @@ function Popup() {
 						</ExtensionSyncProvider>
 					</ThemeProvider>
 				</I18nProvider>
-			</QueryClientProvider>
-		</RpcProvider>
+			</ApiProvider>
+		</QueryClientProvider>
 	);
 }
 

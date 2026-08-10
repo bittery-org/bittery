@@ -1,6 +1,6 @@
 import { useAccountSwitcher } from "@bittery/core/hooks";
 import { peekAccountSessionManager } from "@bittery/core/services/account-session-manager";
-import { createAccountRpcClient } from "@bittery/shared/rpc-client-factory";
+import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import {
 	AccountSwitcher,
 	Avatar,
@@ -92,9 +92,9 @@ export function ExtensionAccountSwitcher() {
 					const serverUrl =
 						(await storage.getServerUrl(account.accountId)) ||
 						"http://localhost:3000";
-					const client = createAccountRpcClient(authToken, serverUrl);
+					const client = createAccountApiClient(authToken, serverUrl);
 
-					const userData = await client.auth.me.query();
+					const { data: userData } = await client.auth.me();
 
 					// Update account with team name and avatar
 					await storage.addAccount({

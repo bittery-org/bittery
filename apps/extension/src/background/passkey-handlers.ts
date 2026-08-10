@@ -26,10 +26,10 @@ import type {
 	SerializedCredentialDescriptor,
 	SerializedGetResult,
 } from "../passkey/types";
+import { apiClient } from "./api-client";
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { getDesktopStatus, isDesktopUnlockedNow } from "./desktop-status";
-import { rpcClient } from "./rpc-client";
 import {
 	resolveAccountEmailForVault,
 	resolveEmailFromAccountId,
@@ -322,10 +322,14 @@ function readVaultAccountEmail(vault: unknown): string | undefined {
 async function getWritableVaultOptions(): Promise<
 	PasskeyWritableVaultOption[]
 > {
-	const vaults = await rpcClient.vault.list.query();
+	const { data: vaults } = await apiClient.vaults.list();
 	return vaults
 		.map((vault) => {
-			const decodedVault = toVaultKeyEntry(vault);
+			const decodedVault = toVaultKeyEntry({
+				...vault,
+				icon: vault.icon ?? null,
+				imageUrl: vault.imageUrl ?? null,
+			});
 			return {
 				id: decodedVault.vaultId,
 				name: decodedVault.vaultName,
@@ -551,7 +555,7 @@ async function attachPasskeyToExistingItem(input: {
 			},
 			accountEmail,
 		},
-		rpcClient as Parameters<typeof core.items.updateItem>[1],
+		apiClient,
 	);
 
 	await onLocalItemUpdated({
@@ -591,7 +595,7 @@ async function createItemWithPasskey(input: {
 			},
 			accountEmail,
 		},
-		rpcClient as Parameters<typeof core.items.createItem>[1],
+		apiClient,
 	);
 
 	await onLocalItemCreated({
@@ -748,7 +752,7 @@ async function updateStoredPasskey(input: {
 			},
 			accountEmail,
 		},
-		rpcClient as Parameters<typeof core.items.updateItem>[1],
+		apiClient,
 	);
 
 	await onLocalItemUpdated({

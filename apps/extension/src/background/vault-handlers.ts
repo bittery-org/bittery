@@ -4,7 +4,7 @@
  */
 
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
-import { rpcClient } from "./rpc-client";
+import { apiClient } from "./api-client";
 import { updateActivity } from "./session-manager";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
@@ -43,7 +43,14 @@ export async function handleGetWritableVaults(): Promise<MessageResponse> {
 	updateActivity();
 
 	try {
-		const vaults = (await rpcClient.vault.list.query()).map(toVaultKeyEntry);
+		const { data: vaultData } = await apiClient.vaults.list();
+		const vaults = vaultData.map((vault) =>
+			toVaultKeyEntry({
+				...vault,
+				icon: vault.icon ?? null,
+				imageUrl: vault.imageUrl ?? null,
+			}),
+		);
 		const writableVaults = vaults.filter((vault) => vault.role !== "read-only");
 
 		return {

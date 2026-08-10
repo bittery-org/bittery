@@ -42,6 +42,9 @@ let invalidateResult: (target: InvalidationTarget) => AccountMetadata[] =
 const alarmCreates: string[] = [];
 const runtimeMessages: Array<{ type: string }> = [];
 const storageLocal: Record<string, unknown> = {};
+let stagedRefreshCount = 0;
+let requireFullRefreshOnCatchUp = false;
+let lastSseRequest: { url: string; headers: Headers } | null = null;
 
 globalThis.chrome = {
 	storage: {
@@ -81,11 +84,18 @@ globalThis.chrome = {
 } as unknown as typeof chrome;
 
 mock.module("@bittery/sync", () => ({
-	runCatchUp: async () => ({ cursor: { id: "" }, processedCount: 0 }),
+	runCatchUp: async (options: {
+		onRequiresFullRefresh?: () => Promise<void>;
+	}) => {
+		if (requireFullRefreshOnCatchUp) {
+			await options.onRequiresFullRefresh?.();
+		}
+		return { cursor: { id: "" }, processedCount: 0 };
+	},
 }));
 
-mock.module("@bittery/shared/rpc-client-factory", () => ({
-	clearAccountRpcClient: () => {},
+mock.module("@bittery/shared/api-client-factory", () => ({
+	clearAccountApiClient: () => {},
 }));
 
 mock.module("@bittery/core/services/account-lifecycle", () => ({
@@ -125,7 +135,9 @@ mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 		}),
 		getClientForEmail: async () => ({}),
 		applyDeltaSyncForEvent: async () => {},
-		clearItemCachesForKnownAccounts: async () => {},
+		refreshItemCachesForKnownAccounts: async () => {
+			stagedRefreshCount++;
+		},
 	},
 }));
 
@@ -153,8 +165,13 @@ function sseBody(frames: string[]): ReadableStream<Uint8Array> {
 
 /** Streams the given frames, then ends — exactly what the server does after revoking. */
 function stubStream(frames: string[]): void {
-	globalThis.fetch = (async () =>
-		new Response(sseBody(frames), { status: 200 })) as typeof fetch;
+	globalThis.fetch = (async (input, init) => {
+		lastSseRequest = {
+			url: String(input),
+			headers: new Headers(init?.headers),
+		};
+		return new Response(sseBody(frames), { status: 200 });
+	}) as typeof fetch;
 }
 
 function revocationFrame(payload: Record<string, unknown>): string {
@@ -176,6 +193,9 @@ beforeEach(() => {
 	alarmCreates.length = 0;
 	runtimeMessages.length = 0;
 	lockAllCalls = 0;
+	stagedRefreshCount = 0;
+	requireFullRefreshOnCatchUp = false;
+	lastSseRequest = null;
 	invalidateResult = () => [ACCOUNT];
 });
 
@@ -187,6 +207,12 @@ describe("session_revoked over SSE", () => {
 		]);
 
 		await connect();
+		expect(lastSseRequest?.url).toBe(
+			"https://sync.example.com/api/v1/sync/events",
+		);
+		expect(lastSseRequest?.headers.get("Bittery-Client-Platform")).toBe(
+			"extension",
+		);
 
 		expect(vaultSession.getSnapshot().unlocked).toBe(false);
 		expect(vaultSession.getSnapshot().lockReason).toBe("session_revoked");
@@ -257,8 +283,10 @@ describe("session_revoked over SSE", () => {
 	});
 
 	test("a sync ping still triggers a full refresh", async () => {
+		requireFullRefreshOnCatchUp = true;
 		await handleSyncSseFrame({ event: "sync", data: {} });
 
+		expect(stagedRefreshCount).toBe(1);
 		expect(runtimeMessages).toContainEqual({
 			type: "SYNC_FULL_REFRESH_REQUIRED",
 		});

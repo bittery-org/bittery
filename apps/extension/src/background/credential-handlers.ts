@@ -8,13 +8,13 @@ import {
 	hostnameMatches,
 	parseHostname,
 } from "../lib/hostname";
+import { apiClient } from "./api-client";
 import { core } from "./core-instance";
 import {
 	type CredentialErrorType,
 	classifyCredentialError,
 } from "./credential-error";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
-import { rpcClient } from "./rpc-client";
 import {
 	resolveAccountEmailForItemId,
 	resolveAccountEmailForVault,
@@ -174,7 +174,7 @@ export async function handleSaveNewCredential(payload: {
 				},
 				accountEmail,
 			},
-			rpcClient as Parameters<typeof core.items.createItem>[1],
+			apiClient,
 		);
 
 		await onLocalItemCreated({
@@ -264,7 +264,7 @@ export async function handleUpdateExistingCredential(payload: {
 				},
 				accountEmail,
 			},
-			rpcClient as Parameters<typeof core.items.updateItem>[1],
+			apiClient,
 		);
 
 		await onLocalItemUpdated({

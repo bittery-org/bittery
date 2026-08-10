@@ -1,4 +1,4 @@
-import { createSessionRefreshingRpcClient } from "@bittery/shared/rpc-session-refresh";
+import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
@@ -7,6 +7,10 @@ import { desktopSync } from "./desktop-sync";
 const fallbackServerUrl =
 	normalizeServerUrl("http://localhost:3000") ?? "http://localhost:3000";
 const CLIENT_ID_KEY = "bittery_sync_client_id";
+
+export function getExtensionClientVersion(): string {
+	return globalThis.chrome?.runtime?.getManifest?.().version ?? "0.0.0";
+}
 
 function generateClientId(): string {
 	const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
@@ -51,7 +55,7 @@ async function getAuthToken(): Promise<string | null> {
 	return storage.getAuthToken(accountId);
 }
 
-export const rpcClient = createSessionRefreshingRpcClient({
+export const apiClient = createSessionRefreshingApiClient({
 	defaultServerUrl: fallbackServerUrl,
 	getServerUrl: async () => {
 		const storedServerUrl = await storage.getServerUrl();
@@ -84,5 +88,6 @@ export const rpcClient = createSessionRefreshingRpcClient({
 		}
 	},
 	getClientId: async () => getOrCreateSyncClientId(),
-	appPlatform: "extension",
+	clientPlatform: "extension",
+	clientVersion: getExtensionClientVersion(),
 });

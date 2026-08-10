@@ -15,11 +15,11 @@ import {
 import { unlockAllWithPassword } from "@bittery/core/services/unlock";
 import { crypto } from "../lib/crypto";
 import { itemCache, storage } from "../lib/storage";
+import { apiClient } from "./api-client";
 import { PENDING_DESKTOP_UNLOCK } from "./desktop-protocol";
 import { isDesktopUnlockedNow } from "./desktop-status";
 import { requireDesktopUnlock } from "./desktop-unlock";
 import { lifecycleDeps } from "./lifecycle";
-import { rpcClient } from "./rpc-client";
 import { resolveEmailFromAccountId } from "./services/account-resolution";
 import { restoreUnlockedSessions } from "./services/session-restore";
 import {
@@ -40,13 +40,15 @@ export async function handleLogin(payload: {
 	email: string;
 	password: string;
 	secretKey: string;
+	serverUrl?: string;
 }): Promise<MessageResponse> {
 	const { email, password, secretKey } = payload;
+	const serverUrl = payload.serverUrl ?? DEFAULT_SERVER_URL;
 
 	// Perform SRP login using shared utility
 	const result = await performSRPLogin(
-		{ email, password, secretKey, serverUrl: DEFAULT_SERVER_URL },
-		{ crypto, rpcClient, storage },
+		{ email, password, secretKey, serverUrl },
+		{ apiClient, crypto, storage },
 	);
 
 	// Store session data using shared utility
@@ -58,7 +60,7 @@ export async function handleLogin(payload: {
 		crypto,
 		email,
 		{
-			serverUrl: DEFAULT_SERVER_URL,
+			serverUrl,
 			onMasterUnlockKeyTransferred: () => {
 				setMasterUnlockKey(result.masterUnlockKey);
 			},
@@ -100,7 +102,7 @@ export async function handleQuickUnlock(payload: {
 	// Perform SRP unlock using shared utility (retrieves stored secret key internally)
 	const result = await performSRPUnlock(
 		{ accountId: activeAccount, password },
-		{ crypto, rpcClient, storage },
+		{ apiClient, crypto, storage },
 	);
 
 	// Store session data using shared utility
@@ -111,7 +113,7 @@ export async function handleQuickUnlock(payload: {
 		crypto,
 		activeAccount,
 		{
-			travelModeRpcClient: rpcClient,
+			travelModeApiClient: apiClient,
 			setActive: true,
 		},
 	);

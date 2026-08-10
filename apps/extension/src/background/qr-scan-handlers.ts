@@ -6,9 +6,9 @@
 import { resolveAccountScopeId } from "@bittery/storage/account-id";
 import { crypto } from "../lib/crypto";
 import { storage } from "../lib/storage";
+import { apiClient } from "./api-client";
 import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
-import { rpcClient } from "./rpc-client";
 import { resolveAccountEmailForVault } from "./services/account-resolution";
 import { onLocalItemUpdated } from "./services/local-item-cache-service";
 import {
@@ -120,7 +120,7 @@ export async function handleUpdateItemTotp(payload: {
 
 	try {
 		// Get the existing item
-		const item = await rpcClient.vault.getItem.query({ itemId });
+		const { data: item } = await apiClient.items.get(itemId);
 
 		if (!item) {
 			return {
@@ -211,14 +211,15 @@ export async function handleUpdateItemTotp(payload: {
 				scope,
 			);
 
-			await rpcClient.vault.updateItem.mutate({
+			await apiClient.items.update(
 				itemId,
-				encryptedData: encryptedData.ciphertext,
-				encryptionIv: encryptedData.iv,
-				encryptionAlgorithm: encryptedData.algorithm,
-				expectedVersion: null,
-				clientId: null,
-			});
+				{
+					encryptedData: encryptedData.ciphertext,
+					encryptionIv: encryptedData.iv,
+					encryptionAlgorithm: encryptedData.algorithm,
+				},
+				{ etag: `"${item.version}"` },
+			);
 
 			await onLocalItemUpdated({
 				itemId,

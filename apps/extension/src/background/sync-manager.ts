@@ -3,8 +3,8 @@
  *
  * MV3-compatible SSE sync with explicit service-worker recovery behavior.
  * Incoming events follow a strict order:
- * 1) persist last processed cursor
- * 2) apply account-scoped cache delta updates
+ * 1) apply account-scoped cache delta updates
+ * 2) persist the processed cursor
  * 3) notify UI listeners for query invalidation/refetch
  */
 
@@ -13,6 +13,7 @@ import {
 	runCatchUp,
 	type SyncCursor,
 } from "@bittery/sync";
+import { getExtensionClientVersion } from "./api-client";
 import { parseSseFrame, type SseFrame } from "./services/sse-frame";
 import { syncCacheService } from "./services/sync-cache-service";
 import {
@@ -131,7 +132,7 @@ async function catchUpMissedEvents(): Promise<void> {
 				await syncCacheService.applyDeltaSyncForEvent(event);
 			},
 			onRequiresFullRefresh: async () => {
-				await syncCacheService.clearItemCachesForKnownAccounts();
+				await syncCacheService.refreshItemCachesForKnownAccounts();
 				sendRuntimeMessage({ type: "SYNC_FULL_REFRESH_REQUIRED" });
 			},
 		});
@@ -171,11 +172,16 @@ export async function connect(): Promise<void> {
 		setSyncConnectionEmail(context.email);
 		abortController = new AbortController();
 
-		const response = await fetch(`${context.serverUrl}/sync/events`, {
+		const clientId = await getClientId();
+		const serverUrl = context.serverUrl.replace(/\/$/, "");
+		const response = await fetch(`${serverUrl}/api/v1/sync/events`, {
 			method: "GET",
 			headers: {
 				Authorization: `Bearer ${context.token}`,
 				Accept: "text/event-stream",
+				"Bittery-Client-Id": clientId,
+				"Bittery-Client-Platform": "extension",
+				"Bittery-Client-Version": getExtensionClientVersion(),
 			},
 			signal: abortController.signal,
 		});
@@ -261,7 +267,7 @@ function readString(value: unknown): string | undefined {
  * Handle a single parsed SSE frame.
  *
  * The server sends lightweight pings:
- *   event: sync             → something changed, catch up via getEventsSince
+ *   event: sync             → something changed, catch up via `/sync/changes`
  *   event: session_revoked  → this connection's own session was revoked
  *   event: connected        → connection established
  */

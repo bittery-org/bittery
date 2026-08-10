@@ -5,7 +5,7 @@ import {
 	createSyncCacheService,
 	type SyncCacheDesktopClient,
 	type SyncCacheStorage,
-	type SyncEventQueryClient,
+	type SyncEventApiClient,
 } from "../../src/background/services/sync-cache-service";
 
 type AccountInput =
@@ -27,31 +27,8 @@ function resolveAccount(input: AccountInput): {
 	return input;
 }
 
-function createClientStub(): SyncEventQueryClient {
-	return {
-		vault: {
-			getItem: {
-				query: async () => {
-					throw new Error("not implemented in test");
-				},
-			},
-			get: {
-				query: async () => {
-					throw new Error("not implemented in test");
-				},
-			},
-		},
-		sync: {
-			getEventsSince: {
-				query: async () => ({
-					events: [],
-					hasMore: false,
-					requiresFullRefresh: false,
-					cursor: null,
-				}),
-			},
-		},
-	} as SyncEventQueryClient;
+function createClientStub(): SyncEventApiClient {
+	return {} as SyncEventApiClient;
 }
 
 function createStorageStub(input: {
@@ -161,6 +138,33 @@ function createSyncEvent(partial?: Partial<SyncEvent>): SyncEvent {
 }
 
 describe("sync-cache-service", () => {
+	test("delegates full refresh to staged repository promotion", async () => {
+		let stagedRefreshCount = 0;
+		const service = createSyncCacheService({
+			storage: createStorageStub({
+				activeAccount: "acc_alice",
+				accounts: [{ accountId: "acc_alice", email: "alice@example.com" }],
+				tokensByAccountId: { acc_alice: "token" },
+			}),
+			itemCache: createItemCacheStub(),
+			desktopClient: {
+				getAuthToken: async () => null,
+				clearCache: () => {},
+			},
+			defaultClient: createClientStub(),
+			createAccountClient: () => createClientStub(),
+			deltaSync: async () => {},
+			refreshFromServer: async () => {
+				stagedRefreshCount++;
+			},
+			logger: console,
+		});
+
+		await service.refreshItemCachesForKnownAccounts();
+
+		expect(stagedRefreshCount).toBe(1);
+	});
+
 	test("desktop-origin item changes apply account-scoped delta and clear desktop decrypt cache", async () => {
 		const deltaCalls: Array<{
 			eventType: SyncEvent["type"];
