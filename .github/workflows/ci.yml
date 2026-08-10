@@ -770,7 +770,7 @@ jobs:
         run: echo "DOCKER_BUILD_START=$(date +%s)" >> "$GITHUB_ENV"
 
       - name: Build ${{ matrix.name }} image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}

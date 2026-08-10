@@ -76,7 +76,7 @@ jobs:
 
       - name: Build and push server image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/server/Dockerfile
@@ -132,7 +132,7 @@ jobs:
 
       - name: Build and push web image
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/web/Dockerfile
