@@ -19,6 +19,11 @@
 		"./favicon": "./src/favicon.ts",
 		"./identity": "./src/identity.ts",
 		"./import": "./src/import/index.ts",
+		"./api": "./src/api.ts",
+		"./api-client": "./src/api-client.ts",
+		"./api-client-factory": "./src/api-client-factory.ts",
+		"./api-query": "./src/api-query.ts",
+		"./api-session-refresh": "./src/api-session-refresh.ts",
 		"./totp": "./src/totp.ts",
 		"./rpc": "./src/rpc.ts",
 		"./rpc-client": "./src/rpc-client.ts",
@@ -36,6 +41,7 @@
 		"./vault-mapping": "./src/vault-mapping.ts"
 	},
 	"dependencies": {
+		"@bittery/api-contract": "workspace:*",
 		"@bittery/device": "workspace:*",
 		"@bittery/rust-rpc": "workspace:*",
 		"@bittery/types": "workspace:*",

@@ -4,7 +4,7 @@ Status: implementation inventory for the pre-launch big-bang cutover. This docum
 
 ## Scope and verification
 
-The registration graph in `apps/server/src/lib.rs` and `apps/server/src/rpc/*.rs` contains **113 handlers: 45 queries and 68 mutations**. Production TypeScript (all `apps/**` and `packages/**` `.ts`/`.tsx`, excluding generated code, tests and specs) references **99 distinct procedures: 38 queries and 61 mutations**. The remaining **14 procedures have no production call through `.query`, `.mutate`, `.queryKey` or `.queryOptions`** and are intentionally deleted rather than ported:
+The registration graph in `apps/server/src/lib.rs` and `apps/server/src/rpc/*.rs` contains **113 handlers: 45 queries and 68 mutations**. Production TypeScript (all `apps/**` and `packages/**` `.ts`/`.tsx`, excluding generated code, tests and specs) references **99 distinct procedures: 38 queries and 61 mutations**. The REST OpenAPI surface has 100 operations, including the separately registered non-Qubit `/api/meta` and sync-SSE operations; route coverage tests are the exact source of truth. The remaining **14 procedures have no production call through `.query`, `.mutate`, `.queryKey` or `.queryOptions`** and are intentionally deleted rather than ported:
 
 `healthCheck`, `privateData`, `auth.heartbeat`, `auth.logout`, `auth.logoutAll`, `billing.syncSeats`, `share.get`, `share.update`, `sync.checkConflict`, `sync.acknowledgeEvents`, `sync.getLastAcknowledged`, `sync.getSyncState`, `team.members.deleteAccount`, and `vault.members.lookupUser`.
 
@@ -31,7 +31,7 @@ The counts match the architecture decision with no discrepancies. The inventory 
 
 | Procedure | Kind | Current input → output | Authorization | Behavior, side effects, errors | Production consumers / cache | REST replacement |
 |---|---|---|---|---|---|---|
-| `auth.registrationStatus` | Q | `()` → `RegistrationStatusResponse` | Open | Reads instance signup/billing policy. | Web sign-in, signup and team screens. | `GET /api/meta` (registration fields in metadata) |
+| `auth.registrationStatus` | Q | `()` → `RegistrationStatusResponse` | Open | Reads instance signup/billing policy. | Web sign-in, signup and team screens. | `GET /api/v1/auth/registration-status` |
 | `auth.checkEmail` | Q | `CheckEmailInput` → `CheckEmailResponse` | Open | Returns account-discovery/KDF bootstrap information; enumeration and input rules must remain deliberate; `BAD_REQUEST`. | Core auth service and `use-check-email`. | `POST /api/v1/auth/email-checks` |
 | `auth.requestSignupVerification` | M | `RequestSignupVerificationInput` → `LogoutResponse` | Public-auth | Validates signup policy/email, issues a digest-backed verification code and sends email; `BAD_REQUEST`, `FORBIDDEN`, `TOO_MANY_REQUESTS`. | Web signup flow; Local signup state. | `POST /api/v1/auth/signup-verifications` |
 | `auth.verifySignupVerification` | M | `VerifySignupVerificationInput` → `VerifySignupVerificationResponse` | Public-auth | Consumes/validates the verification code and returns a short-lived signup token; `BAD_REQUEST`, `NOT_FOUND`, `TOO_MANY_REQUESTS`. | Web signup flow; Local signup state. | `POST /api/v1/auth/signup-verifications/verify` |

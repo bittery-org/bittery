@@ -99,6 +99,20 @@ export class SessionRefreshManager {
 		return this.refreshPromise;
 	}
 
+	async refreshNow(): Promise<string | null> {
+		const snapshot = await this.options.getSessionSnapshot();
+		this.syncState(snapshot);
+		if (!snapshot.token) {
+			return null;
+		}
+
+		if (!this.refreshPromise) {
+			this.refreshPromise = this.refresh(snapshot.token);
+		}
+
+		return this.refreshPromise;
+	}
+
 	private async refresh(fallbackToken: string): Promise<string> {
 		try {
 			const result = await this.options.refreshSession();

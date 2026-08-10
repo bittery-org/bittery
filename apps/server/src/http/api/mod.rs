@@ -154,7 +154,7 @@ mod tests {
             })
             .sum::<usize>();
 
-        assert_eq!(paths.len(), 84);
-        assert_eq!(operation_count, 99);
+        assert_eq!(paths.len(), 85);
+        assert_eq!(operation_count, 100);
     }
 }

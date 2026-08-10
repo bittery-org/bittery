@@ -144,6 +144,14 @@ request_dto!(RenameSessionRequest {
 });
 
 response_dto!(SuccessResponse { success: bool });
+response_dto!(RegistrationStatusResponse {
+    mode: String,
+    billing_enabled: bool,
+    allow_public_signup: bool,
+    requires_email_verification: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+});
 response_dto!(EmailCheckResponse {
     exists: bool,
     secret_key_hint: String,
@@ -320,6 +328,20 @@ async fn check_email(
     Ok(Json(EmailCheckResponse {
         exists: response.exists,
         secret_key_hint: response.secret_key_hint,
+    }))
+}
+
+#[utoipa::path(get, path = "/auth/registration-status", operation_id = "getRegistrationStatus", tag = "auth", responses((status = 200, body = RegistrationStatusResponse, headers(("Cache-Control" = String, description = "Public policy responses must not be stored"))), (status = 500, body = super::dto::ProblemDetails, content_type = "application/problem+json")))]
+async fn registration_status(
+    State(state): State<AppState>,
+) -> Result<Json<RegistrationStatusResponse>, ApiError> {
+    let response = auth::registration_status(&state).await?;
+    Ok(Json(RegistrationStatusResponse {
+        mode: response.mode,
+        billing_enabled: response.billing_enabled,
+        allow_public_signup: response.allow_public_signup,
+        requires_email_verification: response.requires_email_verification,
+        reason: response.reason,
     }))
 }
 
@@ -726,6 +748,7 @@ async fn refresh_session(
 
 pub(crate) fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
+        .routes(routes!(registration_status))
         .routes(routes!(check_email))
         .routes(routes!(request_signup_verification))
         .routes(routes!(verify_signup_verification))
@@ -917,6 +940,7 @@ mod tests {
         let document = serde_json::to_value(super::router().split_for_parts().1).unwrap();
         let paths = document["paths"].as_object().unwrap();
         let expected = [
+            ("/auth/registration-status", "get"),
             ("/auth/email-checks", "post"),
             ("/auth/signup-verifications", "post"),
             ("/auth/signup-verifications/verify", "post"),
