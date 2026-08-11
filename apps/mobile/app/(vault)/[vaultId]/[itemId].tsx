@@ -1,6 +1,7 @@
 import {
 	useCreateShare,
 	useDeleteItem,
+	useOpenedItemEncryptionContextMigration,
 	useUpdateItem,
 	useVaultItems,
 } from "@bittery/core/hooks";
@@ -46,6 +47,7 @@ export default function ItemDetailScreen() {
 	const [passwordHistoryVisible, setPasswordHistoryVisible] = useState(false);
 
 	const item = items.find((i) => i.id === itemId);
+	useOpenedItemEncryptionContextMigration(item);
 
 	const handleCopy = async (value: string, label: string) => {
 		await Clipboard.setStringAsync(value);

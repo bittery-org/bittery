@@ -117,9 +117,8 @@ object VaultDecryptor {
     /**
      * Decrypt an item's encrypted data using the vault key.
      *
-     * Tries to decrypt with the correct AES-GCM-AAD-V1 context using the stored
-     * version, falling back to lower version candidates (down to 1) to handle
-     * items that were re-encrypted after version bumps.
+     * Uses the exact stored AES-GCM-AAD-V1 context. Legacy rows get a bounded
+     * fallback window until the main Item sync engine migrates their context.
      *
      * @param item The item entity from database
      * @param vaultKey Decrypted vault key bytes (32 bytes)
@@ -132,11 +131,26 @@ object VaultDecryptor {
             algorithm = item.encryptionAlgorithm
         )
 
+        val exactVersion = item.encryptionVersion?.coerceAtLeast(1L)
+        val exactAuthor = item.encryptedByUserId?.takeIf { it.isNotBlank() }
+        if (exactVersion != null && exactAuthor != null) {
+            return AesGcmCrypto.decryptWithContext(
+                encryptedData,
+                vaultKey,
+                vaultId = item.vaultId,
+                entityId = item.id,
+                entityType = "item",
+                version = exactVersion,
+                userId = exactAuthor
+            )
+        }
+
         val storedVersion = item.version.coerceAtLeast(1L)
+        val oldestLegacyVersion = (storedVersion - 7L).coerceAtLeast(1L)
         val decryptUserId = item.lastModifiedBy?.takeIf { it.isNotBlank() } ?: item.userId
         var lastError: Exception? = null
 
-        for (version in storedVersion downTo 1L) {
+        for (version in storedVersion downTo oldestLegacyVersion) {
             try {
                 return AesGcmCrypto.decryptWithContext(
                     encryptedData,

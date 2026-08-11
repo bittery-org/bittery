@@ -60,6 +60,12 @@ interface ItemContextInput {
 	userId: string;
 }
 
+export interface StoredItemContextInput extends ItemContextInput {
+	encryptionVersion?: number | null;
+	encryptedByUserId?: string | null;
+	lastModifiedBy?: string | null;
+}
+
 interface AttachmentContextInput {
 	vaultId: string;
 	attachmentKey: string;
@@ -92,6 +98,17 @@ export function buildItemEncryptionContext(
 		version: normalizeVersion(input.version),
 		userId: input.userId,
 	};
+}
+
+export function buildStoredItemEncryptionContext(
+	input: StoredItemContextInput,
+): EncryptionContext {
+	return buildItemEncryptionContext({
+		vaultId: input.vaultId,
+		itemId: input.itemId,
+		version: input.encryptionVersion ?? input.version,
+		userId: input.encryptedByUserId ?? input.lastModifiedBy ?? input.userId,
+	});
 }
 
 export function buildAttachmentNameEncryptionContext(

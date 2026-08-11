@@ -7,7 +7,7 @@ import {
 	createInMemoryRecordPort,
 	type InMemoryRecordPort,
 } from "@bittery/storage/testing";
-import type { CachedEncryptedItem } from "@bittery/types";
+import type { CachedEncryptedItem, ItemSyncCommand } from "@bittery/types";
 import {
 	accountMetadata,
 	createTestAccountStore,
@@ -685,6 +685,38 @@ describe("VaultRepository encryption context migration", () => {
 		expect(cached?.encryptedByUserId).toBe(USER_ID);
 	});
 
+	it("adopts a metadata acknowledgement revision without changing ciphertext context", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		await itemCache.setCachedItems(
+			[await cachedItem("acknowledged_item", crypto, vaultCrypto)],
+			ACCOUNT_ID,
+		);
+		await repo.hydrate();
+		await (repo as any).acknowledgeItemCommand(
+			{
+				accountId: ACCOUNT_ID,
+				id: "favorite_operation",
+				type: "toggle_favorite",
+				entityId: "acknowledged_item",
+				vaultId: "vault_1",
+				favorite: true,
+				baseVersion: 1,
+				timestamp: 1,
+				retryCount: 0,
+			},
+			{ entityId: "acknowledged_item", etag: '"2"', version: 2 },
+		);
+
+		const acknowledged = repo.getById("acknowledged_item");
+		expect(acknowledged?.favorite).toBe(true);
+		expect(acknowledged?.version).toBe(2);
+		expect(acknowledged?.encryptionVersion).toBe(1);
+		expect(acknowledged?.encryptedByUserId).toBe(USER_ID);
+		const cached = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(cached?.version).toBe(2);
+		expect(cached?.encryptionVersion).toBe(1);
+	});
+
 	it("persists a bounded legacy version discovery and uses the exact context after restart", async () => {
 		const discoveries: unknown[] = [];
 		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup(
@@ -707,6 +739,10 @@ describe("VaultRepository encryption context migration", () => {
 		expect(migrated?.version).toBe(3);
 		expect(migrated?.encryptionVersion).toBe(1);
 		expect(migrated?.encryptedByUserId).toBe(USER_ID);
+		expect(discoveries).toEqual([]);
+
+		await repo.publishPendingEncryptionContextMigration("legacy_item");
+
 		expect(discoveries).toEqual([
 			{
 				accountId: ACCOUNT_ID,
@@ -803,5 +839,418 @@ describe("VaultRepository encryption context migration", () => {
 		expect(cached?.lastModifiedBy).toBe(metadataWriterId);
 		expect(cached?.encryptionVersion).toBe(1);
 		expect(cached?.encryptedByUserId).toBe(authorId);
+	});
+
+	it("recovers a legacy shared Item after another member changed only metadata", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await setup();
+		const authorId = "user-author";
+		const metadataWriterId = "user-trash-writer";
+		const key = await vaultCrypto.getVaultKey({
+			vaultId: "vault_1",
+			accountId: ACCOUNT_ID,
+			userId: USER_ID,
+		});
+		if (!key) throw new Error("Missing test vault key");
+		const encrypted = await vaultCrypto.encryptItem(
+			JSON.stringify({ title: "Legacy Shared Item" }),
+			key,
+			{
+				vaultId: "vault_1",
+				itemId: "legacy_shared_item",
+				version: 1,
+				userId: authorId,
+			},
+		);
+		await crypto.destroyKey(key);
+		await itemCache.setCachedItems(
+			[
+				{
+					id: "legacy_shared_item",
+					vaultId: "vault_1",
+					category: "login",
+					favorite: false,
+					encryptedData: encrypted.ciphertext,
+					encryptionIv: encrypted.iv,
+					encryptionAlgorithm: encrypted.algorithm,
+					version: 3,
+					lastModifiedBy: metadataWriterId,
+					encryptionVersion: null,
+					encryptedByUserId: null,
+					createdAt: "2026-08-01T00:00:00.000Z",
+					updatedAt: "2026-08-03T00:00:00.000Z",
+					deletedAt: null,
+				},
+			],
+			ACCOUNT_ID,
+		);
+
+		const restarted = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+			ACCOUNT_ID,
+			"https://bittery.test",
+			"reader@bittery.test",
+			undefined,
+			async () => [metadataWriterId, authorId],
+		);
+		await restarted.hydrate();
+
+		expect(restarted.getById("legacy_shared_item")?.title).toBe(
+			"Legacy Shared Item",
+		);
+		const migrated = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(migrated?.encryptionVersion).toBe(1);
+		expect(migrated?.encryptedByUserId).toBe(authorId);
+	});
+
+	it("loads legacy author candidates once per Vault during a fresh hydration", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await setup();
+		const authorId = "user-author";
+		const key = await vaultCrypto.getVaultKey({
+			vaultId: "vault_1",
+			accountId: ACCOUNT_ID,
+			userId: USER_ID,
+		});
+		if (!key) throw new Error("Missing test vault key");
+		const legacyItems = await Promise.all(
+			["legacy_shared_one", "legacy_shared_two"].map(async (itemId) => {
+				const encrypted = await vaultCrypto.encryptItem(
+					JSON.stringify({ title: itemId }),
+					key,
+					{ vaultId: "vault_1", itemId, version: 1, userId: authorId },
+				);
+				return {
+					id: itemId,
+					vaultId: "vault_1",
+					category: "login",
+					favorite: false,
+					encryptedData: encrypted.ciphertext,
+					encryptionIv: encrypted.iv,
+					encryptionAlgorithm: encrypted.algorithm,
+					version: 2,
+					lastModifiedBy: "metadata-writer",
+					encryptionVersion: null,
+					encryptedByUserId: null,
+					createdAt: "2026-08-01T00:00:00.000Z",
+					updatedAt: "2026-08-02T00:00:00.000Z",
+					deletedAt: null,
+				};
+			}),
+		);
+		await crypto.destroyKey(key);
+		await itemCache.setCachedItems(legacyItems, ACCOUNT_ID);
+		let authorLookups = 0;
+		const restarted = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+			ACCOUNT_ID,
+			"https://bittery.test",
+			"reader@bittery.test",
+			undefined,
+			async () => {
+				authorLookups += 1;
+				return [authorId];
+			},
+		);
+
+		await restarted.hydrate();
+
+		expect(authorLookups).toBe(1);
+		expect(
+			restarted
+				.getAll()
+				.map((item) => item.title)
+				.sort(),
+		).toEqual(legacyItems.map((item) => item.id).sort());
+	});
+});
+
+describe("VaultRepository Item sync projections", () => {
+	beforeEach(() => {
+		resetTravelModeEnforcerForTests();
+	});
+
+	function favoriteCommand(itemId: string): ItemSyncCommand {
+		return {
+			accountId: ACCOUNT_ID,
+			id: `favorite-${itemId}`,
+			operationId: `favorite-${itemId}`,
+			type: "toggle_favorite",
+			entityId: itemId,
+			vaultId: "vault_1",
+			favorite: true,
+			baseVersion: 1,
+			timestamp: 1,
+			retryCount: 0,
+		};
+	}
+
+	it("keeps an optimistic metadata command out of the authoritative cache", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("overlay_item", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+
+		await repo.applyItemCommand(favoriteCommand(item.id));
+
+		expect(repo.getById(item.id)?.favorite).toBe(true);
+		const authoritative = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(authoritative?.favorite).toBe(false);
+		expect(authoritative?.version).toBe(1);
+	});
+
+	it("retains the optimistic overlay when a newer event arrives first", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("event_first", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+		const command = favoriteCommand(item.id);
+		await repo.applyItemCommand(command);
+
+		await repo.upsertCachedItem(
+			{ ...item, version: 2, favorite: false },
+			ACCOUNT_ID,
+		);
+
+		expect(repo.getById(item.id)?.favorite).toBe(true);
+		expect((await itemCache.getCachedItems(ACCOUNT_ID))?.[0]?.favorite).toBe(
+			false,
+		);
+		await repo.acknowledgeItemCommand(command, {
+			entityId: item.id,
+			etag: '"2"',
+			version: 2,
+		});
+		expect(repo.getById(item.id)?.version).toBe(2);
+	});
+
+	it("adopts the acknowledgement before the matching event arrives", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("response_first", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+		const command = favoriteCommand(item.id);
+		await repo.applyItemCommand(command);
+
+		await repo.acknowledgeItemCommand(command, {
+			entityId: item.id,
+			etag: '"2"',
+			version: 2,
+		});
+
+		const acknowledged = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(acknowledged?.favorite).toBe(true);
+		expect(acknowledged?.version).toBe(2);
+		await repo.upsertCachedItem(
+			{ ...item, version: 2, favorite: true },
+			ACCOUNT_ID,
+		);
+		expect(repo.getById(item.id)?.favorite).toBe(true);
+	});
+
+	it("drops a stale-tab overlay after another tab durably acknowledges it", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("other_tab_ack", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+		const command = favoriteCommand(item.id);
+		await repo.applyItemCommand(command);
+
+		await itemCache.upsertCachedItem(
+			{ ...item, version: 2, favorite: true },
+			ACCOUNT_ID,
+		);
+		await repo.discardItemCommandAcknowledgedElsewhere(command);
+
+		expect(repo.getById(item.id)?.version).toBe(2);
+		expect(repo.getById(item.id)?.favorite).toBe(true);
+		await repo.upsertCachedItem(
+			{ ...item, version: 3, favorite: false },
+			ACCOUNT_ID,
+		);
+		expect(repo.getById(item.id)?.favorite).toBe(false);
+	});
+
+	it("keeps a permanently deleted Item visible until the server acknowledges it", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("delete_pending", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+		const command: ItemSyncCommand = {
+			accountId: ACCOUNT_ID,
+			id: "delete-pending",
+			operationId: "delete-pending",
+			type: "permanent_delete",
+			entityId: item.id,
+			vaultId: item.vaultId,
+			baseVersion: 1,
+			timestamp: 1,
+			retryCount: 0,
+		};
+
+		await repo.applyItemCommand(command);
+		expect(repo.getById(item.id)).toBeDefined();
+		expect((await itemCache.getCachedItems(ACCOUNT_ID))?.[0]?.id).toBe(item.id);
+
+		await repo.acknowledgeItemCommand(command, {
+			entityId: item.id,
+			etag: '"2"',
+			version: 2,
+		});
+		expect(repo.getById(item.id)).toBeUndefined();
+		expect(await itemCache.getCachedItems(ACCOUNT_ID)).toEqual([]);
+	});
+
+	it("retains a conflicted encrypted overlay when the server deletes its base", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem(
+			"remote_delete_conflict",
+			crypto,
+			vaultCrypto,
+		);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+		const encrypted = await repo.encryptWithVaultKey(
+			item.vaultId,
+			{ title: "Offline edit" },
+			{ itemId: item.id, version: 2 },
+		);
+		await repo.applyItemCommand({
+			accountId: ACCOUNT_ID,
+			id: "offline-edit",
+			operationId: "offline-edit",
+			type: "update",
+			entityId: item.id,
+			vaultId: item.vaultId,
+			encryptedPayload: {
+				encryptedData: encrypted.ciphertext,
+				encryptionIv: encrypted.iv,
+				encryptionAlgorithm: encrypted.algorithm,
+				encryptionVersion: encrypted.encryptionVersion,
+				encryptedByUserId: encrypted.encryptedByUserId,
+			},
+			baseVersion: 1,
+			timestamp: 1,
+			retryCount: 0,
+		});
+
+		await repo.removeCachedItem(item.id, ACCOUNT_ID);
+
+		expect(repo.getById(item.id)?.title).toBe("Offline edit");
+		expect((await itemCache.getCachedItems(ACCOUNT_ID))?.[0]?.version).toBe(1);
+	});
+
+	it("preserves both encrypted conflict versions as a durable conflict copy", async () => {
+		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("content_conflict", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+		const encrypted = await repo.encryptWithVaultKey(
+			item.vaultId,
+			{ title: "Local conflicting edit" },
+			{ itemId: item.id, version: 2 },
+		);
+		const command: ItemSyncCommand = {
+			accountId: ACCOUNT_ID,
+			id: "conflicting-edit",
+			operationId: "conflicting-edit",
+			type: "update",
+			entityId: item.id,
+			vaultId: item.vaultId,
+			encryptedPayload: {
+				encryptedData: encrypted.ciphertext,
+				encryptionIv: encrypted.iv,
+				encryptionAlgorithm: encrypted.algorithm,
+				encryptionVersion: encrypted.encryptionVersion,
+				encryptedByUserId: encrypted.encryptedByUserId,
+			},
+			baseVersion: 1,
+			timestamp: 1,
+			retryCount: 0,
+			status: "conflicted",
+			conflictCopyId: "content_conflict_copy",
+		};
+		await repo.applyItemCommand(command);
+
+		const copyCommand = await repo.preserveItemConflict(command);
+
+		expect(repo.getById(item.id)?.title).toBe("Item");
+		expect(copyCommand?.type).toBe("create");
+		if (!copyCommand) throw new Error("Missing conflict copy command");
+		const restarted = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+			ACCOUNT_ID,
+			"https://bittery.test",
+		);
+		await restarted.hydrate();
+		await restarted.applyItemCommand(copyCommand);
+
+		expect(restarted.getById("content_conflict_copy")?.title).toBe(
+			"Local conflicting edit",
+		);
+		expect(restarted.getById(item.id)?.title).toBe("Item");
+	});
+
+	it("keeps the conflict base through an event-retention full refresh", async () => {
+		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup();
+		const item = await cachedItem("refresh_conflict", crypto, vaultCrypto);
+		await itemCache.setCachedItems([item], ACCOUNT_ID);
+		await repo.hydrate();
+		const encrypted = await repo.encryptWithVaultKey(
+			item.vaultId,
+			{ title: "Unsynced content" },
+			{ itemId: item.id, version: 2 },
+		);
+		await repo.applyItemCommand({
+			accountId: ACCOUNT_ID,
+			id: "refresh-edit",
+			operationId: "refresh-edit",
+			type: "update",
+			entityId: item.id,
+			vaultId: item.vaultId,
+			encryptedPayload: {
+				encryptedData: encrypted.ciphertext,
+				encryptionIv: encrypted.iv,
+				encryptionAlgorithm: encrypted.algorithm,
+				encryptionVersion: encrypted.encryptionVersion,
+				encryptedByUserId: encrypted.encryptedByUserId,
+			},
+			baseVersion: 1,
+			timestamp: 1,
+			retryCount: 0,
+		});
+		const client = createClient();
+		client.sync.bootstrap = mock(async () => ({
+			data: { items: [], hasMore: false },
+		}));
+		const storedVaultKey = (await storage.getVaultKeys(ACCOUNT_ID))?.[0];
+		if (!storedVaultKey || !client.vaults) {
+			throw new Error("Missing stored Vault key fixture");
+		}
+		client.vaults.list = mock(async () => ({
+			data: [
+				{
+					id: storedVaultKey.vaultId,
+					name: storedVaultKey.vaultName,
+					vaultType: storedVaultKey.vaultType,
+					icon: storedVaultKey.vaultIcon,
+					imageUrl: storedVaultKey.vaultImageUrl,
+					encryptedVaultKey: storedVaultKey.encryptedVaultKey,
+					role: storedVaultKey.role,
+				},
+			],
+		}));
+
+		await repo.hydrateFromServer(client);
+
+		expect(repo.getById(item.id)?.title).toBe("Unsynced content");
+		expect((await itemCache.getCachedItems(ACCOUNT_ID))?.[0]?.id).toBe(item.id);
 	});
 });

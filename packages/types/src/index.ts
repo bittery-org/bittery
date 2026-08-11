@@ -197,6 +197,7 @@ export interface CachedEncryptedItem {
 	lastModifiedBy: string | null;
 	encryptionVersion?: number | null;
 	encryptedByUserId?: string | null;
+	encryptionContextPendingMigration?: boolean;
 	createdAt: string;
 	updatedAt: string;
 	deletedAt?: string | null;
@@ -246,6 +247,100 @@ export interface CachedAttachment {
 	createdAt: string;
 }
 
+export type ItemSyncCommandType =
+	| "create"
+	| "update"
+	| "delete"
+	| "permanent_delete"
+	| "restore"
+	| "move"
+	| "cross_account_move"
+	| "toggle_favorite"
+	| "adopt_encryption_context";
+
+export type ItemSyncCommandStatus =
+	| "staged"
+	| "applying"
+	| "pending"
+	| "retrying"
+	| "conflicted"
+	| "failed";
+
+export interface ItemSyncEncryptedPayload {
+	encryptedData: string;
+	encryptionIv: string;
+	encryptionAlgorithm: string;
+	encryptionVersion?: number;
+	encryptedByUserId?: string;
+}
+
+/** A durable semantic Item operation. HTTP attempts are replaceable; this identity is not. */
+export interface ItemSyncCommand {
+	accountId: string;
+	accountEmail?: string;
+	id: string;
+	operationId?: string;
+	attemptId?: string;
+	type: ItemSyncCommandType;
+	entityId: string;
+	vaultId: string;
+	targetVaultId?: string;
+	targetAccountId?: string;
+	targetAccountEmail?: string;
+	targetItemId?: string;
+	category?: string;
+	encryptedPayload?: ItemSyncEncryptedPayload;
+	favorite?: boolean;
+	baseVersion: number;
+	timestamp: number;
+	retryCount: number;
+	status?: ItemSyncCommandStatus;
+	lastError?: string;
+	nextAttemptAt?: number;
+	conflictCopyId?: string;
+	migrationTrigger?: "explicit_open";
+	projectionClaimId?: string;
+	projectionClaimExpiresAt?: number;
+}
+
+export interface ItemSyncAcknowledgement {
+	entityId: string;
+	etag: string | null;
+	version: number | undefined;
+}
+
+export interface DiscoveredItemEncryptionContext {
+	accountId: string;
+	itemId: string;
+	vaultId: string;
+	baseVersion: number;
+	encryptionVersion: number;
+	encryptedByUserId: string;
+}
+
+export type ItemEncryptionContextMigrationPort = (
+	context: DiscoveredItemEncryptionContext,
+) => Promise<void> | void;
+
+export interface ItemSyncReconciler {
+	apply(command: ItemSyncCommand): Promise<void>;
+	executeSemanticCommand?(
+		command: ItemSyncCommand,
+	): Promise<ItemSyncAcknowledgement | undefined>;
+	discardAcknowledgedElsewhere?(command: ItemSyncCommand): Promise<void>;
+	preserveConflict?(
+		command: ItemSyncCommand,
+	): Promise<ItemSyncCommand | undefined>;
+	reconcileAuthoritative?(
+		command: ItemSyncCommand,
+		item: CachedEncryptedItem,
+	): Promise<void>;
+	acknowledge(
+		command: ItemSyncCommand,
+		acknowledgement: ItemSyncAcknowledgement,
+	): Promise<void>;
+}
+
 // ============================================================================
 // Hook/Platform Integration Types
 // ============================================================================
@@ -267,11 +362,12 @@ export interface IQueryInvalidator {
 
 export interface IPendingMutationQueue {
 	enqueue(
-		mutation: unknown,
+		mutation: ItemSyncCommand,
 		applyOptimistic?: () => Promise<void>,
 	): Promise<void>;
 	getPendingCount?(): number;
 	hasPendingForItem?(itemId: string): boolean;
+	getCommands?(accountId?: string): ItemSyncCommand[];
 }
 
 /**

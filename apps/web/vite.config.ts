@@ -40,6 +40,31 @@ export default defineConfig({
 	// Discovered lazily (recovery-kit imports pdf-lib on demand, and the router
 	// code-splits every route), which is what triggers that mid-run re-optimize.
 	...(isE2E && {
-		optimizeDeps: { include: ["pdf-lib", "jszip", "zxcvbn"] },
+		optimizeDeps: {
+			noDiscovery: true,
+			include: [
+				"react",
+				"react-dom",
+				"react/jsx-dev-runtime",
+				"react/jsx-runtime",
+				"react-dom/client",
+				"@tanstack/react-router > @tanstack/react-store",
+				"@dnd-kit/core",
+				"@tanstack/react-form",
+				"@tanstack/react-query",
+				"@tanstack/react-query-devtools",
+				"date-fns",
+				"date-fns/locale",
+				"jszip",
+				"lucide-react",
+				"nanoid",
+				"next-themes",
+				"pdf-lib",
+				"qrcode.react",
+				"use-sync-external-store/shim",
+				"use-sync-external-store/shim/with-selector",
+				"zxcvbn",
+			],
+		},
 	}),
 });

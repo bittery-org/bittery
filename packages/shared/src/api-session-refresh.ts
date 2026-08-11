@@ -78,12 +78,12 @@ function pathWithoutBase(pathname: string, basePathname: string): string {
 		: pathname;
 }
 
-function rewriteRequest(
-	request: Request,
+function routeRequestUrl(
+	requestUrl: string,
 	fromServerUrl: string,
 	toServerUrl: string,
-): Request {
-	const target = new URL(request.url);
+): string {
+	const target = new URL(requestUrl);
 	const sourceServer = new URL(fromServerUrl);
 	const destinationServer = new URL(toServerUrl);
 	const relativePath = pathWithoutBase(target.pathname, sourceServer.pathname);
@@ -91,7 +91,36 @@ function rewriteRequest(
 	target.protocol = destinationServer.protocol;
 	target.host = destinationServer.host;
 	target.pathname = `${serverPath}${relativePath}`;
-	return new Request(target, request);
+	return target.toString();
+}
+
+/**
+ * WebKit cannot upload a streamed request body, and reusing a body-carrying
+ * `Request` as constructor input turns its body into a stream. Buffering the
+ * bytes keeps rerouting and 401 replays sendable in the desktop webview.
+ */
+async function readRequestBody(request: Request): Promise<ArrayBuffer | null> {
+	if (request.method === "GET" || request.method === "HEAD") {
+		return null;
+	}
+	const body = await request.arrayBuffer();
+	return body.byteLength > 0 ? body : null;
+}
+
+function rebuildRequest(
+	source: Request,
+	url: string,
+	headers: Headers,
+	body: ArrayBuffer | null,
+): Request {
+	return new Request(url, {
+		method: source.method,
+		headers,
+		body,
+		credentials: source.credentials,
+		redirect: source.redirect,
+		signal: source.signal,
+	});
 }
 
 function metadata(options: SessionRefreshingApiClientOptions) {
@@ -214,16 +243,18 @@ export function createSessionRefreshingApiClient(
 			snapshot?.insecureTransportConfirmed === true,
 		);
 		const token = snapshot ? await refreshSnapshot(snapshot, false) : null;
-		const routed = rewriteRequest(request, defaultServerUrl, serverUrl);
-		const retrySource = routed.clone();
-		const headers = new Headers(routed.headers);
+		const routedUrl = routeRequestUrl(request.url, defaultServerUrl, serverUrl);
+		const body = await readRequestBody(request);
+		const headers = new Headers(request.headers);
 		if (token) {
 			headers.set("Authorization", `Bearer ${token}`);
 		} else {
 			headers.delete("Authorization");
 		}
 
-		const response = await fetchImpl(new Request(routed, { headers }));
+		const response = await fetchImpl(
+			rebuildRequest(request, routedUrl, headers, body),
+		);
 		if (snapshot) {
 			const expiresAt = response.headers.get("Bittery-Session-Expires");
 			if (expiresAt) {
@@ -242,9 +273,11 @@ export function createSessionRefreshingApiClient(
 			) {
 				const refreshedToken = await refreshSnapshot(snapshot, true);
 				if (refreshedToken && refreshedToken !== token) {
-					const retryHeaders = new Headers(retrySource.headers);
+					const retryHeaders = new Headers(headers);
 					retryHeaders.set("Authorization", `Bearer ${refreshedToken}`);
-					return fetchImpl(new Request(retrySource, { headers: retryHeaders }));
+					return fetchImpl(
+						rebuildRequest(request, routedUrl, retryHeaders, body),
+					);
 				}
 			}
 		}

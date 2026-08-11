@@ -2,6 +2,7 @@ import {
 	AccountResolver,
 	createStoredAccountApiClient,
 } from "@bittery/core/services/account-resolver";
+import { createStagedFullRefresh } from "@bittery/core/services/staged-full-refresh";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
@@ -194,6 +195,11 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		[],
 	);
 
+	const refreshFromServer = useMemo(
+		() => createStagedFullRefresh(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
+
 	const onTravelModeEvent = useCallback(
 		async (event: { type: string; metadata?: Record<string, unknown> }) => {
 			if (!syncAccountId || event.type !== "travel_mode_updated") {
@@ -246,6 +252,7 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAccountId: syncAccountId,
 		itemCacheServerUrl: syncAccountId ? serverUrl : null,
 		getClientForAccount,
+		refreshFromServer,
 		resolveLegacyAccountId,
 		onEventProcessed: onTravelModeEvent,
 	});

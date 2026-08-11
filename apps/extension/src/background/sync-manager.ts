@@ -8,13 +8,16 @@
  * 3) notify UI listeners for query invalidation/refetch
  */
 
+import { normalizeAccountServerUrl } from "@bittery/storage/account-id";
 import {
 	type ConnectionStatus,
 	runCatchUp,
 	type SyncCursor,
 } from "@bittery/sync";
+import { drainOutboundQueue } from "./outbound-drain";
 import { parseSseFrame, type SseFrame } from "./services/sse-frame";
 import { syncCacheService } from "./services/sync-cache-service";
+import { getOrCreateSyncClientId } from "./sync-client-id";
 import {
 	setSessionFallbackEmail,
 	setSyncPort,
@@ -22,8 +25,8 @@ import {
 } from "./vault-session";
 
 // Storage keys
-const CLIENT_ID_KEY = "bittery_sync_client_id";
-const LAST_SYNC_CURSOR_KEY_PREFIX = "bittery_last_sync_cursor_v2";
+const LAST_SYNC_CURSOR_KEY_PREFIX = "bittery_last_sync_cursor_v3";
+const LEGACY_ACCOUNT_CURSOR_KEY_PREFIX = "bittery_last_sync_cursor_v2";
 const LEGACY_LAST_SYNC_KEY = "bittery_last_sync_timestamp";
 const SYNC_ALARM_NAME = "bittery_sync_reconnect";
 
@@ -33,6 +36,7 @@ let connectionStatus: ConnectionStatus = "disconnected";
 let reconnectAttempt = 0;
 let syncConnectionEmail: string | null = null;
 let syncConnectionAccountId: string | null = null;
+let syncConnectionServerUrl: string | null = null;
 /** Set once the server revoked this session; the JWT is dead, so reconnecting only loops 401s. */
 let revoked = false;
 
@@ -48,38 +52,10 @@ function setSyncConnectionEmail(email: string | null): void {
 }
 
 /**
- * Generate a random ID (simpler than nanoid for extension context)
- */
-function generateId(length = 8): string {
-	const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-	let result = "";
-	const randomValues = new Uint8Array(length);
-	crypto.getRandomValues(randomValues);
-	for (let i = 0; i < length; i++) {
-		const randomVal = randomValues[i] ?? 0;
-		result += chars[randomVal % chars.length];
-	}
-	return result;
-}
-
-/**
- * Get or create a unique client ID for this extension instance
- */
-async function getOrCreateClientId(): Promise<string> {
-	const result = await chrome.storage.local.get(CLIENT_ID_KEY);
-	if (result[CLIENT_ID_KEY]) {
-		return result[CLIENT_ID_KEY] as string;
-	}
-	const clientId = `ext_${Date.now()}_${generateId(8)}`;
-	await chrome.storage.local.set({ [CLIENT_ID_KEY]: clientId });
-	return clientId;
-}
-
-/**
  * Get the client ID
  */
 export async function getClientId(): Promise<string> {
-	return getOrCreateClientId();
+	return getOrCreateSyncClientId();
 }
 
 type SyncRuntimeMessage =
@@ -115,6 +91,21 @@ export function getStatus(): ConnectionStatus {
 }
 
 /**
+ * Push locally queued mutations. Never rethrows: a failed push keeps its
+ * mutations queued, and the connect flow that triggered it must carry on.
+ */
+async function pushOutboundQueue(reason: string): Promise<void> {
+	try {
+		await drainOutboundQueue();
+	} catch (error) {
+		console.error(
+			`[sync-manager] Outbound queue drain failed (${reason}):`,
+			error,
+		);
+	}
+}
+
+/**
  * Catch up on missed events since last sync timestamp.
  */
 async function catchUpMissedEvents(): Promise<void> {
@@ -122,7 +113,13 @@ async function catchUpMissedEvents(): Promise<void> {
 		if (!syncConnectionAccountId) {
 			throw new Error("Sync catch-up requires an accountId cursor scope");
 		}
-		const lastCursor = await getLastSyncCursor(syncConnectionAccountId);
+		if (!syncConnectionServerUrl) {
+			throw new Error("Sync catch-up requires a server URL cursor scope");
+		}
+		const lastCursor = await getLastSyncCursor(
+			syncConnectionAccountId,
+			syncConnectionServerUrl,
+		);
 
 		const client =
 			await syncCacheService.getClientForEmail(syncConnectionEmail);
@@ -138,7 +135,11 @@ async function catchUpMissedEvents(): Promise<void> {
 			},
 		});
 
-		await setLastSyncCursor(syncConnectionAccountId, result.cursor);
+		await setLastSyncCursor(
+			syncConnectionAccountId,
+			syncConnectionServerUrl,
+			result.cursor,
+		);
 		if (result.processedCount > 0) {
 			sendRuntimeMessage({
 				type: "SYNC_FULL_REFRESH_REQUIRED",
@@ -172,6 +173,7 @@ export async function connect(): Promise<void> {
 
 		setSyncConnectionEmail(context.email);
 		syncConnectionAccountId = context.accountId;
+		syncConnectionServerUrl = context.serverUrl;
 		abortController = new AbortController();
 
 		const response = await context.client.sync.events(abortController.signal);
@@ -192,6 +194,9 @@ export async function connect(): Promise<void> {
 
 		// Catch up on missed events since last sync.
 		await catchUpMissedEvents();
+
+		// Anything the popup queued while the worker was asleep or offline.
+		await pushOutboundQueue("stream opened");
 
 		// Read SSE stream.
 		await readStream(response.body);
@@ -350,6 +355,7 @@ export function disconnect(
 	}
 	syncConnectionEmail = null;
 	syncConnectionAccountId = null;
+	syncConnectionServerUrl = null;
 	// A revoked teardown keeps the fallback identity: the session invalidation it
 	// triggers runs after this disconnect and resolves by email.
 	if (!suppressReconnect) {
@@ -372,17 +378,23 @@ export async function initializeSync(): Promise<void> {
  */
 export async function cleanupSync(): Promise<void> {
 	const accountId = syncConnectionAccountId;
+	const serverUrl = syncConnectionServerUrl;
 	disconnect("logout cleanup");
 	revoked = false;
 	const keys = [LEGACY_LAST_SYNC_KEY];
-	if (accountId) {
-		keys.push(lastSyncCursorKey(accountId));
+	if (accountId && serverUrl) {
+		keys.push(lastSyncCursorKey(accountId, serverUrl));
+		keys.push(legacyAccountCursorKey(accountId));
 	}
 	await chrome.storage.local.remove(keys);
 }
 
-function lastSyncCursorKey(accountId: string): string {
-	return `${LAST_SYNC_CURSOR_KEY_PREFIX}:${encodeURIComponent(accountId)}`;
+function lastSyncCursorKey(accountId: string, serverUrl: string): string {
+	return `${LAST_SYNC_CURSOR_KEY_PREFIX}:${encodeURIComponent(normalizeAccountServerUrl(serverUrl))}:${encodeURIComponent(accountId)}`;
+}
+
+function legacyAccountCursorKey(accountId: string): string {
+	return `${LEGACY_ACCOUNT_CURSOR_KEY_PREFIX}:${encodeURIComponent(accountId)}`;
 }
 
 /**
@@ -390,9 +402,12 @@ function lastSyncCursorKey(accountId: string): string {
  */
 export async function setLastSyncCursor(
 	accountId: string,
+	serverUrl: string,
 	cursor: SyncCursor,
 ): Promise<void> {
-	await chrome.storage.local.set({ [lastSyncCursorKey(accountId)]: cursor });
+	await chrome.storage.local.set({
+		[lastSyncCursorKey(accountId, serverUrl)]: cursor,
+	});
 }
 
 /**
@@ -401,8 +416,9 @@ export async function setLastSyncCursor(
  */
 export async function getLastSyncCursor(
 	accountId: string,
+	serverUrl: string,
 ): Promise<SyncCursor | null> {
-	const key = lastSyncCursorKey(accountId);
+	const key = lastSyncCursorKey(accountId, serverUrl);
 	const result = await chrome.storage.local.get(key);
 	const cursor = result[key] as SyncCursor | undefined;
 	if (cursor && typeof cursor.id === "string") {

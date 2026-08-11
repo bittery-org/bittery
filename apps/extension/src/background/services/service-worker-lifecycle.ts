@@ -8,6 +8,7 @@
 import { crypto } from "../../lib/crypto";
 import { initializeStorage } from "../../lib/storage";
 import { desktopSync } from "../desktop-sync";
+import { handleOutboundRetryAlarm } from "../outbound-drain";
 import {
 	handleAutoLockAlarm,
 	refreshAutoLockTimeout,
@@ -87,6 +88,7 @@ export function ensureBackgroundServicesReady(): Promise<void> {
 export function registerLifecycleListeners(): void {
 	chrome.alarms.onAlarm.addListener((alarm) => {
 		void handleAutoLockAlarm(alarm);
+		void handleOutboundRetryAlarm(alarm);
 		void handleSyncReconnectAlarm(alarm);
 	});
 }

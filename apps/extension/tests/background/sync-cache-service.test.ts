@@ -114,6 +114,12 @@ function createItemCacheStub(): SyncItemCache & {
 		removeCachedVault: async () => {},
 		syncVaultKeys: async () => {},
 		replaceItemId: () => {},
+		applyItemCommand: async () => {},
+		executeSemanticItemCommand: async () => undefined,
+		discardItemCommandAcknowledgedElsewhere: async () => {},
+		preserveItemConflict: async () => undefined,
+		acknowledgeItemCommand: async () => {},
+		setEncryptionContextMigrationPort: async () => {},
 		clearItemCache: async (accountId?: string) => {
 			if (accountId) {
 				clearedAccountIds.push(accountId);
@@ -274,6 +280,7 @@ describe("sync-cache-service", () => {
 		expect(context).toEqual({
 			accountId: bobAccountId,
 			email: "bob@example.com",
+			serverUrl: "https://api.example.com",
 			client,
 		});
 	});
@@ -320,6 +327,46 @@ describe("sync-cache-service", () => {
 		// candidates is what makes the next read correct.
 		expect(deltaCalls).toEqual([]);
 		expect(itemCache.clearedAccountIds).toEqual([accountBId, accountAId]);
+	});
+
+	test("rejects a candidate delta failure without involving irrelevant accounts", async () => {
+		const relevantAccountId = "acc_relevant";
+		const irrelevantAccountId = "acc_irrelevant";
+		const attemptedAccountIds: string[] = [];
+		const service = createSyncCacheService({
+			storage: createStorageStub({
+				activeAccount: null,
+				accounts: [
+					{ accountId: relevantAccountId, email: "relevant@example.com" },
+					{ accountId: irrelevantAccountId, email: "other@example.com" },
+				],
+				tokensByAccountId: {
+					[relevantAccountId]: "relevant-token",
+					[irrelevantAccountId]: "irrelevant-token",
+				},
+				vaultIdsByAccountId: {
+					[relevantAccountId]: ["vault_1"],
+					[irrelevantAccountId]: ["vault_9"],
+				},
+			}),
+			itemCache: createItemCacheStub(),
+			desktopClient: {
+				getAuthToken: async () => null,
+				clearCache: () => {},
+			},
+			defaultClient: createClientStub(),
+			createAccountClient: () => createClientStub(),
+			deltaSync: async (_client, _cache, _event, accountId) => {
+				attemptedAccountIds.push(accountId ?? "global");
+				throw new Error("candidate cache write failed");
+			},
+			logger: console,
+		});
+
+		expect(service.applyDeltaSyncForEvent(createSyncEvent())).rejects.toThrow(
+			"candidate cache write failed",
+		);
+		expect(attemptedAccountIds).toEqual([relevantAccountId]);
 	});
 
 	test("travel_mode_updated invokes travel mode handler only for matching account", async () => {

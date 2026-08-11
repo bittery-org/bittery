@@ -5,7 +5,9 @@
  */
 
 import type { DecryptedItemData } from "@bittery/shared/types";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useCoreContext } from "../context/platform-context";
 import { extractDecryptedItemData } from "./items/mutation-utils";
 import { useVaultRepositorySync } from "./use-vault-repository-sync";
 
@@ -20,6 +22,41 @@ export interface UseItemResult {
 	isLoading: boolean;
 	error: Error | null;
 	refetch: () => void;
+}
+
+export interface EncryptionContextMigrationItem {
+	id: string;
+	accountId?: string;
+	account?: { accountId?: string };
+	version?: number;
+	encryptionContextPendingMigration?: boolean;
+}
+
+export function useOpenedItemEncryptionContextMigration(
+	item: EncryptionContextMigrationItem | null | undefined,
+): void {
+	const core = useCoreContext();
+	const accountId = item?.accountId ?? item?.account?.accountId;
+	useQuery({
+		queryKey: [
+			"item-encryption-context-migration",
+			accountId,
+			item?.id,
+			item?.version,
+		],
+		enabled:
+			Boolean(item?.encryptionContextPendingMigration) &&
+			Boolean(accountId) &&
+			Boolean(item?.id),
+		queryFn: async () => {
+			await core.vaultCoordinator.publishPendingEncryptionContextMigration(
+				accountId as string,
+				item?.id as string,
+			);
+			return true;
+		},
+		staleTime: Number.POSITIVE_INFINITY,
+	});
 }
 
 /**
@@ -45,6 +82,8 @@ export function useItem(
 		}
 		return vaultCoordinator.getById(itemId);
 	}, [vaultCoordinator, enabled, itemId, snapshot]);
+
+	useOpenedItemEncryptionContextMigration(item);
 
 	if (!enabled || !itemId) {
 		return {
@@ -76,12 +115,16 @@ export function useItem(
 		encryptionAlgorithm: item._encrypted.algorithm,
 		version: item.version,
 		lastModifiedBy: item.lastModifiedBy,
+		encryptionVersion: item.encryptionVersion,
+		encryptedByUserId: item.encryptedByUserId,
 		createdAt: item.createdAt,
 		updatedAt: item.updatedAt,
 		deletedAt: item.deletedAt,
 		attachments: item.attachments,
 		accountEmail: item.accountEmail ?? item.account?.email,
+		accountId: item.accountId ?? item.account?.accountId,
 		serverUrl: item.serverUrl ?? item.account?.serverUrl,
+		encryptionContextPendingMigration: item.encryptionContextPendingMigration,
 		account: item.account,
 	};
 

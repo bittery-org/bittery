@@ -75,11 +75,9 @@ function takeRequestOrigin(request: Request): {
 	request: Request;
 	origin?: ApiRequestOrigin;
 } {
-	const headers = new Headers(request.headers);
-	const serialized = headers.get(LOCAL_REQUEST_ORIGIN_HEADER);
+	const serialized = request.headers.get(LOCAL_REQUEST_ORIGIN_HEADER);
 	if (!serialized) return { request };
 
-	headers.delete(LOCAL_REQUEST_ORIGIN_HEADER);
 	let candidate: unknown;
 	try {
 		candidate = JSON.parse(decodeURIComponent(serialized));
@@ -101,8 +99,11 @@ function takeRequestOrigin(request: Request): {
 			typeof origin.insecureTransportConfirmed === "boolean" &&
 			hasServerUrl)
 	) {
+		// Mutated in place: `new Request(request, ...)` turns the body into a
+		// stream, and WebKit cannot upload a streamed request body.
+		request.headers.delete(LOCAL_REQUEST_ORIGIN_HEADER);
 		return {
-			request: new Request(request, { headers }),
+			request,
 			origin: origin as ApiRequestOrigin,
 		};
 	}
@@ -212,38 +213,37 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 		fetch: fetchImplementation,
 	});
 
-	async function requestHeaders(headers?: HeadersInit): Promise<Headers> {
+	async function applyRequestHeaders(headers: Headers): Promise<void> {
 		const [accessToken, metadata] = await Promise.all([
 			options.getAccessToken?.() ?? null,
 			options.getClientMetadata(),
 		]);
-		const next = new Headers(headers);
-		if (accessToken && !next.has("Authorization")) {
-			next.set(
+		if (accessToken && !headers.has("Authorization")) {
+			headers.set(
 				"Authorization",
 				`Bearer ${nonEmptyHeaderValue(accessToken, "Access token")}`,
 			);
 		}
-		next.set(
+		headers.set(
 			"Bittery-Client-Id",
 			nonEmptyHeaderValue(metadata.id, "Client ID"),
 		);
-		next.set(
+		headers.set(
 			"Bittery-Client-Platform",
 			nonEmptyHeaderValue(metadata.platform, "Client platform"),
 		);
-		next.set(
+		headers.set(
 			"Bittery-Client-Version",
 			nonEmptyHeaderValue(metadata.version, "Client version"),
 		);
-		return next;
 	}
 
 	client.use({
 		async onRequest({ request }) {
-			return new Request(request, {
-				headers: await requestHeaders(request.headers),
-			});
+			// Headers are set in place: `new Request(request, ...)` turns the body
+			// into a stream, and WebKit cannot upload a streamed request body.
+			await applyRequestHeaders(request.headers);
+			return request;
 		},
 		async onResponse({ response }) {
 			const sessionExpires = response.headers.get("Bittery-Session-Expires");
@@ -300,9 +300,11 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 		getApiMetadata: () => request("GET", "/api/meta"),
 		request,
 		async openSyncEvents(signal) {
+			const headers = new Headers({ Accept: "text/event-stream" });
+			await applyRequestHeaders(headers);
 			const response = await fetchImplementation(
 				new Request(new URL("api/v1/sync/events", `${baseUrl}/`), {
-					headers: await requestHeaders({ Accept: "text/event-stream" }),
+					headers,
 					signal,
 				}),
 			);

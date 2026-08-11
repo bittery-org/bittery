@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { KeyRef } from "@bittery/crypto-port";
 import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
-import type { CachedEncryptedItem } from "@bittery/types";
+import { ApiError } from "@bittery/shared/api-client";
+import type { CachedEncryptedItem, ItemSyncCommand } from "@bittery/types";
 import {
 	encodeAttachmentBlobEnvelope,
 	encryptAttachmentParts,
@@ -141,6 +142,46 @@ const TARGET = {
 	userId: "user_target",
 	vaultIds: ["vault_target"],
 };
+
+function notFound(): ApiError {
+	return new ApiError(
+		{
+			type: "https://bittery.test/not-found",
+			title: "Not found",
+			status: 404,
+			code: "NOT_FOUND",
+		},
+		null,
+	);
+}
+
+function crossAccountMoveCommand(
+	overrides: Partial<ItemSyncCommand> = {},
+): ItemSyncCommand {
+	return {
+		accountId: SOURCE.accountId,
+		accountEmail: SOURCE.email,
+		id: "move_1",
+		operationId: "move_1",
+		type: "cross_account_move",
+		entityId: "item_1",
+		vaultId: "vault_source",
+		targetAccountId: TARGET.accountId,
+		targetAccountEmail: TARGET.email,
+		targetVaultId: "vault_target",
+		targetItemId: "item_target",
+		category: "login",
+		encryptedPayload: {
+			encryptedData: "target_ciphertext",
+			encryptionIv: "target_iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+		},
+		baseVersion: 1,
+		timestamp: 1,
+		retryCount: 0,
+		...overrides,
+	};
+}
 
 describe("ItemService", () => {
 	test("consumes active attachment arrays and accepts trashed items without attachments", async () => {
@@ -602,5 +643,370 @@ describe("ItemService", () => {
 		} finally {
 			globalThis.fetch = originalFetch;
 		}
+	});
+
+	test("completes a durable cross-account move with stable phase identities", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		const phases: Array<{ phase: string; key?: string }> = [];
+		const service = fixture.service((accountId) =>
+			accountId === TARGET.accountId
+				? {
+						items: {
+							get: async () => {
+								throw notFound();
+							},
+							create: async (
+								_vaultId: string,
+								itemId: string,
+								_input: unknown,
+								options: { idempotencyKey?: string },
+							) => {
+								phases.push({
+									phase: `create:${itemId}`,
+									key: options.idempotencyKey,
+								});
+								return { data: { itemId } };
+							},
+						},
+						attachments: { list: async () => ({ data: [] }) },
+					}
+				: {
+						items: {
+							get: async () => ({
+								data: { version: 1, deletedAt: null },
+							}),
+							trash: async (
+								_itemId: string,
+								options: { idempotencyKey?: string },
+							) => phases.push({ phase: "trash", key: options.idempotencyKey }),
+							deletePermanently: async (
+								_itemId: string,
+								options: { idempotencyKey?: string },
+							) =>
+								phases.push({ phase: "delete", key: options.idempotencyKey }),
+						},
+						attachments: { list: async () => ({ data: [] }) },
+					},
+		);
+
+		await expect(
+			service.executeCrossAccountMoveCommand(crossAccountMoveCommand()),
+		).resolves.toEqual({ entityId: "item_1", etag: '"3"', version: 3 });
+		expect(phases).toEqual([
+			{ phase: "create:item_target", key: "move_1:create-target" },
+			{ phase: "trash", key: "move_1:trash-source" },
+			{ phase: "delete", key: "move_1:delete-source" },
+		]);
+	});
+
+	test("probes the deterministic target after a lost create response", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		let targetExists = false;
+		let createAttempts = 0;
+		let sourceDeleted = false;
+		const service = fixture.service((accountId) =>
+			accountId === TARGET.accountId
+				? {
+						items: {
+							get: async () => {
+								if (!targetExists) throw notFound();
+								return {
+									data: {
+										vaultId: "vault_target",
+										category: "login",
+										encryptedData: "target_ciphertext",
+										encryptionIv: "target_iv",
+										encryptionAlgorithm: "AES-GCM-AAD-V1",
+									},
+								};
+							},
+							create: async () => {
+								createAttempts += 1;
+								targetExists = true;
+								throw new Error("network lost after commit");
+							},
+						},
+						attachments: { list: async () => ({ data: [] }) },
+					}
+				: {
+						items: {
+							get: async () => ({ data: { version: 1, deletedAt: null } }),
+							trash: async () => undefined,
+							deletePermanently: async () => {
+								sourceDeleted = true;
+							},
+						},
+						attachments: { list: async () => ({ data: [] }) },
+					},
+		);
+
+		await expect(
+			service.executeCrossAccountMoveCommand(crossAccountMoveCommand()),
+		).rejects.toThrow("network lost after commit");
+		await service.executeCrossAccountMoveCommand(crossAccountMoveCommand());
+
+		expect(createAttempts).toBe(1);
+		expect(sourceDeleted).toBe(true);
+	});
+
+	test("rejects a changed source before creating the deterministic target", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		let targetCreated = false;
+		const service = fixture.service((accountId) =>
+			accountId === TARGET.accountId
+				? {
+						items: {
+							get: async () => {
+								throw notFound();
+							},
+							create: async () => {
+								targetCreated = true;
+							},
+						},
+					}
+				: {
+						items: {
+							get: async () => ({ data: { version: 2, deletedAt: null } }),
+						},
+					},
+		);
+
+		await expect(
+			service.executeCrossAccountMoveCommand(crossAccountMoveCommand()),
+		).rejects.toMatchObject({ status: 412 });
+		expect(targetCreated).toBe(false);
+	});
+
+	test("keeps the source when a durable move attachment transfer fails", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async () => ({ ok: false })) as never;
+		let sourceDeleted = false;
+		try {
+			const service = fixture.service((accountId) =>
+				accountId === TARGET.accountId
+					? {
+							items: {
+								get: async () => ({
+									data: {
+										vaultId: "vault_target",
+										category: "login",
+										encryptedData: "target_ciphertext",
+										encryptionIv: "target_iv",
+										encryptionAlgorithm: "AES-GCM-AAD-V1",
+									},
+								}),
+							},
+							attachments: { list: async () => ({ data: [] }) },
+						}
+					: {
+							items: {
+								get: async () => ({
+									data: { version: 1, deletedAt: null },
+								}),
+								trash: async () => {
+									sourceDeleted = true;
+								},
+							},
+							attachments: {
+								list: async () => ({
+									data: [
+										{
+											id: "attachment_1",
+											storageKey: "source_key",
+											fileSize: 4,
+										},
+									],
+								}),
+								createDownloadUrl: async () => ({
+									data: { downloadUrl: "https://download.test" },
+								}),
+							},
+						},
+			);
+
+			await expect(
+				service.executeCrossAccountMoveCommand(crossAccountMoveCommand()),
+			).rejects.toThrow("Failed to download attachment");
+			expect(sourceDeleted).toBe(false);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("rebuilds a partial target with the retry attachment identity", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		const sourceVaultKey = await fixture.vaultCrypto.getVaultKey({
+			vaultId: "vault_source",
+			accountId: SOURCE.accountId,
+			userId: SOURCE.userId,
+		});
+		if (!sourceVaultKey) throw new Error("Missing source key");
+		const sourceParts = await encryptAttachmentParts(
+			fixture.vaultCrypto,
+			sourceVaultKey,
+			{
+				vaultId: "vault_source",
+				attachmentKey: "source_key",
+				userId: SOURCE.userId,
+			},
+			{ base64File: "ZmlsZQ==", name: "secret.txt", contentType: "text/plain" },
+		);
+		await fixture.crypto.destroyKey(sourceVaultKey);
+		const originalFetch = globalThis.fetch;
+		globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+			if (init?.method === "PUT") return { ok: true } as Response;
+			return {
+				ok: true,
+				text: async () =>
+					new TextDecoder().decode(
+						encodeAttachmentBlobEnvelope(sourceParts.blobEnvelope),
+					),
+			} as Response;
+		}) as typeof fetch;
+		const attachmentCreateKeys: string[] = [];
+		let sourceDeleted = false;
+		try {
+			const service = fixture.service((accountId) =>
+				accountId === TARGET.accountId
+					? {
+							items: {
+								get: async () => ({
+									data: {
+										vaultId: "vault_target",
+										category: "login",
+										encryptedData: "target_ciphertext",
+										encryptionIv: "target_iv",
+										encryptionAlgorithm: "AES-GCM-AAD-V1",
+									},
+								}),
+							},
+							attachments: {
+								list: async () => ({ data: [{ id: "partial_attachment" }] }),
+								remove: async () => {
+									throw notFound();
+								},
+								createUpload: async () => ({
+									data: { key: "target_key", uploadUrl: "https://upload.test" },
+								}),
+								create: async (
+									_itemId: string,
+									_input: unknown,
+									options: { idempotencyKey?: string },
+								) => {
+									attachmentCreateKeys.push(options.idempotencyKey ?? "");
+								},
+							},
+						}
+					: {
+							items: {
+								get: async () => ({ data: { version: 1, deletedAt: null } }),
+								trash: async () => undefined,
+								deletePermanently: async () => {
+									sourceDeleted = true;
+								},
+							},
+							attachments: {
+								list: async () => ({
+									data: [
+										{
+											id: "attachment_1",
+											storageKey: "source_key",
+											encryptedName: sourceParts.encryptedName,
+											encryptedContentType: sourceParts.encryptedContentType,
+											encryptionIv: sourceParts.encryptionIv,
+											encryptedContentTypeIv:
+												sourceParts.encryptedContentTypeIv,
+											encryptionAlgorithm: sourceParts.encryptionAlgorithm,
+											fileSize: 4,
+											uploadedBy: SOURCE.userId,
+										},
+									],
+								}),
+								createDownloadUrl: async () => ({
+									data: { downloadUrl: "https://download.test" },
+								}),
+							},
+						},
+			);
+			await service.executeCrossAccountMoveCommand(
+				crossAccountMoveCommand({ attemptId: "move_1:attempt:second" }),
+			);
+
+			expect(attachmentCreateKeys).toEqual([
+				"move_1:attempt:second:attachment:attachment_1",
+			]);
+			expect(sourceDeleted).toBe(true);
+		} finally {
+			globalThis.fetch = originalFetch;
+		}
+	});
+
+	test("resumes source finalization after trash and after a lost permanent-delete response", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		let sourceState: "trashed" | "missing" = "trashed";
+		let permanentDeleteAttempts = 0;
+		const target = {
+			vaultId: "vault_target",
+			category: "login",
+			encryptedData: "target_ciphertext",
+			encryptionIv: "target_iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+		};
+		const service = fixture.service((accountId) =>
+			accountId === TARGET.accountId
+				? { items: { get: async () => ({ data: target }) } }
+				: {
+						items: {
+							get: async () => {
+								if (sourceState === "missing") throw notFound();
+								return {
+									data: {
+										version: 2,
+										deletedAt: "2026-08-11T00:00:00Z",
+									},
+								};
+							},
+							deletePermanently: async () => {
+								permanentDeleteAttempts += 1;
+								sourceState = "missing";
+								throw new Error("network lost after permanent delete");
+							},
+						},
+					},
+		);
+
+		await expect(
+			service.executeCrossAccountMoveCommand(crossAccountMoveCommand()),
+		).rejects.toThrow("network lost after permanent delete");
+		await expect(
+			service.executeCrossAccountMoveCommand(crossAccountMoveCommand()),
+		).resolves.toEqual({ entityId: "item_1", etag: '"3"', version: 3 });
+		expect(permanentDeleteAttempts).toBe(1);
+	});
+
+	test("does not accept a mismatched target after the source is already gone", async () => {
+		const fixture = await createFixture([SOURCE, TARGET]);
+		const service = fixture.service((accountId) =>
+			accountId === TARGET.accountId
+				? {
+						items: {
+							get: async () => ({
+								data: {
+									vaultId: "vault_target",
+									category: "login",
+									encryptedData: "different_ciphertext",
+									encryptionIv: "target_iv",
+									encryptionAlgorithm: "AES-GCM-AAD-V1",
+								},
+							}),
+						},
+					}
+				: { items: { get: async () => Promise.reject(notFound()) } },
+		);
+
+		await expect(
+			service.executeCrossAccountMoveCommand(crossAccountMoveCommand()),
+		).rejects.toThrow("does not match move");
 	});
 });

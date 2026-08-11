@@ -6,6 +6,7 @@ import {
 	AccountResolver,
 	createStoredAccountApiClient,
 } from "@bittery/core/services/account-resolver";
+import { createStagedFullRefresh } from "@bittery/core/services/staged-full-refresh";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
@@ -17,7 +18,7 @@ import type {
 	SyncSource,
 	SyncStorage,
 } from "@bittery/sync";
-import { useSync } from "@bittery/sync";
+import { buildDefaultSyncSourceId, useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { crypto } from "@/lib/crypto";
@@ -379,18 +380,24 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		[getClientForAccount, vaultCoordinator],
 	);
 
+	const refreshFromServer = useMemo(
+		() => createStagedFullRefresh(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
+
 	const syncSources = useMemo<SyncSource[]>(
 		() =>
 			syncContexts.map((context) => ({
-				id: context.accountId,
+				id: buildDefaultSyncSourceId(context.serverUrl, context.accountId),
 				serverUrl: context.serverUrl,
 				getAuthToken: () => storage.getAuthToken(context.accountId),
 				apiClient: context.apiClient,
+				refreshFromServer,
 				itemCacheAccountId: context.accountId,
 				itemCacheAccountEmail: context.email,
 				itemCacheServerUrl: context.serverUrl,
 			})),
-		[syncContexts],
+		[syncContexts, refreshFromServer],
 	);
 
 	const syncState = useSync({

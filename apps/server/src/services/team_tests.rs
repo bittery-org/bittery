@@ -2044,6 +2044,13 @@ async fn team_leave_paths() {
 			.fetch_one(&app.pool)
 			.await
 			.expect("rotation count should load");
+        let rotated_item: (String, String, i32, Option<i32>, Option<String>) = sqlx::query_as(
+            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        )
+        .bind(&fixture.accessible_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("rotated item should load");
         let remaining_sessions =
             query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM session WHERE user_id = $1")
                 .bind(&fixture.member_user_id)
@@ -2057,6 +2064,16 @@ async fn team_leave_paths() {
         assert_eq!(rotated_owner_key, "rotated-owner-key");
         assert_eq!(new_key_version, 2);
         assert_eq!(completed_rotations, 1);
+        assert_eq!(
+            rotated_item,
+            (
+                "rotated-item-ciphertext".to_string(),
+                "rotated-item-iv".to_string(),
+                2,
+                Some(2),
+                Some(fixture.member_user_id.clone()),
+            )
+        );
         assert_eq!(remaining_sessions, 0);
 
         let revoked_session = load_session_revocation(

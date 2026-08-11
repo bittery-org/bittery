@@ -1524,6 +1524,35 @@ async fn legacy_encryption_context_can_be_adopted_without_replacing_ciphertext()
             .await
             .unwrap();
         let session = app.issue_session(&fixture.owner_user_id).await;
+        let stale_response = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/items/{}", fixture.active_item_id),
+                Some(json!({
+                    "encryptionVersion": 1,
+                    "encryptedByUserId": fixture.owner_user_id
+                })),
+                with_if_match(authenticated_json_headers(&session.token), 3),
+            )
+            .await;
+        assert_eq!(stale_response.status, StatusCode::PRECONDITION_FAILED);
+        let unchanged_item: (String, String, i32, Option<i32>, Option<String>) = sqlx::query_as(
+            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        )
+        .bind(&fixture.active_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            unchanged_item,
+            (
+                "active-encrypted-data".to_string(),
+                "active-iv".to_string(),
+                4,
+                None,
+                None,
+            )
+        );
 
         let response = app
             .api_json(
@@ -2953,7 +2982,11 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     ),
                     Some(json!({ "keyRotation": {
                             "memberKeys": [],
-                            "reEncryptedItems": []
+                            "reEncryptedItems": [{
+                                "itemId": fixture.active_item_id,
+                                "encryptedData": "rotated-active-data",
+                                "encryptionIv": "rotated-active-iv"
+                            }]
                         } })),
                     owner_headers,
                 )
@@ -2977,8 +3010,26 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                     .fetch_one(&app.pool)
                     .await
                     .expect("ending key version should load");
+            let rotated_item: (String, String, i32, Option<i32>, Option<String>) =
+                sqlx::query_as(
+                    "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+                )
+                .bind(&fixture.active_item_id)
+                .fetch_one(&app.pool)
+                .await
+                .expect("rotated item should load");
             assert_eq!(removed_member_count, 0);
             assert_eq!(ending_key_version, starting_key_version + 1);
+            assert_eq!(
+                rotated_item,
+                (
+                    "rotated-active-data".to_string(),
+                    "rotated-active-iv".to_string(),
+                    2,
+                    Some(2),
+                    Some(fixture.owner_user_id),
+                )
+            );
         },
     )
     .await;

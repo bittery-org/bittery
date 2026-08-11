@@ -43,7 +43,10 @@ const alarmCreates: string[] = [];
 const runtimeMessages: Array<{ type: string }> = [];
 const storageLocal: Record<string, unknown> = {};
 let stagedRefreshCount = 0;
+let outboundDrainCount = 0;
 let requireFullRefreshOnCatchUp = false;
+let catchUpEvent: Record<string, unknown> | null = null;
+let deltaSyncError: Error | null = null;
 let lastSseRequest: { signal: AbortSignal | undefined } | null = null;
 let openSyncEvents: (signal?: AbortSignal) => Promise<Response> = async () =>
 	new Response(null, { status: 401 });
@@ -64,7 +67,11 @@ globalThis.chrome = {
 			set: async (items: Record<string, unknown>) => {
 				Object.assign(storageLocal, items);
 			},
-			remove: async () => {},
+			remove: async (keys: string | string[]) => {
+				for (const key of Array.isArray(keys) ? keys : [keys]) {
+					delete storageLocal[key];
+				}
+			},
 		},
 	},
 	alarms: {
@@ -87,12 +94,19 @@ globalThis.chrome = {
 
 mock.module("@bittery/sync", () => ({
 	runCatchUp: async (options: {
+		onEvent?: (event: Record<string, unknown>) => Promise<void>;
 		onRequiresFullRefresh?: () => Promise<void>;
 	}) => {
+		if (catchUpEvent) {
+			await options.onEvent?.(catchUpEvent);
+		}
 		if (requireFullRefreshOnCatchUp) {
 			await options.onRequiresFullRefresh?.();
 		}
-		return { cursor: { id: "" }, processedCount: 0 };
+		return {
+			cursor: { id: String(catchUpEvent?.id ?? "") },
+			processedCount: catchUpEvent ? 1 : 0,
+		};
 	},
 }));
 
@@ -129,6 +143,7 @@ mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 		resolveConnectionContext: async () => ({
 			accountId: ACCOUNT.accountId,
 			email: CONNECTION_EMAIL,
+			serverUrl: "http://localhost:3000",
 			client: {
 				sync: {
 					events: (signal?: AbortSignal) => openSyncEvents(signal),
@@ -136,22 +151,29 @@ mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 			},
 		}),
 		getClientForEmail: async () => ({}),
-		applyDeltaSyncForEvent: async () => {},
+		applyDeltaSyncForEvent: async () => {
+			if (deltaSyncError) throw deltaSyncError;
+		},
 		refreshItemCachesForKnownAccounts: async () => {
 			stagedRefreshCount++;
 		},
 	},
 }));
 
+mock.module(path.join(bgDir, "outbound-drain.ts"), () => ({
+	drainOutboundQueue: async () => {
+		outboundDrainCount++;
+	},
+}));
+
 const {
+	cleanupSync,
 	connect,
 	disconnect,
 	getLastSyncCursor,
 	handleSyncSseFrame,
 	setLastSyncCursor,
-} = await import(
-	path.join(bgDir, "sync-manager.ts")
-);
+} = await import(path.join(bgDir, "sync-manager.ts"));
 const { parseSseFrame } = await import(
 	path.join(bgDir, "services/sse-frame.ts")
 );
@@ -199,7 +221,10 @@ beforeEach(() => {
 	runtimeMessages.length = 0;
 	lockAllCalls = 0;
 	stagedRefreshCount = 0;
+	outboundDrainCount = 0;
 	requireFullRefreshOnCatchUp = false;
+	catchUpEvent = null;
+	deltaSyncError = null;
 	lastSseRequest = null;
 	openSyncEvents = async () => new Response(null, { status: 401 });
 	invalidateResult = () => [ACCOUNT];
@@ -208,11 +233,83 @@ beforeEach(() => {
 
 describe("account-scoped sync cursors", () => {
 	test("keeps independent durable cursors for two accounts", async () => {
-		await setLastSyncCursor("acc-1", { id: "evt-1" });
-		await setLastSyncCursor("acc-2", { id: "evt-9" });
+		await setLastSyncCursor("acc-1", "https://one.example", { id: "evt-1" });
+		await setLastSyncCursor("acc-2", "https://one.example", { id: "evt-9" });
 
-		expect(await getLastSyncCursor("acc-1")).toEqual({ id: "evt-1" });
-		expect(await getLastSyncCursor("acc-2")).toEqual({ id: "evt-9" });
+		expect(await getLastSyncCursor("acc-1", "https://one.example/")).toEqual({
+			id: "evt-1",
+		});
+		expect(await getLastSyncCursor("acc-2", "https://one.example")).toEqual({
+			id: "evt-9",
+		});
+	});
+
+	test("isolates the same accountId across normalized server URLs", async () => {
+		await setLastSyncCursor("shared-account", "https://one.example/", {
+			id: "evt-one",
+		});
+		await setLastSyncCursor("shared-account", "https://two.example", {
+			id: "evt-two",
+		});
+
+		expect(
+			await getLastSyncCursor("shared-account", "https://one.example"),
+		).toEqual({ id: "evt-one" });
+		expect(
+			await getLastSyncCursor("shared-account", "https://two.example/"),
+		).toEqual({ id: "evt-two" });
+	});
+
+	test("ignores an ambiguous legacy account-only cursor", async () => {
+		storageLocal["bittery_last_sync_cursor_v2:shared-account"] = {
+			id: "legacy-event",
+		};
+
+		expect(
+			await getLastSyncCursor("shared-account", "https://one.example"),
+		).toBeNull();
+	});
+
+	test("cleanup removes only the connected account and server cursor", async () => {
+		stubStream([]);
+		await connect();
+		await setLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000/", {
+			id: "connected-event",
+		});
+		await setLastSyncCursor(ACCOUNT.accountId, "https://other.example", {
+			id: "other-event",
+		});
+
+		await cleanupSync();
+
+		expect(
+			await getLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000"),
+		).toBeNull();
+		expect(
+			await getLastSyncCursor(ACCOUNT.accountId, "https://other.example"),
+		).toEqual({ id: "other-event" });
+	});
+
+	test("does not advance an account cursor when its catch-up delta fails", async () => {
+		await setLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000", {
+			id: "evt-1",
+		});
+		catchUpEvent = {
+			id: "evt-2",
+			type: "item_updated",
+			entityId: "item-1",
+			entityType: "item",
+			vaultId: "vault-1",
+			version: 2,
+		};
+		deltaSyncError = new Error("candidate cache write failed");
+		stubStream([{ event: "sync", data: {} }]);
+
+		await connect();
+
+		expect(
+			await getLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000"),
+		).toEqual({ id: "evt-1" });
 	});
 });
 
@@ -296,13 +393,23 @@ describe("session_revoked over SSE", () => {
 
 	test("a sync ping still triggers a full refresh", async () => {
 		requireFullRefreshOnCatchUp = true;
-		await handleSyncSseFrame({ event: "sync", data: {} });
+		stubStream([{ event: "sync", data: {} }]);
+		await connect();
 
 		expect(stagedRefreshCount).toBe(1);
 		expect(runtimeMessages).toContainEqual({
 			type: "SYNC_FULL_REFRESH_REQUIRED",
 		});
 		expect(invalidationTargets).toEqual([]);
+	});
+
+	// The popup queues writes it cannot push itself, so a worker that opens a
+	// stream without draining leaves them stranded until the next popup visit.
+	test("pushes the outbound queue once the stream opens", async () => {
+		stubStream([]);
+		await connect();
+
+		expect(outboundDrainCount).toBe(1);
 	});
 });
 

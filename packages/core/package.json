@@ -23,6 +23,7 @@
 		"./services/share-service": "./src/services/share-service.ts",
 		"./services/account-session-manager": "./src/services/account-session-manager.ts",
 		"./services/select-active-account": "./src/services/select-active-account.ts",
+		"./services/staged-full-refresh": "./src/services/staged-full-refresh.ts",
 		"./services/travel-mode-enforcer": "./src/services/travel-mode-enforcer.ts",
 		"./services/travel-mode-sync": "./src/services/travel-mode-sync.ts",
 		"./services/unlock": "./src/services/unlock.ts",

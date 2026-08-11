@@ -6,6 +6,7 @@
  * the dispatcher that looks routes up here.
  */
 
+import type { ItemSyncCommand } from "@bittery/types";
 import type {
 	PasskeyCreateHandlerPayload,
 	PasskeyGetHandlerPayload,
@@ -44,6 +45,14 @@ import {
 	handleNativeBiometricUnlockAll,
 	handleOpenDesktopApp,
 } from "../native-messaging";
+import {
+	activateAndDrainOutboundCommand,
+	cancelStagedOutboundCommand,
+	claimStagedOutboundCommands,
+	drainOutboundQueue,
+	getOutboundCommandSummary,
+	stageOutboundCommand,
+} from "../outbound-drain";
 import {
 	handleCaptureTabScreenshot,
 	handleUpdateItemTotp,
@@ -155,6 +164,100 @@ export const routeRegistry: RouteRegistry = {
 
 	GET_SYNC_CLIENT_ID: {
 		handle: async () => ({ success: true, clientId: await getSyncClientId() }),
+	},
+
+	GET_SYNC_COMMAND_SUMMARY: {
+		handle: async () => ({
+			success: true,
+			summary: await getOutboundCommandSummary(),
+		}),
+	},
+
+	CLAIM_STAGED_ITEM_COMMANDS: {
+		handle: async (payload: { claimId: string }) => {
+			const claim = await claimStagedOutboundCommands(payload.claimId);
+			return { success: true, ...claim };
+		},
+	},
+
+	ENQUEUE_ITEM_COMMAND: {
+		handle: async (payload: { command: ItemSyncCommand; claimId: string }) => {
+			try {
+				if (!(await stageOutboundCommand(payload.command, payload.claimId))) {
+					return {
+						success: false,
+						code: "ALREADY_EXISTS",
+						error: "Item command already exists",
+					};
+				}
+				return { success: true };
+			} catch (error) {
+				return { success: false, error: String(error) };
+			}
+		},
+	},
+
+	CANCEL_STAGED_ITEM_COMMAND: {
+		handle: async (payload: {
+			accountId: string;
+			operationId: string;
+			claimId: string;
+		}) => {
+			try {
+				if (
+					!(await cancelStagedOutboundCommand(
+						payload.accountId,
+						payload.operationId,
+						payload.claimId,
+					))
+				) {
+					return {
+						success: false,
+						code: "CLAIM_LOST",
+						error: "Staged Item command claim was lost",
+					};
+				}
+				return { success: true };
+			} catch (error) {
+				return { success: false, error: String(error) };
+			}
+		},
+	},
+
+	/**
+	 * Sent by the popup after it queues a mutation. The push runs here because
+	 * only the worker can authenticate as the account that produced it.
+	 */
+	DRAIN_OUTBOUND_QUEUE: {
+		handle: async (payload?: {
+			accountId?: string;
+			operationId?: string;
+			claimId?: string;
+		}) => {
+			try {
+				if (payload?.accountId && payload.operationId && payload.claimId) {
+					if (
+						!(await activateAndDrainOutboundCommand(
+							payload.accountId,
+							payload.operationId,
+							payload.claimId,
+						))
+					) {
+						return {
+							success: false,
+							code: "CLAIM_LOST",
+							error: "Staged Item command claim was lost",
+						};
+					}
+				} else {
+					await drainOutboundQueue();
+				}
+				return { success: true };
+			} catch (error) {
+				console.error("[Background router] Outbound drain failed:", error);
+				return { success: false, error: String(error) };
+			}
+		},
 	},
 
 	// Vault operations

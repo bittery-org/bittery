@@ -29,11 +29,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let bind_address = read_bind_address();
     let edge_http_config = load_edge_http_config().map_err(std::io::Error::other)?;
     let redis_pool = init_redis().await;
-    validate_sync_fanout_requirement(
-        env::var("NODE_ENV").ok().as_deref(),
-        redis_pool.is_some(),
-    )
-    .map_err(std::io::Error::other)?;
+    validate_sync_fanout_requirement(env::var("NODE_ENV").ok().as_deref(), redis_pool.is_some())
+        .map_err(std::io::Error::other)?;
     let mut app_state = match db::connect_from_env().await? {
         Some(pool) => {
             db::run_migrations(&pool).await?;

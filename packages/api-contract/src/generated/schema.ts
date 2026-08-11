@@ -1397,9 +1397,12 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly favorite: boolean;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
@@ -1539,9 +1542,12 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly favorite: boolean;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
@@ -1672,9 +1678,12 @@ export interface components {
                 readonly category: string;
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
+                readonly encryptedByUserId?: string | null;
                 readonly encryptedData: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
+                /** Format: int32 */
+                readonly encryptionVersion?: number | null;
                 readonly favorite: boolean;
                 readonly id: string;
                 readonly lastModifiedBy?: string | null;
@@ -1797,9 +1806,12 @@ export interface components {
                 readonly category: string;
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
+                readonly encryptedByUserId?: string | null;
                 readonly encryptedData: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
+                /** Format: int32 */
+                readonly encryptionVersion?: number | null;
                 readonly favorite: boolean;
                 readonly id: string;
                 readonly lastModifiedBy?: string | null;
@@ -1816,9 +1828,12 @@ export interface components {
                 readonly category: string;
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
+                readonly encryptedByUserId?: string | null;
                 readonly encryptedData: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
+                /** Format: int32 */
+                readonly encryptionVersion?: number | null;
                 readonly favorite: boolean;
                 readonly id: string;
                 readonly lastModifiedBy?: string | null;
@@ -1862,9 +1877,12 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly favorite: boolean;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
@@ -1968,9 +1986,12 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly favorite: boolean;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
@@ -2226,9 +2247,12 @@ export interface components {
             readonly itemId: string;
         };
         readonly RotationItemResponse: {
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
             /** Format: int32 */
@@ -2488,9 +2512,12 @@ export interface components {
             readonly encryptionIv: string;
         };
         readonly UpdateItemBody: {
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData?: string | null;
             readonly encryptionAlgorithm?: string | null;
             readonly encryptionIv?: string | null;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
         };
         readonly UpdateItemResponse: {
             readonly success: boolean;
@@ -2552,9 +2579,12 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly favorite: boolean;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
@@ -2567,9 +2597,12 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly favorite: boolean;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
@@ -2617,9 +2650,12 @@ export interface components {
             readonly members: readonly components["schemas"]["VaultRotationMemberResponse"][];
         };
         readonly VaultRotationItemResponse: {
+            readonly encryptedByUserId?: string | null;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly encryptionVersion?: number | null;
             readonly id: string;
             readonly lastModifiedBy?: string | null;
             /** Format: int32 */

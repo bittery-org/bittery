@@ -59,6 +59,12 @@ export class SyncOrchestrator {
 		connectionStatus: "disconnected",
 		lastSyncTime: null,
 		pendingChanges: 0,
+		commandSummary: {
+			pending: 0,
+			retrying: 0,
+			conflicted: 0,
+			failed: 0,
+		},
 		error: null,
 	};
 	private readonly unsubscribeQueue: () => void;
@@ -66,6 +72,8 @@ export class SyncOrchestrator {
 	private catchUpInFlight = false;
 	private catchUpRequested = false;
 	private drainingInFlight = false;
+	private drainRequested = false;
+	private retryTimer: ReturnType<typeof setTimeout> | undefined;
 
 	constructor(private readonly options: SyncOrchestratorOptions) {
 		this.itemCacheAccountId = options.itemCacheAccountId;
@@ -90,19 +98,23 @@ export class SyncOrchestrator {
 
 		this.unsubscribeQueue = this.options.outboundQueue.subscribe(() => {
 			const pendingChanges = this.options.outboundQueue.getPendingCount();
-			this.setStatus({ pendingChanges });
+			const previousPendingChanges = this.status.pendingChanges;
+			this.setStatus({
+				pendingChanges,
+				commandSummary: this.options.outboundQueue.getCommandSummary(),
+			});
 
-			// Drain newly enqueued mutations immediately when already connected.
+			// The event stream is a read-path hint only: gating writes on it strands
+			// every mutation while the stream is down, connecting, or never opened.
+			// A failed push stays queued and retries on the next drain trigger.
+			// Only a grown queue triggers a drain here: retry bookkeeping also emits,
+			// and draining on it re-runs the same failing mutation in a tight loop.
 			if (
 				this.shouldDrainOutboundQueue() &&
-				pendingChanges > 0 &&
-				this.status.connectionStatus === "connected"
+				pendingChanges > previousPendingChanges
 			) {
 				void this.drainQueue().catch((error) => {
-					console.error(
-						"[SyncOrchestrator] Queue drain failed while connected:",
-						error,
-					);
+					console.error("[SyncOrchestrator] Queue drain failed:", error);
 				});
 			}
 		});
@@ -225,30 +237,59 @@ export class SyncOrchestrator {
 	}
 
 	private async drainQueue(): Promise<void> {
+		// `compact()` swaps the queue arrays a running drain is shifting from, so a
+		// concurrent drain could resurrect an already-sent mutation. Overlapping
+		// callers are coalesced into a follow-up pass instead of being dropped,
+		// otherwise a mutation enqueued mid-drain never gets pushed.
 		if (this.drainingInFlight) {
+			this.drainRequested = true;
 			return;
 		}
 		this.drainingInFlight = true;
 
 		try {
-			this.options.outboundQueue.compact();
-			await this.options.outboundQueue.drain((accountId) => {
-				if (this.getClientForAccount) {
-					return this.getClientForAccount(accountId);
-				}
-				return this.options.apiClient;
-			});
+			do {
+				this.drainRequested = false;
+				this.options.outboundQueue.compact();
+				await this.options.outboundQueue.drain((accountId) => {
+					if (this.getClientForAccount) {
+						return this.getClientForAccount(accountId);
+					}
+					return this.options.apiClient;
+				});
 
-			for (const mapping of this.options.outboundQueue.consumeTempIdMappings()) {
-				this.options.itemCache.replaceItemId(
-					mapping.tempId,
-					mapping.realId,
-					mapping.accountId,
-				);
-			}
+				for (const mapping of this.options.outboundQueue.consumeTempIdMappings()) {
+					this.options.itemCache.replaceItemId(
+						mapping.tempId,
+						mapping.realId,
+						mapping.accountId,
+					);
+				}
+			} while (this.drainRequested);
 		} finally {
 			this.drainingInFlight = false;
+			this.scheduleRetry();
 		}
+	}
+
+	private scheduleRetry(): void {
+		if (this.retryTimer !== undefined) {
+			clearTimeout(this.retryTimer);
+			this.retryTimer = undefined;
+		}
+		const retryAt = this.options.outboundQueue.getNextRetryAt();
+		if (retryAt === undefined) {
+			return;
+		}
+		this.retryTimer = setTimeout(
+			() => {
+				this.retryTimer = undefined;
+				void this.drainQueue().catch((error) => {
+					console.error("[SyncOrchestrator] Scheduled retry failed:", error);
+				});
+			},
+			Math.max(0, retryAt - Date.now()),
+		);
 	}
 
 	private async handleStatusChange(
@@ -289,6 +330,10 @@ export class SyncOrchestrator {
 	}
 
 	dispose(): void {
+		if (this.retryTimer !== undefined) {
+			clearTimeout(this.retryTimer);
+			this.retryTimer = undefined;
+		}
 		this.unsubscribeQueue();
 		this.disconnect();
 		this.listeners.clear();

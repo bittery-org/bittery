@@ -1,4 +1,5 @@
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import { ApiError, isApiErrorStatus } from "@bittery/shared/api-client";
 import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type {
 	DecryptedItem,
@@ -18,6 +19,8 @@ import type {
 	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
+	ItemSyncAcknowledgement,
+	ItemSyncCommand,
 	RawEncryptedItem,
 	RawEncryptedItemWithVault,
 } from "@bittery/types";
@@ -1148,6 +1151,7 @@ export class ItemService {
 		sourceAccountEmail?: string;
 		targetVaultKey: KeyRef;
 		targetUserId: string;
+		attachmentAttemptId?: string;
 	}): Promise<void> {
 		const { data: attachments } = await params.sourceClient.attachments.list(
 			params.sourceItemId,
@@ -1241,15 +1245,23 @@ export class ItemService {
 					);
 				}
 
-				await params.targetClient.attachments.create(params.targetItemId, {
-					storageKey: upload.key,
-					encryptedName: reEncrypted.encryptedName,
-					encryptedContentType: reEncrypted.encryptedContentType,
-					encryptionIv: reEncrypted.encryptionIv,
-					encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
-					encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
-					fileSize: attachment.fileSize,
-				});
+				await params.targetClient.attachments.create(
+					params.targetItemId,
+					{
+						storageKey: upload.key,
+						encryptedName: reEncrypted.encryptedName,
+						encryptedContentType: reEncrypted.encryptedContentType,
+						encryptionIv: reEncrypted.encryptionIv,
+						encryptedContentTypeIv: reEncrypted.encryptedContentTypeIv,
+						encryptionAlgorithm: reEncrypted.encryptionAlgorithm,
+						fileSize: attachment.fileSize,
+					},
+					params.attachmentAttemptId
+						? {
+								idempotencyKey: `${params.attachmentAttemptId}:attachment:${attachment.id}`,
+							}
+						: undefined,
+				);
 			}
 		} finally {
 			await this.crypto.destroyKey(sourceVaultKey);
@@ -1279,6 +1291,187 @@ export class ItemService {
 				cleanupError,
 			);
 		}
+	}
+
+	private sourceConflict(itemId: string): ApiError {
+		return new ApiError(
+			{
+				type: "https://bittery.com/problems/precondition-failed",
+				title: "Precondition Failed",
+				status: 412,
+				code: "PRECONDITION_FAILED",
+				detail: `Item ${itemId} changed before its cross-account move completed`,
+			},
+			null,
+		);
+	}
+
+	private async probeItem(
+		client: DefaultApiClient,
+		itemId: string,
+	): Promise<Awaited<ReturnType<DefaultApiClient["items"]["get"]>> | null> {
+		try {
+			return await client.items.get(itemId);
+		} catch (error) {
+			if (isApiErrorStatus(error, 404)) return null;
+			throw error;
+		}
+	}
+
+	private async clearTargetAttachments(
+		client: DefaultApiClient,
+		itemId: string,
+		operationId: string,
+	): Promise<void> {
+		const { data: attachments } = await client.attachments.list(itemId);
+		for (const attachment of attachments ?? []) {
+			try {
+				await client.attachments.remove(attachment.id, {
+					idempotencyKey: `${operationId}:clear-attachment:${attachment.id}`,
+				});
+			} catch (error) {
+				if (!isApiErrorStatus(error, 404)) throw error;
+			}
+		}
+	}
+
+	async executeCrossAccountMoveCommand(
+		command: ItemSyncCommand,
+	): Promise<ItemSyncAcknowledgement | undefined> {
+		if (command.type !== "cross_account_move") return undefined;
+		const payload = command.encryptedPayload;
+		const targetAccountId = command.targetAccountId;
+		const targetVaultId = command.targetVaultId;
+		const targetItemId = command.targetItemId;
+		const operationId = command.operationId ?? command.id;
+		if (
+			!payload ||
+			!command.category ||
+			!targetAccountId ||
+			!targetVaultId ||
+			!targetItemId
+		) {
+			throw new Error(`Invalid cross-account move command ${operationId}`);
+		}
+
+		const [sourceClient, targetClient] = await Promise.all([
+			this.accounts.getClientForAccount(
+				{} as DefaultApiClient,
+				command.accountId,
+			),
+			this.accounts.getClientForAccount(
+				{} as DefaultApiClient,
+				targetAccountId,
+			),
+		]);
+		const [source, target] = await Promise.all([
+			this.probeItem(sourceClient, command.entityId),
+			this.probeItem(targetClient, targetItemId),
+		]);
+		if (
+			target &&
+			(target.data.vaultId !== targetVaultId ||
+				target.data.category !== command.category ||
+				target.data.encryptedData !== payload.encryptedData ||
+				target.data.encryptionIv !== payload.encryptionIv ||
+				target.data.encryptionAlgorithm !== payload.encryptionAlgorithm)
+		) {
+			throw new Error(
+				`Deterministic target ${targetItemId} does not match move`,
+			);
+		}
+
+		if (!source) {
+			if (!target) {
+				throw new Error(
+					`Cross-account move ${operationId} lost both source and target Items`,
+				);
+			}
+			return {
+				entityId: command.entityId,
+				etag: `"${command.baseVersion + 2}"`,
+				version: command.baseVersion + 2,
+			};
+		}
+
+		const sourceVersion = source.data.version;
+		if (source.data.deletedAt) {
+			if (sourceVersion !== command.baseVersion + 1 || !target) {
+				throw this.sourceConflict(command.entityId);
+			}
+			await sourceClient.items.deletePermanently(command.entityId, {
+				etag: strongItemEtag(sourceVersion),
+				idempotencyKey: `${operationId}:delete-source`,
+			});
+			return {
+				entityId: command.entityId,
+				etag: `"${sourceVersion + 1}"`,
+				version: sourceVersion + 1,
+			};
+		}
+		if (sourceVersion !== command.baseVersion) {
+			throw this.sourceConflict(command.entityId);
+		}
+
+		if (target) {
+			await this.clearTargetAttachments(
+				targetClient,
+				targetItemId,
+				operationId,
+			);
+		} else {
+			await targetClient.items.create(
+				targetVaultId,
+				targetItemId,
+				{
+					category: command.category,
+					encryptedData: payload.encryptedData,
+					encryptionIv: payload.encryptionIv,
+					encryptionAlgorithm: payload.encryptionAlgorithm,
+				},
+				{ idempotencyKey: `${operationId}:create-target` },
+			);
+		}
+
+		const targetVaultKey = await this.getVaultKey(
+			targetVaultId,
+			command.targetAccountEmail ?? targetAccountId,
+		);
+		if (!targetVaultKey) {
+			throw new Error("Cannot access target vault key for cross-account move");
+		}
+		try {
+			await this.migrateAttachmentsForCrossAccountMove({
+				sourceClient,
+				targetClient,
+				sourceItemId: command.entityId,
+				targetItemId,
+				sourceVaultId: command.vaultId,
+				targetVaultId,
+				sourceAccountEmail: command.accountEmail ?? command.accountId,
+				targetVaultKey,
+				targetUserId: await this.resolveUserId(
+					command.targetAccountEmail ?? targetAccountId,
+				),
+				attachmentAttemptId: command.attemptId ?? command.id,
+			});
+		} finally {
+			await this.crypto.destroyKey(targetVaultKey);
+		}
+
+		await sourceClient.items.trash(command.entityId, {
+			etag: strongItemEtag(command.baseVersion),
+			idempotencyKey: `${operationId}:trash-source`,
+		});
+		await sourceClient.items.deletePermanently(command.entityId, {
+			etag: strongItemEtag(command.baseVersion + 1),
+			idempotencyKey: `${operationId}:delete-source`,
+		});
+		return {
+			entityId: command.entityId,
+			etag: `"${command.baseVersion + 2}"`,
+			version: command.baseVersion + 2,
+		};
 	}
 
 	async moveItem(

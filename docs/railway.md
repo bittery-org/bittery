@@ -4,7 +4,7 @@
 
 ## About Hosting bittery
 
-Hosting Bittery means running a **Caddy reverse proxy**, a **Rust API server**, and a **web vault** (static SPA behind nginx), backed by **PostgreSQL**. Railway terminates TLS at the edge; Caddy listens on `$PORT` and routes `/api/*`, `/cdn/*`, and other server-owned paths to the server, with `/api/v1/sync/events` kept unbuffered for SSE. Everything else reaches the web app over **private networking** (`server.railway.internal`, `web.railway.internal`). The server handles authentication (SRP), encrypted vault sync, teams, and share links; it does not decrypt user data. Database migrations run automatically on server startup. The Railway template pre-wires `DATABASE_URL`, object-storage bucket variables, and Caddy upstream reference variables—only **caddy** needs a public domain. **Redis/Valkey** is optional for cross-instance SSE sync and distributed rate limiting. Pin `ghcr.io/bittery-org/bittery-server` and `ghcr.io/bittery-org/bittery-web` to the same exact release; `latest` is only suitable for disposable evaluation.
+Hosting Bittery means running a **Caddy reverse proxy**, a **Rust API server**, and a **web vault** (static SPA behind nginx), backed by **PostgreSQL**. Railway terminates TLS at the edge; Caddy listens on `$PORT` and routes `/api/*`, `/cdn/*`, and other server-owned paths to the server, with `/api/v1/sync/events` kept unbuffered for SSE. Everything else reaches the web app over **private networking** (`server.railway.internal`, `web.railway.internal`). The server handles authentication (SRP), encrypted vault sync, teams, and share links; it does not decrypt user data. Database migrations run automatically on server startup. The Railway template pre-wires `DATABASE_URL`, object-storage bucket variables, and Caddy upstream reference variables—only **caddy** needs a public domain. Every production server requires **Redis/Valkey** so durable Item catch-up wake-ups are reliable across instances; startup fails if `REDIS_URL` cannot connect. Pin `ghcr.io/bittery-org/bittery-server` and `ghcr.io/bittery-org/bittery-web` to the same exact release; `latest` is only suitable for disposable evaluation.
 
 ## Common Use Cases
 
@@ -15,6 +15,7 @@ Hosting Bittery means running a **Caddy reverse proxy**, a **Rust API server**, 
 ## Dependencies for bittery Hosting
 
 - **PostgreSQL 15+** (required) — Primary datastore for users, sessions, and encrypted vault blobs. Provisioned and linked by the template.
+- **Redis/Valkey** (required) — Durable Item catch-up notification fan-out. The server validates the connection at production startup.
 - **Caddy** (required) — Public entry point. Proxies to server/web over Railway private networking (`*.railway.internal`). Railway handles HTTPS at the edge.
 - **bittery-server** — Rust/Axum API (`PORT` defaults to `3000`, health check at `/healthz`).
 - **bittery-web** — Vite-built SPA served on port `8080` (health check at `/nginx-health`).
@@ -60,6 +61,8 @@ Only **caddy** should have public networking enabled. **server** and **web** sta
 - `BITTERY_STORAGE_*` — wired from the template's object-storage bucket
 - Caddy upstream reference variables (above)
 
+Add a Redis/Valkey service to the project and set the server's `REDIS_URL` to its private authenticated connection URL before the first production start.
+
 **What you may customize after deploy**
 
 ```env
@@ -71,7 +74,7 @@ BITTERY_MODE=self-hosted
 
 `VITE_SERVER_URL` is **not** required. With Caddy serving both the web app and API on the same domain, the web app uses the current page origin for API and sync requests.
 
-**Optional server vars:** `REDIS_URL` (cross-instance sync), `SHARE_LINK_DAILY_LIMIT` (default `50`).
+**Server vars:** `REDIS_URL` is required in production, including a single server instance. `SHARE_LINK_DAILY_LIMIT` defaults to `50`.
 
 Updates: set server and web to the same exact target release, then redeploy them together. Migrations apply on server boot. Railway's public edge must remain HTTPS; a non-loopback HTTP exception requires both operator enablement and per-account client confirmation.
 

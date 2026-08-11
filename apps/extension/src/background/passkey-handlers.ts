@@ -27,17 +27,16 @@ import type {
 	SerializedGetResult,
 } from "../passkey/types";
 import { apiClient } from "./api-client";
-import { core } from "./core-instance";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import { getDesktopStatus, isDesktopUnlockedNow } from "./desktop-status";
+import {
+	createExtensionItem,
+	updateExtensionItem,
+} from "./extension-item-mutations";
 import {
 	resolveAccountEmailForVault,
 	resolveEmailFromAccountId,
 } from "./services/account-resolution";
-import {
-	onLocalItemCreated,
-	onLocalItemUpdated,
-} from "./services/local-item-cache-service";
 import {
 	isUnlocked,
 	setDesktopModeSentinel,
@@ -545,23 +544,13 @@ async function attachPasskeyToExistingItem(input: {
 	const existingData = toDecryptedData(input.item);
 	const nextPasskeys = [...(existingData.passkeys ?? []), input.passkey];
 
-	const updateResult = await core.items.updateItem(
-		{
-			itemId: input.item.id,
-			vaultId: input.item.vaultId,
-			data: {
-				...existingData,
-				passkeys: nextPasskeys,
-			},
-			accountEmail,
-		},
-		apiClient,
-	);
-
-	await onLocalItemUpdated({
+	await updateExtensionItem({
 		itemId: input.item.id,
-		encryptedData: updateResult._encryptedData,
-		accountEmail: updateResult._accountEmail,
+		data: {
+			...existingData,
+			passkeys: nextPasskeys,
+		},
+		accountEmail,
 	});
 }
 
@@ -583,27 +572,16 @@ async function createItemWithPasskey(input: {
 		throw new Error("No vault keys available for writable vault");
 	}
 
-	const createResult = await core.items.createItem(
-		{
-			vaultId: input.targetVault.id,
-			category: "login",
-			data: {
-				title: input.rpId,
-				url: `https://${input.rpId}`,
-				username: input.username,
-				passkeys: [input.passkey],
-			},
-			accountEmail,
-		},
-		apiClient,
-	);
-
-	await onLocalItemCreated({
-		itemId: createResult.itemId,
+	await createExtensionItem({
 		vaultId: input.targetVault.id,
 		category: "login",
-		encryptedData: createResult._encryptedData,
-		accountEmail: createResult._accountEmail,
+		data: {
+			title: input.rpId,
+			url: `https://${input.rpId}`,
+			username: input.username,
+			passkeys: [input.passkey],
+		},
+		accountEmail,
 	});
 }
 
@@ -742,23 +720,13 @@ async function updateStoredPasskey(input: {
 	}
 	nextPasskeys[input.match.passkeyIndex] = input.update(current);
 
-	const updateResult = await core.items.updateItem(
-		{
-			itemId: input.match.item.id,
-			vaultId: input.match.item.vaultId,
-			data: {
-				...data,
-				passkeys: nextPasskeys,
-			},
-			accountEmail,
-		},
-		apiClient,
-	);
-
-	await onLocalItemUpdated({
+	await updateExtensionItem({
 		itemId: input.match.item.id,
-		encryptedData: updateResult._encryptedData,
-		accountEmail: updateResult._accountEmail,
+		data: {
+			...data,
+			passkeys: nextPasskeys,
+		},
+		accountEmail,
 	});
 }
 

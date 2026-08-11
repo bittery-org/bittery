@@ -1,7 +1,14 @@
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import type { VaultKeyData } from "@bittery/storage/types";
-import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
+import type {
+	CachedEncryptedItem,
+	CachedVaultMetadata,
+	DiscoveredItemEncryptionContext,
+	ItemEncryptionContextMigrationPort,
+	ItemSyncAcknowledgement,
+	ItemSyncCommand,
+} from "@bittery/types";
 import type { AccountInfo } from "./account-resolver";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { TravelModeApiClient } from "./travel-mode-service";
@@ -33,16 +40,28 @@ type RepoEntry = {
 };
 
 export class VaultRepositoryCoordinator {
+	private itemCommandExecutor?: (
+		command: ItemSyncCommand,
+	) => Promise<ItemSyncAcknowledgement | undefined>;
 	private readonly repos = new Map<string, RepoEntry>();
 	private readonly listeners = new Set<() => void>();
 	private readonly accountInfoByAccountId = new Map<
 		string,
 		CoordinatedItemAccount
 	>();
+	private readonly apiClientByAccountId = new Map<
+		string,
+		AccountInfo["apiClient"]
+	>();
 	private readonly activeAccountIds = new Set<string>();
 	private readonly hydratingAccountIds = new Set<string>();
 	private readonly verifyingAccounts = new Map<string, Promise<void>>();
 	private snapshot = 0;
+	private encryptionContextMigrationPort?: ItemEncryptionContextMigrationPort;
+	private readonly deferredEncryptionContextMigrations = new Map<
+		string,
+		DiscoveredItemEncryptionContext
+	>();
 
 	constructor(
 		private readonly crypto: CryptoPort,
@@ -106,6 +125,26 @@ export class VaultRepositoryCoordinator {
 		this.repos.set(accountId, { repo, unsubscribe });
 	}
 
+	private encryptionContextMigrationKey(
+		context: DiscoveredItemEncryptionContext,
+	): string {
+		return `${context.accountId}:${context.itemId}`;
+	}
+
+	private async publishOrDeferEncryptionContextMigration(
+		context: DiscoveredItemEncryptionContext,
+	): Promise<void> {
+		const port = this.encryptionContextMigrationPort;
+		if (!port) {
+			this.deferredEncryptionContextMigrations.set(
+				this.encryptionContextMigrationKey(context),
+				context,
+			);
+			return;
+		}
+		await port(context);
+	}
+
 	getOrCreate(
 		accountId: string,
 		serverUrl?: string,
@@ -127,6 +166,13 @@ export class VaultRepositoryCoordinator {
 			accountId,
 			serverUrl,
 			accountEmail,
+			(context) => this.publishOrDeferEncryptionContextMigration(context),
+			async (vaultId) => {
+				const client = this.apiClientByAccountId.get(accountId);
+				if (!client) return [];
+				const { data: members } = await client.vaults.members.list(vaultId);
+				return members.map((member) => member.userId);
+			},
 		);
 		this.attachRepo(accountId, repo);
 		return repo;
@@ -141,7 +187,13 @@ export class VaultRepositoryCoordinator {
 		entry.repo.clear();
 		this.repos.delete(accountId);
 		this.accountInfoByAccountId.delete(accountId);
+		this.apiClientByAccountId.delete(accountId);
 		this.activeAccountIds.delete(accountId);
+		for (const [key, context] of this.deferredEncryptionContextMigrations) {
+			if (context.accountId === accountId) {
+				this.deferredEncryptionContextMigrations.delete(key);
+			}
+		}
 		this.emit();
 	}
 
@@ -157,6 +209,7 @@ export class VaultRepositoryCoordinator {
 	setActiveAccounts(accounts: AccountInfo[]): void {
 		this.activeAccountIds.clear();
 		this.accountInfoByAccountId.clear();
+		this.apiClientByAccountId.clear();
 
 		for (const account of accounts) {
 			this.activeAccountIds.add(account.accountId);
@@ -169,6 +222,7 @@ export class VaultRepositoryCoordinator {
 				teamName: account.teamName,
 				teamAvatarUrl: account.teamAvatarUrl,
 			});
+			this.apiClientByAccountId.set(account.accountId, account.apiClient);
 			this.getOrCreate(account.accountId, account.serverUrl, account.email);
 		}
 
@@ -268,6 +322,7 @@ export class VaultRepositoryCoordinator {
 	async hydrateAccountRepos(accounts: AccountInfo[]): Promise<void> {
 		await Promise.all(
 			accounts.map(async (account) => {
+				this.apiClientByAccountId.set(account.accountId, account.apiClient);
 				const repo = this.getOrCreate(
 					account.accountId,
 					account.serverUrl,
@@ -502,6 +557,8 @@ export class VaultRepositoryCoordinator {
 		this.hydratingAccountIds.clear();
 		this.activeAccountIds.clear();
 		this.accountInfoByAccountId.clear();
+		this.apiClientByAccountId.clear();
+		this.deferredEncryptionContextMigrations.clear();
 		for (const entry of this.repos.values()) {
 			entry.unsubscribe();
 			entry.repo.clear();
@@ -511,6 +568,78 @@ export class VaultRepositoryCoordinator {
 	}
 
 	// --- SyncItemCache surface (packages/sync/src/types.ts) ---
+	async setEncryptionContextMigrationPort(
+		port: ItemEncryptionContextMigrationPort | undefined,
+	): Promise<void> {
+		this.encryptionContextMigrationPort = port;
+		if (!port) return;
+		for (const [key, context] of this.deferredEncryptionContextMigrations) {
+			await port(context);
+			this.deferredEncryptionContextMigrations.delete(key);
+		}
+	}
+
+	async publishPendingEncryptionContextMigration(
+		accountId: string,
+		itemId: string,
+	): Promise<void> {
+		await this.getOrCreate(accountId).publishPendingEncryptionContextMigration(
+			itemId,
+		);
+	}
+
+	async applyItemCommand(command: ItemSyncCommand): Promise<void> {
+		await this.getOrCreate(command.accountId).applyItemCommand(command);
+	}
+
+	setItemCommandExecutor(
+		executor: (
+			command: ItemSyncCommand,
+		) => Promise<ItemSyncAcknowledgement | undefined>,
+	): void {
+		this.itemCommandExecutor = executor;
+	}
+
+	async executeSemanticItemCommand(
+		command: ItemSyncCommand,
+	): Promise<ItemSyncAcknowledgement | undefined> {
+		return this.itemCommandExecutor?.(command);
+	}
+
+	async discardItemCommandAcknowledgedElsewhere(
+		command: ItemSyncCommand,
+	): Promise<void> {
+		await this.getOrCreate(
+			command.accountId,
+		).discardItemCommandAcknowledgedElsewhere(command);
+	}
+
+	async preserveItemConflict(
+		command: ItemSyncCommand,
+	): Promise<ItemSyncCommand | undefined> {
+		return this.getOrCreate(command.accountId).preserveItemConflict(command);
+	}
+
+	async acknowledgeItemCommand(
+		command: ItemSyncCommand,
+		acknowledgement: ItemSyncAcknowledgement,
+	): Promise<void> {
+		await this.getOrCreate(command.accountId).acknowledgeItemCommand(
+			command,
+			acknowledgement,
+		);
+	}
+
+	async reconcileAuthoritative(
+		command: ItemSyncCommand,
+		item: CachedEncryptedItem,
+	): Promise<void> {
+		await this.getOrCreate(command.accountId).upsertCachedItem(
+			item,
+			command.accountId,
+		);
+	}
+
 	async upsertCachedItem(
 		item: CachedEncryptedItem,
 		accountId: string,
@@ -519,7 +648,7 @@ export class VaultRepositoryCoordinator {
 	}
 
 	async removeCachedItem(itemId: string, accountId: string): Promise<void> {
-		await this.getOrCreate(accountId).removeItem(itemId);
+		await this.getOrCreate(accountId).removeCachedItem(itemId, accountId);
 	}
 
 	async upsertCachedVault(

@@ -142,7 +142,15 @@ export interface SyncStatus {
 	connectionStatus: ConnectionStatus;
 	lastSyncTime: number | null;
 	pendingChanges: number;
+	commandSummary: SyncCommandSummary;
 	error: string | null;
+}
+
+export interface SyncCommandSummary {
+	pending: number;
+	retrying: number;
+	conflicted: number;
+	failed: number;
 }
 
 export type { PendingMutation } from "./outbound-queue";
@@ -154,6 +162,10 @@ export interface SyncStorage {
 	get<T>(key: string): Promise<T | null>;
 	set<T>(key: string, value: T): Promise<void>;
 	remove(key: string): Promise<void>;
+	update?<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null>;
 }
 
 /**
@@ -224,4 +236,25 @@ export interface SyncItemCache extends ItemCacheAdapter {
 		accountId: string,
 	): Promise<void>;
 	replaceItemId(tempId: string, realId: string, accountId: string): void;
+	applyItemCommand(
+		command: import("@bittery/types").ItemSyncCommand,
+	): Promise<void>;
+	executeSemanticItemCommand(
+		command: import("@bittery/types").ItemSyncCommand,
+	): Promise<import("@bittery/types").ItemSyncAcknowledgement | undefined>;
+	discardItemCommandAcknowledgedElsewhere(
+		command: import("@bittery/types").ItemSyncCommand,
+	): Promise<void>;
+	preserveItemConflict(
+		command: import("@bittery/types").ItemSyncCommand,
+	): Promise<import("@bittery/types").ItemSyncCommand | undefined>;
+	acknowledgeItemCommand(
+		command: import("@bittery/types").ItemSyncCommand,
+		acknowledgement: import("@bittery/types").ItemSyncAcknowledgement,
+	): Promise<void>;
+	setEncryptionContextMigrationPort(
+		port:
+			| import("@bittery/types").ItemEncryptionContextMigrationPort
+			| undefined,
+	): Promise<void>;
 }

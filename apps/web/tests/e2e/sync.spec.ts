@@ -8,6 +8,8 @@ import {
 	type TestUser,
 	test,
 } from "../fixtures/auth";
+import { runE2eSql, sqlString } from "../fixtures/e2e-database";
+import { uiText } from "../fixtures/messages";
 import { waitForNetworkIdleExceptSSE } from "../fixtures/network-helpers";
 import {
 	createItem,
@@ -19,7 +21,6 @@ import {
 	openVault,
 	VAULT_READY_TIMEOUT_MS,
 } from "../fixtures/vault";
-import { uiText } from "../fixtures/messages";
 
 /**
  * Live sync between two devices of one account: a write in one browser context
@@ -59,6 +60,7 @@ const suffix = nanoid(6);
 const seedTitle = `Sync Seed ${suffix}`;
 const fromWriterTitle = `Sync From A ${suffix}`;
 const fromReaderTitle = `Sync From B ${suffix}`;
+const deleteForeverTitle = `Sync Delete Forever ${suffix}`;
 
 let user: TestUser;
 let vaultId: string;
@@ -156,6 +158,30 @@ test("the reverse direction works too, and the writing context does not duplicat
 	expect((await itemRowTitles(reader)).sort()).toEqual(expected);
 });
 
+test("starring and unstarring converge in both directions without navigation", async () => {
+	test.setTimeout(TEST_BUDGET_MS);
+
+	await openItem(writer, fromWriterTitle);
+	await openItemMenu(writer);
+	await writer.getByTestId("item-favorite-button").click();
+
+	const favoritesHeading = (page: Page) =>
+		page.getByText(
+			uiText("vaults_detail_items_list_section_favorites", { count: 1 }),
+		);
+	await expect(favoritesHeading(reader)).toBeVisible({
+		timeout: SYNC_BUDGET_MS,
+	});
+
+	await openItem(reader, fromWriterTitle);
+	await openItemMenu(reader);
+	await reader.getByTestId("item-favorite-button").click();
+
+	await expect(favoritesHeading(writer)).toHaveCount(0, {
+		timeout: SYNC_BUDGET_MS,
+	});
+});
+
 test("the two contexts are two sync clients of one account", async () => {
 	test.setTimeout(TEST_BUDGET_MS);
 
@@ -177,11 +203,88 @@ test("the two contexts are two sync clients of one account", async () => {
 	expect(new URL(reader.url()).pathname).toBe(`/vaults/${vaultId}`);
 });
 
+test("fresh hydration defers legacy encryption migrations until one Item is opened", async ({
+	browser,
+}) => {
+	test.setTimeout(TEST_BUDGET_MS);
+
+	const resetContexts = runE2eSql(
+		`UPDATE item SET encryption_version = NULL, encrypted_by_user_id = NULL WHERE vault_id = '${sqlString(vaultId)}'`,
+	);
+	if (!/^UPDATE [1-9]\d*$/.test(resetContexts)) {
+		throw new Error(
+			`Expected legacy Items to reset, psql said: ${resetContexts}`,
+		);
+	}
+
+	type ObservedMigration = {
+		status: number;
+		ifMatch: string | undefined;
+		etag: string | undefined;
+		itemId: string;
+	};
+	const migrations: ObservedMigration[] = [];
+	const context = await browser.newContext();
+	const page = await context.newPage();
+	const observeMigration = async (
+		response: import("@playwright/test").Response,
+	) => {
+		const request = response.request();
+		const match = new URL(response.url()).pathname.match(
+			/^\/api\/v1\/items\/([^/]+)$/,
+		);
+		if (request.method() !== "PATCH" || !match?.[1]) return;
+		const requestHeaders = await request.allHeaders();
+		const responseHeaders = await response.allHeaders();
+		migrations.push({
+			status: response.status(),
+			ifMatch: requestHeaders["if-match"],
+			etag: responseHeaders.etag,
+			itemId: match[1],
+		});
+	};
+	page.on("response", observeMigration);
+
+	try {
+		await signIn(page, user);
+		await openSharedVault(page, seedTitle);
+		await page.waitForTimeout(1_000);
+		expect(migrations).toEqual([]);
+
+		await openItem(page, seedTitle);
+		const openedItemId = await page
+			.getByTestId("item-detail-pane")
+			.getAttribute("data-item-id");
+		if (!openedItemId) throw new Error("The opened legacy Item has no id.");
+		await expect
+			.poll(() => migrations.length, { timeout: SYNC_BUDGET_MS })
+			.toBe(1);
+		expect(migrations).toEqual([
+			{
+				status: 200,
+				ifMatch: '"1"',
+				etag: '"2"',
+				itemId: openedItemId,
+			},
+		]);
+	} finally {
+		page.off("response", observeMigration);
+		await context.close();
+	}
+});
+
 test("Trash acknowledgement advances Delete Forever's If-Match and converges both clients", async () => {
 	test.setTimeout(TEST_BUDGET_MS);
 
-	await openVault(writer, vaultId);
-	await openItem(writer, fromWriterTitle);
+	await createItem(writer, "login", async (sheet) => {
+		await sheet.locator("#title").fill(deleteForeverTitle);
+		await sheet.locator("#username").fill(`delete_${suffix}`);
+		await sheet.locator("#password").fill(`Delete-Pass-${suffix}!`);
+	});
+	await expect(itemRow(reader, deleteForeverTitle)).toBeVisible({
+		timeout: SYNC_BUDGET_MS,
+	});
+	await openItem(writer, deleteForeverTitle);
 	const itemId = await writer
 		.getByTestId("item-detail-pane")
 		.getAttribute("data-item-id");
@@ -196,7 +299,9 @@ test("Trash acknowledgement advances Delete Forever's If-Match and converges bot
 		etag: string | undefined;
 	};
 	const writes: ObservedWrite[] = [];
-	const observeWrite = async (response: import("@playwright/test").Response) => {
+	const observeWrite = async (
+		response: import("@playwright/test").Response,
+	) => {
 		const request = response.request();
 		const path = new URL(response.url()).pathname;
 		const itemPath = `/api/v1/items/${itemId}`;
@@ -218,7 +323,7 @@ test("Trash acknowledgement advances Delete Forever's If-Match and converges bot
 		await openItemMenu(writer);
 		await writer.getByTestId("item-delete-button").click();
 		await writer.getByTestId("delete-item-confirm-button").click();
-		await expect(itemRow(writer, fromWriterTitle)).toHaveCount(0);
+		await expect(itemRow(writer, deleteForeverTitle)).toHaveCount(0);
 
 		await writer.goto("/vaults/trash");
 		const deleteForever = writer.locator(
@@ -235,9 +340,7 @@ test("Trash acknowledgement advances Delete Forever's If-Match and converges bot
 			})
 			.click();
 
-		await expect
-			.poll(() => writes.length, { timeout: SYNC_BUDGET_MS })
-			.toBe(2);
+		await expect.poll(() => writes.length, { timeout: SYNC_BUDGET_MS }).toBe(2);
 		expect(writes).toEqual([
 			{
 				operation: "trash",

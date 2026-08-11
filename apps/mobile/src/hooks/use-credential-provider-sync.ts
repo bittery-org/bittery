@@ -1,4 +1,12 @@
-import { useAccountsInfo, useItems } from "@bittery/core/hooks";
+import {
+	useAccountsInfo,
+	useItems,
+	usePlatformSync,
+} from "@bittery/core/hooks";
+import {
+	createNativeItemSyncCommand,
+	isLegacyNativeItemConflict,
+} from "@bittery/sync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, InteractionManager, Platform } from "react-native";
 import { storage } from "@/services/storage";
@@ -133,6 +141,7 @@ export function useCredentialProviderSync(
 		refetch: refetchItems,
 	} = useItems({ enabled });
 	const { accountsInfo } = useAccountsInfo({ enabled });
+	const platformSync = usePlatformSync();
 
 	const [isSyncing, setIsSyncing] = useState(false);
 	const [lastSyncResult, setLastSyncResult] = useState<{
@@ -392,6 +401,8 @@ export function useCredentialProviderSync(
 							isFavorite: item.favorite || false,
 							version: item.version ?? 1,
 							lastModifiedBy: item.lastModifiedBy ?? null,
+							encryptionVersion: item.encryptionVersion ?? null,
+							encryptedByUserId: item.encryptedByUserId ?? null,
 						};
 					});
 
@@ -546,10 +557,12 @@ export function useCredentialProviderSync(
 		};
 
 		for (const mutation of pending as PendingPasskeyMutation[]) {
+			const legacyConflict = isLegacyNativeItemConflict(mutation);
 			const ageMs = Date.now() - mutation.createdAt;
 			if (
-				mutation.attemptCount >= MAX_PENDING_PASSKEY_ATTEMPTS ||
-				ageMs > MAX_PENDING_PASSKEY_AGE_MS
+				!legacyConflict &&
+				(mutation.attemptCount >= MAX_PENDING_PASSKEY_ATTEMPTS ||
+					ageMs > MAX_PENDING_PASSKEY_AGE_MS)
 			) {
 				discardedIds.push(mutation.id);
 				continue;
@@ -565,39 +578,15 @@ export function useCredentialProviderSync(
 			}
 
 			try {
-				if (mutation.operation === "update_item") {
-					const current = await account.apiClient.items.get(mutation.itemId);
-					if (!current.etag) {
-						throw new Error("Missing item version for credential update");
-					}
-					await account.apiClient.items.update(
-						mutation.itemId,
-						{
-							encryptedData: mutation.encryptedData,
-							encryptionIv: mutation.encryptionIv,
-							encryptionAlgorithm:
-								mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
-						},
-						{ etag: current.etag },
-					);
-				} else if (mutation.operation === "create_item") {
-					await account.apiClient.items.create(
-						mutation.vaultId,
-						mutation.itemId,
-						{
-							category: "login",
-							encryptedData: mutation.encryptedData,
-							encryptionIv: mutation.encryptionIv,
-							encryptionAlgorithm:
-								mutation.encryptionAlgorithm || "AES-GCM-AAD-V1",
-						},
-					);
-				} else {
-					throw new Error(
-						`Unsupported passkey mutation operation: ${mutation.operation}`,
-					);
+				if (!platformSync) {
+					throw new Error("Item sync engine is unavailable");
 				}
-
+				const command = createNativeItemSyncCommand(mutation, {
+					accountId: account.accountId,
+					accountEmail: account.email,
+				});
+				await platformSync.outboundQueue.enqueue(command);
+				if (command.status === "conflicted") continue;
 				appliedIds.push(mutation.id);
 			} catch (error) {
 				const message = getErrorMessage(error);
@@ -638,7 +627,7 @@ export function useCredentialProviderSync(
 			),
 			discarded: discardedIds.length,
 		};
-	}, [enabled, accountsInfo, isAvailable]);
+	}, [enabled, accountsInfo, isAvailable, platformSync]);
 
 	const flushPendingPasskeyMutationsAndRefresh = useCallback(async () => {
 		const result = await flushPendingPasskeyMutations();

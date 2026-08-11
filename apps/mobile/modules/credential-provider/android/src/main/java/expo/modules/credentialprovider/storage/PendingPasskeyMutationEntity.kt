@@ -28,6 +28,9 @@ data class PendingPasskeyMutationEntity(
     val encryptedData: String,
     val encryptionIv: String,
     val encryptionAlgorithm: String = "AES-GCM-AAD-V1",
+    val baseVersion: Long,
+    val encryptionVersion: Long,
+    val encryptedByUserId: String,
     val createdAt: Long = System.currentTimeMillis(),
     val attemptCount: Int = 0,
     val lastError: String? = null

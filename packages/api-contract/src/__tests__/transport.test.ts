@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createApiTransport } from "../transport.ts";
+import { createApiTransport, requestOriginHeaders } from "../transport.ts";
 
 function streamResponse(): Response {
 	return new Response(
@@ -23,6 +23,51 @@ function transportOptions() {
 		}),
 	};
 }
+
+describe("request transport", () => {
+	// WebKit rejects uploads whose body became a stream, which is what
+	// reconstructing a body-carrying Request does. Header injection and origin
+	// extraction must leave the original request body intact.
+	test("adds headers and strips the local origin while keeping the body", async () => {
+		const seen: { body: string; origin: unknown; request: Request }[] = [];
+		const transport = createApiTransport({
+			...transportOptions(),
+			insecureTransport: { operatorEnabled: true, accountConfirmed: true },
+			fetch: async (request, requestOrigin) => {
+				seen.push({
+					body: await request.text(),
+					origin: requestOrigin,
+					request,
+				});
+				return Response.json({ ok: true });
+			},
+		});
+
+		await transport.request("POST", "/api/v1/items", {
+			body: { name: "item" },
+			headers: requestOriginHeaders({
+				kind: "persistedAccount",
+				accountId: "account_1",
+				serverUrl: "http://self-hosted.example/bittery",
+			}),
+		});
+
+		const [call] = seen;
+		expect(call?.origin).toEqual({
+			kind: "persistedAccount",
+			accountId: "account_1",
+			serverUrl: "http://self-hosted.example/bittery",
+		});
+		expect(call?.body).toBe(JSON.stringify({ name: "item" }));
+		expect(
+			call?.request.headers.get("Bittery-Local-Request-Origin"),
+		).toBeNull();
+		expect(call?.request.headers.get("Bittery-Client-Id")).toBe("client-1");
+		expect(call?.request.headers.get("Authorization")).toBe(
+			"Bearer session-token",
+		);
+	});
+});
 
 describe("sync event transport", () => {
 	test("does not send the bearer when remote HTTP lacks account confirmation", async () => {

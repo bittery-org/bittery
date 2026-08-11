@@ -164,6 +164,7 @@ setup_files() {
 DOMAIN=${DOMAIN}
 BITTERY_RELEASE=${BITTERY_RELEASE}
 BITTERY_MODE=self-hosted
+REDIS_URL=redis://valkey:6379
 JWT_SECRET=${JWT_SECRET}
 DB_PASSWORD=${DB_PASSWORD}
 # Optional hardening
@@ -183,9 +184,9 @@ EOF
 start_services() {
   cd "$INSTALL_DIR"
 
-  COMPOSE_PROFILES=""
+  COMPOSE_PROFILES="cache"
   if [[ "$USE_BUILTIN_DB" == true ]]; then
-    COMPOSE_PROFILES="builtin-db"
+    COMPOSE_PROFILES="cache,builtin-db"
   fi
 
   log "Pulling Docker images..."

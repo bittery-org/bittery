@@ -141,6 +141,7 @@ function apiServerEnv(options: {
 		// second connection for the limiter write; the default pool of 5 queues on
 		// sqlx's acquire timeout and surfaces as intermittent 500s.
 		DATABASE_MAX_CONNECTIONS: "25",
+		NODE_ENV: "test",
 		BITTERY_MODE: options.mode,
 		BITTERY_CLOUD_PUBLIC_SIGNUP: "true",
 		// The plan step and /billing must render; specs pick the Free plan, so no

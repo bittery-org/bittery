@@ -5,6 +5,7 @@
 
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { apiClient } from "./api-client";
+import { publishOpenedItemEncryptionContextMigration } from "./outbound-drain";
 import { updateActivity } from "./session-manager";
 import type { MessageResponse } from "./types";
 import { getDecryptedItemsForCurrentMode } from "./vault-utils";
@@ -33,6 +34,9 @@ export async function handleGetVaultItem(payload: {
 	const { itemId } = payload;
 	const items = await getDecryptedItemsForCurrentMode();
 	const item = items.find((candidate) => candidate?.id === itemId) ?? null;
+	if (item) {
+		await publishOpenedItemEncryptionContextMigration(itemId);
+	}
 	return { success: true, item };
 }
 

@@ -32,6 +32,7 @@ const DEFAULT_SERVER_URL = "http://localhost:3000";
 export type SyncConnectionContext = {
 	accountId: string | null;
 	email: string | null;
+	serverUrl: string;
 	client: SyncEventApiClient;
 };
 
@@ -166,6 +167,10 @@ function shouldClearDesktopCacheForEvent(event: SyncEvent): boolean {
 export interface SyncCacheService {
 	resolveConnectionContext: () => Promise<SyncConnectionContext | null>;
 	getClientForEmail: (email?: string | null) => Promise<SyncEventApiClient>;
+	/** Null when the account has no reachable token; callers must not fall back to another account's client. */
+	getClientForAccountId: (
+		accountId: string,
+	) => Promise<SyncEventApiClient | null>;
 	resolveCandidateAccountIdsForEvent: (event: SyncEvent) => Promise<string[]>;
 	applyDeltaSyncForEvent: (event: SyncEvent) => Promise<void>;
 	refreshItemCachesForKnownAccounts: () => Promise<void>;
@@ -287,6 +292,7 @@ export function createSyncCacheService(
 			return {
 				accountId,
 				email: email ? normalizeEmail(email) : null,
+				serverUrl: await getServerUrlForAccountId(accountId),
 				client,
 			};
 		}
@@ -306,6 +312,7 @@ export function createSyncCacheService(
 		return {
 			accountId: activeAccountId,
 			email: null,
+			serverUrl: await getServerUrlForAccountId(activeAccountId),
 			client: deps.defaultClient,
 		};
 	}
@@ -480,6 +487,7 @@ export function createSyncCacheService(
 					`[sync-cache-service] Delta sync failed for ${accountId} (${event.type})`,
 					error,
 				);
+				throw error;
 			}
 		}
 
@@ -508,6 +516,7 @@ export function createSyncCacheService(
 	return {
 		resolveConnectionContext,
 		getClientForEmail,
+		getClientForAccountId: getAccountClientForAccountId,
 		resolveCandidateAccountIdsForEvent,
 		applyDeltaSyncForEvent,
 		refreshItemCachesForKnownAccounts,

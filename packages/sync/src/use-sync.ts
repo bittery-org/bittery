@@ -1,7 +1,7 @@
 import { useApiClient } from "@bittery/shared/api";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { OutboundQueue, type OutboundQueueApiClient } from "./outbound-queue";
+import { ItemSyncEngine, type OutboundQueueApiClient } from "./outbound-queue";
 import {
 	createQueryInvalidator,
 	invalidateQueriesForEvent,
@@ -12,6 +12,7 @@ import {
 } from "./sync-orchestrator";
 import type {
 	SessionRevokedControlPayload,
+	SyncCommandSummary,
 	SyncEvent,
 	SyncItemCache,
 	SyncStatus,
@@ -55,6 +56,24 @@ class NamespacedSyncStorage implements SyncStorage {
 	remove(key: string): Promise<void> {
 		return this.storage.remove(this.key(key));
 	}
+
+	update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		if (!this.storage.update) {
+			return this.storage.get<T>(this.key(key)).then(async (current) => {
+				const next = updater(current);
+				if (next === null) {
+					await this.storage.remove(this.key(key));
+				} else {
+					await this.storage.set(this.key(key), next);
+				}
+				return next;
+			});
+		}
+		return this.storage.update(this.key(key), updater);
+	}
 }
 
 export interface SyncSource {
@@ -78,6 +97,7 @@ export interface SyncEventContext {
 function aggregateStatuses(
 	statuses: Iterable<SyncStatus>,
 	pendingChanges: number,
+	commandSummary: SyncCommandSummary,
 ): SyncStatus {
 	const list = Array.from(statuses);
 	if (list.length === 0) {
@@ -85,6 +105,7 @@ function aggregateStatuses(
 			connectionStatus: "disconnected",
 			lastSyncTime: null,
 			pendingChanges,
+			commandSummary,
 			error: null,
 		};
 	}
@@ -114,6 +135,7 @@ function aggregateStatuses(
 		connectionStatus,
 		lastSyncTime,
 		pendingChanges,
+		commandSummary,
 		error: list.find((status) => status.error)?.error ?? null,
 	};
 }
@@ -133,7 +155,13 @@ export function buildDefaultSyncSourceId(
 	if (!accountId) {
 		return "unscoped";
 	}
-	return `account:${encodeURIComponent(accountId)}:server:${encodeURIComponent(serverUrl)}`;
+	let normalizedServerUrl = serverUrl.trim().replace(/\/+$/, "");
+	try {
+		normalizedServerUrl = new URL(serverUrl).toString().replace(/\/+$/, "");
+	} catch {
+		// A malformed URL still gets a deterministic isolated scope.
+	}
+	return `account:${encodeURIComponent(accountId)}:server:${encodeURIComponent(normalizedServerUrl)}`;
 }
 
 /**
@@ -199,8 +227,31 @@ export function useSync(options: UseSyncOptions) {
 		[storage],
 	);
 	const outboundQueue = useMemo(
-		() => new OutboundQueue(syncStorage, clientId, resolveLegacyAccountId),
-		[syncStorage, clientId, resolveLegacyAccountId],
+		() =>
+			new ItemSyncEngine(syncStorage, clientId, resolveLegacyAccountId, {
+				apply: async (command) => {
+					await itemCacheAdapter?.applyItemCommand(command);
+				},
+				executeSemanticCommand: async (command) =>
+					itemCacheAdapter?.executeSemanticItemCommand(command),
+				discardAcknowledgedElsewhere: async (command) => {
+					await itemCacheAdapter?.discardItemCommandAcknowledgedElsewhere(
+						command,
+					);
+				},
+				preserveConflict: async (command) =>
+					itemCacheAdapter?.preserveItemConflict(command),
+				reconcileAuthoritative: async (command, item) => {
+					await itemCacheAdapter?.upsertCachedItem(item, command.accountId);
+				},
+				acknowledge: async (command, acknowledgement) => {
+					await itemCacheAdapter?.acknowledgeItemCommand(
+						command,
+						acknowledgement,
+					);
+				},
+			}),
+		[syncStorage, clientId, resolveLegacyAccountId, itemCacheAdapter],
 	);
 	const orchestratorsRef = useRef<Map<string, SyncOrchestrator>>(new Map());
 	const sourceStatusesRef = useRef<Map<string, SyncStatus>>(new Map());
@@ -209,6 +260,12 @@ export function useSync(options: UseSyncOptions) {
 		connectionStatus: "disconnected",
 		lastSyncTime: null,
 		pendingChanges: 0,
+		commandSummary: {
+			pending: 0,
+			retrying: 0,
+			conflicted: 0,
+			failed: 0,
+		},
 		error: null,
 	});
 
@@ -268,6 +325,7 @@ export function useSync(options: UseSyncOptions) {
 				aggregateStatuses(
 					sourceStatusesRef.current.values(),
 					outboundQueue.getPendingCount(),
+					outboundQueue.getCommandSummary(),
 				),
 			);
 		};
@@ -319,6 +377,30 @@ export function useSync(options: UseSyncOptions) {
 		orchestratorsRef.current = orchestrators;
 
 		(async () => {
+			await itemCacheAdapter.setEncryptionContextMigrationPort(
+				async (context) => {
+					const operationId = `adopt-context:${context.accountId}:${context.itemId}:${context.encryptionVersion}:${context.encryptedByUserId}`;
+					await outboundQueue.enqueue({
+						accountId: context.accountId,
+						id: operationId,
+						operationId,
+						type: "adopt_encryption_context",
+						entityId: context.itemId,
+						vaultId: context.vaultId,
+						encryptedPayload: {
+							encryptedData: "",
+							encryptionIv: "",
+							encryptionAlgorithm: "",
+							encryptionVersion: context.encryptionVersion,
+							encryptedByUserId: context.encryptedByUserId,
+						},
+						baseVersion: context.baseVersion,
+						timestamp: Date.now(),
+						retryCount: 0,
+						migrationTrigger: "explicit_open",
+					});
+				},
+			);
 			await outboundQueue.restore();
 			if (disposed) {
 				return;
@@ -326,6 +408,7 @@ export function useSync(options: UseSyncOptions) {
 			setStatus((prev) => ({
 				...prev,
 				pendingChanges: outboundQueue.getPendingCount(),
+				commandSummary: outboundQueue.getCommandSummary(),
 			}));
 
 			await Promise.all(
@@ -337,6 +420,7 @@ export function useSync(options: UseSyncOptions) {
 
 		return () => {
 			disposed = true;
+			void itemCacheAdapter.setEncryptionContextMigrationPort(undefined);
 			for (const unsubscribe of unsubscribers) {
 				unsubscribe();
 			}

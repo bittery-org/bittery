@@ -15,9 +15,10 @@ import androidx.room.RoomDatabase
  * - v3: Added pending passkey mutation queue for durable writeback
  * - v4: Added version + lastModifiedBy to ItemEntity and keyVersion to VaultKeyEntity
  *       for correct AES-GCM-AAD-V1 context reconstruction during decryption
+ * - v6: Separated Item OCC revision from exact ciphertext revision and author
  *
- * The database uses destructive migration because all data can be re-synced from the server.
- * The MUK is the only critical piece, and it's managed separately in VaultStateManager.
+ * Explicit migrations protect the durable passkey outbox added in v3. Destructive fallback is
+ * limited to v1/v2, whose resynchronizable schemas predate that outbox.
  */
 @Database(
     entities = [
@@ -30,7 +31,7 @@ import androidx.room.RoomDatabase
         ItemDomainEntity::class,
         PendingPasskeyMutationEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class CredentialDatabase : RoomDatabase() {
@@ -43,6 +44,7 @@ abstract class CredentialDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
     abstract fun itemDomainDao(): ItemDomainDao
     abstract fun pendingPasskeyMutationDao(): PendingPasskeyMutationDao
+    abstract fun passkeyMutationDao(): PasskeyMutationDao
 
     companion object {
         private const val DATABASE_NAME = "bittery_credentials.db"
@@ -62,9 +64,8 @@ abstract class CredentialDatabase : RoomDatabase() {
                 CredentialDatabase::class.java,
                 DATABASE_NAME
             )
-                // Use destructive migration since all data can be re-synced from server
-                // The MUK and session data are stored separately in VaultStateManager
-                .fallbackToDestructiveMigration()
+                .addMigrations(*CredentialDatabaseMigrations.all)
+                .fallbackToDestructiveMigrationFrom(true, 1, 2)
                 .build()
         }
 

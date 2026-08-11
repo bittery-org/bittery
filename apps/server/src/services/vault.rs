@@ -2898,10 +2898,11 @@ pub(crate) mod member_handlers {
 			}
 			for item in &input.key_rotation.re_encrypted_items {
 				let updated_rows = query(
-					"UPDATE item SET encrypted_data = $1, encryption_iv = $2, updated_at = $3 WHERE id = $4 AND vault_id = $5",
+					"UPDATE item SET encrypted_data = $1, encryption_iv = $2, version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $3, last_modified_by = $3, updated_at = $4 WHERE id = $5 AND vault_id = $6",
 				)
 				.bind(&item.encrypted_data)
 				.bind(&item.encryption_iv)
+				.bind(user_id)
 				.bind(OffsetDateTime::now_utc())
 				.bind(&item.item_id)
 				.bind(&input.vault_id)

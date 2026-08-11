@@ -1,6 +1,13 @@
+import { createStoredAccountApiClient } from "@bittery/core/services/account-resolver";
+import { createStagedFullRefresh } from "@bittery/core/services/staged-full-refresh";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import { getOrCreateClientId, type SyncStorage, useSync } from "@bittery/sync";
+import {
+	getOrCreateClientId,
+	type OutboundQueueApiClient,
+	type SyncStorage,
+	useSync,
+} from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { getServerUrl } from "@/lib/auth-server";
@@ -59,6 +66,34 @@ class WebSyncStorage implements SyncStorage {
 			return;
 		}
 		window.localStorage.removeItem(this.getStorageKey(key));
+	}
+
+	async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		if (typeof window === "undefined") {
+			return updater(null);
+		}
+		const storageKey = this.getStorageKey(key);
+		return navigator.locks.request(`bittery-sync:${storageKey}`, async () => {
+			const stored = window.localStorage.getItem(storageKey);
+			let current: T | null = null;
+			if (stored) {
+				try {
+					current = JSON.parse(stored) as T;
+				} catch {
+					current = null;
+				}
+			}
+			const next = updater(current);
+			if (next === null) {
+				window.localStorage.removeItem(storageKey);
+			} else {
+				window.localStorage.setItem(storageKey, JSON.stringify(next));
+			}
+			return next;
+		});
 	}
 }
 
@@ -120,6 +155,29 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		return matches[0]?.accountId;
 	}, []);
 
+	// A queued mutation carries the account that produced it, so the drain must
+	// authenticate as that account rather than as whichever one is active now.
+	const getClientForAccount = useCallback(
+		async (accountId: string): Promise<OutboundQueueApiClient> => {
+			await initializeStorage();
+			const client = await createStoredAccountApiClient(
+				storage,
+				accountId,
+				clientId,
+			);
+			if (!client) {
+				throw new Error(`No API client for account ${accountId}`);
+			}
+			return client as unknown as OutboundQueueApiClient;
+		},
+		[clientId],
+	);
+
+	const refreshFromServer = useMemo(
+		() => createStagedFullRefresh(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
+
 	return useSync({
 		serverUrl,
 		getAuthToken: getAuthTokenAsync,
@@ -129,6 +187,8 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		enabled,
 		itemCacheAdapter: vaultCoordinator,
 		itemCacheAccountId: syncAccountId,
+		getClientForAccount,
+		refreshFromServer,
 		resolveLegacyAccountId,
 		onSessionRevoked,
 	});

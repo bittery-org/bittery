@@ -38,6 +38,7 @@ COPY --from=builder --chown=10001:10001 /app/apps/server/target/release/bittery-
 COPY --chown=10001:10001 apps/server/migrations ./migrations
 
 ENV MIGRATIONS_FOLDER=/app/migrations
+ENV NODE_ENV=production
 ENV PORT=3000
 
 USER 10001:10001

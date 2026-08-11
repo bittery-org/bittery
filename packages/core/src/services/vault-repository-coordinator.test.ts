@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock } from "bun:test";
 import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import type { AccountStore, ItemCache } from "@bittery/storage";
+import type { CachedEncryptedItem } from "@bittery/types";
 import {
 	createTestAccountStore,
 	createTestItemCache,
@@ -300,5 +301,54 @@ describe("VaultRepositoryCoordinator", () => {
 
 			expect(travelMode.get).toHaveBeenCalledTimes(1);
 		});
+	});
+
+	it("defers an opened Item migration until the sync command port is ready", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		const coordinator = new VaultRepositoryCoordinator(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+		const item: CachedEncryptedItem = {
+			id: "legacy-item",
+			vaultId: "vault-1",
+			accountId: "account-1",
+			category: "login",
+			favorite: false,
+			encryptedData: "ciphertext",
+			encryptionIv: "iv",
+			encryptionAlgorithm: "xchacha20poly1305",
+			version: 4,
+			lastModifiedBy: "user-1",
+			encryptionVersion: 1,
+			encryptedByUserId: "user-1",
+			encryptionContextPendingMigration: true,
+			createdAt: new Date(0).toISOString(),
+			updatedAt: new Date(0).toISOString(),
+		};
+		await itemCache.setCachedItems([item], "account-1");
+
+		await coordinator.publishPendingEncryptionContextMigration(
+			"account-1",
+			"legacy-item",
+		);
+
+		const published: unknown[] = [];
+		await coordinator.setEncryptionContextMigrationPort((context) => {
+			published.push(context);
+		});
+
+		expect(published).toEqual([
+			{
+				accountId: "account-1",
+				itemId: "legacy-item",
+				vaultId: "vault-1",
+				baseVersion: 4,
+				encryptionVersion: 1,
+				encryptedByUserId: "user-1",
+			},
+		]);
 	});
 });

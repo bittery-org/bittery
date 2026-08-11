@@ -7,6 +7,7 @@ import {
 import { currentKdfProfile } from "@bittery/shared/kdf-policy";
 import type { EncryptedData, KdfProfile } from "@bittery/types";
 import {
+	buildStoredItemEncryptionContext,
 	createVaultCrypto,
 	isOwnerWrappedVaultKey,
 	VAULT_KEY_WRAP_PURPOSE,
@@ -21,6 +22,34 @@ const ACCOUNT_ID = "acc_1";
 const EMAIL = "alice@example.com";
 const PASSWORD = "correct horse battery staple";
 const SECRET_KEY = "A3-ABCDEF-GHIJKL-MNOPQ-RSTUV-WXYZ2";
+
+describe("stored Item encryption context", () => {
+	test("uses the ciphertext revision and author after metadata revision drift", () => {
+		expect(
+			buildStoredItemEncryptionContext({
+				vaultId: VAULT_ID,
+				itemId: "item_1",
+				version: 9,
+				lastModifiedBy: "metadata_writer",
+				encryptionVersion: 3,
+				encryptedByUserId: "ciphertext_author",
+				userId: USER_ID,
+			}),
+		).toMatchObject({ version: 3, userId: "ciphertext_author" });
+	});
+
+	test("falls back to legacy OCC metadata only while migration is incomplete", () => {
+		expect(
+			buildStoredItemEncryptionContext({
+				vaultId: VAULT_ID,
+				itemId: "legacy_item",
+				version: 4,
+				lastModifiedBy: "legacy_author",
+				userId: USER_ID,
+			}),
+		).toMatchObject({ version: 4, userId: "legacy_author" });
+	});
+});
 
 interface StoreState {
 	vaultKeys: Array<{ vaultId: string; encryptedVaultKey: string }> | null;

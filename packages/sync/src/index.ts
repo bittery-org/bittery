@@ -11,6 +11,12 @@ export { runCatchUp } from "./catch-up";
 export type { DeltaSyncApiClient } from "./delta-sync";
 export { performDeltaSync } from "./delta-sync";
 export {
+	createNativeItemSyncCommand,
+	isLegacyNativeItemConflict,
+	type NativeEncryptedItemHandoff,
+} from "./native-command-handoff";
+export {
+	ItemSyncEngine,
 	OutboundQueue,
 	type OutboundQueueApiClient,
 	type PendingMutation,

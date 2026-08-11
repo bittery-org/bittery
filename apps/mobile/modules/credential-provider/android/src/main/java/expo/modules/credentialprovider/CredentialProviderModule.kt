@@ -804,7 +804,9 @@ class CredentialProviderModule : Module() {
                                     updatedAt = (itemData["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
                                     isFavorite = itemData["isFavorite"] as? Boolean ?: false,
                                     version = (itemData["version"] as? Number)?.toLong() ?: 1L,
-                                    lastModifiedBy = itemData["lastModifiedBy"] as? String
+                                    lastModifiedBy = itemData["lastModifiedBy"] as? String,
+                                    encryptionVersion = (itemData["encryptionVersion"] as? Number)?.toLong(),
+                                    encryptedByUserId = itemData["encryptedByUserId"] as? String
                                 )
                             } catch (e: Exception) {
                                 Log.w(TAG, "Failed to parse item: ${itemData["id"]}", e)
@@ -950,6 +952,9 @@ class CredentialProviderModule : Module() {
                             "encryptedData" to entity.encryptedData,
                             "encryptionIv" to entity.encryptionIv,
                             "encryptionAlgorithm" to entity.encryptionAlgorithm,
+                            "baseVersion" to entity.baseVersion,
+                            "encryptionVersion" to entity.encryptionVersion,
+                            "encryptedByUserId" to entity.encryptedByUserId,
                             "createdAt" to entity.createdAt,
                             "attemptCount" to entity.attemptCount,
                             "lastError" to entity.lastError

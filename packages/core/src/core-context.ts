@@ -53,6 +53,9 @@ export function createCoreContext(
 		vaultCrypto: options.vaultCrypto,
 		accounts,
 	});
+	vaultCoordinator.setItemCommandExecutor((command) =>
+		items.executeCrossAccountMoveCommand(command),
+	);
 	const vaults = new VaultService({
 		storage: options.storage,
 		crypto: options.crypto,

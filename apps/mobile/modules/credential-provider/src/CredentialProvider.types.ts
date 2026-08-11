@@ -94,6 +94,9 @@ export interface PendingPasskeyMutation {
 	encryptedData: string;
 	encryptionIv: string;
 	encryptionAlgorithm: string;
+	baseVersion?: number;
+	encryptionVersion?: number;
+	encryptedByUserId?: string;
 	createdAt: number;
 	attemptCount: number;
 	lastError?: string | null;

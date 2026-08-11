@@ -23,6 +23,7 @@ type LocalFirstMutationType =
 	| "permanent_delete"
 	| "restore"
 	| "move"
+	| "cross_account_move"
 	| "toggle_favorite";
 
 interface BasePendingMutation {
@@ -30,6 +31,9 @@ interface BasePendingMutation {
 	entityId: string;
 	vaultId: string;
 	targetVaultId?: string;
+	targetAccountId?: string;
+	targetAccountEmail?: string;
+	targetItemId?: string;
 	category?: string;
 	encryptedPayload?: {
 		encryptedData: string;
@@ -155,7 +159,7 @@ export function requireLocalItemMutationContext(
 	};
 }
 
-export function enqueueItemMutation(
+export async function enqueueItemMutation(
 	queue: IPendingMutationQueue,
 	context: Pick<
 		LocalItemMutationContext,
@@ -167,7 +171,7 @@ export function enqueueItemMutation(
 	>,
 	applyOptimistic?: () => Promise<void>,
 ): Promise<void> {
-	return enqueuePendingMutation(
+	await enqueuePendingMutation(
 		queue,
 		{
 			...mutation,

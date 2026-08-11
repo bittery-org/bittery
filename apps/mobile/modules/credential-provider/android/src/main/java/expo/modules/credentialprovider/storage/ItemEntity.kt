@@ -94,10 +94,7 @@ data class ItemEntity(
     /** Whether this item is marked as favorite */
     val isFavorite: Boolean = false,
 
-    /**
-     * Encryption version — part of the AES-GCM-AAD-V1 context.
-     * Matches the `version` field on the server-side item record.
-     */
+    /** Server/OCC revision used for If-Match ordering. */
     val version: Long = 1L,
 
     /**
@@ -105,5 +102,11 @@ data class ItemEntity(
      * Used as the `userId` field in the AES-GCM-AAD-V1 context.
      * Falls back to [userId] when null.
      */
-    val lastModifiedBy: String? = null
+    val lastModifiedBy: String? = null,
+
+    /** Exact revision bound into this ciphertext's AES-GCM AAD. */
+    val encryptionVersion: Long? = null,
+
+    /** Exact author bound into this ciphertext's AES-GCM AAD. */
+    val encryptedByUserId: String? = null
 )

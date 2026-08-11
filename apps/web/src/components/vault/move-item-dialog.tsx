@@ -126,8 +126,8 @@ export function MoveItemDialog({
 			});
 
 			if (result.crossAccount) {
-				toast.success(
-					m.vaults_detail_items_move_dialog_toast_cross_account_success(),
+				toast.info(
+					m.vaults_detail_items_move_dialog_toast_cross_account_pending(),
 				);
 			} else {
 				toast.success(m.vaults_detail_items_move_dialog_toast_success());
@@ -135,10 +135,13 @@ export function MoveItemDialog({
 
 			onOpenChange(false);
 
+			if (result.crossAccount) {
+				return;
+			}
 			navigate({
 				to: "/vaults/$vaultId",
 				params: { vaultId: selectedVaultId },
-				search: { itemId: result.newItemId || item.id },
+				search: { itemId: item.id },
 			});
 		} catch (error) {
 			const errorMessage =

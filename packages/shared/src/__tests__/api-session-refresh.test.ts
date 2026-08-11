@@ -37,6 +37,40 @@ function persistedOrigin(accountId: string, serverUrl: string) {
 	return { kind: "persistedAccount" as const, accountId, serverUrl };
 }
 
+/**
+ * WebKit (the desktop app's webview) rejects any request whose body is a
+ * stream with "ReadableStream uploading is not supported", and reusing a
+ * body-carrying `Request` as constructor input or init produces exactly that.
+ */
+async function countStreamedBodies(
+	run: () => Promise<unknown>,
+): Promise<number> {
+	const OriginalRequest = globalThis.Request;
+	let streamed = 0;
+	class TrackedRequest extends OriginalRequest {
+		constructor(input: RequestInfo | URL, init?: RequestInit) {
+			const initBody = (init as { body?: unknown } | undefined)?.body;
+			if (initBody instanceof ReadableStream) {
+				streamed += 1;
+			} else if (
+				initBody === undefined &&
+				input instanceof OriginalRequest &&
+				input.body !== null
+			) {
+				streamed += 1;
+			}
+			super(input as never, init);
+		}
+	}
+	globalThis.Request = TrackedRequest as never;
+	try {
+		await run();
+	} finally {
+		globalThis.Request = OriginalRequest;
+	}
+	return streamed;
+}
+
 function createSwitchingClient(
 	fetch: (request: Request) => Promise<Response>,
 	options: {
@@ -509,6 +543,34 @@ describe("session-refreshing API client account isolation", () => {
 		).toEqual([
 			{ encryptedData: "ciphertext" },
 			{ encryptedData: "ciphertext" },
+		]);
+	});
+
+	test("never sends a mutation body as a stream, even across a 401 replay", async () => {
+		const bodies: string[] = [];
+		const { client } = createSwitchingClient(async (request) => {
+			if (request.url.endsWith("/sessions/current/refresh")) {
+				return refreshedSession();
+			}
+			bodies.push(await request.text());
+			return request.headers.get("Authorization") ===
+				"Bearer account-a-refreshed"
+				? Response.json({ version: 2 })
+				: unauthorized();
+		});
+
+		const streamed = await countStreamedBodies(() =>
+			client.items.update(
+				"item-1",
+				{ encryptedData: "ciphertext" },
+				{ etag: '"1"', idempotencyKey: "mutation-1" },
+			),
+		);
+
+		expect(streamed).toBe(0);
+		expect(bodies).toEqual([
+			JSON.stringify({ encryptedData: "ciphertext" }),
+			JSON.stringify({ encryptedData: "ciphertext" }),
 		]);
 	});
 

@@ -15,6 +15,9 @@ import type {
 	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
+	ItemEncryptionContextMigrationPort,
+	ItemSyncAcknowledgement,
+	ItemSyncCommand,
 } from "@bittery/types";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import { isVaultHidden } from "./travel-mode-service";
@@ -37,6 +40,7 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	lastModifiedBy: string | null;
 	encryptionVersion?: number | null;
 	encryptedByUserId?: string | null;
+	encryptionContextPendingMigration?: boolean;
 	attachments?: CachedAttachment[];
 	_encrypted: {
 		data: string;
@@ -54,18 +58,17 @@ export interface EncryptedPayload {
 	encryptedByUserId?: string;
 }
 
-export interface DiscoveredItemEncryptionContext {
-	accountId: string;
-	itemId: string;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-}
-
-export type ItemEncryptionContextMigrationPort = (
-	context: DiscoveredItemEncryptionContext,
-) => Promise<void> | void;
+export type {
+	DiscoveredItemEncryptionContext,
+	ItemEncryptionContextMigrationPort,
+} from "@bittery/types";
 
 const LEGACY_ENCRYPTION_VERSION_WINDOW = 8;
+const LEGACY_ENCRYPTION_AUTHOR_LIMIT = 32;
+
+export type LegacyEncryptionAuthorProvider = (
+	vaultId: string,
+) => Promise<string[]>;
 
 interface BootstrapItemPage {
 	items: Array<{
@@ -106,8 +109,14 @@ export class VaultRepository {
 	private readonly fallbackServerUrl = getDefaultServerUrl();
 
 	private readonly items = new Map<string, VaultRepositoryItem>();
+	private readonly authoritativeItems = new Map<string, CachedEncryptedItem>();
+	private readonly pendingCommands = new Map<string, ItemSyncCommand>();
 	private readonly vaults = new Map<string, CachedVaultMetadata>();
 	private readonly vaultKeyEntries = new Map<string, VaultKeyData>();
+	private readonly legacyEncryptionAuthorsByVaultId = new Map<
+		string,
+		Promise<string[]>
+	>();
 	private readonly listeners = new Set<() => void>();
 	private snapshot = 0;
 	private hydrated = false;
@@ -128,6 +137,7 @@ export class VaultRepository {
 		serverUrl?: string,
 		private readonly accountEmail?: string,
 		private readonly onEncryptionContextDiscovered?: ItemEncryptionContextMigrationPort,
+		private readonly getLegacyEncryptionAuthors?: LegacyEncryptionAuthorProvider,
 	) {
 		this.serverUrl = serverUrl;
 	}
@@ -282,6 +292,7 @@ export class VaultRepository {
 		for (const [itemId, item] of this.items) {
 			if (hidden.has(item.vaultId)) {
 				this.items.delete(itemId);
+				this.authoritativeItems.delete(itemId);
 			}
 		}
 		this.emit();
@@ -325,10 +336,25 @@ export class VaultRepository {
 		return candidates;
 	}
 
-	private getEncryptionContextCandidates(
+	private getLegacyAuthors(vaultId: string): Promise<string[]> {
+		const existing = this.legacyEncryptionAuthorsByVaultId.get(vaultId);
+		if (existing) return existing;
+		const lookup = Promise.resolve(
+			this.getLegacyEncryptionAuthors?.(vaultId) ?? [],
+		)
+			.then((authors) => authors.slice(0, LEGACY_ENCRYPTION_AUTHOR_LIMIT))
+			.catch((error) => {
+				this.legacyEncryptionAuthorsByVaultId.delete(vaultId);
+				throw error;
+			});
+		this.legacyEncryptionAuthorsByVaultId.set(vaultId, lookup);
+		return lookup;
+	}
+
+	private async getEncryptionContextCandidates(
 		item: CachedEncryptedItem,
 		defaultUserId: string,
-	): Array<{ version: number; userId: string; legacy: boolean }> {
+	): Promise<Array<{ version: number; userId: string; legacy: boolean }>> {
 		const hasVersion = item.encryptionVersion != null;
 		const hasAuthor = item.encryptedByUserId != null;
 		if (hasVersion || hasAuthor) {
@@ -350,9 +376,20 @@ export class VaultRepository {
 			];
 		}
 
+		let vaultAuthors: string[] = [];
+		try {
+			vaultAuthors = await this.getLegacyAuthors(item.vaultId);
+		} catch {
+			// The bounded local candidates still cover personal Vaults while offline.
+		}
 		const authors = Array.from(
-			new Set([item.lastModifiedBy, defaultUserId].filter(Boolean) as string[]),
-		);
+			new Set(
+				[item.lastModifiedBy, defaultUserId, ...vaultAuthors].filter(
+					(author): author is string =>
+						typeof author === "string" && author !== "",
+				),
+			),
+		).slice(0, LEGACY_ENCRYPTION_AUTHOR_LIMIT);
 		return this.getLegacyVersionCandidates(item.version).flatMap((version) =>
 			authors.map((userId) => ({ version, userId, legacy: true })),
 		);
@@ -362,20 +399,25 @@ export class VaultRepository {
 		item: CachedEncryptedItem,
 		version: number,
 		encryptedByUserId: string,
+		publish = true,
 	): Promise<CachedEncryptedItem> {
 		const migrated = {
 			...item,
 			encryptionVersion: version,
 			encryptedByUserId,
+			encryptionContextPendingMigration: true,
 		};
 		await this.persistItem(migrated);
 		try {
-			await this.onEncryptionContextDiscovered?.({
-				accountId: this.accountId,
-				itemId: item.id,
-				encryptionVersion: version,
-				encryptedByUserId,
-			});
+			if (publish)
+				await this.onEncryptionContextDiscovered?.({
+					accountId: this.accountId,
+					itemId: item.id,
+					vaultId: item.vaultId,
+					baseVersion: item.version,
+					encryptionVersion: version,
+					encryptedByUserId,
+				});
 		} catch (error) {
 			console.warn(
 				`[VaultRepository] Failed to publish discovered encryption context for item ${item.id}:`,
@@ -392,7 +434,10 @@ export class VaultRepository {
 	): Promise<{ plaintext: string; item: CachedEncryptedItem }> {
 		let lastError: unknown = null;
 
-		for (const context of this.getEncryptionContextCandidates(item, userId)) {
+		for (const context of await this.getEncryptionContextCandidates(
+			item,
+			userId,
+		)) {
 			try {
 				const decrypted = await this.vaultCrypto.decryptItem(
 					{
@@ -410,7 +455,7 @@ export class VaultRepository {
 				);
 
 				if (context.legacy) {
-					console.warn(
+					console.debug(
 						`[VaultRepository] Recovered item ${item.id} with legacy encryption context version ${context.version} (stored version ${item.version})`,
 					);
 					return {
@@ -419,6 +464,7 @@ export class VaultRepository {
 							item,
 							context.version,
 							context.userId,
+							false,
 						),
 					};
 				}
@@ -500,14 +546,17 @@ export class VaultRepository {
 				}
 			}
 
-			const decryptable = items.flatMap((item) => {
-				const vaultKey = vaultKeys.get(item.vaultId);
-				const contexts = this.getEncryptionContextCandidates(
-					item,
-					defaultUserId,
-				);
-				return vaultKey && contexts[0] ? [{ item, vaultKey, contexts }] : [];
-			});
+			const candidates = await Promise.all(
+				items.map(async (item) => {
+					const vaultKey = vaultKeys.get(item.vaultId);
+					const contexts = await this.getEncryptionContextCandidates(
+						item,
+						defaultUserId,
+					);
+					return vaultKey && contexts[0] ? { item, vaultKey, contexts } : null;
+				}),
+			);
+			const decryptable = candidates.filter((entry) => entry !== null);
 			const primary = await this.vaultCrypto.decryptItems(
 				decryptable.map(({ item, vaultKey, contexts }) => ({
 					id: item.id,
@@ -541,6 +590,7 @@ export class VaultRepository {
 								entry.item,
 								primaryContext.version,
 								primaryContext.userId,
+								false,
 							)
 						: entry.item;
 					outcomeByItem.set(entry.item, {
@@ -570,13 +620,14 @@ export class VaultRepository {
 								userId: context.userId,
 							},
 						);
-						console.warn(
+						console.debug(
 							`[VaultRepository] Recovered item ${entry.item.id} with legacy encryption context version ${context.version} (stored version ${entry.item.version})`,
 						);
 						const migratedItem = await this.persistDiscoveredEncryptionContext(
 							entry.item,
 							context.version,
 							context.userId,
+							false,
 						);
 						outcomeByItem.set(entry.item, {
 							ok: true,
@@ -635,11 +686,143 @@ export class VaultRepository {
 			lastModifiedBy: item.lastModifiedBy,
 			encryptionVersion: item.encryptionVersion,
 			encryptedByUserId: item.encryptedByUserId,
+			encryptionContextPendingMigration: item.encryptionContextPendingMigration,
 			createdAt: item.createdAt,
 			updatedAt: item.updatedAt,
 			deletedAt: item.deletedAt,
 			attachments: item.attachments,
 		};
+	}
+
+	private commandOperationId(command: ItemSyncCommand): string {
+		return command.operationId ?? command.id;
+	}
+
+	private commandsForItem(itemId: string): ItemSyncCommand[] {
+		return Array.from(this.pendingCommands.values())
+			.filter((command) => command.entityId === itemId)
+			.sort((left, right) => left.timestamp - right.timestamp);
+	}
+
+	private hasPendingEncryptedCommand(itemId: string): boolean {
+		return this.commandsForItem(itemId).some(
+			(command) =>
+				command.type === "create" ||
+				command.type === "update" ||
+				command.type === "move" ||
+				command.type === "cross_account_move",
+		);
+	}
+
+	private applyCommandToCachedItem(
+		base: CachedEncryptedItem | undefined,
+		command: ItemSyncCommand,
+	): CachedEncryptedItem | undefined {
+		const timestamp = new Date(command.timestamp).toISOString();
+		if (command.type === "permanent_delete") {
+			return base;
+		}
+		if (command.type === "create") {
+			const payload = command.encryptedPayload;
+			if (!payload || !command.category) {
+				throw new Error(
+					`Missing create projection data for ${command.entityId}`,
+				);
+			}
+			return {
+				id: command.entityId,
+				vaultId: command.vaultId,
+				accountId: this.accountId,
+				accountEmail: command.accountEmail ?? this.accountEmail,
+				serverUrl: this.serverUrl ?? this.fallbackServerUrl,
+				category: command.category,
+				favorite: false,
+				encryptedData: payload.encryptedData,
+				encryptionIv: payload.encryptionIv,
+				encryptionAlgorithm: payload.encryptionAlgorithm,
+				version: payload.encryptionVersion ?? 1,
+				lastModifiedBy: payload.encryptedByUserId ?? null,
+				encryptionVersion: payload.encryptionVersion ?? 1,
+				encryptedByUserId: payload.encryptedByUserId,
+				createdAt: timestamp,
+				updatedAt: timestamp,
+				deletedAt: null,
+			};
+		}
+		if (!base) {
+			return undefined;
+		}
+
+		switch (command.type) {
+			case "cross_account_move":
+				return base;
+			case "update":
+			case "move": {
+				const payload = command.encryptedPayload;
+				if (!payload) {
+					throw new Error(`Missing ${command.type} projection data`);
+				}
+				return {
+					...base,
+					vaultId:
+						command.type === "move"
+							? (command.targetVaultId ?? base.vaultId)
+							: base.vaultId,
+					encryptedData: payload.encryptedData,
+					encryptionIv: payload.encryptionIv,
+					encryptionAlgorithm: payload.encryptionAlgorithm,
+					version: payload.encryptionVersion ?? base.version + 1,
+					lastModifiedBy: payload.encryptedByUserId ?? base.lastModifiedBy,
+					encryptionVersion: payload.encryptionVersion ?? base.version + 1,
+					encryptedByUserId:
+						payload.encryptedByUserId ?? base.encryptedByUserId,
+					updatedAt: timestamp,
+				};
+			}
+			case "delete":
+				return { ...base, deletedAt: timestamp, updatedAt: timestamp };
+			case "restore":
+				return { ...base, deletedAt: null, updatedAt: timestamp };
+			case "toggle_favorite":
+				return {
+					...base,
+					favorite: command.favorite ?? false,
+					updatedAt: timestamp,
+				};
+			case "adopt_encryption_context":
+				return {
+					...base,
+					encryptionVersion:
+						command.encryptedPayload?.encryptionVersion ??
+						base.encryptionVersion,
+					encryptedByUserId:
+						command.encryptedPayload?.encryptedByUserId ??
+						base.encryptedByUserId,
+					encryptionContextPendingMigration: true,
+				};
+		}
+	}
+
+	private async rebuildItemProjection(itemId: string): Promise<void> {
+		let projected = this.authoritativeItems.get(itemId);
+		for (const command of this.commandsForItem(itemId)) {
+			projected = this.applyCommandToCachedItem(projected, command);
+		}
+		if (!projected || (await this.isLocked())) {
+			this.items.delete(itemId);
+			this.emit();
+			return;
+		}
+		try {
+			this.items.set(itemId, await this.decryptItem(projected));
+		} catch (error) {
+			this.items.delete(itemId);
+			console.error(
+				`[VaultRepository] Failed to project ${await this.describeUndecryptableItem(projected)}:`,
+				error,
+			);
+		}
+		this.emit();
 	}
 
 	private mergeVaultKeyEntries(
@@ -722,6 +905,8 @@ export class VaultRepository {
 			lastModifiedBy: cached.lastModifiedBy,
 			encryptionVersion: cached.encryptionVersion,
 			encryptedByUserId: cached.encryptedByUserId,
+			encryptionContextPendingMigration:
+				cached.encryptionContextPendingMigration,
 			attachments: cached.attachments,
 			...decryptedData,
 			_encrypted: {
@@ -802,28 +987,16 @@ export class VaultRepository {
 		if (!(await this.persistItem(item))) {
 			return;
 		}
+		const currentBase = this.authoritativeItems.get(item.id);
+		if (currentBase && currentBase.version > item.version) {
+			return;
+		}
+		this.authoritativeItems.set(item.id, item);
 
 		// Sync keeps running on a locked account, and the ciphertext is all the cache
 		// wants from it. Decryption waits for the hydrate that follows the unlock, rather
 		// than failing once per delta.
-		if (await this.isLocked()) {
-			this.items.delete(item.id);
-			this.emit();
-			return;
-		}
-
-		try {
-			this.items.set(item.id, await this.decryptItem(item));
-		} catch (error) {
-			// Dropping the stale plaintext also drops its superseded `_encrypted` blob,
-			// which a later favorite/delete write would otherwise persist over this ciphertext.
-			this.items.delete(item.id);
-			console.error(
-				`[VaultRepository] Failed to decrypt synced ${await this.describeUndecryptableItem(item)}:`,
-				error,
-			);
-		}
-		this.emit();
+		await this.rebuildItemProjection(item.id);
 	}
 
 	async upsertLocal(
@@ -859,6 +1032,7 @@ export class VaultRepository {
 		};
 
 		this.items.set(item.id, next);
+		this.authoritativeItems.set(item.id, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
@@ -878,6 +1052,7 @@ export class VaultRepository {
 			// causes a stored-version/ciphertext mismatch during decryption.
 		};
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
@@ -897,29 +1072,48 @@ export class VaultRepository {
 			// causes a stored-version/ciphertext mismatch during decryption.
 		};
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
 
 	async removeItem(itemId: string): Promise<void> {
 		this.items.delete(itemId);
+		this.authoritativeItems.delete(itemId);
+		for (const [operationId, command] of this.pendingCommands) {
+			if (command.entityId === itemId) {
+				this.pendingCommands.delete(operationId);
+			}
+		}
 		await this.itemCache.removeCachedItem(itemId, this.accountId);
 		this.emit();
 	}
 
 	replaceItemId(tempId: string, realId: string): void {
 		const existing = this.items.get(tempId);
-		if (!existing) {
-			return;
-		}
 		this.items.delete(tempId);
-		const migrated: VaultRepositoryItem = {
-			...existing,
-			id: realId,
-		};
-		this.items.set(realId, migrated);
-		void this.itemCache.removeCachedItem(tempId, this.accountId);
-		void this.persistItem(this.toCachedItem(migrated));
+		const authoritative = this.authoritativeItems.get(tempId);
+		if (authoritative) {
+			this.authoritativeItems.delete(tempId);
+			const current = this.authoritativeItems.get(realId);
+			if (!current || current.version < authoritative.version) {
+				this.authoritativeItems.set(realId, { ...authoritative, id: realId });
+			}
+		}
+		if (existing) {
+			this.items.set(realId, { ...existing, id: realId });
+		}
+		for (const command of this.pendingCommands.values()) {
+			if (command.entityId === tempId) {
+				command.entityId = realId;
+			}
+		}
+		const base = this.authoritativeItems.get(realId);
+		void Promise.all([
+			this.itemCache.removeCachedItem(tempId, this.accountId),
+			base ? this.persistItem(base) : Promise.resolve(),
+			this.rebuildItemProjection(realId),
+		]);
 		this.emit();
 	}
 
@@ -934,8 +1128,187 @@ export class VaultRepository {
 			updatedAt: new Date().toISOString(),
 		};
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
+	}
+
+	async applyItemCommand(command: ItemSyncCommand): Promise<void> {
+		if (!this.isForThisAccount(command.accountId)) {
+			return;
+		}
+		this.pendingCommands.set(this.commandOperationId(command), command);
+		await this.rebuildItemProjection(command.entityId);
+	}
+
+	async discardItemCommandAcknowledgedElsewhere(
+		command: ItemSyncCommand,
+	): Promise<void> {
+		if (!this.isForThisAccount(command.accountId)) return;
+		this.pendingCommands.delete(this.commandOperationId(command));
+		const cached = (await this.itemCache.getCachedItems(this.accountId))?.find(
+			(item) => item.id === command.entityId,
+		);
+		if (cached) {
+			await this.upsertEncrypted(cached, this.accountId);
+			return;
+		}
+		if (command.type === "permanent_delete") {
+			this.authoritativeItems.delete(command.entityId);
+			this.items.delete(command.entityId);
+			this.emit();
+			return;
+		}
+		await this.rebuildItemProjection(command.entityId);
+	}
+
+	async preserveItemConflict(
+		command: ItemSyncCommand,
+	): Promise<ItemSyncCommand | undefined> {
+		if (
+			!this.isForThisAccount(command.accountId) ||
+			(command.type !== "update" &&
+				command.type !== "move" &&
+				command.type !== "cross_account_move") ||
+			!command.conflictCopyId
+		) {
+			return undefined;
+		}
+		const local = this.items.get(command.entityId);
+		if (!local) return undefined;
+
+		const {
+			id: _id,
+			vaultId: _vaultId,
+			category: _category,
+			favorite: _favorite,
+			createdAt: _createdAt,
+			updatedAt: _updatedAt,
+			accountId: _accountId,
+			accountEmail: _accountEmail,
+			serverUrl: _serverUrl,
+			deletedAt: _deletedAt,
+			version: _version,
+			lastModifiedBy: _lastModifiedBy,
+			encryptionVersion: _encryptionVersion,
+			encryptedByUserId: _encryptedByUserId,
+			encryptionContextPendingMigration: _pendingMigration,
+			attachments: _attachments,
+			_encrypted,
+			vault: _vault,
+			...data
+		} = local;
+		const payload = await this.encryptWithVaultKey(local.vaultId, data, {
+			itemId: command.conflictCopyId,
+			version: 1,
+		});
+		this.pendingCommands.delete(this.commandOperationId(command));
+		await this.rebuildItemProjection(command.entityId);
+		const operationId = `conflict-copy:${this.commandOperationId(command)}`;
+		return {
+			accountId: this.accountId,
+			accountEmail: command.accountEmail ?? this.accountEmail,
+			id: operationId,
+			operationId,
+			type: "create",
+			entityId: command.conflictCopyId,
+			vaultId: local.vaultId,
+			category: local.category,
+			encryptedPayload: {
+				encryptedData: payload.ciphertext,
+				encryptionIv: payload.iv,
+				encryptionAlgorithm: payload.algorithm,
+				encryptionVersion: payload.encryptionVersion,
+				encryptedByUserId: payload.encryptedByUserId,
+			},
+			baseVersion: 0,
+			timestamp: Date.now(),
+			retryCount: 0,
+			status: "pending",
+		};
+	}
+
+	async acknowledgeItemCommand(
+		command: ItemSyncCommand,
+		acknowledgement: ItemSyncAcknowledgement,
+	): Promise<void> {
+		if (!this.isForThisAccount(command.accountId)) {
+			return;
+		}
+		const version = acknowledgement.version;
+		if (version === undefined) {
+			throw new Error(
+				`Item command ${command.operationId ?? command.id} returned no strong revision`,
+			);
+		}
+		this.pendingCommands.delete(this.commandOperationId(command));
+		if (command.type === "cross_account_move") {
+			this.authoritativeItems.delete(command.entityId);
+			await this.itemCache.removeCachedItem(command.entityId, this.accountId);
+			await this.rebuildItemProjection(command.entityId);
+			return;
+		}
+		if (command.type === "permanent_delete") {
+			this.authoritativeItems.delete(acknowledgement.entityId);
+			await this.itemCache.removeCachedItem(
+				acknowledgement.entityId,
+				this.accountId,
+			);
+			await this.rebuildItemProjection(acknowledgement.entityId);
+			return;
+		}
+
+		const base = this.authoritativeItems.get(acknowledgement.entityId);
+		if (base && base.version >= version) {
+			await this.rebuildItemProjection(acknowledgement.entityId);
+			return;
+		}
+		const projected = this.applyCommandToCachedItem(base, command);
+		if (!projected) {
+			await this.rebuildItemProjection(acknowledgement.entityId);
+			return;
+		}
+		const acknowledged: CachedEncryptedItem = {
+			...projected,
+			id: acknowledgement.entityId,
+			version,
+		};
+		if (command.type === "adopt_encryption_context") {
+			acknowledged.encryptionVersion =
+				command.encryptedPayload?.encryptionVersion ??
+				acknowledged.encryptionVersion;
+			acknowledged.encryptedByUserId =
+				command.encryptedPayload?.encryptedByUserId ??
+				acknowledged.encryptedByUserId;
+			acknowledged.encryptionContextPendingMigration = false;
+		}
+		this.authoritativeItems.set(acknowledgement.entityId, acknowledged);
+		await this.persistItem(acknowledged);
+		await this.rebuildItemProjection(acknowledgement.entityId);
+	}
+
+	async publishPendingEncryptionContextMigration(
+		itemId: string,
+	): Promise<void> {
+		if (!this.onEncryptionContextDiscovered) return;
+		const item = (await this.itemCache.getCachedItems(this.accountId))?.find(
+			(candidate) => candidate.id === itemId,
+		);
+		if (
+			!item?.encryptionContextPendingMigration ||
+			item.encryptionVersion == null ||
+			!item.encryptedByUserId
+		) {
+			return;
+		}
+		await this.onEncryptionContextDiscovered({
+			accountId: this.accountId,
+			itemId: item.id,
+			vaultId: item.vaultId,
+			baseVersion: item.version,
+			encryptionVersion: item.encryptionVersion,
+			encryptedByUserId: item.encryptedByUserId,
+		});
 	}
 
 	/**
@@ -975,6 +1348,7 @@ export class VaultRepository {
 		};
 
 		this.items.set(itemId, next);
+		this.authoritativeItems.set(itemId, this.toCachedItem(next));
 		await this.persistItem(this.toCachedItem(next));
 		this.emit();
 	}
@@ -1001,8 +1375,10 @@ export class VaultRepository {
 				]);
 
 			this.items.clear();
+			this.authoritativeItems.clear();
 			this.vaults.clear();
 			this.vaultKeyEntries.clear();
+			this.legacyEncryptionAuthorsByVaultId.clear();
 
 			for (const vault of cachedVaults ?? []) {
 				if (!this.serverUrl && vault.serverUrl) {
@@ -1020,12 +1396,25 @@ export class VaultRepository {
 			for (const outcome of await this.decryptItemBatch(cachedItems ?? [])) {
 				if ("decrypted" in outcome) {
 					this.items.set(outcome.item.id, outcome.decrypted);
+					this.authoritativeItems.set(
+						outcome.item.id,
+						this.toCachedItem(outcome.decrypted),
+					);
 				} else {
+					this.authoritativeItems.set(outcome.item.id, outcome.item);
 					console.error(
 						`[VaultRepository] Failed to decrypt cached ${await this.describeUndecryptableItem(outcome.item)}:`,
 						outcome.error,
 					);
 				}
+			}
+			for (const itemId of new Set(
+				Array.from(
+					this.pendingCommands.values(),
+					(command) => command.entityId,
+				),
+			)) {
+				await this.rebuildItemProjection(itemId);
 			}
 
 			this.hasCacheSnapshotFlag =
@@ -1048,6 +1437,11 @@ export class VaultRepository {
 		travelMode.assertVerified(this.accountId);
 		await this.ensureServerUrl();
 
+		const conflictBases = new Map(
+			Array.from(this.authoritativeItems).filter(([itemId]) =>
+				this.hasPendingEncryptedCommand(itemId),
+			),
+		);
 		let cursor: string | undefined;
 		const staging = await this.itemCache.beginStagedGeneration(this.accountId);
 		let refreshedVaultKeys: VaultKeyData[] | null = null;
@@ -1112,10 +1506,18 @@ export class VaultRepository {
 			throw error;
 		}
 
-		const [cachedItems, cachedVaults] = await Promise.all([
+		const [promotedItems, cachedVaults] = await Promise.all([
 			this.itemCache.getCachedItems(this.accountId),
 			this.itemCache.getCachedVaults(this.accountId),
 		]);
+		const cachedItems = [...(promotedItems ?? [])];
+		const promotedIds = new Set(cachedItems.map((item) => item.id));
+		for (const [itemId, conflictBase] of conflictBases) {
+			if (!promotedIds.has(itemId)) {
+				cachedItems.push(conflictBase);
+				await this.persistItem(conflictBase);
+			}
+		}
 		const vaultKeys =
 			refreshedVaultKeys ?? (await this.storage.getVaultKeys(this.accountId));
 
@@ -1130,15 +1532,27 @@ export class VaultRepository {
 		this.mergeVaultKeyEntries(vaultKeys);
 
 		this.items.clear();
-		for (const outcome of await this.decryptItemBatch(cachedItems ?? [])) {
+		this.authoritativeItems.clear();
+		this.legacyEncryptionAuthorsByVaultId.clear();
+		for (const outcome of await this.decryptItemBatch(cachedItems)) {
 			if ("decrypted" in outcome) {
 				this.items.set(outcome.item.id, outcome.decrypted);
+				this.authoritativeItems.set(
+					outcome.item.id,
+					this.toCachedItem(outcome.decrypted),
+				);
 			} else {
+				this.authoritativeItems.set(outcome.item.id, outcome.item);
 				console.error(
 					`[VaultRepository] Failed to decrypt bootstrap ${await this.describeUndecryptableItem(outcome.item)}:`,
 					outcome.error,
 				);
 			}
+		}
+		for (const itemId of new Set(
+			Array.from(this.pendingCommands.values(), (command) => command.entityId),
+		)) {
+			await this.rebuildItemProjection(itemId);
 		}
 
 		this.hasCacheSnapshotFlag = true;
@@ -1148,8 +1562,10 @@ export class VaultRepository {
 
 	clear(): void {
 		this.items.clear();
+		this.authoritativeItems.clear();
 		this.vaults.clear();
 		this.vaultKeyEntries.clear();
+		this.legacyEncryptionAuthorsByVaultId.clear();
 		this.hydrated = false;
 		this.hydrating = false;
 		this.hasCacheSnapshotFlag = false;
@@ -1168,7 +1584,13 @@ export class VaultRepository {
 		if (!this.isForThisAccount(accountId)) {
 			return;
 		}
-		await this.removeItem(itemId);
+		if (this.hasPendingEncryptedCommand(itemId)) {
+			await this.rebuildItemProjection(itemId);
+			return;
+		}
+		this.authoritativeItems.delete(itemId);
+		await this.itemCache.removeCachedItem(itemId, this.accountId);
+		await this.rebuildItemProjection(itemId);
 	}
 
 	async upsertCachedVault(
@@ -1225,6 +1647,12 @@ export class VaultRepository {
 		for (const [itemId, item] of this.items.entries()) {
 			if (item.vaultId === vaultId) {
 				this.items.delete(itemId);
+				this.authoritativeItems.delete(itemId);
+			}
+		}
+		for (const [itemId, item] of this.authoritativeItems) {
+			if (item.vaultId === vaultId) {
+				this.authoritativeItems.delete(itemId);
 			}
 		}
 		await this.itemCache.removeCachedVault(vaultId, this.accountId);

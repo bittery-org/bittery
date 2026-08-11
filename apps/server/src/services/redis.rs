@@ -65,6 +65,7 @@ mod tests {
         assert!(validate_sync_fanout_requirement(Some("production"), false).is_err());
         assert!(validate_sync_fanout_requirement(Some("production"), true).is_ok());
         assert!(validate_sync_fanout_requirement(Some("development"), false).is_ok());
+        assert!(validate_sync_fanout_requirement(Some("test"), false).is_ok());
         assert!(validate_sync_fanout_requirement(None, false).is_ok());
     }
 }

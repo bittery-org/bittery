@@ -3,7 +3,10 @@
  * Extracted for reuse in both React hooks and non-React contexts (e.g., extension service worker)
  */
 
-import type { AppApiClient } from "@bittery/shared/api-client";
+import {
+	type AppApiClient,
+	isApiErrorStatus,
+} from "@bittery/shared/api-client";
 import {
 	type ServerVaultListEntry,
 	type ServerVaultSummary,
@@ -104,6 +107,8 @@ export async function performDeltaSync(
 				encryptionAlgorithm: item.encryptionAlgorithm,
 				version: item.version,
 				lastModifiedBy: item.lastModifiedBy,
+				encryptionVersion: item.encryptionVersion,
+				encryptedByUserId: item.encryptedByUserId,
 				createdAt: String(item.createdAt),
 				updatedAt: String(item.updatedAt),
 				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
@@ -126,13 +131,15 @@ export async function performDeltaSync(
 					encryptionAlgorithm: item.encryptionAlgorithm,
 					version: item.version,
 					lastModifiedBy: item.lastModifiedBy,
+					encryptionVersion: item.encryptionVersion,
+					encryptedByUserId: item.encryptedByUserId,
 					createdAt: String(item.createdAt),
 					updatedAt: String(item.updatedAt),
 					deletedAt: item.deletedAt ? String(item.deletedAt) : null,
 					attachments: item.attachments ? [...item.attachments] : undefined,
 				} as CachedEncryptedItem);
-			} catch {
-				// Item might be permanently deleted, remove from cache
+			} catch (error) {
+				if (!isApiErrorStatus(error, 404)) throw error;
 				await removeItem(event.entityId);
 			}
 			break;
@@ -165,6 +172,8 @@ export async function performDeltaSync(
 						encryptionAlgorithm: vaultItem.encryptionAlgorithm,
 						version: vaultItem.version,
 						lastModifiedBy: vaultItem.lastModifiedBy,
+						encryptionVersion: vaultItem.encryptionVersion,
+						encryptedByUserId: vaultItem.encryptedByUserId,
 						createdAt: String(vaultItem.createdAt),
 						updatedAt: String(vaultItem.updatedAt),
 						deletedAt: vaultItem.deletedAt ? String(vaultItem.deletedAt) : null,

@@ -1,5 +1,5 @@
 import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { buildItemEncryptionContext } from "@bittery/core/services/vault-crypto";
+import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
 import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
@@ -103,11 +103,14 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 							encryptedData: item.encryptedData,
 							encryptionIv: item.encryptionIv,
 							encryptionAlgorithm: item.encryptionAlgorithm,
-							context: buildItemEncryptionContext({
+							context: buildStoredItemEncryptionContext({
 								vaultId: vaultData.vaultId,
 								itemId: item.id,
 								version: item.version,
-								userId: item.lastModifiedBy ?? currentUserId,
+								lastModifiedBy: item.lastModifiedBy,
+								encryptionVersion: item.encryptionVersion,
+								encryptedByUserId: item.encryptedByUserId,
+								userId: currentUserId,
 							}),
 						})),
 						vaultData.vaultId,

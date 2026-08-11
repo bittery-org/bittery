@@ -8,21 +8,19 @@ import {
 	hostnameMatches,
 	parseHostname,
 } from "../lib/hostname";
-import { apiClient } from "./api-client";
-import { core } from "./core-instance";
 import {
 	type CredentialErrorType,
 	classifyCredentialError,
 } from "./credential-error";
 import { ensureDesktopWriteCapability } from "./desktop-key-material";
 import {
+	createExtensionItem,
+	updateExtensionItem,
+} from "./extension-item-mutations";
+import {
 	resolveAccountEmailForItemId,
 	resolveAccountEmailForVault,
 } from "./services/account-resolution";
-import {
-	onLocalItemCreated,
-	onLocalItemUpdated,
-} from "./services/local-item-cache-service";
 import {
 	ensureUnlockedOrRecoverFromDesktop,
 	updateActivity,
@@ -162,26 +160,15 @@ export async function handleSaveNewCredential(payload: {
 		}
 		const hostname = extractHostname(url);
 
-		const result = await core.items.createItem(
-			{
-				vaultId,
-				category: "login",
-				data: {
-					title: hostname,
-					url,
-					username,
-					password,
-				},
-				accountEmail,
-			},
-			apiClient,
-		);
-
-		await onLocalItemCreated({
-			itemId: result.itemId,
+		const result = await createExtensionItem({
 			vaultId,
 			category: "login",
-			encryptedData: result._encryptedData,
+			data: {
+				title: hostname,
+				url,
+				username,
+				password,
+			},
 			accountEmail,
 		});
 
@@ -251,26 +238,15 @@ export async function handleUpdateExistingCredential(payload: {
 			};
 		}
 		const hostname = extractHostname(url);
-
-		const result = await core.items.updateItem(
-			{
-				itemId,
-				vaultId,
-				data: {
-					title: hostname,
-					url,
-					username,
-					password,
-				},
-				accountEmail,
-			},
-			apiClient,
-		);
-
-		await onLocalItemUpdated({
+		await updateExtensionItem({
 			itemId,
-			encryptedData: result._encryptedData,
-			accountEmail: result._accountEmail,
+			data: {
+				title: hostname,
+				url,
+				username,
+				password,
+			},
+			accountEmail,
 		});
 
 		return { success: true };

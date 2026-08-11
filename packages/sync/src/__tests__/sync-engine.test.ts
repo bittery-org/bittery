@@ -22,6 +22,12 @@ function stubItemCache(overrides: Partial<SyncItemCache> = {}): SyncItemCache {
 		clearItemCache: async () => undefined,
 		syncVaultKeys: async () => undefined,
 		replaceItemId: () => undefined,
+		applyItemCommand: async () => undefined,
+		executeSemanticItemCommand: async () => undefined,
+		discardItemCommandAcknowledgedElsewhere: async () => undefined,
+		preserveItemConflict: async () => undefined,
+		acknowledgeItemCommand: async () => undefined,
+		setEncryptionContextMigrationPort: async () => undefined,
 		...overrides,
 	};
 }
@@ -57,6 +63,41 @@ class GatedStorage extends MemoryStorage {
 
 	release(): void {
 		this.writeGate.resolve();
+	}
+}
+
+class AtomicMemoryStorage extends MemoryStorage {
+	private updateTail: Promise<void> = Promise.resolve();
+
+	async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		let result: T | null = null;
+		const update = this.updateTail.then(() => {
+			const current = (this.data.get(key) as T | undefined) ?? null;
+			result = updater(structuredClone(current));
+			if (result === null) {
+				this.data.delete(key);
+			} else {
+				this.data.set(key, structuredClone(result));
+			}
+		});
+		this.updateTail = update.catch(() => undefined);
+		await update;
+		return structuredClone(result);
+	}
+}
+
+class FailLegacyAccountIndexStorage extends AtomicMemoryStorage {
+	override async update<T>(
+		key: string,
+		updater: (current: T | null) => T | null,
+	): Promise<T | null> {
+		if (key === "bittery_pending_mutation_account_ids_v2") {
+			throw new Error("simulated crash before account discovery index write");
+		}
+		return super.update(key, updater);
 	}
 }
 
@@ -810,7 +851,7 @@ describe("sync engine regressions", () => {
 		const email = "a+b@example.com";
 		const normalizedEmail = email.toLowerCase();
 		const legacyKey = `bittery_pending_mutations_${normalizedEmail.replace(/[^a-z0-9]/g, "_")}`;
-		const nextKey = "bittery_pending_mutations_v2_account-legacy";
+		const queueDocumentKey = "bittery_pending_mutation_queues_v3";
 
 		await storage.set("bittery_pending_mutation_accounts", [normalizedEmail]);
 		await storage.set(legacyKey, [
@@ -835,7 +876,11 @@ describe("sync engine regressions", () => {
 
 		expect(queue.getPendingCount()).toBe(1);
 		expect(await storage.get(legacyKey)).toBeNull();
-		expect(await storage.get(nextKey)).not.toBeNull();
+		expect(
+			(
+				await storage.get<Record<string, PendingMutation[]>>(queueDocumentKey)
+			)?.["account-legacy"],
+		).toHaveLength(1);
 	});
 
 	test("preserves and refuses to drain an ambiguous legacy queue", async () => {
@@ -905,6 +950,233 @@ function conflictError(status: 409 | 412): ApiError {
 }
 
 describe("outbound queue multi-account drain isolation", () => {
+	test("preserves an enqueued terminal native conflict across restart without projecting or draining it", async () => {
+		const storage = new AtomicMemoryStorage();
+		let projected = 0;
+		let conflictCopies = 0;
+		const queue = new OutboundQueue(storage, "self_client", undefined, {
+			apply: async () => {
+				projected += 1;
+			},
+			preserveConflict: async () => {
+				conflictCopies += 1;
+				return undefined;
+			},
+			acknowledge: async () => undefined,
+		});
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "legacy-native-operation",
+				operationId: "legacy-native-operation",
+				type: "update",
+				status: "conflicted",
+				lastError: "legacy encryption context is unknown",
+				encryptedPayload: {
+					encryptedData: "legacy-ciphertext",
+					encryptionIv: "legacy-iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+				},
+			}),
+		);
+
+		expect(projected).toBe(0);
+		expect(queue.getCommandSummary()).toMatchObject({ conflicted: 1 });
+
+		const restarted = new OutboundQueue(storage, "self_client", undefined, {
+			apply: async () => {
+				projected += 1;
+			},
+			preserveConflict: async () => {
+				conflictCopies += 1;
+				return undefined;
+			},
+			acknowledge: async () => undefined,
+		});
+		await restarted.restore();
+		let clientRequests = 0;
+		await restarted.drain(async () => {
+			clientRequests += 1;
+			return outboundApiClient();
+		});
+
+		expect(projected).toBe(0);
+		expect(conflictCopies).toBe(0);
+		expect(clientRequests).toBe(0);
+		expect(restarted.getCommandSummary()).toMatchObject({ conflicted: 1 });
+		expect(restarted.getCommands("account_a")[0]).toMatchObject({
+			id: "legacy-native-operation",
+			status: "conflicted",
+			retryCount: 0,
+			encryptedPayload: { encryptedData: "legacy-ciphertext" },
+		});
+	});
+
+	test("a conflicted encrypted command does not block later Item commands", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		const encryptedPayload = {
+			encryptedData: "local_cipher",
+			encryptionIv: "local_iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+		};
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "conflicting-edit",
+				type: "update",
+				encryptedPayload,
+			}),
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "later-favorite",
+				type: "toggle_favorite",
+				favorite: true,
+				timestamp: 2,
+			}),
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "later-edit",
+				type: "update",
+				encryptedPayload,
+				timestamp: 3,
+			}),
+		);
+
+		const operations: string[] = [];
+		let updateAttempts = 0;
+		const client = outboundApiClient({
+			update: async () => {
+				updateAttempts += 1;
+				operations.push(`update-${updateAttempts}`);
+				if (updateAttempts === 1) throw conflictError(412);
+			},
+			setFavorite: async () => {
+				operations.push("favorite");
+			},
+		}) as any;
+		client.items.get = async (itemId: string) =>
+			apiResult({
+				id: itemId,
+				vaultId: "vault_1",
+				category: "login",
+				favorite: false,
+				encryptedData: "server_cipher",
+				encryptionIv: "server_iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				version: 2,
+				lastModifiedBy: "other_user",
+				createdAt: "2026-08-01T00:00:00.000Z",
+				updatedAt: "2026-08-02T00:00:00.000Z",
+				deletedAt: null,
+				attachments: [],
+			});
+
+		await queue.drain(() => client);
+
+		expect(operations).toEqual(["update-1", "favorite", "update-2"]);
+		expect(queue.getCommands("account_a")).toMatchObject([
+			{ id: "conflicting-edit", status: "conflicted" },
+		]);
+	});
+
+	test("client creation failure schedules the first runnable command after terminal history", async () => {
+		const storage = new AtomicMemoryStorage();
+		await storage.set("bittery_pending_mutation_queues_v3", {
+			account_a: [
+				buildDeleteMutation("account_a", "item_a", {
+					id: "conflicted-history",
+					status: "conflicted",
+					lastError: "content conflict",
+				}),
+				buildDeleteMutation("account_a", "item_b", {
+					id: "failed-history",
+					status: "failed",
+					lastError: "retry limit reached",
+					timestamp: 2,
+				}),
+				buildDeleteMutation("account_a", "item_b", {
+					id: "runnable-command",
+					timestamp: 3,
+				}),
+			],
+		});
+		const queue = new OutboundQueue(storage, "self_client");
+		await queue.restore();
+
+		await queue.drain(async () => {
+			throw new Error("client unavailable");
+		});
+
+		expect(queue.getCommands("account_a")).toMatchObject([
+			{
+				id: "conflicted-history",
+				status: "conflicted",
+				lastError: "content conflict",
+				retryCount: 0,
+			},
+			{
+				id: "failed-history",
+				status: "failed",
+				lastError: "retry limit reached",
+				retryCount: 0,
+			},
+			{
+				id: "runnable-command",
+				status: "retrying",
+				lastError: "client unavailable",
+				retryCount: 1,
+			},
+		]);
+	});
+
+	test("discovers a durable command after a crash without a separate account index write", async () => {
+		const storage = new FailLegacyAccountIndexStorage();
+		const writer = new OutboundQueue(storage, "tab_a");
+
+		await writer.enqueue(buildDeleteMutation("account_a", "item_a"));
+
+		const restarted = new OutboundQueue(storage, "tab_b");
+		await restarted.restore();
+		expect(restarted.getCommands("account_a")).toHaveLength(1);
+		expect(restarted.getPendingForItem("item_a")?.status).toBe("pending");
+	});
+
+	test("resumes a durable cross-account move through the semantic executor", async () => {
+		const storage = new AtomicMemoryStorage();
+		const writer = new OutboundQueue(storage, "tab_a");
+		await writer.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "transfer_a",
+				operationId: "transfer_a",
+				type: "cross_account_move",
+				targetAccountId: "account_b",
+				targetVaultId: "vault_b",
+				targetItemId: "item_b",
+				category: "login",
+				encryptedPayload: {
+					encryptedData: "target_ciphertext",
+					encryptionIv: "target_iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+				},
+			}),
+		);
+
+		const executed: string[] = [];
+		const restarted = new OutboundQueue(storage, "tab_b", undefined, {
+			apply: async () => undefined,
+			executeSemanticCommand: async (command) => {
+				executed.push(command.operationId ?? command.id);
+				return { entityId: command.entityId, etag: '"3"', version: 3 };
+			},
+			acknowledge: async () => undefined,
+		});
+		await restarted.restore();
+		await restarted.drain(() => outboundApiClient());
+
+		expect(executed).toEqual(["transfer_a"]);
+		expect(restarted.getPendingCount()).toBe(0);
+	});
+
 	test("enqueue resolves only after the command is durably persisted", async () => {
 		const storage = new GatedStorage();
 		const queue = new OutboundQueue(storage, "self_client");
@@ -923,6 +1195,360 @@ describe("outbound queue multi-account drain isolation", () => {
 		const restored = new OutboundQueue(storage, "self_client");
 		await restored.restore();
 		expect(restored.hasPendingForItem("item_a")).toBe(true);
+	});
+
+	test("marks a cloned durable applying snapshot pending after projection", async () => {
+		const storage = new AtomicMemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client", undefined, {
+			apply: async () => undefined,
+			acknowledge: async () => undefined,
+		});
+
+		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+
+		expect(queue.getPendingForItem("item_a")?.status).toBe("pending");
+		const restarted = new OutboundQueue(storage, "other_client");
+		await restarted.restore();
+		expect(restarted.getPendingForItem("item_a")?.status).toBe("pending");
+	});
+
+	test("does not drain a command before its optimistic projection finishes", async () => {
+		const projection = Promise.withResolvers<void>();
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+		let requests = 0;
+		const enqueue = queue.enqueue(
+			buildDeleteMutation("account_a", "item_a"),
+			async () => projection.promise,
+		);
+		await queue.whenPersisted();
+
+		await queue.drain(() =>
+			outboundApiClient({
+				trash: async () => {
+					requests += 1;
+				},
+			}),
+		);
+		expect(requests).toBe(0);
+
+		projection.resolve();
+		await enqueue;
+		await queue.drain(() =>
+			outboundApiClient({
+				trash: async () => {
+					requests += 1;
+				},
+			}),
+		);
+		expect(requests).toBe(1);
+	});
+
+	test("replays a crashed applying command before making it drainable", async () => {
+		const storage = new MemoryStorage();
+		await storage.set("bittery_pending_mutation_account_ids_v2", ["account_a"]);
+		await storage.set("bittery_pending_mutations_v2_account_a", [
+			{
+				...buildDeleteMutation("account_a", "item_a"),
+				status: "applying",
+			},
+		]);
+		const applied: string[] = [];
+		const queue = new OutboundQueue(storage, "self_client", undefined, {
+			apply: async (command) => {
+				applied.push(command.entityId);
+			},
+			acknowledge: async () => undefined,
+		});
+
+		await queue.restore();
+
+		expect(applied).toEqual(["item_a"]);
+		expect(queue.getCommands("account_a")[0]?.status).toBe("pending");
+	});
+
+	test("keeps a staged worker command durable and undrainable across worker restart until popup activation", async () => {
+		const storage = new AtomicMemoryStorage();
+		let projected = 0;
+		const writer = new OutboundQueue(storage, "worker", undefined, {
+			apply: async () => {
+				projected += 1;
+			},
+			acknowledge: async () => undefined,
+		});
+		await writer.stage(buildDeleteMutation("account_a", "item_a"));
+		const queue = new OutboundQueue(storage, "restarted-worker", undefined, {
+			apply: async () => {
+				projected += 1;
+			},
+			acknowledge: async () => undefined,
+		});
+		await queue.restore();
+		expect(await queue.claimStaged("popup-a", 30_000)).toHaveLength(1);
+		let requests = 0;
+		await queue.drain(() => {
+			requests += 1;
+			return outboundApiClient();
+		});
+
+		expect(projected).toBe(0);
+		expect(requests).toBe(0);
+		expect(queue.getPendingForItem("item_a")?.status).toBe("staged");
+
+		await queue.activate("account_a", "m_account_a_item_a", "popup-a");
+
+		expect(projected).toBe(1);
+		expect(queue.getPendingForItem("item_a")?.status).toBe("pending");
+	});
+
+	test("cancels a rejected staged projection durably without an HTTP write", async () => {
+		const storage = new AtomicMemoryStorage();
+		const queue = new OutboundQueue(storage, "worker");
+		await queue.stage(buildDeleteMutation("account_a", "item_a"));
+		expect(await queue.claimStaged("popup-a", 30_000)).toHaveLength(1);
+		await queue.cancel("account_a", "m_account_a_item_a", "popup-a");
+		let requests = 0;
+		await queue.drain(() => {
+			requests += 1;
+			return outboundApiClient();
+		});
+		const restarted = new OutboundQueue(storage, "restarted-worker");
+		await restarted.restore();
+
+		expect(requests).toBe(0);
+		expect(restarted.getPendingCount()).toBe(0);
+	});
+
+	test("a staged command blocks later active commands for the same Item", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "worker");
+		await queue.stage(buildDeleteMutation("account_a", "item_a"));
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "later-command",
+				timestamp: 2,
+			}),
+		);
+		expect(await queue.claimStaged("popup-a", 30_000)).toHaveLength(1);
+		expect(await queue.claimStaged("popup-b", 30_000)).toHaveLength(0);
+		let requests = 0;
+		const client = outboundApiClient({
+			trash: async () => {
+				requests += 1;
+			},
+		});
+
+		await queue.drain(() => client);
+		expect(requests).toBe(0);
+
+		await queue.activate("account_a", "m_account_a_item_a", "popup-a");
+		await queue.drain(() => client);
+		expect(requests).toBe(2);
+	});
+
+	test("an expired popup claim can be recovered without duplicate projection", async () => {
+		let now = 1_000;
+		const queue = new OutboundQueue(
+			new MemoryStorage(),
+			"worker",
+			undefined,
+			undefined,
+			() => now,
+		);
+		await queue.stage(buildDeleteMutation("account_a", "item_a"));
+
+		expect(await queue.claimStaged("popup-a", 100)).toHaveLength(1);
+		expect(await queue.claimStaged("popup-b", 100)).toHaveLength(0);
+		now = 1_101;
+		expect(await queue.claimStaged("popup-b", 100)).toHaveLength(1);
+		expect(
+			await queue.activate("account_a", "m_account_a_item_a", "popup-a"),
+		).toBe(false);
+		expect(
+			await queue.activate("account_a", "m_account_a_item_a", "popup-b"),
+		).toBe(true);
+	});
+
+	test("does not grant a second initial enqueue ownership of an existing operation", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "worker");
+		const command = buildDeleteMutation("account_a", "item_a");
+
+		expect(
+			await queue.stage(command, { id: "popup-a", expiresAt: 30_000 }),
+		).toBe(true);
+		expect(
+			await queue.stage(command, { id: "popup-b", expiresAt: 30_000 }),
+		).toBe(false);
+		expect(queue.getPendingForItem("item_a")?.projectionClaimId).toBe(
+			"popup-a",
+		);
+	});
+
+	test("does not replay eager legacy-context migrations for every Item on login", async () => {
+		const storage = new AtomicMemoryStorage();
+		await storage.set("bittery_pending_mutation_queues_v3", {
+			account_a: [
+				buildDeleteMutation("account_a", "legacy_item", {
+					id: "adopt-context",
+					operationId: "adopt-context",
+					type: "adopt_encryption_context",
+					encryptedPayload: {
+						encryptedData: "",
+						encryptionIv: "",
+						encryptionAlgorithm: "",
+						encryptionVersion: 1,
+						encryptedByUserId: "author",
+					},
+				}),
+				buildDeleteMutation("account_a", "changed_item", {
+					id: "real-command",
+				}),
+			],
+		});
+		const queue = new OutboundQueue(storage, "self_client");
+
+		await queue.restore();
+
+		expect(queue.getCommands("account_a").map((command) => command.id)).toEqual(
+			["real-command"],
+		);
+		const restarted = new OutboundQueue(storage, "next_client");
+		await restarted.restore();
+		expect(restarted.getCommands("account_a")).toHaveLength(1);
+	});
+
+	test("restores a context migration explicitly requested by opening one Item", async () => {
+		const storage = new AtomicMemoryStorage();
+		const writer = new OutboundQueue(storage, "tab_a");
+		await writer.enqueue(
+			buildDeleteMutation("account_a", "opened_item", {
+				id: "adopt-opened-context",
+				operationId: "adopt-opened-context",
+				type: "adopt_encryption_context",
+				migrationTrigger: "explicit_open",
+				encryptedPayload: {
+					encryptedData: "",
+					encryptionIv: "",
+					encryptionAlgorithm: "",
+					encryptionVersion: 1,
+					encryptedByUserId: "author",
+				},
+			}),
+		);
+
+		const restarted = new OutboundQueue(storage, "tab_b");
+		await restarted.restore();
+
+		expect(restarted.getCommands("account_a")).toHaveLength(1);
+		expect(restarted.getCommands("account_a")[0]?.entityId).toBe("opened_item");
+	});
+
+	test("merges concurrent tab writes and acknowledgements without losing commands", async () => {
+		const storage = new AtomicMemoryStorage();
+		const firstTab = new OutboundQueue(storage, "tab_a");
+		const secondTab = new OutboundQueue(storage, "tab_b");
+		await Promise.all([
+			firstTab.enqueue(buildDeleteMutation("account_a", "item_a")),
+			secondTab.enqueue(buildDeleteMutation("account_a", "item_b")),
+		]);
+		const request = Promise.withResolvers<void>();
+		const requested = Promise.withResolvers<void>();
+		const sent: string[] = [];
+		const drain = firstTab.drain(() =>
+			outboundApiClient({
+				trash: async (itemId) => {
+					sent.push(itemId);
+					requested.resolve();
+					await request.promise;
+				},
+			}),
+		);
+		await requested.promise;
+		await secondTab.enqueue(
+			buildDeleteMutation("account_a", "item_c", { timestamp: 2 }),
+		);
+		request.resolve();
+		await drain;
+
+		const restarted = new OutboundQueue(storage, "tab_c");
+		await restarted.restore();
+		const durable = restarted
+			.getCommands("account_a")
+			.map((command) => command.entityId);
+		expect([...sent, ...durable].sort()).toEqual([
+			"item_a",
+			"item_b",
+			"item_c",
+		]);
+		expect(new Set([...sent, ...durable]).size).toBe(3);
+	});
+
+	test("does not resurrect an acknowledged command from a stale tab snapshot", async () => {
+		const storage = new AtomicMemoryStorage();
+		const seed = new OutboundQueue(storage, "seed");
+		await seed.enqueue(buildDeleteMutation("account_a", "acknowledged_item"));
+
+		const drainingTab = new OutboundQueue(storage, "tab_a");
+		const discarded: string[] = [];
+		const staleTab = new OutboundQueue(storage, "tab_b", undefined, {
+			apply: async () => undefined,
+			discardAcknowledgedElsewhere: async (command) => {
+				discarded.push(command.entityId);
+			},
+			acknowledge: async () => undefined,
+		});
+		await Promise.all([drainingTab.restore(), staleTab.restore()]);
+
+		await drainingTab.drain(() => outboundApiClient());
+		await staleTab.enqueue(
+			buildDeleteMutation("account_a", "new_item", {
+				id: "new-operation",
+				operationId: "new-operation",
+				timestamp: 2,
+			}),
+		);
+
+		const restarted = new OutboundQueue(storage, "tab_c");
+		await restarted.restore();
+
+		expect(
+			restarted.getCommands("account_a").map((command) => command.entityId),
+		).toEqual(["new_item"]);
+		expect(discarded).toEqual(["acknowledged_item"]);
+	});
+
+	test("does not overwrite another tab's newer retry attempt with a stale snapshot", async () => {
+		const storage = new AtomicMemoryStorage();
+		const writer = new OutboundQueue(storage, "tab_a");
+		await writer.enqueue(buildDeleteMutation("account_a", "shared_item"));
+		const staleTab = new OutboundQueue(storage, "tab_b");
+		await staleTab.restore();
+
+		await storage.update<Record<string, PendingMutation[]>>(
+			"bittery_pending_mutation_queues_v3",
+			(current) => {
+				const command = current?.account_a?.[0];
+				if (!current || !command) throw new Error("missing durable command");
+				command.baseVersion = 2;
+				command.attemptId = "newer-attempt";
+				command.retryCount = 1;
+				command.status = "retrying";
+				return current;
+			},
+		);
+		await staleTab.enqueue(
+			buildDeleteMutation("account_a", "new_item", {
+				id: "new-operation",
+				operationId: "new-operation",
+				timestamp: 2,
+			}),
+		);
+
+		const restarted = new OutboundQueue(storage, "tab_c");
+		await restarted.restore();
+		const shared = restarted.getPendingForItem("shared_item");
+		expect(shared?.baseVersion).toBe(2);
+		expect(shared?.attemptId).toBe("newer-attempt");
+		expect(shared?.status).toBe("retrying");
 	});
 
 	test("compaction preserves semantic command order", async () => {
@@ -1060,8 +1686,241 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(requests[1]?.idempotencyKey).not.toBe("forever");
 	});
 
+	for (const [storageKind, createStorage] of [
+		["atomic update", () => new AtomicMemoryStorage()],
+		["legacy set", () => new MemoryStorage()],
+	] as const) {
+		for (const terminalStatus of ["conflicted", "failed"] as const) {
+			test(`ACK chaining with ${storageKind} preserves later ${terminalStatus} history`, async () => {
+				const queue = new OutboundQueue(createStorage(), "self_client");
+				await queue.enqueue(
+					buildDeleteMutation("account_a", "item_a", {
+						id: "acknowledged-command",
+					}),
+				);
+				await queue.enqueue(
+					buildDeleteMutation("account_a", "item_a", {
+						id: "terminal-history",
+						baseVersion: 7,
+						attemptId: "terminal-attempt",
+						status: terminalStatus,
+						lastError: "terminal reason",
+						timestamp: 2,
+					}),
+				);
+				const client = outboundApiClient() as any;
+				client.items.trash = async () => ({
+					...apiResult({}),
+					etag: '"2"',
+				});
+
+				await queue.drain(() => client);
+
+				expect(queue.getCommands("account_a")).toMatchObject([
+					{
+						id: "terminal-history",
+						baseVersion: 7,
+						attemptId: "terminal-attempt",
+						status: terminalStatus,
+						lastError: "terminal reason",
+					},
+				]);
+			});
+		}
+	}
+
+	test("reconciles an acknowledgement before removing its durable command", async () => {
+		let pendingDuringAcknowledgement = -1;
+		const acknowledgements: Array<{
+			operationId: string;
+			entityId: string;
+			version: number | undefined;
+		}> = [];
+		const queue = new OutboundQueue(
+			new MemoryStorage(),
+			"self_client",
+			undefined,
+			{
+				apply: async () => undefined,
+				acknowledge: async (command, acknowledgement) => {
+					pendingDuringAcknowledgement = queue.getPendingCount();
+					acknowledgements.push({
+						operationId: command.operationId ?? command.id,
+						entityId: acknowledgement.entityId,
+						version: acknowledgement.version,
+					});
+				},
+			},
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", { id: "trash" }),
+		);
+		const client = outboundApiClient() as any;
+		client.items.trash = async () => ({ ...apiResult({}), etag: '"2"' });
+
+		await queue.drain(() => client);
+
+		expect(pendingDuringAcknowledgement).toBe(1);
+		expect(acknowledgements).toEqual([
+			{ operationId: "trash", entityId: "item_a", version: 2 },
+		]);
+		expect(queue.getPendingCount()).toBe(0);
+	});
+
+	test("migrates a discovered legacy encryption context with OCC protection", async () => {
+		const acknowledgements: number[] = [];
+		const queue = new OutboundQueue(
+			new MemoryStorage(),
+			"self_client",
+			undefined,
+			{
+				apply: async () => undefined,
+				acknowledge: async (_command, acknowledgement) => {
+					if (acknowledgement.version !== undefined) {
+						acknowledgements.push(acknowledgement.version);
+					}
+				},
+			},
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "legacy_item", {
+				id: "adopt-context",
+				operationId: "adopt-context",
+				type: "adopt_encryption_context",
+				baseVersion: 7,
+				encryptedPayload: {
+					encryptedData: "",
+					encryptionIv: "",
+					encryptionAlgorithm: "",
+					encryptionVersion: 3,
+					encryptedByUserId: "ciphertext_author",
+				},
+			}),
+		);
+		const requests: Array<{
+			input: Record<string, unknown>;
+			options: TestWriteOptions;
+		}> = [];
+		const client = outboundApiClient() as any;
+		client.items.update = async (
+			_itemId: string,
+			input: Record<string, unknown>,
+			options: TestWriteOptions,
+		) => {
+			requests.push({ input, options });
+			return { ...apiResult({ success: true, version: 8 }), etag: '"8"' };
+		};
+
+		await queue.drain(() => client);
+
+		expect(requests).toHaveLength(1);
+		expect(requests[0]?.input).toEqual({
+			encryptionVersion: 3,
+			encryptedByUserId: "ciphertext_author",
+		});
+		expect(requests[0]?.options.etag).toBe('"7"');
+		expect(requests[0]?.options.idempotencyKey).toBe("adopt-context");
+		expect(acknowledgements).toEqual([8]);
+	});
+
+	test("omits server-derived encryption context from ciphertext update and move HTTP requests", async () => {
+		const acknowledgements: Array<{
+			type: string;
+			baseVersion: number;
+			aadVersion: number | undefined;
+			serverVersion: number | undefined;
+		}> = [];
+		const queue = new OutboundQueue(
+			new MemoryStorage(),
+			"self_client",
+			undefined,
+			{
+				apply: async () => undefined,
+				acknowledge: async (command, acknowledgement) => {
+					acknowledgements.push({
+						type: command.type,
+						baseVersion: command.baseVersion,
+						aadVersion: command.encryptedPayload?.encryptionVersion,
+						serverVersion: acknowledgement.version,
+					});
+				},
+			},
+		);
+		const encryptedPayload = {
+			encryptedData: "new_ciphertext",
+			encryptionIv: "new_iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+			encryptionVersion: 7,
+			encryptedByUserId: "local_author",
+		};
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "updated_item", {
+				type: "update",
+				baseVersion: 6,
+				encryptedPayload,
+			}),
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "moved_item", {
+				type: "move",
+				baseVersion: 6,
+				targetVaultId: "vault_2",
+				encryptedPayload,
+			}),
+		);
+		const requests = new Map<
+			string,
+			{ input: Record<string, unknown>; options: TestWriteOptions }
+		>();
+		const client = outboundApiClient() as any;
+		client.items.update = async (
+			itemId: string,
+			input: Record<string, unknown>,
+			options: TestWriteOptions,
+		) => {
+			requests.set(itemId, { input, options });
+			return { ...apiResult({ success: true, version: 7 }), etag: '"7"' };
+		};
+		client.items.move = async (
+			itemId: string,
+			input: Record<string, unknown>,
+			options: TestWriteOptions,
+		) => {
+			requests.set(itemId, { input, options });
+			return { ...apiResult({ success: true, version: 7 }), etag: '"7"' };
+		};
+
+		await queue.drain(() => client);
+
+		expect(requests.get("updated_item")?.input).toEqual({
+			encryptedData: "new_ciphertext",
+			encryptionIv: "new_iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+		});
+		expect(requests.get("moved_item")?.input).toEqual({
+			sourceVaultId: "vault_1",
+			targetVaultId: "vault_2",
+			encryptedData: "new_ciphertext",
+			encryptionIv: "new_iv",
+			encryptionAlgorithm: "AES-GCM-AAD-V1",
+		});
+		expect(requests.get("updated_item")?.options.etag).toBe('"6"');
+		expect(requests.get("moved_item")?.options.etag).toBe('"6"');
+		expect(acknowledgements).toEqual([
+			{ type: "update", baseVersion: 6, aadVersion: 7, serverVersion: 7 },
+			{ type: "move", baseVersion: 6, aadVersion: 7, serverVersion: 7 },
+		]);
+	});
+
 	test("keeps an attempt ID across a lost-response retry", async () => {
-		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		let now = 10_000;
+		const queue = new OutboundQueue(
+			new MemoryStorage(),
+			"self_client",
+			undefined,
+			undefined,
+			() => now,
+		);
 		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
 		const attempts: string[] = [];
 		let fail = true;
@@ -1073,11 +1932,56 @@ describe("outbound queue multi-account drain isolation", () => {
 		});
 
 		await queue.drain(() => client);
+		expect(queue.getNextRetryAt()).toBe(11_000);
+		await queue.drain(() => client);
+		expect(attempts).toHaveLength(1);
+		now = 11_000;
 		fail = false;
 		await queue.drain(() => client);
 
 		expect(attempts).toHaveLength(2);
 		expect(attempts[1]).toBe(attempts[0]);
+	});
+
+	test("rotates a cross-account move attachment attempt after a network failure", async () => {
+		let now = 10_000;
+		const attempts: string[] = [];
+		let fail = true;
+		const queue = new OutboundQueue(
+			new MemoryStorage(),
+			"self_client",
+			undefined,
+			{
+				apply: async () => undefined,
+				executeSemanticCommand: async (command) => {
+					attempts.push(command.attemptId ?? command.id);
+					if (fail) throw networkError();
+					return { entityId: command.entityId, etag: '"3"', version: 3 };
+				},
+				acknowledge: async () => undefined,
+			},
+			() => now,
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "move_1",
+				operationId: "move_1",
+				attemptId: "move_1:first-attempt",
+				type: "cross_account_move",
+				targetAccountId: "account_b",
+				targetVaultId: "vault_b",
+				targetItemId: "item_b",
+			}),
+		);
+
+		await queue.drain(() => outboundApiClient());
+		now = 11_000;
+		fail = false;
+		await queue.drain(() => outboundApiClient());
+
+		expect(attempts).toHaveLength(2);
+		expect(attempts[0]).toBe("move_1:first-attempt");
+		expect(attempts[1]).not.toBe(attempts[0]);
 	});
 
 	test("rebases a metadata command after 412 with a fresh attempt ID", async () => {
@@ -1107,7 +2011,42 @@ describe("outbound queue multi-account drain isolation", () => {
 	});
 
 	test("marks encrypted updates conflicted instead of silently rebasing", async () => {
-		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		const authoritativeSnapshots: Array<{
+			version: number;
+			encryptedData: string;
+		}> = [];
+		const preservedCopyIds: string[] = [];
+		const queue = new OutboundQueue(
+			new MemoryStorage(),
+			"self_client",
+			undefined,
+			{
+				apply: async () => undefined,
+				acknowledge: async () => undefined,
+				preserveConflict: async (command) => {
+					if (!command.conflictCopyId) return undefined;
+					preservedCopyIds.push(command.conflictCopyId);
+					return buildDeleteMutation("account_a", command.conflictCopyId, {
+						id: `copy:${command.operationId ?? command.id}`,
+						operationId: `copy:${command.operationId ?? command.id}`,
+						type: "create",
+						category: "login",
+						baseVersion: 0,
+						encryptedPayload: {
+							encryptedData: "conflict_cipher",
+							encryptionIv: "conflict_iv",
+							encryptionAlgorithm: "AES-GCM-AAD-V1",
+						},
+					});
+				},
+				reconcileAuthoritative: async (_command, item) => {
+					authoritativeSnapshots.push({
+						version: item.version,
+						encryptedData: item.encryptedData,
+					});
+				},
+			},
+		);
 		await queue.enqueue(
 			buildDeleteMutation("account_a", "item_a", {
 				type: "update",
@@ -1122,15 +2061,73 @@ describe("outbound queue multi-account drain isolation", () => {
 		const client = outboundApiClient() as any;
 		client.items.get = async () => {
 			getCalls += 1;
-			return apiResult({ id: "item_a", version: 2 });
+			return apiResult({
+				id: "item_a",
+				vaultId: "vault_1",
+				category: "login",
+				favorite: false,
+				encryptedData: "server_cipher",
+				encryptionIv: "server_iv",
+				encryptionAlgorithm: "AES-GCM-AAD-V1",
+				version: 2,
+				lastModifiedBy: "other_user",
+				encryptionVersion: 2,
+				encryptedByUserId: "other_user",
+				createdAt: "2026-08-01T00:00:00.000Z",
+				updatedAt: "2026-08-02T00:00:00.000Z",
+				deletedAt: null,
+				attachments: [],
+			});
 		};
 		client.items.update = async () => {
 			throw conflictError(412);
 		};
+		client.items.create = async (_vaultId: string, itemId: string) => ({
+			...apiResult({ itemId }),
+			etag: '"1"',
+		});
 
 		await queue.drain(() => client);
 
-		expect(getCalls).toBe(0);
+		expect(getCalls).toBe(1);
+		expect(authoritativeSnapshots).toEqual([
+			{ version: 2, encryptedData: "server_cipher" },
+		]);
+		expect(queue.getCommands("account_a")[0]?.status).toBe("conflicted");
+		expect(preservedCopyIds).toHaveLength(1);
+		expect(preservedCopyIds[0]).toBeString();
+		expect(preservedCopyIds[0]).toBe(
+			queue.getCommands("account_a")[0]?.conflictCopyId,
+		);
+	});
+
+	test("treats a remotely deleted encrypted base as a content conflict", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				type: "update",
+				encryptedPayload: {
+					encryptedData: "offline_cipher",
+					encryptionIv: "offline_iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+				},
+			}),
+		);
+		const client = outboundApiClient() as any;
+		client.items.update = async () => {
+			throw new ApiError(
+				{
+					type: "https://bittery.com/problems/not-found",
+					title: "Not found",
+					status: 404,
+					code: "NOT_FOUND",
+				},
+				null,
+			);
+		};
+
+		await queue.drain(() => client);
+
 		expect(queue.getCommands("account_a")[0]?.status).toBe("conflicted");
 	});
 
@@ -1269,5 +2266,120 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(deleteCalls.sort()).toEqual(["item_a", "item_b"]);
 		expect(observedConcurrency).toBe(1);
 		expect(queue.getPendingCount()).toBe(0);
+	});
+});
+
+describe("outbound push independence from the event stream", () => {
+	function orchestratorWithQueue(
+		queue: OutboundQueue,
+		client: OutboundQueueApiClient,
+	): SyncOrchestrator {
+		return new SyncOrchestrator({
+			syncManager: {
+				clientId: "self_client",
+				storage: new MemoryStorage(),
+			},
+			apiClient: testApiClient(),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			outboundQueue: queue,
+			getClientForAccount: () => client,
+		});
+	}
+
+	// The SSE stream is a read-path hint. Gating writes on it stranded every
+	// mutation whenever the stream was down, connecting, or never opened.
+	test("pushes a queued mutation while the event stream is disconnected", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+		const trashed: string[] = [];
+		const orchestrator = orchestratorWithQueue(
+			queue,
+			outboundApiClient({
+				trash: async (itemId) => {
+					trashed.push(itemId);
+				},
+			}),
+		);
+
+		expect(orchestrator.getStatus().connectionStatus).toBe("disconnected");
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		await sleep(10);
+
+		expect(trashed).toEqual(["item_a"]);
+		expect(queue.getPendingCount()).toBe(0);
+
+		orchestrator.dispose();
+	});
+
+	test("pushes a mutation enqueued while a drain is already in flight", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+		const trashed: string[] = [];
+		const orchestrator = orchestratorWithQueue(
+			queue,
+			outboundApiClient({
+				trash: async (itemId) => {
+					await sleep(10);
+					trashed.push(itemId);
+				},
+			}),
+		);
+
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		await sleep(1);
+		// Arrives while the first drain is still awaiting its response.
+		queue.enqueue(buildDeleteMutation("account_b", "item_b"));
+		await sleep(60);
+
+		expect(trashed.sort()).toEqual(["item_a", "item_b"]);
+		expect(queue.getPendingCount()).toBe(0);
+
+		orchestrator.dispose();
+	});
+
+	// Retry bookkeeping emits a queue change, and draining on that emit re-runs
+	// the same failing mutation in a tight loop (seen on WebKit, where every
+	// upload failed with "ReadableStream uploading is not supported").
+	test("a persistently failing mutation does not re-trigger an endless drain loop", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+		let attempts = 0;
+		const orchestrator = orchestratorWithQueue(
+			queue,
+			outboundApiClient({
+				trash: async () => {
+					attempts += 1;
+					throw new Error(
+						"NotSupportedError: ReadableStream uploading is not supported",
+					);
+				},
+			}),
+		);
+
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		await sleep(50);
+
+		expect(attempts).toBe(1);
+		expect(queue.getPendingCount()).toBe(1);
+
+		orchestrator.dispose();
+	});
+
+	// The extension enqueues in the popup and drains in the background worker,
+	// which restores from storage. Signalling the drain before the write lands
+	// makes the worker read a queue that does not contain the mutation yet.
+	test("persists an enqueued mutation before whenPersisted resolves", async () => {
+		const storage = new MemoryStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+
+		queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		await queue.whenPersisted();
+
+		const reader = new OutboundQueue(storage, "other_client");
+		await reader.restore();
+
+		expect(reader.getPendingCount()).toBe(1);
+		expect(reader.getPendingForItem("item_a")?.type).toBe("delete");
 	});
 });

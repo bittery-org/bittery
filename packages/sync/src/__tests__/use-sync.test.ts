@@ -83,6 +83,9 @@ describe("sync replica and cursor scopes", () => {
 		expect(alice).not.toBe(
 			buildDefaultSyncSourceId("https://other.example", "acc_alice"),
 		);
+		expect(alice).toBe(
+			buildDefaultSyncSourceId("https://VAULT.example:443/", "acc_alice"),
+		);
 	});
 
 	test("keeps one replica id per tab-scoped storage", () => {

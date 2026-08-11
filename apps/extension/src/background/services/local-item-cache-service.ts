@@ -14,6 +14,8 @@ interface EncryptedPayload {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
+	encryptionVersion?: number;
+	encryptedByUserId?: string;
 }
 
 interface LocalItemCreatedInput {
@@ -108,7 +110,9 @@ export function createLocalItemCacheService(
 				encryptionIv: input.encryptedData.iv,
 				encryptionAlgorithm: input.encryptedData.algorithm,
 				version: 1,
-				lastModifiedBy: null,
+				lastModifiedBy: input.encryptedData.encryptedByUserId ?? null,
+				encryptionVersion: input.encryptedData.encryptionVersion ?? 1,
+				encryptedByUserId: input.encryptedData.encryptedByUserId,
 				createdAt: now,
 				updatedAt: now,
 				deletedAt: null,
@@ -149,8 +153,13 @@ export function createLocalItemCacheService(
 				encryptedData: input.encryptedData.ciphertext,
 				encryptionIv: input.encryptedData.iv,
 				encryptionAlgorithm: input.encryptedData.algorithm,
-				version: existing.version + 1,
-				lastModifiedBy: existing.lastModifiedBy,
+				version: input.encryptedData.encryptionVersion ?? existing.version + 1,
+				lastModifiedBy:
+					input.encryptedData.encryptedByUserId ?? existing.lastModifiedBy,
+				encryptionVersion:
+					input.encryptedData.encryptionVersion ?? existing.version + 1,
+				encryptedByUserId:
+					input.encryptedData.encryptedByUserId ?? existing.encryptedByUserId,
 				createdAt: existing.createdAt,
 				updatedAt: new Date().toISOString(),
 				deletedAt: existing.deletedAt,

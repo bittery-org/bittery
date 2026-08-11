@@ -681,34 +681,45 @@ class GetCredentialsActivity : FragmentActivity() {
                         )
                     }
 
+                    val baseVersion = item.version
+                    val encryptionVersion = baseVersion + 1L
                     val encryptedItem = VaultDecryptor.encryptItemJson(
                         updatedJson = itemDataJson,
                         vaultKey = decryptedVaultKey,
                         vaultId = item.vaultId,
                         itemId = item.id,
-                        version = item.version,
-                        userId = item.lastModifiedBy?.takeIf { it.isNotBlank() } ?: item.userId
+                        version = encryptionVersion,
+                        userId = item.userId
                     )
                     val updatedItem = item.copy(
                         encryptedData = encryptedItem.ciphertext,
                         encryptionIv = encryptedItem.iv,
                         encryptionAlgorithm = encryptedItem.algorithm,
+                        version = encryptionVersion,
+                        lastModifiedBy = item.userId,
+                        encryptionVersion = encryptionVersion,
+                        encryptedByUserId = item.userId,
                         lastUsedAt = System.currentTimeMillis(),
                         updatedAt = System.currentTimeMillis()
                     )
-                    database.itemDao().insert(updatedItem)
-
-                    // Queue durable writeback mutation only when the passkey payload changed.
                     if (passkeyMetadataUpdated) {
-                        queuePendingPasskeyMutation(
-                            userId = item.userId,
-                            vaultId = item.vaultId,
-                            itemId = item.id,
-                            operation = "update_item",
-                            encryptedData = encryptedItem.ciphertext,
-                            encryptionIv = encryptedItem.iv,
-                            encryptionAlgorithm = encryptedItem.algorithm
+                        database.passkeyMutationDao().updateItemAndQueue(
+                            updatedItem,
+                            pendingPasskeyMutation(
+                                userId = item.userId,
+                                vaultId = item.vaultId,
+                                itemId = item.id,
+                                operation = "update_item",
+                                encryptedData = encryptedItem.ciphertext,
+                                encryptionIv = encryptedItem.iv,
+                                encryptionAlgorithm = encryptedItem.algorithm,
+                                baseVersion = baseVersion,
+                                encryptionVersion = encryptionVersion,
+                                encryptedByUserId = item.userId
+                            )
                         )
+                    } else {
+                        database.itemDao().insert(updatedItem)
                     }
 
                     val requestOptions = PublicKeyCredentialRequestOptions(passkeyOption.requestJson)
@@ -839,29 +850,40 @@ class GetCredentialsActivity : FragmentActivity() {
                 val itemDataJson = VaultDecryptor.decryptItemJson(targetItem, decryptedVaultKey)
                 appendStoredPasskeyPreservingExisting(itemDataJson, passkeyModel)
 
+                val baseVersion = targetItem.version
+                val encryptionVersion = baseVersion + 1L
                 val encryptedItem = VaultDecryptor.encryptItemJson(
                     updatedJson = itemDataJson,
                     vaultKey = decryptedVaultKey,
                     vaultId = targetItem.vaultId,
                     itemId = targetItem.id,
-                    version = targetItem.version,
-                    userId = targetItem.lastModifiedBy?.takeIf { it.isNotBlank() } ?: targetItem.userId
+                    version = encryptionVersion,
+                    userId = targetItem.userId
                 )
                 targetItem.copy(
                     encryptedData = encryptedItem.ciphertext,
                     encryptionIv = encryptedItem.iv,
                     encryptionAlgorithm = encryptedItem.algorithm,
+                    version = encryptionVersion,
+                    lastModifiedBy = targetItem.userId,
+                    encryptionVersion = encryptionVersion,
+                    encryptedByUserId = targetItem.userId,
                     updatedAt = System.currentTimeMillis()
                 ).also { item ->
-                    database.itemDao().insert(item)
-                    queuePendingPasskeyMutation(
-                        userId = item.userId,
-                        vaultId = item.vaultId,
-                        itemId = item.id,
-                        operation = "update_item",
-                        encryptedData = encryptedItem.ciphertext,
-                        encryptionIv = encryptedItem.iv,
-                        encryptionAlgorithm = encryptedItem.algorithm
+                    database.passkeyMutationDao().updateItemAndQueue(
+                        item,
+                        pendingPasskeyMutation(
+                            userId = item.userId,
+                            vaultId = item.vaultId,
+                            itemId = item.id,
+                            operation = "update_item",
+                            encryptedData = encryptedItem.ciphertext,
+                            encryptionIv = encryptedItem.iv,
+                            encryptionAlgorithm = encryptedItem.algorithm,
+                            baseVersion = baseVersion,
+                            encryptionVersion = encryptionVersion,
+                            encryptedByUserId = item.userId
+                        )
                     )
                 }
             } else {
@@ -899,12 +921,15 @@ class GetCredentialsActivity : FragmentActivity() {
                     syncedAt = System.currentTimeMillis(),
                     createdAt = System.currentTimeMillis(),
                     updatedAt = System.currentTimeMillis(),
-                    isFavorite = false
+                    isFavorite = false,
+                    version = 1L,
+                    lastModifiedBy = vaultKeyEntity.userId,
+                    encryptionVersion = 1L,
+                    encryptedByUserId = vaultKeyEntity.userId
                 )
 
-                database.itemDao().insert(createdItem)
-                database.itemDomainDao().replaceDomainsForItem(
-                    createdItem.id,
+                database.passkeyMutationDao().createItemAndQueue(
+                    createdItem,
                     listOf(
                         ItemDomainEntity(
                             itemId = createdItem.id,
@@ -912,16 +937,19 @@ class GetCredentialsActivity : FragmentActivity() {
                             isPrimary = true,
                             fullUrl = primaryUrl
                         )
+                    ),
+                    pendingPasskeyMutation(
+                        userId = createdItem.userId,
+                        vaultId = createdItem.vaultId,
+                        itemId = createdItem.id,
+                        operation = "create_item",
+                        encryptedData = encryptedItem.ciphertext,
+                        encryptionIv = encryptedItem.iv,
+                        encryptionAlgorithm = encryptedItem.algorithm,
+                        baseVersion = 0L,
+                        encryptionVersion = 1L,
+                        encryptedByUserId = createdItem.userId
                     )
-                )
-                queuePendingPasskeyMutation(
-                    userId = createdItem.userId,
-                    vaultId = createdItem.vaultId,
-                    itemId = createdItem.id,
-                    operation = "create_item",
-                    encryptedData = encryptedItem.ciphertext,
-                    encryptionIv = encryptedItem.iv,
-                    encryptionAlgorithm = encryptedItem.algorithm
                 )
                 createdItem
             }
@@ -1304,29 +1332,33 @@ class GetCredentialsActivity : FragmentActivity() {
             .firstOrNull()
     }
 
-    private suspend fun queuePendingPasskeyMutation(
+    private fun pendingPasskeyMutation(
         userId: String,
         vaultId: String,
         itemId: String,
         operation: String,
         encryptedData: String,
         encryptionIv: String,
-        encryptionAlgorithm: String
-    ) {
-        database.pendingPasskeyMutationDao().insert(
-            PendingPasskeyMutationEntity(
-                id = UUID.randomUUID().toString(),
-                userId = userId,
-                vaultId = vaultId,
-                itemId = itemId,
-                operation = operation,
-                encryptedData = encryptedData,
-                encryptionIv = encryptionIv,
-                encryptionAlgorithm = encryptionAlgorithm,
-                createdAt = System.currentTimeMillis(),
-                attemptCount = 0,
-                lastError = null
-            )
+        encryptionAlgorithm: String,
+        baseVersion: Long,
+        encryptionVersion: Long,
+        encryptedByUserId: String
+    ): PendingPasskeyMutationEntity {
+        return PendingPasskeyMutationEntity(
+            id = UUID.randomUUID().toString(),
+            userId = userId,
+            vaultId = vaultId,
+            itemId = itemId,
+            operation = operation,
+            encryptedData = encryptedData,
+            encryptionIv = encryptionIv,
+            encryptionAlgorithm = encryptionAlgorithm,
+            baseVersion = baseVersion,
+            encryptionVersion = encryptionVersion,
+            encryptedByUserId = encryptedByUserId,
+            createdAt = System.currentTimeMillis(),
+            attemptCount = 0,
+            lastError = null
         )
     }
 

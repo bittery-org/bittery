@@ -23,6 +23,7 @@ import { lockVaultThroughWorker } from "@/lib/lock-vault";
 import { useSessionStatus } from "@/lib/session-status";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
+import { useSyncContext } from "@/providers/sync-provider";
 
 type PopupActiveAccount = Awaited<ReturnType<typeof storage.getActiveAccount>>;
 
@@ -168,6 +169,7 @@ export function VaultPage() {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { m } = useI18n();
+	const sync = useSyncContext();
 	const [isLocking, setIsLocking] = useState(false);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [manualSelectionByScope, setManualSelectionByScope] = useState<
@@ -470,11 +472,29 @@ export function VaultPage() {
 			hostnameMatches(selectedItem.url, currentHostname),
 	);
 
-	const footerText = isDesktopMode
-		? m.ext_vault_status_synced()
-		: locksInMinutes != null
-			? m.ext_vault_status_locks_in({ minutes: locksInMinutes })
-			: m.ext_vault_status_unlocked();
+	const commandState =
+		sync.commandSummary.failed > 0
+			? (["failed", sync.commandSummary.failed] as const)
+			: sync.commandSummary.conflicted > 0
+				? (["conflicted", sync.commandSummary.conflicted] as const)
+				: sync.commandSummary.retrying > 0
+					? (["retrying", sync.commandSummary.retrying] as const)
+					: sync.commandSummary.pending > 0
+						? (["pending", sync.commandSummary.pending] as const)
+						: null;
+	const footerText = commandState
+		? commandState[0] === "failed"
+			? m.sync_command_status_failed({ count: commandState[1] })
+			: commandState[0] === "conflicted"
+				? m.sync_command_status_conflicted({ count: commandState[1] })
+				: commandState[0] === "retrying"
+					? m.sync_command_status_retrying({ count: commandState[1] })
+					: m.sync_command_status_pending({ count: commandState[1] })
+		: isDesktopMode
+			? m.ext_vault_status_synced()
+			: locksInMinutes != null
+				? m.ext_vault_status_locks_in({ minutes: locksInMinutes })
+				: m.ext_vault_status_unlocked();
 
 	const renderRow = (item: DecryptedItemWithContext, isSuggested: boolean) => (
 		<VaultRow
@@ -627,7 +647,17 @@ export function VaultPage() {
 					<footer className="flex h-[30px] shrink-0 items-center gap-1.5 border-t bg-sidebar px-2.5 text-[11px] text-muted-foreground">
 						<span
 							aria-hidden
-							className="size-1.5 rounded-full bg-success shadow-[0_0_6px_color-mix(in_oklab,var(--color-success)_60%,transparent)]"
+							className={cn(
+								"size-1.5 rounded-full",
+								commandState?.[0] === "failed" ||
+									commandState?.[0] === "conflicted"
+									? "bg-destructive"
+									: commandState?.[0] === "retrying"
+										? "bg-warning"
+										: commandState?.[0] === "pending"
+											? "bg-primary"
+											: "bg-success shadow-[0_0_6px_color-mix(in_oklab,var(--color-success)_60%,transparent)]",
+							)}
 						/>
 						<span className="truncate">{footerText}</span>
 						{canLockLocally && (

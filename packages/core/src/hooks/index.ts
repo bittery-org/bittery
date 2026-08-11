@@ -131,7 +131,12 @@ export {
 	type UseDeletedItemsOptions,
 	useDeletedItems,
 } from "./use-deleted-items";
-export { type UseItemResult, useItem } from "./use-item";
+export {
+	type EncryptionContextMigrationItem,
+	type UseItemResult,
+	useItem,
+	useOpenedItemEncryptionContextMigration,
+} from "./use-item";
 export {
 	type AttachmentMeta,
 	type AttachmentUploadErrorCode,
