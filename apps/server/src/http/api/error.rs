@@ -33,7 +33,7 @@ impl RetryAfter {
 #[derive(Debug)]
 pub(crate) struct ApiError {
     status: StatusCode,
-    problem: ProblemDetails,
+    problem: Box<ProblemDetails>,
     retry_after: Option<RetryAfter>,
 }
 
@@ -162,7 +162,7 @@ impl ApiError {
         Self {
             status,
             retry_after: None,
-            problem: ProblemDetails {
+            problem: Box::new(ProblemDetails {
                 problem_type: format!(
                     "https://bittery.com/problems/{}",
                     code.to_ascii_lowercase().replace('_', "-")
@@ -175,7 +175,7 @@ impl ApiError {
                 request_id,
                 retryable,
                 errors: Vec::new(),
-            },
+            }),
         }
     }
 

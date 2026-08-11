@@ -32,6 +32,8 @@
 			"!**/.zed",
 			"!**/.vscode",
 			"!**/routeTree.gen.ts",
+			"!packages/api-contract/openapi.v1.json",
+			"!packages/api-contract/src/generated",
 			"!**/src-tauri",
 			"!**/.nuxt",
 			"!bts.jsonc",

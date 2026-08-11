@@ -763,6 +763,7 @@ jobs:
         shell: bash
         env:
           DOMAIN: example.com
+          BITTERY_RELEASE: 0.0.0-ci-validation-only
           JWT_SECRET: ci-validation-only
           DB_PASSWORD: ci-validation-only
           MINIO_ROOT_PASSWORD: ci-validation-only

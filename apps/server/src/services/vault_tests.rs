@@ -826,10 +826,8 @@ async fn vault_query_handlers_return_expected_results() {
                 .api_json(
                     Method::GET,
                     &format!(
-                        "/api/v1/vaults/{}/items?cursor={}&limit={}",
-                        fixture.main_vault_id,
-                        format!("{cursor}x"),
-                        1
+                        "/api/v1/vaults/{}/items?cursor={cursor}x&limit={}",
+                        fixture.main_vault_id, 1
                     ),
                     None,
                     owner_headers.clone(),
