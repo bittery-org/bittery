@@ -7,7 +7,7 @@ use axum::{
 };
 use rand::random;
 use serde_json::{json, Value};
-use sqlx::{query, PgPool};
+use sqlx::{query, query_scalar, PgPool};
 use time::{macros::datetime, OffsetDateTime};
 use tower::util::ServiceExt;
 
@@ -798,9 +798,31 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
                 first_page.body["nextCursor"],
                 json!(fixture.primary_item_id)
             );
+            assert_eq!(
+                first_page.body["syncCursor"]["id"],
+                json!(fixture.secondary_event_id)
+            );
 
-            let second_page_path =
-                format!("/api/v1/sync/bootstrap?cursor={}", fixture.primary_item_id);
+            let later_event_id = "event_sync_after_bootstrap_page_1";
+            seed_sync_event(
+                &app.pool,
+                later_event_id,
+                "item_updated",
+                &fixture.secondary_item_id,
+                "item",
+                Some(&fixture.secondary_vault_id),
+                &fixture.owner_user_id,
+                2,
+                Some("client-sync-after-page-1"),
+                None,
+                datetime!(2025-05-01 15:00 UTC),
+            )
+            .await;
+
+            let second_page_path = format!(
+                "/api/v1/sync/bootstrap?cursor={}&syncCursor={}",
+                fixture.primary_item_id, fixture.secondary_event_id
+            );
             let second_page = app
                 .api_json(Method::GET, &second_page_path, None, headers)
                 .await;
@@ -818,6 +840,177 @@ async fn bootstrap_items_returns_paginated_items_with_vault_details_and_attachme
             );
             assert_eq!(second_page.body["hasMore"], json!(false));
             assert_eq!(second_page.body["nextCursor"], Value::Null);
+            assert_eq!(
+                second_page.body["syncCursor"]["id"],
+                json!(fixture.secondary_event_id)
+            );
+            assert_ne!(second_page.body["syncCursor"]["id"], json!(later_event_id));
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn bootstrap_rejects_invalid_or_inaccessible_sync_cursors() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_cursor_visibility", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+
+            for (sync_cursor, expected_detail) in [
+                ("bad!", "Invalid resource ID"),
+                (fixture.hidden_event_id.as_str(), "Invalid params"),
+            ] {
+                let response = app
+                    .api_json(
+                        Method::GET,
+                        &format!("/api/v1/sync/bootstrap?syncCursor={sync_cursor}"),
+                        None,
+                        headers.clone(),
+                    )
+                    .await;
+
+                assert_eq!(response.status, StatusCode::BAD_REQUEST);
+                assert_handler_error(&response.body, "BAD_REQUEST", expected_detail);
+            }
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn bootstrap_captures_sync_cursor_before_fetching_the_first_item_page() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_capture_order", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+
+            let mut item_lock = app.pool.begin().await.expect("item lock should begin");
+            query("LOCK TABLE item IN ACCESS EXCLUSIVE MODE")
+                .execute(&mut *item_lock)
+                .await
+                .expect("item reads should be held until the watermark is captured");
+
+            let request_app = app.clone();
+            let response_task = tokio::spawn(async move {
+                request_app
+                    .api_json(
+                        Method::GET,
+                        "/api/v1/sync/bootstrap?limit=1",
+                        None,
+                        headers,
+                    )
+                    .await
+            });
+
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    let item_fetch_is_waiting = query_scalar::<_, bool>(
+                        "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%WITH candidates AS (%')",
+                    )
+                    .fetch_one(&app.pool)
+                    .await
+                    .expect("blocked bootstrap query should be observable");
+                    if item_fetch_is_waiting {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("bootstrap should reach the blocked item fetch");
+
+            let later_event_id = "event_sync_during_first_bootstrap_page";
+            seed_sync_event(
+                &app.pool,
+                later_event_id,
+                "item_updated",
+                &fixture.primary_item_id,
+                "item",
+                Some(&fixture.primary_vault_id),
+                &fixture.owner_user_id,
+                4,
+                Some("client-sync-during-bootstrap"),
+                None,
+                datetime!(2025-05-01 15:00 UTC),
+            )
+            .await;
+            item_lock.commit().await.expect("item fetch should resume");
+
+            let response = response_task.await.expect("bootstrap task should finish");
+            response.assert_contract_status();
+            assert_eq!(
+                response.body["syncCursor"]["id"],
+                json!(fixture.secondary_event_id)
+            );
+            assert_ne!(response.body["syncCursor"]["id"], json!(later_event_id));
+        })
+        .await;
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn bootstrap_pins_an_empty_sync_cursor_across_item_pages() {
+    with_bittery_mode_async(Some("self-hosted"), async {
+        with_sync_test_app("sync_bootstrap_empty_cursor", |app| async move {
+            let fixture = build_sync_router_fixture(&app.pool).await;
+            query("DELETE FROM sync_event")
+                .execute(&app.pool)
+                .await
+                .expect("fixture events should be removable");
+            let session = app.issue_session(&fixture.owner_user_id).await;
+            let headers = authenticated_json_headers(&session.token);
+
+            let first_page = app
+                .api_json(
+                    Method::GET,
+                    "/api/v1/sync/bootstrap?limit=1",
+                    None,
+                    headers.clone(),
+                )
+                .await;
+            first_page.assert_contract_status();
+            assert_eq!(first_page.status, StatusCode::OK);
+            assert_eq!(first_page.body["syncCursor"], Value::Null);
+            let next_cursor = first_page.body["nextCursor"]
+                .as_str()
+                .expect("first page should continue");
+
+            seed_sync_event(
+                &app.pool,
+                "event_sync_after_empty_bootstrap_cursor",
+                "item_updated",
+                &fixture.secondary_item_id,
+                "item",
+                Some(&fixture.secondary_vault_id),
+                &fixture.owner_user_id,
+                2,
+                Some("client-sync-after-empty-cursor"),
+                None,
+                datetime!(2025-05-01 15:00 UTC),
+            )
+            .await;
+
+            let second_page = app
+                .api_json(
+                    Method::GET,
+                    &format!(
+                        "/api/v1/sync/bootstrap?cursor={}&limit=1&syncCursorCaptured=true",
+                        next_cursor
+                    ),
+                    None,
+                    headers,
+                )
+                .await;
+            second_page.assert_contract_status();
+            assert_eq!(second_page.status, StatusCode::OK);
+            assert_eq!(second_page.body["syncCursor"], Value::Null);
+            assert_eq!(second_page.body["items"].as_array().map(Vec::len), Some(1));
         })
         .await;
     })

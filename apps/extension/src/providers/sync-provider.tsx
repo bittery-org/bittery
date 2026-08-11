@@ -1,7 +1,12 @@
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
-import type { ConnectionStatus, SyncCommandSummary } from "@bittery/sync";
+import {
+	type ConnectionStatus,
+	getNewTerminalCommandCount,
+	type SyncCommandSummary,
+} from "@bittery/sync";
 import type { IPendingMutationQueue, IQueryInvalidator } from "@bittery/types";
+import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import {
 	createContext,
@@ -10,6 +15,7 @@ import {
 	useContext,
 	useEffect,
 	useMemo,
+	useRef,
 	useState,
 } from "react";
 import { crypto } from "../lib/crypto";
@@ -20,6 +26,7 @@ import {
 	reconcileWorkerItemCommandAcknowledgement,
 } from "../lib/worker-item-acknowledgement";
 import { createWorkerOwnedOutboundQueue } from "../lib/worker-owned-outbound-queue";
+import { useI18n } from "./i18n-provider";
 
 /**
  * Context for sync state
@@ -30,7 +37,6 @@ interface SyncContextValue {
 	isConnected: boolean;
 	isOnline: boolean;
 	isInitialized: boolean;
-	commandSummary: SyncCommandSummary;
 	invalidator: IQueryInvalidator;
 	outboundQueue: IPendingMutationQueue;
 }
@@ -85,12 +91,14 @@ export function ExtensionSyncProvider({
 	const [status, setStatus] = useState<ConnectionStatus>("disconnected");
 	const [clientId, setClientId] = useState<string>("");
 	const [isInitialized, setIsInitialized] = useState(false);
-	const [commandSummary, setCommandSummary] = useState<SyncCommandSummary>({
+	const { m } = useI18n();
+	const commandSummaryRef = useRef<SyncCommandSummary>({
 		pending: 0,
 		retrying: 0,
 		conflicted: 0,
 		failed: 0,
 	});
+	const commandSummaryInitializedRef = useRef(false);
 	const [invalidator] = useState(() => createExtensionInvalidator(queryClient));
 	const vaultCoordinator = useMemo(
 		() =>
@@ -137,7 +145,9 @@ export function ExtensionSyncProvider({
 					type: "GET_SYNC_COMMAND_SUMMARY",
 				});
 				if (commandResponse?.summary) {
-					setCommandSummary(commandResponse.summary as SyncCommandSummary);
+					commandSummaryRef.current =
+						commandResponse.summary as SyncCommandSummary;
+					commandSummaryInitializedRef.current = true;
 				}
 				await outboundQueue.recoverStaged();
 
@@ -183,7 +193,17 @@ export function ExtensionSyncProvider({
 			} else if (message.type === "SYNC_FULL_REFRESH_REQUIRED") {
 				void handleFullRefresh();
 			} else if (message.type === "SYNC_COMMAND_STATUS_CHANGED") {
-				setCommandSummary(message.summary);
+				const newTerminalCount = getNewTerminalCommandCount(
+					commandSummaryRef.current,
+					message.summary,
+				);
+				commandSummaryRef.current = message.summary;
+				if (commandSummaryInitializedRef.current && newTerminalCount > 0) {
+					toast.error(m.sync_command_terminal_error(), {
+						description: m.sync_command_terminal_error_description(),
+					});
+				}
+				commandSummaryInitializedRef.current = true;
 			}
 		};
 
@@ -192,7 +212,7 @@ export function ExtensionSyncProvider({
 		return () => {
 			chrome.runtime.onMessage.removeListener(handleMessage);
 		};
-	}, [handleFullRefresh, vaultCoordinator]);
+	}, [handleFullRefresh, m, vaultCoordinator]);
 
 	const contextValue: SyncContextValue = {
 		status,
@@ -200,7 +220,6 @@ export function ExtensionSyncProvider({
 		isConnected: status === "connected",
 		isOnline: status === "connected", // Extension is always online if connected
 		isInitialized,
-		commandSummary,
 		invalidator,
 		outboundQueue,
 	};

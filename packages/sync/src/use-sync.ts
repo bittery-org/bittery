@@ -10,6 +10,7 @@ import {
 	SyncOrchestrator,
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";
+import { subscribeToNewTerminalCommands } from "./terminal-command-status";
 import type {
 	SessionRevokedControlPayload,
 	SyncCommandSummary,
@@ -82,6 +83,7 @@ export interface SyncSource {
 	getAuthToken: () => Promise<string | null>;
 	apiClient: SyncOrchestratorOptions["apiClient"];
 	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
+	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
 	itemCacheAccountId?: string | null;
 	itemCacheAccountEmail?: string | null;
 	itemCacheServerUrl?: string | null;
@@ -184,6 +186,7 @@ export interface UseSyncOptions {
 		accountId: string,
 	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
 	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
+	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
 	resolveLegacyAccountId?: (
 		email: string,
 	) => string | undefined | Promise<string | undefined>;
@@ -194,6 +197,7 @@ export interface UseSyncOptions {
 		event: SyncEvent,
 		context: SyncEventContext,
 	) => void | Promise<void>;
+	onTerminalCommandFailure?: (newTerminalCount: number) => void;
 }
 
 /**
@@ -217,9 +221,11 @@ export function useSync(options: UseSyncOptions) {
 		sources,
 		getClientForAccount,
 		refreshFromServer,
+		initializeFromServer,
 		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed,
+		onTerminalCommandFailure,
 	} = options;
 
 	const syncStorage = useMemo<SyncStorage>(
@@ -291,6 +297,7 @@ export function useSync(options: UseSyncOptions) {
 				getAuthToken,
 				apiClient,
 				refreshFromServer,
+				initializeFromServer,
 				itemCacheAccountId,
 				itemCacheAccountEmail,
 				itemCacheServerUrl,
@@ -302,6 +309,7 @@ export function useSync(options: UseSyncOptions) {
 		getAuthToken,
 		apiClient,
 		refreshFromServer,
+		initializeFromServer,
 		itemCacheAccountId,
 		itemCacheAccountEmail,
 		itemCacheServerUrl,
@@ -342,6 +350,7 @@ export function useSync(options: UseSyncOptions) {
 				},
 				apiClient: source.apiClient,
 				refreshFromServer: source.refreshFromServer,
+				initializeFromServer: source.initializeFromServer,
 				itemCache: itemCacheAdapter,
 				outboundQueue,
 				itemCacheAccountId: source.itemCacheAccountId,
@@ -405,6 +414,11 @@ export function useSync(options: UseSyncOptions) {
 			if (disposed) {
 				return;
 			}
+			unsubscribers.push(
+				subscribeToNewTerminalCommands(outboundQueue, (newTerminalCount) => {
+					onTerminalCommandFailure?.(newTerminalCount);
+				}),
+			);
 			setStatus((prev) => ({
 				...prev,
 				pendingChanges: outboundQueue.getPendingCount(),
@@ -440,6 +454,7 @@ export function useSync(options: UseSyncOptions) {
 		getClientForAccount,
 		onSessionRevoked,
 		onEventProcessed,
+		onTerminalCommandFailure,
 		invalidateForEvent,
 		realtimeEnabled,
 	]);

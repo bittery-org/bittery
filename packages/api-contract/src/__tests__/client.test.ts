@@ -318,6 +318,47 @@ describe("Bittery API facade", () => {
 		expect(result.data.events[0]?.timestamp).toBe(1_710_000_000_000n);
 	});
 
+	test("pins and validates a bootstrap sync watermark", async () => {
+		const requests: Request[] = [];
+		let malformed = false;
+		const client = createApiClient({
+			serverUrl: "https://api.example.test",
+			supportedApiMajors: [1],
+			getClientMetadata: () => ({
+				id: "client-123",
+				platform: "web",
+				version: "0.5.1",
+			}),
+			fetch: async (request) => {
+				requests.push(request);
+				return Response.json({
+					items: [],
+					hasMore: false,
+					syncCursor: malformed ? { id: 42 } : null,
+				});
+			},
+		});
+
+		const result = await client.sync.bootstrap({
+			cursor: "page-2",
+			syncCursor: "evt-bootstrap",
+			syncCursorCaptured: true,
+		});
+		expect(result.data.syncCursor).toBeNull();
+		expect(new URL(requests[0]?.url ?? "").searchParams).toEqual(
+			new URLSearchParams({
+				cursor: "page-2",
+				syncCursor: "evt-bootstrap",
+				syncCursorCaptured: "true",
+			}),
+		);
+
+		malformed = true;
+		await expect(client.sync.bootstrap()).rejects.toThrow(
+			"/sync/bootstrap/syncCursor/id must be a non-empty string",
+		);
+	});
+
 	test("refreshes and replays an authenticated request exactly once after a 401", async () => {
 		let refreshRequired = 0;
 		let accessToken = "expired-token";

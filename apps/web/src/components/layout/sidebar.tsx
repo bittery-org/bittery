@@ -3,7 +3,6 @@ import { apiQueries } from "@bittery/shared/api-query";
 import {
 	Avatar,
 	AvatarFallback,
-	cn,
 	DropdownMenu,
 	DropdownMenuContent,
 	DropdownMenuItem,
@@ -38,58 +37,6 @@ import {
 } from "@/lib/api-normalizers";
 import { clearActiveAccountData } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
-import { useSyncContextOptional } from "@/providers/sync-provider";
-
-function SyncCommandStatus({ isCollapsed }: { isCollapsed: boolean }) {
-	const sync = useSyncContextOptional();
-	const { m } = useI18n();
-	const summary = sync?.status.commandSummary;
-	if (!summary) {
-		return null;
-	}
-	const state =
-		summary.failed > 0
-			? (["failed", summary.failed] as const)
-			: summary.conflicted > 0
-				? (["conflicted", summary.conflicted] as const)
-				: summary.retrying > 0
-					? (["retrying", summary.retrying] as const)
-					: summary.pending > 0
-						? (["pending", summary.pending] as const)
-						: null;
-	if (!state) {
-		return null;
-	}
-	const [kind, count] = state;
-	const label =
-		kind === "failed"
-			? m.sync_command_status_failed({ count })
-			: kind === "conflicted"
-				? m.sync_command_status_conflicted({ count })
-				: kind === "retrying"
-					? m.sync_command_status_retrying({ count })
-					: m.sync_command_status_pending({ count });
-
-	return (
-		<div
-			className="flex h-7 items-center gap-2 rounded-sm px-2 text-muted-foreground text-xs"
-			title={label}
-			data-testid="sync-command-status"
-		>
-			<span
-				className={cn(
-					"size-2 shrink-0 rounded-full",
-					kind === "failed" || kind === "conflicted"
-						? "bg-destructive"
-						: kind === "retrying"
-							? "bg-warning"
-							: "bg-primary",
-				)}
-			/>
-			{!isCollapsed && <span className="truncate">{label}</span>}
-		</div>
-	);
-}
 
 function getNavLabel(path: string, m: ReturnType<typeof useI18n>["m"]) {
 	switch (path) {
@@ -301,7 +248,6 @@ export function AppSidebar() {
 			</SidebarContent>
 
 			<SidebarFooter className="gap-1">
-				<SyncCommandStatus isCollapsed={state === "collapsed"} />
 				<ImportOnboardingCard isCollapsed={state === "collapsed"} />
 				<UserNav />
 			</SidebarFooter>

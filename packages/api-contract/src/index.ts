@@ -108,6 +108,7 @@ export type {
 	StartLoginInput,
 	SyncBootstrapItem,
 	SyncBootstrapPage,
+	SyncBootstrapRequest,
 	SyncChanges,
 	SyncEvent,
 	TeamDetails,

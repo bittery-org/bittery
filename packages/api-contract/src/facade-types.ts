@@ -19,6 +19,11 @@ export interface ApiPageRequest {
 	limit?: number;
 }
 
+export interface SyncBootstrapRequest extends ApiPageRequest {
+	syncCursor?: string;
+	syncCursorCaptured?: boolean;
+}
+
 export interface ApiPage<T> {
 	items: readonly T[];
 	nextCursor?: string | null;

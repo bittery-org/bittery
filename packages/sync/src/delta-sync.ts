@@ -68,6 +68,34 @@ export async function performDeltaSync(
 	const removeVault = (vaultId: string) =>
 		cache.removeCachedVault(vaultId, accountScope);
 
+	const reconcileCurrentItem = async (itemId: string) => {
+		try {
+			const { data: item } = await apiClient.items.get(itemId);
+			await upsertItem({
+				id: item.id,
+				vaultId: item.vaultId,
+				accountEmail: itemAccountEmail,
+				serverUrl,
+				category: item.category,
+				favorite: item.favorite,
+				encryptedData: item.encryptedData,
+				encryptionIv: item.encryptionIv,
+				encryptionAlgorithm: item.encryptionAlgorithm,
+				version: item.version,
+				lastModifiedBy: item.lastModifiedBy,
+				encryptionVersion: item.encryptionVersion,
+				encryptedByUserId: item.encryptedByUserId,
+				createdAt: String(item.createdAt),
+				updatedAt: String(item.updatedAt),
+				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
+				attachments: item.attachments ? [...item.attachments] : undefined,
+			} as CachedEncryptedItem);
+		} catch (error) {
+			if (!isApiErrorStatus(error, 404)) throw error;
+			await removeItem(itemId);
+		}
+	};
+
 	const syncVaultKeysFromServer = async () => {
 		const { data: vaults } = await apiClient.vaults.list();
 		await cache.syncVaultKeys(
@@ -94,54 +122,11 @@ export async function performDeltaSync(
 		case "item_updated":
 		case "item_restored":
 		case "item_moved": {
-			const { data: item } = await apiClient.items.get(event.entityId);
-			await upsertItem({
-				id: item.id,
-				vaultId: item.vaultId,
-				accountEmail: itemAccountEmail,
-				serverUrl,
-				category: item.category,
-				favorite: item.favorite,
-				encryptedData: item.encryptedData,
-				encryptionIv: item.encryptionIv,
-				encryptionAlgorithm: item.encryptionAlgorithm,
-				version: item.version,
-				lastModifiedBy: item.lastModifiedBy,
-				encryptionVersion: item.encryptionVersion,
-				encryptedByUserId: item.encryptedByUserId,
-				createdAt: String(item.createdAt),
-				updatedAt: String(item.updatedAt),
-				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-				attachments: item.attachments ? [...item.attachments] : undefined,
-			} as CachedEncryptedItem);
+			await reconcileCurrentItem(event.entityId);
 			break;
 		}
 		case "item_deleted": {
-			try {
-				const { data: item } = await apiClient.items.get(event.entityId);
-				await upsertItem({
-					id: item.id,
-					vaultId: item.vaultId,
-					accountEmail: itemAccountEmail,
-					serverUrl,
-					category: item.category,
-					favorite: item.favorite,
-					encryptedData: item.encryptedData,
-					encryptionIv: item.encryptionIv,
-					encryptionAlgorithm: item.encryptionAlgorithm,
-					version: item.version,
-					lastModifiedBy: item.lastModifiedBy,
-					encryptionVersion: item.encryptionVersion,
-					encryptedByUserId: item.encryptedByUserId,
-					createdAt: String(item.createdAt),
-					updatedAt: String(item.updatedAt),
-					deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-					attachments: item.attachments ? [...item.attachments] : undefined,
-				} as CachedEncryptedItem);
-			} catch (error) {
-				if (!isApiErrorStatus(error, 404)) throw error;
-				await removeItem(event.entityId);
-			}
+			await reconcileCurrentItem(event.entityId);
 			break;
 		}
 		case "item_permanently_deleted":

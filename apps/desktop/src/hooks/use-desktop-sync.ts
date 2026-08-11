@@ -6,7 +6,10 @@ import {
 	AccountResolver,
 	createStoredAccountApiClient,
 } from "@bittery/core/services/account-resolver";
-import { createStagedFullRefresh } from "@bittery/core/services/staged-full-refresh";
+import {
+	createInitialSyncBootstrap,
+	createStagedFullRefresh,
+} from "@bittery/core/services/staged-full-refresh";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
@@ -19,6 +22,7 @@ import type {
 	SyncStorage,
 } from "@bittery/sync";
 import { buildDefaultSyncSourceId, useSync } from "@bittery/sync";
+import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { crypto } from "@/lib/crypto";
@@ -28,6 +32,7 @@ import {
 	getDesktopSyncStore,
 	getOrCreateDesktopSyncClientId,
 } from "@/lib/sync-client-id";
+import { useI18n } from "@/providers/i18n-provider";
 
 /**
  * `accountId` is deliberately non-nullable: it becomes `SyncSource.itemCacheAccountId`, which
@@ -139,6 +144,7 @@ const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
  * Desktop-specific sync hook that integrates with Tauri storage
  */
 export function useDesktopSync(queryClient: QueryClient, enabled = true) {
+	const { m } = useI18n();
 	const [clientId, setClientId] = useState<string>("");
 	const [serverUrl, setServerUrl] = useState<string>("");
 	const [syncContexts, setSyncContexts] = useState<SyncConnectionContext[]>([]);
@@ -384,6 +390,10 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		() => createStagedFullRefresh(storage, vaultCoordinator),
 		[vaultCoordinator],
 	);
+	const initializeFromServer = useMemo(
+		() => createInitialSyncBootstrap(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
 
 	const syncSources = useMemo<SyncSource[]>(
 		() =>
@@ -393,12 +403,18 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 				getAuthToken: () => storage.getAuthToken(context.accountId),
 				apiClient: context.apiClient,
 				refreshFromServer,
+				initializeFromServer,
 				itemCacheAccountId: context.accountId,
 				itemCacheAccountEmail: context.email,
 				itemCacheServerUrl: context.serverUrl,
 			})),
-		[syncContexts, refreshFromServer],
+		[syncContexts, refreshFromServer, initializeFromServer],
 	);
+	const onTerminalCommandFailure = useCallback(() => {
+		toast.error(m.sync_command_terminal_error(), {
+			description: m.sync_command_terminal_error_description(),
+		});
+	}, [m]);
 
 	const syncState = useSync({
 		serverUrl,
@@ -413,6 +429,7 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed: onTravelModeEvent,
+		onTerminalCommandFailure,
 	});
 
 	return {

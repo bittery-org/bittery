@@ -46,6 +46,9 @@ let stagedRefreshCount = 0;
 let outboundDrainCount = 0;
 let requireFullRefreshOnCatchUp = false;
 let catchUpEvent: Record<string, unknown> | null = null;
+const catchUpInitialCursors: Array<{ id: string }> = [];
+let initialSyncCursor: { id: string } | null = null;
+let initialSyncCount = 0;
 let deltaSyncError: Error | null = null;
 let lastSseRequest: { signal: AbortSignal | undefined } | null = null;
 let openSyncEvents: (signal?: AbortSignal) => Promise<Response> = async () =>
@@ -94,9 +97,11 @@ globalThis.chrome = {
 
 mock.module("@bittery/sync", () => ({
 	runCatchUp: async (options: {
+		initialCursor: { id: string };
 		onEvent?: (event: Record<string, unknown>) => Promise<void>;
 		onRequiresFullRefresh?: () => Promise<void>;
 	}) => {
+		catchUpInitialCursors.push(options.initialCursor);
 		if (catchUpEvent) {
 			await options.onEvent?.(catchUpEvent);
 		}
@@ -104,7 +109,9 @@ mock.module("@bittery/sync", () => ({
 			await options.onRequiresFullRefresh?.();
 		}
 		return {
-			cursor: { id: String(catchUpEvent?.id ?? "") },
+			cursor: catchUpEvent
+				? { id: String(catchUpEvent.id ?? "") }
+				: options.initialCursor,
 			processedCount: catchUpEvent ? 1 : 0,
 		};
 	},
@@ -156,6 +163,10 @@ mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 		},
 		refreshItemCachesForKnownAccounts: async () => {
 			stagedRefreshCount++;
+		},
+		initializeSyncBaselineForAccount: async () => {
+			initialSyncCount++;
+			return initialSyncCursor;
 		},
 	},
 }));
@@ -224,6 +235,9 @@ beforeEach(() => {
 	outboundDrainCount = 0;
 	requireFullRefreshOnCatchUp = false;
 	catchUpEvent = null;
+	catchUpInitialCursors.length = 0;
+	initialSyncCursor = null;
+	initialSyncCount = 0;
 	deltaSyncError = null;
 	lastSseRequest = null;
 	openSyncEvents = async () => new Response(null, { status: 401 });
@@ -232,6 +246,48 @@ beforeEach(() => {
 });
 
 describe("account-scoped sync cursors", () => {
+	test("initializes a cold worker from bootstrap before catch-up", async () => {
+		initialSyncCursor = { id: "evt-bootstrap" };
+		stubStream([]);
+
+		await connect();
+
+		expect(initialSyncCount).toBe(1);
+		expect(catchUpInitialCursors).toEqual([{ id: "evt-bootstrap" }]);
+		expect(
+			await getLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000"),
+		).toEqual({ id: "evt-bootstrap" });
+	});
+
+	test("replaces a stale cursor with the committed cache baseline", async () => {
+		await setLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000", {
+			id: "evt-stale",
+		});
+		initialSyncCursor = { id: "evt-bootstrap" };
+		stubStream([]);
+
+		await connect();
+
+		expect(initialSyncCount).toBe(1);
+		expect(catchUpInitialCursors).toEqual([{ id: "evt-bootstrap" }]);
+		expect(
+			await getLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000"),
+		).toEqual({ id: "evt-bootstrap" });
+	});
+
+	test("persists an initialized bootstrap with no visible events", async () => {
+		initialSyncCursor = null;
+		stubStream([]);
+
+		await connect();
+
+		expect(initialSyncCount).toBe(1);
+		expect(catchUpInitialCursors).toEqual([{ id: "" }]);
+		expect(
+			await getLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000"),
+		).toEqual({ id: "" });
+	});
+
 	test("keeps independent durable cursors for two accounts", async () => {
 		await setLastSyncCursor("acc-1", "https://one.example", { id: "evt-1" });
 		await setLastSyncCursor("acc-2", "https://one.example", { id: "evt-9" });
@@ -294,6 +350,7 @@ describe("account-scoped sync cursors", () => {
 		await setLastSyncCursor(ACCOUNT.accountId, "http://localhost:3000", {
 			id: "evt-1",
 		});
+		initialSyncCursor = { id: "evt-1" };
 		catchUpEvent = {
 			id: "evt-2",
 			type: "item_updated",

@@ -1561,6 +1561,7 @@ export interface components {
             readonly hasMore: boolean;
             readonly items: readonly components["schemas"]["BootstrapItemResponse"][];
             readonly nextCursor?: string | null;
+            readonly syncCursor?: null | components["schemas"]["SyncCursorResponse"];
         };
         readonly BootstrapVaultSummary: {
             readonly encryptedVaultKey: string;
@@ -6999,6 +7000,8 @@ export interface operations {
         readonly parameters: {
             readonly query?: {
                 readonly cursor?: string;
+                readonly syncCursor?: string;
+                readonly syncCursorCaptured?: boolean;
                 readonly limit?: number;
             };
             readonly header?: never;

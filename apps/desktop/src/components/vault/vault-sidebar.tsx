@@ -27,54 +27,7 @@ import {
 	useVaultDnd,
 } from "../../providers/dnd-provider";
 import { useI18n } from "../../providers/i18n-provider";
-import { useSyncContextOptional } from "../../providers/sync-provider";
 import { AccountSwitcher } from "../account-switcher";
-
-function SyncCommandStatus() {
-	const sync = useSyncContextOptional();
-	const { m } = useI18n();
-	const summary = sync?.status.commandSummary;
-	if (!summary) return null;
-	const state =
-		summary.failed > 0
-			? (["failed", summary.failed] as const)
-			: summary.conflicted > 0
-				? (["conflicted", summary.conflicted] as const)
-				: summary.retrying > 0
-					? (["retrying", summary.retrying] as const)
-					: summary.pending > 0
-						? (["pending", summary.pending] as const)
-						: null;
-	if (!state) return null;
-	const [kind, count] = state;
-	const label =
-		kind === "failed"
-			? m.sync_command_status_failed({ count })
-			: kind === "conflicted"
-				? m.sync_command_status_conflicted({ count })
-				: kind === "retrying"
-					? m.sync_command_status_retrying({ count })
-					: m.sync_command_status_pending({ count });
-
-	return (
-		<div
-			className="flex h-7 items-center gap-2 px-2 text-muted-foreground text-xs"
-			data-testid="sync-command-status"
-		>
-			<span
-				className={cn(
-					"size-2 shrink-0 rounded-full",
-					kind === "failed" || kind === "conflicted"
-						? "bg-destructive"
-						: kind === "retrying"
-							? "bg-warning"
-							: "bg-primary",
-				)}
-			/>
-			<span className="truncate">{label}</span>
-		</div>
-	);
-}
 
 interface VaultInfo {
 	vaultId: string;
@@ -508,7 +461,6 @@ export function VaultSidebar({
 
 			{/* Trash — pinned at the bottom */}
 			<div className="relative border-t p-2">
-				<SyncCommandStatus />
 				<Link
 					to="/vault/trash"
 					className={cn(

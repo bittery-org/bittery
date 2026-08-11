@@ -34,6 +34,8 @@ pub struct GetEventsSinceInput {
 #[serde(deny_unknown_fields)]
 pub struct BootstrapItemsInput {
     pub cursor: Option<String>,
+    pub sync_cursor: Option<String>,
+    pub sync_cursor_captured: bool,
     pub limit: Option<i32>,
 }
 
@@ -125,6 +127,7 @@ pub struct BootstrapItemResponse {
 pub struct BootstrapItemsResponse {
     pub items: Vec<BootstrapItemResponse>,
     pub next_cursor: Option<String>,
+    pub sync_cursor: Option<SyncCursorResponse>,
     pub has_more: bool,
 }
 
@@ -217,10 +220,32 @@ pub(crate) async fn bootstrap_items(
     if let Some(cursor) = &input.cursor {
         validate_resource_id(cursor)?;
     }
+    if let Some(sync_cursor) = &input.sync_cursor {
+        validate_resource_id(sync_cursor)?;
+    }
     let limit = input.limit.unwrap_or(DEFAULT_BOOTSTRAP_LIMIT);
     if !(1..=1000).contains(&limit) {
         return Err(AppError::bad_request("Invalid params"));
     }
+
+    let user_vault_ids = fetch_user_vault_ids(pool, user_id).await?;
+    let sync_cursor = match (input.sync_cursor_captured, input.sync_cursor.as_deref()) {
+        (_, Some(sync_cursor)) => {
+            let visible_cursor =
+                fetch_visible_cursor_event(pool, user_id, &user_vault_ids, sync_cursor).await?;
+            let Some(visible_cursor) = visible_cursor else {
+                return Err(AppError::bad_request("Invalid params"));
+            };
+            Some(SyncCursorResponse {
+                id: visible_cursor.id,
+            })
+        }
+        (true, None) => None,
+        (false, None) => fetch_latest_visible_event_id(pool, user_id, &user_vault_ids)
+            .await?
+            .map(|id| SyncCursorResponse { id }),
+    };
+
     let attachments_enabled = attachments_enabled_for_user(pool, user_id).await?;
     let paged_items = fetch_bootstrap_items(pool, user_id, input.cursor.as_deref(), limit).await?;
     let count_has_more = paged_items.rows.len() > limit as usize;
@@ -310,6 +335,7 @@ pub(crate) async fn bootstrap_items(
             })
             .collect(),
         next_cursor,
+        sync_cursor,
         has_more,
     })
 }

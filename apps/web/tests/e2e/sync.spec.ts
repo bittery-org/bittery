@@ -223,17 +223,23 @@ test("fresh hydration defers legacy encryption migrations until one Item is open
 		etag: string | undefined;
 		itemId: string;
 	};
+	const itemReads: string[] = [];
 	const migrations: ObservedMigration[] = [];
 	const context = await browser.newContext();
 	const page = await context.newPage();
-	const observeMigration = async (
+	const observeItemRequest = async (
 		response: import("@playwright/test").Response,
 	) => {
 		const request = response.request();
 		const match = new URL(response.url()).pathname.match(
 			/^\/api\/v1\/items\/([^/]+)$/,
 		);
-		if (request.method() !== "PATCH" || !match?.[1]) return;
+		if (!match?.[1]) return;
+		if (request.method() === "GET") {
+			itemReads.push(match[1]);
+			return;
+		}
+		if (request.method() !== "PATCH") return;
 		const requestHeaders = await request.allHeaders();
 		const responseHeaders = await response.allHeaders();
 		migrations.push({
@@ -243,12 +249,13 @@ test("fresh hydration defers legacy encryption migrations until one Item is open
 			itemId: match[1],
 		});
 	};
-	page.on("response", observeMigration);
+	page.on("response", observeItemRequest);
 
 	try {
 		await signIn(page, user);
 		await openSharedVault(page, seedTitle);
 		await page.waitForTimeout(1_000);
+		expect(itemReads).toEqual([]);
 		expect(migrations).toEqual([]);
 
 		await openItem(page, seedTitle);
@@ -268,7 +275,7 @@ test("fresh hydration defers legacy encryption migrations until one Item is open
 			},
 		]);
 	} finally {
-		page.off("response", observeMigration);
+		page.off("response", observeItemRequest);
 		await context.close();
 	}
 });

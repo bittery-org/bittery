@@ -7,6 +7,12 @@ export type StagedFullRefresh = (
 	accountId: string,
 ) => Promise<void>;
 
+export type InitialSyncBootstrap = (
+	apiClient: unknown,
+	accountId: string,
+	currentCursor: { id: string } | null,
+) => Promise<{ id: string } | null>;
+
 /**
  * Catch-up advances its cursor only once this resolves, so an account that
  * cannot be refreshed must throw instead of resolving silently — otherwise the
@@ -30,5 +36,21 @@ export function createStagedFullRefresh(
 			);
 		}
 		await coordinator.refreshFromServer(accountsInfo);
+	};
+}
+
+export function createInitialSyncBootstrap(
+	storage: AccountStore,
+	coordinator: VaultRepositoryCoordinator,
+): InitialSyncBootstrap {
+	const accounts = new AccountResolver(storage);
+
+	return async (_apiClient, accountId, currentCursor) => {
+		const { accountsInfo } = await accounts.resolveAccounts();
+		return coordinator.initializeSyncBaseline(
+			accountsInfo,
+			accountId,
+			currentCursor,
+		);
 	};
 }

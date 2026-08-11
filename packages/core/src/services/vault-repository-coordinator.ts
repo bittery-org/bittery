@@ -1,5 +1,6 @@
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { AccountStore, ItemCache } from "@bittery/storage";
+import { normalizeAccountServerUrl } from "@bittery/storage/account-id";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type {
 	CachedEncryptedItem,
@@ -14,7 +15,6 @@ import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import type { TravelModeApiClient } from "./travel-mode-service";
 import type { VaultCrypto } from "./vault-crypto";
 import {
-	type BootstrapItemsClient,
 	type VaultRepository,
 	VaultRepository as VaultRepositoryImpl,
 	type VaultRepositoryItem,
@@ -55,6 +55,11 @@ export class VaultRepositoryCoordinator {
 	>();
 	private readonly activeAccountIds = new Set<string>();
 	private readonly hydratingAccountIds = new Set<string>();
+	private readonly accountHydrations = new Map<string, Promise<void>>();
+	private readonly serverRefreshes = new Map<
+		string,
+		Promise<{ id: string } | null>
+	>();
 	private readonly verifyingAccounts = new Map<string, Promise<void>>();
 	private snapshot = 0;
 	private encryptionContextMigrationPort?: ItemEncryptionContextMigrationPort;
@@ -262,53 +267,75 @@ export class VaultRepositoryCoordinator {
 		return verification;
 	}
 
+	private refreshAccountFromServer(
+		account: AccountInfo,
+	): Promise<{ id: string } | null> {
+		const existing = this.serverRefreshes.get(account.accountId);
+		if (existing) {
+			return existing;
+		}
+
+		const refresh = this.getOrCreate(
+			account.accountId,
+			account.serverUrl,
+			account.email,
+		)
+			.hydrateFromServer(account.apiClient)
+			.finally(() => {
+				this.serverRefreshes.delete(account.accountId);
+			});
+		this.serverRefreshes.set(account.accountId, refresh);
+		return refresh;
+	}
+
+	private hydrateAccount(account: AccountInfo): Promise<void> {
+		const existing = this.accountHydrations.get(account.accountId);
+		if (existing) {
+			return existing;
+		}
+
+		const hydration = (async () => {
+			const repo = this.getOrCreate(
+				account.accountId,
+				account.serverUrl,
+				account.email,
+			);
+			if (repo.isHydrated() && repo.hasCacheSnapshot()) {
+				return;
+			}
+
+			this.hydratingAccountIds.add(account.accountId);
+			this.emit();
+			try {
+				await this.ensureTravelModeVerified(account);
+				await repo.hydrate();
+				if (!repo.hasCacheSnapshot()) {
+					await this.refreshAccountFromServer(account);
+				}
+			} catch (error) {
+				console.error(
+					`[VaultRepositoryCoordinator] hydrate failed for account ${account.accountId}:`,
+					error,
+				);
+			} finally {
+				this.hydratingAccountIds.delete(account.accountId);
+				this.emit();
+			}
+		})();
+		this.accountHydrations.set(account.accountId, hydration);
+		void hydration.finally(() => {
+			this.accountHydrations.delete(account.accountId);
+		});
+		return hydration;
+	}
+
 	async hydrate(accounts: AccountInfo[]): Promise<void> {
 		this.setActiveAccounts(accounts);
 
 		// Per-account failures are isolated: one account throwing (e.g. an
 		// unverified travel-mode policy) must not abort hydration of the others.
 		// A failed account simply yields no in-memory data (fail-closed).
-		await Promise.all(
-			accounts.map(async (account) => {
-				const repo = this.getOrCreate(
-					account.accountId,
-					account.serverUrl,
-					account.email,
-				);
-
-				if (
-					(repo.isHydrated() && repo.hasCacheSnapshot()) ||
-					this.hydratingAccountIds.has(account.accountId)
-				) {
-					return;
-				}
-
-				this.hydratingAccountIds.add(account.accountId);
-				this.emit();
-
-				try {
-					await this.ensureTravelModeVerified(account);
-					await repo.hydrate();
-
-					// Bootstrap only when local cache has no established snapshot yet.
-					if (!repo.hasCacheSnapshot()) {
-						await repo.hydrateFromServer(
-							account.apiClient as unknown as BootstrapItemsClient,
-						);
-					}
-				} catch (error) {
-					// Log only the accountId, never the underlying data, so an
-					// unverified/failed account cannot leak hidden-vault contents.
-					console.error(
-						`[VaultRepositoryCoordinator] hydrate failed for account ${account.accountId}:`,
-						error,
-					);
-				} finally {
-					this.hydratingAccountIds.delete(account.accountId);
-					this.emit();
-				}
-			}),
-		);
+		await Promise.all(accounts.map((account) => this.hydrateAccount(account)));
 	}
 
 	/**
@@ -320,59 +347,64 @@ export class VaultRepositoryCoordinator {
 	 * single account remains active.
 	 */
 	async hydrateAccountRepos(accounts: AccountInfo[]): Promise<void> {
-		await Promise.all(
-			accounts.map(async (account) => {
-				this.apiClientByAccountId.set(account.accountId, account.apiClient);
-				const repo = this.getOrCreate(
-					account.accountId,
-					account.serverUrl,
-					account.email,
-				);
+		for (const account of accounts) {
+			this.apiClientByAccountId.set(account.accountId, account.apiClient);
+		}
+		await Promise.all(accounts.map((account) => this.hydrateAccount(account)));
+	}
 
-				if (
-					(repo.isHydrated() && repo.hasCacheSnapshot()) ||
-					this.hydratingAccountIds.has(account.accountId)
-				) {
-					return;
-				}
-
-				this.hydratingAccountIds.add(account.accountId);
-				this.emit();
-
-				try {
-					await this.ensureTravelModeVerified(account);
-					await repo.hydrate();
-
-					if (!repo.hasCacheSnapshot()) {
-						await repo.hydrateFromServer(
-							account.apiClient as unknown as BootstrapItemsClient,
-						);
-					}
-				} catch (error) {
-					console.error(
-						`[VaultRepositoryCoordinator] hydrateAccountRepos failed for account ${account.accountId}:`,
-						error,
-					);
-				} finally {
-					this.hydratingAccountIds.delete(account.accountId);
-					this.emit();
-				}
-			}),
+	async initializeSyncBaseline(
+		accounts: AccountInfo[],
+		accountId: string,
+		currentCursor: { id: string } | null = null,
+	): Promise<{ id: string } | null> {
+		this.setActiveAccounts(accounts);
+		const account = accounts.find(
+			(candidate) => candidate.accountId === accountId,
 		);
+		if (!account) {
+			throw new Error(
+				`Cannot initialize sync for unavailable account ${accountId}`,
+			);
+		}
+
+		const serverUrl = normalizeAccountServerUrl(account.serverUrl);
+		const metadataBeforeHydration =
+			await this.itemCache.getItemCacheMetadata(accountId);
+		const hadCommittedGeneration =
+			metadataBeforeHydration?.syncBaseline?.serverUrl === serverUrl;
+		await this.ensureTravelModeVerified(account);
+		await this.hydrateAccount(account);
+		const metadata = await this.itemCache.getItemCacheMetadata(accountId);
+		if (metadata?.syncBaseline?.serverUrl === serverUrl) {
+			if (hadCommittedGeneration && currentCursor) {
+				return currentCursor;
+			}
+			return metadata.syncBaseline.cursorId
+				? { id: metadata.syncBaseline.cursorId }
+				: null;
+		}
+
+		await this.refreshAccountFromServer(account);
+		const committedMetadata =
+			await this.itemCache.getItemCacheMetadata(accountId);
+		if (committedMetadata?.syncBaseline?.serverUrl !== serverUrl) {
+			throw new Error(
+				`Bootstrap for account ${accountId} did not commit a sync baseline`,
+			);
+		}
+
+		return committedMetadata.syncBaseline.cursorId
+			? { id: committedMetadata.syncBaseline.cursorId }
+			: null;
 	}
 
 	async refreshFromServer(accounts: AccountInfo[]): Promise<void> {
 		this.setActiveAccounts(accounts);
 		await Promise.all(
 			accounts.map(async (account) => {
-				const repo = this.getOrCreate(
-					account.accountId,
-					account.serverUrl,
-					account.email,
-				);
-				await repo.hydrateFromServer(
-					account.apiClient as unknown as BootstrapItemsClient,
-				);
+				await this.accountHydrations.get(account.accountId);
+				await this.refreshAccountFromServer(account);
 			}),
 		);
 	}
@@ -555,6 +587,8 @@ export class VaultRepositoryCoordinator {
 
 	clear(): void {
 		this.hydratingAccountIds.clear();
+		this.accountHydrations.clear();
+		this.serverRefreshes.clear();
 		this.activeAccountIds.clear();
 		this.accountInfoByAccountId.clear();
 		this.apiClientByAccountId.clear();

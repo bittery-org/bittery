@@ -5802,6 +5802,22 @@
             }
           },
           {
+            "name": "syncCursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "syncCursorCaptured",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -13319,6 +13335,16 @@
             "type": [
               "string",
               "null"
+            ]
+          },
+          "syncCursor": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/SyncCursorResponse"
+              }
             ]
           }
         }

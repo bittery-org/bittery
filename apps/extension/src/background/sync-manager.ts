@@ -37,6 +37,7 @@ let reconnectAttempt = 0;
 let syncConnectionEmail: string | null = null;
 let syncConnectionAccountId: string | null = null;
 let syncConnectionServerUrl: string | null = null;
+let syncBaselineValidated = false;
 /** Set once the server revoked this session; the JWT is dead, so reconnecting only loops 401s. */
 let revoked = false;
 
@@ -116,10 +117,24 @@ async function catchUpMissedEvents(): Promise<void> {
 		if (!syncConnectionServerUrl) {
 			throw new Error("Sync catch-up requires a server URL cursor scope");
 		}
-		const lastCursor = await getLastSyncCursor(
+		let lastCursor = await getLastSyncCursor(
 			syncConnectionAccountId,
 			syncConnectionServerUrl,
 		);
+		if (!syncBaselineValidated || !lastCursor) {
+			const committedCursor =
+				await syncCacheService.initializeSyncBaselineForAccount(
+					syncConnectionAccountId,
+					lastCursor,
+				);
+			lastCursor = committedCursor ?? { id: "" };
+			await setLastSyncCursor(
+				syncConnectionAccountId,
+				syncConnectionServerUrl,
+				lastCursor,
+			);
+			syncBaselineValidated = true;
+		}
 
 		const client =
 			await syncCacheService.getClientForEmail(syncConnectionEmail);
@@ -174,6 +189,7 @@ export async function connect(): Promise<void> {
 		setSyncConnectionEmail(context.email);
 		syncConnectionAccountId = context.accountId;
 		syncConnectionServerUrl = context.serverUrl;
+		syncBaselineValidated = false;
 		abortController = new AbortController();
 
 		const response = await context.client.sync.events(abortController.signal);
@@ -356,6 +372,7 @@ export function disconnect(
 	syncConnectionEmail = null;
 	syncConnectionAccountId = null;
 	syncConnectionServerUrl = null;
+	syncBaselineValidated = false;
 	// A revoked teardown keeps the fallback identity: the session invalidation it
 	// triggers runs after this disconnect and resolves by email.
 	if (!suppressReconnect) {

@@ -1,4 +1,5 @@
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
+import type { AppApiClient } from "@bittery/shared/api-client";
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
@@ -9,7 +10,10 @@ import {
 	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore, ItemCache } from "@bittery/storage";
-import { resolveUserIdForAccount } from "@bittery/storage/account-id";
+import {
+	normalizeAccountServerUrl,
+	resolveUserIdForAccount,
+} from "@bittery/storage/account-id";
 import type { VaultKeyData } from "@bittery/storage/types";
 import type {
 	CachedAttachment,
@@ -70,8 +74,10 @@ export type LegacyEncryptionAuthorProvider = (
 	vaultId: string,
 ) => Promise<string[]>;
 
+type BootstrapRequest = Parameters<AppApiClient["sync"]["bootstrap"]>[0];
+
 interface BootstrapItemPage {
-	items: Array<{
+	items: ReadonlyArray<{
 		id: string;
 		vaultId: string;
 		category: string;
@@ -86,22 +92,25 @@ interface BootstrapItemPage {
 		createdAt: string | Date;
 		updatedAt: string | Date;
 		deletedAt?: string | Date | null;
-		attachments?: CachedAttachment[];
-		vault: ServerVaultSummary;
+		attachments?: ReadonlyArray<
+			Omit<CachedAttachment, "encryptedContentTypeIv" | "uploadedBy"> & {
+				encryptedContentTypeIv?: string | null;
+				uploadedBy?: string | null;
+			}
+		>;
+		vault?: ServerVaultSummary | null;
 	}>;
 	hasMore: boolean;
-	nextCursor?: string;
+	nextCursor?: string | null;
+	syncCursor?: { id: string } | null;
 }
 
 export interface BootstrapItemsClient {
 	sync: {
-		bootstrap: (input: {
-			cursor?: string;
-			limit?: number;
-		}) => Promise<{ data: BootstrapItemPage }>;
+		bootstrap(input?: BootstrapRequest): Promise<{ data: BootstrapItemPage }>;
 	};
 	vaults?: {
-		list?: () => Promise<{ data: Array<ServerVaultListEntry> }>;
+		list?: () => Promise<{ data: ReadonlyArray<ServerVaultListEntry> }>;
 	};
 }
 
@@ -1428,9 +1437,11 @@ export class VaultRepository {
 		}
 	}
 
-	async hydrateFromServer(client: BootstrapItemsClient): Promise<void> {
+	async hydrateFromServer(
+		client: BootstrapItemsClient,
+	): Promise<{ id: string } | null> {
 		if (await this.isLocked()) {
-			return;
+			return null;
 		}
 
 		const travelMode = getTravelModeEnforcer(this.storage, this.itemCache);
@@ -1443,6 +1454,8 @@ export class VaultRepository {
 			),
 		);
 		let cursor: string | undefined;
+		let syncBaseline: { id: string } | null = null;
+		let syncBaselineCaptured = false;
 		const staging = await this.itemCache.beginStagedGeneration(this.accountId);
 		let refreshedVaultKeys: VaultKeyData[] | null = null;
 
@@ -1451,12 +1464,27 @@ export class VaultRepository {
 				const { data: page } = await client.sync.bootstrap({
 					cursor,
 					limit: 500,
+					syncCursor: syncBaseline?.id,
+					syncCursorCaptured: syncBaselineCaptured,
 				});
+				const pageSyncBaseline = page.syncCursor ?? null;
+				if (!syncBaselineCaptured) {
+					syncBaseline = pageSyncBaseline;
+					syncBaselineCaptured = true;
+				} else if (pageSyncBaseline?.id !== syncBaseline?.id) {
+					throw new Error(
+						"Bootstrap sync cursor changed before the cache generation completed.",
+					);
+				}
 
-				for (const rawItem of travelMode.filterItems(
-					this.accountId,
-					page.items,
-				)) {
+				for (const rawItem of travelMode.filterItems(this.accountId, [
+					...page.items,
+				])) {
+					if (!rawItem.vault) {
+						throw new Error(
+							`Bootstrap Item ${rawItem.id} is missing its Vault summary.`,
+						);
+					}
 					const cachedItem: CachedEncryptedItem = {
 						id: rawItem.id,
 						vaultId: rawItem.vaultId,
@@ -1475,7 +1503,11 @@ export class VaultRepository {
 						createdAt: String(rawItem.createdAt),
 						updatedAt: String(rawItem.updatedAt),
 						deletedAt: rawItem.deletedAt ? String(rawItem.deletedAt) : null,
-						attachments: rawItem.attachments,
+						attachments: (rawItem.attachments ?? []).map((attachment) => ({
+							...attachment,
+							encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? null,
+							uploadedBy: attachment.uploadedBy ?? null,
+						})),
 					};
 					await staging.upsertCachedItem(cachedItem);
 
@@ -1500,6 +1532,12 @@ export class VaultRepository {
 			await staging.promote({
 				lastFullSyncAt: Date.now(),
 				cacheVersion: 1,
+				syncBaseline: {
+					serverUrl: normalizeAccountServerUrl(
+						this.serverUrl ?? this.fallbackServerUrl,
+					),
+					cursorId: syncBaseline?.id ?? null,
+				},
 			});
 		} catch (error) {
 			await staging.discard();
@@ -1558,6 +1596,7 @@ export class VaultRepository {
 		this.hasCacheSnapshotFlag = true;
 		this.hydrated = true;
 		this.emit();
+		return syncBaseline;
 	}
 
 	clear(): void {

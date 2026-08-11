@@ -18,6 +18,7 @@ import type { ActiveAccountId } from "@bittery/storage/types";
 import type {
 	DeltaSyncApiClient,
 	SyncApiClient,
+	SyncCursor,
 	SyncEvent,
 	SyncItemCache,
 } from "@bittery/sync";
@@ -99,6 +100,10 @@ export interface SyncCacheServiceDeps {
 		accountClient: SyncEventApiClient | null,
 	) => Promise<void>;
 	refreshFromServer: () => Promise<void>;
+	initializeFromServer: (
+		accountId: string,
+		currentCursor: SyncCursor | null,
+	) => Promise<SyncCursor | null>;
 	logger: Pick<Console, "debug" | "info" | "warn" | "error">;
 }
 
@@ -133,6 +138,16 @@ const defaultDeps: SyncCacheServiceDeps = {
 			storage,
 		).resolveUnlockedAccounts();
 		await core.vaultCoordinator.refreshFromServer(accounts);
+	},
+	initializeFromServer: async (accountId, currentCursor) => {
+		const accounts = await new AccountResolver(
+			storage,
+		).resolveUnlockedAccounts();
+		return core.vaultCoordinator.initializeSyncBaseline(
+			accounts,
+			accountId,
+			currentCursor,
+		);
 	},
 	logger: console,
 };
@@ -174,6 +189,10 @@ export interface SyncCacheService {
 	resolveCandidateAccountIdsForEvent: (event: SyncEvent) => Promise<string[]>;
 	applyDeltaSyncForEvent: (event: SyncEvent) => Promise<void>;
 	refreshItemCachesForKnownAccounts: () => Promise<void>;
+	initializeSyncBaselineForAccount: (
+		accountId: string,
+		currentCursor: SyncCursor | null,
+	) => Promise<SyncCursor | null>;
 }
 
 export function createSyncCacheService(
@@ -513,6 +532,13 @@ export function createSyncCacheService(
 		await deps.refreshFromServer();
 	}
 
+	async function initializeSyncBaselineForAccount(
+		accountId: string,
+		currentCursor: SyncCursor | null,
+	): Promise<SyncCursor | null> {
+		return deps.initializeFromServer(accountId, currentCursor);
+	}
+
 	return {
 		resolveConnectionContext,
 		getClientForEmail,
@@ -520,6 +546,7 @@ export function createSyncCacheService(
 		resolveCandidateAccountIdsForEvent,
 		applyDeltaSyncForEvent,
 		refreshItemCachesForKnownAccounts,
+		initializeSyncBaselineForAccount,
 	};
 }
 

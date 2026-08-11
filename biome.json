@@ -32,6 +32,7 @@
 			"!**/.zed",
 			"!**/.vscode",
 			"!**/routeTree.gen.ts",
+			"!**/expo-env.d.ts",
 			"!packages/api-contract/openapi.v1.json",
 			"!packages/api-contract/src/generated",
 			"!**/src-tauri",

@@ -2,7 +2,10 @@ import {
 	AccountResolver,
 	createStoredAccountApiClient,
 } from "@bittery/core/services/account-resolver";
-import { createStagedFullRefresh } from "@bittery/core/services/staged-full-refresh";
+import {
+	createInitialSyncBootstrap,
+	createStagedFullRefresh,
+} from "@bittery/core/services/staged-full-refresh";
 import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sync";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
@@ -11,6 +14,7 @@ import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { OutboundQueueApiClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
+import { useToast } from "heroui-native";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { crypto } from "../lib/crypto";
@@ -18,6 +22,7 @@ import {
 	getMobileSyncDb,
 	getOrCreateMobileSyncClientId,
 } from "../lib/sync-client-id";
+import { useI18n } from "../providers/i18n-provider";
 import { itemCache, storage } from "../services/storage";
 
 /**
@@ -103,6 +108,8 @@ async function resolveMobileSyncContext(): Promise<SyncConnectionContext | null>
  * Mobile-specific sync hook that integrates with React Native storage
  */
 export function useMobileSync(queryClient: QueryClient, enabled = true) {
+	const { m } = useI18n();
+	const { toast } = useToast();
 	const [clientId, setClientId] = useState<string>("");
 	const [serverUrl, setServerUrl] = useState<string>("");
 	const [syncAccountId, setSyncAccountId] = useState<string | null>(null);
@@ -199,6 +206,10 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		() => createStagedFullRefresh(storage, vaultCoordinator),
 		[vaultCoordinator],
 	);
+	const initializeFromServer = useMemo(
+		() => createInitialSyncBootstrap(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
 
 	const onTravelModeEvent = useCallback(
 		async (event: { type: string; metadata?: Record<string, unknown> }) => {
@@ -238,6 +249,14 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		},
 		[serverUrl, syncAccountId, vaultCoordinator],
 	);
+	const onTerminalCommandFailure = useCallback(() => {
+		toast.show({
+			variant: "danger",
+			label: m.sync_command_terminal_error(),
+			description: m.sync_command_terminal_error_description(),
+			placement: "bottom",
+		});
+	}, [m, toast]);
 
 	const syncState = useSync({
 		serverUrl,
@@ -253,8 +272,10 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		itemCacheServerUrl: syncAccountId ? serverUrl : null,
 		getClientForAccount,
 		refreshFromServer,
+		initializeFromServer,
 		resolveLegacyAccountId,
 		onEventProcessed: onTravelModeEvent,
+		onTerminalCommandFailure,
 	});
 
 	return {

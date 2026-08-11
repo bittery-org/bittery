@@ -226,6 +226,11 @@ export interface ItemCacheMetadata {
 	lastFullSyncAt: number;
 	itemCount: number;
 	cacheVersion: number;
+	/** Cache promotion and its catch-up baseline must become durable together. */
+	syncBaseline?: {
+		serverUrl: string;
+		cursorId: string | null;
+	};
 }
 
 /**

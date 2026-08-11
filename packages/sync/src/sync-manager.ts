@@ -6,6 +6,11 @@ import type {
 	SyncStorage,
 } from "./types";
 
+interface StoredSyncBaseline {
+	initialized: true;
+	cursor: SyncCursor | null;
+}
+
 /**
  * Default in-memory storage implementation
  */
@@ -351,7 +356,34 @@ export class SyncManager {
 	 * Persist an explicit sync cursor.
 	 */
 	async setStoredLastSyncCursor(cursor: SyncCursor): Promise<void> {
-		await this.storage.set("lastSyncCursor", cursor);
+		await Promise.all([
+			this.storage.set("lastSyncCursor", cursor),
+			this.setStoredSyncBaseline(cursor),
+		]);
+	}
+
+	async setStoredSyncBaseline(cursor: SyncCursor | null): Promise<void> {
+		await this.storage.set<StoredSyncBaseline>("syncBaselineV1", {
+			initialized: true,
+			cursor,
+		});
+	}
+
+	async getStoredSyncBaseline(): Promise<StoredSyncBaseline | null> {
+		const baseline =
+			await this.storage.get<StoredSyncBaseline>("syncBaselineV1");
+		if (
+			baseline?.initialized === true &&
+			(baseline.cursor === null ||
+				(typeof baseline.cursor === "object" &&
+					typeof baseline.cursor.id === "string" &&
+					baseline.cursor.id.length > 0))
+		) {
+			return baseline;
+		}
+
+		const legacyCursor = await this.getStoredLastSyncCursor();
+		return legacyCursor ? { initialized: true, cursor: legacyCursor } : null;
 	}
 
 	/**

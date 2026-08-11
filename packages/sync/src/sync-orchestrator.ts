@@ -5,6 +5,7 @@ import { createSyncManager, type SyncManager } from "./sync-manager";
 import type {
 	ConnectionStatus,
 	SessionRevokedControlPayload,
+	SyncCursor,
 	SyncEvent,
 	SyncItemCache,
 	SyncManagerOptions,
@@ -37,6 +38,11 @@ export interface SyncOrchestratorOptions {
 		apiClient: SyncApiClient,
 		accountId: string,
 	) => Promise<void>;
+	initializeFromServer?: (
+		apiClient: SyncApiClient,
+		accountId: string,
+		currentCursor: SyncCursor | null,
+	) => Promise<SyncCursor | null>;
 	onEventProcessed?: (event: SyncEvent) => Promise<void>;
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
@@ -71,6 +77,7 @@ export class SyncOrchestrator {
 
 	private catchUpInFlight = false;
 	private catchUpRequested = false;
+	private initialBaselineValidated = false;
 	private drainingInFlight = false;
 	private drainRequested = false;
 	private retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -210,7 +217,21 @@ export class SyncOrchestrator {
 		try {
 			do {
 				this.catchUpRequested = false;
-				const cursor = await this.syncManager.getStoredLastSyncCursor();
+				let baseline = await this.syncManager.getStoredSyncBaseline();
+				if (
+					this.options.initializeFromServer &&
+					(!this.initialBaselineValidated || !baseline)
+				) {
+					const cursor = await this.options.initializeFromServer(
+						this.options.apiClient,
+						this.getDeltaSyncAccountScope(),
+						baseline?.cursor ?? null,
+					);
+					await this.syncManager.setStoredSyncBaseline(cursor);
+					baseline = { initialized: true, cursor };
+					this.initialBaselineValidated = true;
+				}
+				const cursor = baseline?.cursor;
 
 				const result = await runCatchUp({
 					client: this.options.apiClient,
@@ -229,7 +250,11 @@ export class SyncOrchestrator {
 					},
 				});
 
-				await this.syncManager.setStoredLastSyncCursor(result.cursor);
+				if (result.cursor.id) {
+					await this.syncManager.setStoredLastSyncCursor(result.cursor);
+				} else if (baseline) {
+					await this.syncManager.setStoredSyncBaseline(null);
+				}
 			} while (this.catchUpRequested);
 		} finally {
 			this.catchUpInFlight = false;
@@ -318,6 +343,7 @@ export class SyncOrchestrator {
 
 	disconnect(): void {
 		this.syncManager.disconnect();
+		this.initialBaselineValidated = false;
 		this.setStatus({
 			connectionStatus: "disconnected",
 			error: null,

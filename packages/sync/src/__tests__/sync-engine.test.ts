@@ -125,7 +125,7 @@ function apiResult<T>(data: T) {
 }
 
 interface TestApiClientOptions {
-	changes?: () => Promise<{
+	changes?: (input: { sinceId?: string; limit?: number }) => Promise<{
 		events: SyncEvent[];
 		hasMore: boolean;
 		requiresFullRefresh: boolean;
@@ -150,9 +150,9 @@ function testApiClient(options: TestApiClientOptions = {}): SyncApiClient {
 						{ status: 200 },
 					),
 				),
-			changes: async () =>
+			changes: async (input: { sinceId?: string; limit?: number }) =>
 				apiResult(
-					await (options.changes?.() ??
+					await (options.changes?.(input) ??
 						Promise.resolve({
 							events: [],
 							hasMore: false,
@@ -285,6 +285,175 @@ function poisonItemClient() {
 }
 
 describe("sync engine regressions", () => {
+	test("initializes a cold source from its committed bootstrap cursor before catch-up", async () => {
+		const storage = new MemoryStorage();
+		const changesSinceIds: Array<string | undefined> = [];
+		let itemReads = 0;
+		let initializations = 0;
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				changes: async ({ sinceId }) => {
+					changesSinceIds.push(sinceId);
+					return {
+						events:
+							sinceId === "evt_bootstrap"
+								? []
+								: [buildEvent({ id: "evt_historical" })],
+						hasMore: false,
+						requiresFullRefresh: false,
+						cursor: sinceId ? { id: sinceId } : { id: "evt_historical" },
+					};
+				},
+				getItem: async () => {
+					itemReads += 1;
+					return {};
+				},
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			initializeFromServer: async () => {
+				initializations += 1;
+				return { id: "evt_bootstrap" };
+			},
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+		});
+
+		await (orchestrator as any).runCatchUp();
+
+		expect(initializations).toBe(1);
+		expect(changesSinceIds).toEqual(["evt_bootstrap"]);
+		expect(itemReads).toBe(0);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_bootstrap",
+		);
+		orchestrator.dispose();
+	});
+
+	test("replaces a stale durable cursor with the cache generation baseline", async () => {
+		const storage = new MemoryStorage();
+		await storage.set("lastSyncCursor", { id: "evt_stale" });
+		await storage.set("syncBaselineV1", {
+			initialized: true,
+			cursor: { id: "evt_stale" },
+		});
+		const changesSinceIds: Array<string | undefined> = [];
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				changes: async ({ sinceId }) => {
+					changesSinceIds.push(sinceId);
+					return {
+						events: [],
+						hasMore: false,
+						requiresFullRefresh: false,
+						cursor: sinceId ? { id: sinceId } : null,
+					};
+				},
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			initializeFromServer: async () => ({ id: "evt_bootstrap" }),
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+		});
+
+		await (orchestrator as any).runCatchUp();
+
+		expect(changesSinceIds).toEqual(["evt_bootstrap"]);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_bootstrap",
+		);
+		orchestrator.dispose();
+	});
+
+	test("remembers a committed bootstrap with no event cursor", async () => {
+		const storage = new MemoryStorage();
+		let initializations = 0;
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient(),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			initializeFromServer: async () => {
+				initializations += 1;
+				return null;
+			},
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+		});
+
+		await (orchestrator as any).runCatchUp();
+		await (orchestrator as any).runCatchUp();
+
+		expect(initializations).toBe(1);
+		orchestrator.disconnect();
+		await (orchestrator as any).runCatchUp();
+		expect(initializations).toBe(2);
+		orchestrator.dispose();
+	});
+
+	test("does not record an initial baseline when bootstrap fails", async () => {
+		const storage = new MemoryStorage();
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient(),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			initializeFromServer: async () => {
+				throw new Error("bootstrap failed");
+			},
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+		});
+
+		await expect((orchestrator as any).runCatchUp()).rejects.toThrow(
+			"bootstrap failed",
+		);
+		expect(await storage.get("syncBaselineV1")).toBeNull();
+		expect(await storage.get("lastSyncCursor")).toBeNull();
+		orchestrator.dispose();
+	});
+
+	test("applies an Item event committed after the bootstrap watermark", async () => {
+		const storage = new MemoryStorage();
+		const changesSinceIds: Array<string | undefined> = [];
+		let itemReads = 0;
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				changes: async ({ sinceId }) => {
+					changesSinceIds.push(sinceId);
+					return {
+						events: [
+							buildEvent({
+								id: "evt_concurrent",
+								entityId: "item_concurrent",
+							}),
+						],
+						hasMore: false,
+						requiresFullRefresh: false,
+						cursor: { id: "evt_concurrent" },
+					};
+				},
+				getItem: async () => {
+					itemReads += 1;
+					return {};
+				},
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			initializeFromServer: async () => ({ id: "evt_bootstrap" }),
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+		});
+
+		await (orchestrator as any).runCatchUp();
+
+		expect(changesSinceIds).toEqual(["evt_bootstrap"]);
+		expect(itemReads).toBe(1);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_concurrent",
+		);
+		orchestrator.dispose();
+	});
+
 	test("does not advance cursor when live delta application fails", async () => {
 		const storage = new MemoryStorage();
 		await storage.set("lastSyncCursor", { id: "evt_10" });

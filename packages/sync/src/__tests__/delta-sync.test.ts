@@ -56,6 +56,7 @@ function recordingCache() {
 	const vaultKeys: SyncVaultKeyEntry[] = [];
 	const vaults: CachedVaultMetadata[] = [];
 	const items: CachedEncryptedItem[] = [];
+	const removedItems: string[] = [];
 
 	const cache: SyncItemCache = {
 		syncVaultKeys: async (keys) => {
@@ -67,7 +68,9 @@ function recordingCache() {
 		upsertCachedItem: async (item) => {
 			items.push(item);
 		},
-		removeCachedItem: async () => undefined,
+		removeCachedItem: async (itemId) => {
+			removedItems.push(itemId);
+		},
 		removeCachedVault: async () => undefined,
 		clearItemCache: async () => undefined,
 		replaceItemId: () => undefined,
@@ -79,7 +82,7 @@ function recordingCache() {
 		setEncryptionContextMigrationPort: async () => undefined,
 	};
 
-	return { cache, items, vaultKeys, vaults };
+	return { cache, items, removedItems, vaultKeys, vaults };
 }
 
 function serverItem() {
@@ -147,6 +150,36 @@ describe("performDeltaSync vault mapping", () => {
 });
 
 describe("performDeltaSync Item encryption context", () => {
+	it.each([
+		"item_created",
+		"item_updated",
+		"item_restored",
+		"item_moved",
+	] as const)("converges a %s event when the Item was permanently deleted before its fetch", async (type) => {
+		const api = client();
+		api.items.get = async () => {
+			throw new ApiError(
+				{
+					type: "about:blank",
+					title: "Not found",
+					status: 404,
+					code: "NOT_FOUND",
+				},
+				null,
+			);
+		};
+		const { cache, removedItems } = recordingCache();
+
+		await performDeltaSync(
+			api,
+			cache,
+			event({ type, entityId: "item_1", entityType: "item" }),
+			"acc_1",
+		);
+
+		expect(removedItems).toEqual(["item_1"]);
+	});
+
 	it("retains an Item event when fetching its trashed state fails transiently", async () => {
 		const api = client();
 		api.items.get = async () => {

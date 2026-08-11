@@ -67,6 +67,7 @@ import type {
 	SignupVerificationInput,
 	StartLoginInput,
 	SyncBootstrapPage,
+	SyncBootstrapRequest,
 	SyncChanges,
 	SyncEvent,
 	TeamDetails,
@@ -415,7 +416,9 @@ export interface ApiClient {
 		vaults(teamId: string): Promise<ApiResult<readonly TeamVault[]>>;
 	};
 	readonly sync: {
-		bootstrap(page?: ApiPageRequest): Promise<ApiResult<SyncBootstrapPage>>;
+		bootstrap(
+			page?: SyncBootstrapRequest,
+		): Promise<ApiResult<SyncBootstrapPage>>;
 		changes(input?: {
 			sinceId?: string;
 			vaultIds?: readonly string[];
@@ -551,6 +554,10 @@ function validateBootstrap(value: unknown): SyncBootstrapPage {
 	boolean(page.hasMore, "/sync/bootstrap/hasMore");
 	if (page.nextCursor !== undefined && page.nextCursor !== null) {
 		string(page.nextCursor, "/sync/bootstrap/nextCursor");
+	}
+	if (page.syncCursor !== undefined && page.syncCursor !== null) {
+		const cursor = object(page.syncCursor, "/sync/bootstrap/syncCursor");
+		string(cursor.id, "/sync/bootstrap/syncCursor/id");
 	}
 	return value as SyncBootstrapPage;
 }

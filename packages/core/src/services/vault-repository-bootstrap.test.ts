@@ -237,6 +237,138 @@ describe("VaultRepository.hydrateFromServer", () => {
 		expect(cached?.encryptedByUserId).toBe(USER_ID);
 	});
 
+	it("pins the first bootstrap sync cursor through promotion", async () => {
+		const { repo, itemCache } = await setup();
+		const client = createClient();
+		const firstItem = (await client.sync.bootstrap({ limit: 500 })).data
+			.items[0];
+		if (!firstItem) throw new Error("Missing bootstrap fixture Item");
+		const requests: Array<{
+			cursor?: string;
+			limit?: number;
+			syncCursor?: string;
+			syncCursorCaptured?: boolean;
+		}> = [];
+		client.sync.bootstrap = mock(async (input: any) => {
+			requests.push(input);
+			return {
+				data: input.cursor
+					? {
+							items: [],
+							hasMore: false,
+							syncCursor: { id: "evt_bootstrap" },
+						}
+					: {
+							items: [firstItem],
+							hasMore: true,
+							nextCursor: "page-2",
+							syncCursor: { id: "evt_bootstrap" },
+						},
+			} as any;
+		}) as BootstrapItemsClient["sync"]["bootstrap"];
+
+		const baseline = await repo.hydrateFromServer(client);
+
+		expect(requests).toEqual([
+			{
+				cursor: undefined,
+				limit: 500,
+				syncCursor: undefined,
+				syncCursorCaptured: false,
+			},
+			{
+				cursor: "page-2",
+				limit: 500,
+				syncCursor: "evt_bootstrap",
+				syncCursorCaptured: true,
+			},
+		]);
+		expect(baseline).toEqual({ id: "evt_bootstrap" });
+		expect(
+			(await itemCache.getItemCacheMetadata(ACCOUNT_ID))?.syncBaseline,
+		).toEqual({
+			serverUrl: "https://bittery.test",
+			cursorId: "evt_bootstrap",
+		});
+	});
+
+	it("pins an explicit empty sync cursor through every bootstrap page", async () => {
+		const { repo, itemCache } = await setup();
+		const client = createClient();
+		const firstItem = (await client.sync.bootstrap({ limit: 500 })).data
+			.items[0];
+		if (!firstItem) throw new Error("Missing bootstrap fixture Item");
+		const requests: Array<{
+			cursor?: string;
+			syncCursor?: string;
+			syncCursorCaptured?: boolean;
+		}> = [];
+		client.sync.bootstrap = mock(async (input: any) => {
+			requests.push(input);
+			return {
+				data: input.cursor
+					? { items: [], hasMore: false, syncCursor: null }
+					: {
+							items: [firstItem],
+							hasMore: true,
+							nextCursor: "page-2",
+							syncCursor: null,
+						},
+			} as any;
+		}) as BootstrapItemsClient["sync"]["bootstrap"];
+
+		const baseline = await repo.hydrateFromServer(client);
+
+		expect(requests[1]).toMatchObject({
+			cursor: "page-2",
+			syncCursor: undefined,
+			syncCursorCaptured: true,
+		});
+		expect(baseline).toBeNull();
+		expect(
+			(await itemCache.getItemCacheMetadata(ACCOUNT_ID))?.syncBaseline,
+		).toEqual({
+			serverUrl: "https://bittery.test",
+			cursorId: null,
+		});
+	});
+
+	it("rejects a changed bootstrap sync cursor before promotion", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		await itemCache.setCachedItems(
+			[await cachedItem("previous", crypto, vaultCrypto)],
+			ACCOUNT_ID,
+		);
+		const client = createClient();
+		const firstItem = (await client.sync.bootstrap({ limit: 500 })).data
+			.items[0];
+		if (!firstItem) throw new Error("Missing bootstrap fixture Item");
+		client.sync.bootstrap = mock(async (input: any) => ({
+			data: input.cursor
+				? {
+						items: [],
+						hasMore: false,
+						syncCursor: { id: "evt_changed" },
+					}
+				: {
+						items: [firstItem],
+						hasMore: true,
+						nextCursor: "page-2",
+						syncCursor: { id: "evt_bootstrap" },
+					},
+		})) as BootstrapItemsClient["sync"]["bootstrap"];
+
+		await expect(repo.hydrateFromServer(client)).rejects.toThrow(
+			"Bootstrap sync cursor changed",
+		);
+		expect(
+			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
+		).toEqual(["previous"]);
+		expect(
+			(await itemCache.getItemCacheMetadata(ACCOUNT_ID))?.syncBaseline,
+		).toBeUndefined();
+	});
+
 	it("keeps hidden vaults out of every promoted bootstrap layer", async () => {
 		const { repo, storage, itemCache } = await setup();
 		const enforcer = getTravelModeEnforcer(storage, itemCache);
@@ -402,6 +534,9 @@ describe("VaultRepository.hydrateFromServer", () => {
 		expect(
 			(await itemCache.getCachedItems(ACCOUNT_ID))?.map(({ id }) => id),
 		).toEqual(["previous"]);
+		expect(
+			(await itemCache.getItemCacheMetadata(ACCOUNT_ID))?.syncBaseline,
+		).toBeUndefined();
 	});
 
 	it("publishes a complete cache before any failure after promotion", async () => {

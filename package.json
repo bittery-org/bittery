@@ -16,9 +16,12 @@
 	},
 	"scripts": {
 		"preinstall": "node ./scripts/load-env.mjs",
+		"postinstall": "pnpm --filter @bittery/i18n run build",
 		"setup:worktree": "./scripts/setup-worktree.sh",
 		"check": "biome check . && pnpm --filter server check",
 		"check:fix": "biome check --write --unsafe . && pnpm --filter server format",
+		"check:ci": "pnpm run i18n:generate && pnpm run db:check && pnpm run i18n:check && pnpm run env:check && pnpm exec biome check . && pnpm run check-types && pnpm exec turbo run test --filter='!server' --filter='!@bittery/crypto-core' && node --test \"scripts/**/*.test.mjs\"",
+		"check:ci:rust": "pnpm --filter server check && pnpm --filter @bittery/crypto-core test && cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check && cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets -- -D warnings",
 		"check-types": "turbo check-types",
 		"i18n:check": "pnpm --filter @bittery/i18n run check:keys",
 		"shadcn": "pnpm --filter @bittery/ui run shadcn",

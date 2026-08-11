@@ -39,6 +39,10 @@ export {
 	SyncOrchestrator,
 	type SyncOrchestratorOptions,
 } from "./sync-orchestrator";
+export {
+	getNewTerminalCommandCount,
+	subscribeToNewTerminalCommands,
+} from "./terminal-command-status";
 export * from "./types";
 // React hooks
 export type { SyncEventContext, SyncSource, UseSyncOptions } from "./use-sync";

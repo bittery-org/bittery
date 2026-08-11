@@ -17,7 +17,6 @@ import {
 } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/providers/i18n-provider";
-import { useSyncContextOptional } from "@/providers/sync-provider";
 import { useAccount } from "../contexts/account-context";
 import { lifecycleDeps } from "../services/lifecycle";
 import { type AccountMetadata, storage } from "../services/storage";
@@ -71,7 +70,6 @@ export function AccountSwitcher() {
 	const { toast } = useToast();
 	const { m } = useI18n();
 	const queryClient = useQueryClient();
-	const sync = useSyncContextOptional();
 	const { allAccounts, activeAccount, activeAccountConfig, switchAccount } =
 		useAccount();
 	const [switching, setSwitching] = useState(false);
@@ -154,26 +152,6 @@ export function AccountSwitcher() {
 	};
 
 	const accountFallback = m.mob_settings_account_fallback();
-	const commandState = sync?.status.commandSummary
-		? sync.status.commandSummary.failed > 0
-			? (["failed", sync.status.commandSummary.failed] as const)
-			: sync.status.commandSummary.conflicted > 0
-				? (["conflicted", sync.status.commandSummary.conflicted] as const)
-				: sync.status.commandSummary.retrying > 0
-					? (["retrying", sync.status.commandSummary.retrying] as const)
-					: sync.status.commandSummary.pending > 0
-						? (["pending", sync.status.commandSummary.pending] as const)
-						: null
-		: null;
-	const commandLabel = commandState
-		? commandState[0] === "failed"
-			? m.sync_command_status_failed({ count: commandState[1] })
-			: commandState[0] === "conflicted"
-				? m.sync_command_status_conflicted({ count: commandState[1] })
-				: commandState[0] === "retrying"
-					? m.sync_command_status_retrying({ count: commandState[1] })
-					: m.sync_command_status_pending({ count: commandState[1] })
-		: null;
 
 	return (
 		<BottomSheet isOpen={isOpen} onOpenChange={setIsOpen}>
@@ -234,23 +212,6 @@ export function AccountSwitcher() {
 					</View>
 
 					<View className="h-px bg-separator" />
-					{commandState && commandLabel ? (
-						<View className="flex-row items-center gap-2 px-6 py-3">
-							<View
-								className={cn(
-									"h-2 w-2 rounded-full",
-									commandState[0] === "failed" ||
-										commandState[0] === "conflicted"
-										? "bg-danger"
-										: commandState[0] === "retrying"
-											? "bg-warning"
-											: "bg-accent",
-								)}
-							/>
-							<Text className="text-muted text-sm">{commandLabel}</Text>
-						</View>
-					) : null}
-
 					<View className="px-4 pt-2 pb-6">
 						<SheetAction
 							label={m.mob_account_switcher_add_account()}

@@ -1,5 +1,8 @@
 import { createStoredAccountApiClient } from "@bittery/core/services/account-resolver";
-import { createStagedFullRefresh } from "@bittery/core/services/staged-full-refresh";
+import {
+	createInitialSyncBootstrap,
+	createStagedFullRefresh,
+} from "@bittery/core/services/staged-full-refresh";
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
 import {
@@ -8,6 +11,7 @@ import {
 	type SyncStorage,
 	useSync,
 } from "@bittery/sync";
+import { toast } from "@bittery/ui";
 import type { QueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { getServerUrl } from "@/lib/auth-server";
@@ -20,6 +24,7 @@ import {
 	storage,
 	subscribeActiveAccountId,
 } from "@/lib/storage";
+import { useI18n } from "@/providers/i18n-provider";
 
 /**
  * Get or create a unique client ID for this browser session
@@ -101,6 +106,7 @@ class WebSyncStorage implements SyncStorage {
  * Web-specific sync hook that integrates with existing auth system
  */
 export function useWebSync(queryClient: QueryClient, enabled = true) {
+	const { m } = useI18n();
 	const serverUrl = getServerUrl();
 	const clientId = useMemo(() => getClientId(), []);
 	const syncStorage = useMemo(() => new WebSyncStorage(), []);
@@ -177,6 +183,15 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		() => createStagedFullRefresh(storage, vaultCoordinator),
 		[vaultCoordinator],
 	);
+	const initializeFromServer = useMemo(
+		() => createInitialSyncBootstrap(storage, vaultCoordinator),
+		[vaultCoordinator],
+	);
+	const onTerminalCommandFailure = useCallback(() => {
+		toast.error(m.sync_command_terminal_error(), {
+			description: m.sync_command_terminal_error_description(),
+		});
+	}, [m]);
 
 	return useSync({
 		serverUrl,
@@ -189,8 +204,10 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAccountId: syncAccountId,
 		getClientForAccount,
 		refreshFromServer,
+		initializeFromServer,
 		resolveLegacyAccountId,
 		onSessionRevoked,
+		onTerminalCommandFailure,
 	});
 }
 

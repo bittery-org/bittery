@@ -22,6 +22,9 @@ use super::{
 #[into_params(parameter_in = Query, rename_all = "camelCase")]
 struct BootstrapQuery {
     cursor: Option<String>,
+    sync_cursor: Option<String>,
+    #[serde(default)]
+    sync_cursor_captured: bool,
     #[serde(default = "default_bootstrap_limit")]
     #[schema(minimum = 1, maximum = 500, default = 500)]
     limit: u16,
@@ -35,6 +38,8 @@ impl From<BootstrapQuery> for sync::BootstrapItemsInput {
     fn from(value: BootstrapQuery) -> Self {
         Self {
             cursor: value.cursor,
+            sync_cursor: value.sync_cursor,
+            sync_cursor_captured: value.sync_cursor_captured,
             limit: Some(i32::from(value.limit)),
         }
     }
@@ -267,6 +272,7 @@ impl From<sync::BootstrapItemResponse> for BootstrapItemResponse {
 struct BootstrapItemsResponse {
     items: Vec<BootstrapItemResponse>,
     next_cursor: Option<String>,
+    sync_cursor: Option<SyncCursorResponse>,
     has_more: bool,
 }
 
@@ -275,6 +281,9 @@ impl From<sync::BootstrapItemsResponse> for BootstrapItemsResponse {
         Self {
             items: value.items.into_iter().map(Into::into).collect(),
             next_cursor: value.next_cursor,
+            sync_cursor: value
+                .sync_cursor
+                .map(|cursor| SyncCursorResponse { id: cursor.id }),
             has_more: value.has_more,
         }
     }
@@ -439,7 +448,7 @@ mod tests {
         BootstrapItemResponse as ServiceBootstrapItemResponse,
         BootstrapItemsResponse as ServiceBootstrapItemsResponse,
         BootstrapVaultSummary as ServiceBootstrapVaultSummary, GetEventsSinceResponse,
-        SyncCursorResponse, SyncEventDto,
+        SyncCursorResponse as ServiceSyncCursorResponse, SyncEventDto,
     };
 
     #[test]
@@ -485,12 +494,16 @@ mod tests {
                 }),
             }],
             next_cursor: Some("item_test".to_string()),
+            sync_cursor: Some(ServiceSyncCursorResponse {
+                id: "event_test".to_string(),
+            }),
             has_more: true,
         }
         .into();
 
         let json = serde_json::to_value(response).expect("bootstrap response should serialize");
         assert_eq!(json["nextCursor"], json!("item_test"));
+        assert_eq!(json["syncCursor"]["id"], json!("event_test"));
         assert_eq!(json["items"][0]["lastModifiedBy"], json!(null));
         assert_eq!(json["items"][0]["attachments"][0]["fileSize"], json!(42));
         assert_eq!(
@@ -529,7 +542,7 @@ mod tests {
                 metadata: None,
                 timestamp: i64::MAX,
             }],
-            cursor: Some(SyncCursorResponse {
+            cursor: Some(ServiceSyncCursorResponse {
                 id: "sync_event_test".to_string(),
             }),
             has_more: false,
