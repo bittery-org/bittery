@@ -2,24 +2,6 @@ import { apiQueryKeys } from "@bittery/shared/api-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { SyncEvent, SyncEventType } from "./types";
 
-export const syncApiQueryKeys = {
-	travelMode: ["api", "v1", "travel-mode"] as unknown[],
-	vaults: {
-		list: ["api", "v1", "vaults"] as unknown[],
-		members: (vaultId: string) =>
-			["api", "v1", "vaults", vaultId, "members"] as unknown[],
-	},
-	items: {
-		all: ["api", "v1", "items"] as unknown[],
-		get: (itemId: string) => ["api", "v1", "items", itemId] as unknown[],
-		inVault: (vaultId: string) =>
-			["api", "v1", "vaults", vaultId, "items"] as unknown[],
-		trashed: ["api", "v1", "trashed-items"] as unknown[],
-		trashedInVault: (vaultId: string) =>
-			["api", "v1", "vaults", vaultId, "trashed-items"] as unknown[],
-	},
-};
-
 /**
  * Invalidation context for a sync event
  */
@@ -38,8 +20,10 @@ export interface QueryInvalidatorOptions {
 /**
  * Get query keys to invalidate based on sync event type
  */
-export function getQueryKeysForEvent(event: SyncEvent): unknown[][] {
-	const keys: unknown[][] = [];
+export function getQueryKeysForEvent(
+	event: SyncEvent,
+): Array<readonly unknown[]> {
+	const keys: Array<readonly unknown[]> = [];
 	const { type, vaultId } = event;
 
 	switch (type) {
@@ -54,48 +38,48 @@ export function getQueryKeysForEvent(event: SyncEvent): unknown[][] {
 
 		case "vault_created":
 			keys.push(["vault-keys"]);
-			keys.push(syncApiQueryKeys.vaults.list);
+			keys.push(apiQueryKeys.vaults.list);
 			break;
 
 		case "vault_updated":
 			keys.push(["vault-keys"]);
-			keys.push(syncApiQueryKeys.vaults.list);
+			keys.push(apiQueryKeys.vaults.list);
 			if (event.metadata?.reason === "bulk_import" && vaultId) {
-				keys.push(syncApiQueryKeys.items.inVault(vaultId));
-				keys.push(syncApiQueryKeys.items.all);
+				keys.push(apiQueryKeys.items.inVault(vaultId));
+				keys.push(apiQueryKeys.items.all);
 			}
 			break;
 
 		case "vault_deleted":
 			keys.push(["vault-keys"]);
-			keys.push(syncApiQueryKeys.vaults.list);
+			keys.push(apiQueryKeys.vaults.list);
 			break;
 
 		case "vault_access_revoked": {
 			keys.push(["vault-keys"]);
-			keys.push(syncApiQueryKeys.vaults.list);
+			keys.push(apiQueryKeys.vaults.list);
 			break;
 		}
 
 		case "vault_member_added":
 		case "vault_member_removed":
 			if (vaultId) {
-				keys.push(syncApiQueryKeys.vaults.members(vaultId));
+				keys.push(apiQueryKeys.vaults.members(vaultId));
 			}
 			keys.push(["vault-keys"]);
-			keys.push(syncApiQueryKeys.vaults.list);
+			keys.push(apiQueryKeys.vaults.list);
 			break;
 
 		case "vault_key_rotated":
 			keys.push(["vault-keys"]);
-			keys.push(syncApiQueryKeys.vaults.list);
+			keys.push(apiQueryKeys.vaults.list);
 			break;
 
 		case "travel_mode_updated":
 			keys.push(["travel-mode"]);
 			keys.push(["all-vault-keys"]);
-			keys.push(syncApiQueryKeys.travelMode);
-			keys.push(syncApiQueryKeys.vaults.list);
+			keys.push(apiQueryKeys.travelMode);
+			keys.push(apiQueryKeys.vaults.list);
 			break;
 	}
 
@@ -154,13 +138,13 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			const { queryClient } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.items.inVault(vaultId),
+					queryKey: apiQueryKeys.items.inVault(vaultId),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.items.get(itemId),
+					queryKey: apiQueryKeys.items.get(itemId),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.items.all,
+					queryKey: apiQueryKeys.items.all,
 				}),
 			]);
 		},
@@ -172,11 +156,11 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			const { queryClient } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.items.inVault(vaultId),
+					queryKey: apiQueryKeys.items.inVault(vaultId),
 				}),
 				// The aggregate item view has its own cache entry outside a vault page.
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.items.all,
+					queryKey: apiQueryKeys.items.all,
 				}),
 			]);
 		},
@@ -188,10 +172,10 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			const { queryClient } = options;
 			await Promise.all([
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.items.trashedInVault(vaultId),
+					queryKey: apiQueryKeys.items.trashedInVault(vaultId),
 				}),
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.items.trashed,
+					queryKey: apiQueryKeys.items.trashed,
 				}),
 			]);
 		},
@@ -204,7 +188,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			await Promise.all([
 				queryClient.invalidateQueries({ queryKey: ["vault-keys"] }),
 				queryClient.invalidateQueries({
-					queryKey: syncApiQueryKeys.vaults.list,
+					queryKey: apiQueryKeys.vaults.list,
 				}),
 			]);
 		},
@@ -250,7 +234,7 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		invalidateVaultMembers: async (vaultId: string): Promise<void> => {
 			const { queryClient } = options;
 			await queryClient.invalidateQueries({
-				queryKey: syncApiQueryKeys.vaults.members(vaultId),
+				queryKey: apiQueryKeys.vaults.members(vaultId),
 			});
 		},
 
@@ -264,13 +248,13 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 			// Removing remote API queries prevents refetch without an account token.
 			// This is important when switching to "All Accounts" mode where there's no auth token
 			queryClient.removeQueries({
-				queryKey: syncApiQueryKeys.vaults.list,
+				queryKey: apiQueryKeys.vaults.list,
 			});
 			queryClient.removeQueries({
-				queryKey: syncApiQueryKeys.items.all,
+				queryKey: apiQueryKeys.items.all,
 			});
 			queryClient.removeQueries({
-				queryKey: syncApiQueryKeys.items.trashed,
+				queryKey: apiQueryKeys.items.trashed,
 			});
 
 			// Invalidate (not remove) local storage queries - these should refetch from storage

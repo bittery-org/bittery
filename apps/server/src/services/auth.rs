@@ -48,12 +48,9 @@ use crate::{
 };
 
 const AUTHORIZATION_HEADER: &str = "authorization";
-const CLIENT_ID_HEADER: &str = "x-client-id";
-const APP_PLATFORM_HEADER: &str = "x-app-platform";
-const SESSION_EXPIRY_HEADER: &str = "x-session-expires";
-const API_CLIENT_ID_HEADER: &str = "bittery-client-id";
-const API_CLIENT_PLATFORM_HEADER: &str = "bittery-client-platform";
-const API_SESSION_EXPIRY_HEADER: &str = "bittery-session-expires";
+const CLIENT_ID_HEADER: &str = "bittery-client-id";
+const CLIENT_PLATFORM_HEADER: &str = "bittery-client-platform";
+const SESSION_EXPIRY_HEADER: &str = "bittery-session-expires";
 const JWT_ISSUER: &str = "bittery";
 const SIGNUP_VERIFICATION_JWT_AUDIENCE: &str = "bittery-signup-verification";
 const RECOVERY_JWT_AUDIENCE: &str = "bittery-recovery";
@@ -1996,10 +1993,8 @@ pub async fn request_context_middleware(
 ) -> Response {
     let metadata = RequestMetadata {
         auth_token: parse_bearer_token(&request),
-        client_id: header_value(&request, API_CLIENT_ID_HEADER)
-            .or_else(|| header_value(&request, CLIENT_ID_HEADER)),
-        app_platform: header_value(&request, API_CLIENT_PLATFORM_HEADER)
-            .or_else(|| header_value(&request, APP_PLATFORM_HEADER)),
+        client_id: header_value(&request, CLIENT_ID_HEADER),
+        app_platform: header_value(&request, CLIENT_PLATFORM_HEADER),
         user_agent: header_value(&request, "user-agent"),
         ip_address: client_ip_address(&request),
     };
@@ -2024,10 +2019,7 @@ pub async fn request_context_middleware(
         if let Ok(value) = HeaderValue::from_str(&format_rfc3339(session.expires_at)) {
             response
                 .headers_mut()
-                .insert(session_expiry_header_name(), value.clone());
-            response
-                .headers_mut()
-                .insert(api_session_expiry_header_name(), value);
+                .insert(session_expiry_header_name(), value);
         }
     }
 
@@ -3145,10 +3137,6 @@ fn bad_request_handler_error(message: &str) -> AppError {
 
 fn session_expiry_header_name() -> HeaderName {
     HeaderName::from_static(SESSION_EXPIRY_HEADER)
-}
-
-fn api_session_expiry_header_name() -> HeaderName {
-    HeaderName::from_static(API_SESSION_EXPIRY_HEADER)
 }
 
 #[cfg(test)]

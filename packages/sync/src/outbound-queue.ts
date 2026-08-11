@@ -1,4 +1,8 @@
-import type { AppApiClient } from "@bittery/shared/api-client";
+import {
+	ApiError,
+	type AppApiClient,
+	isApiErrorStatus,
+} from "@bittery/shared/api-client";
 import type { SyncStorage } from "./types";
 
 export interface PendingMutation {
@@ -60,29 +64,9 @@ function getLegacyQueueKeyForEmail(email: string): string {
 	return `bittery_pending_mutations_${sanitizeEmailLegacy(email)}`;
 }
 
-function getHttpStatus(error: unknown): number | null {
-	if (!error || typeof error !== "object") {
-		return null;
-	}
-
-	const maybeStatus = (error as { status?: unknown }).status;
-	if (typeof maybeStatus === "number") {
-		return maybeStatus;
-	}
-
-	const maybeDataStatus = (error as { data?: { httpStatus?: unknown } }).data
-		?.httpStatus;
-	if (typeof maybeDataStatus === "number") {
-		return maybeDataStatus;
-	}
-
-	return null;
-}
-
 function isNetworkError(error: unknown): boolean {
-	const status = getHttpStatus(error);
-	if (status !== null) {
-		return status >= 500;
+	if (error instanceof ApiError) {
+		return error.status >= 500;
 	}
 
 	const message = error instanceof Error ? error.message : String(error ?? "");
@@ -439,18 +423,16 @@ export class OutboundQueue {
 					await this.persistQueue(accountId);
 					this.emit();
 				} catch (error) {
-					const status = getHttpStatus(error);
-
-					if (status === 409 || status === 412) {
+					if (isApiErrorStatus(error, 409) || isApiErrorStatus(error, 412)) {
 						mutation.retryCount += 1;
 						await this.persistQueue(accountId);
 						this.emit();
 						break;
 					}
 
-					if (status === 400 || status === 404) {
+					if (isApiErrorStatus(error, 400) || isApiErrorStatus(error, 404)) {
 						console.warn(
-							`[OutboundQueue] Discarding mutation ${mutation.id} (${mutation.type}) due to ${status}`,
+							`[OutboundQueue] Discarding mutation ${mutation.id} (${mutation.type}) due to ${error.status}`,
 						);
 						queue.shift();
 						await this.persistQueue(accountId);

@@ -1,5 +1,6 @@
 import { invalidateAccountSession } from "@bittery/core/services/account-lifecycle";
 import { m } from "@bittery/i18n/paraglide/messages";
+import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { toast } from "@bittery/ui";
@@ -23,15 +24,6 @@ function resolveFallbackServerUrl(): string {
 const fallbackServerUrl = resolveFallbackServerUrl();
 
 let isHandlingAuthError = false;
-
-function isUnauthorizedApiError(error: unknown): boolean {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		"status" in error &&
-		(error as { status?: unknown }).status === 401
-	);
-}
 
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;

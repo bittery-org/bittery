@@ -10,6 +10,7 @@ import { handleTravelModeSyncEvent } from "@bittery/core/services/travel-mode-sy
 import { createVaultCrypto } from "@bittery/core/services/vault-crypto";
 import { getOrCreateVaultRepositoryCoordinator } from "@bittery/core/services/vault-repository-coordinator";
 import type { ApiVaultClient } from "@bittery/core/services/vault-service";
+import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type {
 	OutboundQueueApiClient,
@@ -132,15 +133,6 @@ class TauriSyncStorage implements SyncStorage {
 }
 
 const SESSION_REVALIDATION_INTERVAL_MS = 5 * 60 * 1000;
-
-function isUnauthorizedApiError(error: unknown): boolean {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		"status" in error &&
-		(error as { status?: unknown }).status === 401
-	);
-}
 
 /**
  * Desktop-specific sync hook that integrates with Tauri storage

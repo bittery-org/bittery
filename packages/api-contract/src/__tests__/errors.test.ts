@@ -1,7 +1,28 @@
 import { describe, expect, test } from "bun:test";
-import { normalizeApiError } from "../errors.ts";
+import {
+	ApiError,
+	isApiErrorStatus,
+	isUnauthorizedApiError,
+	normalizeApiError,
+} from "../errors.ts";
 
 describe("API problem errors", () => {
+	test("classifies API error statuses without accepting lookalikes", () => {
+		const error = new ApiError(
+			{
+				type: "https://bittery.com/problems/authentication-required",
+				title: "Authentication required",
+				status: 401,
+				code: "AUTHENTICATION_REQUIRED",
+			},
+			null,
+		);
+
+		expect(isApiErrorStatus(error, 401)).toBe(true);
+		expect(isUnauthorizedApiError(error)).toBe(true);
+		expect(isApiErrorStatus({ status: 401 }, 401)).toBe(false);
+	});
+
 	test("normalizes a valid RFC 9457 response", async () => {
 		const error = await normalizeApiError(
 			new Response(

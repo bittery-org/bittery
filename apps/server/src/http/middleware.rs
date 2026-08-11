@@ -205,8 +205,8 @@ fn parse_tracestate_member_count(value: &str) -> Option<usize> {
 
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
 const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
-const ALLOW_HEADERS: &str = "Content-Type, Authorization, X-Client-Id, X-App-Platform, Bittery-Client-Id, Bittery-Client-Platform, Bittery-Client-Version, Idempotency-Key, Traceparent, Tracestate, If-Match, If-None-Match";
-const EXPOSE_HEADERS: &str = "X-Session-Expires, Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After, Idempotency-Replayed";
+const ALLOW_HEADERS: &str = "Content-Type, Authorization, Bittery-Client-Id, Bittery-Client-Platform, Bittery-Client-Version, Idempotency-Key, Traceparent, Tracestate, If-Match, If-None-Match";
+const EXPOSE_HEADERS: &str = "Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After, Idempotency-Replayed";
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
 const SECURITY_HEADERS: [(HeaderName, HeaderValue); 6] = [
     (

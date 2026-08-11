@@ -1,5 +1,6 @@
 import { m } from "@bittery/i18n/paraglide/messages";
 import { ApiProvider } from "@bittery/shared/api";
+import { isUnauthorizedApiError } from "@bittery/shared/api-client";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { getOrCreateClientId } from "@bittery/sync";
 import { toast } from "@bittery/ui";
@@ -21,15 +22,6 @@ import { SyncProvider } from "./providers/sync-provider";
 import { routeTree } from "./routeTree.gen";
 
 let isHandlingAuthError = false;
-
-function isUnauthorizedApiError(error: unknown): boolean {
-	return (
-		typeof error === "object" &&
-		error !== null &&
-		"status" in error &&
-		error.status === 401
-	);
-}
 
 function handleUnauthorizedError() {
 	if (isHandlingAuthError) return;

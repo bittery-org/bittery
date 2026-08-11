@@ -24,13 +24,14 @@ export {
 	ApiError,
 	type ApiProblem,
 	type ApiProblemFieldError,
+	isApiErrorStatus,
+	isUnauthorizedApiError,
 	normalizeApiError,
 } from "./errors.ts";
 export type {
 	AcceptTeamInvitationResponse,
 	AddVaultMemberInput,
 	ApiPageRequest,
-	ApiReadOptions,
 	ApiResult,
 	ApiWriteOptions,
 	Attachment,
@@ -139,6 +140,10 @@ export type {
 	VerifySignupVerificationInput,
 	VerifySignupVerificationResponse,
 } from "./facade-types.ts";
+export {
+	classifyHttpServerUrl,
+	type HttpServerUrlClassification,
+} from "./transport.ts";
 export {
 	ApiValueValidationError,
 	parseDecimalString,

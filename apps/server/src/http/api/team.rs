@@ -564,14 +564,6 @@ fn rotations(values: Vec<RotationVaultRequest>) -> Vec<team::RotationVaultInput>
         .collect()
 }
 
-fn client_id(request: &AuthenticatedRequest) -> Option<String> {
-    request
-        .metadata
-        .client_id
-        .clone()
-        .or_else(|| request.session.client_id.clone())
-}
-
 #[utoipa::path(get, path = "/teams/current", operation_id = "getCurrentTeam", tag = "teams", responses((status = 200, body = TeamSummaryResponse), TeamErrorResponses))]
 async fn current_team(
     State(state): State<AppState>,
@@ -735,11 +727,11 @@ async fn leave_team(
     let response = team::leave_team(
         db_pool(&state)?,
         &request.session.user_id,
-        client_id(&request).as_deref(),
+        request.effective_client_id().as_deref(),
         team::LeaveTeamInput {
             team_id,
             vault_rotations: rotations(body.vault_rotations),
-            client_id: client_id(&request),
+            client_id: request.effective_client_id(),
         },
     )
     .await
@@ -1039,12 +1031,12 @@ async fn remove_member(
     let response = member_handlers::remove_team_member(
         db_pool(&state)?,
         &request.session.user_id,
-        client_id(&request).as_deref(),
+        request.effective_client_id().as_deref(),
         team::RemoveTeamMemberInput {
             team_id,
             user_id,
             vault_rotations: rotations(body.vault_rotations),
-            client_id: client_id(&request),
+            client_id: request.effective_client_id(),
         },
     )
     .await

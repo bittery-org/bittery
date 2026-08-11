@@ -10,7 +10,6 @@ import type {
 	AddVaultMemberInput,
 	ApiPage,
 	ApiPageRequest,
-	ApiReadOptions,
 	ApiResult,
 	ApiWriteOptions,
 	Attachment,
@@ -473,23 +472,6 @@ export interface ApiClient {
 		list(
 			input?: Final.AuditEventsRequest,
 		): Promise<ApiResult<Final.AuditEvents>>;
-	};
-	readonly cache: {
-		vaults: { list(): ApiReadOptions<ApiResult<readonly Vault[]>> };
-		items: {
-			get(itemId: string): ApiReadOptions<ApiResult<VaultItemDetails>>;
-			listInVault(
-				vaultId: string,
-				page?: ApiPageRequest,
-			): ApiReadOptions<ApiResult<readonly VaultItem[]>>;
-		};
-		sync: {
-			changes(input?: {
-				sinceId?: string;
-				vaultIds?: readonly string[];
-				limit?: number;
-			}): ApiReadOptions<ApiResult<SyncChanges>>;
-		};
 	};
 }
 
@@ -1324,37 +1306,6 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 		audit: {
 			list: (input) =>
 				call("GET", "/api/v1/audit-events", { params: { query: input } }),
-		},
-		cache: {
-			vaults: {
-				list: () => ({
-					queryKey: ["api", "v1", "vaults"] as const,
-					queryFn: () => client.vaults.list(),
-				}),
-			},
-			items: {
-				get: (itemId) => ({
-					queryKey: ["api", "v1", "items", itemId] as const,
-					queryFn: () => client.items.get(itemId),
-				}),
-				listInVault: (vaultId, page) => ({
-					queryKey: [
-						"api",
-						"v1",
-						"vaults",
-						vaultId,
-						"items",
-						page ?? {},
-					] as const,
-					queryFn: () => client.items.listInVault(vaultId, page),
-				}),
-			},
-			sync: {
-				changes: (input) => ({
-					queryKey: ["api", "v1", "sync", "changes", input ?? {}] as const,
-					queryFn: () => client.sync.changes(input),
-				}),
-			},
 		},
 	};
 

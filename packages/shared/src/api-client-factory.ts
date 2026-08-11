@@ -29,8 +29,6 @@ export interface AccountSessionRefreshOptions {
 	getInsecureTransportConfirmed?: () => Promise<boolean>;
 }
 
-const clientCache = new Map<string, AppApiClient>();
-
 function getRuntimeClientId(): string | undefined {
 	const globalClientId = (globalThis as { __BITTERY_SYNC_CLIENT_ID__?: string })
 		.__BITTERY_SYNC_CLIENT_ID__;
@@ -114,16 +112,6 @@ function resolveServerUrl(serverUrl?: string | null): string {
 	return normalized;
 }
 
-function cacheKey(
-	authToken: string | null,
-	serverUrl: string,
-	clientId: string,
-	mode: "static" | "session-refresh",
-	insecureTransportConfirmed?: boolean,
-): string {
-	return `${serverUrl}:${authToken ?? ""}:${clientId}:${mode}:${insecureTransportConfirmed === true}`;
-}
-
 export function createAccountApiClient(
 	authToken: string,
 	serverUrl?: string | null,
@@ -139,18 +127,7 @@ export function createAccountApiClient(
 		metadata?.clientPlatform ?? sessionRefresh?.appPlatform,
 	);
 	const clientVersion = getClientVersion(metadata?.clientVersion);
-	const mode = sessionRefresh ? "session-refresh" : "static";
-	const key = cacheKey(
-		authToken,
-		resolvedServerUrl,
-		resolvedClientId,
-		mode,
-		insecureTransportConfirmed,
-	);
-	const cached = clientCache.get(key);
-	if (cached) return cached;
-
-	const client = sessionRefresh
+	return sessionRefresh
 		? createSessionRefreshingApiClient({
 				defaultServerUrl: resolvedServerUrl,
 				getAccountSnapshot: async (originAccountId) => {
@@ -188,43 +165,6 @@ export function createAccountApiClient(
 					version: clientVersion,
 				}),
 			});
-
-	clientCache.set(key, client);
-	return client;
-}
-
-export function clearAccountApiClient(
-	authToken: string,
-	serverUrl?: string | null,
-	clientId?: string,
-	metadata?: AccountApiClientMetadataOptions,
-) {
-	const insecureTransportConfirmed =
-		metadata?.insecureTransportConfirmed === true;
-	const resolvedServerUrl = resolveServerUrl(serverUrl);
-	const resolvedClientId = resolveClientId(clientId);
-	clientCache.delete(
-		cacheKey(
-			authToken,
-			resolvedServerUrl,
-			resolvedClientId,
-			"static",
-			insecureTransportConfirmed,
-		),
-	);
-	clientCache.delete(
-		cacheKey(
-			authToken,
-			resolvedServerUrl,
-			resolvedClientId,
-			"session-refresh",
-			insecureTransportConfirmed,
-		),
-	);
-}
-
-export function clearApiClientCache() {
-	clientCache.clear();
 }
 
 export function createApiClientForServer(
@@ -236,17 +176,7 @@ export function createApiClientForServer(
 		metadata?.insecureTransportConfirmed === true;
 	const resolvedServerUrl = resolveServerUrl(serverUrl);
 	const resolvedClientId = resolveClientId(clientId);
-	const key = cacheKey(
-		null,
-		resolvedServerUrl,
-		resolvedClientId,
-		"static",
-		insecureTransportConfirmed,
-	);
-	const cached = clientCache.get(key);
-	if (cached) return cached;
-
-	const client = createAppApiClient({
+	return createAppApiClient({
 		serverUrl: resolvedServerUrl,
 		authorizeInsecureTransport: () =>
 			resolveInsecureTransportPolicy({
@@ -260,8 +190,6 @@ export function createApiClientForServer(
 			version: getClientVersion(metadata?.clientVersion),
 		}),
 	});
-	clientCache.set(key, client);
-	return client;
 }
 
 export async function createAllAccountApiClients(

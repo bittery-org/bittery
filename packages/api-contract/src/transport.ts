@@ -10,6 +10,13 @@ export interface InsecureTransportPolicy {
 	accountConfirmed: boolean;
 }
 
+export interface HttpServerUrlClassification {
+	url: URL;
+	isLoopback: boolean;
+	isRemoteHttp: boolean;
+	shouldInferHttp: boolean;
+}
+
 export interface ApiClientMetadata {
 	id: string;
 	platform: ApiClientPlatform;
@@ -146,20 +153,33 @@ function isLoopbackHostname(hostname: string): boolean {
 	);
 }
 
+export function classifyHttpServerUrl(
+	value: string,
+): HttpServerUrlClassification {
+	const url = new URL(value);
+	if (url.protocol !== "http:" && url.protocol !== "https:") {
+		throw new TypeError("Server URL must use HTTP or HTTPS.");
+	}
+
+	const isLoopback = isLoopbackHostname(url.hostname);
+	return {
+		url,
+		isLoopback,
+		isRemoteHttp: url.protocol === "http:" && !isLoopback,
+		shouldInferHttp: isLoopback || url.hostname === "0.0.0.0",
+	};
+}
+
 function normalizeBaseUrl(
 	value: string,
 	insecureTransport?: InsecureTransportPolicy,
 ): string {
-	const url = new URL(value);
-	if (url.protocol !== "http:" && url.protocol !== "https:") {
-		throw new TypeError("API base URL must use HTTP or HTTPS.");
-	}
+	const { url, isRemoteHttp } = classifyHttpServerUrl(value);
 	if (url.search || url.hash) {
 		throw new TypeError("API base URL must not include a query or fragment.");
 	}
 	if (
-		url.protocol === "http:" &&
-		!isLoopbackHostname(url.hostname) &&
+		isRemoteHttp &&
 		!(insecureTransport?.operatorEnabled && insecureTransport.accountConfirmed)
 	) {
 		throw new TypeError(

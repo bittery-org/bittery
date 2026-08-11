@@ -120,7 +120,9 @@ function createAuthClient(
 ): IAuthClient {
 	return {
 		auth: {
-			checkEmail: mock(async () => ({ data: { exists: true } })),
+			checkEmail: mock(async () => ({
+				data: { exists: true },
+			})),
 			startLogin: mock(async ({ email }) => {
 				startedEmails.push(email);
 				return {
@@ -137,11 +139,14 @@ function createAuthClient(
 					token,
 					serverProof: "server-proof",
 					user: { id: "user-new", email: "same@example.com" },
-					expiresAt: new Date(Date.now() + 60_000),
+					expiresAt: new Date(Date.now() + 60_000).toISOString(),
+					vaultKeys: { items: [], hasMore: false },
 				},
 			})),
+			drainVaultKeys: mock(async (_token, initialPage) => ({
+				data: initialPage.items,
+			})),
 		},
-		vaults: { list: mock(async () => ({ data: [] })) },
 	};
 }
 
@@ -201,7 +206,6 @@ describe("account-routed authentication", () => {
 			await storage.storePinnedKdfProfile(kdfParams, metadata.accountId);
 		}
 
-		const clientAccountIds: string[] = [];
 		const startedEmails: string[] = [];
 		const getPinnedKdfProfile = spyOn(storage, "getPinnedKdfProfile");
 		const { crypto, derivations } = createRecordingCryptoPort();
@@ -212,10 +216,7 @@ describe("account-routed authentication", () => {
 				{
 					crypto,
 					storage,
-					createAuthClientForAccount: async (resolvedAccountId) => {
-						clientAccountIds.push(resolvedAccountId);
-						return createAuthClient(startedEmails);
-					},
+					apiClient: createAuthClient(startedEmails),
 				},
 			);
 		}
@@ -232,7 +233,6 @@ describe("account-routed authentication", () => {
 			["account-b"],
 			["account-b"],
 		]);
-		expect(clientAccountIds).toEqual(["account-a", "account-b"]);
 		expect(startedEmails).toEqual(["same@example.com", "same@example.com"]);
 	});
 
@@ -252,8 +252,6 @@ describe("account-routed authentication", () => {
 		};
 		const startedEmails: string[] = [];
 		const handshakeClient = createAuthClient(startedEmails, "self-token");
-		const authenticatedClient = createAuthClient([], "self-token");
-
 		const result = await performSRPLogin(
 			{
 				email: "same@example.com",
@@ -263,13 +261,8 @@ describe("account-routed authentication", () => {
 			},
 			{
 				crypto,
-				authClient: handshakeClient,
+				apiClient: handshakeClient,
 				storage,
-				createAuthenticatedClient: (token, serverUrl) => {
-					expect(token).toBe("self-token");
-					expect(serverUrl).toBe("https://self-hosted.example");
-					return authenticatedClient;
-				},
 			},
 		);
 
@@ -290,7 +283,7 @@ describe("account-routed authentication", () => {
 				token: "ceremony-token",
 				serverProof: SERVER_PROOF,
 				user: { id: "new-user", email: "new@example.com" },
-				expiresAt: new Date(Date.now() + 60_000),
+				expiresAt: new Date(Date.now() + 60_000).toISOString(),
 				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
 			},
 		}));
@@ -309,7 +302,7 @@ describe("account-routed authentication", () => {
 				serverUrl: "http://server.example/",
 				insecureTransportConfirmed: true,
 			},
-			{ crypto, storage, authClient: handshakeClient },
+			{ crypto, storage, apiClient: handshakeClient },
 		);
 
 		expect(drainedOrigins).toEqual([
@@ -349,8 +342,7 @@ describe("account-routed authentication", () => {
 			{
 				crypto,
 				storage,
-				authClient: createAuthClient([]),
-				createAuthenticatedClient: () => createAuthClient([]),
+				apiClient: createAuthClient([]),
 			},
 		);
 
@@ -378,7 +370,7 @@ describe("account-routed authentication", () => {
 					secretKey: SECRET_KEY,
 					serverUrl: "https://a.example",
 				},
-				{ crypto, storage, authClient: createAuthClient([]) },
+				{ crypto, storage, apiClient: createAuthClient([]) },
 			),
 		).rejects.toThrow("downgraded");
 		expect(derivations).toHaveLength(0);
@@ -402,7 +394,7 @@ describe("account-routed authentication", () => {
 					secretKey: SECRET_KEY,
 					serverUrl: "https://a.example",
 				},
-				{ crypto, storage, authClient: createAuthClient([]) },
+				{ crypto, storage, apiClient: createAuthClient([]) },
 			),
 		).rejects.toThrow("Ambiguous account");
 		expect(derivations).toHaveLength(0);
@@ -438,7 +430,7 @@ describe("KDF agility on unlock", () => {
 			{
 				crypto,
 				storage,
-				createAuthClientForAccount: async () => createAuthClient([]),
+				apiClient: createAuthClient([]),
 			},
 		);
 
@@ -461,7 +453,7 @@ describe("KDF agility on unlock", () => {
 				{
 					crypto,
 					storage,
-					createAuthClientForAccount: async () => createAuthClient([]),
+					apiClient: createAuthClient([]),
 				},
 			),
 		).rejects.toThrow("sign in again");
@@ -484,7 +476,7 @@ describe("KDF agility on unlock", () => {
 				token: "reauth-token",
 				serverProof: SERVER_PROOF,
 				user: { id: "user", email: "same@example.com" },
-				expiresAt: new Date(Date.now() + 60_000),
+				expiresAt: new Date(Date.now() + 60_000).toISOString(),
 				vaultKeys: { items: [], nextCursor: "page-2", hasMore: true },
 			},
 		}));
@@ -500,7 +492,7 @@ describe("KDF agility on unlock", () => {
 			{
 				crypto,
 				storage,
-				createAuthClientForAccount: async () => authClient,
+				apiClient: authClient,
 			},
 		);
 
@@ -523,26 +515,22 @@ describe("KDF agility on unlock", () => {
 		await storage.storeSecretKey("secret", "acct");
 		await storage.storePinnedKdfProfile(pinnedProfile, "acct");
 
-		const authClient = {
-			auth: {
-				startLogin: mock(async () => ({
-					data: {
-						attemptId: "attempt",
-						salt: "srp-salt",
-						serverPublicKey: "server-public",
-						kdfParams: { ...pinnedProfile },
-					},
-				})),
+		const authClient = createAuthClient([]);
+		authClient.auth.startLogin = mock(async () => ({
+			data: {
+				attemptId: "attempt",
+				salt: "srp-salt",
+				serverPublicKey: "server-public",
+				kdfParams: { ...pinnedProfile },
 			},
-			vaults: { list: mock(async () => ({ data: [] })) },
-		} as unknown as IAuthClient;
+		}));
 
 		await deriveSrpLoginProof(
 			{ accountId: "acct", password: "password" },
 			{
 				crypto,
 				storage,
-				createAuthClientForAccount: async () => authClient,
+				apiClient: authClient,
 			},
 		);
 

@@ -1,12 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
-import { clearApiClientCache } from "@bittery/shared/api-client-factory";
 import { loadRecoveredAccountBootstrap } from "./recovery-session";
 
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
 	globalThis.fetch = originalFetch;
-	clearApiClientCache();
 });
 
 test("recovered account bootstrap uses the newly issued session", async () => {

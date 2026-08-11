@@ -96,14 +96,6 @@ enum TravelModeErrorResponses {
     Internal(ProblemDetails),
 }
 
-fn client_id(request: &AuthenticatedRequest) -> Option<String> {
-    request
-        .metadata
-        .client_id
-        .clone()
-        .or_else(|| request.session.client_id.clone())
-}
-
 fn enforce_hidden_vault_limit(hidden_vault_ids: &[String]) -> Result<(), ApiError> {
     if hidden_vault_ids.len() > MAX_HIDDEN_VAULTS {
         return Err(ApiError::bad_request(
@@ -136,7 +128,7 @@ async fn set_hidden_vaults(
     let response = travel_mode::set_travel_mode_hidden_vaults(
         db_pool(&state)?,
         &request.session.user_id,
-        client_id(&request).as_deref(),
+        request.effective_client_id().as_deref(),
         SetTravelModeHiddenVaultsInput {
             hidden_vault_ids: body.hidden_vault_ids,
         },
@@ -156,7 +148,7 @@ async fn enable_travel_mode(
     let response = travel_mode::enable_travel_mode(
         db_pool(&state)?,
         &request.session.user_id,
-        client_id(&request).as_deref(),
+        request.effective_client_id().as_deref(),
         EnableTravelModeInput {
             hidden_vault_ids: body.hidden_vault_ids,
         },
@@ -186,7 +178,7 @@ async fn disable_travel_mode(
     let response = travel_mode::disable_travel_mode(
         pool,
         &request.session.user_id,
-        client_id(&request).as_deref(),
+        request.effective_client_id().as_deref(),
     )
     .await
     .notify_sync(&state)?;

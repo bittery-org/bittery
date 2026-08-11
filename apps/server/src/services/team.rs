@@ -1757,7 +1757,6 @@ fn validate_rotation_vault_inputs(vault_rotations: &[RotationVaultInput]) -> Res
         }
         for member_key in &vault_rotation.key_rotation.member_keys {
             validate_encrypted_vault_key(&member_key.encrypted_vault_key)?;
-            validate_encrypted_vault_key(&member_key.encrypted_vault_key)?;
         }
     }
 

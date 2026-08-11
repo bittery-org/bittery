@@ -37,6 +37,17 @@ export class ApiError extends Error {
 	}
 }
 
+export function isApiErrorStatus(
+	error: unknown,
+	status: number,
+): error is ApiError {
+	return error instanceof ApiError && error.status === status;
+}
+
+export function isUnauthorizedApiError(error: unknown): error is ApiError {
+	return isApiErrorStatus(error, 401);
+}
+
 function string(value: unknown): string | undefined {
 	return typeof value === "string" && value.length > 0 ? value : undefined;
 }

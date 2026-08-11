@@ -25,11 +25,6 @@ export interface ApiPage<T> {
 	hasMore: boolean;
 }
 
-export interface ApiReadOptions<T> {
-	queryKey: readonly unknown[];
-	queryFn: () => Promise<T>;
-}
-
 export type EmailCheckInput = Schema<"EmailCheckRequest">;
 export type EmailCheckResponse = Schema<"EmailCheckResponse">;
 export type RegistrationStatus = Schema<"RegistrationStatusResponse">;

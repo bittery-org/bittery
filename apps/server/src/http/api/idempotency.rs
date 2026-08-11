@@ -16,30 +16,30 @@ const IDEMPOTENCY_KEY: &str = "idempotency-key";
 const IDEMPOTENCY_REPLAYED: &str = "idempotency-replayed";
 
 pub(crate) async fn execute<F, Fut>(
-    pool: &PgPool,
+    pool: PgPool,
     headers: &HeaderMap,
-    principal_id: &str,
+    principal_id: String,
     method: &str,
     route_target: &str,
     request_body: &[u8],
     operation: F,
 ) -> Result<Response, ApiError>
 where
-    F: FnOnce() -> Fut,
+    F: FnOnce(PgPool, String) -> Fut,
     Fut: Future<Output = Result<Response, ApiError>>,
 {
     let Some(key) = idempotency_key(headers)? else {
-        return operation().await;
+        return operation(pool, principal_id).await;
     };
     let fingerprint = request_fingerprint(request_body, headers.get("if-match"));
     let scope = RequestScope {
-        principal_id,
+        principal_id: &principal_id,
         method,
         route_target,
         key: &key,
     };
 
-    match idempotency::claim(pool, &scope, &fingerprint).await? {
+    match idempotency::claim(&pool, &scope, &fingerprint).await? {
         Claim::Replay(stored) => replay(stored),
         Claim::FingerprintMismatch => Err(ApiError::unprocessable(
             "IDEMPOTENCY_KEY_REUSED",
@@ -54,7 +54,7 @@ where
             "The previous request outcome is unknown and must be verified before operator recovery.",
         )),
         Claim::Execute => {
-            let response = operation()
+            let response = operation(pool.clone(), principal_id.clone())
                 .await
                 .unwrap_or_else(IntoResponse::into_response);
             let (parts, body) = response.into_parts();
@@ -81,7 +81,7 @@ where
                     .and_then(|value| value.to_str().ok())
                     .map(str::to_string),
             };
-            idempotency::complete(pool, &scope, &fingerprint, &stored).await?;
+            idempotency::complete(&pool, &scope, &fingerprint, &stored).await?;
             Ok(Response::from_parts(parts, Body::from(body)))
         }
     }

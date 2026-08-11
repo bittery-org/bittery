@@ -1,4 +1,7 @@
-import type { InsecureTransportPolicy } from "@bittery/api-contract";
+import {
+	classifyHttpServerUrl,
+	type InsecureTransportPolicy,
+} from "@bittery/api-contract";
 
 export const INSECURE_HTTP_CAPABILITY = "insecure-http";
 
@@ -16,31 +19,21 @@ export class InsecureTransportError extends Error {
 }
 
 export function parseServerUrlForDiscovery(value: string): URL {
-	let parsed: URL;
+	let classification: ReturnType<typeof classifyHttpServerUrl>;
 	try {
-		parsed = new URL(value);
+		classification = classifyHttpServerUrl(value);
 	} catch {
 		throw new InsecureTransportError("INVALID_SERVER_URL");
 	}
-	if (
-		(parsed.protocol !== "http:" && parsed.protocol !== "https:") ||
-		parsed.search ||
-		parsed.hash
-	) {
+	if (classification.url.search || classification.url.hash) {
 		throw new InsecureTransportError("INVALID_SERVER_URL");
 	}
-	return parsed;
+	return classification.url;
 }
 
 export function isRemoteHttpServer(value: string): boolean {
-	const parsed = parseServerUrlForDiscovery(value);
-	const hostname = parsed.hostname.toLowerCase();
-	const loopback =
-		hostname === "localhost" ||
-		hostname === "::1" ||
-		hostname === "[::1]" ||
-		/^127(?:\.\d{1,3}){3}$/.test(hostname);
-	return parsed.protocol === "http:" && !loopback;
+	return classifyHttpServerUrl(parseServerUrlForDiscovery(value).toString())
+		.isRemoteHttp;
 }
 
 export async function resolveInsecureTransportPolicy(options: {

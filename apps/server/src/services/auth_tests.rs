@@ -1118,12 +1118,12 @@ async fn auth_session_management_and_account_deletion_flow() {
 fn header_helpers_trim_values_and_extract_bearer_tokens() {
     let request = Request::builder()
         .header(AUTHORIZATION, "  bearer session-token  ")
-        .header("x-client-id", "  browser-1  ")
+        .header("bittery-client-id", "  browser-1  ")
         .body(Body::empty())
         .expect("request should build");
 
     assert_eq!(
-        header_value(&request, "x-client-id").as_deref(),
+        header_value(&request, "bittery-client-id").as_deref(),
         Some("browser-1")
     );
     assert_eq!(
@@ -1139,12 +1139,12 @@ fn header_helpers_trim_values_and_extract_bearer_tokens() {
 
     let invalid_header = Request::builder()
         .header(
-            "x-client-id",
+            "bittery-client-id",
             HeaderValue::from_bytes(&[0xff]).expect("header value should build"),
         )
         .body(Body::empty())
         .expect("request should build");
-    assert_eq!(header_value(&invalid_header, "x-client-id"), None);
+    assert_eq!(header_value(&invalid_header, "bittery-client-id"), None);
 }
 
 #[test]
@@ -1495,8 +1495,14 @@ where
 fn unauthenticated_json_headers() -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert("x-app-platform", HeaderValue::from_static("desktop"));
-    headers.insert("x-client-id", HeaderValue::from_static("integration-test"));
+    headers.insert(
+        "bittery-client-platform",
+        HeaderValue::from_static("desktop"),
+    );
+    headers.insert(
+        "bittery-client-id",
+        HeaderValue::from_static("integration-test"),
+    );
     headers
 }
 

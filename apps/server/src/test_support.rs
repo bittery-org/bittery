@@ -498,8 +498,14 @@ fn next_test_client_id() -> u64 {
 pub(crate) fn authenticated_json_headers(token: &str) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-    headers.insert("x-app-platform", HeaderValue::from_static("desktop"));
-    headers.insert("x-client-id", HeaderValue::from_static("integration-test"));
+    headers.insert(
+        "bittery-client-platform",
+        HeaderValue::from_static("desktop"),
+    );
+    headers.insert(
+        "bittery-client-id",
+        HeaderValue::from_static("integration-test"),
+    );
     headers.insert(
         AUTHORIZATION,
         HeaderValue::from_str(&format!("Bearer {token}"))

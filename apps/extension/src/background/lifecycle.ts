@@ -9,32 +9,12 @@
  * or run work at module scope beyond building the object.
  */
 
-import type {
-	CredentialMirror,
-	LifecycleDeps,
-} from "@bittery/core/services/account-lifecycle";
-import { clearAccountApiClient } from "@bittery/shared/api-client-factory";
+import type { LifecycleDeps } from "@bittery/core/services/account-lifecycle";
+import { NO_CREDENTIAL_MIRROR } from "@bittery/core/services/account-lifecycle";
 import { itemCache, storage } from "../lib/storage";
-
-/**
- * The extension keeps no MUK mirror outside `AccountStore`, but the shared API
- * client cache holds live clients bound to the bearer token — dropping the token
- * without dropping the client leaves a cached client still sending a revoked
- * credential.
- */
-const apiClientCacheMirror: CredentialMirror = {
-	async purge(refs) {
-		for (const ref of refs) {
-			if (!ref.authToken) {
-				continue;
-			}
-			clearAccountApiClient(ref.authToken, ref.serverUrl);
-		}
-	},
-};
 
 export const lifecycleDeps: LifecycleDeps = {
 	storage,
 	itemCache,
-	credentialMirror: apiClientCacheMirror,
+	credentialMirror: NO_CREDENTIAL_MIRROR,
 };

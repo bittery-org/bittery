@@ -170,6 +170,15 @@ pub(crate) struct AuthenticatedRequest {
     pub(crate) metadata: RequestMetadata,
 }
 
+impl AuthenticatedRequest {
+    pub(crate) fn effective_client_id(&self) -> Option<String> {
+        self.metadata
+            .client_id
+            .clone()
+            .or_else(|| self.session.client_id.clone())
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct PublicRequest {
     pub(crate) metadata: RequestMetadata,

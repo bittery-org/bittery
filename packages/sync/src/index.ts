@@ -25,7 +25,6 @@ export {
 	createQueryInvalidator,
 	getQueryKeysForEvent,
 	invalidateQueriesForEvent,
-	syncApiQueryKeys,
 } from "./query-invalidation";
 // Core sync functionality
 export { createSyncManager, SyncManager } from "./sync-manager";

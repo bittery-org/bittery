@@ -96,11 +96,8 @@ mock.module("@bittery/sync", () => ({
 	},
 }));
 
-mock.module("@bittery/shared/api-client-factory", () => ({
-	clearAccountApiClient: () => {},
-}));
-
 mock.module("@bittery/core/services/account-lifecycle", () => ({
+	NO_CREDENTIAL_MIRROR: { purge: async () => {} },
 	lockAllAccounts: async () => {
 		lockAllCalls++;
 		return outcome([]);

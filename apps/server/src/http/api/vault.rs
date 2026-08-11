@@ -956,13 +956,6 @@ impl From<vault::VaultItemDetailsResponse> for ItemResponseDto {
     }
 }
 
-fn request_client_id(auth: &AuthenticatedRequest) -> Option<String> {
-    auth.metadata
-        .client_id
-        .clone()
-        .or_else(|| auth.session.client_id.clone())
-}
-
 fn check_ciphertext(value: &str) -> Result<(), ApiError> {
     if value.len() > ITEM_CIPHERTEXT_BYTES as usize {
         Err(ApiError::payload_too_large(format!(
@@ -1188,7 +1181,7 @@ async fn create_vault(
     let result = vault::create_vault(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::CreateVaultInput {
             vault_id: Some(vault_id),
             name: body.name,
@@ -1196,7 +1189,7 @@ async fn create_vault(
             encrypted_vault_key: body.encrypted_vault_key,
             icon: body.icon,
             image_key: body.image_key,
-            client_id: request_client_id(&auth),
+            client_id: auth.effective_client_id(),
         },
     )
     .await
@@ -1218,13 +1211,13 @@ async fn update_vault(
     let result = vault::update_vault(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::UpdateVaultInput {
             vault_id,
             name,
             icon,
             image_key,
-            client_id: request_client_id(&auth),
+            client_id: auth.effective_client_id(),
         },
     )
     .await
@@ -1243,12 +1236,12 @@ async fn convert_vault(
     let result = vault::convert_vault_type(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::ConvertVaultTypeInput {
             vault_id,
             target_type: body.target_type,
             personal_encrypted_vault_key: body.personal_encrypted_vault_key,
-            client_id: request_client_id(&auth),
+            client_id: auth.effective_client_id(),
         },
     )
     .await
@@ -1266,7 +1259,7 @@ async fn delete_vault(
     let result = vault::delete_vault(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::VaultIdInput { vault_id },
     )
     .await
@@ -1510,19 +1503,16 @@ async fn create_item(
 ) -> Result<Response, ApiError> {
     check_ciphertext(&body.encrypted_data)?;
     let pool = db_pool(&state)?.clone();
-    let operation_pool = pool.clone();
-    let principal_id = auth.session.user_id.clone();
-    let operation_principal_id = principal_id.clone();
-    let client_id = request_client_id(&auth);
+    let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/vaults/{vault_id}/items/{item_id}");
     idempotency::execute(
-        &pool,
+        pool,
         &headers,
-        &principal_id,
+        auth.session.user_id.clone(),
         "PUT",
         &route_target,
         &bytes,
-        || async move {
+        |operation_pool, operation_principal_id| async move {
             let result = vault::create_vault_item(
                 &operation_pool,
                 &operation_principal_id,
@@ -1558,7 +1548,7 @@ async fn bulk_import_items(
         &auth.session.user_id,
         vault::BulkImportItemsInput {
             vault_id,
-            client_id: request_client_id(&auth),
+            client_id: auth.effective_client_id(),
             items: body.items.into_iter().map(Into::into).collect(),
         },
     )
@@ -1587,19 +1577,16 @@ async fn update_item(
         check_ciphertext(value)?;
     }
     let pool = db_pool(&state)?.clone();
-    let operation_pool = pool.clone();
-    let principal_id = auth.session.user_id.clone();
-    let operation_principal_id = principal_id.clone();
-    let client_id = request_client_id(&auth);
+    let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}");
     idempotency::execute(
-        &pool,
+        pool,
         &headers,
-        &principal_id,
+        auth.session.user_id.clone(),
         "PATCH",
         &route_target,
         &bytes,
-        || async move {
+        |operation_pool, operation_principal_id| async move {
             let result = vault::update_vault_item(
                 &operation_pool,
                 &operation_principal_id,
@@ -1635,18 +1622,15 @@ async fn set_favorite(
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let pool = db_pool(&state)?.clone();
-    let operation_pool = pool.clone();
-    let principal_id = auth.session.user_id.clone();
-    let operation_principal_id = principal_id.clone();
     let route_target = format!("/api/v1/items/{item_id}/favorite");
     idempotency::execute(
-        &pool,
+        pool,
         &headers,
-        &principal_id,
+        auth.session.user_id.clone(),
         "PATCH",
         &route_target,
         &bytes,
-        || async move {
+        |operation_pool, operation_principal_id| async move {
             let result = vault::toggle_vault_favorite(
                 &operation_pool,
                 &operation_principal_id,
@@ -1674,19 +1658,16 @@ async fn delete_item(
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let pool = db_pool(&state)?.clone();
-    let operation_pool = pool.clone();
-    let principal_id = auth.session.user_id.clone();
-    let operation_principal_id = principal_id.clone();
-    let client_id = request_client_id(&auth);
+    let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}");
     idempotency::execute(
-        &pool,
+        pool,
         &headers,
-        &principal_id,
+        auth.session.user_id.clone(),
         "DELETE",
         &route_target,
         &[],
-        || async move {
+        |operation_pool, operation_principal_id| async move {
             let result = vault::delete_vault_item(
                 &operation_pool,
                 &operation_principal_id,
@@ -1714,19 +1695,16 @@ async fn restore_item(
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let pool = db_pool(&state)?.clone();
-    let operation_pool = pool.clone();
-    let principal_id = auth.session.user_id.clone();
-    let operation_principal_id = principal_id.clone();
-    let client_id = request_client_id(&auth);
+    let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}/restore");
     idempotency::execute(
-        &pool,
+        pool,
         &headers,
-        &principal_id,
+        auth.session.user_id.clone(),
         "POST",
         &route_target,
         &[],
-        || async move {
+        |operation_pool, operation_principal_id| async move {
             let result = vault::restore_vault_item(
                 &operation_pool,
                 &operation_principal_id,
@@ -1756,19 +1734,16 @@ async fn move_item(
     let expected_version = required_item_version(&headers)?;
     check_ciphertext(&body.encrypted_data)?;
     let pool = db_pool(&state)?.clone();
-    let operation_pool = pool.clone();
-    let principal_id = auth.session.user_id.clone();
-    let operation_principal_id = principal_id.clone();
-    let client_id = request_client_id(&auth);
+    let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}/moves");
     idempotency::execute(
-        &pool,
+        pool,
         &headers,
-        &principal_id,
+        auth.session.user_id.clone(),
         "POST",
         &route_target,
         &bytes,
-        || async move {
+        |operation_pool, operation_principal_id| async move {
             let result = vault::move_vault_item(
                 &operation_pool,
                 &operation_principal_id,
@@ -1802,19 +1777,16 @@ async fn permanently_delete_item(
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let pool = db_pool(&state)?.clone();
-    let operation_pool = pool.clone();
-    let principal_id = auth.session.user_id.clone();
-    let operation_principal_id = principal_id.clone();
-    let client_id = request_client_id(&auth);
+    let client_id = auth.effective_client_id();
     let route_target = format!("/api/v1/items/{item_id}/permanent");
     idempotency::execute(
-        &pool,
+        pool,
         &headers,
-        &principal_id,
+        auth.session.user_id.clone(),
         "DELETE",
         &route_target,
         &[],
-        || async move {
+        |operation_pool, operation_principal_id| async move {
             let result = vault::permanently_delete_vault_item(
                 &operation_pool,
                 &operation_principal_id,
@@ -1881,7 +1853,7 @@ async fn create_attachment(
     let result = vault::create_vault_attachment(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::CreateAttachmentInput {
             item_id,
             storage_key: body.storage_key,
@@ -1959,7 +1931,7 @@ async fn update_attachment(
     let result = vault::update_vault_attachment(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::UpdateAttachmentInput {
             attachment_id,
             encrypted_name: body.encrypted_name,
@@ -1982,7 +1954,7 @@ async fn delete_attachment(
     let result = vault::delete_vault_attachment(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::AttachmentIdInput { attachment_id },
     )
     .await
@@ -2055,13 +2027,13 @@ async fn add_member(
     let result = vault::member_handlers::add_vault_member(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::AddVaultMemberInput {
             vault_id,
             user_id,
             role: body.role,
             encrypted_vault_key: body.encrypted_vault_key,
-            client_id: request_client_id(&auth),
+            client_id: auth.effective_client_id(),
         },
     )
     .await
@@ -2123,12 +2095,12 @@ async fn remove_member(
     let result = vault::member_handlers::remove_vault_member(
         pool,
         &auth.session.user_id,
-        request_client_id(&auth).as_deref(),
+        auth.effective_client_id().as_deref(),
         vault::RemoveVaultMemberInput {
             vault_id,
             user_id,
             key_rotation: body.key_rotation.into(),
-            client_id: request_client_id(&auth),
+            client_id: auth.effective_client_id(),
         },
     )
     .await

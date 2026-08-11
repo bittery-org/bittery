@@ -6,6 +6,7 @@
 
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import { m } from "@bittery/i18n/paraglide/messages";
+import type { AppApiClient } from "@bittery/shared/api-client";
 import {
 	createAccountApiClient,
 	getDefaultServerUrl,
@@ -13,9 +14,7 @@ import {
 import { validateKdfProfileOrThrow } from "@bittery/shared/kdf-policy";
 import {
 	type ServerAuthVaultKeyEntry,
-	type ServerVaultListEntry,
 	toAuthVaultKeyEntry,
-	toVaultKeyEntry,
 } from "@bittery/shared/vault-mapping";
 import type { AccountStore, ItemCache, VaultKeyData } from "@bittery/storage";
 import {
@@ -130,21 +129,6 @@ export interface SrpLoginProof {
 	clientProof: string;
 }
 
-/**
- * User data returned from login
- */
-export interface LoginUserData {
-	id: string;
-	email: string;
-	name?: string;
-	teamName?: string;
-	teamAvatarUrl?: string | null;
-	encryptedPrivateKey?: string;
-}
-
-/**
- * Result from successful login
- */
 export interface LoginResult {
 	token: string;
 	sessionId?: string;
@@ -177,14 +161,6 @@ export interface UnlockResult {
 }
 
 /**
- * Result from email check
- */
-export interface CheckEmailResult {
-	exists: boolean;
-	secretKeyHint?: string | null;
-}
-
-/**
  * Session state information
  */
 export interface SessionState {
@@ -204,9 +180,41 @@ export interface SessionState {
 	expiresAt: number | null;
 }
 
-/**
- * Start login response (SRP challenge)
- */
+/** The React-free auth surface needed by login and unlock ceremonies. */
+type AuthClientMethods = Pick<
+	AppApiClient["auth"],
+	"checkEmail" | "startLogin" | "finishLogin" | "drainVaultKeys"
+>;
+
+type ApiResponse<T> = { data: T };
+
+export interface IAuthClient {
+	auth: {
+		checkEmail(
+			input: Parameters<AuthClientMethods["checkEmail"]>[0],
+		): Promise<ApiResponse<CheckEmailResult>>;
+		startLogin(
+			input: Parameters<AuthClientMethods["startLogin"]>[0],
+		): Promise<ApiResponse<StartLoginResponse>>;
+		finishLogin(
+			attemptId: Parameters<AuthClientMethods["finishLogin"]>[0],
+			input: Parameters<AuthClientMethods["finishLogin"]>[1],
+		): Promise<ApiResponse<FinishLoginResponse>>;
+		drainVaultKeys(
+			accessToken: Parameters<AuthClientMethods["drainVaultKeys"]>[0],
+			initialPage: FinishLoginResponse["vaultKeys"],
+			requestOrigin: Parameters<AuthClientMethods["drainVaultKeys"]>[2],
+		): Promise<ApiResponse<readonly ServerAuthVaultKeyEntry[]>>;
+	};
+}
+
+/** Result from email check. */
+export interface CheckEmailResult {
+	exists: boolean;
+	secretKeyHint?: string | null;
+}
+
+/** Start login response (SRP challenge). */
 export interface StartLoginResponse {
 	attemptId: string;
 	salt: string;
@@ -218,78 +226,42 @@ export interface StartLoginResponse {
 	};
 }
 
-/**
- * Finish login response (session data)
- */
+/** Finish login response (session data). */
 export interface FinishLoginResponse {
 	token: string;
 	serverProof: string;
 	user: LoginUserData;
 	sessionId?: string;
 	expiresAt: string | Date;
-	vaultKeys?: {
+	vaultKeys: {
 		items: readonly ServerAuthVaultKeyEntry[];
 		nextCursor?: string | null;
 		hasMore: boolean;
 	};
 }
 
-type AuthRequestOrigin =
-	| {
-			kind: "persistedAccount";
-			accountId: string;
-			serverUrl: string;
-	  }
-	| {
-			kind: "authCeremony";
-			serverUrl: string;
-			insecureTransportConfirmed: boolean;
-	  };
+export interface LoginUserData {
+	id: string;
+	email: string;
+	name?: string;
+	teamName?: string;
+	teamAvatarUrl?: string | null;
+	encryptedPrivateKey?: string;
+}
 
-type VaultListEntry = Omit<ServerVaultListEntry, "icon" | "imageUrl"> & {
-	icon?: string | null;
-	imageUrl?: string | null;
+type StartLoginApiClient = {
+	auth: Pick<IAuthClient["auth"], "startLogin">;
 };
 
-type ApiResponse<T> = { data: T };
-
-/** The React-free auth surface needed by login and unlock ceremonies. */
-export interface IAuthClient {
-	auth: {
-		checkEmail(input: {
-			email: string;
-		}): Promise<ApiResponse<CheckEmailResult>>;
-		startLogin(input: {
-			email: string;
-			clientPublicKey: string;
-		}): Promise<ApiResponse<StartLoginResponse>>;
-		finishLogin(
-			attemptId: string,
-			input: {
-				clientPublicKey: string;
-				clientProof: string;
-			},
-		): Promise<ApiResponse<FinishLoginResponse>>;
-		drainVaultKeys?(
-			accessToken: string,
-			initialPage: NonNullable<FinishLoginResponse["vaultKeys"]>,
-			requestOrigin: AuthRequestOrigin,
-		): Promise<ApiResponse<readonly ServerAuthVaultKeyEntry[]>>;
-	};
-	vaults: {
-		list(): Promise<ApiResponse<readonly VaultListEntry[]>>;
-	};
-}
+type AuthRequestOrigin = Parameters<AuthClientMethods["drainVaultKeys"]>[2];
 
 /**
  * Dependencies required for SRP login.
  */
 export interface SRPLoginDeps {
 	crypto: CryptoPort;
-	authClient?: IAuthClient;
-	apiClient?: IAuthClient;
+	apiClient: IAuthClient;
 	storage: AccountStore;
-	createAuthenticatedClient?: (token: string, serverUrl: string) => IAuthClient;
 }
 
 /**
@@ -297,33 +269,34 @@ export interface SRPLoginDeps {
  */
 export interface SRPUnlockDeps {
 	crypto: CryptoPort;
-	authClient?: IAuthClient;
-	apiClient?: IAuthClient;
+	apiClient: IAuthClient;
 	storage: AccountStore;
-	createAuthClientForAccount?: (accountId: string) => Promise<IAuthClient>;
-	createAuthenticatedClient?: (token: string, serverUrl: string) => IAuthClient;
+}
+
+export interface SrpLoginProofDeps {
+	crypto: CryptoPort;
+	apiClient: StartLoginApiClient;
+	storage: AccountStore;
 }
 
 async function resolveAccountAuthClient(
 	accountId: string,
 	deps: SRPUnlockDeps,
 ): Promise<IAuthClient> {
-	if (deps.createAuthClientForAccount) {
-		return deps.createAuthClientForAccount(accountId);
-	}
-	return ((await createStoredAccountApiClient(deps.storage, accountId)) ??
-		resolveAuthClient(deps)) as IAuthClient;
+	return (
+		(await createStoredAccountApiClient(deps.storage, accountId)) ??
+		deps.apiClient
+	);
 }
 
-function resolveAuthClient(deps: {
-	authClient?: IAuthClient;
-	apiClient?: IAuthClient;
-}): IAuthClient {
-	const client = deps.authClient ?? deps.apiClient;
-	if (!client) {
-		throw new Error("Auth client is required");
-	}
-	return client;
+async function resolveStartLoginApiClient(
+	accountId: string,
+	deps: SrpLoginProofDeps,
+): Promise<StartLoginApiClient> {
+	return (
+		(await createStoredAccountApiClient(deps.storage, accountId)) ??
+		deps.apiClient
+	);
 }
 
 function parseEncryptedData(serialized: string | null): EncryptedData | null {
@@ -338,35 +311,18 @@ function parseEncryptedData(serialized: string | null): EncryptedData | null {
 	}
 }
 
-async function fetchVaultKeys(
-	authClient: IAuthClient,
-): Promise<VaultKeyData[]> {
-	const { data: vaults } = await authClient.vaults.list();
-	return vaults.map((vault) =>
-		toVaultKeyEntry({
-			...vault,
-			icon: vault.icon ?? null,
-			imageUrl: vault.imageUrl ?? null,
-		}),
-	);
-}
-
 async function fetchIssuedVaultKeys(
-	authClient: IAuthClient,
+	apiClient: IAuthClient,
 	accessToken: string,
 	initialPage: FinishLoginResponse["vaultKeys"],
-	fallbackClient: IAuthClient,
 	requestOrigin: AuthRequestOrigin,
 ): Promise<VaultKeyData[]> {
-	if (authClient.auth.drainVaultKeys && initialPage) {
-		const { data } = await authClient.auth.drainVaultKeys(
-			accessToken,
-			initialPage,
-			requestOrigin,
-		);
-		return data.map(toAuthVaultKeyEntry);
-	}
-	return fetchVaultKeys(fallbackClient);
+	const { data } = await apiClient.auth.drainVaultKeys(
+		accessToken,
+		initialPage,
+		requestOrigin,
+	);
+	return data.map(toAuthVaultKeyEntry);
 }
 
 /**
@@ -438,7 +394,7 @@ export async function performSRPLogin(
 	const serverUrl = normalizeAccountServerUrl(input.serverUrl);
 	const { crypto } = deps;
 	const vaultCrypto = createVaultCrypto({ crypto, storage: deps.storage });
-	const authClient = resolveAuthClient(deps);
+	const { apiClient } = deps;
 
 	const isValid = await crypto.validateSecretKey(secretKey);
 	if (!isValid) {
@@ -447,7 +403,7 @@ export async function performSRPLogin(
 
 	const clientEphemeral = await crypto.generateClientEphemeral();
 
-	const { data: startResult } = await authClient.auth.startLogin({
+	const { data: startResult } = await apiClient.auth.startLogin({
 		email,
 		clientPublicKey: clientEphemeral.publicKey,
 	});
@@ -485,7 +441,7 @@ export async function performSRPLogin(
 			srpPassword,
 		);
 
-		const { data: finishResult } = await authClient.auth.finishLogin(
+		const { data: finishResult } = await apiClient.auth.finishLogin(
 			startResult.attemptId,
 			{
 				clientPublicKey: clientEphemeral.publicKey,
@@ -499,23 +455,10 @@ export async function performSRPLogin(
 			finishResult.serverProof,
 		);
 
-		const authenticatedClient = deps.createAuthenticatedClient
-			? deps.createAuthenticatedClient(finishResult.token, serverUrl)
-			: (createAccountApiClient(
-					finishResult.token,
-					serverUrl,
-					undefined,
-					undefined,
-					{
-						insecureTransportConfirmed:
-							input.insecureTransportConfirmed === true,
-					},
-				) as unknown as IAuthClient);
 		const vaultKeys = await fetchIssuedVaultKeys(
-			authClient,
+			apiClient,
 			finishResult.token,
 			finishResult.vaultKeys,
-			authenticatedClient,
 			{
 				kind: "authCeremony",
 				serverUrl,
@@ -717,15 +660,15 @@ async function deriveSrpPasswordForAccount(
  */
 export async function deriveSrpLoginProof(
 	input: SRPUnlockInput,
-	deps: SRPUnlockDeps,
+	deps: SrpLoginProofDeps,
 ): Promise<SrpLoginProof> {
 	const { accountId, password } = input;
 	const { crypto, storage } = deps;
 	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	const { email } = await resolveUnlockAccount(accountId, storage);
-	const authClient = await resolveAccountAuthClient(accountId, deps);
+	const apiClient = await resolveStartLoginApiClient(accountId, deps);
 	const clientEphemeral = await crypto.generateClientEphemeral();
-	const { data: startResult } = await authClient.auth.startLogin({
+	const { data: startResult } = await apiClient.auth.startLogin({
 		email,
 		clientPublicKey: clientEphemeral.publicKey,
 	});
@@ -774,7 +717,7 @@ export async function performSRPUnlock(
 	const { crypto, storage } = deps;
 	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	const { email } = await resolveUnlockAccount(accountId, storage);
-	const authClient = await resolveAccountAuthClient(accountId, deps);
+	const apiClient = await resolveAccountAuthClient(accountId, deps);
 
 	const storedSecretKey = await storage.getStoredSecretKey(accountId);
 	if (!storedSecretKey) {
@@ -848,7 +791,7 @@ export async function performSRPUnlock(
 
 		const clientEphemeral = await crypto.generateClientEphemeral();
 
-		const { data: startResult } = await authClient.auth.startLogin({
+		const { data: startResult } = await apiClient.auth.startLogin({
 			email,
 			clientPublicKey: clientEphemeral.publicKey,
 		});
@@ -869,7 +812,7 @@ export async function performSRPUnlock(
 			srpPassword,
 		);
 
-		const { data: finishResult } = await authClient.auth.finishLogin(
+		const { data: finishResult } = await apiClient.auth.finishLogin(
 			startResult.attemptId,
 			{
 				clientPublicKey: clientEphemeral.publicKey,
@@ -885,23 +828,10 @@ export async function performSRPUnlock(
 			finishResult.serverProof,
 		);
 
-		const authenticatedClient = deps.createAuthenticatedClient
-			? deps.createAuthenticatedClient(finishResult.token, serverUrl)
-			: (createAccountApiClient(
-					finishResult.token,
-					serverUrl,
-					undefined,
-					undefined,
-					{
-						insecureTransportConfirmed:
-							accountMetadata?.insecureTransportConfirmed === true,
-					},
-				) as unknown as IAuthClient);
 		const vaultKeys = await fetchIssuedVaultKeys(
-			authClient,
+			apiClient,
 			finishResult.token,
 			finishResult.vaultKeys,
-			authenticatedClient,
 			{ kind: "persistedAccount", accountId, serverUrl },
 		);
 
@@ -1101,8 +1031,8 @@ export async function getBiometricUnlockAvailability(
  * Check if an email has an existing account on the server.
  */
 export async function checkEmailExists(
-	authClient: Pick<IAuthClient, "auth">,
+	apiClient: Pick<IAuthClient, "auth">,
 	email: string,
 ): Promise<CheckEmailResult> {
-	return (await authClient.auth.checkEmail({ email })).data;
+	return (await apiClient.auth.checkEmail({ email })).data;
 }

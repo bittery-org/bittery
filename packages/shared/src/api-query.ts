@@ -14,6 +14,15 @@ export const apiQueryKeys = {
 		availableMembers: (vaultId: string) =>
 			["api", "v1", "vaults", vaultId, "available-team-members"] as const,
 	},
+	items: {
+		all: ["api", "v1", "items"] as const,
+		get: (itemId: string) => ["api", "v1", "items", itemId] as const,
+		inVault: (vaultId: string) =>
+			["api", "v1", "vaults", vaultId, "items"] as const,
+		trashed: ["api", "v1", "trashed-items"] as const,
+		trashedInVault: (vaultId: string) =>
+			["api", "v1", "vaults", vaultId, "trashed-items"] as const,
+	},
 	teams: {
 		all: ["api", "v1", "teams"] as const,
 		current: ["api", "v1", "teams", "current"] as const,
@@ -33,6 +42,7 @@ export const apiQueryKeys = {
 		status: ["api", "v1", "billing", "status"] as const,
 		attachmentUsage: ["api", "v1", "billing", "attachment-usage"] as const,
 	},
+	travelMode: ["api", "v1", "travel-mode"] as const,
 	shares: {
 		list: (itemId: string) =>
 			["api", "v1", "items", itemId, "share-links"] as const,

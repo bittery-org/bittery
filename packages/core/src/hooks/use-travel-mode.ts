@@ -11,12 +11,8 @@ import {
 	type DefaultApiClient,
 	getClientForAccount,
 } from "../services/account-resolver";
-import {
-	deriveSrpLoginProof,
-	type IAuthClient,
-} from "../services/auth-service";
+import { deriveSrpLoginProof } from "../services/auth-service";
 import { getTravelModeEnforcer } from "../services/travel-mode-enforcer";
-import type { TravelModeApiClient } from "../services/travel-mode-service";
 import { restoreAfterTravelModeDisabled } from "../services/travel-mode-sync";
 import type { ApiVaultClient } from "../services/vault-service";
 
@@ -24,13 +20,13 @@ async function resolveAccountApiClient(
 	storage: AccountStore,
 	defaultClient: DefaultApiClient,
 	accountId: string,
-): Promise<{ accountId: string; apiClient: TravelModeApiClient }> {
+): Promise<{ accountId: string; apiClient: DefaultApiClient }> {
 	const apiClient = await getClientForAccount(
 		storage,
 		defaultClient,
 		accountId,
 	);
-	return { accountId, apiClient: apiClient as TravelModeApiClient };
+	return { accountId, apiClient };
 }
 
 export function useTravelMode(accountId?: string) {
@@ -145,7 +141,7 @@ export function useTravelMode(accountId?: string) {
 				{ accountId: resolvedAccountId, password: input.password },
 				{
 					crypto,
-					apiClient: accountApiClient as unknown as IAuthClient,
+					apiClient: accountApiClient,
 					storage,
 				},
 			);
