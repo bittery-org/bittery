@@ -38,6 +38,7 @@ import type {
 	FinishLoginInput,
 	FinishLoginResponse,
 	ImageUploadInput,
+	ItemPayload,
 	LoginAttempt,
 	MoveItemInput,
 	PasswordChangeInput,
@@ -276,7 +277,12 @@ export interface ApiClient {
 			vaultId: string,
 			page?: ApiPageRequest,
 		): Promise<ApiResult<readonly DeletedVaultItem[]>>;
-		get(itemId: string): Promise<ApiResult<VaultItemDetails>>;
+		/**
+		 * `GET /items/{itemId}` answers with `ItemResponseDto` — the item and nothing else.
+		 * It used to be declared as {@link VaultItemDetails}, which promised `attachments`
+		 * the endpoint has never sent; callers wanting those use `items.listAttachments`.
+		 */
+		get(itemId: string): Promise<ApiResult<ItemPayload>>;
 		create(
 			vaultId: string,
 			itemId: string,

@@ -7,6 +7,7 @@ import {
 	type AppApiClient,
 	isApiErrorStatus,
 } from "@bittery/shared/api-client";
+import { toCachedItem } from "@bittery/shared/item-mapping";
 import {
 	type ServerVaultListEntry,
 	type ServerVaultSummary,
@@ -71,25 +72,9 @@ export async function performDeltaSync(
 	const reconcileCurrentItem = async (itemId: string) => {
 		try {
 			const { data: item } = await apiClient.items.get(itemId);
-			await upsertItem({
-				id: item.id,
-				vaultId: item.vaultId,
-				accountEmail: itemAccountEmail,
-				serverUrl,
-				category: item.category,
-				favorite: item.favorite,
-				encryptedData: item.encryptedData,
-				encryptionIv: item.encryptionIv,
-				encryptionAlgorithm: item.encryptionAlgorithm,
-				version: item.version,
-				lastModifiedBy: item.lastModifiedBy,
-				encryptionVersion: item.encryptionVersion,
-				encryptedByUserId: item.encryptedByUserId,
-				createdAt: String(item.createdAt),
-				updatedAt: String(item.updatedAt),
-				deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-				attachments: item.attachments ? [...item.attachments] : undefined,
-			} as CachedEncryptedItem);
+			await upsertItem(
+				toCachedItem(item, { accountEmail: itemAccountEmail, serverUrl }),
+			);
 		} catch (error) {
 			if (!isApiErrorStatus(error, 404)) throw error;
 			await removeItem(itemId);
@@ -145,27 +130,12 @@ export async function performDeltaSync(
 					await apiClient.items.listInVault(targetVaultId);
 
 				for (const vaultItem of items) {
-					await upsertItem({
-						id: vaultItem.id,
-						vaultId: vaultItem.vaultId,
-						accountEmail: itemAccountEmail,
-						serverUrl,
-						category: vaultItem.category,
-						favorite: vaultItem.favorite,
-						encryptedData: vaultItem.encryptedData,
-						encryptionIv: vaultItem.encryptionIv,
-						encryptionAlgorithm: vaultItem.encryptionAlgorithm,
-						version: vaultItem.version,
-						lastModifiedBy: vaultItem.lastModifiedBy,
-						encryptionVersion: vaultItem.encryptionVersion,
-						encryptedByUserId: vaultItem.encryptedByUserId,
-						createdAt: String(vaultItem.createdAt),
-						updatedAt: String(vaultItem.updatedAt),
-						deletedAt: vaultItem.deletedAt ? String(vaultItem.deletedAt) : null,
-						attachments: vaultItem.attachments
-							? [...vaultItem.attachments]
-							: undefined,
-					} as CachedEncryptedItem);
+					await upsertItem(
+						toCachedItem(vaultItem, {
+							accountEmail: itemAccountEmail,
+							serverUrl,
+						}),
+					);
 				}
 			}
 

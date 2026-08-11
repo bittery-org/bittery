@@ -949,6 +949,10 @@ importers:
         version: 5.9.3
 
   packages/types:
+    dependencies:
+      '@bittery/api-contract':
+        specifier: workspace:*
+        version: link:../api-contract
     devDependencies:
       '@bittery/config':
         specifier: workspace:*

@@ -10,7 +10,9 @@
 	"exports": {
 		".": "./src/index.ts"
 	},
-	"dependencies": {},
+	"dependencies": {
+		"@bittery/api-contract": "workspace:*"
+	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
 		"typescript": "^5.7.2"

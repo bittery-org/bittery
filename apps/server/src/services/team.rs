@@ -15,6 +15,7 @@ use crate::{
     services::session_control::{load_user_session_ids, record_session_revocations},
     services::team_billing::team_management_enabled as shared_team_management_enabled,
     services::vault_key::validate_encrypted_vault_key,
+    shapes::rotation_item_shape,
 };
 
 const TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE: &str =
@@ -127,17 +128,10 @@ pub struct RotationMemberResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RotationItemResponse {
-    pub id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
+rotation_item_shape! {
+    #[derive(Debug, Clone, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct RotationItemResponse {}
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2023,13 +2017,16 @@ async fn load_rotation_vault_data(
 		.fetch_all(pool)
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); AppError::internal("Failed to load rotation members") })?;
-        let items = query_as::<_, DbRotationItemRow>(
-			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
-		)
-		.bind(&vault.id)
-		.fetch_all(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation items"); AppError::internal("Failed to load rotation items") })?;
+        let items = query_as::<_, DbRotationItemRow>(&format!(
+            "SELECT {ROTATION_ITEM_COLUMNS} FROM item WHERE vault_id = $1 ORDER BY created_at ASC"
+        ))
+        .bind(&vault.id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load rotation items");
+            AppError::internal("Failed to load rotation items")
+        })?;
 
         rotation_vaults.push(RotationVaultResponse {
             vault_id: vault.id,
@@ -2045,16 +2042,7 @@ async fn load_rotation_vault_data(
                 .collect(),
             items: items
                 .into_iter()
-                .map(|item| RotationItemResponse {
-                    id: item.id,
-                    encrypted_data: item.encrypted_data,
-                    encryption_iv: item.encryption_iv,
-                    encryption_algorithm: item.encryption_algorithm,
-                    version: item.version,
-                    encryption_version: item.encryption_version,
-                    encrypted_by_user_id: item.encrypted_by_user_id,
-                    last_modified_by: item.last_modified_by,
-                })
+                .map(|item| RotationItemResponse::compose(item.into()))
                 .collect(),
         });
     }
@@ -2167,8 +2155,11 @@ async fn apply_team_vault_rotations(
             }
         }
         for item in &vault_rotation.key_rotation.re_encrypted_items {
+            // Rotation re-seals the ciphertext under the context the item already carried, so
+            // `encryption_version`/`encrypted_by_user_id` must not move — they describe the AAD
+            // binding, and rewriting them would make every rotated item undecryptable.
             let updated_rows = query(
-				"UPDATE item SET encrypted_data = $1, encryption_iv = $2, version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $3, last_modified_by = $3, updated_at = $4 WHERE id = $5 AND vault_id = $6",
+				"UPDATE item SET encrypted_data = $1, encryption_iv = $2, version = version + 1, last_modified_by = $3, updated_at = $4 WHERE id = $5 AND vault_id = $6",
 			)
 			.bind(&item.encrypted_data)
 			.bind(&item.encryption_iv)

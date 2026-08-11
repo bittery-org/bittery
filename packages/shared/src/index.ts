@@ -8,6 +8,7 @@ export * from "./export-types";
 export * from "./favicon";
 export * from "./identity";
 export * from "./import";
+export * from "./item-mapping";
 export * from "./kdf-policy";
 export * from "./password";
 export * from "./password-analysis";

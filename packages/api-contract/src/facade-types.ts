@@ -94,6 +94,19 @@ export type ConvertVaultResponse = Schema<"ConvertVaultTypeResponse">;
 export type BulkImportInput = Schema<"BulkImportBody">;
 export type BulkImportResponse = Schema<"BulkImportItemsResponse">;
 
+/**
+ * The fields every server Item payload carries, whichever endpoint returned it.
+ *
+ * Six generated schemas restate them — {@link VaultItem}, {@link VaultItemDetails},
+ * {@link DeletedVaultItem}, {@link SyncBootstrapItem}, `VaultItemResponse` and this one —
+ * because utoipa cannot flatten a shared component without rewriting all six as `allOf`,
+ * which would break the published contract. `ItemResponseDto`, the `GET /items/{itemId}`
+ * body, is the one that carries these fields and nothing else, so it is the canonical set
+ * every client-side Item shape derives from. The others are this plus `attachments`,
+ * `vault`, or both.
+ */
+export type ItemPayload = Schema<"ItemResponseDto">;
+
 type WireVaultItem = Schema<"AllItemsResponse">["items"][number];
 export type VaultItem = Omit<WireVaultItem, "attachments"> & {
 	attachments: readonly Attachment[];

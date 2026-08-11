@@ -1934,6 +1934,71 @@ async fn team_invitation_accept_and_decline_paths() {
     .await;
 }
 
+/// Same invariant as the vault-side rotation: the team member-removal rotation re-seals each
+/// ciphertext under the context it already carried, so the apply step must not re-stamp
+/// `encryption_version`/`encrypted_by_user_id`. Doing so leaves the stored context describing a
+/// binding the ciphertext never had, and the item becomes permanently undecryptable.
+#[tokio::test]
+async fn team_rotation_advances_version_without_rebinding_encryption_context() {
+    with_api_test_app("team_rotation_preserves_encryption_context", |app| async move {
+        let fixture = build_team_router_fixture(&app.pool).await;
+
+        let before: (i32, i32, String) = sqlx::query_as(
+            "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        )
+        .bind(&fixture.accessible_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("pre-rotation item context should load");
+        assert_eq!(before, (1, 1, fixture.owner_user_id.clone()));
+
+        // The leaving member drives the rotation; the item was sealed by the owner.
+        let leaving_session = app.issue_session(&fixture.member_user_id).await;
+        let leave_response = app
+            .api_json(
+                Method::POST,
+                &format!("/api/v1/teams/{}/leave", fixture.team_id),
+                Some(json!({
+                    "vaultRotations": [{
+                        "vaultId": fixture.accessible_vault_id,
+                        "keyRotation": {
+                            "memberKeys": [
+                                { "userId": fixture.owner_user_id, "encryptedVaultKey": "rotated-owner-key" },
+                                { "userId": fixture.admin_user_id, "encryptedVaultKey": "rotated-admin-key" },
+                                { "userId": fixture.remove_target_user_id, "encryptedVaultKey": "rotated-target-key" }
+                            ],
+                            "reEncryptedItems": [{
+                                "itemId": fixture.accessible_item_id,
+                                "encryptedData": "rotated-item-ciphertext",
+                                "encryptionIv": "rotated-item-iv"
+                            }]
+                        }
+                    }]
+                })),
+                authenticated_json_headers(&leaving_session.token),
+            )
+            .await;
+        leave_response.assert_contract_status();
+        assert_eq!(leave_response.body["success"], json!(true));
+
+        let after: (String, String, i32, i32, String, String) = sqlx::query_as(
+            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE id = $1",
+        )
+        .bind(&fixture.accessible_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .expect("rotated item should load");
+
+        assert_eq!(after.0, "rotated-item-ciphertext");
+        assert_eq!(after.1, "rotated-item-iv");
+        assert_eq!(after.2, before.0 + 1);
+        assert_eq!(after.3, before.1);
+        assert_eq!(after.4, before.2);
+        assert_eq!(after.5, fixture.member_user_id);
+    })
+    .await;
+}
+
 #[tokio::test]
 async fn team_leave_paths() {
     with_api_test_app("team_leave", |app| async move {
@@ -2054,14 +2119,16 @@ async fn team_leave_paths() {
         assert_eq!(rotated_owner_key, "rotated-owner-key");
         assert_eq!(new_key_version, 2);
         assert_eq!(completed_rotations, 1);
+        // Rotation advances the concurrency counter but leaves the AAD binding
+        // (`encryption_version`/`encrypted_by_user_id`) exactly as the ciphertext was sealed.
         assert_eq!(
             rotated_item,
             (
                 "rotated-item-ciphertext".to_string(),
                 "rotated-item-iv".to_string(),
                 2,
-                Some(2),
-                Some(fixture.member_user_id.clone()),
+                Some(1),
+                Some(fixture.owner_user_id.clone()),
             )
         );
         assert_eq!(remaining_sessions, 0);

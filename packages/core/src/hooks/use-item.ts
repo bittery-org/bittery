@@ -4,8 +4,11 @@
  * Reads from the local VaultRepositoryCoordinator.
  */
 
-import type { DecryptedItemData } from "@bittery/shared/types";
+import { toCachedItemFromRepositoryItem } from "@bittery/shared/item-mapping";
+import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
+import type { CachedEncryptedItem } from "@bittery/types";
 import { useMemo } from "react";
+import type { CoordinatedItemAccount } from "../services/vault-repository-coordinator";
 import { extractDecryptedItemData } from "./items/mutation-utils";
 import { useVaultRepositorySync } from "./use-vault-repository-sync";
 
@@ -14,8 +17,18 @@ export interface UseItemOptions {
 	enabled?: boolean;
 }
 
+/**
+ * The item's own fields come straight from the cached record, so this hook cannot quietly
+ * drop one the server started sending. `account` is the coordinator's, not the server's.
+ */
+export type RawItemForAccount = CachedEncryptedItem & {
+	/** Already decoded by the repository; the wire spells it as an open string. */
+	category: ItemCategory;
+	account?: CoordinatedItemAccount;
+};
+
 export interface UseItemResult {
-	rawItem: any;
+	rawItem: RawItemForAccount | null;
 	decryptedData: DecryptedItemData | null | undefined;
 	isLoading: boolean;
 	error: Error | null;
@@ -66,25 +79,13 @@ export function useItem(
 		};
 	}
 
-	const rawItem = {
-		id: item.id,
-		vaultId: item.vaultId,
+	const rawItem: RawItemForAccount = {
+		...toCachedItemFromRepositoryItem(item, {
+			accountId: item.account?.accountId,
+			accountEmail: item.account?.email,
+			serverUrl: item.account?.serverUrl,
+		}),
 		category: item.category,
-		favorite: item.favorite,
-		encryptedData: item._encrypted.data,
-		encryptionIv: item._encrypted.iv,
-		encryptionAlgorithm: item._encrypted.algorithm,
-		version: item.version,
-		lastModifiedBy: item.lastModifiedBy,
-		encryptionVersion: item.encryptionVersion,
-		encryptedByUserId: item.encryptedByUserId,
-		createdAt: item.createdAt,
-		updatedAt: item.updatedAt,
-		deletedAt: item.deletedAt,
-		attachments: item.attachments,
-		accountEmail: item.accountEmail ?? item.account?.email,
-		accountId: item.accountId ?? item.account?.accountId,
-		serverUrl: item.serverUrl ?? item.account?.serverUrl,
 		account: item.account,
 	};
 

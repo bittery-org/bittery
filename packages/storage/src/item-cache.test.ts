@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { cachedItem } from "@bittery/shared/testing/item-fixtures";
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
@@ -30,22 +31,16 @@ function item(
 	vaultId: string,
 	overrides?: Partial<CachedEncryptedItem>,
 ): CachedEncryptedItem {
-	return {
+	return cachedItem({
 		id,
 		vaultId,
-		category: "login",
-		favorite: false,
 		encryptedData: `data-${id}`,
 		encryptionIv: `iv-${id}`,
 		encryptionAlgorithm: "AES-GCM",
-		version: 1,
-		lastModifiedBy: null,
-		encryptionVersion: 1,
-		encryptedByUserId: "user-1",
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
 		...overrides,
-	};
+	});
 }
 
 function vault(id: string, name = `vault-${id}`): CachedVaultMetadata {

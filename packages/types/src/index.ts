@@ -3,7 +3,20 @@
  *
  * These types are used across all platforms (web, desktop, mobile, extension)
  * for consistent interfaces when working with crypto operations.
+ *
+ * The Item shapes here are the one exception to "hand-written": they derive from the
+ * generated API contract, so the server owns the field list and a new server field fails
+ * to compile rather than going quietly missing. See {@link CachedEncryptedItem}.
  */
+
+import type { Attachment, ItemPayload } from "@bittery/api-contract";
+
+/**
+ * The generated contract is emitted `--immutable`, but a cached record is a local working
+ * copy that projections rebuild in place. Only the `readonly` is dropped; the mapping stays
+ * homomorphic, so a field added to the contract still shows up here.
+ */
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
 
 // ============================================================================
 // Key Derivation Types
@@ -179,30 +192,33 @@ export interface ValidationResult {
 // ============================================================================
 
 /**
- * Cached encrypted item for local-first storage
- * Stores the encrypted form (safe at rest, requires vault key to decrypt)
+ * Which account a locally stored record belongs to. Not on the wire — a server answers for
+ * one account at a time, so only a device holding several has to say which. Every key is
+ * optional because the call sites genuinely differ: a bootstrap knows all three, an
+ * outbound acknowledgement knows the account but not its server.
  */
-export interface CachedEncryptedItem {
-	id: string;
-	vaultId: string;
+export interface CachedItemAccountScope {
 	accountId?: string;
 	accountEmail?: string;
 	serverUrl?: string;
-	category: string;
-	favorite: boolean;
-	encryptedData: string;
-	encryptionIv: string;
-	encryptionAlgorithm: string;
-	version: number;
-	lastModifiedBy: string | null;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-	createdAt: string;
-	updatedAt: string;
-	deletedAt?: string | null;
-	/** Attachment metadata cached alongside the item */
-	attachments?: CachedAttachment[];
 }
+
+/**
+ * Cached encrypted item for local-first storage.
+ * Stores the encrypted form (safe at rest, requires vault key to decrypt).
+ *
+ * The item's own fields are **the server's**, not this package's: {@link ItemPayload} is
+ * the generated `ItemResponseDto`. Adding a field to the Rust item shape therefore
+ * regenerates the contract and fails to compile in `@bittery/shared/item-mapping` — the
+ * only place a record of this shape is built — instead of being silently dropped by every
+ * cache on every device. Everything added on top of {@link ItemPayload} here is local:
+ * the account scope, and attachments in their cached (mutable, non-null) spelling.
+ */
+export type CachedEncryptedItem = Mutable<ItemPayload> &
+	CachedItemAccountScope & {
+		/** Attachment metadata cached alongside the item */
+		attachments?: CachedAttachment[];
+	};
 
 /**
  * Cached vault metadata for local-first storage
@@ -235,21 +251,11 @@ export interface ItemCacheMetadata {
 /**
  * Cached attachment metadata for local-first storage.
  * Stores the encrypted form (requires vault key to decrypt name/content-type).
+ *
+ * Server-owned for the same reason {@link CachedEncryptedItem} is: `Attachment` is the
+ * generated `VaultAttachmentResponse`.
  */
-export interface CachedAttachment {
-	id: string;
-	itemId: string;
-	vaultId: string;
-	storageKey: string;
-	encryptedName: string;
-	encryptedContentType: string;
-	encryptionIv: string;
-	encryptedContentTypeIv: string;
-	encryptionAlgorithm: string;
-	fileSize: number;
-	uploadedBy: string;
-	createdAt: string;
-}
+export type CachedAttachment = Mutable<Attachment>;
 
 export type ItemSyncCommandType =
 	| "create"
@@ -389,26 +395,14 @@ export interface IAutolockService {
 // ============================================================================
 
 /**
- * Raw encrypted item returned by API/query layers.
+ * Raw encrypted item returned by API/query layers: a cached record minus the account scope,
+ * which only a stored record carries. Stated as a subtraction rather than restated field by
+ * field so the two cannot drift — both bottom out in the generated contract.
  */
-export interface RawEncryptedItem {
-	id: string;
-	vaultId: string;
-	category: string;
-	favorite: boolean;
-	encryptedData: string;
-	encryptionIv: string;
-	encryptionAlgorithm: string;
-	version: number;
-	lastModifiedBy?: string | null;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-	createdAt: string | Date;
-	updatedAt: string | Date;
-	deletedAt?: string | Date | null;
-	/** Attachment metadata loaded alongside the item */
-	attachments?: CachedAttachment[];
-}
+export type RawEncryptedItem = Omit<
+	CachedEncryptedItem,
+	keyof CachedItemAccountScope
+>;
 
 /**
  * Raw encrypted item with vault metadata.

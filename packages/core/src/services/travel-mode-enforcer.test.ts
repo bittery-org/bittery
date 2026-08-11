@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { cachedItem } from "@bittery/shared/testing/item-fixtures";
 import type { AccountStore, ItemCache } from "@bittery/storage";
-import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
+import type { CachedVaultMetadata } from "@bittery/types";
 import {
 	accountMetadata,
 	createTestAccountStore,
@@ -49,7 +50,7 @@ async function createLayers(
 	}
 
 	await cache.setCachedItems(
-		[{ id: "i1", vaultId: "v1" } as CachedEncryptedItem],
+		[cachedItem({ id: "i1", vaultId: "v1" })],
 		ACCOUNT_ID,
 	);
 	await cache.setCachedVaults(

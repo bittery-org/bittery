@@ -1162,7 +1162,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert_eq!(empty_import_response.body["importedCount"], json!(0));
 
             let create_item_response = app
-                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.owner_personal_vault_id, created_item_id), Some(json!({ "category": "login", "encryptedData": "created-encrypted-data", "encryptionIv": "created-iv" })), owner_headers.clone())
+                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.owner_personal_vault_id, created_item_id), Some(json!({ "category": "login", "encryptedData": "created-encrypted-data", "encryptionIv": "created-iv", "encryptionAlgorithm": "aes-gcm" })), owner_headers.clone())
                 .await;
             create_item_response.assert_contract_status();
             assert_eq!(create_item_response.body["itemId"], json!(created_item_id));
@@ -1174,13 +1174,15 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
                                 "category": "login",
                                 "favorite": true,
                                 "encryptedData": "imported-a-data",
-                                "encryptionIv": "imported-a-iv"
+                                "encryptionIv": "imported-a-iv",
+                                "encryptionAlgorithm": "aes-gcm"
                             },
                             {
                                 "itemId": imported_item_b,
                                 "category": "login",
                                 "encryptedData": "imported-b-data",
-                                "encryptionIv": "imported-b-iv"
+                                "encryptionIv": "imported-b-iv",
+                                "encryptionAlgorithm": "aes-gcm"
                             }
                         ] })), owner_headers.clone())
                 .await;
@@ -1241,7 +1243,7 @@ async fn vault_item_mutation_handlers_manage_item_lifecycle() {
             assert!(restored_deleted_at.is_none());
 
             let move_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv" })), with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(owner_headers.clone(), 1))
                 .await;
             move_response.assert_contract_status();
             let moved_vault_id: String = query_scalar("SELECT vault_id FROM item WHERE id = $1")
@@ -1489,7 +1491,8 @@ async fn attachment_update_event_names_the_parent_item() {
                 &format!("/api/v1/attachments/{}", fixture.attachment_id),
                 Some(json!({
                     "encryptedName": "renamed-attachment",
-                    "encryptionIv": "renamed-iv"
+                    "encryptionIv": "renamed-iv",
+                    "encryptionAlgorithm": "aes-gcm"
                 })),
                 authenticated_json_headers(&session.token),
             )
@@ -1523,7 +1526,8 @@ async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
                 Some(json!({
                     "category": "login",
                     "encryptedData": "created-ciphertext",
-                    "encryptionIv": "created-iv"
+                    "encryptionIv": "created-iv",
+                    "encryptionAlgorithm": "aes-gcm"
                 })),
                 authenticated_json_headers(&owner_session.token),
             )
@@ -1626,7 +1630,7 @@ async fn move_item_requires_source_vault_write_access() {
             let readonly_session = app.issue_session(&fixture.readonly_user_id).await;
 
             let response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv" })), with_if_match(authenticated_json_headers(&readonly_session.token), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.main_vault_id, "targetVaultId": fixture.target_vault_id, "encryptedData": "moved-encrypted-data", "encryptionIv": "moved-iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(authenticated_json_headers(&readonly_session.token), 1))
                 .await;
 
             response.assert_contract_status();
@@ -1715,7 +1719,8 @@ async fn queued_item_create_replays_a_lost_success_without_duplicate_side_effect
         let body = json!({
             "category": "login",
             "encryptedData": "queued-create-ciphertext",
-            "encryptionIv": "queued-create-iv"
+            "encryptionIv": "queued-create-iv",
+            "encryptionAlgorithm": "aes-gcm"
         });
 
         let first = app
@@ -1858,7 +1863,8 @@ async fn queued_item_idempotency_rejects_changed_bodies_and_preconditions() {
                 Some(json!({
                     "category": "login",
                     "encryptedData": "first",
-                    "encryptionIv": "iv"
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
                 })),
                 create_headers(),
             )
@@ -1871,7 +1877,8 @@ async fn queued_item_idempotency_rejects_changed_bodies_and_preconditions() {
                 Some(json!({
                     "category": "login",
                     "encryptedData": "second",
-                    "encryptionIv": "iv"
+                    "encryptionIv": "iv",
+                    "encryptionAlgorithm": "aes-gcm"
                 })),
                 create_headers(),
             )
@@ -1922,7 +1929,8 @@ async fn concurrent_queued_item_create_executes_once_and_then_replays() {
         let body = json!({
             "category": "login",
             "encryptedData": "concurrent-create",
-            "encryptionIv": "concurrent-iv"
+            "encryptionIv": "concurrent-iv",
+            "encryptionAlgorithm": "aes-gcm"
         });
         let first = app.api_json(
             Method::PUT,
@@ -2224,7 +2232,8 @@ async fn restore_move_and_favorite_commands_replay_idempotently() {
             "sourceVaultId": fixture.main_vault_id,
             "targetVaultId": fixture.target_vault_id,
             "encryptedData": "moved-idempotently",
-            "encryptionIv": "moved-iv"
+            "encryptionIv": "moved-iv",
+            "encryptionAlgorithm": "aes-gcm"
         });
         for _ in 0..2 {
             let response = app
@@ -2266,7 +2275,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             let readonly_headers = authenticated_json_headers(&readonly_session.token);
 
             let readonly_create_response = app
-                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv" })), readonly_headers.clone())
+                .api_json(Method::PUT, &format!("/api/v1/vaults/{}/items/{}", fixture.main_vault_id, "item_explicit_request"), Some(json!({ "category": "login", "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), readonly_headers.clone())
                 .await;
             readonly_create_response.assert_contract_status();
             assert_handler_error(
@@ -2287,13 +2296,15 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
                                 "itemId": "duplicate_item",
                                 "category": "login",
                                 "encryptedData": "duplicate-a",
-                                "encryptionIv": "duplicate-a-iv"
+                                "encryptionIv": "duplicate-a-iv",
+                                "encryptionAlgorithm": "aes-gcm"
                             },
                             {
                                 "itemId": "duplicate_item",
                                 "category": "login",
                                 "encryptedData": "duplicate-b",
-                                "encryptionIv": "duplicate-b-iv"
+                                "encryptionIv": "duplicate-b-iv",
+                                "encryptionAlgorithm": "aes-gcm"
                             }
                         ] })), owner_headers.clone())
                 .await;
@@ -2325,7 +2336,7 @@ async fn vault_item_mutation_handlers_reject_invalid_state_and_access() {
             );
 
             let wrong_source_response = app
-                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv" })), with_if_match(owner_headers.clone(), 1))
+                .api_json(Method::POST, &format!("/api/v1/items/{}/moves", fixture.movable_item_id), Some(json!({ "sourceVaultId": fixture.target_vault_id, "targetVaultId": fixture.main_vault_id, "encryptedData": "enc", "encryptionIv": "iv", "encryptionAlgorithm": "aes-gcm" })), with_if_match(owner_headers.clone(), 1))
                 .await;
             wrong_source_response.assert_contract_status();
             assert_handler_error(
@@ -2701,7 +2712,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert_eq!(pending_storage_size, 102);
 
 				let create_attachment_response = app
-					.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.active_item_id), Some(json!({ "storageKey": "invalid-key", "encryptedName": "encrypted-name", "encryptedContentType": "encrypted-content-type", "encryptionIv": "attachment-iv", "encryptedContentTypeIv": "content-type-iv", "fileSize": 4 })), owner_headers.clone())
+					.api_json(Method::POST, &format!("/api/v1/items/{}/attachments", fixture.active_item_id), Some(json!({ "storageKey": "invalid-key", "encryptedName": "encrypted-name", "encryptedContentType": "encrypted-content-type", "encryptionIv": "attachment-iv", "encryptedContentTypeIv": "content-type-iv", "encryptionAlgorithm": "aes-gcm", "fileSize": 4 })), owner_headers.clone())
 					.await;
 				create_attachment_response.assert_contract_status();
 				assert_handler_error(
@@ -2732,7 +2743,7 @@ async fn vault_attachment_handlers_cover_presign_and_access_paths() {
 				assert_eq!(download_response.body["fileSize"], json!(128));
 
 				let update_attachment_response = app
-					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "updated-encrypted-name", "encryptionIv": "updated-attachment-iv" })), owner_headers.clone())
+					.api_json(Method::PATCH, &format!("/api/v1/attachments/{}", fixture.attachment_id), Some(json!({ "encryptedName": "updated-encrypted-name", "encryptionIv": "updated-attachment-iv", "encryptionAlgorithm": "aes-gcm" })), owner_headers.clone())
 					.await;
 				update_attachment_response.assert_contract_status();
 				let updated_attachment_name: String =
@@ -2943,16 +2954,101 @@ async fn vault_member_handlers_manage_members_and_rotation() {
                 .expect("rotated item should load");
             assert_eq!(removed_member_count, 0);
             assert_eq!(ending_key_version, starting_key_version + 1);
+            // Rotation advances the concurrency counter but leaves the AAD binding
+            // (`encryption_version`/`encrypted_by_user_id`) exactly as the ciphertext was sealed.
             assert_eq!(
                 rotated_item,
                 (
                     "rotated-active-data".to_string(),
                     "rotated-active-iv".to_string(),
                     2,
-                    Some(2),
+                    Some(1),
                     Some(fixture.owner_user_id),
                 )
             );
+        },
+    )
+    .await;
+}
+
+/// Rotation hands the server a ciphertext re-sealed under the context the item *already*
+/// carried. If the apply step also re-stamps `encryption_version`/`encrypted_by_user_id`, the
+/// stored context no longer describes the ciphertext and every rotated item stops decrypting —
+/// removing one member bricks the whole vault. `version` and `last_modified_by` are free to
+/// move: they are concurrency and audit, not the AAD binding.
+#[tokio::test]
+async fn vault_rotation_advances_version_without_rebinding_encryption_context() {
+    with_api_test_app(
+        "vault_rotation_preserves_encryption_context",
+        |app| async move {
+            let fixture = build_vault_router_fixture(&app.pool).await;
+            let owner_headers = authenticated_json_headers(
+                &app.issue_session(&fixture.owner_user_id).await.token,
+            );
+            let admin_headers = authenticated_json_headers(
+                &app.issue_session(&fixture.admin_user_id).await.token,
+            );
+
+            let add_member_response = app
+                .api_json(
+                    Method::PUT,
+                    &format!(
+                        "/api/v1/vaults/{}/members/{}",
+                        fixture.main_vault_id, fixture.addable_user_id
+                    ),
+                    Some(json!({ "role": "member", "encryptedVaultKey": "addable-member-key" })),
+                    owner_headers,
+                )
+                .await;
+            add_member_response.assert_contract_status();
+
+            let before: (i32, i32, String) = sqlx::query_as(
+                "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+            )
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("pre-rotation item context should load");
+            assert_eq!(before, (1, 1, fixture.owner_user_id.clone()));
+
+            // The admin rotates; the item was sealed by the owner. Any re-stamping is visible.
+            let remove_member_response = app
+                .api_json(
+                    Method::DELETE,
+                    &format!(
+                        "/api/v1/vaults/{}/members/{}",
+                        fixture.main_vault_id, fixture.addable_user_id
+                    ),
+                    Some(json!({ "keyRotation": {
+                        "memberKeys": [],
+                        "reEncryptedItems": [{
+                            "itemId": fixture.active_item_id,
+                            "encryptedData": "rotated-active-data",
+                            "encryptionIv": "rotated-active-iv"
+                        }]
+                    } })),
+                    admin_headers,
+                )
+                .await;
+            remove_member_response.assert_contract_status();
+
+            let after: (String, String, i32, i32, String, String) = sqlx::query_as(
+                "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE id = $1",
+            )
+            .bind(&fixture.active_item_id)
+            .fetch_one(&app.pool)
+            .await
+            .expect("rotated item should load");
+
+            assert_eq!(after.0, "rotated-active-data");
+            assert_eq!(after.1, "rotated-active-iv");
+            // Concurrency counter advances: the row changed.
+            assert_eq!(after.2, before.0 + 1);
+            // The AAD binding is whatever the rotating client re-sealed under — untouched.
+            assert_eq!(after.3, before.1);
+            assert_eq!(after.4, before.2);
+            // Audit still names the actor who performed the rotation.
+            assert_eq!(after.5, fixture.admin_user_id);
         },
     )
     .await;

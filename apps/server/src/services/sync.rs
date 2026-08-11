@@ -9,7 +9,7 @@ use time::OffsetDateTime;
 use utoipa::ToSchema;
 
 use crate::{
-    config::{bittery_mode, format_timestamp},
+    config::bittery_mode,
     db::models::*,
     error::AppError,
     integrations::storage,
@@ -18,6 +18,7 @@ use crate::{
         fetch_visible_cursor_event, fetch_visible_events_since, load_bootstrap_attachment_rows,
     },
     services::team_billing::{load_team_billing_entitlement, resolve_attachment_entitlement},
+    shapes::{attachment_shape, item_shape},
 };
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -84,42 +85,19 @@ pub struct BootstrapVaultSummary {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BootstrapAttachmentResponse {
-    pub id: String,
-    pub item_id: String,
-    pub vault_id: String,
-    pub storage_key: String,
-    pub encrypted_name: String,
-    pub encrypted_content_type: String,
-    pub encryption_iv: String,
-    pub encrypted_content_type_iv: String,
-    pub encryption_algorithm: String,
-    pub file_size: i32,
-    pub uploaded_by: String,
-    pub created_at: String,
+attachment_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BootstrapAttachmentResponse {}
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct BootstrapItemResponse {
-    pub id: String,
-    pub vault_id: String,
-    pub category: String,
-    pub favorite: bool,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub deleted_at: Option<String>,
-    pub attachments: Vec<BootstrapAttachmentResponse>,
-    pub vault: Option<BootstrapVaultSummary>,
+item_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct BootstrapItemResponse {
+        attachments: Vec<BootstrapAttachmentResponse>,
+        vault: Option<BootstrapVaultSummary>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -312,26 +290,13 @@ pub(crate) async fn bootstrap_items(
     Ok(BootstrapItemsResponse {
         items: result_items
             .into_iter()
-            .map(|item| BootstrapItemResponse {
-                id: item.id.clone(),
-                vault_id: item.vault_id.clone(),
-                category: item.category,
-                favorite: item.favorite,
-                encrypted_data: item.encrypted_data,
-                encryption_iv: item.encryption_iv,
-                encryption_algorithm: item.encryption_algorithm,
-                version: item.version,
-                encryption_version: item.encryption_version,
-                encrypted_by_user_id: item.encrypted_by_user_id,
-                last_modified_by: item.last_modified_by,
-                created_at: format_timestamp(item.created_at),
-                updated_at: format_timestamp(item.updated_at),
-                deleted_at: item.deleted_at.map(format_timestamp),
-                attachments: attachments_by_item
+            .map(|item| {
+                let attachments = attachments_by_item
                     .get(&item.id)
                     .cloned()
-                    .unwrap_or_default(),
-                vault: vault_map.get(&item.vault_id).cloned(),
+                    .unwrap_or_default();
+                let vault = vault_map.get(&item.vault_id).cloned();
+                BootstrapItemResponse::compose(item.into(), attachments, vault)
             })
             .collect(),
         next_cursor,
@@ -445,20 +410,7 @@ async fn load_bootstrap_attachments(
         grouped
             .entry(attachment.item_id.clone())
             .or_default()
-            .push(BootstrapAttachmentResponse {
-                id: attachment.id,
-                item_id: attachment.item_id,
-                vault_id: attachment.vault_id,
-                storage_key: attachment.storage_key,
-                encrypted_name: attachment.encrypted_name,
-                encrypted_content_type: attachment.encrypted_content_type,
-                encryption_iv: attachment.encryption_iv,
-                encrypted_content_type_iv: attachment.encrypted_content_type_iv,
-                encryption_algorithm: attachment.encryption_algorithm,
-                file_size: attachment.file_size,
-                uploaded_by: attachment.uploaded_by,
-                created_at: format_timestamp(attachment.created_at),
-            });
+            .push(BootstrapAttachmentResponse::compose(attachment.into()));
     }
 
     Ok(grouped)

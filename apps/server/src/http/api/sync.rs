@@ -8,7 +8,13 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
-use crate::{config::db_pool, http::sync_sse, services::sync, AppState};
+use crate::{
+    config::db_pool,
+    http::sync_sse,
+    services::sync,
+    shapes::{attachment_shape, item_shape},
+    AppState,
+};
 
 use super::{
     dto::{DecimalString, ProblemDetails, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE},
@@ -187,83 +193,35 @@ impl From<sync::BootstrapVaultSummary> for BootstrapVaultSummary {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BootstrapAttachmentResponse {
-    id: String,
-    item_id: String,
-    vault_id: String,
-    storage_key: String,
-    encrypted_name: String,
-    encrypted_content_type: String,
-    encryption_iv: String,
-    encrypted_content_type_iv: String,
-    encryption_algorithm: String,
-    file_size: i32,
-    uploaded_by: String,
-    created_at: String,
+attachment_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BootstrapAttachmentResponse {}
 }
 
 impl From<sync::BootstrapAttachmentResponse> for BootstrapAttachmentResponse {
     fn from(value: sync::BootstrapAttachmentResponse) -> Self {
-        Self {
-            id: value.id,
-            item_id: value.item_id,
-            vault_id: value.vault_id,
-            storage_key: value.storage_key,
-            encrypted_name: value.encrypted_name,
-            encrypted_content_type: value.encrypted_content_type,
-            encryption_iv: value.encryption_iv,
-            encrypted_content_type_iv: value.encrypted_content_type_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            file_size: value.file_size,
-            uploaded_by: value.uploaded_by,
-            created_at: value.created_at,
-        }
+        Self::compose(value.decompose().0)
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct BootstrapItemResponse {
-    id: String,
-    vault_id: String,
-    category: String,
-    favorite: bool,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
-    created_at: String,
-    updated_at: String,
-    deleted_at: Option<String>,
-    attachments: Vec<BootstrapAttachmentResponse>,
-    vault: Option<BootstrapVaultSummary>,
+item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct BootstrapItemResponse {
+        attachments: Vec<BootstrapAttachmentResponse>,
+        vault: Option<BootstrapVaultSummary>,
+    }
 }
 
 impl From<sync::BootstrapItemResponse> for BootstrapItemResponse {
     fn from(value: sync::BootstrapItemResponse) -> Self {
-        Self {
-            id: value.id,
-            vault_id: value.vault_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-            attachments: value.attachments.into_iter().map(Into::into).collect(),
-            vault: value.vault.map(Into::into),
-        }
+        let (item, (attachments, vault)) = value.decompose();
+        Self::compose(
+            item,
+            attachments.into_iter().map(Into::into).collect(),
+            vault.map(Into::into),
+        )
     }
 }
 
@@ -652,7 +610,7 @@ mod tests {
             "int32"
         );
         assert!(
-            !openapi["components"]["schemas"]["BootstrapItemResponse"]["required"]
+            openapi["components"]["schemas"]["BootstrapItemResponse"]["required"]
                 .as_array()
                 .unwrap()
                 .contains(&json!("lastModifiedBy"))

@@ -432,6 +432,61 @@ mod tests {
         assert!(decrypt_with_aad(&new_encrypted, &new_key, &item_context("other-item")).is_err());
     }
 
+    /// Rotation re-binds a ciphertext to the *same* context it came in with. Any store that
+    /// bumps the recorded encryption version or re-stamps the encrypting user alongside a
+    /// rotation therefore describes a context the ciphertext was never sealed under, and the
+    /// item can no longer be opened. This pins that the drift is fatal, not merely untidy.
+    #[test]
+    fn test_re_encrypt_item_is_unreadable_under_a_drifted_stored_context() {
+        let old_key = generate_new_vault_key();
+        let new_key = generate_new_vault_key();
+        let context = item_context("item-1");
+
+        let encrypted = encrypt_with_aad("Secret item data", &old_key, &context).unwrap();
+        let item = ItemData {
+            id: "item-1".to_string(),
+            encrypted_data: encrypted.ciphertext,
+            encryption_iv: encrypted.iv,
+            encryption_algorithm: encrypted.algorithm,
+            context: context.clone(),
+        };
+
+        let re_encrypted = re_encrypt_item(&item, &old_key, &new_key).unwrap();
+        let rotated = EncryptedData {
+            ciphertext: re_encrypted.encrypted_data,
+            iv: re_encrypted.encryption_iv,
+            algorithm: "AES-GCM-AAD-V1".to_string(),
+        };
+
+        // The context the caller supplied still opens it.
+        assert_eq!(
+            decrypt_with_aad(&rotated, &new_key, &context).unwrap(),
+            "Secret item data"
+        );
+
+        // A store that recorded `version + 1` alongside the rotation has bricked the item.
+        let bumped_version = AadContext {
+            version: context.version + 1,
+            ..context.clone()
+        };
+        assert!(decrypt_with_aad(&rotated, &new_key, &bumped_version).is_err());
+
+        // So has one that re-stamped the rotating admin as the encrypting user.
+        let rotating_admin = AadContext {
+            user_id: "admin-user".to_string(),
+            ..context.clone()
+        };
+        assert!(decrypt_with_aad(&rotated, &new_key, &rotating_admin).is_err());
+
+        // Both at once — exactly what a rotation-apply UPDATE that touches both columns writes.
+        let both = AadContext {
+            version: context.version + 1,
+            user_id: "admin-user".to_string(),
+            ..context
+        };
+        assert!(decrypt_with_aad(&rotated, &new_key, &both).is_err());
+    }
+
     #[test]
     fn test_re_encrypt_item_rejects_a_mismatched_context() {
         let old_key = generate_new_vault_key();

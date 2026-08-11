@@ -73,6 +73,7 @@ export type {
 	FinishLoginResponse,
 	HiddenVaultsInput,
 	ImageUploadInput,
+	ItemPayload,
 	LoginAttempt,
 	MoveItemInput,
 	PasswordChangeInput,

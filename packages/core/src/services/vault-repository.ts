@@ -1,6 +1,15 @@
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import type { AppApiClient } from "@bittery/shared/api-client";
 import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
+import type { ServerEncryptedItem } from "@bittery/shared/item-mapping";
+import {
+	stripToDecryptedData,
+	toCachedItem,
+	toCachedItemFromRepositoryItem,
+	toEncryptedPayload,
+	toNewCachedItem,
+	withEncryptedPayload,
+} from "@bittery/shared/item-mapping";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
 	decodeVaultType,
@@ -24,7 +33,7 @@ import type {
 } from "@bittery/types";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
 import { isVaultHidden } from "./travel-mode-service";
-import type { VaultCrypto } from "./vault-crypto";
+import type { ItemWriteScope, VaultCrypto } from "./vault-crypto";
 
 export interface VaultView {
 	id: string;
@@ -40,7 +49,7 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	serverUrl?: string;
 	deletedAt: string | null;
 	version: number;
-	lastModifiedBy: string | null;
+	lastModifiedBy: string;
 	encryptionVersion: number;
 	encryptedByUserId: string;
 	attachments?: CachedAttachment[];
@@ -63,24 +72,13 @@ export interface EncryptedPayload {
 type BootstrapRequest = Parameters<AppApiClient["sync"]["bootstrap"]>[0];
 
 interface BootstrapItemPage {
-	items: ReadonlyArray<{
-		id: string;
-		vaultId: string;
-		category: string;
-		favorite: boolean;
-		encryptedData: string;
-		encryptionIv: string;
-		encryptionAlgorithm: string;
-		version: number;
-		lastModifiedBy?: string | null;
-		encryptionVersion: number;
-		encryptedByUserId: string;
-		createdAt: string | Date;
-		updatedAt: string | Date;
-		deletedAt?: string | Date | null;
-		attachments?: ReadonlyArray<CachedAttachment>;
-		vault?: ServerVaultSummary | null;
-	}>;
+	/**
+	 * Structural so a client that is not the generated one still fits, but the item fields
+	 * are the contract's — restating them here is how a new server field went missing.
+	 */
+	items: ReadonlyArray<
+		ServerEncryptedItem & { vault?: ServerVaultSummary | null }
+	>;
 	hasMore: boolean;
 	nextCursor?: string | null;
 	syncCursor?: { id: string } | null;
@@ -310,20 +308,7 @@ export class VaultRepository {
 		item: CachedEncryptedItem,
 		vaultKey: KeyRef,
 	): Promise<{ plaintext: string; item: CachedEncryptedItem }> {
-		const plaintext = await this.vaultCrypto.decryptItem(
-			{
-				ciphertext: item.encryptedData,
-				iv: item.encryptionIv,
-				algorithm: item.encryptionAlgorithm,
-			},
-			vaultKey,
-			{
-				vaultId: item.vaultId,
-				itemId: item.id,
-				version: item.encryptionVersion,
-				userId: item.encryptedByUserId,
-			},
-		);
+		const plaintext = await this.vaultCrypto.decryptStoredItem(item, vaultKey);
 		return { plaintext, item };
 	}
 
@@ -334,7 +319,7 @@ export class VaultRepository {
 	private async describeUndecryptableItem(
 		item: CachedEncryptedItem,
 	): Promise<string> {
-		return `item ${item.id} vault=${item.vaultId} version=${item.version} lastModifiedBy=${item.lastModifiedBy ?? "null"} encryptedDataLength=${item.encryptedData.length}`;
+		return `item ${item.id} vault=${item.vaultId} version=${item.version} lastModifiedBy=${item.lastModifiedBy} encryptedDataLength=${item.encryptedData.length}`;
 	}
 
 	private async decryptItemBatch(
@@ -363,23 +348,7 @@ export class VaultRepository {
 				return vaultKey ? { item, vaultKey } : null;
 			});
 			const decryptable = candidates.filter((entry) => entry !== null);
-			const primary = await this.vaultCrypto.decryptItems(
-				decryptable.map(({ item, vaultKey }) => ({
-					id: item.id,
-					data: {
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
-					vaultKey,
-					scope: {
-						vaultId: item.vaultId,
-						itemId: item.id,
-						version: item.encryptionVersion,
-						userId: item.encryptedByUserId,
-					},
-				})),
-			);
+			const primary = await this.vaultCrypto.decryptStoredItems(decryptable);
 
 			const outcomeByItem = new Map<
 				CachedEncryptedItem,
@@ -426,25 +395,19 @@ export class VaultRepository {
 	}
 
 	private toCachedItem(item: VaultRepositoryItem): CachedEncryptedItem {
+		return toCachedItemFromRepositoryItem(item, this.cacheScope());
+	}
+
+	/** The account fields a record inherits when it does not already name one. */
+	private cacheScope(): {
+		accountId: string;
+		accountEmail?: string;
+		serverUrl?: string;
+	} {
 		return {
-			id: item.id,
-			vaultId: item.vaultId,
-			accountId: item.accountId ?? this.accountId,
-			accountEmail: item.accountEmail ?? this.accountEmail,
-			serverUrl: item.serverUrl ?? this.serverUrl ?? this.fallbackServerUrl,
-			category: item.category,
-			favorite: item.favorite,
-			encryptedData: item._encrypted.data,
-			encryptionIv: item._encrypted.iv,
-			encryptionAlgorithm: item._encrypted.algorithm,
-			version: item.version,
-			lastModifiedBy: item.lastModifiedBy,
-			encryptionVersion: item.encryptionVersion,
-			encryptedByUserId: item.encryptedByUserId,
-			createdAt: item.createdAt,
-			updatedAt: item.updatedAt,
-			deletedAt: item.deletedAt,
-			attachments: item.attachments,
+			accountId: this.accountId,
+			accountEmail: this.accountEmail,
+			serverUrl: this.serverUrl ?? this.fallbackServerUrl,
 		};
 	}
 
@@ -483,25 +446,22 @@ export class VaultRepository {
 					`Missing create projection data for ${command.entityId}`,
 				);
 			}
-			return {
-				id: command.entityId,
-				vaultId: command.vaultId,
-				accountId: this.accountId,
-				accountEmail: command.accountEmail ?? this.accountEmail,
-				serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-				category: command.category,
-				favorite: false,
-				encryptedData: payload.encryptedData,
-				encryptionIv: payload.encryptionIv,
-				encryptionAlgorithm: payload.encryptionAlgorithm,
-				version: payload.encryptionVersion,
-				lastModifiedBy: payload.encryptedByUserId,
-				encryptionVersion: payload.encryptionVersion,
-				encryptedByUserId: payload.encryptedByUserId,
-				createdAt: timestamp,
-				updatedAt: timestamp,
-				deletedAt: null,
-			};
+			return toNewCachedItem(
+				{
+					id: command.entityId,
+					vaultId: command.vaultId,
+					category: command.category,
+					timestamp,
+					// Distinct fields that coincide here: a create binds its ciphertext to encryption
+					// version 1, and the server's INSERT lands the row at version 1 as well.
+					version: payload.encryptionVersion,
+					payload,
+				},
+				{
+					...this.cacheScope(),
+					accountEmail: command.accountEmail ?? this.accountEmail,
+				},
+			);
 		}
 		if (!base) {
 			return undefined;
@@ -516,21 +476,18 @@ export class VaultRepository {
 				if (!payload) {
 					throw new Error(`Missing ${command.type} projection data`);
 				}
-				return {
-					...base,
+				return withEncryptedPayload(base, payload, {
 					vaultId:
 						command.type === "move"
 							? (command.targetVaultId ?? base.vaultId)
 							: base.vaultId,
-					encryptedData: payload.encryptedData,
-					encryptionIv: payload.encryptionIv,
-					encryptionAlgorithm: payload.encryptionAlgorithm,
+					// Distinct fields that coincide here: an update/move binds its ciphertext to the
+					// base version + 1, which is exactly the version the CAS-guarded server write lands
+					// on. They are not interchangeable in general — the server advances `version` alone
+					// for favourite/trash/restore and for key rotation.
 					version: payload.encryptionVersion,
-					lastModifiedBy: payload.encryptedByUserId,
-					encryptionVersion: payload.encryptionVersion,
-					encryptedByUserId: payload.encryptedByUserId,
 					updatedAt: timestamp,
-				};
+				});
 			}
 			case "delete":
 				return { ...base, deletedAt: timestamp, updatedAt: timestamp };
@@ -738,7 +695,10 @@ export class VaultRepository {
 			createdAt: existing ? existing.createdAt : item.createdAt,
 			deletedAt: existing?.deletedAt ?? null,
 			version,
-			lastModifiedBy: existing?.lastModifiedBy ?? null,
+			// This device is writing, so this device's user is the modifier. Stated rather
+			// than derived from `encryptedByUserId`: they coincide here only because the
+			// same write both re-seals and records the edit.
+			lastModifiedBy: encryptedByUserId,
 			encryptionVersion: encryptedPayload.encryptionVersion,
 			encryptedByUserId,
 			attachments: existing?.attachments,
@@ -896,26 +856,7 @@ export class VaultRepository {
 		const local = this.items.get(command.entityId);
 		if (!local) return undefined;
 
-		const {
-			id: _id,
-			vaultId: _vaultId,
-			category: _category,
-			favorite: _favorite,
-			createdAt: _createdAt,
-			updatedAt: _updatedAt,
-			accountId: _accountId,
-			accountEmail: _accountEmail,
-			serverUrl: _serverUrl,
-			deletedAt: _deletedAt,
-			version: _version,
-			lastModifiedBy: _lastModifiedBy,
-			encryptionVersion: _encryptionVersion,
-			encryptedByUserId: _encryptedByUserId,
-			attachments: _attachments,
-			_encrypted,
-			vault: _vault,
-			...data
-		} = local;
+		const data = stripToDecryptedData(local);
 		const payload = await this.encryptWithVaultKey(local.vaultId, data, {
 			itemId: command.conflictCopyId,
 			version: 1,
@@ -932,13 +873,7 @@ export class VaultRepository {
 			entityId: command.conflictCopyId,
 			vaultId: local.vaultId,
 			category: local.category,
-			encryptedPayload: {
-				encryptedData: payload.ciphertext,
-				encryptionIv: payload.iv,
-				encryptionAlgorithm: payload.algorithm,
-				encryptionVersion: payload.encryptionVersion,
-				encryptedByUserId: payload.encryptedByUserId,
-			},
+			encryptedPayload: toEncryptedPayload(payload),
 			baseVersion: 0,
 			timestamp: Date.now(),
 			retryCount: 0,
@@ -1158,30 +1093,10 @@ export class VaultRepository {
 							`Bootstrap Item ${rawItem.id} is missing its Vault summary.`,
 						);
 					}
-					const cachedItem: CachedEncryptedItem = {
-						id: rawItem.id,
-						vaultId: rawItem.vaultId,
-						accountId: this.accountId,
-						accountEmail: this.accountEmail,
-						serverUrl: this.serverUrl ?? this.fallbackServerUrl,
-						category: rawItem.category,
-						favorite: rawItem.favorite,
-						encryptedData: rawItem.encryptedData,
-						encryptionIv: rawItem.encryptionIv,
-						encryptionAlgorithm: rawItem.encryptionAlgorithm,
-						version: rawItem.version,
-						lastModifiedBy: rawItem.lastModifiedBy ?? null,
-						encryptionVersion: rawItem.encryptionVersion,
-						encryptedByUserId: rawItem.encryptedByUserId,
-						createdAt: String(rawItem.createdAt),
-						updatedAt: String(rawItem.updatedAt),
-						deletedAt: rawItem.deletedAt ? String(rawItem.deletedAt) : null,
-						attachments: (rawItem.attachments ?? []).map((attachment) => ({
-							...attachment,
-							encryptedContentTypeIv: attachment.encryptedContentTypeIv,
-							uploadedBy: attachment.uploadedBy,
-						})),
-					};
+					const cachedItem = toCachedItem(rawItem, this.cacheScope());
+					// A staged bootstrap record always carries the field, so a promoted
+					// generation never mixes "no attachments" with "not loaded".
+					cachedItem.attachments ??= [];
 					await staging.upsertCachedItem(cachedItem);
 
 					await staging.upsertCachedVault({
@@ -1390,15 +1305,18 @@ export class VaultRepository {
 		try {
 			const encryptionVersion = options.version;
 			const encryptedByUserId = options.userId ?? (await this.resolveUserId());
+			// A write states its own revision: this ciphertext is about to *become*
+			// `encryptionVersion`, so there is no record yet to read it off.
+			const scope: ItemWriteScope = {
+				vaultId,
+				itemId: options.itemId,
+				version: encryptionVersion,
+				userId: encryptedByUserId,
+			};
 			const encrypted = await this.vaultCrypto.encryptItem(
 				JSON.stringify(data),
 				vaultKey,
-				{
-					vaultId,
-					itemId: options.itemId,
-					version: encryptionVersion,
-					userId: encryptedByUserId,
-				},
+				scope,
 			);
 			return { ...encrypted, encryptionVersion, encryptedByUserId };
 		} finally {

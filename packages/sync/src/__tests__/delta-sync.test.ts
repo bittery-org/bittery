@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { ApiError } from "@bittery/shared/api-client";
+import { serverEncryptedItem } from "@bittery/shared/testing/item-fixtures";
 import type { CachedEncryptedItem, CachedVaultMetadata } from "@bittery/types";
 import { type DeltaSyncApiClient, performDeltaSync } from "../delta-sync";
 import type { SyncEvent, SyncItemCache, SyncVaultKeyEntry } from "../types";
@@ -85,11 +86,9 @@ function recordingCache() {
 }
 
 function serverItem() {
-	return {
+	return serverEncryptedItem({
 		id: "item_1",
 		vaultId: "vault_1",
-		category: "login",
-		favorite: false,
 		encryptedData: "ciphertext",
 		encryptionIv: "iv",
 		encryptionAlgorithm: "AES-GCM-AAD-V1",
@@ -101,7 +100,7 @@ function serverItem() {
 		updatedAt: "2026-08-02T00:00:00.000Z",
 		deletedAt: null,
 		attachments: [],
-	};
+	});
 }
 
 describe("performDeltaSync vault mapping", () => {

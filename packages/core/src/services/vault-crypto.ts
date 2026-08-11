@@ -37,6 +37,7 @@ import {
 import type { VaultKeyEntry } from "@bittery/shared/vault-mapping";
 import type { SessionExpiryInput } from "@bittery/storage/types";
 import type {
+	CachedEncryptedItem,
 	EncryptedData,
 	EncryptionContext,
 	KdfProfile,
@@ -50,21 +51,43 @@ import type {
  * Every ciphertext in a vault is bound to the entity it belongs to, so a ciphertext moved
  * from one item, field or vault to another fails to decrypt instead of silently opening.
  * These builders are the only place that binding is spelled out.
+ *
+ * An item has two of them and they are deliberately not interchangeable:
+ *
+ * - **Writing** binds the revision the ciphertext is *about to become* — `existing.version + 1`,
+ *   a number no record carries yet — so the writer states it. That is {@link ItemWriteScope}.
+ * - **Reading** binds the revision the ciphertext was *sealed at*, which the stored record
+ *   already carries. Readers therefore hand over the record ({@link StoredItemBinding}) and
+ *   the fields are pulled from it, because a reader who retypes them can pair one item's
+ *   ciphertext with another item's binding and lose that plaintext permanently.
+ *
+ * `encryptionVersion` is not `version`: a bump for optimistic concurrency leaves the
+ * ciphertext alone, so the two drift apart as a matter of course.
  */
 
-interface ItemContextInput {
+/** Where a *new* ciphertext will sit — the revision being written, not one already stored. */
+export interface ItemWriteScope {
 	vaultId: string;
 	itemId: string;
 	version: number;
 	userId: string;
 }
 
-export interface StoredItemContextInput {
-	vaultId: string;
-	itemId: string;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-}
+/**
+ * The stored fields an item's AAD was bound to. Read paths pass the record itself, so the
+ * compiler pulls these four rather than the programmer.
+ */
+export type StoredItemBinding = Pick<
+	CachedEncryptedItem,
+	"id" | "vaultId" | "encryptionVersion" | "encryptedByUserId"
+>;
+
+/** A stored item's ciphertext together with the binding it was sealed under. */
+export type StoredItemCiphertext = StoredItemBinding &
+	Pick<
+		CachedEncryptedItem,
+		"encryptedData" | "encryptionIv" | "encryptionAlgorithm"
+	>;
 
 interface AttachmentContextInput {
 	vaultId: string;
@@ -88,26 +111,41 @@ function normalizeVersion(version: number): number {
 	return Math.floor(version);
 }
 
-export function buildItemEncryptionContext(
-	input: ItemContextInput,
-): EncryptionContext {
+/**
+ * Not exported: `encryptItem` is the only way to bind a write context, so nobody can seal a
+ * ciphertext against a context this module never saw.
+ */
+function buildItemEncryptionContext(scope: ItemWriteScope): EncryptionContext {
 	return {
-		vaultId: input.vaultId,
-		entityId: input.itemId,
+		vaultId: scope.vaultId,
+		entityId: scope.itemId,
 		entityType: "item",
-		version: normalizeVersion(input.version),
-		userId: input.userId,
+		version: normalizeVersion(scope.version),
+		userId: scope.userId,
 	};
 }
 
+/** The stored ciphertext triple, read off the record beside the binding it belongs to. */
+function storedItemData(item: StoredItemCiphertext): EncryptedData {
+	return {
+		ciphertext: item.encryptedData,
+		iv: item.encryptionIv,
+		algorithm: item.encryptionAlgorithm,
+	};
+}
+
+/**
+ * Rebuilds the context a stored item was sealed under, from the record itself. Exported for
+ * key rotation, which re-encrypts under the binding each item already has.
+ */
 export function buildStoredItemEncryptionContext(
-	input: StoredItemContextInput,
+	item: StoredItemBinding,
 ): EncryptionContext {
 	return buildItemEncryptionContext({
-		vaultId: input.vaultId,
-		itemId: input.itemId,
-		version: input.encryptionVersion,
-		userId: input.encryptedByUserId,
+		vaultId: item.vaultId,
+		itemId: item.id,
+		version: item.encryptionVersion,
+		userId: item.encryptedByUserId,
 	});
 }
 
@@ -226,14 +264,6 @@ export interface VaultCryptoDeps {
 	storage: VaultCryptoStore;
 }
 
-/** Where an item's ciphertext sits, which is what its AAD is built from. */
-export interface ItemScope {
-	vaultId: string;
-	itemId: string;
-	version: number;
-	userId: string;
-}
-
 export interface AttachmentScope {
 	vaultId: string;
 	attachmentKey: string;
@@ -242,11 +272,9 @@ export interface AttachmentScope {
 
 export type AttachmentField = "name" | "contentType" | "blob";
 
-export interface DecryptItemRequest {
-	id: string;
-	data: EncryptedData;
+export interface DecryptStoredItemRequest {
+	item: StoredItemCiphertext;
 	vaultKey: KeyRef;
-	scope: ItemScope;
 }
 
 export interface EncryptedAttachmentMetaInput {
@@ -354,21 +382,25 @@ export interface VaultCrypto {
 
 	// --- item payloads ---
 
+	/**
+	 * Seals a new revision. The scope's `version` is the revision this ciphertext will be
+	 * stored as, which is why it is stated rather than read off a record.
+	 */
 	encryptItem(
 		plaintext: string,
 		vaultKey: KeyRef,
-		scope: ItemScope,
+		scope: ItemWriteScope,
 	): Promise<EncryptedData>;
 
-	decryptItem(
-		data: EncryptedData,
+	/** Opens a stored item under the binding its own record carries. */
+	decryptStoredItem(
+		item: StoredItemCiphertext,
 		vaultKey: KeyRef,
-		scope: ItemScope,
 	): Promise<string>;
 
-	/** One port round trip for the whole batch. */
-	decryptItems(
-		requests: readonly DecryptItemRequest[],
+	/** One port round trip for the whole batch; results keep request order and item ids. */
+	decryptStoredItems(
+		requests: readonly DecryptStoredItemRequest[],
 	): Promise<readonly DecryptManyResult[]>;
 
 	encryptAttachment(
@@ -607,7 +639,7 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 		async encryptItem(
 			plaintext: string,
 			vaultKey: KeyRef,
-			scope: ItemScope,
+			scope: ItemWriteScope,
 		): Promise<EncryptedData> {
 			return crypto.encrypt(
 				plaintext,
@@ -616,27 +648,26 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 			);
 		},
 
-		async decryptItem(
-			data: EncryptedData,
+		async decryptStoredItem(
+			item: StoredItemCiphertext,
 			vaultKey: KeyRef,
-			scope: ItemScope,
 		): Promise<string> {
 			return decryptBoundToContext(
-				data,
+				storedItemData(item),
 				vaultKey,
-				buildItemEncryptionContext(scope),
+				buildStoredItemEncryptionContext(item),
 			);
 		},
 
-		async decryptItems(
-			requests: readonly DecryptItemRequest[],
+		async decryptStoredItems(
+			requests: readonly DecryptStoredItemRequest[],
 		): Promise<readonly DecryptManyResult[]> {
 			return crypto.decryptMany(
-				requests.map((request) => ({
-					id: request.id,
-					data: request.data,
-					key: request.vaultKey,
-					context: buildItemEncryptionContext(request.scope),
+				requests.map(({ item, vaultKey }) => ({
+					id: item.id,
+					data: storedItemData(item),
+					key: vaultKey,
+					context: buildStoredItemEncryptionContext(item),
 				})),
 			);
 		},

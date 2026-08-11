@@ -1,5 +1,10 @@
+import {
+	stripToDecryptedData,
+	toCachedItem,
+	toEncryptedPayload,
+} from "@bittery/shared/item-mapping";
 import type { DecryptedItemData, ItemCategory } from "@bittery/shared/types";
-import type { CachedEncryptedItem, ItemSyncCommand } from "@bittery/types";
+import type { ItemSyncCommand } from "@bittery/types";
 import { core } from "./core-instance";
 import { enqueueOutboundCommand } from "./outbound-drain";
 import { syncCacheService } from "./services/sync-cache-service";
@@ -62,43 +67,6 @@ interface UpdateItemInput {
 	accountEmail?: string;
 }
 
-function toDecryptedData(item: RepositoryItem): DecryptedItemData {
-	const data = { ...item };
-	for (const key of [
-		"id",
-		"vaultId",
-		"category",
-		"favorite",
-		"createdAt",
-		"updatedAt",
-		"deletedAt",
-		"version",
-		"lastModifiedBy",
-		"encryptionVersion",
-		"encryptedByUserId",
-		"attachments",
-		"accountEmail",
-		"accountId",
-		"serverUrl",
-		"_encrypted",
-		"vault",
-		"account",
-	]) {
-		delete data[key];
-	}
-	return data as unknown as DecryptedItemData;
-}
-
-function toCommandPayload(payload: EncryptedPayload) {
-	return {
-		encryptedData: payload.ciphertext,
-		encryptionIv: payload.iv,
-		encryptionAlgorithm: payload.algorithm,
-		encryptionVersion: payload.encryptionVersion,
-		encryptedByUserId: payload.encryptedByUserId,
-	};
-}
-
 export function createExtensionItemMutationModule(
 	deps: ExtensionItemMutationDeps,
 ) {
@@ -146,7 +114,7 @@ export function createExtensionItemMutationModule(
 				entityId: itemId,
 				vaultId: input.vaultId,
 				category: input.category,
-				encryptedPayload: toCommandPayload(encrypted),
+				encryptedPayload: toEncryptedPayload(encrypted),
 				baseVersion: 0,
 			});
 			return { itemId };
@@ -174,7 +142,7 @@ export function createExtensionItemMutationModule(
 				);
 			}
 			const data = deps.mergeItemUpdate(
-				toDecryptedData(repositoryItem),
+				stripToDecryptedData(repositoryItem),
 				input.data,
 				repositoryItem.category,
 			);
@@ -192,7 +160,7 @@ export function createExtensionItemMutationModule(
 				type: "update",
 				entityId: repositoryItem.id,
 				vaultId: repositoryItem.vaultId,
-				encryptedPayload: toCommandPayload(encrypted),
+				encryptedPayload: toEncryptedPayload(encrypted),
 				baseVersion: repositoryItem.version,
 			});
 		},
@@ -217,30 +185,10 @@ const extensionItemMutations = createExtensionItemMutationModule({
 			throw new Error(`No authenticated client for account ${accountId}`);
 		}
 		const { data: item } = await client.items.get(itemId);
-		const cachedItem: CachedEncryptedItem = {
-			id: item.id,
-			vaultId: item.vaultId,
+		await core.vaultCoordinator.upsertCachedItem(
+			toCachedItem(item, { accountId, accountEmail }),
 			accountId,
-			accountEmail,
-			category: item.category,
-			favorite: item.favorite,
-			encryptedData: item.encryptedData,
-			encryptionIv: item.encryptionIv,
-			encryptionAlgorithm: item.encryptionAlgorithm,
-			version: item.version,
-			lastModifiedBy: item.lastModifiedBy ?? null,
-			encryptionVersion: item.encryptionVersion,
-			encryptedByUserId: item.encryptedByUserId,
-			createdAt: String(item.createdAt),
-			updatedAt: String(item.updatedAt),
-			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-			attachments: item.attachments?.map((attachment) => ({
-				...attachment,
-				encryptedContentTypeIv: attachment.encryptedContentTypeIv,
-				uploadedBy: attachment.uploadedBy,
-			})),
-		};
-		await core.vaultCoordinator.upsertCachedItem(cachedItem, accountId);
+		);
 	},
 	enqueue: enqueueOutboundCommand,
 	now: Date.now,

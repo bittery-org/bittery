@@ -2,7 +2,11 @@ import { describe, expect, test } from "bun:test";
 import type { KeyRef } from "@bittery/crypto-port";
 import { createInMemoryCryptoPort } from "@bittery/crypto-port/testing";
 import { ApiError } from "@bittery/shared/api-client";
-import type { CachedEncryptedItem, ItemSyncCommand } from "@bittery/types";
+import {
+	cachedItem,
+	serverEncryptedItem,
+} from "@bittery/shared/testing/item-fixtures";
+import type { ItemSyncCommand } from "@bittery/types";
 import {
 	encodeAttachmentBlobEnvelope,
 	encryptAttachmentParts,
@@ -222,20 +226,18 @@ describe("ItemService", () => {
 			getCachedVaults: async () => null,
 		};
 		const trashedWireItem = {
-			id: "trashed-item",
-			vaultId: "vault_source",
-			category: "login",
-			favorite: false,
-			encryptedData: trashedEncrypted.ciphertext,
-			encryptionIv: trashedEncrypted.iv,
-			encryptionAlgorithm: trashedEncrypted.algorithm,
-			encryptionVersion: 1,
-			encryptedByUserId: SOURCE.userId,
-			version: 1,
-			lastModifiedBy: SOURCE.userId,
-			createdAt: "2026-08-10T00:00:00Z",
-			updatedAt: "2026-08-10T00:00:00Z",
-			deletedAt: "2026-08-10T01:00:00Z",
+			...serverEncryptedItem({
+				id: "trashed-item",
+				vaultId: "vault_source",
+				encryptedData: trashedEncrypted.ciphertext,
+				encryptionIv: trashedEncrypted.iv,
+				encryptionAlgorithm: trashedEncrypted.algorithm,
+				encryptedByUserId: SOURCE.userId,
+				lastModifiedBy: SOURCE.userId,
+				createdAt: "2026-08-10T00:00:00Z",
+				updatedAt: "2026-08-10T00:00:00Z",
+				deletedAt: "2026-08-10T01:00:00Z",
+			}),
 			vault: {
 				id: "vault_source",
 				name: "Personal",
@@ -246,22 +248,33 @@ describe("ItemService", () => {
 			items: {
 				listInVault: async () => ({
 					data: [
-						{
+						serverEncryptedItem({
 							id: "active-item",
 							vaultId: "vault_source",
-							category: "login",
-							favorite: false,
 							encryptedData: activeEncrypted.ciphertext,
 							encryptionIv: activeEncrypted.iv,
 							encryptionAlgorithm: activeEncrypted.algorithm,
-							encryptionVersion: 1,
 							encryptedByUserId: SOURCE.userId,
-							version: 1,
 							lastModifiedBy: SOURCE.userId,
 							createdAt: "2026-08-10T00:00:00Z",
 							updatedAt: "2026-08-10T00:00:00Z",
-							attachments: [{ id: "attachment-1" }],
-						},
+							attachments: [
+								{
+									id: "attachment-1",
+									itemId: "active-item",
+									vaultId: "vault_source",
+									encryptedName: "name",
+									encryptedContentType: "type",
+									encryptedContentTypeIv: "iv",
+									encryptionAlgorithm: "AES-GCM-AAD-V1",
+									encryptionIv: "iv",
+									fileSize: 1,
+									storageKey: "key",
+									uploadedBy: SOURCE.userId,
+									createdAt: "2026-08-10T00:00:00Z",
+								},
+							],
+						}),
 					],
 				}),
 				listTrashed: async () => ({ data: [trashedWireItem] }),
@@ -340,19 +353,17 @@ describe("ItemService", () => {
 		});
 		if (!vaultKey || !mutation) throw new Error("Test fixture did not encrypt");
 		await expect(
-			fixture.vaultCrypto.decryptItem(
+			fixture.vaultCrypto.decryptStoredItem(
 				{
-					ciphertext: mutation.encryptedData ?? "",
-					iv: mutation.encryptionIv ?? "",
-					algorithm: mutation.encryptionAlgorithm ?? "",
+					id: result.itemId,
+					vaultId: "vault_source",
+					encryptedData: mutation.encryptedData ?? "",
+					encryptionIv: mutation.encryptionIv ?? "",
+					encryptionAlgorithm: mutation.encryptionAlgorithm ?? "",
+					encryptionVersion: 1,
+					encryptedByUserId: SOURCE.userId,
 				},
 				vaultKey,
-				{
-					vaultId: "vault_source",
-					itemId: result.itemId,
-					version: 1,
-					userId: SOURCE.userId,
-				},
 			),
 		).resolves.toContain("example.com");
 		await fixture.crypto.destroyKey(vaultKey);
@@ -377,11 +388,9 @@ describe("ItemService", () => {
 			},
 		);
 		await fixture.crypto.destroyKey(vaultKey);
-		const cached: CachedEncryptedItem = {
+		const cached = cachedItem({
 			id: "item_1",
 			vaultId: "vault_source",
-			category: "login",
-			favorite: false,
 			encryptedData: encrypted.ciphertext,
 			encryptionIv: encrypted.iv,
 			encryptionAlgorithm: encrypted.algorithm,
@@ -391,7 +400,7 @@ describe("ItemService", () => {
 			encryptedByUserId: SOURCE.userId,
 			createdAt: "2026-03-13T00:00:00.000Z",
 			updatedAt: "2026-03-13T00:00:00.000Z",
-		};
+		});
 		const service = fixture.service(() => ({}), {
 			getCachedItems: async () => [cached],
 		});

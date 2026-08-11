@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { ApiError } from "@bittery/shared/api-client";
+import { serverEncryptedItem } from "@bittery/shared/testing/item-fixtures";
 import {
 	OutboundQueue,
 	type OutboundQueueApiClient,
@@ -152,23 +153,25 @@ function testApiClient(options: TestApiClientOptions = {}): SyncApiClient {
 			get: async (itemId: string) =>
 				apiResult(
 					await (options.getItem?.(itemId) ??
-						Promise.resolve({
-							id: itemId,
-							vaultId: "vault_1",
-							category: "login",
-							favorite: false,
-							encryptedData: "ciphertext",
-							encryptionIv: "iv",
-							encryptionAlgorithm: "AES-GCM-AAD-V1",
-							encryptionVersion: 1,
-							encryptedByUserId: "user_1",
-							version: 1,
-							lastModifiedBy: "user_1",
-							createdAt: "2026-03-13T00:00:00.000Z",
-							updatedAt: "2026-03-13T00:00:00.000Z",
-							deletedAt: null,
-							attachments: [],
-						})),
+						Promise.resolve(
+							serverEncryptedItem({
+								id: itemId,
+								vaultId: "vault_1",
+								category: "login",
+								favorite: false,
+								encryptedData: "ciphertext",
+								encryptionIv: "iv",
+								encryptionAlgorithm: "AES-GCM-AAD-V1",
+								encryptionVersion: 1,
+								encryptedByUserId: "user_1",
+								version: 1,
+								lastModifiedBy: "user_1",
+								createdAt: "2026-03-13T00:00:00.000Z",
+								updatedAt: "2026-03-13T00:00:00.000Z",
+								deletedAt: null,
+								attachments: [],
+							}),
+						)),
 				),
 			listInVault: async () => apiResult([]),
 		},
@@ -678,23 +681,24 @@ describe("sync engine regressions", () => {
 		const orchestrator = new SyncOrchestrator({
 			syncManager: { clientId: "self_client", storage },
 			apiClient: testApiClient({
-				getItem: async (id) => ({
-					id,
-					vaultId: "vault_1",
-					category: "login",
-					favorite: true,
-					encryptedData: "ciphertext",
-					encryptionIv: "iv",
-					encryptionAlgorithm: "AES-GCM-AAD-V1",
-					encryptionVersion: 1,
-					encryptedByUserId: "user_1",
-					version: 2,
-					lastModifiedBy: "user_1",
-					createdAt: "2026-03-13T00:00:00.000Z",
-					updatedAt: "2026-03-13T00:00:00.000Z",
-					deletedAt: null,
-					attachments: [],
-				}),
+				getItem: async (id) =>
+					serverEncryptedItem({
+						id,
+						vaultId: "vault_1",
+						category: "login",
+						favorite: true,
+						encryptedData: "ciphertext",
+						encryptionIv: "iv",
+						encryptionAlgorithm: "AES-GCM-AAD-V1",
+						encryptionVersion: 1,
+						encryptedByUserId: "user_1",
+						version: 2,
+						lastModifiedBy: "user_1",
+						createdAt: "2026-03-13T00:00:00.000Z",
+						updatedAt: "2026-03-13T00:00:00.000Z",
+						deletedAt: null,
+						attachments: [],
+					}),
 			}),
 			itemCache: stubItemCache({
 				upsertCachedItem: async (item) => {
@@ -1092,23 +1096,25 @@ describe("outbound queue multi-account drain isolation", () => {
 			},
 		}) as any;
 		client.items.get = async (itemId: string) =>
-			apiResult({
-				id: itemId,
-				vaultId: "vault_1",
-				category: "login",
-				favorite: false,
-				encryptedData: "server_cipher",
-				encryptionIv: "server_iv",
-				encryptionAlgorithm: "AES-GCM-AAD-V1",
-				encryptionVersion: 1,
-				encryptedByUserId: "user_1",
-				version: 2,
-				lastModifiedBy: "other_user",
-				createdAt: "2026-08-01T00:00:00.000Z",
-				updatedAt: "2026-08-02T00:00:00.000Z",
-				deletedAt: null,
-				attachments: [],
-			});
+			apiResult(
+				serverEncryptedItem({
+					id: itemId,
+					vaultId: "vault_1",
+					category: "login",
+					favorite: false,
+					encryptedData: "server_cipher",
+					encryptionIv: "server_iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+					encryptionVersion: 1,
+					encryptedByUserId: "user_1",
+					version: 2,
+					lastModifiedBy: "other_user",
+					createdAt: "2026-08-01T00:00:00.000Z",
+					updatedAt: "2026-08-02T00:00:00.000Z",
+					deletedAt: null,
+					attachments: [],
+				}),
+			);
 
 		await queue.drain(() => client);
 
@@ -1715,6 +1721,114 @@ describe("outbound queue multi-account drain isolation", () => {
 		}
 	}
 
+	/**
+	 * Favourite/trash/restore advance the server's `version` without resealing ciphertext, so the
+	 * local projection lags. Rebasing a chained edit onto the acknowledged version makes the
+	 * server stamp an `encryption_version` the ciphertext was never sealed under: the GCM AAD no
+	 * longer verifies and the Item is permanently undecryptable.
+	 */
+	for (const [storageKind, createStorage] of [
+		["atomic update", () => new AtomicMemoryStorage()],
+		["set", () => new MemoryStorage()],
+	] as const) {
+		test(`does not rebase a chained ciphertext command onto a metadata ACK (${storageKind})`, async () => {
+			const queue = new OutboundQueue(createStorage(), "self_client", {
+				apply: async () => undefined,
+				acknowledge: async () => undefined,
+				preserveConflict: async () => undefined,
+			});
+			await queue.enqueue(
+				buildDeleteMutation("account_a", "item_a", {
+					id: "favorite",
+					type: "toggle_favorite",
+					favorite: true,
+					baseVersion: 1,
+				}),
+			);
+			await queue.enqueue(
+				buildDeleteMutation("account_a", "item_a", {
+					id: "edit",
+					type: "update",
+					baseVersion: 1,
+					timestamp: 2,
+					encryptedPayload: {
+						encryptedData: "offline_cipher",
+						encryptionIv: "offline_iv",
+						encryptionAlgorithm: "AES-GCM-AAD-V1",
+						// Sealed against the version the CAS-guarded write would land on.
+						encryptionVersion: 2,
+						encryptedByUserId: "user_1",
+					},
+				}),
+			);
+
+			// Stands in for the server: CAS on `version`, and `encryption_version` follows it only
+			// for writes that carry ciphertext.
+			let version = 1;
+			let encryptionVersion = 1;
+			const stampedEncryptionVersions: number[] = [];
+			const requireCas = (options: TestWriteOptions) => {
+				if (options.etag !== `"${version}"`) throw conflictError(412);
+			};
+			const client = outboundApiClient() as any;
+			client.items.get = async () => ({
+				...apiResult(
+					serverEncryptedItem({
+						id: "item_a",
+						vaultId: "vault_1",
+						category: "login",
+						favorite: true,
+						encryptedData: "server_cipher",
+						encryptionIv: "server_iv",
+						encryptionAlgorithm: "AES-GCM-AAD-V1",
+						version,
+						encryptionVersion,
+						encryptedByUserId: "user_1",
+						lastModifiedBy: "user_1",
+						createdAt: "2026-08-01T00:00:00.000Z",
+						updatedAt: "2026-08-02T00:00:00.000Z",
+						deletedAt: null,
+						attachments: [],
+					}),
+				),
+				etag: `"${version}"`,
+			});
+			client.items.setFavorite = async (
+				_itemId: string,
+				_input: unknown,
+				options: TestWriteOptions,
+			) => {
+				requireCas(options);
+				version += 1;
+				return { ...apiResult({}), etag: `"${version}"` };
+			};
+			client.items.update = async (
+				_itemId: string,
+				_input: unknown,
+				options: TestWriteOptions,
+			) => {
+				requireCas(options);
+				version += 1;
+				encryptionVersion = version;
+				stampedEncryptionVersions.push(encryptionVersion);
+				return {
+					...apiResult({ success: true, version }),
+					etag: `"${version}"`,
+				};
+			};
+
+			await queue.drain(() => client);
+			await queue.drain(() => client);
+
+			expect(
+				stampedEncryptionVersions.filter((stamped) => stamped !== 2),
+			).toEqual([]);
+			expect(queue.getCommands("account_a")).toMatchObject([
+				{ id: "edit", baseVersion: 1, status: "conflicted" },
+			]);
+		});
+	}
+
 	test("reconciles an acknowledgement before removing its durable command", async () => {
 		let pendingDuringAcknowledgement = -1;
 		const acknowledgements: Array<{
@@ -1978,23 +2092,25 @@ describe("outbound queue multi-account drain isolation", () => {
 		const client = outboundApiClient() as any;
 		client.items.get = async () => {
 			getCalls += 1;
-			return apiResult({
-				id: "item_a",
-				vaultId: "vault_1",
-				category: "login",
-				favorite: false,
-				encryptedData: "server_cipher",
-				encryptionIv: "server_iv",
-				encryptionAlgorithm: "AES-GCM-AAD-V1",
-				version: 2,
-				lastModifiedBy: "other_user",
-				encryptionVersion: 2,
-				encryptedByUserId: "other_user",
-				createdAt: "2026-08-01T00:00:00.000Z",
-				updatedAt: "2026-08-02T00:00:00.000Z",
-				deletedAt: null,
-				attachments: [],
-			});
+			return apiResult(
+				serverEncryptedItem({
+					id: "item_a",
+					vaultId: "vault_1",
+					category: "login",
+					favorite: false,
+					encryptedData: "server_cipher",
+					encryptionIv: "server_iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+					version: 2,
+					lastModifiedBy: "other_user",
+					encryptionVersion: 2,
+					encryptedByUserId: "other_user",
+					createdAt: "2026-08-01T00:00:00.000Z",
+					updatedAt: "2026-08-02T00:00:00.000Z",
+					deletedAt: null,
+					attachments: [],
+				}),
+			);
 		};
 		client.items.update = async () => {
 			throw conflictError(412);

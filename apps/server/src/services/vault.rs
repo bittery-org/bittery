@@ -18,6 +18,7 @@ use crate::{
         VaultSharingEntitlement,
     },
     services::vault_key::validate_encrypted_vault_key,
+    shapes::{attachment_shape, item_shape, rotation_item_shape},
 };
 
 const ITEM_PAGE_QUERY_BYTES: i64 = 4 * 1024 * 1024 - 16 * 1024;
@@ -305,23 +306,10 @@ pub struct CreateVaultInput {
     pub client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultItemResponse {
-    pub id: String,
-    pub vault_id: String,
-    pub category: String,
-    pub favorite: bool,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub deleted_at: Option<String>,
+item_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultItemResponse {}
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -405,41 +393,18 @@ pub struct SuccessResponse {
     pub success: bool,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultAttachmentResponse {
-    pub id: String,
-    pub item_id: String,
-    pub vault_id: String,
-    pub storage_key: String,
-    pub encrypted_name: String,
-    pub encrypted_content_type: String,
-    pub encryption_iv: String,
-    pub encrypted_content_type_iv: String,
-    pub encryption_algorithm: String,
-    pub file_size: i32,
-    pub uploaded_by: String,
-    pub created_at: String,
+attachment_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultAttachmentResponse {}
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultItemDetailsResponse {
-    pub id: String,
-    pub vault_id: String,
-    pub category: String,
-    pub favorite: bool,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub deleted_at: Option<String>,
-    pub attachments: Vec<VaultAttachmentResponse>,
+item_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultItemDetailsResponse {
+        attachments: Vec<VaultAttachmentResponse>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -454,45 +419,21 @@ pub struct VaultSummaryResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultItemWithVaultResponse {
-    pub id: String,
-    pub vault_id: String,
-    pub category: String,
-    pub favorite: bool,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub deleted_at: Option<String>,
-    pub attachments: Vec<VaultAttachmentResponse>,
-    pub vault: Option<VaultSummaryResponse>,
+item_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultItemWithVaultResponse {
+        attachments: Vec<VaultAttachmentResponse>,
+        vault: Option<VaultSummaryResponse>,
+    }
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct DeletedVaultItemWithVaultResponse {
-    pub id: String,
-    pub vault_id: String,
-    pub category: String,
-    pub favorite: bool,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
-    pub created_at: String,
-    pub updated_at: String,
-    pub deleted_at: Option<String>,
-    pub vault: Option<VaultSummaryResponse>,
+item_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct DeletedVaultItemWithVaultResponse {
+        vault: Option<VaultSummaryResponse>,
+    }
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -529,17 +470,10 @@ pub struct VaultRotationMemberResponse {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct VaultRotationItemResponse {
-    pub id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
+rotation_item_shape! {
+    #[derive(Debug, Clone, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    pub struct VaultRotationItemResponse {}
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -1593,7 +1527,7 @@ pub(crate) async fn list_vault_items_page(
                    ROW_NUMBER() OVER (ORDER BY i.updated_at DESC, i.id DESC)::bigint AS position,
                    (16384 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
                     + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
-                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0)
+                    + octet_length(i.encryption_algorithm) + octet_length(i.last_modified_by)
                     + coalesce((SELECT sum(1024 + octet_length(a.id) + octet_length(a.item_id)
                         + octet_length(a.vault_id) + octet_length(a.storage_key) + octet_length(a.encrypted_name)
                         + octet_length(a.encrypted_content_type) + octet_length(a.encryption_iv)
@@ -1635,9 +1569,9 @@ pub(crate) async fn list_vault_items_page(
             has_more: false,
         });
     }
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
-    )
+    let item_rows = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)"
+    ))
     .bind(&item_ids)
     .fetch_all(pool)
     .await
@@ -1682,7 +1616,7 @@ pub(crate) async fn list_all_vault_items_page(
                    ROW_NUMBER() OVER (ORDER BY i.updated_at DESC, i.id DESC)::bigint AS position,
                    (20480 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
                     + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
-                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0)
+                    + octet_length(i.encryption_algorithm) + octet_length(i.last_modified_by)
                     + coalesce((SELECT sum(1024 + octet_length(a.id) + octet_length(a.item_id)
                         + octet_length(a.vault_id) + octet_length(a.storage_key) + octet_length(a.encrypted_name)
                         + octet_length(a.encrypted_content_type) + octet_length(a.encryption_iv)
@@ -1730,9 +1664,9 @@ pub(crate) async fn list_all_vault_items_page(
             has_more: false,
         });
     }
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
-    )
+    let item_rows = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)"
+    ))
     .bind(&item_ids)
     .fetch_all(pool)
     .await
@@ -1753,26 +1687,13 @@ pub(crate) async fn list_all_vault_items_page(
 
     let values = item_rows
         .into_iter()
-        .map(|item| VaultItemWithVaultResponse {
-            id: item.id.clone(),
-            vault_id: item.vault_id.clone(),
-            category: item.category,
-            favorite: item.favorite,
-            encrypted_data: item.encrypted_data,
-            encryption_iv: item.encryption_iv,
-            encryption_algorithm: item.encryption_algorithm,
-            version: item.version,
-            encryption_version: item.encryption_version,
-            encrypted_by_user_id: item.encrypted_by_user_id,
-            last_modified_by: item.last_modified_by,
-            created_at: format_timestamp(item.created_at),
-            updated_at: format_timestamp(item.updated_at),
-            deleted_at: item.deleted_at.map(format_timestamp),
-            attachments: attachments_by_item
+        .map(|item| {
+            let attachments = attachments_by_item
                 .get(&item.id)
                 .cloned()
-                .unwrap_or_default(),
-            vault: vault_map.get(&item.vault_id).cloned(),
+                .unwrap_or_default();
+            let vault = vault_map.get(&item.vault_id).cloned();
+            VaultItemWithVaultResponse::compose(item.into(), attachments, vault)
         })
         .collect();
     Ok(ByteBoundedPage {
@@ -1795,7 +1716,7 @@ pub(crate) async fn list_all_deleted_vault_items_page(
                    ROW_NUMBER() OVER (ORDER BY i.deleted_at DESC, i.id DESC)::bigint AS position,
                    (20480 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
                     + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
-                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0)
+                    + octet_length(i.encryption_algorithm) + octet_length(i.last_modified_by)
                     + coalesce((SELECT octet_length(v.name) + coalesce(octet_length(v.icon), 0)
                         + coalesce(octet_length(v.image_key), 0) + octet_length(v.type::text)
                         + octet_length(vk.encrypted_vault_key) + octet_length(vk.role::text)
@@ -1837,9 +1758,9 @@ pub(crate) async fn list_all_deleted_vault_items_page(
             has_more: false,
         });
     }
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
-    )
+    let item_rows = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)"
+    ))
     .bind(&item_ids)
     .fetch_all(pool)
     .await
@@ -1854,22 +1775,9 @@ pub(crate) async fn list_all_deleted_vault_items_page(
 
     let values = item_rows
         .into_iter()
-        .map(|item| DeletedVaultItemWithVaultResponse {
-            id: item.id.clone(),
-            vault_id: item.vault_id.clone(),
-            category: item.category,
-            favorite: item.favorite,
-            encrypted_data: item.encrypted_data,
-            encryption_iv: item.encryption_iv,
-            encryption_algorithm: item.encryption_algorithm,
-            version: item.version,
-            encryption_version: item.encryption_version,
-            encrypted_by_user_id: item.encrypted_by_user_id,
-            last_modified_by: item.last_modified_by,
-            created_at: format_timestamp(item.created_at),
-            updated_at: format_timestamp(item.updated_at),
-            deleted_at: item.deleted_at.map(format_timestamp),
-            vault: vault_map.get(&item.vault_id).cloned(),
+        .map(|item| {
+            let vault = vault_map.get(&item.vault_id).cloned();
+            DeletedVaultItemWithVaultResponse::compose(item.into(), vault)
         })
         .collect();
     Ok(ByteBoundedPage {
@@ -1883,14 +1791,17 @@ pub(crate) async fn get_vault_item(
     user_id: &str,
     input: ItemIdInput,
 ) -> Result<VaultItemDetailsResponse, AppError> {
-    let item_row = query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
-	)
-	.bind(&input.item_id)
-	.fetch_optional(pool)
-	.await
-	.map_err(|e| { tracing::error!(error = %e, "Failed to load item"); AppError::internal("Failed to load item") })?
-	.ok_or_else(|| AppError::not_found("Item not found"))?;
+    let item_row = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = $1 LIMIT 1"
+    ))
+    .bind(&input.item_id)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| {
+        tracing::error!(error = %e, "Failed to load item");
+        AppError::internal("Failed to load item")
+    })?
+    .ok_or_else(|| AppError::not_found("Item not found"))?;
     let vault_access = query_as::<_, DbItemVaultAccessRow>(
         "SELECT role::text AS role FROM vault_key WHERE vault_id = $1 AND user_id = $2 LIMIT 1",
     )
@@ -2235,7 +2146,7 @@ pub(crate) async fn list_deleted_vault_items_page(
                    ROW_NUMBER() OVER (ORDER BY i.deleted_at DESC, i.id DESC)::bigint AS position,
                    (16384 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
                     + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
-                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0))::bigint AS estimated_bytes
+                    + octet_length(i.encryption_algorithm) + octet_length(i.last_modified_by))::bigint AS estimated_bytes
             FROM item i
             WHERE i.vault_id = $1 AND i.deleted_at IS NOT NULL
               AND ($2::timestamptz IS NULL OR (i.deleted_at, i.id) < ($2, $3))
@@ -2272,9 +2183,9 @@ pub(crate) async fn list_deleted_vault_items_page(
             has_more: false,
         });
     }
-    let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
-    )
+    let item_rows = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)"
+    ))
     .bind(&item_ids)
     .fetch_all(pool)
     .await
@@ -2726,13 +2637,16 @@ pub(crate) mod member_handlers {
 		.fetch_all(pool)
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); AppError::internal("Failed to load rotation members") })?;
-        let items = query_as::<_, DbRotationItemRow>(
-			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
-		)
-		.bind(&input.vault_id)
-		.fetch_all(pool)
-		.await
-		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation items"); AppError::internal("Failed to load rotation items") })?;
+        let items = query_as::<_, DbRotationItemRow>(&format!(
+            "SELECT {ROTATION_ITEM_COLUMNS} FROM item WHERE vault_id = $1 ORDER BY created_at ASC"
+        ))
+        .bind(&input.vault_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "Failed to load rotation items");
+            AppError::internal("Failed to load rotation items")
+        })?;
         Ok(VaultRotationDataResponse {
             key_version: vault_record.key_version,
             members: members
@@ -2745,16 +2659,7 @@ pub(crate) mod member_handlers {
                 .collect(),
             items: items
                 .into_iter()
-                .map(|item| VaultRotationItemResponse {
-                    id: item.id,
-                    encrypted_data: item.encrypted_data,
-                    encryption_iv: item.encryption_iv,
-                    encryption_algorithm: item.encryption_algorithm,
-                    version: item.version,
-                    encryption_version: item.encryption_version,
-                    encrypted_by_user_id: item.encrypted_by_user_id,
-                    last_modified_by: item.last_modified_by,
-                })
+                .map(|item| VaultRotationItemResponse::compose(item.into()))
                 .collect(),
         })
     }
@@ -2848,8 +2753,11 @@ pub(crate) mod member_handlers {
 				}
 			}
 			for item in &input.key_rotation.re_encrypted_items {
+				// Rotation re-seals the ciphertext under the context the item already carried, so
+				// `encryption_version`/`encrypted_by_user_id` must not move — they describe the AAD
+				// binding, and rewriting them would make every rotated item undecryptable.
 				let updated_rows = query(
-					"UPDATE item SET encrypted_data = $1, encryption_iv = $2, version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $3, last_modified_by = $3, updated_at = $4 WHERE id = $5 AND vault_id = $6",
+					"UPDATE item SET encrypted_data = $1, encryption_iv = $2, version = version + 1, last_modified_by = $3, updated_at = $4 WHERE id = $5 AND vault_id = $6",
 				)
 				.bind(&item.encrypted_data)
 				.bind(&item.encryption_iv)
@@ -3296,59 +3204,15 @@ async fn insert_vault_key_rotated_sync_event(
 }
 
 fn map_item(item: DbBootstrapItemRow) -> VaultItemResponse {
-    VaultItemResponse {
-        id: item.id,
-        vault_id: item.vault_id,
-        category: item.category,
-        favorite: item.favorite,
-        encrypted_data: item.encrypted_data,
-        encryption_iv: item.encryption_iv,
-        encryption_algorithm: item.encryption_algorithm,
-        version: item.version,
-        encryption_version: item.encryption_version,
-        encrypted_by_user_id: item.encrypted_by_user_id,
-        last_modified_by: item.last_modified_by,
-        created_at: format_timestamp(item.created_at),
-        updated_at: format_timestamp(item.updated_at),
-        deleted_at: item.deleted_at.map(format_timestamp),
-    }
+    VaultItemResponse::compose(item.into())
 }
 
 fn map_attachment(attachment: DbBootstrapAttachmentRow) -> VaultAttachmentResponse {
-    VaultAttachmentResponse {
-        id: attachment.id,
-        item_id: attachment.item_id,
-        vault_id: attachment.vault_id,
-        storage_key: attachment.storage_key,
-        encrypted_name: attachment.encrypted_name,
-        encrypted_content_type: attachment.encrypted_content_type,
-        encryption_iv: attachment.encryption_iv,
-        encrypted_content_type_iv: attachment.encrypted_content_type_iv,
-        encryption_algorithm: attachment.encryption_algorithm,
-        file_size: attachment.file_size,
-        uploaded_by: attachment.uploaded_by,
-        created_at: format_timestamp(attachment.created_at),
-    }
+    VaultAttachmentResponse::compose(attachment.into())
 }
 
 fn map_item_details(item: DbBootstrapItemRow) -> VaultItemDetailsResponse {
-    VaultItemDetailsResponse {
-        id: item.id,
-        vault_id: item.vault_id,
-        category: item.category,
-        favorite: item.favorite,
-        encrypted_data: item.encrypted_data,
-        encryption_iv: item.encryption_iv,
-        encryption_algorithm: item.encryption_algorithm,
-        version: item.version,
-        encryption_version: item.encryption_version,
-        encrypted_by_user_id: item.encrypted_by_user_id,
-        last_modified_by: item.last_modified_by,
-        created_at: format_timestamp(item.created_at),
-        updated_at: format_timestamp(item.updated_at),
-        deleted_at: item.deleted_at.map(format_timestamp),
-        attachments: Vec::new(),
-    }
+    VaultItemDetailsResponse::compose(item.into(), Vec::new())
 }
 
 fn build_vault_summary_map(
@@ -3397,20 +3261,7 @@ async fn load_item_attachments(
         grouped
             .entry(attachment.item_id.clone())
             .or_default()
-            .push(VaultAttachmentResponse {
-                id: attachment.id,
-                item_id: attachment.item_id,
-                vault_id: attachment.vault_id,
-                storage_key: attachment.storage_key,
-                encrypted_name: attachment.encrypted_name,
-                encrypted_content_type: attachment.encrypted_content_type,
-                encryption_iv: attachment.encryption_iv,
-                encrypted_content_type_iv: attachment.encrypted_content_type_iv,
-                encryption_algorithm: attachment.encryption_algorithm,
-                file_size: attachment.file_size,
-                uploaded_by: attachment.uploaded_by,
-                created_at: format_timestamp(attachment.created_at),
-            });
+            .push(map_attachment(attachment));
     }
     Ok(grouped)
 }
@@ -3766,9 +3617,9 @@ fn resolve_vault_sharing_entitlement(plan: &str, status: &str) -> VaultSharingEn
 }
 
 async fn load_item_row(pool: &PgPool, item_id: &str) -> Result<DbBootstrapItemRow, AppError> {
-    query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
-    )
+    query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = $1 LIMIT 1"
+    ))
     .bind(item_id)
     .fetch_optional(pool)
     .await

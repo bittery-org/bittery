@@ -207,7 +207,7 @@ pub async fn fetch_bootstrap_items(
             SELECT i.id, ROW_NUMBER() OVER (ORDER BY i.id ASC)::bigint AS position,
                    (20480 + octet_length(i.id) + octet_length(i.vault_id) + octet_length(i.category::text)
                     + octet_length(i.encrypted_data) + octet_length(i.encryption_iv)
-                    + octet_length(i.encryption_algorithm) + coalesce(octet_length(i.last_modified_by), 0)
+                    + octet_length(i.encryption_algorithm) + octet_length(i.last_modified_by)
                     + coalesce((SELECT sum(1024 + octet_length(a.id) + octet_length(a.item_id)
                         + octet_length(a.vault_id) + octet_length(a.storage_key) + octet_length(a.encrypted_name)
                         + octet_length(a.encrypted_content_type) + octet_length(a.encryption_iv)
@@ -256,9 +256,9 @@ pub async fn fetch_bootstrap_items(
         .last()
         .is_some_and(|last| last.position < last.candidate_count);
     let item_ids: Vec<String> = weights.into_iter().map(|weight| weight.id).collect();
-    let rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
-    )
+    let rows = query_as::<_, DbBootstrapItemRow>(&format!(
+        "SELECT {BOOTSTRAP_ITEM_COLUMNS} FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)"
+    ))
     .bind(&item_ids)
     .fetch_all(pool)
     .await

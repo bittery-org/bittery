@@ -33,7 +33,9 @@
 		"./types": "./src/types.ts",
 		"./pricing": "./src/pricing.ts",
 		"./releases": "./src/releases.ts",
-		"./vault-mapping": "./src/vault-mapping.ts"
+		"./vault-mapping": "./src/vault-mapping.ts",
+		"./item-mapping": "./src/item-mapping.ts",
+		"./testing/item-fixtures": "./src/testing/item-fixtures.ts"
 	},
 	"dependencies": {
 		"@bittery/api-contract": "workspace:*",

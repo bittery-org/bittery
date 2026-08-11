@@ -1,5 +1,12 @@
 import type { CryptoPort, KeyRef } from "@bittery/crypto-port";
 import { ApiError, isApiErrorStatus } from "@bittery/shared/api-client";
+import {
+	type ItemVaultSummary,
+	toCachedAttachment,
+	toCachedItem,
+	toItemVaultSummary,
+	toRawItem,
+} from "@bittery/shared/item-mapping";
 import { applyPasswordHistoryOnPasswordChange } from "@bittery/shared/password-history";
 import type {
 	DecryptedItem,
@@ -36,7 +43,11 @@ import {
 	parseAttachmentBlobEnvelope,
 } from "./attachment-crypto";
 import { getTravelModeEnforcer } from "./travel-mode-enforcer";
-import type { ItemScope, VaultCrypto } from "./vault-crypto";
+import type {
+	ItemWriteScope,
+	StoredItemCiphertext,
+	VaultCrypto,
+} from "./vault-crypto";
 
 export type { RawEncryptedItem, RawEncryptedItemWithVault };
 
@@ -46,11 +57,12 @@ export interface EncryptedPayload {
 	algorithm: string;
 }
 
-export interface RawEncryptedItemWithVersion extends RawEncryptedItem {
-	version: number;
-	lastModifiedBy: string | null;
-	attachments?: CachedAttachment[];
-}
+/**
+ * Kept as a name, not a shape: `version`, `lastModifiedBy` and `attachments` used to be
+ * re-stated here because {@link RawEncryptedItem} left them optional. The contract makes
+ * all three part of every item payload, so restating them can only drift.
+ */
+export type RawEncryptedItemWithVersion = RawEncryptedItem;
 
 export interface MultiAccountItem extends DecryptedItem {
 	_encrypted?: {
@@ -134,15 +146,8 @@ export interface MoveItemResult {
 	_targetAccountEmail?: string;
 }
 
-type DecryptableItemRecord = {
-	id: string;
-	vaultId: string;
-	encryptedData: string;
-	encryptionIv: string;
-	encryptionAlgorithm: string;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-};
+/** Anything carrying an item's ciphertext and the binding it was sealed under. */
+type DecryptableItemRecord = StoredItemCiphertext;
 
 type ApiVaultSummary =
 	| (Omit<ServerVaultSummary, "icon" | "imageUrl"> & {
@@ -154,32 +159,21 @@ type ApiVaultSummary =
 
 type ApiAttachment = CachedAttachment;
 
-function normalizeAttachment(attachment: ApiAttachment): CachedAttachment {
-	return {
-		...attachment,
-		encryptedContentTypeIv: attachment.encryptedContentTypeIv,
-		uploadedBy: attachment.uploadedBy,
-	};
-}
-
 function normalizeVaultSummary(
 	vault: ApiVaultSummary,
 	vaultId: string,
-): RawEncryptedItemWithVault["vault"] {
-	const decodedVault = vault
-		? toCachedVaultFields({
-				...vault,
-				icon: vault.icon ?? null,
-				imageUrl: vault.imageUrl ?? null,
-			})
-		: undefined;
-	return {
-		id: decodedVault?.id ?? vaultId,
-		name: decodedVault?.name ?? "Unknown Vault",
-		type: decodedVault?.type ?? "personal",
-		icon: decodedVault?.icon ?? null,
-		imageUrl: decodedVault?.imageUrl ?? null,
-	};
+): ItemVaultSummary {
+	// The wire spells it `vaultType`; `toCachedVaultFields` is the only decoder of that name.
+	return toItemVaultSummary(
+		vault
+			? toCachedVaultFields({
+					...vault,
+					icon: vault.icon ?? null,
+					imageUrl: vault.imageUrl ?? null,
+				})
+			: undefined,
+		vaultId,
+	);
 }
 
 function normalizeRawItemWithVault<
@@ -190,7 +184,7 @@ function normalizeRawItemWithVault<
 >(item: TItem): RawEncryptedItemWithVault {
 	return {
 		...item,
-		attachments: item.attachments?.map(normalizeAttachment),
+		attachments: item.attachments?.map(toCachedAttachment),
 		vault: normalizeVaultSummary(item.vault, item.vaultId),
 	};
 }
@@ -234,7 +228,7 @@ export class ItemService {
 	async encryptItemData(
 		data: DecryptedItemData,
 		vaultKey: KeyRef,
-		context: ItemScope,
+		context: ItemWriteScope,
 	): Promise<EncryptedPayload> {
 		return this.vaultCrypto.encryptItem(
 			JSON.stringify(data),
@@ -268,20 +262,7 @@ export class ItemService {
 		item: DecryptableItemRecord,
 		vaultKey: KeyRef,
 	): Promise<string> {
-		return this.vaultCrypto.decryptItem(
-			{
-				ciphertext: item.encryptedData,
-				iv: item.encryptionIv,
-				algorithm: item.encryptionAlgorithm,
-			},
-			vaultKey,
-			{
-				vaultId: item.vaultId,
-				itemId: item.id,
-				version: item.encryptionVersion,
-				userId: item.encryptedByUserId,
-			},
-		);
+		return this.vaultCrypto.decryptStoredItem(item, vaultKey);
 	}
 
 	private async getVaultKey(
@@ -307,69 +288,19 @@ export class ItemService {
 
 		return cachedItems
 			.filter((item) => (includeDeleted ? !!item.deletedAt : !item.deletedAt))
-			.map((item) => {
-				const vault = vaultMap.get(item.vaultId);
-				return {
-					id: item.id,
-					vaultId: item.vaultId,
-					category: item.category,
-					favorite: item.favorite,
-					encryptedData: item.encryptedData,
-					encryptionIv: item.encryptionIv,
-					encryptionAlgorithm: item.encryptionAlgorithm,
-					version: item.version,
-					lastModifiedBy: item.lastModifiedBy,
-					encryptionVersion: item.encryptionVersion,
-					encryptedByUserId: item.encryptedByUserId,
-					createdAt: item.createdAt,
-					updatedAt: item.updatedAt,
-					deletedAt: item.deletedAt,
-					attachments: item.attachments,
-					vault: vault
-						? {
-								id: vault.id,
-								name: vault.name,
-								type: vault.type,
-								icon: vault.icon,
-								imageUrl: vault.imageUrl,
-							}
-						: {
-								id: item.vaultId,
-								name: "Unknown",
-								type: "personal",
-								icon: null,
-								imageUrl: null,
-							},
-				};
-			});
+			.map((item) => toRawItem(item, vaultMap.get(item.vaultId)));
 	}
 
 	private toCachedItems(
 		rawItems: RawEncryptedItemWithVault[],
 		account: Pick<AccountInfo, "email" | "serverUrl">,
 	): CachedEncryptedItem[] {
-		return rawItems.map((item) => ({
-			id: item.id,
-			vaultId: item.vaultId,
-			accountEmail: account.email,
-			serverUrl: account.serverUrl,
-			category: item.category,
-			favorite: item.favorite,
-			encryptedData: item.encryptedData,
-			encryptionIv: item.encryptionIv,
-			encryptionAlgorithm: item.encryptionAlgorithm,
-			version: item.version,
-			lastModifiedBy: item.lastModifiedBy ?? null,
-			encryptionVersion: item.encryptionVersion,
-			encryptedByUserId: item.encryptedByUserId,
-			createdAt: String(item.createdAt),
-			updatedAt: String(item.updatedAt),
-			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-			attachments: item.attachments?.map((a) => ({
-				...a,
-				createdAt: String(a.createdAt),
-			})),
-		}));
+		return rawItems.map((item) =>
+			toCachedItem(item, {
+				accountEmail: account.email,
+				serverUrl: account.serverUrl,
+			}),
+		);
 	}
 
 	private toCachedVaults(
@@ -518,13 +449,7 @@ export class ItemService {
 												iv: rawItem.encryptionIv,
 												algorithm: rawItem.encryptionAlgorithm,
 											},
-											vault: {
-												id: rawItem.vault.id,
-												name: rawItem.vault.name,
-												type: rawItem.vault.type,
-												icon: rawItem.vault.icon,
-												imageUrl: rawItem.vault.imageUrl,
-											},
+											vault: toItemVaultSummary(rawItem.vault, rawItem.vaultId),
 										} as MultiAccountItem;
 									} catch (error) {
 										console.error(
@@ -590,28 +515,13 @@ export class ItemService {
 				(item) => item.vaultId === vaultId && !item.deletedAt,
 			);
 			if (vaultItems.length > 0) {
-				rawItems = vaultItems.map((item) => ({
-					id: item.id,
-					vaultId: item.vaultId,
-					category: item.category,
-					favorite: item.favorite,
-					encryptedData: item.encryptedData,
-					encryptionIv: item.encryptionIv,
-					encryptionAlgorithm: item.encryptionAlgorithm,
-					version: item.version,
-					lastModifiedBy: item.lastModifiedBy,
-					encryptionVersion: item.encryptionVersion,
-					encryptedByUserId: item.encryptedByUserId,
-					createdAt: item.createdAt,
-					updatedAt: item.updatedAt,
-				}));
+				rawItems = vaultItems.map((item) => toRawItem(item));
 			} else {
 				rawItems = (
 					await ownerAccount.apiClient.items.listInVault(vaultId)
 				).data.map((item) => ({
 					...item,
-					attachments: item.attachments.map(normalizeAttachment),
-					lastModifiedBy: item.lastModifiedBy ?? null,
+					attachments: item.attachments.map(toCachedAttachment),
 				}));
 			}
 		} else {
@@ -619,8 +529,7 @@ export class ItemService {
 				await ownerAccount.apiClient.items.listInVault(vaultId)
 			).data.map((item) => ({
 				...item,
-				attachments: item.attachments.map(normalizeAttachment),
-				lastModifiedBy: item.lastModifiedBy ?? null,
+				attachments: item.attachments.map(toCachedAttachment),
 			}));
 		}
 
@@ -694,23 +603,7 @@ export class ItemService {
 		const cachedItems = await this.itemCache.getCachedItems(accountId);
 		const cached = cachedItems?.find((item) => item.id === itemId);
 		if (cached) {
-			rawItem = {
-				id: cached.id,
-				vaultId: cached.vaultId,
-				category: cached.category,
-				favorite: cached.favorite,
-				encryptedData: cached.encryptedData,
-				encryptionIv: cached.encryptionIv,
-				encryptionAlgorithm: cached.encryptionAlgorithm,
-				version: cached.version,
-				lastModifiedBy: cached.lastModifiedBy,
-				encryptionVersion: cached.encryptionVersion,
-				encryptedByUserId: cached.encryptedByUserId,
-				createdAt: cached.createdAt,
-				updatedAt: cached.updatedAt,
-				deletedAt: cached.deletedAt ?? null,
-				attachments: cached.attachments,
-			};
+			rawItem = toRawItem(cached);
 		}
 
 		if (!rawItem) {
@@ -719,26 +612,9 @@ export class ItemService {
 				accountId,
 			);
 			const { data: fetched } = await client.items.get(itemId);
-			rawItem = {
-				id: fetched.id,
-				vaultId: fetched.vaultId,
-				category: fetched.category,
-				favorite: fetched.favorite,
-				encryptedData: fetched.encryptedData,
-				encryptionIv: fetched.encryptionIv,
-				encryptionAlgorithm: fetched.encryptionAlgorithm,
-				version: fetched.version,
-				lastModifiedBy: fetched.lastModifiedBy ?? null,
-				encryptionVersion: fetched.encryptionVersion,
-				encryptedByUserId: fetched.encryptedByUserId,
-				createdAt: fetched.createdAt,
-				updatedAt: fetched.updatedAt,
-				deletedAt: fetched.deletedAt,
-				attachments: (fetched as any).attachments?.map((a: any) => ({
-					...a,
-					createdAt: String(a.createdAt),
-				})),
-			};
+			// Decoded exactly as if it had come off the cache, so the two branches of this
+			// method cannot disagree about a field.
+			rawItem = toRawItem(toCachedItem(fetched, {}));
 		}
 		if (!rawItem) {
 			throw new Error("Item was not returned by the server");
@@ -854,13 +730,7 @@ export class ItemService {
 											updatedAt: rawItem.updatedAt,
 											deletedAt,
 											...parsedData,
-											vault: {
-												id: rawItem.vault.id,
-												name: rawItem.vault.name,
-												type: rawItem.vault.type,
-												icon: rawItem.vault.icon,
-												imageUrl: rawItem.vault.imageUrl,
-											},
+											vault: toItemVaultSummary(rawItem.vault, rawItem.vaultId),
 										} as MultiAccountDeletedItem;
 									} catch (error) {
 										console.error(
@@ -907,7 +777,7 @@ export class ItemService {
 		try {
 			const itemId = await this.generateItemId();
 			const userId = await this.resolveUserId(input.accountEmail);
-			const context: ItemScope = {
+			const context: ItemWriteScope = {
 				vaultId: input.vaultId,
 				itemId,
 				version: 1,
@@ -993,7 +863,7 @@ export class ItemService {
 
 			const userId = await this.resolveUserId(input.accountEmail);
 			const nextVersion = (rawItem?.version ?? 1) + 1;
-			const context: ItemScope = {
+			const context: ItemWriteScope = {
 				vaultId: input.vaultId,
 				itemId: input.itemId,
 				version: nextVersion,
@@ -1444,7 +1314,7 @@ export class ItemService {
 			}
 
 			const targetUserId = await this.resolveUserId(targetAccountEmail);
-			const context: ItemScope = {
+			const context: ItemWriteScope = {
 				vaultId: input.targetVaultId,
 				itemId: targetItemId,
 				version: targetVersion,

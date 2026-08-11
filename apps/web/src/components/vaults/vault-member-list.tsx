@@ -139,12 +139,7 @@ export function VaultMemberList({
 						encryptedData: item.encryptedData,
 						encryptionIv: item.encryptionIv,
 						encryptionAlgorithm: item.encryptionAlgorithm,
-						context: buildStoredItemEncryptionContext({
-							vaultId,
-							itemId: item.id,
-							encryptionVersion: item.encryptionVersion,
-							encryptedByUserId: item.encryptedByUserId,
-						}),
+						context: buildStoredItemEncryptionContext({ ...item, vaultId }),
 					})),
 					vaultId,
 					rotationData.keyVersion + 1,

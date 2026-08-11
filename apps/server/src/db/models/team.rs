@@ -157,6 +157,10 @@ pub struct DbRotationMemberRow {
     pub role: String,
 }
 
+/// Column list for `item` SELECTs that populate `DbRotationItemRow`.
+/// Must stay in sync with that struct's field order.
+pub(crate) const ROTATION_ITEM_COLUMNS: &str = "id, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by";
+
 #[derive(Clone, Debug, FromRow)]
 pub struct DbRotationItemRow {
     pub id: String,

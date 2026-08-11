@@ -7,6 +7,7 @@ pub(crate) mod integrations;
 mod jobs;
 pub(crate) mod repo;
 pub(crate) mod services;
+pub(crate) mod shapes;
 #[cfg(test)]
 pub(crate) mod test_support;
 

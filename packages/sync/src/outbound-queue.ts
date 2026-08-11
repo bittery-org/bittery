@@ -3,6 +3,7 @@ import {
 	type AppApiClient,
 	isApiErrorStatus,
 } from "@bittery/shared/api-client";
+import { toCachedItem } from "@bittery/shared/item-mapping";
 import type {
 	CachedEncryptedItem,
 	ItemSyncAcknowledgement,
@@ -92,6 +93,22 @@ function newAttemptId(mutation: PendingMutation): string {
 	return `${mutation.operationId ?? mutation.id}:attempt:${suffix}`;
 }
 
+/**
+ * Whether the command carries ciphertext already sealed against a specific revision. The GCM AAD
+ * binds `version`, and the server derives the stored `encryption_version` from the revision its
+ * CAS-guarded write lands on — so moving `baseVersion` under such a command makes the two diverge
+ * and the Item becomes permanently undecryptable. Metadata-only commands carry no ciphertext and
+ * rebase freely.
+ */
+function carriesSealedCiphertext(mutation: PendingMutation): boolean {
+	return (
+		mutation.type === "create" ||
+		mutation.type === "update" ||
+		mutation.type === "move" ||
+		mutation.type === "cross_account_move"
+	);
+}
+
 function newConflictCopyId(): string {
 	return (
 		globalThis.crypto?.randomUUID?.() ??
@@ -157,6 +174,29 @@ export class ItemSyncEngine {
 		mutation.conflictCopyId ??= newConflictCopyId();
 	}
 
+	/**
+	 * Points a command that trailed an acknowledged one at the revision the server just landed on.
+	 * A command whose ciphertext is already sealed cannot follow: it conflicts instead, so the
+	 * edit is preserved as a copy rather than written under an AAD binding it never had.
+	 */
+	private rebaseChainedCommand(
+		chained: PendingMutation,
+		serverVersion: number,
+	): void {
+		if (chained.baseVersion === serverVersion) return;
+		if (carriesSealedCiphertext(chained)) {
+			this.markEncryptedConflict(
+				chained,
+				new Error("The Item changed before this edit was sent"),
+			);
+			return;
+		}
+		chained.baseVersion = serverVersion;
+		chained.attemptId = newAttemptId(chained);
+		chained.status = "pending";
+		chained.nextAttemptAt = undefined;
+	}
+
 	private async preserveConflict(mutation: PendingMutation): Promise<void> {
 		try {
 			const copy = await this.reconciler?.preserveConflict?.(mutation);
@@ -195,29 +235,10 @@ export class ItemSyncEngine {
 		mutation: PendingMutation,
 		item: Awaited<ReturnType<OutboundQueueApiClient["items"]["get"]>>["data"],
 	): CachedEncryptedItem {
-		return {
-			id: item.id,
-			vaultId: item.vaultId,
+		return toCachedItem(item, {
 			accountId: mutation.accountId,
 			accountEmail: mutation.accountEmail,
-			category: item.category,
-			favorite: item.favorite,
-			encryptedData: item.encryptedData,
-			encryptionIv: item.encryptionIv,
-			encryptionAlgorithm: item.encryptionAlgorithm,
-			version: item.version,
-			lastModifiedBy: item.lastModifiedBy ?? null,
-			encryptionVersion: item.encryptionVersion,
-			encryptedByUserId: item.encryptedByUserId,
-			createdAt: String(item.createdAt),
-			updatedAt: String(item.updatedAt),
-			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
-			attachments: item.attachments?.map((attachment) => ({
-				...attachment,
-				encryptedContentTypeIv: attachment.encryptedContentTypeIv,
-				uploadedBy: attachment.uploadedBy,
-			})),
-		};
+		});
 	}
 
 	/**
@@ -323,15 +344,17 @@ export class ItemSyncEngine {
 		return this.persistQueue(accountId);
 	}
 
+	/** Resolves with the chained command the acknowledgement pushed into conflict, if any. */
 	private persistAcknowledgement(
 		accountId: string,
 		mutation: PendingMutation,
 		serverVersion: number | undefined,
-	): Promise<void> {
+	): Promise<PendingMutation | undefined> {
 		const persistence = this.persistenceTail
 			.catch(() => undefined)
 			.then(async () => {
 				const operationId = mutation.operationId ?? mutation.id;
+				let conflictedOperationId: string | undefined;
 				const document =
 					(await this.storage.update?.<QueueDocument>(
 						QUEUE_DOCUMENT_KEY,
@@ -349,15 +372,11 @@ export class ItemSyncEngine {
 												command.entityId === mutation.entityId &&
 												isActiveMutation(command),
 										);
-							if (
-								chained &&
-								serverVersion !== undefined &&
-								chained.baseVersion !== serverVersion
-							) {
-								chained.baseVersion = serverVersion;
-								chained.attemptId = newAttemptId(chained);
-								chained.status = "pending";
-								chained.nextAttemptAt = undefined;
+							if (chained && serverVersion !== undefined) {
+								this.rebaseChainedCommand(chained, serverVersion);
+								if (chained.status === "conflicted") {
+									conflictedOperationId = chained.operationId ?? chained.id;
+								}
 							}
 							if (next.length > 0) {
 								nextDocument[accountId] = next;
@@ -374,8 +393,17 @@ export class ItemSyncEngine {
 					this.queuesByAccountId.set(accountId, reconciled);
 				}
 				this.rememberPersistedCommands(accountId, reconciled);
+				return conflictedOperationId === undefined
+					? undefined
+					: reconciled.find(
+							(command) =>
+								(command.operationId ?? command.id) === conflictedOperationId,
+						);
 			});
-		this.persistenceTail = persistence.catch(() => undefined);
+		this.persistenceTail = persistence.then(
+			() => undefined,
+			() => undefined,
+		);
 		return persistence;
 	}
 
@@ -854,12 +882,7 @@ export class ItemSyncEngine {
 				mutation,
 				this.toAuthoritativeItem(mutation, current.data),
 			);
-			if (
-				mutation.type === "update" ||
-				mutation.type === "move" ||
-				mutation.type === "cross_account_move" ||
-				mutation.type === "create"
-			) {
+			if (carriesSealedCiphertext(mutation)) {
 				this.markEncryptedConflict(
 					mutation,
 					new Error("The Item changed on another device"),
@@ -995,11 +1018,12 @@ export class ItemSyncEngine {
 					});
 					queue.splice(mutationIndex, 1);
 					if (this.storage.update) {
-						await this.persistAcknowledgement(
+						const conflicted = await this.persistAcknowledgement(
 							accountId,
 							mutation,
 							serverVersion,
 						);
+						if (conflicted) await this.preserveConflict(conflicted);
 					} else {
 						const next =
 							serverVersion === undefined
@@ -1009,17 +1033,13 @@ export class ItemSyncEngine {
 											candidate.entityId === mutation.entityId &&
 											isActiveMutation(candidate),
 									);
-						if (
-							serverVersion !== undefined &&
-							next &&
-							next.baseVersion !== serverVersion
-						) {
-							next.baseVersion = serverVersion;
-							next.attemptId = newAttemptId(next);
-							next.status = "pending";
-							next.nextAttemptAt = undefined;
+						if (serverVersion !== undefined && next) {
+							this.rebaseChainedCommand(next, serverVersion);
 						}
 						await this.schedulePersistence(accountId);
+						if (next?.status === "conflicted") {
+							await this.preserveConflict(next);
+						}
 					}
 					this.emit();
 				} catch (error) {

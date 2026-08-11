@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
 import type { CryptoPort } from "@bittery/crypto-port";
 import type { InMemoryCryptoPort } from "@bittery/crypto-port/testing";
+import {
+	cachedItem as buildCachedItem,
+	serverEncryptedItem,
+} from "@bittery/shared/testing/item-fixtures";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { createItemCache, metaCollection } from "@bittery/storage";
 import {
@@ -86,20 +90,17 @@ function createClient(): BootstrapItemsClient {
 				data: {
 					items: [
 						{
-							id: "item_1",
-							vaultId: "vault_1",
-							category: "login",
-							favorite: false,
-							encryptedData: "ZGF0YQ==",
-							encryptionIv: "aXY=",
-							encryptionAlgorithm: "AES-GCM",
-							version: 1,
-							lastModifiedBy: null,
-							encryptionVersion: 1,
-							encryptedByUserId: USER_ID,
-							createdAt: "2026-08-01T00:00:00.000Z",
-							updatedAt: "2026-08-01T00:00:00.000Z",
-							deletedAt: null,
+							...serverEncryptedItem({
+								id: "item_1",
+								vaultId: "vault_1",
+								encryptedData: "ZGF0YQ==",
+								encryptionIv: "aXY=",
+								encryptionAlgorithm: "AES-GCM",
+								lastModifiedBy: USER_ID,
+								encryptedByUserId: USER_ID,
+								createdAt: "2026-08-01T00:00:00.000Z",
+								updatedAt: "2026-08-01T00:00:00.000Z",
+							}),
 							vault: {
 								id: "vault_1",
 								name: "Team Vault",
@@ -128,7 +129,7 @@ function createClient(): BootstrapItemsClient {
 				],
 			})),
 		},
-	} as unknown as BootstrapItemsClient;
+	};
 }
 
 async function setup() {
@@ -169,9 +170,10 @@ async function cachedItem(
 		{ vaultId: "vault_1", itemId: id, version: 1, userId: USER_ID },
 	);
 	await crypto.destroyKey(vaultKey);
-	return {
+	return buildCachedItem({
 		id,
 		vaultId: "vault_1",
+		accountId: ACCOUNT_ID,
 		category: "login",
 		favorite: false,
 		encryptedData: encrypted.ciphertext,
@@ -184,7 +186,7 @@ async function cachedItem(
 		createdAt: "2026-08-01T00:00:00.000Z",
 		updatedAt: "2026-08-01T00:00:00.000Z",
 		deletedAt: null,
-	} as CachedEncryptedItem;
+	});
 }
 
 describe("VaultRepository.hydrateFromServer", () => {
@@ -402,22 +404,18 @@ describe("VaultRepository.hydrateFromServer", () => {
 		);
 		await itemCache.setCachedItems(
 			[
-				{
+				buildCachedItem({
 					id: "previous_hidden_item",
 					vaultId: "vault_hidden",
-					category: "login",
-					favorite: false,
+					accountId: ACCOUNT_ID,
 					encryptedData: "hidden-data",
 					encryptionIv: "hidden-iv",
 					encryptionAlgorithm: "AES-GCM",
-					version: 1,
-					lastModifiedBy: null,
-					encryptionVersion: 1,
+					lastModifiedBy: USER_ID,
 					encryptedByUserId: USER_ID,
 					createdAt: "2026-08-01T00:00:00.000Z",
 					updatedAt: "2026-08-01T00:00:00.000Z",
-					deletedAt: null,
-				},
+				}),
 			],
 			ACCOUNT_ID,
 		);
@@ -872,11 +870,10 @@ describe("VaultRepository encryption context migration", () => {
 		await crypto.destroyKey(key);
 
 		await repo.upsertEncrypted(
-			{
+			buildCachedItem({
 				id: "shared_item",
 				vaultId: "vault_1",
-				category: "login",
-				favorite: false,
+				accountId: ACCOUNT_ID,
 				encryptedData: encrypted.ciphertext,
 				encryptionIv: encrypted.iv,
 				encryptionAlgorithm: encrypted.algorithm,
@@ -887,7 +884,7 @@ describe("VaultRepository encryption context migration", () => {
 				createdAt: "2026-08-01T00:00:00.000Z",
 				updatedAt: "2026-08-01T00:00:00.000Z",
 				deletedAt: "2026-08-02T00:00:00.000Z",
-			},
+			}),
 			ACCOUNT_ID,
 		);
 		expect(repo.getDeleted()[0]?.title).toBe("Shared Item");

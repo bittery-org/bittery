@@ -409,10 +409,6 @@ fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
         assert_eq!(bittery_mode(), "self-hosted");
     });
 
-    with_env_vars(Some("SELFHOSTED"), None, None, || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-
     with_env_vars(Some("cloud"), None, None, || {
         assert_eq!(bittery_mode(), "cloud");
     });

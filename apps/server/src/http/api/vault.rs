@@ -13,6 +13,7 @@ use crate::{
     error::{AppError, AppErrorCode},
     integrations::storage::PresignedUploadResult,
     services::vault,
+    shapes::{attachment_shape, item_shape, rotation_item_shape},
     AppState, NotifySyncExt,
 };
 
@@ -144,26 +145,14 @@ struct AllItemsResponse {
     has_more: bool,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct AllItemResponse {
-    id: String,
-    vault_id: String,
-    category: String,
-    favorite: bool,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
-    created_at: String,
-    updated_at: String,
-    deleted_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    attachments: Option<Vec<VaultAttachmentResponse>>,
-    vault: Option<VaultSummaryResponse>,
+item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct AllItemResponse {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        attachments: Option<Vec<VaultAttachmentResponse>>,
+        vault: Option<VaultSummaryResponse>,
+    }
 }
 
 impl From<CursorPage<vault::VaultItemWithVaultResponse>> for AllItemsResponse {
@@ -188,47 +177,20 @@ impl From<CursorPage<vault::DeletedVaultItemWithVaultResponse>> for AllItemsResp
 
 impl From<vault::VaultItemWithVaultResponse> for AllItemResponse {
     fn from(value: vault::VaultItemWithVaultResponse) -> Self {
-        Self {
-            id: value.id,
-            vault_id: value.vault_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-            attachments: Some(value.attachments.into_iter().map(Into::into).collect()),
-            vault: value.vault.map(Into::into),
-        }
+        let (item, (attachments, vault)) = value.decompose();
+        Self::compose(
+            item,
+            Some(attachments.into_iter().map(Into::into).collect()),
+            vault.map(Into::into),
+        )
     }
 }
 
 impl From<vault::DeletedVaultItemWithVaultResponse> for AllItemResponse {
     fn from(value: vault::DeletedVaultItemWithVaultResponse) -> Self {
-        Self {
-            id: value.id,
-            vault_id: value.vault_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-            attachments: None,
-            vault: value.vault.map(Into::into),
-        }
+        // Trashed items carry no attachments: `attachments` is absent, not an empty list.
+        let (item, (vault,)) = value.decompose();
+        Self::compose(item, None, vault.map(Into::into))
     }
 }
 
@@ -524,39 +486,15 @@ impl From<vault::VaultListEntryResponse> for VaultListEntryResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultAttachmentResponse {
-    id: String,
-    item_id: String,
-    vault_id: String,
-    storage_key: String,
-    encrypted_name: String,
-    encrypted_content_type: String,
-    encryption_iv: String,
-    encrypted_content_type_iv: String,
-    encryption_algorithm: String,
-    file_size: i32,
-    uploaded_by: String,
-    created_at: String,
+attachment_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultAttachmentResponse {}
 }
 
 impl From<vault::VaultAttachmentResponse> for VaultAttachmentResponse {
     fn from(value: vault::VaultAttachmentResponse) -> Self {
-        Self {
-            id: value.id,
-            item_id: value.item_id,
-            vault_id: value.vault_id,
-            storage_key: value.storage_key,
-            encrypted_name: value.encrypted_name,
-            encrypted_content_type: value.encrypted_content_type,
-            encryption_iv: value.encryption_iv,
-            encrypted_content_type_iv: value.encrypted_content_type_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            file_size: value.file_size,
-            uploaded_by: value.uploaded_by,
-            created_at: value.created_at,
-        }
+        Self::compose(value.decompose().0)
     }
 }
 
@@ -586,127 +524,45 @@ impl From<vault::VaultSummaryResponse> for VaultSummaryResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultItemResponse {
-    id: String,
-    vault_id: String,
-    category: String,
-    favorite: bool,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
-    created_at: String,
-    updated_at: String,
-    deleted_at: Option<String>,
+item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultItemResponse {}
 }
 
 impl From<vault::VaultItemResponse> for VaultItemResponse {
     fn from(value: vault::VaultItemResponse) -> Self {
-        Self {
-            id: value.id,
-            vault_id: value.vault_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-        }
+        Self::compose(value.decompose().0)
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultItemDetailsResponse {
-    id: String,
-    vault_id: String,
-    category: String,
-    favorite: bool,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
-    created_at: String,
-    updated_at: String,
-    deleted_at: Option<String>,
-    attachments: Vec<VaultAttachmentResponse>,
+item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultItemDetailsResponse {
+        attachments: Vec<VaultAttachmentResponse>,
+    }
 }
 
 impl From<vault::VaultItemDetailsResponse> for VaultItemDetailsResponse {
     fn from(value: vault::VaultItemDetailsResponse) -> Self {
-        Self {
-            id: value.id,
-            vault_id: value.vault_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-            attachments: value.attachments.into_iter().map(Into::into).collect(),
-        }
+        let (item, (attachments,)) = value.decompose();
+        Self::compose(item, attachments.into_iter().map(Into::into).collect())
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct DeletedVaultItemWithVaultResponse {
-    id: String,
-    vault_id: String,
-    category: String,
-    favorite: bool,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
-    created_at: String,
-    updated_at: String,
-    deleted_at: Option<String>,
-    vault: Option<VaultSummaryResponse>,
+item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct DeletedVaultItemWithVaultResponse {
+        vault: Option<VaultSummaryResponse>,
+    }
 }
 
 impl From<vault::DeletedVaultItemWithVaultResponse> for DeletedVaultItemWithVaultResponse {
     fn from(value: vault::DeletedVaultItemWithVaultResponse) -> Self {
-        Self {
-            id: value.id,
-            vault_id: value.vault_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-            vault: value.vault.map(Into::into),
-        }
+        let (item, (vault,)) = value.decompose();
+        Self::compose(item, vault.map(Into::into))
     }
 }
 
@@ -768,31 +624,15 @@ impl From<vault::VaultRotationMemberResponse> for VaultRotationMemberResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct VaultRotationItemResponse {
-    id: String,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
+rotation_item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct VaultRotationItemResponse {}
 }
 
 impl From<vault::VaultRotationItemResponse> for VaultRotationItemResponse {
     fn from(value: vault::VaultRotationItemResponse) -> Self {
-        Self {
-            id: value.id,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-        }
+        Self::compose(value.decompose().0)
     }
 }
 
@@ -942,43 +782,16 @@ impl From<vault::VaultStatsResponse> for VaultStatsResponseDto {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct ItemResponseDto {
-    id: String,
-    vault_id: String,
-    category: String,
-    favorite: bool,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
-    created_at: String,
-    updated_at: String,
-    deleted_at: Option<String>,
+item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct ItemResponseDto {}
 }
 
 impl From<vault::VaultItemDetailsResponse> for ItemResponseDto {
     fn from(value: vault::VaultItemDetailsResponse) -> Self {
-        Self {
-            id: value.id,
-            vault_id: value.vault_id,
-            category: value.category,
-            favorite: value.favorite,
-            encrypted_data: value.encrypted_data,
-            encryption_iv: value.encryption_iv,
-            encryption_algorithm: value.encryption_algorithm,
-            version: value.version,
-            encryption_version: value.encryption_version,
-            encrypted_by_user_id: value.encrypted_by_user_id,
-            last_modified_by: value.last_modified_by,
-            created_at: value.created_at,
-            updated_at: value.updated_at,
-            deleted_at: value.deleted_at,
-        }
+        // `GET /items/{itemId}` deliberately omits attachments; `listAttachments` serves them.
+        Self::compose(value.decompose().0)
     }
 }
 
@@ -2434,6 +2247,58 @@ mod tests {
         assert!(schema.get("oneOf").is_none());
         assert!(schema.get("anyOf").is_none());
         assert_eq!(schema["properties"]["items"]["maxItems"], 500);
+    }
+
+    /// The item variants share one field list via `item_shape!`. Expressing that with
+    /// `#[serde(flatten)]` instead would make utoipa emit `{"allOf": [{"$ref": ...}]}`, rewriting
+    /// every item schema in the committed contract without changing a single byte on the wire.
+    #[test]
+    fn item_schemas_stay_inline_objects_carrying_the_canonical_field_set() {
+        let openapi = serde_json::to_value(router().split_for_parts().1).unwrap();
+        let canonical = [
+            "id",
+            "vaultId",
+            "category",
+            "favorite",
+            "encryptedData",
+            "encryptionIv",
+            "encryptionAlgorithm",
+            "version",
+            "encryptionVersion",
+            "encryptedByUserId",
+            "lastModifiedBy",
+            "createdAt",
+            "updatedAt",
+            "deletedAt",
+        ];
+
+        for name in [
+            "AllItemResponse",
+            "VaultItemResponse",
+            "VaultItemDetailsResponse",
+            "DeletedVaultItemWithVaultResponse",
+            "ItemResponseDto",
+        ] {
+            let schema = &openapi["components"]["schemas"][name];
+            assert_eq!(
+                schema["type"], "object",
+                "{name} must stay an inline object"
+            );
+            assert!(schema.get("allOf").is_none(), "{name} must not use allOf");
+            for field in canonical {
+                assert!(
+                    schema["properties"].get(field).is_some(),
+                    "{name} is missing {field}"
+                );
+            }
+        }
+
+        // `getItem` deliberately omits attachments; `listAttachments` serves them separately.
+        assert!(
+            openapi["components"]["schemas"]["ItemResponseDto"]["properties"]
+                .get("attachments")
+                .is_none()
+        );
     }
 
     #[test]

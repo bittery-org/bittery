@@ -104,10 +104,8 @@ export function LeaveTeamDialog({ teamId, teamName }: LeaveTeamDialogProps) {
 							encryptionIv: item.encryptionIv,
 							encryptionAlgorithm: item.encryptionAlgorithm,
 							context: buildStoredItemEncryptionContext({
+								...item,
 								vaultId: vaultData.vaultId,
-								itemId: item.id,
-								encryptionVersion: item.encryptionVersion,
-								encryptedByUserId: item.encryptedByUserId,
 							}),
 						})),
 						vaultData.vaultId,

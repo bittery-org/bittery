@@ -1,4 +1,8 @@
 import { useApiClient } from "@bittery/shared/api";
+import {
+	stripToDecryptedData,
+	toEncryptedPayload,
+} from "@bittery/shared/item-mapping";
 import type { DecryptedItemData } from "@bittery/shared/types";
 import type { IPendingMutationQueue } from "@bittery/types";
 import {
@@ -96,13 +100,7 @@ export function enqueuePendingMutation(
 export function toQueueEncryptedPayload(
 	payload: EncryptedPayloadLike,
 ): NonNullable<BasePendingMutation["encryptedPayload"]> {
-	return {
-		encryptedData: payload.ciphertext,
-		encryptionIv: payload.iv,
-		encryptionAlgorithm: payload.algorithm,
-		encryptionVersion: payload.encryptionVersion,
-		encryptedByUserId: payload.encryptedByUserId,
-	};
+	return toEncryptedPayload(payload);
 }
 
 export function requireRepositoryForVault(
@@ -184,26 +182,7 @@ export async function enqueueItemMutation(
 }
 
 export function extractDecryptedItemData(item: unknown): DecryptedItemData {
-	const data = { ...(item as Record<string, unknown>) };
-	delete data.id;
-	delete data.vaultId;
-	delete data.category;
-	delete data.favorite;
-	delete data.createdAt;
-	delete data.updatedAt;
-	delete data.deletedAt;
-	delete data.version;
-	delete data.lastModifiedBy;
-	delete data.encryptionVersion;
-	delete data.encryptedByUserId;
-	delete data.attachments;
-	delete data.accountEmail;
-	delete data.accountId;
-	delete data.serverUrl;
-	delete data._encrypted;
-	delete data.vault;
-	delete data.account;
-	return data as unknown as DecryptedItemData;
+	return stripToDecryptedData(item);
 }
 
 export function useItemMutationRuntime() {

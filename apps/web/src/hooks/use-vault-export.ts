@@ -145,19 +145,9 @@ export function useVaultExport() {
 					continue;
 				}
 
-				const decryptedStr = await vaultCrypto.decryptItem(
-					{
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
+				const decryptedStr = await vaultCrypto.decryptStoredItem(
+					item,
 					vaultKey,
-					{
-						vaultId: item.vaultId,
-						itemId: item.id,
-						version: item.encryptionVersion,
-						userId: item.encryptedByUserId,
-					},
 				);
 
 				exportedItems.push({

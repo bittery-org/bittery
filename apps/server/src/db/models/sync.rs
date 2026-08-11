@@ -68,6 +68,10 @@ pub struct DbBootstrapVaultAccessRow {
     pub role: String,
 }
 
+/// Column list for `item` SELECTs that populate `DbBootstrapItemRow`.
+/// Must stay in sync with that struct's field order and casts.
+pub(crate) const BOOTSTRAP_ITEM_COLUMNS: &str = "id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at";
+
 #[derive(Clone, Debug, FromRow)]
 pub struct DbBootstrapItemRow {
     pub id: String,

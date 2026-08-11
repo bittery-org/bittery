@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "bun:test";
 import type { CryptoPort } from "@bittery/crypto-port";
+import { cachedItem as buildCachedItem } from "@bittery/shared/testing/item-fixtures";
 import type { AccountStore, ItemCache } from "@bittery/storage";
 import { createItemCache } from "@bittery/storage";
 import { createInMemoryRecordPort } from "@bittery/storage/testing";
@@ -106,7 +107,7 @@ async function cachedItem(
 		{ vaultId, itemId: "item_1", version, userId: USER_ID },
 	);
 	await crypto.destroyKey(key);
-	return {
+	return buildCachedItem({
 		id: "item_1",
 		vaultId,
 		category: "login",
@@ -121,7 +122,7 @@ async function cachedItem(
 		createdAt: "2026-08-01T00:00:00.000Z",
 		updatedAt: "2026-08-01T00:00:00.000Z",
 		deletedAt: null,
-	} as CachedEncryptedItem;
+	});
 }
 
 describe("VaultRepository.moveItem", () => {

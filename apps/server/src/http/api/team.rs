@@ -14,6 +14,7 @@ use crate::{
         access::{self, MemberAccessInput},
         team::{self, invitation_handlers, member_handlers},
     },
+    shapes::rotation_item_shape,
     AppState, NotifySyncExt,
 };
 
@@ -263,17 +264,10 @@ struct RotationMemberResponse {
     role: String,
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct RotationItemResponse {
-    id: String,
-    encrypted_data: String,
-    encryption_iv: String,
-    encryption_algorithm: String,
-    version: i32,
-    encryption_version: i32,
-    encrypted_by_user_id: String,
-    last_modified_by: String,
+rotation_item_shape! {
+    #[derive(Debug, Serialize, ToSchema)]
+    #[serde(rename_all = "camelCase")]
+    struct RotationItemResponse {}
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -317,16 +311,7 @@ impl From<team::RotationDataResponse> for RotationDataResponse {
                     items: vault
                         .items
                         .into_iter()
-                        .map(|item| RotationItemResponse {
-                            id: item.id,
-                            encrypted_data: item.encrypted_data,
-                            encryption_iv: item.encryption_iv,
-                            encryption_algorithm: item.encryption_algorithm,
-                            version: item.version,
-                            encryption_version: item.encryption_version,
-                            encrypted_by_user_id: item.encrypted_by_user_id,
-                            last_modified_by: item.last_modified_by,
-                        })
+                        .map(|item| RotationItemResponse::compose(item.decompose().0))
                         .collect(),
                 })
                 .collect(),

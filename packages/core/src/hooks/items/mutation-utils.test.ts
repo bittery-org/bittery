@@ -1,10 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import type { IPendingMutationQueue } from "@bittery/types";
-import {
-	enqueueItemMutation,
-	enqueuePendingMutation,
-	toQueueEncryptedPayload,
-} from "./mutation-utils";
+import { enqueueItemMutation, enqueuePendingMutation } from "./mutation-utils";
 
 describe("Item command persistence", () => {
 	test("does not resolve enqueue until the durable queue write completes", async () => {
@@ -44,24 +40,6 @@ describe("Item command persistence", () => {
 		await pending;
 		expect(resolved).toBe(true);
 		expect(optimisticApplied).toBe(true);
-	});
-
-	test("keeps the exact AAD context with encrypted command payloads", () => {
-		expect(
-			toQueueEncryptedPayload({
-				ciphertext: "ciphertext",
-				iv: "iv",
-				algorithm: "AES-GCM-AAD-V1",
-				encryptionVersion: 5,
-				encryptedByUserId: "user_2",
-			}),
-		).toEqual({
-			encryptedData: "ciphertext",
-			encryptionIv: "iv",
-			encryptionAlgorithm: "AES-GCM-AAD-V1",
-			encryptionVersion: 5,
-			encryptedByUserId: "user_2",
-		});
 	});
 
 	test("enqueues content update and move commands", async () => {

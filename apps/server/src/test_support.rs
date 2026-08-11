@@ -680,8 +680,10 @@ pub(crate) async fn seed_item(
     encryption_iv: &str,
     last_modified_by: &str,
 ) {
+    // A freshly seeded item sits at version 1, so its ciphertext is bound to encryption
+    // version 1 and to the seeding user — the same context item creation writes in production.
     query(
-		"INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6)",
+		"INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, last_modified_by, encryption_version, encrypted_by_user_id) VALUES ($1, $2, $3::item_category, $4, $5, $6, 1, $6)",
 	)
 	.bind(item_id)
 	.bind(vault_id)
