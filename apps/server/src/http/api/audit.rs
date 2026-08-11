@@ -1,8 +1,4 @@
-use axum::{
-    extract::{rejection::QueryRejection, FromRequestParts, Query, State},
-    http::request::Parts,
-    Json,
-};
+use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
@@ -13,29 +9,14 @@ use crate::{
     AppState,
 };
 
-use super::{dto::ProblemDetails, error::ApiError, extract::AuthenticatedRequest};
+use super::{
+    dto::ProblemDetails,
+    error::ApiError,
+    extract::{ApiQuery, AuthenticatedRequest},
+};
 
 const MAX_AUDIT_EVENTS: u16 = 100;
 const MAX_SEARCH_BYTES: usize = 200;
-
-struct ApiQuery<T>(T);
-
-impl<S, T> FromRequestParts<S> for ApiQuery<T>
-where
-    S: Send + Sync,
-    T: for<'de> Deserialize<'de>,
-{
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        Query::<T>::from_request_parts(parts, state)
-            .await
-            .map(|Query(value)| Self(value))
-            .map_err(|error: QueryRejection| {
-                ApiError::bad_request("INVALID_QUERY", error.body_text())
-            })
-    }
-}
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

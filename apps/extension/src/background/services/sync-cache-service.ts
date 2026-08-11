@@ -31,8 +31,7 @@ const DEFAULT_SERVER_URL = "http://localhost:3000";
 
 export type SyncConnectionContext = {
 	email: string | null;
-	serverUrl: string;
-	token: string;
+	client: SyncEventApiClient;
 };
 
 type VaultKeyLike = {
@@ -275,20 +274,18 @@ export function createSyncCacheService(
 		const candidates = buildOrderedCandidates(activeAccountId, knownAccountIds);
 
 		for (const accountId of candidates) {
-			const token = await getAuthTokenForAccountId(accountId);
-			if (!token) {
+			const client = await getAccountClientForAccountId(accountId);
+			if (!client) {
 				continue;
 			}
 
-			const serverUrl = await getServerUrlForAccountId(accountId);
 			const email = await resolveEmailForAccountId(accountId);
 			deps.logger.info(
 				`[sync-cache-service] Selected account-scoped sync context: ${accountId}`,
 			);
 			return {
 				email: email ? normalizeEmail(email) : null,
-				serverUrl,
-				token,
+				client,
 			};
 		}
 
@@ -301,14 +298,12 @@ export function createSyncCacheService(
 			return null;
 		}
 
-		const fallbackServerUrl = await getServerUrlForAccountId(null);
 		deps.logger.info(
 			"[sync-cache-service] Using fallback sync context without explicit account scope",
 		);
 		return {
 			email: null,
-			serverUrl: fallbackServerUrl,
-			token: fallbackToken,
+			client: deps.defaultClient,
 		};
 	}
 

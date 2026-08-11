@@ -38,9 +38,8 @@ const STALE_CONNECTION_THRESHOLD = 35000;
 const STALE_CHECK_INTERVAL = 10000;
 
 export class SyncManager {
-	private serverUrl: string;
-	private getAuthToken: () => Promise<string | null>;
 	private clientId: string;
+	private openSyncEvents: (signal: AbortSignal) => Promise<Response>;
 	private storage: SyncStorage;
 	private onStatusChange?: (status: ConnectionStatus) => void;
 	private onSessionRevoked?: (
@@ -48,7 +47,6 @@ export class SyncManager {
 	) => void | Promise<void>;
 	private onSyncPing?: () => void | Promise<void>;
 
-	private fetchImpl: (url: string, init?: any) => Promise<Response>;
 	private abortController: AbortController | null = null;
 	private connectionStatus: ConnectionStatus = "disconnected";
 	private reconnectAttempt = 0;
@@ -61,16 +59,14 @@ export class SyncManager {
 	private staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
 	constructor(options: SyncManagerOptions) {
-		this.serverUrl = options.serverUrl;
-		this.getAuthToken = options.getAuthToken;
 		this.clientId = options.clientId;
+		this.openSyncEvents = options.openSyncEvents;
 		this.storage = options.storage || new MemoryStorage();
 		this.onStatusChange = options.onStatusChange;
 		this.onSessionRevoked = options.onSessionRevoked;
 		this.onSyncPing = options.onSyncPing;
 		this.reconnectDelay = options.reconnectDelay || 1000;
 		this.maxReconnectDelay = options.maxReconnectDelay || 30000;
-		this.fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
 	}
 
 	/**
@@ -155,27 +151,10 @@ export class SyncManager {
 		this.setStatus("connecting");
 
 		try {
-			const token = await this.getAuthToken();
-			if (!token) {
-				this.setStatus("reconnecting");
-				this.scheduleReconnect();
-				return;
-			}
-
 			// Create abort controller for this connection
 			this.abortController = new AbortController();
 
-			const response = await this.fetchImpl(
-				`${this.serverUrl}/api/v1/sync/events`,
-				{
-					method: "GET",
-					headers: {
-						Authorization: `Bearer ${token}`,
-						Accept: "text/event-stream",
-					},
-					signal: this.abortController.signal,
-				},
-			);
+			const response = await this.openSyncEvents(this.abortController.signal);
 
 			if (!response.ok) {
 				throw new Error(`SSE connection failed: ${response.status}`);

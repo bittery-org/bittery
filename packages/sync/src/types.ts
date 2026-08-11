@@ -160,9 +160,8 @@ export interface SyncStorage {
  * Options for SyncManager
  */
 export interface SyncManagerOptions {
-	serverUrl: string;
-	getAuthToken: () => Promise<string | null>;
 	clientId: string;
+	openSyncEvents: (signal: AbortSignal) => Promise<Response>;
 	storage?: SyncStorage;
 	onStatusChange?: (status: ConnectionStatus) => void;
 	onSessionRevoked?: (
@@ -172,8 +171,6 @@ export interface SyncManagerOptions {
 	onSyncPing?: () => void | Promise<void>;
 	reconnectDelay?: number;
 	maxReconnectDelay?: number;
-	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
-	fetch?: (url: string, init?: any) => Promise<Response>;
 }
 
 /**

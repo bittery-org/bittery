@@ -151,7 +151,37 @@ struct NativeItemCacheView {
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NativeItemCacheState {
-    native_view: NativeItemCacheView,
+    v: u64,
+    #[serde(default)]
+    native_view: Option<NativeItemCacheView>,
+}
+
+fn legacy_item_cache_view(account_id: &str) -> NativeItemCacheView {
+    NativeItemCacheView {
+        v: ITEM_CACHE_NATIVE_VIEW_VERSION,
+        items_key_prefix: format!("record:{}:items:", account_id),
+        vaults_key_prefix: format!("record:{}:vaults:", account_id),
+    }
+}
+
+fn resolve_item_cache_view(
+    state: NativeItemCacheState,
+    account_id: &str,
+) -> Result<NativeItemCacheView, String> {
+    let native_view = match state.native_view {
+        Some(view) => view,
+        None if state.v == 1 => legacy_item_cache_view(account_id),
+        None => return Err("Item cache state is missing its native view".to_string()),
+    };
+
+    if native_view.v != ITEM_CACHE_NATIVE_VIEW_VERSION {
+        return Err(format!(
+            "Unsupported item cache view version: {}",
+            native_view.v
+        ));
+    }
+
+    Ok(native_view)
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -187,14 +217,7 @@ fn load_item_cache_view<R: Runtime>(
     let state: NativeItemCacheState = serde_json::from_str(&raw)
         .map_err(|error| format!("Failed to parse item cache state: {}", error))?;
 
-    if state.native_view.v != ITEM_CACHE_NATIVE_VIEW_VERSION {
-        return Err(format!(
-            "Unsupported item cache view version: {}",
-            state.native_view.v
-        ));
-    }
-
-    Ok(state.native_view)
+    resolve_item_cache_view(state, &account.account_id)
 }
 
 /// Why the published view could not be used. Both variants mean the same thing
@@ -2286,15 +2309,38 @@ mod tests {
         )
         .expect("the ItemCache native projection must parse");
 
-        assert_eq!(state.native_view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
+        let native_view = state
+            .native_view
+            .expect("the ItemCache native projection must be present");
+        assert_eq!(native_view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
         assert_eq!(
-            state.native_view.items_key_prefix,
+            native_view.items_key_prefix,
             "record:item-cache-stage:acct-a:gen:items:"
         );
         assert_eq!(
-            state.native_view.vaults_key_prefix,
+            native_view.vaults_key_prefix,
             "record:item-cache-stage:acct-a:gen:vaults:"
         );
+    }
+
+    #[test]
+    fn legacy_item_cache_state_uses_the_pre_generation_record_prefixes() {
+        let state: NativeItemCacheState = serde_json::from_str(
+            r#"{
+                "v": 1,
+                "itemsPrimed": true,
+                "vaultsPrimed": true,
+                "metadata": null
+            }"#,
+        )
+        .expect("the legacy ItemCache state must parse");
+
+        assert_eq!(state.v, 1);
+        assert!(state.native_view.is_none());
+        let native_view = super::resolve_item_cache_view(state, "acct-a")
+            .expect("the legacy ItemCache state must resolve to its published view");
+        assert_eq!(native_view.items_key_prefix, "record:acct-a:items:");
+        assert_eq!(native_view.vaults_key_prefix, "record:acct-a:vaults:");
     }
 
     #[test]

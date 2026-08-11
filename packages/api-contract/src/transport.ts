@@ -125,7 +125,7 @@ export interface ApiTransport {
 		path: string,
 		request?: ApiTransportRequest,
 	): Promise<ApiTransportResponse<T>>;
-	openSyncEvents(): Promise<Response>;
+	openSyncEvents(signal?: AbortSignal): Promise<Response>;
 }
 
 function nonEmptyHeaderValue(value: string, name: string): string {
@@ -182,10 +182,8 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 	const fetchImplementation = async (request: Request): Promise<Response> => {
 		const localRequest = takeRequestOrigin(request);
 		if (options.authorizeInsecureTransport) {
-			const requestUrl = new URL(localRequest.request.url);
-			const serverUrl = `${requestUrl.protocol}//${requestUrl.host}`;
-			const policy = await options.authorizeInsecureTransport(serverUrl);
-			normalizeBaseUrl(serverUrl, policy);
+			const policy = await options.authorizeInsecureTransport(baseUrl);
+			normalizeBaseUrl(baseUrl, policy);
 		}
 		return rawFetch(localRequest.request, localRequest.origin);
 	};
@@ -281,10 +279,11 @@ export function createApiTransport(options: ApiTransportOptions): ApiTransport {
 	return {
 		getApiMetadata: () => request("GET", "/api/meta"),
 		request,
-		async openSyncEvents() {
+		async openSyncEvents(signal) {
 			const response = await fetchImplementation(
-				new Request(new URL("/api/v1/sync/events", `${baseUrl}/`), {
+				new Request(new URL("api/v1/sync/events", `${baseUrl}/`), {
 					headers: await requestHeaders({ Accept: "text/event-stream" }),
+					signal,
 				}),
 			);
 			if (!response.ok) {

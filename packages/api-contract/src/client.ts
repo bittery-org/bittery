@@ -422,7 +422,7 @@ export interface ApiClient {
 			vaultIds?: readonly string[];
 			limit?: number;
 		}): Promise<ApiResult<SyncChanges>>;
-		events(): Promise<Response>;
+		events(signal?: AbortSignal): Promise<Response>;
 	};
 	readonly share: {
 		list(itemId: string): Promise<ApiResult<Final.ShareLinkList>>;
@@ -1248,7 +1248,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
 				});
 				return { ...result, data: validateSyncChanges(result.data) };
 			},
-			events: () => transport.openSyncEvents(),
+			events: (signal) => transport.openSyncEvents(signal),
 		},
 		share: {
 			list: (itemId) =>

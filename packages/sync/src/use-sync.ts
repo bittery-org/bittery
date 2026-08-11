@@ -156,8 +156,6 @@ export interface UseSyncOptions {
 		event: SyncEvent,
 		context: SyncEventContext,
 	) => void | Promise<void>;
-	/** Custom fetch implementation (e.g. `expo/fetch` for streaming support in React Native) */
-	fetch?: (url: string, init?: any) => Promise<Response>;
 }
 
 /**
@@ -184,7 +182,6 @@ export function useSync(options: UseSyncOptions) {
 		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed,
-		fetch: fetchImpl,
 	} = options;
 
 	const syncStorage = useMemo<SyncStorage>(
@@ -272,11 +269,8 @@ export function useSync(options: UseSyncOptions) {
 			);
 			const orchestrator = new SyncOrchestrator({
 				syncManager: {
-					serverUrl: source.serverUrl,
-					getAuthToken: source.getAuthToken,
 					clientId,
 					storage: sourceStorage,
-					fetch: fetchImpl,
 				},
 				apiClient: source.apiClient,
 				refreshFromServer: source.refreshFromServer,
@@ -348,7 +342,6 @@ export function useSync(options: UseSyncOptions) {
 		syncSources,
 		clientId,
 		syncStorage,
-		fetchImpl,
 		outboundQueue,
 		getClientForAccount,
 		onSessionRevoked,

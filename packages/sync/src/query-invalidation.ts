@@ -1,3 +1,4 @@
+import { apiQueryKeys } from "@bittery/shared/api-query";
 import type { QueryClient } from "@tanstack/react-query";
 import type { SyncEvent, SyncEventType } from "./types";
 
@@ -213,7 +214,9 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		 */
 		invalidateTeam: async (): Promise<void> => {
 			const { queryClient } = options;
-			await queryClient.invalidateQueries({ queryKey: ["team"] });
+			await queryClient.invalidateQueries({
+				queryKey: apiQueryKeys.teams.all,
+			});
 		},
 
 		/**
@@ -222,23 +225,23 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 		invalidateTeamInvitations: async (): Promise<void> => {
 			const { queryClient } = options;
 			await Promise.all([
-				queryClient.invalidateQueries({ queryKey: ["team"] }),
-				queryClient.invalidateQueries({ queryKey: ["team", "invitations"] }),
+				queryClient.invalidateQueries({
+					queryKey: apiQueryKeys.teams.all,
+				}),
+				queryClient.invalidateQueries({
+					queryKey: apiQueryKeys.teams.pendingInvitations,
+				}),
 			]);
 		},
 
 		/**
 		 * Invalidate share-related queries
 		 */
-		invalidateShare: async (itemId?: string): Promise<void> => {
+		invalidateShare: async (itemId: string): Promise<void> => {
 			const { queryClient } = options;
-			if (itemId) {
-				await queryClient.invalidateQueries({
-					queryKey: ["share", "listByItem"],
-				});
-			} else {
-				await queryClient.invalidateQueries({ queryKey: ["share"] });
-			}
+			await queryClient.invalidateQueries({
+				queryKey: apiQueryKeys.shares.list(itemId),
+			});
 		},
 
 		/**
@@ -280,7 +283,9 @@ export function createQueryInvalidator(options: QueryInvalidatorOptions) {
 				queryClient.invalidateQueries({ queryKey: ["accounts", "info"] }),
 
 				// Team queries
-				queryClient.invalidateQueries({ queryKey: ["team"] }),
+				queryClient.invalidateQueries({
+					queryKey: apiQueryKeys.teams.all,
+				}),
 			]);
 		},
 	};

@@ -259,7 +259,7 @@ export interface IQueryInvalidator {
 	invalidateDeletedItems(vaultId: string): Promise<void>;
 	invalidateTeam(): Promise<void>;
 	invalidateTeamInvitations(): Promise<void>;
-	invalidateShare(itemId?: string): Promise<void>;
+	invalidateShare(itemId: string): Promise<void>;
 	invalidateVaultMembers(vaultId: string): Promise<void>;
 }
 

@@ -7,9 +7,9 @@ import type { RefreshResult, SessionSnapshot } from "./session-refresh";
 
 interface AccountStoreLike {
 	getUnlockedAccounts(): Promise<string[]>;
-	getAuthToken(email: string): Promise<string | null>;
-	getServerUrl(email: string): Promise<string | null>;
-	getAccountMetadata(email: string): Promise<{
+	getAuthToken(accountId: string): Promise<string | null>;
+	getServerUrl(accountId: string): Promise<string | null>;
+	getAccountMetadata(accountId: string): Promise<{
 		insecureTransportConfirmed?: boolean;
 	} | null>;
 }

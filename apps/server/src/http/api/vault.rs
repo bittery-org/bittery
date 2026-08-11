@@ -1,14 +1,10 @@
 use axum::{
-    body::to_bytes,
-    extract::{DefaultBodyLimit, FromRequest, Path, State},
-    http::{
-        header::{CONTENT_TYPE, ETAG},
-        HeaderMap, HeaderValue, Request, StatusCode,
-    },
+    extract::{DefaultBodyLimit, Path, State},
+    http::{header::ETAG, HeaderMap, HeaderValue},
     response::{IntoResponse, Response},
     Json,
 };
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, IntoResponses, ToSchema};
 use utoipa_axum::{router::OpenApiRouter, routes};
 
@@ -26,7 +22,9 @@ use super::{
         BULK_IMPORT_BYTES, BULK_IMPORT_ITEMS, DEFAULT_PAGE_SIZE, ITEM_CIPHERTEXT_BYTES,
     },
     error::ApiError,
-    extract::{ApiMergePatch, ApiQuery, AuthenticatedRequest},
+    extract::{
+        ApiJson, ApiJsonBytes, ApiMergePatch, ApiMergePatchBytes, ApiQuery, AuthenticatedRequest,
+    },
     idempotency,
     pagination::{
         decode_page_key, page_prefetched, page_prefetched_with_more, page_values, query_limit,
@@ -36,121 +34,6 @@ use super::{
 };
 
 const ITEM_BODY_LIMIT_BYTES: usize = ITEM_CIPHERTEXT_BYTES as usize + 64 * 1024;
-
-struct ApiJson<T>(T);
-
-#[derive(Debug)]
-struct ApiJsonBytes<T> {
-    value: T,
-    bytes: Vec<u8>,
-}
-
-#[derive(Debug)]
-struct ApiMergePatchBytes<T> {
-    value: T,
-    bytes: Vec<u8>,
-}
-
-impl<S, T> FromRequest<S> for ApiJson<T>
-where
-    S: Send + Sync,
-    T: DeserializeOwned,
-    Json<T>: FromRequest<S, Rejection = axum::extract::rejection::JsonRejection>,
-{
-    type Rejection = ApiError;
-
-    async fn from_request(
-        request: Request<axum::body::Body>,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        Json::<T>::from_request(request, state)
-            .await
-            .map(|Json(value)| Self(value))
-            .map_err(|error| match error.status() {
-                StatusCode::UNSUPPORTED_MEDIA_TYPE => {
-                    ApiError::unsupported_media_type(error.body_text())
-                }
-                StatusCode::PAYLOAD_TOO_LARGE => {
-                    ApiError::payload_too_large("The request body exceeds this route's byte limit.")
-                }
-                _ => ApiError::bad_request("INVALID_JSON", error.body_text()),
-            })
-    }
-}
-
-impl<S, T> FromRequest<S> for ApiJsonBytes<T>
-where
-    S: Send + Sync,
-    T: DeserializeOwned,
-{
-    type Rejection = ApiError;
-
-    async fn from_request(
-        request: Request<axum::body::Body>,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let content_type = request
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .map(str::trim);
-        if !matches!(content_type, Some("application/json"))
-            && !content_type.is_some_and(|value| value.ends_with("+json"))
-        {
-            return Err(ApiError::unsupported_media_type(
-                "Expected a JSON request content type.",
-            ));
-        }
-        let bytes = to_bytes(request.into_body(), ITEM_BODY_LIMIT_BYTES)
-            .await
-            .map_err(|_| {
-                ApiError::payload_too_large("The request body exceeds this route's byte limit.")
-            })?;
-        let Json(value) = Json::<T>::from_bytes(&bytes)
-            .map_err(|error| ApiError::bad_request("INVALID_JSON", error.body_text()))?;
-        Ok(Self {
-            value,
-            bytes: bytes.to_vec(),
-        })
-    }
-}
-
-impl<S, T> FromRequest<S> for ApiMergePatchBytes<T>
-where
-    S: Send + Sync,
-    T: DeserializeOwned,
-{
-    type Rejection = ApiError;
-
-    async fn from_request(
-        request: Request<axum::body::Body>,
-        _state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        let content_type = request
-            .headers()
-            .get(CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.split(';').next())
-            .map(str::trim);
-        if content_type != Some("application/merge-patch+json") {
-            return Err(ApiError::unsupported_media_type(
-                "Expected application/merge-patch+json.",
-            ));
-        }
-        let bytes = to_bytes(request.into_body(), ITEM_BODY_LIMIT_BYTES)
-            .await
-            .map_err(|_| {
-                ApiError::payload_too_large("The request body exceeds this route's byte limit.")
-            })?;
-        let Json(value) = Json::<T>::from_bytes(&bytes)
-            .map_err(|error| ApiError::bad_request("INVALID_JSON", error.body_text()))?;
-        Ok(Self {
-            value,
-            bytes: bytes.to_vec(),
-        })
-    }
-}
 
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1623,7 +1506,7 @@ async fn create_item(
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path((vault_id, item_id)): Path<(String, String)>,
-    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<CreateItemBody>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<CreateItemBody, ITEM_BODY_LIMIT_BYTES>,
 ) -> Result<Response, ApiError> {
     check_ciphertext(&body.encrypted_data)?;
     let pool = db_pool(&state)?.clone();
@@ -1690,7 +1573,10 @@ async fn update_item(
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiMergePatchBytes { value: body, bytes }: ApiMergePatchBytes<UpdateItemBody>,
+    ApiMergePatchBytes { value: body, bytes }: ApiMergePatchBytes<
+        UpdateItemBody,
+        ITEM_BODY_LIMIT_BYTES,
+    >,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let encrypted_data = optional_patch_value(body.encrypted_data, "/encryptedData")?;
@@ -1742,7 +1628,10 @@ async fn set_favorite(
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiMergePatchBytes { value: body, bytes }: ApiMergePatchBytes<FavoriteBody>,
+    ApiMergePatchBytes { value: body, bytes }: ApiMergePatchBytes<
+        FavoriteBody,
+        ITEM_BODY_LIMIT_BYTES,
+    >,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     let pool = db_pool(&state)?.clone();
@@ -1862,7 +1751,7 @@ async fn move_item(
     auth: AuthenticatedRequest,
     headers: HeaderMap,
     Path(item_id): Path<String>,
-    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<MoveItemBody>,
+    ApiJsonBytes { value: body, bytes }: ApiJsonBytes<MoveItemBody, ITEM_BODY_LIMIT_BYTES>,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
     check_ciphertext(&body.encrypted_data)?;
@@ -2305,11 +2194,14 @@ mod tests {
 
     use super::{
         check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
-        ApiJsonBytes, BulkImportBody, BulkImportItemInput, FavoriteBody, RemoveVaultMemberBody,
-        UpdateVaultBody, VaultItemDetailsResponse, VaultStatsResponseDto,
+        BulkImportBody, BulkImportItemInput, FavoriteBody, RemoveVaultMemberBody, UpdateVaultBody,
+        VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
     };
     use crate::{
-        http::api::dto::{CursorPage, PatchField},
+        http::api::{
+            dto::{CursorPage, PatchField},
+            extract::ApiJsonBytes,
+        },
         services::vault::{
             DeletedVaultItemWithVaultResponse, VaultItemWithVaultResponse, VaultStatsResponse,
         },
@@ -2340,7 +2232,7 @@ mod tests {
             .header("content-type", "text/plain")
             .body(Body::from(r#"{"favorite":true}"#))
             .expect("request should build");
-        let error = ApiJsonBytes::<FavoriteBody>::from_request(request, &())
+        let error = ApiJsonBytes::<FavoriteBody, ITEM_BODY_LIMIT_BYTES>::from_request(request, &())
             .await
             .expect_err("plain text must not be accepted as item JSON");
         let response = error.into_response();

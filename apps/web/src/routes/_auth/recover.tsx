@@ -5,10 +5,13 @@ import {
 	recoverAccount,
 } from "@bittery/core/services/vault-crypto";
 import { m as messages } from "@bittery/i18n/paraglide/messages";
-import { useApiClient } from "@bittery/shared/api";
-import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
+import {
+	createApiClientForServer,
+	getDefaultServerUrl,
+} from "@bittery/shared/api-client-factory";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { toVaultKeyEntry } from "@bittery/shared/vault-mapping";
-import { Button, cn, Input, Label, toast } from "@bittery/ui";
+import { Button, Checkbox, cn, Input, Label, toast } from "@bittery/ui";
 import {
 	IconCheck as Check,
 	IconCopy as Copy,
@@ -92,9 +95,20 @@ export const Route = createFileRoute("/_auth/recover")({
 
 function RecoverRouteComponent() {
 	const navigate = useNavigate();
-	const api = useApiClient();
 	const crypto = usePlatformCrypto();
 	const { m } = useI18n();
+	const serverUrl = getDefaultServerUrl();
+	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
+	const ceremonyApiClient = useMemo(
+		() =>
+			createApiClientForServer(serverUrl, undefined, {
+				insecureTransportConfirmed,
+				clientPlatform: "web",
+			}),
+		[insecureTransportConfirmed, serverUrl],
+	);
 
 	const [step, setStep] = useState<RecoveryStep>("email");
 	const [email, setEmail] = useState("");
@@ -124,6 +138,13 @@ function RecoverRouteComponent() {
 
 		return fallback;
 	};
+	const requiresConfirmedInsecureTransport = () => {
+		if (requiresInsecureTransportConfirmation && !insecureTransportConfirmed) {
+			toast.error(m.auth_insecure_http_confirmation_required());
+			return true;
+		}
+		return false;
+	};
 
 	const handleRequestCode = async (e: FormEvent) => {
 		e.preventDefault();
@@ -132,10 +153,13 @@ function RecoverRouteComponent() {
 			toast.error(m.auth_recover_toast_email_required());
 			return;
 		}
+		if (requiresConfirmedInsecureTransport()) {
+			return;
+		}
 
 		setIsSubmitting(true);
 		try {
-			await api.auth.requestRecoveryVerification({
+			await ceremonyApiClient.auth.requestRecoveryVerification({
 				email: email.trim(),
 			});
 			toast.success(m.auth_recover_toast_code_requested());
@@ -159,11 +183,14 @@ function RecoverRouteComponent() {
 			toast.error(m.auth_recover_toast_code_length_invalid());
 			return;
 		}
+		if (requiresConfirmedInsecureTransport()) {
+			return;
+		}
 
 		setIsSubmitting(true);
 		try {
 			const result = (
-				await api.auth.verifyRecovery({
+				await ceremonyApiClient.auth.verifyRecovery({
 					email: email.trim(),
 					code: code.trim(),
 				})
@@ -227,9 +254,11 @@ function RecoverRouteComponent() {
 			toast.error(m.auth_recover_toast_password_mismatch());
 			return;
 		}
+		if (requiresConfirmedInsecureTransport()) {
+			return;
+		}
 
 		setIsSubmitting(true);
-		const serverUrl = getDefaultServerUrl();
 
 		try {
 			const recovered = await recoverAccount(
@@ -238,7 +267,7 @@ function RecoverRouteComponent() {
 					crypto,
 					loadRecoveryData: async () => {
 						const data = (
-							await api.auth.recoveryData({
+							await ceremonyApiClient.auth.recoveryData({
 								recoveryToken,
 							})
 						).data;
@@ -252,7 +281,7 @@ function RecoverRouteComponent() {
 						};
 					},
 					commit: (payload) =>
-						api.auth
+						ceremonyApiClient.auth
 							.resetPassword({ recoveryToken, ...payload })
 							.then((r) => r.data),
 				},
@@ -267,6 +296,7 @@ function RecoverRouteComponent() {
 				const bootstrap = await loadRecoveredAccountBootstrap({
 					token: recovered.result.token,
 					serverUrl,
+					insecureTransportConfirmed,
 				});
 				sessionAdoptionStarted = true;
 				await storeLoginSessionOwned(
@@ -298,7 +328,7 @@ function RecoverRouteComponent() {
 					itemCache,
 					crypto,
 					bootstrap.user.email,
-					{ serverUrl },
+					{ serverUrl, insecureTransportConfirmed },
 				);
 				await refreshActiveAccountId();
 			} catch (bootstrapError) {
@@ -432,6 +462,27 @@ function RecoverRouteComponent() {
 								className="h-10"
 							/>
 						</div>
+
+						{requiresInsecureTransportConfirmation ? (
+							<Label
+								htmlFor="recovery-insecure-http-confirmation"
+								className="flex cursor-pointer items-start gap-2.5 rounded-md border bg-foreground/3 px-3 py-2.5 font-normal transition-colors hover:bg-foreground/5"
+							>
+								<Checkbox
+									id="recovery-insecure-http-confirmation"
+									checked={insecureTransportConfirmed}
+									onCheckedChange={(checked) =>
+										setInsecureTransportConfirmed(checked === true)
+									}
+								/>
+								<span className="grid gap-0.5">
+									<span>{m.auth_insecure_http_confirmation_label()}</span>
+									<span className="text-muted-foreground text-xs">
+										{m.auth_insecure_http_confirmation_description()}
+									</span>
+								</span>
+							</Label>
+						) : null}
 
 						<div className="pt-1">
 							<Button

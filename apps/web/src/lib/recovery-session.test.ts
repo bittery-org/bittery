@@ -69,3 +69,22 @@ test("recovered account bootstrap uses the newly issued session", async () => {
 		vaultIds: bootstrap.vaults.map((vault) => vault.id),
 	}).toEqual({ userId: "user-1", vaultIds: ["vault-1"] });
 });
+
+test("does not send a recovered session to remote HTTP before confirmation", async () => {
+	const requests: Request[] = [];
+	globalThis.fetch = Object.assign(
+		async (input: string | URL | Request) => {
+			requests.push(new Request(input));
+			return Response.json({ capabilities: ["insecure-http"] });
+		},
+		{ preconnect: originalFetch.preconnect },
+	);
+
+	await expect(
+		loadRecoveredAccountBootstrap({
+			token: "recovery-session-token",
+			serverUrl: "http://server.example.test",
+		}),
+	).rejects.toThrow("ACCOUNT_CONFIRMATION_REQUIRED");
+	expect(requests).toEqual([]);
+});

@@ -42,8 +42,8 @@ export function useCreateShare() {
 				defaultClient,
 			);
 		},
-		onSuccess: async () => {
-			await invalidator.invalidateShare();
+		onSuccess: async (_result, input) => {
+			await invalidator.invalidateShare(input.item.id);
 		},
 	});
 }

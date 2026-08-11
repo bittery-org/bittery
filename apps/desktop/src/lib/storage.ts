@@ -100,6 +100,9 @@ export async function initializeStorage(): Promise<void> {
 		subscribeUnlockBroadcast();
 		await storage.initialize();
 		await itemCache.initialize();
+		for (const account of await storage.getAccountsList()) {
+			await itemCache.migrateLegacyMetadata(account.accountId);
+		}
 	})();
 	return initializePromise;
 }

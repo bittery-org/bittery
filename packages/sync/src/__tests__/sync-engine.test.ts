@@ -72,11 +72,24 @@ interface TestApiClientOptions {
 		cursor: { id: string } | null;
 	}>;
 	getItem?: (itemId: string) => Promise<Record<string, unknown>>;
+	events?: (signal?: AbortSignal) => Promise<Response>;
 }
 
 function testApiClient(options: TestApiClientOptions = {}): SyncApiClient {
 	return {
 		sync: {
+			events: (signal?: AbortSignal) =>
+				options.events?.(signal) ??
+				Promise.resolve(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								controller.close();
+							},
+						}),
+						{ status: 200 },
+					),
+				),
 			changes: async () =>
 				apiResult(
 					await (options.changes?.() ??
@@ -219,8 +232,6 @@ describe("sync engine regressions", () => {
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
-				serverUrl: "http://localhost:3000",
-				getAuthToken: async () => "token",
 				clientId: "self_client",
 				storage,
 			},
@@ -262,8 +273,6 @@ describe("sync engine regressions", () => {
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
-				serverUrl: "http://localhost:3000",
-				getAuthToken: async () => "token",
 				clientId: "self_client",
 				storage,
 			},
@@ -303,8 +312,6 @@ describe("sync engine regressions", () => {
 		const outboundQueue = new OutboundQueue(storage, "self_client");
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
-				serverUrl: "http://localhost:3000",
-				getAuthToken: async () => "token",
 				clientId: "self_client",
 				storage,
 			},
@@ -349,8 +356,6 @@ describe("sync engine regressions", () => {
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
-				serverUrl: "http://localhost:3000",
-				getAuthToken: async () => "token",
 				clientId: "self_client",
 				storage,
 			},
@@ -384,8 +389,6 @@ describe("sync engine regressions", () => {
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
-				serverUrl: "http://localhost:3000",
-				getAuthToken: async () => "token",
 				clientId: "self_client",
 				storage,
 			},
@@ -420,8 +423,6 @@ describe("sync engine regressions", () => {
 
 		const orchestrator = new SyncOrchestrator({
 			syncManager: {
-				serverUrl: "http://localhost:3000",
-				getAuthToken: async () => "token",
 				clientId: "self_client",
 				storage,
 			},
@@ -451,9 +452,8 @@ describe("sync engine regressions", () => {
 		let pingCount = 0;
 
 		const manager = createSyncManager({
-			serverUrl: "http://localhost:3000",
-			getAuthToken: async () => "token",
 			clientId: "self_client",
+			openSyncEvents: async () => new Response(),
 			storage,
 			onSyncPing: () => {
 				pingCount++;
@@ -472,16 +472,14 @@ describe("sync engine regressions", () => {
 		manager.disconnect();
 	});
 
-	test("connects to the versioned SSE hint endpoint", async () => {
+	test("opens SSE through the supplied account transport", async () => {
 		const storage = new MemoryStorage();
-		let requestedUrl = "";
+		let receivedSignal: AbortSignal | undefined;
 		const manager = createSyncManager({
-			serverUrl: "https://self-hosted.example",
-			getAuthToken: async () => "token",
 			clientId: "self_client",
 			storage,
-			fetch: async (url) => {
-				requestedUrl = url;
+			openSyncEvents: async (signal) => {
+				receivedSignal = signal;
 				return new Response(
 					new ReadableStream({
 						start(controller) {
@@ -494,7 +492,7 @@ describe("sync engine regressions", () => {
 		});
 
 		await manager.connect();
-		expect(requestedUrl).toBe("https://self-hosted.example/api/v1/sync/events");
+		expect(receivedSignal).toBeInstanceOf(AbortSignal);
 		manager.disconnect();
 	});
 
@@ -509,9 +507,8 @@ describe("sync engine regressions", () => {
 		}> = [];
 
 		const manager = createSyncManager({
-			serverUrl: "http://localhost:3000",
-			getAuthToken: async () => "token",
 			clientId: "self_client",
+			openSyncEvents: async () => new Response(),
 			storage,
 			onSessionRevoked: (payload) => {
 				revokedPayloads.push(payload);

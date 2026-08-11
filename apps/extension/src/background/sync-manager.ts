@@ -13,7 +13,6 @@ import {
 	runCatchUp,
 	type SyncCursor,
 } from "@bittery/sync";
-import { getExtensionClientVersion } from "./api-client";
 import { parseSseFrame, type SseFrame } from "./services/sse-frame";
 import { syncCacheService } from "./services/sync-cache-service";
 import {
@@ -172,19 +171,7 @@ export async function connect(): Promise<void> {
 		setSyncConnectionEmail(context.email);
 		abortController = new AbortController();
 
-		const clientId = await getClientId();
-		const serverUrl = context.serverUrl.replace(/\/$/, "");
-		const response = await fetch(`${serverUrl}/api/v1/sync/events`, {
-			method: "GET",
-			headers: {
-				Authorization: `Bearer ${context.token}`,
-				Accept: "text/event-stream",
-				"Bittery-Client-Id": clientId,
-				"Bittery-Client-Platform": "extension",
-				"Bittery-Client-Version": getExtensionClientVersion(),
-			},
-			signal: abortController.signal,
-		});
+		const response = await context.client.sync.events(abortController.signal);
 
 		if (!response.ok) {
 			throw new Error(`SSE connection failed: ${response.status}`);

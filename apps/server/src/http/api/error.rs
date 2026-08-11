@@ -50,6 +50,10 @@ impl ApiError {
         Self::new(StatusCode::BAD_REQUEST, code, "Bad request", detail, false)
     }
 
+    pub(crate) fn invalid_request(status: StatusCode, detail: impl Into<String>) -> Self {
+        Self::new(status, "INVALID_REQUEST", "Invalid request", detail, false)
+    }
+
     pub(crate) fn payload_too_large(detail: impl Into<String>) -> Self {
         Self::new(
             StatusCode::PAYLOAD_TOO_LARGE,

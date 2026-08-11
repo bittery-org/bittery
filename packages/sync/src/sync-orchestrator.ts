@@ -13,10 +13,17 @@ import type {
 
 export type SyncApiClient = CatchUpApiClient &
 	DeltaSyncApiClient &
-	OutboundQueueApiClient;
+	OutboundQueueApiClient & {
+		sync: {
+			events(signal?: AbortSignal): Promise<Response>;
+		};
+	};
 
 export interface SyncOrchestratorOptions {
-	syncManager: Omit<SyncManagerOptions, "onStatusChange">;
+	syncManager: Omit<
+		SyncManagerOptions,
+		"onStatusChange" | "onSessionRevoked" | "onSyncPing" | "openSyncEvents"
+	>;
 	apiClient: SyncApiClient;
 	itemCache: SyncItemCache;
 	outboundQueue: OutboundQueue;
@@ -68,6 +75,7 @@ export class SyncOrchestrator {
 
 		this.syncManager = createSyncManager({
 			...options.syncManager,
+			openSyncEvents: (signal) => options.apiClient.sync.events(signal),
 			onStatusChange: (connectionStatus) => {
 				void this.handleStatusChange(connectionStatus);
 			},

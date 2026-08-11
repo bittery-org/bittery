@@ -30,7 +30,6 @@
 		"./server-url": "./src/server-url.ts",
 		"./server-transport-policy": "./src/server-transport-policy.ts",
 		"./session-refresh": "./src/session-refresh.ts",
-		"./session-refresh-fetch": "./src/session-refresh-fetch.ts",
 		"./types": "./src/types.ts",
 		"./pricing": "./src/pricing.ts",
 		"./releases": "./src/releases.ts",

@@ -44,7 +44,9 @@ const runtimeMessages: Array<{ type: string }> = [];
 const storageLocal: Record<string, unknown> = {};
 let stagedRefreshCount = 0;
 let requireFullRefreshOnCatchUp = false;
-let lastSseRequest: { url: string; headers: Headers } | null = null;
+let lastSseRequest: { signal: AbortSignal | undefined } | null = null;
+let openSyncEvents: (signal?: AbortSignal) => Promise<Response> = async () =>
+	new Response(null, { status: 401 });
 
 globalThis.chrome = {
 	storage: {
@@ -128,10 +130,12 @@ mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
 mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 	syncCacheService: {
 		resolveConnectionContext: async () => ({
-			accountId: ACCOUNT.accountId,
 			email: CONNECTION_EMAIL,
-			serverUrl: "https://sync.example.com",
-			token: "dead-jwt",
+			client: {
+				sync: {
+					events: (signal?: AbortSignal) => openSyncEvents(signal),
+				},
+			},
 		}),
 		getClientForEmail: async () => ({}),
 		applyDeltaSyncForEvent: async () => {},
@@ -165,13 +169,10 @@ function sseBody(frames: string[]): ReadableStream<Uint8Array> {
 
 /** Streams the given frames, then ends — exactly what the server does after revoking. */
 function stubStream(frames: string[]): void {
-	globalThis.fetch = (async (input, init) => {
-		lastSseRequest = {
-			url: String(input),
-			headers: new Headers(init?.headers),
-		};
+	openSyncEvents = async (signal) => {
+		lastSseRequest = { signal };
 		return new Response(sseBody(frames), { status: 200 });
-	}) as typeof fetch;
+	};
 }
 
 function revocationFrame(payload: Record<string, unknown>): string {
@@ -196,6 +197,7 @@ beforeEach(() => {
 	stagedRefreshCount = 0;
 	requireFullRefreshOnCatchUp = false;
 	lastSseRequest = null;
+	openSyncEvents = async () => new Response(null, { status: 401 });
 	invalidateResult = () => [ACCOUNT];
 });
 
@@ -207,12 +209,7 @@ describe("session_revoked over SSE", () => {
 		]);
 
 		await connect();
-		expect(lastSseRequest?.url).toBe(
-			"https://sync.example.com/api/v1/sync/events",
-		);
-		expect(lastSseRequest?.headers.get("Bittery-Client-Platform")).toBe(
-			"extension",
-		);
+		expect(lastSseRequest?.signal).toBeInstanceOf(AbortSignal);
 
 		expect(vaultSession.getSnapshot().unlocked).toBe(false);
 		expect(vaultSession.getSnapshot().lockReason).toBe("session_revoked");

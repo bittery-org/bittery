@@ -2,6 +2,7 @@ import { ApiProvider as SharedApiProvider } from "@bittery/shared/api";
 import { createSessionRefreshingApiClient } from "@bittery/shared/api-session-refresh";
 import { normalizeServerUrl } from "@bittery/shared/server-url";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fetch as expoFetch } from "expo/fetch";
 import type { ReactNode } from "react";
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { getOrCreateMobileSyncClientId } from "@/lib/sync-client-id";
@@ -113,6 +114,7 @@ export function ApiProvider({ children }: ApiProviderProps) {
 				getClientId: async () => getOrCreateMobileSyncClientId(),
 				clientPlatform: "mobile",
 				clientVersion: process.env.EXPO_PUBLIC_APP_VERSION ?? "0.0.0",
+				fetch: (request) => expoFetch(request),
 			}),
 		[serverUrl],
 	);

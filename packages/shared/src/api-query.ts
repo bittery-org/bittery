@@ -15,6 +15,7 @@ export const apiQueryKeys = {
 			["api", "v1", "vaults", vaultId, "available-team-members"] as const,
 	},
 	teams: {
+		all: ["api", "v1", "teams"] as const,
 		current: ["api", "v1", "teams", "current"] as const,
 		details: (teamId: string) => ["api", "v1", "teams", teamId] as const,
 		members: (teamId: string) =>

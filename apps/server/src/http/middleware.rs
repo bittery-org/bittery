@@ -2,7 +2,7 @@ use std::{any::Any, env, time::Duration};
 
 use axum::{
     body::Body,
-    extract::State,
+    extract::{MatchedPath, State},
     http::{
         header::{
             HeaderName, HeaderValue, ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
@@ -75,7 +75,7 @@ fn make_http_trace_span(request: &Request<Body>) -> Span {
     tracing::debug_span!(
         "request",
         method = %request.method(),
-        path = %request.uri().path(),
+        path = %trace_path_label(request),
         version = ?request.version(),
         trace_id = %trace_context.trace_id,
         parent_span_id = %trace_context.parent_span_id,
@@ -84,6 +84,14 @@ fn make_http_trace_span(request: &Request<Body>) -> Span {
         tracestate_members = trace_context.tracestate_members,
         request_id = tracing::field::Empty,
     )
+}
+
+fn trace_path_label(request: &Request<Body>) -> &str {
+    request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(MatchedPath::as_str)
+        .unwrap_or("<unmatched>")
 }
 
 fn on_http_trace_request(request: &Request<Body>, _span: &Span) {
@@ -198,7 +206,7 @@ fn parse_tracestate_member_count(value: &str) -> Option<usize> {
 const LOCALHOST_HOSTS: [&str; 4] = ["localhost", "127.0.0.1", "::1", "[::1]"];
 const ALLOW_METHODS: &str = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
 const ALLOW_HEADERS: &str = "Content-Type, Authorization, X-Client-Id, X-App-Platform, Bittery-Client-Id, Bittery-Client-Platform, Bittery-Client-Version, Idempotency-Key, Traceparent, Tracestate, If-Match, If-None-Match";
-const EXPOSE_HEADERS: &str = "X-Session-Expires, Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After";
+const EXPOSE_HEADERS: &str = "X-Session-Expires, Bittery-Request-Id, Bittery-Api-Version, Bittery-Session-Expires, ETag, Retry-After, Idempotency-Replayed";
 const PERMISSIONS_POLICY: &str = "accelerometer=(), autoplay=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()";
 const SECURITY_HEADERS: [(HeaderName, HeaderValue); 6] = [
     (
@@ -428,10 +436,12 @@ mod tests {
         http::{
             header::{
                 ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-                ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL, CONTENT_TYPE,
+                ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_EXPOSE_HEADERS, CACHE_CONTROL,
+                CONTENT_TYPE,
             },
             HeaderMap, HeaderValue, Request, StatusCode,
         },
+        middleware::Next,
         response::Response,
         routing::get,
         Router,
@@ -440,8 +450,13 @@ mod tests {
 
     use super::{
         apply_cors_headers, apply_public_asset_cors, apply_security_headers, catch_panic_layer,
-        parse_cors_origins, trace_context, EdgeHttpConfig,
+        parse_cors_origins, trace_context, trace_path_label, EdgeHttpConfig,
     };
+
+    async fn assert_matched_trace_path(request: Request<Body>, next: Next) -> Response {
+        assert_eq!(trace_path_label(&request), "/api/v1/share-links/{token}");
+        next.run(request).await
+    }
 
     #[test]
     fn api_meta_uses_no_store_to_avoid_stale_compatibility_decisions() {
@@ -496,6 +511,34 @@ mod tests {
         assert!(!format!("{context:?}").contains(secret));
     }
 
+    #[tokio::test]
+    async fn trace_paths_use_templates_and_never_raw_uri_values() {
+        let token = "share-token-that-must-not-reach-traces";
+        let router = Router::new()
+            .route(
+                "/api/v1/share-links/{token}",
+                get(|| async { StatusCode::NO_CONTENT }),
+            )
+            .layer(axum::middleware::from_fn(assert_matched_trace_path));
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/v1/share-links/{token}"))
+                    .body(Body::empty())
+                    .expect("request should build"),
+            )
+            .await
+            .expect("route should respond");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let request = Request::builder()
+            .uri(format!("/not-found/{token}"))
+            .body(Body::empty())
+            .expect("request should build");
+        assert_eq!(trace_path_label(&request), "<unmatched>");
+    }
+
     #[test]
     fn api_cors_preflight_allows_every_supported_method_and_header() {
         let config = EdgeHttpConfig {
@@ -534,6 +577,29 @@ mod tests {
                 "missing required CORS header {required}"
             );
         }
+    }
+
+    #[test]
+    fn api_cors_exposes_idempotency_replay_status() {
+        let config = EdgeHttpConfig {
+            allowed_origins: vec!["https://app.example.com".to_string()],
+        };
+        let mut response = Response::new(Body::empty());
+
+        apply_cors_headers(&config, Some("https://app.example.com"), &mut response);
+
+        let exposed_headers = response
+            .headers()
+            .get(ACCESS_CONTROL_EXPOSE_HEADERS)
+            .expect("allowlisted API origin should receive exposed header policy")
+            .to_str()
+            .expect("header policy should be ASCII");
+        assert!(
+            exposed_headers
+                .split(", ")
+                .any(|header| header == "Idempotency-Replayed"),
+            "idempotency replays must be observable to browser clients"
+        );
     }
 
     #[test]

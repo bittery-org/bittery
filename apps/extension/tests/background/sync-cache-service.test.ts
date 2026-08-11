@@ -256,6 +256,7 @@ describe("sync-cache-service", () => {
 			},
 		});
 
+		const client = createClientStub();
 		const service = createSyncCacheService({
 			storage,
 			itemCache: createItemCacheStub(),
@@ -264,7 +265,7 @@ describe("sync-cache-service", () => {
 				clearCache: () => {},
 			},
 			defaultClient: createClientStub(),
-			createAccountClient: () => createClientStub(),
+			createAccountClient: () => client,
 			deltaSync: async () => {},
 			logger: console,
 		});
@@ -272,8 +273,7 @@ describe("sync-cache-service", () => {
 		const context = await service.resolveConnectionContext();
 		expect(context).toEqual({
 			email: "bob@example.com",
-			serverUrl: "https://api.example.com",
-			token: "local-token",
+			client,
 		});
 	});
 

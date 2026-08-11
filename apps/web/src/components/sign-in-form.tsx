@@ -1,18 +1,13 @@
-import {
-	useCheckEmail,
-	usePlatformCrypto,
-	useSessionState,
-} from "@bittery/core/hooks";
+import { usePlatformCrypto, useSessionState } from "@bittery/core/hooks";
 import {
 	performSRPLogin,
 	storeLoginSessionOwned,
 } from "@bittery/core/services/auth-service";
-import { useApiClient } from "@bittery/shared/api";
 import {
 	createApiClientForServer,
 	getDefaultServerUrl,
 } from "@bittery/shared/api-client-factory";
-import { apiQueries } from "@bittery/shared/api-query";
+import { apiQueryKeys } from "@bittery/shared/api-query";
 import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import { Button, Checkbox, Input, Label, toast } from "@bittery/ui";
@@ -25,7 +20,7 @@ import {
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
 	forgetActiveSession,
 	itemCache,
@@ -42,9 +37,19 @@ export default function SignInForm({
 	redirectTo?: string;
 }) {
 	const { m } = useI18n();
-	const api = useApiClient();
-
 	const { data: sessionState, isLoading: isLoadingSession } = useSessionState();
+	const serverUrl = getDefaultServerUrl();
+	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
+		useState(false);
+	const ceremonyApiClient = useMemo(
+		() =>
+			createApiClientForServer(serverUrl, undefined, {
+				insecureTransportConfirmed,
+				clientPlatform: "web",
+			}),
+		[insecureTransportConfirmed, serverUrl],
+	);
 	const isQuickUnlock = Boolean(
 		sessionState?.canQuickUnlock && sessionState?.email,
 	);
@@ -53,9 +58,17 @@ export default function SignInForm({
 		enabled: isQuickUnlock && !!sessionState?.email,
 		queryFn: () => storage.getStoredSecretKey(),
 	});
-	const registrationStatusQuery = useQuery(
-		apiQueries.auth.registrationStatus(api),
-	);
+	const registrationStatusQuery = useQuery({
+		queryKey: [
+			...apiQueryKeys.auth.registrationStatus,
+			serverUrl,
+			insecureTransportConfirmed,
+		],
+		queryFn: async () =>
+			(await ceremonyApiClient.auth.registrationStatus()).data,
+		enabled:
+			!requiresInsecureTransportConfirmation || insecureTransportConfirmed,
+	});
 	const isCloudMode = registrationStatusQuery.data?.mode !== "self-hosted";
 	const allowPublicSignup =
 		registrationStatusQuery.data?.allowPublicSignup ?? true;
@@ -117,6 +130,13 @@ export default function SignInForm({
 					isCloudMode={isCloudMode}
 					canShowSignup={canShowSignup}
 					hasInvitationRedirect={hasInvitationRedirect}
+					serverUrl={serverUrl}
+					requiresInsecureTransportConfirmation={
+						requiresInsecureTransportConfirmation
+					}
+					insecureTransportConfirmed={insecureTransportConfirmed}
+					setInsecureTransportConfirmed={setInsecureTransportConfirmed}
+					ceremonyApiClient={ceremonyApiClient}
 					onSwitchToSignUp={onSwitchToSignUp}
 					redirectTo={redirectTo}
 				/>
@@ -132,6 +152,11 @@ function SignInFormContent({
 	isCloudMode,
 	canShowSignup,
 	hasInvitationRedirect,
+	serverUrl,
+	requiresInsecureTransportConfirmation,
+	insecureTransportConfirmed,
+	setInsecureTransportConfirmed,
+	ceremonyApiClient,
 	onSwitchToSignUp,
 	redirectTo,
 }: {
@@ -141,6 +166,11 @@ function SignInFormContent({
 	isCloudMode: boolean;
 	canShowSignup: boolean;
 	hasInvitationRedirect: boolean;
+	serverUrl: string;
+	requiresInsecureTransportConfirmation: boolean;
+	insecureTransportConfirmed: boolean;
+	setInsecureTransportConfirmed: (confirmed: boolean) => void;
+	ceremonyApiClient: ReturnType<typeof createApiClientForServer>;
 	onSwitchToSignUp: () => void;
 	redirectTo?: string;
 }) {
@@ -150,11 +180,24 @@ function SignInFormContent({
 	const [email, setEmail] = useState(initialEmail);
 	const [showPassword, setShowPassword] = useState(false);
 	const [showSecretKey, setShowSecretKey] = useState(false);
-	const [insecureTransportConfirmed, setInsecureTransportConfirmed] =
-		useState(false);
-	const serverUrl = getDefaultServerUrl();
-	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
-	const { data: emailCheck } = useCheckEmail(email);
+	const { data: emailCheck } = useQuery({
+		queryKey: [
+			"api",
+			"v1",
+			"auth",
+			"email-checks",
+			email,
+			serverUrl,
+			insecureTransportConfirmed,
+		],
+		queryFn: async () =>
+			(await ceremonyApiClient.auth.checkEmail({ email })).data,
+		enabled:
+			email.includes("@") &&
+			(!requiresInsecureTransportConfirmation || insecureTransportConfirmed),
+		staleTime: 60 * 1000,
+		retry: false,
+	});
 
 	const loginMutation = useMutation({
 		mutationFn: async (input: {
@@ -169,9 +212,6 @@ function SignInFormContent({
 			) {
 				throw new Error(m.auth_insecure_http_confirmation_required());
 			}
-			const loginApiClient = createApiClientForServer(serverUrl, undefined, {
-				insecureTransportConfirmed,
-			});
 			const result = await performSRPLogin(
 				{
 					...input,
@@ -179,7 +219,7 @@ function SignInFormContent({
 					serverUrl,
 					insecureTransportConfirmed,
 				},
-				{ crypto, apiClient: loginApiClient, storage },
+				{ crypto, apiClient: ceremonyApiClient, storage },
 			);
 			await storeLoginSessionOwned(
 				result,

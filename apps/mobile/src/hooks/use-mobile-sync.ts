@@ -10,7 +10,6 @@ import { createAccountApiClient } from "@bittery/shared/api-client-factory";
 import type { OutboundQueueApiClient, SyncStorage } from "@bittery/sync";
 import { useSync } from "@bittery/sync";
 import type { QueryClient } from "@tanstack/react-query";
-import { fetch as expoFetch } from "expo/fetch";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppState } from "react-native";
 import { crypto } from "../lib/crypto";
@@ -248,7 +247,6 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		itemCacheServerUrl: syncAccountId ? serverUrl : null,
 		getClientForAccount,
 		resolveLegacyAccountId,
-		fetch: expoFetch,
 		onEventProcessed: onTravelModeEvent,
 	});
 

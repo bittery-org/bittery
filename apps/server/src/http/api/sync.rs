@@ -1,5 +1,5 @@
 use axum::{
-    extract::{FromRequestParts, Query, State},
+    extract::{FromRequestParts, State},
     http::request::Parts,
     response::Response,
     Extension, Json,
@@ -13,26 +13,9 @@ use crate::{config::db_pool, http::sync_sse, services::sync, AppState};
 use super::{
     dto::{DecimalString, ProblemDetails, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE},
     error::ApiError,
-    extract::AuthenticatedRequest,
+    extract::{ApiQuery, AuthenticatedRequest},
     pagination::{truncate_serialized, RESPONSE_PAGE_ITEMS_BYTES},
 };
-
-struct ApiQuery<T>(T);
-
-impl<S, T> FromRequestParts<S> for ApiQuery<T>
-where
-    S: Send + Sync,
-    T: for<'de> Deserialize<'de>,
-{
-    type Rejection = ApiError;
-
-    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        Query::<T>::from_request_parts(parts, state)
-            .await
-            .map(|Query(value)| Self(value))
-            .map_err(|error| ApiError::bad_request("INVALID_QUERY", error.body_text()))
-    }
-}
 
 #[derive(Debug, Deserialize, IntoParams, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,6 +37,22 @@ impl From<BootstrapQuery> for sync::BootstrapItemsInput {
             cursor: value.cursor,
             limit: Some(i32::from(value.limit)),
         }
+    }
+}
+
+#[derive(Debug)]
+struct BootstrapApiQuery(BootstrapQuery);
+
+impl<S> FromRequestParts<S> for BootstrapApiQuery
+where
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let ApiQuery(query) = ApiQuery::<BootstrapQuery>::from_request_parts(parts, state).await?;
+        validate_page_limit(query.limit)?;
+        Ok(Self(query))
     }
 }
 
@@ -118,16 +117,33 @@ where
             ));
         }
 
+        let limit = limit.unwrap_or_else(default_changes_limit);
+        validate_page_limit(limit)?;
+
         Ok(Self(ChangesQuery {
             since_id,
             vault_ids: (!vault_ids.is_empty()).then_some(vault_ids),
-            limit: limit.unwrap_or_else(default_changes_limit),
+            limit,
         }))
     }
 }
 
 fn default_changes_limit() -> u16 {
     DEFAULT_PAGE_SIZE
+}
+
+fn validate_page_limit(limit: u16) -> Result<(), ApiError> {
+    if limit == 0 {
+        return Err(ApiError::bad_request("BAD_REQUEST", "Invalid params"));
+    }
+    if limit <= MAX_PAGE_SIZE {
+        return Ok(());
+    }
+
+    Err(ApiError::bad_request(
+        "INVALID_PAGE_LIMIT",
+        format!("limit must be between 1 and {MAX_PAGE_SIZE}"),
+    ))
 }
 
 impl From<ChangesQuery> for sync::GetEventsSinceInput {
@@ -336,7 +352,7 @@ impl From<sync::GetEventsSinceResponse> for SyncChangesResponse {
 async fn bootstrap(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
-    ApiQuery(query): ApiQuery<BootstrapQuery>,
+    BootstrapApiQuery(query): BootstrapApiQuery,
 ) -> Result<Json<BootstrapItemsResponse>, ApiError> {
     let pool = db_pool(&state)?;
     let mut response: BootstrapItemsResponse =
@@ -410,9 +426,10 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        router, BootstrapItemsResponse, BootstrapQuery, ChangesApiQuery, ChangesQuery,
-        SyncChangesResponse,
+        router, BootstrapApiQuery, BootstrapItemsResponse, BootstrapQuery, ChangesApiQuery,
+        ChangesQuery, SyncChangesResponse,
     };
+    use crate::http::api::dto::MAX_PAGE_SIZE;
     use crate::services::sync::{
         BootstrapAttachmentResponse as ServiceBootstrapAttachmentResponse,
         BootstrapItemResponse as ServiceBootstrapItemResponse,
@@ -548,6 +565,58 @@ mod tests {
             .await
             .expect_err("unknown query fields should be rejected");
         assert_eq!(rejection.code(), "INVALID_QUERY");
+    }
+
+    #[tokio::test]
+    async fn sync_query_limits_match_the_published_page_bound() {
+        for (limit, expected_code) in [
+            (0, "BAD_REQUEST"),
+            (MAX_PAGE_SIZE + 1, "INVALID_PAGE_LIMIT"),
+        ] {
+            let (mut bootstrap_parts, _) = Request::builder()
+                .uri(format!("/sync/bootstrap?limit={limit}"))
+                .body(())
+                .unwrap()
+                .into_parts();
+            let rejection = BootstrapApiQuery::from_request_parts(&mut bootstrap_parts, &())
+                .await
+                .expect_err("bootstrap limit outside the published bound must be rejected");
+            assert_eq!(rejection.code(), expected_code);
+
+            let (mut changes_parts, _) = Request::builder()
+                .uri(format!("/sync/changes?limit={limit}"))
+                .body(())
+                .unwrap()
+                .into_parts();
+            let rejection = ChangesApiQuery::from_request_parts(&mut changes_parts, &())
+                .await
+                .expect_err("changes limit outside the published bound must be rejected");
+            assert_eq!(rejection.code(), expected_code);
+        }
+
+        for limit in [1, MAX_PAGE_SIZE] {
+            let (mut bootstrap_parts, _) = Request::builder()
+                .uri(format!("/sync/bootstrap?limit={limit}"))
+                .body(())
+                .unwrap()
+                .into_parts();
+            let BootstrapApiQuery(bootstrap_query) =
+                BootstrapApiQuery::from_request_parts(&mut bootstrap_parts, &())
+                    .await
+                    .expect("bootstrap limit at the published bound must be accepted");
+            assert_eq!(bootstrap_query.limit, limit);
+
+            let (mut changes_parts, _) = Request::builder()
+                .uri(format!("/sync/changes?limit={limit}"))
+                .body(())
+                .unwrap()
+                .into_parts();
+            let ChangesApiQuery(changes_query) =
+                ChangesApiQuery::from_request_parts(&mut changes_parts, &())
+                    .await
+                    .expect("changes limit at the published bound must be accepted");
+            assert_eq!(changes_query.limit, limit);
+        }
     }
 
     #[test]

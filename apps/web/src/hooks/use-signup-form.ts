@@ -3,8 +3,12 @@ import { storeLoginSessionOwned } from "@bittery/core/services/auth-service";
 import { createAccountKeys } from "@bittery/core/services/vault-crypto";
 import { m } from "@bittery/i18n/paraglide/messages";
 import { useApiClient } from "@bittery/shared/api";
-import { getDefaultServerUrl } from "@bittery/shared/api-client-factory";
-import { apiQueries } from "@bittery/shared/api-query";
+import {
+	createApiClientForServer,
+	getDefaultServerUrl,
+} from "@bittery/shared/api-client-factory";
+import { apiQueryKeys } from "@bittery/shared/api-query";
+import { isRemoteHttpServer } from "@bittery/shared/server-transport-policy";
 import { toAuthVaultKeyEntry } from "@bittery/shared/vault-mapping";
 import { DEFAULT_SESSION_EXPIRY_MS } from "@bittery/storage";
 import type { KdfProfile } from "@bittery/types";
@@ -12,7 +16,7 @@ import { toast } from "@bittery/ui";
 import { useForm } from "@tanstack/react-form";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { downloadRecoveryKit } from "@/lib/recovery-kit";
 import { itemCache, refreshActiveAccountId, storage } from "@/lib/storage";
 
@@ -54,16 +58,31 @@ export function useSignupForm({
 	initialPlan,
 	verificationMode = "dialog",
 	onVerificationRequested,
+	initialInsecureTransportConfirmed = false,
 }: {
 	invitationToken?: string;
 	redirectTo?: string;
 	initialPlan?: CloudPlanId;
 	verificationMode?: "dialog" | "inline";
 	onVerificationRequested?: () => void;
+	initialInsecureTransportConfirmed?: boolean;
 }) {
 	const navigate = useNavigate();
 	const apiClient = useApiClient();
 	const crypto = usePlatformCrypto();
+	const serverUrl = getDefaultServerUrl();
+	const requiresInsecureTransportConfirmation = isRemoteHttpServer(serverUrl);
+	const [insecureTransportConfirmed, setInsecureTransportConfirmed] = useState(
+		initialInsecureTransportConfirmed,
+	);
+	const ceremonyApiClient = useMemo(
+		() =>
+			createApiClientForServer(serverUrl, undefined, {
+				insecureTransportConfirmed,
+				clientPlatform: "web",
+			}),
+		[insecureTransportConfirmed, serverUrl],
+	);
 	const [keyMaterialQueryId] = useState(() => globalThis.crypto.randomUUID());
 	const keyMaterialQuery = useQuery({
 		queryKey: ["signup-key-material", keyMaterialQueryId],
@@ -94,6 +113,14 @@ export function useSignupForm({
 		string | null
 	>(null);
 
+	const requireInsecureTransportConfirmation = () => {
+		if (requiresInsecureTransportConfirmation && !insecureTransportConfirmed) {
+			toast.error(m.auth_insecure_http_confirmation_required());
+			return false;
+		}
+		return true;
+	};
+
 	// Query invitation details if token is provided
 	const invitationQuery = useQuery({
 		queryKey: [
@@ -102,14 +129,27 @@ export function useSignupForm({
 			"public",
 			"team-invitations",
 			invitationToken || "",
+			serverUrl,
+			insecureTransportConfirmed,
 		],
 		queryFn: async () =>
-			(await apiClient.teams.invitations.public(invitationToken || "")).data,
-		enabled: !!invitationToken,
+			(await ceremonyApiClient.teams.invitations.public(invitationToken || ""))
+				.data,
+		enabled:
+			!!invitationToken &&
+			(!requiresInsecureTransportConfirmation || insecureTransportConfirmed),
 	});
-	const registrationStatusQuery = useQuery(
-		apiQueries.auth.registrationStatus(apiClient),
-	);
+	const registrationStatusQuery = useQuery({
+		queryKey: [
+			...apiQueryKeys.auth.registrationStatus,
+			serverUrl,
+			insecureTransportConfirmed,
+		],
+		queryFn: async () =>
+			(await ceremonyApiClient.auth.registrationStatus()).data,
+		enabled:
+			!requiresInsecureTransportConfirmation || insecureTransportConfirmed,
+	});
 
 	const invitation = invitationQuery.data;
 	const hasInvitationToken = !!invitationToken;
@@ -138,27 +178,35 @@ export function useSignupForm({
 	};
 
 	const requestSignupVerificationMutation = useMutation({
-		mutationFn: async (input: { email: string }) =>
-			(
-				await apiClient.auth.requestSignupVerification({
+		mutationFn: async (input: { email: string }) => {
+			if (!requireInsecureTransportConfirmation()) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
+			return (
+				await ceremonyApiClient.auth.requestSignupVerification({
 					email: input.email,
 					invitationToken: invitationToken ?? null,
 				})
-			).data,
+			).data;
+		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to send verification code");
 		},
 	});
 
 	const verifySignupVerificationMutation = useMutation({
-		mutationFn: async (input: { email: string; code: string }) =>
-			(
-				await apiClient.auth.verifySignupVerification({
+		mutationFn: async (input: { email: string; code: string }) => {
+			if (!requireInsecureTransportConfirmation()) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
+			return (
+				await ceremonyApiClient.auth.verifySignupVerification({
 					email: input.email,
 					code: input.code,
 					invitationToken: invitationToken ?? null,
 				})
-			).data,
+			).data;
+		},
 		onError: (error: any) => {
 			toast.error(error.message || "Failed to verify code");
 		},
@@ -166,9 +214,12 @@ export function useSignupForm({
 
 	const signupMutation = useMutation({
 		mutationFn: async (input: SignupMutationInput) => {
+			if (!requireInsecureTransportConfirmation()) {
+				throw new Error(m.auth_insecure_http_confirmation_required());
+			}
 			if (isInvitationSignup) {
 				return (
-					await apiClient.auth.signUp(
+					await ceremonyApiClient.auth.signUp(
 						{
 							invitationToken: input.token || "",
 							userId: input.userId ?? null,
@@ -188,15 +239,15 @@ export function useSignupForm({
 						},
 						{
 							kind: "authCeremony",
-							serverUrl: getDefaultServerUrl(),
-							insecureTransportConfirmed: false,
+							serverUrl,
+							insecureTransportConfirmed,
 						},
 					)
 				).data;
 			}
 
 			return (
-				await apiClient.auth.signUp(
+				await ceremonyApiClient.auth.signUp(
 					{
 						userId: input.userId ?? null,
 						vaultId: input.vaultId ?? null,
@@ -217,8 +268,8 @@ export function useSignupForm({
 					},
 					{
 						kind: "authCeremony",
-						serverUrl: getDefaultServerUrl(),
-						insecureTransportConfirmed: false,
+						serverUrl,
+						insecureTransportConfirmed,
 					},
 				)
 			).data;
@@ -271,6 +322,9 @@ export function useSignupForm({
 		value: SignupFormValues,
 		verificationToken: string,
 	) => {
+		if (!requireInsecureTransportConfirmation()) {
+			return;
+		}
 		const teamName = value.organizationName.trim();
 		const email = getSignupEmail(value);
 		if (!email) {
@@ -279,7 +333,6 @@ export function useSignupForm({
 		}
 
 		setIsEncrypting(true);
-		const serverUrl = getDefaultServerUrl();
 		try {
 			const { keys, result } = await createAccountKeys(
 				{ email, password: value.password, secretKey, recoveryKey },
@@ -342,7 +395,7 @@ export function useSignupForm({
 				itemCache,
 				crypto,
 				email,
-				{ serverUrl },
+				{ serverUrl, insecureTransportConfirmed },
 			);
 			await refreshActiveAccountId();
 
@@ -586,5 +639,8 @@ export function useSignupForm({
 		allowPublicSignup,
 		requiresEmailVerification,
 		hasAllKeyMaterial,
+		requiresInsecureTransportConfirmation,
+		insecureTransportConfirmed,
+		setInsecureTransportConfirmed,
 	};
 }

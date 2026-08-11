@@ -16,6 +16,5 @@ export * from "./pricing";
 export * from "./releases";
 export * from "./server-url";
 export * from "./session-refresh";
-export * from "./session-refresh-fetch";
 export * from "./types";
 export * from "./vault-mapping";
