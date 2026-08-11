@@ -187,9 +187,6 @@ export interface UseSyncOptions {
 	) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>;
 	refreshFromServer?: SyncOrchestratorOptions["refreshFromServer"];
 	initializeFromServer?: SyncOrchestratorOptions["initializeFromServer"];
-	resolveLegacyAccountId?: (
-		email: string,
-	) => string | undefined | Promise<string | undefined>;
 	onSessionRevoked?: (
 		payload: SessionRevokedControlPayload,
 	) => void | Promise<void>;
@@ -222,7 +219,6 @@ export function useSync(options: UseSyncOptions) {
 		getClientForAccount,
 		refreshFromServer,
 		initializeFromServer,
-		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed,
 		onTerminalCommandFailure,
@@ -234,7 +230,7 @@ export function useSync(options: UseSyncOptions) {
 	);
 	const outboundQueue = useMemo(
 		() =>
-			new ItemSyncEngine(syncStorage, clientId, resolveLegacyAccountId, {
+			new ItemSyncEngine(syncStorage, clientId, {
 				apply: async (command) => {
 					await itemCacheAdapter?.applyItemCommand(command);
 				},
@@ -257,7 +253,7 @@ export function useSync(options: UseSyncOptions) {
 					);
 				},
 			}),
-		[syncStorage, clientId, resolveLegacyAccountId, itemCacheAdapter],
+		[syncStorage, clientId, itemCacheAdapter],
 	);
 	const orchestratorsRef = useRef<Map<string, SyncOrchestrator>>(new Map());
 	const sourceStatusesRef = useRef<Map<string, SyncStatus>>(new Map());
@@ -386,30 +382,6 @@ export function useSync(options: UseSyncOptions) {
 		orchestratorsRef.current = orchestrators;
 
 		(async () => {
-			await itemCacheAdapter.setEncryptionContextMigrationPort(
-				async (context) => {
-					const operationId = `adopt-context:${context.accountId}:${context.itemId}:${context.encryptionVersion}:${context.encryptedByUserId}`;
-					await outboundQueue.enqueue({
-						accountId: context.accountId,
-						id: operationId,
-						operationId,
-						type: "adopt_encryption_context",
-						entityId: context.itemId,
-						vaultId: context.vaultId,
-						encryptedPayload: {
-							encryptedData: "",
-							encryptionIv: "",
-							encryptionAlgorithm: "",
-							encryptionVersion: context.encryptionVersion,
-							encryptedByUserId: context.encryptedByUserId,
-						},
-						baseVersion: context.baseVersion,
-						timestamp: Date.now(),
-						retryCount: 0,
-						migrationTrigger: "explicit_open",
-					});
-				},
-			);
 			await outboundQueue.restore();
 			if (disposed) {
 				return;
@@ -434,7 +406,6 @@ export function useSync(options: UseSyncOptions) {
 
 		return () => {
 			disposed = true;
-			void itemCacheAdapter.setEncryptionContextMigrationPort(undefined);
 			for (const unsubscribe of unsubscribers) {
 				unsubscribe();
 			}

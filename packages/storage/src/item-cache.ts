@@ -123,9 +123,6 @@ export interface ItemCache {
 		metadata: ItemCacheMetadata,
 		accountId: string,
 	): Promise<void>;
-	/** Rewrites legacy metadata so native readers can follow the published cache view. */
-	migrateLegacyMetadata(accountId: string): Promise<void>;
-
 	/** Creates an unreachable write generation for a full bootstrap. */
 	beginStagedGeneration(accountId: string): Promise<ItemCacheStagingGeneration>;
 
@@ -279,6 +276,13 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 			return coldState(accountId);
 		}
 
+		if (
+			parsed.v !== ITEM_CACHE_STATE_VERSION ||
+			parsed.nativeView?.v !== ITEM_CACHE_NATIVE_VIEW_VERSION
+		) {
+			return coldState(accountId);
+		}
+
 		const activeGeneration =
 			typeof parsed.activeGeneration === "string"
 				? parsed.activeGeneration
@@ -292,14 +296,11 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 			activeGeneration,
 			nativeView: nativeViewFor(accountId, activeGeneration),
 		};
-
 		if (
-			parsed.v !== ITEM_CACHE_STATE_VERSION ||
-			parsed.nativeView?.v !== ITEM_CACHE_NATIVE_VIEW_VERSION ||
-			parsed.nativeView?.itemsKeyPrefix !== state.nativeView.itemsKeyPrefix ||
-			parsed.nativeView?.vaultsKeyPrefix !== state.nativeView.vaultsKeyPrefix
+			parsed.nativeView.itemsKeyPrefix !== state.nativeView.itemsKeyPrefix ||
+			parsed.nativeView.vaultsKeyPrefix !== state.nativeView.vaultsKeyPrefix
 		) {
-			await writeState(accountId, state);
+			return coldState(accountId);
 		}
 
 		return state;
@@ -528,12 +529,6 @@ export function createItemCache(options: ItemCacheOptions): ItemCache {
 			await withAccountLock(accountId, async () => {
 				const state = await readState(accountId);
 				await writeState(accountId, { ...state, metadata });
-			});
-		},
-
-		async migrateLegacyMetadata(accountId: string): Promise<void> {
-			await withAccountLock(accountId, async () => {
-				await readState(accountId);
 			});
 		},
 

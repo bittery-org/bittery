@@ -3,9 +3,6 @@ import type { AccountMetadata } from "./types";
 
 /**
  * Monotonic counter guaranteeing uniqueness for the `randomUUID` fallback path.
- * Without this, several accounts minted within the same millisecond (e.g. the
- * synchronous `ensureAccountIds` map) would collide on `Date.now()` and alias
- * each other's per-account storage.
  */
 let accountIdFallbackCounter = 0;
 
@@ -142,31 +139,7 @@ export function resolveOrCreateAccountId(
 		return existing.accountId;
 	}
 
-	const legacyCandidates = accounts.filter(
-		(account) => account.userId === userId && !account.serverUrl,
-	);
-	if (legacyCandidates.length > 1) {
-		throw new Error(
-			`Ambiguous legacy accounts without server URL for user ${userId}`,
-		);
-	}
-	const legacyCandidate = legacyCandidates[0];
-	if (legacyCandidate) {
-		legacyCandidate.serverUrl = normalizeAccountServerUrl(serverUrl);
-		return legacyCandidate.accountId;
-	}
 	return generateAccountId();
-}
-
-/** Ensure every account in the list has an accountId (legacy migration helper). */
-export function ensureAccountIds(
-	accounts: AccountMetadata[],
-): AccountMetadata[] {
-	return accounts.map((account) =>
-		account.accountId
-			? account
-			: { ...account, accountId: generateAccountId() },
-	);
 }
 
 /** Resolve accountId from active single-account config, validating against list. */
@@ -214,7 +187,7 @@ export async function resolveUserIdForAccount(
 
 /**
  * Same as {@link resolveUserIdForAccount}, but resolves a storage scope
- * (accountId or legacy email) to an accountId first via {@link resolveAccountScopeId}.
+ * (accountId or display email) to an accountId first via {@link resolveAccountScopeId}.
  */
 export async function resolveUserIdForScope(
 	storage: AccountStore,

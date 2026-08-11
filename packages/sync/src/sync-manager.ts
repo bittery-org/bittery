@@ -382,8 +382,7 @@ export class SyncManager {
 			return baseline;
 		}
 
-		const legacyCursor = await this.getStoredLastSyncCursor();
-		return legacyCursor ? { initialized: true, cursor: legacyCursor } : null;
+		return null;
 	}
 
 	/**
@@ -395,10 +394,7 @@ export class SyncManager {
 		}
 	}
 
-	/**
-	 * Get stored sync cursor.
-	 * Supports invalidating legacy cursor formats that exposed server seq values.
-	 */
+	/** Get the stored sync cursor. */
 	async getStoredLastSyncCursor(): Promise<SyncCursor | null> {
 		const cursor = await this.storage.get<SyncCursor>("lastSyncCursor");
 		if (
@@ -415,20 +411,6 @@ export class SyncManager {
 			return null;
 		}
 
-		return null;
-	}
-
-	/**
-	 * Backward-compatible wrapper for legacy callers.
-	 */
-	async saveLastSyncTimestamp(): Promise<void> {
-		await this.saveLastSyncCursor();
-	}
-
-	/**
-	 * Backward-compatible wrapper for legacy callers.
-	 */
-	async getStoredLastSyncTimestamp(): Promise<number | null> {
 		return null;
 	}
 }

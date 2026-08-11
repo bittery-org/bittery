@@ -400,12 +400,12 @@ fn self_hosted_mode_enables_non_cloud_features() {
 }
 
 #[test]
-fn bittery_mode_normalizes_self_hosted_aliases_and_defaults_to_cloud() {
+fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
     with_env_vars(None, None, None, || {
         assert_eq!(bittery_mode(), "cloud");
     });
 
-    with_env_vars(Some("self_hosted"), None, None, || {
+    with_env_vars(Some("SELF-HOSTED"), None, None, || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
 

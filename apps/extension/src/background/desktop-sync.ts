@@ -9,7 +9,6 @@ import {
 	getAccountSessionManager,
 	peekAccountSessionManager,
 } from "@bittery/core/services/account-session-manager";
-import { selectActiveAccountAfterUnlock } from "@bittery/core/services/select-active-account";
 import { itemCache, storage } from "../lib/storage";
 import { desktopClient } from "./desktop-client";
 import type { DesktopEventPayload, DesktopStatus } from "./desktop-protocol";
@@ -105,26 +104,11 @@ class DesktopSyncService {
 				if (previousState.activeAccount) {
 					try {
 						const accounts = await storage.getAccountsList();
-						// All-accounts mode was removed; collapse a legacy "all" pointer
-						// to the single account the user was last on.
-						if (previousState.activeAccount === "all") {
-							const previousActive = await storage.getActiveAccount();
-							const unlocked = await storage.getUnlockedAccounts();
-							const accountId = selectActiveAccountAfterUnlock({
-								previousActive,
-								unlockedAccountIds: unlocked,
-								accounts,
-							});
-							if (accountId) {
-								await storage.setActiveAccount(accountId);
-							}
-						} else {
-							const account = accounts.find(
-								(item) => item.accountId === previousState.activeAccount,
-							);
-							if (account) {
-								await storage.setActiveAccount(account.accountId);
-							}
+						const account = accounts.find(
+							(item) => item.accountId === previousState.activeAccount,
+						);
+						if (account) {
+							await storage.setActiveAccount(account.accountId);
 						}
 					} catch (error) {
 						console.error(
@@ -189,12 +173,15 @@ class DesktopSyncService {
 						email: desktopAccount.email,
 						userId: desktopAccount.userId,
 						name: desktopAccount.name,
+						serverUrl: desktopAccount.serverUrl,
 						secretKeyHint: desktopAccount.secretKeyHint,
 						teamName: desktopAccount.teamName,
 						teamAvatarUrl: desktopAccount.teamAvatarUrl,
 						addedAt: desktopAccount.addedAt,
 						lastActiveAt: desktopAccount.lastActiveAt,
 						biometricEnabled: desktopAccount.biometricEnabled,
+						insecureTransportConfirmed:
+							desktopAccount.insecureTransportConfirmed,
 					});
 				} else {
 					// Update existing account with latest data from desktop
@@ -216,26 +203,11 @@ class DesktopSyncService {
 			// Update active account if desktop has one set
 			if (accountsData.activeAccount) {
 				const refreshedAccounts = await storage.getAccountsList();
-				// All-accounts mode was removed; collapse a legacy "all" pointer to
-				// the single account the user was last on.
-				if (accountsData.activeAccount === "all") {
-					const previousActive = await storage.getActiveAccount();
-					const unlocked = await storage.getUnlockedAccounts();
-					const accountId = selectActiveAccountAfterUnlock({
-						previousActive,
-						unlockedAccountIds: unlocked,
-						accounts: refreshedAccounts,
-					});
-					if (accountId) {
-						await storage.setActiveAccount(accountId);
-					}
-				} else {
-					const active = refreshedAccounts.find(
-						(item) => item.accountId === accountsData.activeAccount,
-					);
-					if (active) {
-						await storage.setActiveAccount(active.accountId);
-					}
+				const active = refreshedAccounts.find(
+					(item) => item.accountId === accountsData.activeAccount,
+				);
+				if (active) {
+					await storage.setActiveAccount(active.accountId);
 				}
 			}
 		} catch (error) {

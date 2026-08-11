@@ -65,10 +65,6 @@ const UNDOCUMENTED_SERVER_VARS = new Map([
 		"local-development stub for auth email delivery; must not be advertised as a deployment option",
 	],
 	[
-		"BITTERY_STORAGE_PUBLIC_URL",
-		"legacy fallback for BITTERY_STORAGE_CDN_URL, which is the documented name",
-	],
-	[
 		"DATABASE_MAX_CONNECTIONS",
 		"connection-pool tuning; defaults to 5 and is not part of the supported surface",
 	],

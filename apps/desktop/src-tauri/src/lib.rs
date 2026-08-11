@@ -51,7 +51,6 @@ impl Default for DesktopIpcState {
     }
 }
 
-const CONTEXT_ENVELOPE_MARKER: &str = "bittery-context-envelope-v1";
 /// Persisted UI appearance preference ("light" | "dark" | "system"). Kept in
 /// the Rust-side store so the native host can report it to the extension even
 /// before the desktop frontend window has loaded (next-themes only writes the
@@ -91,6 +90,7 @@ const NATIVE_VIEW_VERSION: u64 = 3;
 /// same record as the active-generation pointer, so a prefix pair can never straddle two
 /// promoted generations.
 const ITEM_CACHE_NATIVE_VIEW_VERSION: u64 = 1;
+const ITEM_CACHE_STATE_VERSION: u64 = 2;
 
 /// Which store a published key lives in. This exists so Rust never re-derives
 /// the tier table: `Secret` is the OS keychain, `Plain` is `store.json`.
@@ -152,27 +152,17 @@ struct NativeItemCacheView {
 #[serde(rename_all = "camelCase")]
 struct NativeItemCacheState {
     v: u64,
-    #[serde(default)]
-    native_view: Option<NativeItemCacheView>,
-}
-
-fn legacy_item_cache_view(account_id: &str) -> NativeItemCacheView {
-    NativeItemCacheView {
-        v: ITEM_CACHE_NATIVE_VIEW_VERSION,
-        items_key_prefix: format!("record:{}:items:", account_id),
-        vaults_key_prefix: format!("record:{}:vaults:", account_id),
-    }
+    native_view: NativeItemCacheView,
 }
 
 fn resolve_item_cache_view(
     state: NativeItemCacheState,
-    account_id: &str,
+    _account_id: &str,
 ) -> Result<NativeItemCacheView, String> {
-    let native_view = match state.native_view {
-        Some(view) => view,
-        None if state.v == 1 => legacy_item_cache_view(account_id),
-        None => return Err("Item cache state is missing its native view".to_string()),
-    };
+    if state.v != ITEM_CACHE_STATE_VERSION {
+        return Err(format!("Unsupported item cache state version: {}", state.v));
+    }
+    let native_view = state.native_view;
 
     if native_view.v != ITEM_CACHE_NATIVE_VIEW_VERSION {
         return Err(format!(
@@ -357,80 +347,6 @@ fn read_records<R: Runtime, T: serde::de::DeserializeOwned>(
     decode_records(records_under_prefix(store.entries(), prefix), kind)
 }
 
-fn normalize_item_version(version: Option<u64>) -> u64 {
-    match version {
-        Some(value) if value >= 1 => value,
-        _ => 1,
-    }
-}
-
-fn serialize_encryption_context(
-    vault_id: &str,
-    entity_id: &str,
-    entity_type: &str,
-    version: u64,
-    user_id: &str,
-) -> String {
-    format!(
-        "{}\0{}\0{}\0{}\0{}",
-        vault_id, entity_id, entity_type, version, user_id
-    )
-}
-
-fn unwrap_plaintext_with_context(
-    decrypted_data: String,
-    vault_id: &str,
-    entity_id: &str,
-    entity_type: &str,
-    version: u64,
-    user_id: &str,
-) -> Result<String, String> {
-    let parsed: serde_json::Value = serde_json::from_str(&decrypted_data)
-        .map_err(|_| "Missing encryption context envelope".to_string())?;
-
-    let marker = parsed
-        .get("marker")
-        .and_then(|value| value.as_str())
-        .ok_or("Invalid encryption context envelope".to_string())?;
-    let context = parsed
-        .get("context")
-        .and_then(|value| value.as_str())
-        .ok_or("Invalid encryption context envelope".to_string())?;
-    let payload = parsed
-        .get("payload")
-        .and_then(|value| value.as_str())
-        .ok_or("Invalid encryption context envelope".to_string())?;
-
-    if marker != CONTEXT_ENVELOPE_MARKER {
-        return Err("Invalid encryption context marker".to_string());
-    }
-
-    let expected = serialize_encryption_context(vault_id, entity_id, entity_type, version, user_id);
-    if context != expected {
-        return Err("Encryption context mismatch".to_string());
-    }
-
-    Ok(payload.to_string())
-}
-
-fn normalize_decrypted_item_payload(decrypted_data: String) -> String {
-    let parsed: serde_json::Value = match serde_json::from_str(&decrypted_data) {
-        Ok(value) => value,
-        Err(_) => return decrypted_data,
-    };
-
-    let marker = parsed.get("marker").and_then(|value| value.as_str());
-    let payload = parsed.get("payload").and_then(|value| value.as_str());
-
-    if marker == Some(CONTEXT_ENVELOPE_MARKER) {
-        if let Some(payload_json) = payload {
-            return payload_json.to_string();
-        }
-    }
-
-    decrypted_data
-}
-
 #[derive(Debug, Clone, serde::Deserialize)]
 struct CachedItemRecord {
     id: String,
@@ -444,9 +360,10 @@ struct CachedItemRecord {
     encryption_iv: String,
     #[serde(rename = "encryptionAlgorithm")]
     encryption_algorithm: String,
-    version: u64,
-    #[serde(rename = "lastModifiedBy")]
-    last_modified_by: Option<String>,
+    #[serde(rename = "encryptionVersion")]
+    encryption_version: u64,
+    #[serde(rename = "encryptedByUserId")]
+    encrypted_by_user_id: String,
     #[serde(rename = "createdAt")]
     created_at: String,
     #[serde(rename = "updatedAt")]
@@ -459,79 +376,25 @@ struct CachedItemRecord {
 struct CachedVaultRecord {
     id: String,
     name: String,
-    #[serde(rename = "type", default = "default_cached_vault_type")]
+    #[serde(rename = "type")]
     vault_type: String,
     icon: Option<String>,
     #[serde(rename = "imageUrl")]
     image_url: Option<String>,
 }
 
-fn default_cached_vault_type() -> String {
-    "personal".to_string()
-}
-
 fn decrypt_item_payload(item: &CachedItemRecord, vault_key_base64: &str) -> Result<String, String> {
-    let user_id = item
-        .last_modified_by
-        .as_deref()
-        .filter(|value| !value.is_empty());
-    if let Some(user_id) = user_id {
-        let stored_version = normalize_item_version(Some(item.version));
-        let mut last_error: Option<String> = None;
-
-        for version in (1..=stored_version).rev() {
-            match native_host_crypto::decrypt_with_context(
-                item.encrypted_data.clone(),
-                item.encryption_iv.clone(),
-                item.encryption_algorithm.clone(),
-                vault_key_base64.to_string(),
-                item.vault_id.clone(),
-                item.id.clone(),
-                "item".to_string(),
-                version,
-                user_id.to_string(),
-            ) {
-                Ok(decrypted_data) => {
-                    if version != stored_version {
-                        eprintln!(
-                            "[desktop-ipc] Recovered item {} with fallback encryption version {} (stored version {})",
-                            item.id, version, stored_version
-                        );
-                    }
-                    return Ok(normalize_decrypted_item_payload(decrypted_data));
-                }
-                Err(error) => {
-                    last_error = Some(format!("Decryption failed: {}", error));
-                }
-            }
-        }
-
-        let decrypted_data = native_host_crypto::decrypt(
-            item.encrypted_data.clone(),
-            item.encryption_iv.clone(),
-            item.encryption_algorithm.clone(),
-            vault_key_base64.to_string(),
-        )
-        .map_err(|e| last_error.unwrap_or_else(|| format!("Decryption failed: {}", e)))?;
-
-        let unwrapped = unwrap_plaintext_with_context(
-            decrypted_data,
-            &item.vault_id,
-            &item.id,
-            "item",
-            stored_version,
-            user_id,
-        )?;
-        return Ok(normalize_decrypted_item_payload(unwrapped));
-    }
-
-    native_host_crypto::decrypt(
+    native_host_crypto::decrypt_with_context(
         item.encrypted_data.clone(),
         item.encryption_iv.clone(),
         item.encryption_algorithm.clone(),
         vault_key_base64.to_string(),
+        item.vault_id.clone(),
+        item.id.clone(),
+        "item".to_string(),
+        item.encryption_version,
+        item.encrypted_by_user_id.clone(),
     )
-    .map(normalize_decrypted_item_payload)
     .map_err(|e| format!("Decryption failed: {}", e))
 }
 
@@ -1203,7 +1066,7 @@ where
                         eprintln!(
                             "[desktop-ipc] Protocol mismatch expected={} received={}",
                             DESKTOP_PROTOCOL_VERSION,
-                            message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "legacy".to_string()),
+                            message.protocol_version.map(|version| version.to_string()).unwrap_or_else(|| "missing".to_string()),
                         );
                         let response = DesktopEnvelope::current(
                             message.request_id,
@@ -1256,7 +1119,7 @@ where
                     message
                         .protocol_version
                         .map(|version| version.to_string())
-                        .unwrap_or_else(|| "legacy".to_string()),
+                        .unwrap_or_else(|| "missing".to_string()),
                 );
                 let response = DesktopEnvelope::current(
                     message.request_id,
@@ -2175,9 +2038,8 @@ pub fn run() {
 mod tests {
     use super::{
         biometric_signature, build_snapshot_item_payload, decode_records, parse_native_view,
-        read_key_ref_with, records_under_prefix, serialize_encryption_context,
-        unwrap_plaintext_with_context, CachedItemRecord, CachedVaultRecord, NativeItemCacheState,
-        NativeKeyStore, NativeViewProblem, CONTEXT_ENVELOPE_MARKER, ITEM_CACHE_NATIVE_VIEW_VERSION,
+        read_key_ref_with, records_under_prefix, CachedItemRecord, CachedVaultRecord,
+        NativeItemCacheState, NativeKeyStore, NativeViewProblem, ITEM_CACHE_NATIVE_VIEW_VERSION,
         NATIVE_VIEW_VERSION,
     };
 
@@ -2309,9 +2171,7 @@ mod tests {
         )
         .expect("the ItemCache native projection must parse");
 
-        let native_view = state
-            .native_view
-            .expect("the ItemCache native projection must be present");
+        let native_view = state.native_view;
         assert_eq!(native_view.v, ITEM_CACHE_NATIVE_VIEW_VERSION);
         assert_eq!(
             native_view.items_key_prefix,
@@ -2321,26 +2181,6 @@ mod tests {
             native_view.vaults_key_prefix,
             "record:item-cache-stage:acct-a:gen:vaults:"
         );
-    }
-
-    #[test]
-    fn legacy_item_cache_state_uses_the_pre_generation_record_prefixes() {
-        let state: NativeItemCacheState = serde_json::from_str(
-            r#"{
-                "v": 1,
-                "itemsPrimed": true,
-                "vaultsPrimed": true,
-                "metadata": null
-            }"#,
-        )
-        .expect("the legacy ItemCache state must parse");
-
-        assert_eq!(state.v, 1);
-        assert!(state.native_view.is_none());
-        let native_view = super::resolve_item_cache_view(state, "acct-a")
-            .expect("the legacy ItemCache state must resolve to its published view");
-        assert_eq!(native_view.items_key_prefix, "record:acct-a:items:");
-        assert_eq!(native_view.vaults_key_prefix, "record:acct-a:vaults:");
     }
 
     #[test]
@@ -2461,38 +2301,6 @@ mod tests {
     }
 
     #[test]
-    fn unwrap_plaintext_with_context_accepts_matching_envelope() {
-        let decrypted = serde_json::json!({
-            "marker": CONTEXT_ENVELOPE_MARKER,
-            "context": serialize_encryption_context("vault-1", "item-1", "item", 2, "user-1"),
-            "payload": "{\"title\":\"Example\"}",
-        })
-        .to_string();
-
-        let unwrapped =
-            unwrap_plaintext_with_context(decrypted, "vault-1", "item-1", "item", 2, "user-1")
-                .expect("expected envelope to unwrap");
-
-        assert_eq!(unwrapped, "{\"title\":\"Example\"}");
-    }
-
-    #[test]
-    fn unwrap_plaintext_with_context_rejects_mismatched_context() {
-        let decrypted = serde_json::json!({
-            "marker": CONTEXT_ENVELOPE_MARKER,
-            "context": serialize_encryption_context("vault-1", "item-1", "item", 2, "user-1"),
-            "payload": "{\"title\":\"Example\"}",
-        })
-        .to_string();
-
-        let error =
-            unwrap_plaintext_with_context(decrypted, "vault-1", "item-1", "item", 3, "user-1")
-                .expect_err("expected context mismatch");
-
-        assert_eq!(error, "Encryption context mismatch");
-    }
-
-    #[test]
     fn build_snapshot_item_payload_returns_none_for_invalid_json() {
         let item = CachedItemRecord {
             id: "item-1".to_string(),
@@ -2502,8 +2310,8 @@ mod tests {
             encrypted_data: "ciphertext".to_string(),
             encryption_iv: "iv".to_string(),
             encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
-            version: 1,
-            last_modified_by: Some("user-1".to_string()),
+            encryption_version: 1,
+            encrypted_by_user_id: "user-1".to_string(),
             created_at: "2026-03-12T00:00:00.000Z".to_string(),
             updated_at: "2026-03-12T00:00:00.000Z".to_string(),
             deleted_at: None,
@@ -2539,8 +2347,8 @@ mod tests {
             encrypted_data: "ciphertext".to_string(),
             encryption_iv: "iv".to_string(),
             encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
-            version: 1,
-            last_modified_by: Some("user-1".to_string()),
+            encryption_version: 1,
+            encrypted_by_user_id: "user-1".to_string(),
             created_at: "2026-03-12T00:00:00.000Z".to_string(),
             updated_at: "2026-03-12T01:00:00.000Z".to_string(),
             deleted_at: None,
@@ -2584,15 +2392,6 @@ mod tests {
                 .and_then(|value| value.as_str()),
             Some("alice@example.com")
         );
-    }
-
-    #[test]
-    fn cached_vault_record_defaults_legacy_entries_to_personal_type() {
-        let vault: CachedVaultRecord =
-            serde_json::from_str(r#"{"id":"vault-1","name":"Main","icon":null,"imageUrl":null}"#)
-                .expect("legacy cached vault should deserialize");
-
-        assert_eq!(vault.vault_type, "personal");
     }
 
     // ----------------------------------------------------------------------

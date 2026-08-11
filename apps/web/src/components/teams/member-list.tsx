@@ -129,11 +129,8 @@ export function MemberList({
 							context: buildStoredItemEncryptionContext({
 								vaultId: vaultData.vaultId,
 								itemId: item.id,
-								version: item.version,
-								lastModifiedBy: item.lastModifiedBy,
 								encryptionVersion: item.encryptionVersion,
 								encryptedByUserId: item.encryptedByUserId,
-								userId: currentUserId,
 							}),
 						})),
 						vaultData.vaultId,

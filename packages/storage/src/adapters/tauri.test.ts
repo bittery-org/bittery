@@ -100,6 +100,7 @@ describe("tauri adapter — platform-specific mapping", () => {
 			addedAt: 1,
 			lastActiveAt: 1,
 			biometricEnabled: false,
+			insecureTransportConfirmed: false,
 		});
 
 		const nativeView = JSON.parse(

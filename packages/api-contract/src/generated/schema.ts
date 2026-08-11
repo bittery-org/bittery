@@ -1397,15 +1397,15 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly favorite: boolean;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             readonly updatedAt: string;
             readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
             readonly vaultId: string;
@@ -1525,7 +1525,7 @@ export interface components {
         readonly BootstrapAttachmentResponse: {
             readonly createdAt: string;
             readonly encryptedContentType: string;
-            readonly encryptedContentTypeIv?: string | null;
+            readonly encryptedContentTypeIv: string;
             readonly encryptedName: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
@@ -1534,7 +1534,7 @@ export interface components {
             readonly id: string;
             readonly itemId: string;
             readonly storageKey: string;
-            readonly uploadedBy?: string | null;
+            readonly uploadedBy: string;
             readonly vaultId: string;
         };
         readonly BootstrapItemResponse: {
@@ -1542,15 +1542,15 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly favorite: boolean;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             readonly updatedAt: string;
             readonly vault?: null | components["schemas"]["BootstrapVaultSummary"];
             readonly vaultId: string;
@@ -1578,7 +1578,7 @@ export interface components {
         readonly BulkImportItemInput: {
             readonly category: string;
             readonly encryptedData: string;
-            readonly encryptionAlgorithm?: string | null;
+            readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             readonly favorite?: boolean | null;
             readonly itemId: string;
@@ -1611,7 +1611,7 @@ export interface components {
             readonly encryptedContentType: string;
             readonly encryptedContentTypeIv: string;
             readonly encryptedName: string;
-            readonly encryptionAlgorithm?: string | null;
+            readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
             readonly fileSize: number;
@@ -1623,7 +1623,7 @@ export interface components {
         readonly CreateItemBody: {
             readonly category: string;
             readonly encryptedData: string;
-            readonly encryptionAlgorithm?: string | null;
+            readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
         };
         readonly CreateItemResponse: {
@@ -1679,15 +1679,15 @@ export interface components {
                 readonly category: string;
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
-                readonly encryptedByUserId?: string | null;
+                readonly encryptedByUserId: string;
                 readonly encryptedData: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
                 /** Format: int32 */
-                readonly encryptionVersion?: number | null;
+                readonly encryptionVersion: number;
                 readonly favorite: boolean;
                 readonly id: string;
-                readonly lastModifiedBy?: string | null;
+                readonly lastModifiedBy: string;
                 readonly updatedAt: string;
                 readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
                 readonly vaultId: string;
@@ -1776,7 +1776,7 @@ export interface components {
             readonly items: readonly {
                 readonly createdAt: string;
                 readonly encryptedContentType: string;
-                readonly encryptedContentTypeIv?: string | null;
+                readonly encryptedContentTypeIv: string;
                 readonly encryptedName: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
@@ -1785,7 +1785,7 @@ export interface components {
                 readonly id: string;
                 readonly itemId: string;
                 readonly storageKey: string;
-                readonly uploadedBy?: string | null;
+                readonly uploadedBy: string;
                 readonly vaultId: string;
             }[];
             readonly nextCursor?: null | components["schemas"]["PageCursor"];
@@ -1807,15 +1807,15 @@ export interface components {
                 readonly category: string;
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
-                readonly encryptedByUserId?: string | null;
+                readonly encryptedByUserId: string;
                 readonly encryptedData: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
                 /** Format: int32 */
-                readonly encryptionVersion?: number | null;
+                readonly encryptionVersion: number;
                 readonly favorite: boolean;
                 readonly id: string;
-                readonly lastModifiedBy?: string | null;
+                readonly lastModifiedBy: string;
                 readonly updatedAt: string;
                 readonly vaultId: string;
                 /** Format: int32 */
@@ -1829,15 +1829,15 @@ export interface components {
                 readonly category: string;
                 readonly createdAt: string;
                 readonly deletedAt?: string | null;
-                readonly encryptedByUserId?: string | null;
+                readonly encryptedByUserId: string;
                 readonly encryptedData: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
                 /** Format: int32 */
-                readonly encryptionVersion?: number | null;
+                readonly encryptionVersion: number;
                 readonly favorite: boolean;
                 readonly id: string;
-                readonly lastModifiedBy?: string | null;
+                readonly lastModifiedBy: string;
                 readonly updatedAt: string;
                 readonly vaultId: string;
                 /** Format: int32 */
@@ -1878,15 +1878,15 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly favorite: boolean;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             readonly updatedAt: string;
             readonly vault?: null | components["schemas"]["VaultSummaryResponse"];
             readonly vaultId: string;
@@ -1987,15 +1987,15 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly favorite: boolean;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             readonly updatedAt: string;
             readonly vaultId: string;
             /** Format: int32 */
@@ -2089,7 +2089,7 @@ export interface components {
         };
         readonly MoveItemBody: {
             readonly encryptedData: string;
-            readonly encryptionAlgorithm?: string | null;
+            readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             readonly sourceVaultId: string;
             readonly targetVaultId: string;
@@ -2248,14 +2248,14 @@ export interface components {
             readonly itemId: string;
         };
         readonly RotationItemResponse: {
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             /** Format: int32 */
             readonly version: number;
         };
@@ -2509,16 +2509,13 @@ export interface components {
         };
         readonly UpdateAttachmentBody: {
             readonly encryptedName: string;
-            readonly encryptionAlgorithm?: string | null;
+            readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
         };
         readonly UpdateItemBody: {
-            readonly encryptedByUserId?: string | null;
             readonly encryptedData?: string | null;
             readonly encryptionAlgorithm?: string | null;
             readonly encryptionIv?: string | null;
-            /** Format: int32 */
-            readonly encryptionVersion?: number | null;
         };
         readonly UpdateItemResponse: {
             readonly success: boolean;
@@ -2546,7 +2543,7 @@ export interface components {
         readonly VaultAttachmentResponse: {
             readonly createdAt: string;
             readonly encryptedContentType: string;
-            readonly encryptedContentTypeIv?: string | null;
+            readonly encryptedContentTypeIv: string;
             readonly encryptedName: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
@@ -2555,7 +2552,7 @@ export interface components {
             readonly id: string;
             readonly itemId: string;
             readonly storageKey: string;
-            readonly uploadedBy?: string | null;
+            readonly uploadedBy: string;
             readonly vaultId: string;
         };
         readonly VaultAvailableMemberResponse: {
@@ -2580,15 +2577,15 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly favorite: boolean;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             readonly updatedAt: string;
             readonly vaultId: string;
             /** Format: int32 */
@@ -2598,15 +2595,15 @@ export interface components {
             readonly category: string;
             readonly createdAt: string;
             readonly deletedAt?: string | null;
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly favorite: boolean;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             readonly updatedAt: string;
             readonly vaultId: string;
             /** Format: int32 */
@@ -2651,14 +2648,14 @@ export interface components {
             readonly members: readonly components["schemas"]["VaultRotationMemberResponse"][];
         };
         readonly VaultRotationItemResponse: {
-            readonly encryptedByUserId?: string | null;
+            readonly encryptedByUserId: string;
             readonly encryptedData: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
             /** Format: int32 */
-            readonly encryptionVersion?: number | null;
+            readonly encryptionVersion: number;
             readonly id: string;
-            readonly lastModifiedBy?: string | null;
+            readonly lastModifiedBy: string;
             /** Format: int32 */
             readonly version: number;
         };

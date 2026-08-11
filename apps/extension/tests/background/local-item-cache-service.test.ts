@@ -2,20 +2,31 @@ import { describe, expect, test } from "bun:test";
 import { createLocalItemCacheService } from "../../src/background/services/local-item-cache-service";
 
 describe("local-item-cache-service", () => {
-	test("item update path writes cache then clears desktop cache for immediate TOTP/UI reads", async () => {
-		const calls: Array<{ itemId: string; accountEmail?: string }> = [];
+	test("item update path writes the account repository then clears the desktop cache", async () => {
+		const calls: Array<{ itemId: string; accountId: string }> = [];
 		let desktopCacheClearCount = 0;
+		const existing = {
+			id: "item_123",
+			vaultId: "vault_abc",
+			accountEmail: "alice@example.com",
+			serverUrl: "https://api.example.test",
+			category: "login",
+			favorite: false,
+			createdAt: "2026-08-11T00:00:00.000Z",
+			deletedAt: null,
+		};
 
 		const service = createLocalItemCacheService({
-			cache: {
-				onItemCreated: async () => {},
-				onItemUpdated: async (input) => {
-					calls.push({
-						itemId: input.itemId,
-						accountEmail: input.accountEmail,
-					});
+			vaultCoordinator: {
+				resolveAccountIdByEmail: () => "account_123",
+				getRepositoryForAccount: () => ({
+					getById: () => existing,
+					getServerUrl: () => "https://api.example.test",
+				}),
+				upsertCachedItem: async (item, accountId) => {
+					calls.push({ itemId: item.id, accountId });
 				},
-			},
+			} as never,
 			desktopClient: {
 				clearCache: () => {
 					desktopCacheClearCount++;
@@ -30,29 +41,34 @@ describe("local-item-cache-service", () => {
 				ciphertext: "encrypted",
 				iv: "iv",
 				algorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_123",
 			},
 		});
 
 		expect(calls).toEqual([
 			{
 				itemId: "item_123",
-				accountEmail: "alice@example.com",
+				accountId: "account_123",
 			},
 		]);
 		expect(desktopCacheClearCount).toBe(1);
 	});
 
-	test("item create path also clears desktop cache", async () => {
+	test("item create path writes the account repository and clears desktop cache", async () => {
 		let createCallCount = 0;
 		let desktopCacheClearCount = 0;
 
 		const service = createLocalItemCacheService({
-			cache: {
-				onItemCreated: async () => {
+			vaultCoordinator: {
+				resolveAccountIdByEmail: () => "account_123",
+				getRepositoryForAccount: () => ({
+					getServerUrl: () => "https://api.example.test",
+				}),
+				upsertCachedItem: async () => {
 					createCallCount++;
 				},
-				onItemUpdated: async () => {},
-			},
+			} as never,
 			desktopClient: {
 				clearCache: () => {
 					desktopCacheClearCount++;
@@ -64,10 +80,13 @@ describe("local-item-cache-service", () => {
 			itemId: "item_123",
 			vaultId: "vault_abc",
 			category: "login",
+			accountEmail: "alice@example.com",
 			encryptedData: {
 				ciphertext: "encrypted",
 				iv: "iv",
 				algorithm: "AES-GCM-AAD-V1",
+				encryptionVersion: 1,
+				encryptedByUserId: "user_123",
 			},
 		});
 

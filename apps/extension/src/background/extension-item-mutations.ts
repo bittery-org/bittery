@@ -16,8 +16,8 @@ interface EncryptedPayload {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
-	encryptionVersion?: number;
-	encryptedByUserId?: string;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 }
 
 interface ExtensionItemMutationRepository {
@@ -25,7 +25,7 @@ interface ExtensionItemMutationRepository {
 	encryptWithVaultKey(
 		vaultId: string,
 		data: DecryptedItemData,
-		options: { itemId?: string; version?: number; userId?: string },
+		options: { itemId: string; version: number; userId?: string },
 	): Promise<EncryptedPayload>;
 }
 
@@ -229,15 +229,15 @@ const extensionItemMutations = createExtensionItemMutationModule({
 			encryptionAlgorithm: item.encryptionAlgorithm,
 			version: item.version,
 			lastModifiedBy: item.lastModifiedBy ?? null,
-			encryptionVersion: item.encryptionVersion ?? undefined,
-			encryptedByUserId: item.encryptedByUserId ?? undefined,
+			encryptionVersion: item.encryptionVersion,
+			encryptedByUserId: item.encryptedByUserId,
 			createdAt: String(item.createdAt),
 			updatedAt: String(item.updatedAt),
 			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
 			attachments: item.attachments?.map((attachment) => ({
 				...attachment,
-				encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? null,
-				uploadedBy: attachment.uploadedBy ?? null,
+				encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+				uploadedBy: attachment.uploadedBy,
 			})),
 		};
 		await core.vaultCoordinator.upsertCachedItem(cachedItem, accountId);

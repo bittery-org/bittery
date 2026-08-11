@@ -294,7 +294,7 @@ fn team_management_enabled_respects_billing_state_and_mode() {
         assert_eq!(bittery_mode(), "cloud");
     });
 
-    with_bittery_mode(Some("self_hosted"), || {
+    with_bittery_mode(Some("self-hosted"), || {
         assert!(console_gate(None));
         assert_eq!(bittery_mode(), "self-hosted");
     });
@@ -552,7 +552,7 @@ async fn team_events_allow_self_hosted_admins_without_team_plan() {
         let fixture = build_audit_router_fixture(&app.pool).await;
         let session = app.issue_session(&fixture.personal_owner_user_id).await;
         let response = with_bittery_mode_async(
-            Some("self_hosted"),
+            Some("self-hosted"),
             app.api_json(
                 Method::GET,
                 &format!("/api/v1/audit-events?limit={}", 1),

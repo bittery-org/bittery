@@ -140,13 +140,9 @@ type DecryptableItemRecord = {
 	encryptedData: string;
 	encryptionIv: string;
 	encryptionAlgorithm: string;
-	version?: number;
-	lastModifiedBy?: string | null;
-	encryptionVersion?: number | null;
-	encryptedByUserId?: string | null;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 };
-
-const LEGACY_ENCRYPTION_VERSION_WINDOW = 8;
 
 type ApiVaultSummary =
 	| (Omit<ServerVaultSummary, "icon" | "imageUrl"> & {
@@ -156,19 +152,13 @@ type ApiVaultSummary =
 	| null
 	| undefined;
 
-type ApiAttachment = Omit<
-	CachedAttachment,
-	"encryptedContentTypeIv" | "uploadedBy"
-> & {
-	encryptedContentTypeIv?: string | null;
-	uploadedBy?: string | null;
-};
+type ApiAttachment = CachedAttachment;
 
 function normalizeAttachment(attachment: ApiAttachment): CachedAttachment {
 	return {
 		...attachment,
-		encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? null,
-		uploadedBy: attachment.uploadedBy ?? null,
+		encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+		uploadedBy: attachment.uploadedBy,
 	};
 }
 
@@ -274,97 +264,24 @@ export class ItemService {
 		return merged;
 	}
 
-	private getLegacyVersionCandidates(version?: number): number[] {
-		const normalized =
-			typeof version === "number" && Number.isFinite(version) && version > 0
-				? Math.floor(version)
-				: 1;
-		const candidates: number[] = [];
-		const minimum = Math.max(
-			1,
-			normalized - LEGACY_ENCRYPTION_VERSION_WINDOW + 1,
-		);
-		for (let candidate = normalized; candidate >= minimum; candidate -= 1) {
-			candidates.push(candidate);
-		}
-		return candidates;
-	}
-
-	private getEncryptionContextCandidates(
-		item: DecryptableItemRecord,
-		fallbackUserId: string,
-	): Array<{ version: number; userId: string; legacy: boolean }> {
-		const hasVersion = item.encryptionVersion != null;
-		const hasAuthor = item.encryptedByUserId != null;
-		if (hasVersion || hasAuthor) {
-			if (
-				!hasVersion ||
-				!hasAuthor ||
-				!Number.isInteger(item.encryptionVersion) ||
-				(item.encryptionVersion ?? 0) < 1 ||
-				item.encryptedByUserId === ""
-			) {
-				return [];
-			}
-			return [
-				{
-					version: item.encryptionVersion as number,
-					userId: item.encryptedByUserId as string,
-					legacy: false,
-				},
-			];
-		}
-
-		const authors = Array.from(
-			new Set(
-				[item.lastModifiedBy, fallbackUserId].filter(Boolean) as string[],
-			),
-		);
-		return this.getLegacyVersionCandidates(item.version).flatMap((version) =>
-			authors.map((userId) => ({ version, userId, legacy: true })),
-		);
-	}
-
 	private async decryptItemPayload(
 		item: DecryptableItemRecord,
 		vaultKey: KeyRef,
-		fallbackUserId: string,
 	): Promise<string> {
-		let lastError: unknown = null;
-
-		for (const context of this.getEncryptionContextCandidates(
-			item,
-			fallbackUserId,
-		)) {
-			try {
-				const decrypted = await this.vaultCrypto.decryptItem(
-					{
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
-					vaultKey,
-					{
-						vaultId: item.vaultId,
-						itemId: item.id,
-						version: context.version,
-						userId: context.userId,
-					},
-				);
-
-				if (context.legacy) {
-					console.warn(
-						`[ItemService] Recovered item ${item.id} with legacy encryption context version ${context.version} (stored version ${item.version ?? 1})`,
-					);
-				}
-
-				return decrypted;
-			} catch (error) {
-				lastError = error;
-			}
-		}
-
-		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
+		return this.vaultCrypto.decryptItem(
+			{
+				ciphertext: item.encryptedData,
+				iv: item.encryptionIv,
+				algorithm: item.encryptionAlgorithm,
+			},
+			vaultKey,
+			{
+				vaultId: item.vaultId,
+				itemId: item.id,
+				version: item.encryptionVersion,
+				userId: item.encryptedByUserId,
+			},
+		);
 	}
 
 	private async getVaultKey(
@@ -441,11 +358,10 @@ export class ItemService {
 			encryptedData: item.encryptedData,
 			encryptionIv: item.encryptionIv,
 			encryptionAlgorithm: item.encryptionAlgorithm,
-			version: (item as { version?: number }).version ?? 1,
-			lastModifiedBy:
-				(item as { lastModifiedBy?: string | null }).lastModifiedBy ?? null,
-			encryptionVersion: item.encryptionVersion ?? null,
-			encryptedByUserId: item.encryptedByUserId ?? null,
+			version: item.version,
+			lastModifiedBy: item.lastModifiedBy ?? null,
+			encryptionVersion: item.encryptionVersion,
+			encryptedByUserId: item.encryptedByUserId,
 			createdAt: String(item.createdAt),
 			updatedAt: String(item.updatedAt),
 			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
@@ -584,7 +500,6 @@ export class ItemService {
 										const decryptedData = await this.decryptItemPayload(
 											rawItem,
 											vaultKey,
-											account.userId,
 										);
 
 										const parsedData = JSON.parse(
@@ -728,11 +643,7 @@ export class ItemService {
 			const decryptedItems = await Promise.all(
 				rawItems.map(async (item) => {
 					try {
-						const decryptedData = await this.decryptItemPayload(
-							item,
-							vaultKey,
-							ownerAccount.userId,
-						);
+						const decryptedData = await this.decryptItemPayload(item, vaultKey);
 
 						const parsedData = JSON.parse(decryptedData) as DecryptedItemData;
 						return {
@@ -818,12 +729,8 @@ export class ItemService {
 				encryptionAlgorithm: fetched.encryptionAlgorithm,
 				version: fetched.version,
 				lastModifiedBy: fetched.lastModifiedBy ?? null,
-				encryptionVersion:
-					(fetched as { encryptionVersion?: number | null })
-						.encryptionVersion ?? null,
-				encryptedByUserId:
-					(fetched as { encryptedByUserId?: string | null })
-						.encryptedByUserId ?? null,
+				encryptionVersion: fetched.encryptionVersion,
+				encryptedByUserId: fetched.encryptedByUserId,
 				createdAt: fetched.createdAt,
 				updatedAt: fetched.updatedAt,
 				deletedAt: fetched.deletedAt,
@@ -845,11 +752,7 @@ export class ItemService {
 			);
 		}
 		try {
-			const decryptedJson = await this.decryptItemPayload(
-				rawItem,
-				vaultKey,
-				await this.resolveUserId(accountEmail),
-			);
+			const decryptedJson = await this.decryptItemPayload(rawItem, vaultKey);
 
 			return {
 				rawItem,
@@ -932,7 +835,6 @@ export class ItemService {
 										const decryptedData = await this.decryptItemPayload(
 											rawItem,
 											vaultKey,
-											account.userId,
 										);
 
 										const parsedData = JSON.parse(decryptedData) as Record<
@@ -1169,7 +1071,6 @@ export class ItemService {
 				"Cannot access the source vault key to migrate attachments. Please unlock the source account.",
 			);
 		}
-		const sourceUserId = await this.resolveUserId(params.sourceAccountEmail);
 		try {
 			for (const attachment of attachments) {
 				// Fetch the encrypted blob envelope from object storage.
@@ -1185,23 +1086,21 @@ export class ItemService {
 				}
 				const blobEnvelope = parseAttachmentBlobEnvelope(await response.text());
 
-				// Decrypt under the SOURCE scope (source vault key + source AAD). The
-				// attachment's own uploader is used for context binding when present,
-				// mirroring the read paths in useItemAttachments.
+				// Decrypt under the source vault key and the attachment's persisted scope.
 				const decrypted = await decryptAttachmentParts(
 					this.vaultCrypto,
 					sourceVaultKey,
 					{
 						vaultId: params.sourceVaultId,
 						attachmentKey: attachment.storageKey,
-						userId: attachment.uploadedBy || sourceUserId,
+						userId: attachment.uploadedBy,
 					},
 					{
 						blobEnvelope,
 						encryptedName: attachment.encryptedName,
 						encryptedContentType: attachment.encryptedContentType,
 						encryptionIv: attachment.encryptionIv,
-						encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? null,
+						encryptedContentTypeIv: attachment.encryptedContentTypeIv,
 						encryptionAlgorithm: attachment.encryptionAlgorithm,
 					},
 				);

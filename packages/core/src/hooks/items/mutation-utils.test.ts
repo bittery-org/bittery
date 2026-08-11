@@ -64,7 +64,7 @@ describe("Item command persistence", () => {
 		});
 	});
 
-	test("content update and move commands do not publish a prerequisite context migration", async () => {
+	test("enqueues content update and move commands", async () => {
 		const calls: string[] = [];
 		const queue: IPendingMutationQueue = {
 			enqueue: async (command) => {
@@ -75,11 +75,7 @@ describe("Item command persistence", () => {
 			accountId: "account_1",
 			accountEmail: "alice@example.com",
 			baseVersion: 4,
-			repo: {
-				publishPendingEncryptionContextMigration: async () => {
-					calls.push("migration");
-				},
-			} as never,
+			repo: {} as never,
 		};
 
 		for (const mutation of [

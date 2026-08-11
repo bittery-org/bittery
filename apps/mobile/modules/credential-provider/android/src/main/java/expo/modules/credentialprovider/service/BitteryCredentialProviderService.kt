@@ -33,7 +33,6 @@ import expo.modules.credentialprovider.passkey.PasskeyUtils
 import expo.modules.credentialprovider.passkey.StoredPasskey
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
-import expo.modules.credentialprovider.storage.CredentialEntity
 import expo.modules.credentialprovider.storage.ItemEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -55,11 +54,9 @@ class BitteryCredentialProviderService : CredentialProviderService() {
 
     companion object {
         private const val TAG = "BitteryCredProvider"
-        const val EXTRA_CREDENTIAL_ID = "credential_id"
         const val EXTRA_ITEM_ID = "item_id"
         const val EXTRA_REQUEST_TYPE = "request_type"
         const val REQUEST_TYPE_GET = "get"
-        const val REQUEST_TYPE_CREATE = "create"
         const val REQUEST_TYPE_GET_PASSKEY = "get_passkey"
         const val REQUEST_TYPE_CREATE_PASSKEY = "create_passkey"
         const val REQUEST_TYPE_UNLOCK = "unlock"
@@ -154,7 +151,7 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                             val items = mutableListOf<ItemEntity>()
                             for (userId in unlockedUserIds) {
                                 val userItems = if (isValidWebDomain && domain.isNotEmpty() && parentDomain.isNotEmpty()) {
-                                    database.itemDao().getLoginItemsByDomainWithFallback(domain, parentDomain, userId)
+                                    database.itemDao().getLoginItemsByDomainAndParent(domain, parentDomain, userId)
                                 } else if (isValidWebDomain && domain.isNotEmpty()) {
                                     database.itemDao().getLoginItemsByDomain(domain, userId)
                                 } else {
@@ -237,20 +234,13 @@ class BitteryCredentialProviderService : CredentialProviderService() {
     ) {
         Log.d(TAG, "onBeginCreateCredentialRequest called")
 
-        try {
-            if (request is BeginCreatePasswordCredentialRequest) {
-                val createEntry = CreateEntry.Builder(
-                    "Bittery",
-                    createCreatePendingIntent(request)
-                )
-                    .setDescription("Save password to Bittery")
-                    .build()
-
-                val response = BeginCreateCredentialResponse.Builder()
-                    .setCreateEntries(listOf(createEntry))
-                    .build()
-
-                callback.onResult(response)
+		try {
+			if (request is BeginCreatePasswordCredentialRequest) {
+				callback.onError(
+					CreateCredentialUnknownException(
+						"Password creation is not available through the credential provider"
+					)
+				)
             } else if (request is BeginCreatePublicKeyCredentialRequest) {
                 val createEntry = CreateEntry.Builder(
                     "Bittery",
@@ -288,26 +278,6 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         callback.onResult(null)
     }
 
-    /**
-     * Create a PasswordCredentialEntry for display in the credential picker.
-     * Used for legacy CredentialEntity storage.
-     */
-    private fun createPasswordEntry(
-        credential: CredentialEntity,
-        option: BeginGetPasswordOption
-    ): PasswordCredentialEntry {
-        val pendingIntent = createGetPendingIntent(credential.id)
-
-        return PasswordCredentialEntry.Builder(
-            applicationContext,
-            credential.username,
-            pendingIntent,
-            option
-        )
-            .setDisplayName(credential.displayName)
-            .setLastUsedTime(Instant.ofEpochMilli(credential.lastUsedAt))
-            .build()
-    }
 
     /**
      * Create a PasswordCredentialEntry from unified ItemEntity storage.
@@ -389,16 +359,6 @@ class BitteryCredentialProviderService : CredentialProviderService() {
                     itemById[item.id] = item
                 }
             }
-            // Fallback for stale/missing item_domains rows.
-            val primaryDomainItems = database.itemDao().getLoginItemsByPrimaryDomain(
-                domain = normalizedRpId,
-                canonicalDomain = canonicalRpId,
-                userId = userId
-            )
-            for (item in primaryDomainItems) {
-                itemById[item.id] = item
-            }
-
             for (item in itemById.values) {
                 val matchingPasskeys = loadMatchingPasskeysForItem(
                     item = item,
@@ -472,23 +432,6 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         }
     }
 
-    /**
-     * Create PendingIntent for credential retrieval (legacy storage).
-     * Opens GetCredentialsActivity for biometric authentication.
-     */
-    private fun createGetPendingIntent(credentialId: String): PendingIntent {
-        val intent = Intent(applicationContext, GetCredentialsActivity::class.java).apply {
-            putExtra(EXTRA_CREDENTIAL_ID, credentialId)
-            putExtra(EXTRA_REQUEST_TYPE, REQUEST_TYPE_GET)
-        }
-
-        return PendingIntent.getActivity(
-            applicationContext,
-            credentialId.hashCode(),
-            intent,
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-    }
 
     /**
      * Create PendingIntent for item credential retrieval (unified storage).
@@ -544,23 +487,6 @@ class BitteryCredentialProviderService : CredentialProviderService() {
         )
     }
 
-    /**
-     * Create PendingIntent for credential creation.
-     * Opens activity to save a new credential.
-     */
-    private fun createCreatePendingIntent(request: BeginCreatePasswordCredentialRequest): PendingIntent {
-        val intent = Intent(applicationContext, GetCredentialsActivity::class.java).apply {
-            putExtra(EXTRA_REQUEST_TYPE, REQUEST_TYPE_CREATE)
-            // The actual username/password will come from ProviderCreateCredentialRequest
-        }
-
-        return PendingIntent.getActivity(
-            applicationContext,
-            REQUEST_TYPE_CREATE.hashCode(),
-            intent,
-            PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-    }
 
     /**
      * Create PendingIntent for passkey registration.

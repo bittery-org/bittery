@@ -16,14 +16,6 @@ import { toCachedVaultFields } from "@bittery/shared/vault-mapping";
 import JSZip from "jszip";
 import { useCallback, useState } from "react";
 import { normalizeItemCategory } from "@/lib/api-normalizers";
-import { storage } from "@/lib/storage";
-
-function normalizeVersion(version: number): number {
-	if (!Number.isFinite(version) || version < 1) {
-		return 1;
-	}
-	return Math.floor(version);
-}
 
 export type ExportStage =
 	| "idle"
@@ -133,10 +125,6 @@ export function useVaultExport() {
 				processedAttachments: 0,
 			});
 
-			// Get fallback userId for encryption context
-			const fallbackUserId =
-				(await storage.getActiveAccountUserId()) ?? me?.id ?? "";
-
 			for (const vaultId of vaultMap.keys()) {
 				const key = await vaultCrypto.getVaultKey({ vaultId });
 				if (key) {
@@ -157,44 +145,31 @@ export function useVaultExport() {
 					continue;
 				}
 
-				const contextUserId = item.lastModifiedBy ?? fallbackUserId;
-				const storedVersion = normalizeVersion(item.version ?? 1);
-				let decryptedStr: string | null = null;
-
-				for (let ver = storedVersion; ver >= 1; ver--) {
-					try {
-						decryptedStr = await vaultCrypto.decryptItem(
-							{
-								ciphertext: item.encryptedData,
-								iv: item.encryptionIv,
-								algorithm: item.encryptionAlgorithm,
-							},
-							vaultKey,
-							{
-								vaultId: item.vaultId,
-								itemId: item.id,
-								version: ver,
-								userId: contextUserId,
-							},
-						);
-						break;
-					} catch {
-						// try next version
-					}
-				}
-
-				if (decryptedStr) {
-					exportedItems.push({
-						id: item.id,
+				const decryptedStr = await vaultCrypto.decryptItem(
+					{
+						ciphertext: item.encryptedData,
+						iv: item.encryptionIv,
+						algorithm: item.encryptionAlgorithm,
+					},
+					vaultKey,
+					{
 						vaultId: item.vaultId,
-						category: normalizeItemCategory(item.category),
-						favorite: item.favorite,
-						data: JSON.parse(decryptedStr),
-						attachments: [],
-						createdAt: String(item.createdAt),
-						updatedAt: String(item.updatedAt),
-					});
-				}
+						itemId: item.id,
+						version: item.encryptionVersion,
+						userId: item.encryptedByUserId,
+					},
+				);
+
+				exportedItems.push({
+					id: item.id,
+					vaultId: item.vaultId,
+					category: normalizeItemCategory(item.category),
+					favorite: item.favorite,
+					data: JSON.parse(decryptedStr),
+					attachments: [],
+					createdAt: String(item.createdAt),
+					updatedAt: String(item.updatedAt),
+				});
 
 				setProgress((prev) => ({
 					...prev,
@@ -223,7 +198,7 @@ export function useVaultExport() {
 
 				for (const attachment of item.attachments) {
 					try {
-						const contextUserId = attachment.uploadedBy ?? fallbackUserId;
+						const contextUserId = attachment.uploadedBy;
 
 						const blobContext = buildAttachmentBlobEncryptionContext({
 							vaultId: item.vaultId,
@@ -281,7 +256,7 @@ export function useVaultExport() {
 						const contentType = await crypto.decrypt(
 							{
 								ciphertext: encryptedContentType,
-								iv: encryptedContentTypeIv ?? encryptionIv,
+								iv: encryptedContentTypeIv,
 								algorithm: encryptionAlgorithm,
 							},
 							vaultKey,

@@ -87,14 +87,11 @@ fn validate_resource_id_accepts_uuid_and_slug_variants() {
 }
 
 #[test]
-fn bittery_mode_normalizes_self_hosted_variants() {
+fn bittery_mode_accepts_the_canonical_value() {
     with_bittery_mode(Some("self-hosted"), || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
-    with_bittery_mode(Some("SELF_HOSTED"), || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-    with_bittery_mode(Some("selfhosted"), || {
+    with_bittery_mode(Some("SELF-HOSTED"), || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
     with_bittery_mode(Some("cloud"), || {

@@ -1094,13 +1094,13 @@ export async function signPasskeyAssertion(privateKeyBase64: string, rpId: strin
     }
     }
 
-export async function unwrapKey(data: EncryptedData, wrappingKey: KeyHandleLike, context: EncryptionContext | undefined, legacyMarker: string | undefined, legacyContext: string | undefined, asyncOpts_?: { signal: AbortSignal }): Promise<KeyHandleLike> /*throws*/ {
+export async function unwrapKey(data: EncryptedData, wrappingKey: KeyHandleLike, context: EncryptionContext | undefined, asyncOpts_?: { signal: AbortSignal }): Promise<KeyHandleLike> /*throws*/ {
     const __stack = uniffiIsDebug ? new Error().stack : undefined;
     try {
         return await uniffiRustCallAsync(
             /*rustCaller:*/ uniffiCaller,
             /*rustFutureFunc:*/ () => {
-                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(FfiConverterTypeEncryptedData.lower(data, nativeModule().rustbuffer_alloc),FfiConverterTypeKeyHandle.lower(wrappingKey, nativeModule().rustbuffer_alloc),FfiConverterOptionalTypeEncryptionContext.lower(context, nativeModule().rustbuffer_alloc),FfiConverterOptionalString.lower(legacyMarker, nativeModule().rustbuffer_alloc),FfiConverterOptionalString.lower(legacyContext, nativeModule().rustbuffer_alloc)
+                return nativeModule().ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(FfiConverterTypeEncryptedData.lower(data, nativeModule().rustbuffer_alloc),FfiConverterTypeKeyHandle.lower(wrappingKey, nativeModule().rustbuffer_alloc),FfiConverterOptionalTypeEncryptionContext.lower(context, nativeModule().rustbuffer_alloc)
                 );
             },
             /*pollFunc:*/ nativeModule().ubrn_ffi_bittery_crypto_api_rust_future_poll_u64,
@@ -3828,7 +3828,7 @@ function uniffiEnsureInitialized() {
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_sign_passkey_assertion() !== 32518) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_sign_passkey_assertion");
     }
-    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_unwrap_key() !== 34433) {
+    if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_unwrap_key() !== 60728) {
         throw new UniffiInternalError.ApiChecksumMismatch("uniffi_bittery_crypto_api_checksum_func_unwrap_key");
     }
     if (nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key() !== 314) {

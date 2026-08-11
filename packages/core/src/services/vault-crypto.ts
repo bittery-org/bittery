@@ -5,9 +5,8 @@
  * between — which key opens which value, what gets bound into the AAD, what a wrapped vault
  * key looks like on the wire, which KDF profiles this client will accept — is policy, and it
  * lives here so that exactly one implementation of it exists. Before this module the four
- * platform adapters each carried a copy: every one of them attached the vault-key wrap
- * context inside `encrypt()` and ran the legacy AAD fallback inside `decrypt()`, so the
- * envelope format was defined four times and enforced nowhere.
+ * platform adapters each carried a copy of the vault-key wrap context inside `encrypt()`,
+ * so the envelope format was defined four times and enforced nowhere.
  *
  * ## `KeyRef` ownership
  *
@@ -60,10 +59,11 @@ interface ItemContextInput {
 	userId: string;
 }
 
-export interface StoredItemContextInput extends ItemContextInput {
-	encryptionVersion?: number | null;
-	encryptedByUserId?: string | null;
-	lastModifiedBy?: string | null;
+export interface StoredItemContextInput {
+	vaultId: string;
+	itemId: string;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 }
 
 interface AttachmentContextInput {
@@ -106,8 +106,8 @@ export function buildStoredItemEncryptionContext(
 	return buildItemEncryptionContext({
 		vaultId: input.vaultId,
 		itemId: input.itemId,
-		version: input.encryptionVersion ?? input.version,
-		userId: input.encryptedByUserId ?? input.lastModifiedBy ?? input.userId,
+		version: input.encryptionVersion,
+		userId: input.encryptedByUserId,
 	});
 }
 
@@ -160,70 +160,6 @@ function buildVaultKeyEncryptionContext(
 }
 
 // ============================================================================
-// The legacy context envelope (back-compat only)
-// ============================================================================
-
-const CONTEXT_ENVELOPE_MARKER = "bittery-context-envelope-v1";
-
-interface ContextEnvelope {
-	marker: typeof CONTEXT_ENVELOPE_MARKER;
-	context: string;
-	payload: string;
-}
-
-function serializeEncryptionContext(context: EncryptionContext): string {
-	return [
-		context.vaultId,
-		context.entityId,
-		context.entityType,
-		String(context.version),
-		context.userId,
-	].join("\0");
-}
-
-/**
- * Reads a context envelope out of a plaintext.
- *
- * Ciphertext written before the AES-GCM AAD binding existed carries its context *inside*
- * the plaintext as this JSON envelope instead of alongside the ciphertext. Such records are
- * still in real vaults and are only rewritten when the value they hold is next saved, so
- * this cannot be deleted until every one of them has been re-encrypted — a migration
- * nothing schedules today. The envelope is read-only on purpose: no new write produces one.
- */
-function unwrapPlaintextWithContext(
-	decrypted: string,
-	context: EncryptionContext,
-): string {
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(decrypted);
-	} catch {
-		throw new Error("Missing encryption context envelope");
-	}
-
-	if (
-		typeof parsed !== "object" ||
-		parsed === null ||
-		!("marker" in parsed) ||
-		!("context" in parsed) ||
-		!("payload" in parsed)
-	) {
-		throw new Error("Invalid encryption context envelope");
-	}
-
-	const envelope = parsed as ContextEnvelope;
-	if (envelope.marker !== CONTEXT_ENVELOPE_MARKER) {
-		throw new Error("Invalid encryption context marker");
-	}
-
-	if (envelope.context !== serializeEncryptionContext(context)) {
-		throw new Error("Encryption context mismatch");
-	}
-
-	return envelope.payload;
-}
-
-// ============================================================================
 // The wrapped vault key envelope
 // ============================================================================
 
@@ -237,7 +173,7 @@ interface WrappedVaultKey {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
-	context?: {
+	context: {
 		vaultId: string;
 		userId: string;
 		keyVersion: number;
@@ -317,7 +253,7 @@ export interface EncryptedAttachmentMetaInput {
 	encryptedName: string;
 	encryptedContentType: string;
 	encryptionIv: string;
-	encryptedContentTypeIv: string | null;
+	encryptedContentTypeIv: string;
 	encryptionAlgorithm: string;
 }
 
@@ -430,7 +366,7 @@ export interface VaultCrypto {
 		scope: ItemScope,
 	): Promise<string>;
 
-	/** One port round trip for the primary path; legacy envelopes are retried in place. */
+	/** One port round trip for the whole batch. */
 	decryptItems(
 		requests: readonly DecryptItemRequest[],
 	): Promise<readonly DecryptManyResult[]>;
@@ -467,26 +403,12 @@ export interface VaultCrypto {
 export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 	const { crypto, storage } = deps;
 
-	/**
-	 * Decryption with the AAD bound, falling back to the pre-AAD format.
-	 *
-	 * The fallback is load-bearing back-compat, not defensive coding: a record written
-	 * before AAD binding decrypts with no context at all and carries its context in the
-	 * plaintext envelope, which `unwrapPlaintextWithContext` then verifies. Both paths bind
-	 * the same context, so neither accepts a ciphertext from a different entity — the only
-	 * difference is where the binding is written. It can go once no such record is left.
-	 */
 	async function decryptBoundToContext(
 		data: EncryptedData,
 		key: KeyRef,
 		context: EncryptionContext,
 	): Promise<string> {
-		try {
-			return await crypto.decrypt(data, key, context);
-		} catch {
-			const decrypted = await crypto.decrypt(data, key, null);
-			return unwrapPlaintextWithContext(decrypted, context);
-		}
+		return crypto.decrypt(data, key, context);
 	}
 
 	function parseEncryptedData(serialized: string): EncryptedData {
@@ -546,19 +468,7 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 				userId: wrapContext.userId,
 				keyVersion: wrapContext.keyVersion,
 			});
-			try {
-				return await crypto.unwrapKey(encryptedData, masterUnlockKey, {
-					context,
-				});
-			} catch {
-				return crypto.unwrapKey(encryptedData, masterUnlockKey, {
-					context: null,
-					legacyEnvelope: {
-						marker: CONTEXT_ENVELOPE_MARKER,
-						context: serializeEncryptionContext(context),
-					},
-				});
-			}
+			return crypto.unwrapKey(encryptedData, masterUnlockKey, context);
 		}
 
 		if (!encryptedPrivateKey) {
@@ -721,46 +631,13 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 		async decryptItems(
 			requests: readonly DecryptItemRequest[],
 		): Promise<readonly DecryptManyResult[]> {
-			const primary = await crypto.decryptMany(
+			return crypto.decryptMany(
 				requests.map((request) => ({
 					id: request.id,
 					data: request.data,
 					key: request.vaultKey,
 					context: buildItemEncryptionContext(request.scope),
 				})),
-			);
-
-			return Promise.all(
-				primary.map(async (result, index): Promise<DecryptManyResult> => {
-					if (result.ok) {
-						return result;
-					}
-					const request = requests[index];
-					if (!request) {
-						return result;
-					}
-					try {
-						const decrypted = await crypto.decrypt(
-							request.data,
-							request.vaultKey,
-							null,
-						);
-						return {
-							id: result.id,
-							ok: true,
-							plaintext: unwrapPlaintextWithContext(
-								decrypted,
-								buildItemEncryptionContext(request.scope),
-							),
-						};
-					} catch (error) {
-						return {
-							id: result.id,
-							ok: false,
-							error: error instanceof Error ? error.message : String(error),
-						};
-					}
-				}),
 			);
 		},
 
@@ -808,7 +685,7 @@ export function createVaultCrypto(deps: VaultCryptoDeps): VaultCrypto {
 				decryptBoundToContext(
 					{
 						ciphertext: encrypted.encryptedContentType,
-						iv: encrypted.encryptedContentTypeIv ?? encrypted.encryptionIv,
+						iv: encrypted.encryptedContentTypeIv,
 						algorithm: encrypted.encryptionAlgorithm,
 					},
 					vaultKey,
@@ -967,8 +844,11 @@ const NO_LOCAL_ACCOUNT: VaultCryptoStore = {
  */
 function ownerWrapKeyVersion(encryptedVaultKey: string): number {
 	const parsed = JSON.parse(encryptedVaultKey) as WrappedVaultKey;
-	const keyVersion = parsed.context?.keyVersion;
-	return Number.isInteger(keyVersion) ? (keyVersion as number) : 1;
+	const keyVersion = parsed.context.keyVersion;
+	if (!Number.isInteger(keyVersion) || keyVersion < 1) {
+		throw new Error("Invalid vault key wrap version");
+	}
+	return keyVersion;
 }
 
 interface ReKeyedAccount extends AccountReKeyPayload {

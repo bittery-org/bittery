@@ -4,11 +4,9 @@ export type {
 	DecryptRequest,
 	DerivedKeyRefs,
 	KeyRef,
-	LegacyKeyEnvelope,
 	PasskeyAssertion,
 	PasskeyAttestation,
 	PasskeyKeypair,
-	UnwrapKeyOptions,
 } from "./crypto-port";
 export type { CryptoPortErrorCode } from "./errors";
 export {

@@ -9,7 +9,7 @@
  * An adapter is pure marshalling onto one backend — argument order, base64 boundaries,
  * `KeyRef` bookkeeping, error translation. It makes no decisions. All policy lives above
  * this seam in `VaultCrypto`: the wrapped-vault-key envelope, wrap contexts, KDF pinning,
- * the legacy "decrypt without AAD then unwrap" fallback, and the seven account ceremonies.
+ * and the seven account ceremonies.
  * The algorithms live below it, in the one Rust core (ADR 0001).
  *
  * Behavioural rules every adapter must obey:
@@ -97,17 +97,6 @@ export interface PasskeyAttestation {
 export interface PasskeyAssertion {
 	authenticatorData: Uint8Array;
 	signatureDer: Uint8Array;
-}
-
-/** Generic description of the read-only plaintext envelope used by legacy ciphertexts. */
-export interface LegacyKeyEnvelope {
-	marker: string;
-	context: string;
-}
-
-export interface UnwrapKeyOptions {
-	context: EncryptionContext | null;
-	legacyEnvelope?: LegacyKeyEnvelope;
 }
 
 export interface CryptoPort {
@@ -200,7 +189,7 @@ export interface CryptoPort {
 	unwrapKey(
 		data: EncryptedData,
 		wrappingKey: KeyRef,
-		options?: UnwrapKeyOptions,
+		context: EncryptionContext | null,
 	): Promise<KeyRef>;
 
 	// ------------------------------------------------------------------
@@ -251,8 +240,7 @@ export interface CryptoPort {
 	/**
 	 * Moves one item's ciphertext onto a new vault key without changing what it is bound to:
 	 * `item.context` is both the AAD the stored ciphertext is opened with and the AAD the
-	 * replacement is sealed under. An item written before AAD binding existed opens with no
-	 * context and is re-sealed with none, because re-binding it is a persisted-format change.
+	 * replacement is sealed under.
 	 */
 	reEncryptItem(
 		item: ItemData,

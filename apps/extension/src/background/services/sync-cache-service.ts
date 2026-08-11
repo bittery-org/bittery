@@ -6,7 +6,6 @@
  * - Resolve the account/token/server context used for SSE connection.
  * - Resolve deterministic account candidates for incoming sync events.
  * - Apply delta sync updates to item cache(s) before UI invalidation.
- * - Fall back to global cache updates when account-scoped updates cannot be applied.
  */
 
 import { AccountResolver } from "@bittery/core/services/account-resolver";
@@ -24,7 +23,6 @@ import type {
 } from "@bittery/sync";
 import { performDeltaSync } from "@bittery/sync";
 import { itemCache, storage } from "../../lib/storage";
-import { apiClient } from "../api-client";
 import { core } from "../core-instance";
 import { desktopClient } from "../desktop-client";
 
@@ -77,7 +75,6 @@ export interface SyncCacheServiceDeps {
 	 */
 	itemCache: SyncItemCache;
 	desktopClient: SyncCacheDesktopClient;
-	defaultClient: SyncEventApiClient;
 	createAccountClient: (
 		token: string,
 		serverUrl: string,
@@ -111,7 +108,6 @@ const defaultDeps: SyncCacheServiceDeps = {
 	storage,
 	itemCache: core.vaultCoordinator,
 	desktopClient,
-	defaultClient: apiClient,
 	createAccountClient: (token, serverUrl, insecureTransportConfirmed) =>
 		createAccountApiClient(token, serverUrl, undefined, undefined, {
 			insecureTransportConfirmed,
@@ -181,7 +177,6 @@ function shouldClearDesktopCacheForEvent(event: SyncEvent): boolean {
 
 export interface SyncCacheService {
 	resolveConnectionContext: () => Promise<SyncConnectionContext | null>;
-	getClientForEmail: (email?: string | null) => Promise<SyncEventApiClient>;
 	/** Null when the account has no reachable token; callers must not fall back to another account's client. */
 	getClientForAccountId: (
 		accountId: string,
@@ -316,44 +311,8 @@ export function createSyncCacheService(
 			};
 		}
 
-		// Compatibility fallback for legacy/global token resolution paths.
-		const fallbackToken = await deps.storage.getAuthToken();
-		if (!fallbackToken) {
-			deps.logger.info(
-				"[sync-cache-service] No account-scoped or fallback token available",
-			);
-			return null;
-		}
-
-		deps.logger.info(
-			"[sync-cache-service] Using fallback sync context without explicit account scope",
-		);
-		return {
-			accountId: activeAccountId,
-			email: null,
-			serverUrl: await getServerUrlForAccountId(activeAccountId),
-			client: deps.defaultClient,
-		};
-	}
-
-	async function getClientForEmail(
-		email?: string | null,
-	): Promise<SyncEventApiClient> {
-		if (!email) {
-			return deps.defaultClient;
-		}
-
-		const normalizedEmail = normalizeEmail(email);
-		const accounts = await deps.storage.getAccountsList();
-		const matchedAccount = accounts.find(
-			(account) => normalizeEmail(account.email) === normalizedEmail,
-		);
-		if (!matchedAccount) {
-			return deps.defaultClient;
-		}
-
-		const client = await getAccountClientForAccountId(matchedAccount.accountId);
-		return client ?? deps.defaultClient;
+		deps.logger.info("[sync-cache-service] No account-scoped token available");
+		return null;
 	}
 
 	async function resolveCandidateAccountIdsForEvent(
@@ -541,7 +500,6 @@ export function createSyncCacheService(
 
 	return {
 		resolveConnectionContext,
-		getClientForEmail,
 		getClientForAccountId: getAccountClientForAccountId,
 		resolveCandidateAccountIdsForEvent,
 		applyDeltaSyncForEvent,

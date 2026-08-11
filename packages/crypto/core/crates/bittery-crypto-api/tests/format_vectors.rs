@@ -214,7 +214,7 @@ fn recovery_and_vault_key_wrapping_interoperate_with_core() {
 }
 
 #[test]
-fn key_rotation_preserves_each_item_binding_style() {
+fn key_rotation_preserves_each_item_context() {
     let old_vault_key = [0x11; 32];
     let master_unlock_key = [0x22; 32];
 
@@ -224,11 +224,14 @@ fn key_rotation_preserves_each_item_binding_style() {
         Some(context()),
     ))
     .unwrap();
-    // Written before AAD binding existed: its context lives inside the plaintext envelope.
-    let unbound = block_on(api::encrypt(
-        "legacy payload".into(),
+    let second_context = api::EncryptionContext {
+        entity_id: "item-8".into(),
+        ..context()
+    };
+    let second = block_on(api::encrypt(
+        "second payload".into(),
         block_on(api::import_key(old_vault_key.to_vec())).unwrap(),
-        None,
+        Some(second_context.clone()),
     ))
     .unwrap();
 
@@ -248,13 +251,10 @@ fn key_rotation_preserves_each_item_binding_style() {
             },
             api::ItemData {
                 id: "item-8".into(),
-                encrypted_data: unbound.ciphertext,
-                encryption_iv: unbound.iv,
-                encryption_algorithm: unbound.algorithm,
-                context: api::EncryptionContext {
-                    entity_id: "item-8".into(),
-                    ..context()
-                },
+                encrypted_data: second.ciphertext,
+                encryption_iv: second.iv,
+                encryption_algorithm: second.algorithm,
+                context: second_context,
             },
         ],
         "vault-1".into(),
@@ -290,18 +290,18 @@ fn key_rotation_preserves_each_item_binding_style() {
     );
     assert!(core::decrypt(&rotated(0), &new_vault_key).is_err());
     assert_eq!(
-        core::decrypt(&rotated(1), &new_vault_key).unwrap(),
-        "legacy payload"
+        core::decrypt_with_aad(
+            &rotated(1),
+            &new_vault_key,
+            &core::AadContext {
+                entity_id: "item-8".into(),
+                ..core_context
+            }
+        )
+        .unwrap(),
+        "second payload"
     );
-    assert!(core::decrypt_with_aad(
-        &rotated(1),
-        &new_vault_key,
-        &core::AadContext {
-            entity_id: "item-8".into(),
-            ..core_context
-        }
-    )
-    .is_err());
+    assert!(core::decrypt(&rotated(1), &new_vault_key).is_err());
 }
 
 #[test]
@@ -316,23 +316,21 @@ fn key_handle_destroy_is_idempotent_and_blocks_later_use() {
 }
 
 #[test]
-fn legacy_unwrap_reads_payload_and_rejects_mismatched_metadata() {
+fn unwrap_key_requires_the_exact_authenticated_context() {
     let wrapping_key = block_on(api::import_key(vec![9; 32])).unwrap();
     let payload = vec![0x42; 32];
-    let plaintext = serde_json::json!({
-        "marker": "legacy-marker",
-        "context": "legacy-context",
-        "payload": BASE64.encode(&payload),
-    })
-    .to_string();
-    let encrypted = block_on(api::encrypt(plaintext, wrapping_key.clone(), None)).unwrap();
+    let encryption_context = context();
+    let encrypted = block_on(api::encrypt(
+        BASE64.encode(&payload),
+        wrapping_key.clone(),
+        Some(encryption_context.clone()),
+    ))
+    .unwrap();
 
     let restored = block_on(api::unwrap_key(
         encrypted.clone(),
         wrapping_key.clone(),
-        None,
-        Some("legacy-marker".into()),
-        Some("legacy-context".into()),
+        Some(encryption_context.clone()),
     ))
     .unwrap();
     assert_eq!(block_on(api::export_key(restored)).unwrap(), payload);
@@ -341,11 +339,11 @@ fn legacy_unwrap_reads_payload_and_rejects_mismatched_metadata() {
         block_on(api::unwrap_key(
             encrypted,
             wrapping_key,
-            None,
-            Some("wrong-marker".into()),
-            Some("legacy-context".into()),
+            Some(api::EncryptionContext {
+                entity_id: "other-item".into(),
+                ..encryption_context
+            }),
         )),
-        Err(api::CryptoError::InvalidInput(message))
-            if message == "legacy key envelope did not match"
+        Err(api::CryptoError::Decryption(_))
     ));
 }

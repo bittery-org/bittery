@@ -234,14 +234,8 @@ export function createCryptoUniffiBackend(
 			);
 		},
 		wrapKey: (key, wrappingKey) => wasm.wrapKey(key, wrappingKey),
-		unwrapKey: (data, wrappingKey, options) =>
-			wasm.unwrapKey(
-				data,
-				wrappingKey,
-				options ? context(options.context) : undefined,
-				options?.legacyEnvelope?.marker,
-				options?.legacyEnvelope?.context,
-			),
+		unwrapKey: (data, wrappingKey, encryptionContext) =>
+			wasm.unwrapKey(data, wrappingKey, context(encryptionContext)),
 		generateRsaKeyPair: () => wasm.generateRsaKeyPair(),
 		rsaEncrypt: (plaintext, publicKeyPem) =>
 			wasm.rsaEncrypt(plaintext, publicKeyPem),

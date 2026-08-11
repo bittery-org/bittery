@@ -197,10 +197,10 @@ struct BootstrapAttachmentResponse {
     encrypted_name: String,
     encrypted_content_type: String,
     encryption_iv: String,
-    encrypted_content_type_iv: Option<String>,
+    encrypted_content_type_iv: String,
     encryption_algorithm: String,
     file_size: i32,
-    uploaded_by: Option<String>,
+    uploaded_by: String,
     created_at: String,
 }
 
@@ -234,9 +234,9 @@ struct BootstrapItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
     created_at: String,
     updated_at: String,
     deleted_at: Option<String>,
@@ -463,9 +463,9 @@ mod tests {
                 encryption_iv: "item-iv".to_string(),
                 encryption_algorithm: "aes-256-gcm".to_string(),
                 version: 3,
-                encryption_version: None,
-                encrypted_by_user_id: None,
-                last_modified_by: None,
+                encryption_version: 3,
+                encrypted_by_user_id: "user_test".to_string(),
+                last_modified_by: "user_test".to_string(),
                 created_at: "2026-08-10T10:00:00Z".to_string(),
                 updated_at: "2026-08-10T11:00:00Z".to_string(),
                 deleted_at: None,
@@ -477,10 +477,10 @@ mod tests {
                     encrypted_name: "encrypted-name".to_string(),
                     encrypted_content_type: "encrypted-type".to_string(),
                     encryption_iv: "attachment-iv".to_string(),
-                    encrypted_content_type_iv: None,
+                    encrypted_content_type_iv: "content-type-iv".to_string(),
                     encryption_algorithm: "aes-256-gcm".to_string(),
                     file_size: 42,
-                    uploaded_by: None,
+                    uploaded_by: "user_test".to_string(),
                     created_at: "2026-08-10T10:30:00Z".to_string(),
                 }],
                 vault: Some(ServiceBootstrapVaultSummary {
@@ -504,11 +504,11 @@ mod tests {
         let json = serde_json::to_value(response).expect("bootstrap response should serialize");
         assert_eq!(json["nextCursor"], json!("item_test"));
         assert_eq!(json["syncCursor"]["id"], json!("event_test"));
-        assert_eq!(json["items"][0]["lastModifiedBy"], json!(null));
+        assert_eq!(json["items"][0]["lastModifiedBy"], json!("user_test"));
         assert_eq!(json["items"][0]["attachments"][0]["fileSize"], json!(42));
         assert_eq!(
             json["items"][0]["attachments"][0]["encryptedContentTypeIv"],
-            json!(null)
+            json!("content-type-iv")
         );
         assert_eq!(json["items"][0]["vault"]["vaultType"], json!("personal"));
     }

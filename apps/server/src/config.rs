@@ -13,10 +13,7 @@ pub(crate) fn bittery_mode() -> &'static str {
     match std::env::var("BITTERY_MODE") {
         Ok(value) => {
             let normalized = value.trim().to_ascii_lowercase();
-            if normalized == SELF_HOSTED_MODE
-                || normalized == "self_hosted"
-                || normalized == "selfhosted"
-            {
+            if normalized == SELF_HOSTED_MODE {
                 SELF_HOSTED_MODE
             } else {
                 CLOUD_MODE

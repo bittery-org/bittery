@@ -40,6 +40,8 @@ function item(
 		encryptionAlgorithm: "AES-GCM",
 		version: 1,
 		lastModifiedBy: null,
+		encryptionVersion: 1,
+		encryptedByUserId: "user-1",
 		createdAt: "2026-01-01T00:00:00.000Z",
 		updatedAt: "2026-01-01T00:00:00.000Z",
 		...overrides,
@@ -72,41 +74,6 @@ describe("ItemCache.initialize", () => {
 		const { cache, port } = makeCache();
 		await cache.initialize();
 		expect(port.calls.initialize).toBe(1);
-	});
-
-	it("durably upgrades legacy metadata with the native cache pointer", async () => {
-		const { cache, port } = makeCache();
-		await port.recordPut(
-			metaCollection("a"),
-			"meta",
-			JSON.stringify({
-				v: 1,
-				itemsPrimed: true,
-				vaultsPrimed: true,
-				metadata: metadata(),
-			}),
-		);
-
-		await cache.migrateLegacyMetadata("a");
-
-		const upgraded = JSON.parse(
-			(await port.recordGet(metaCollection("a"), "meta")) ?? "{}",
-		) as {
-			v?: number;
-			activeGeneration?: string | null;
-			nativeView?: {
-				v?: number;
-				itemsKeyPrefix?: string;
-				vaultsKeyPrefix?: string;
-			};
-		};
-		expect(upgraded.v).toBe(2);
-		expect(upgraded.activeGeneration).toBeNull();
-		expect(upgraded.nativeView).toEqual({
-			v: 1,
-			itemsKeyPrefix: "a:items:",
-			vaultsKeyPrefix: "a:vaults:",
-		});
 	});
 });
 

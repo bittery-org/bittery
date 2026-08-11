@@ -90,10 +90,7 @@ export function useMoveItem() {
 			if (!sourceAccount) {
 				throw new Error("Source account not found");
 			}
-			const contextUserId =
-				sourceAccount?.userId ??
-				sourceContext.item.lastModifiedBy ??
-				"unknown-user";
+			const contextUserId = sourceAccount.userId;
 
 			const encryptedData = await sourceContext.repo.encryptWithVaultKey(
 				input.targetVaultId,

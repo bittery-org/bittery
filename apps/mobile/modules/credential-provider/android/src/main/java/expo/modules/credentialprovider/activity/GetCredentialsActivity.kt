@@ -13,7 +13,6 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.credentials.CreatePublicKeyCredentialRequest
 import androidx.credentials.CreatePublicKeyCredentialResponse
-import androidx.credentials.CreatePasswordResponse
 import androidx.credentials.GetCredentialResponse
 import androidx.credentials.GetPublicKeyCredentialOption
 import androidx.credentials.PasswordCredential
@@ -36,7 +35,6 @@ import expo.modules.credentialprovider.passkey.StoredPasskey
 import expo.modules.credentialprovider.service.BitteryCredentialProviderService
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
-import expo.modules.credentialprovider.storage.CredentialStorageManager
 import expo.modules.credentialprovider.storage.ItemDomainEntity
 import expo.modules.credentialprovider.storage.PendingPasskeyMutationEntity
 import kotlinx.coroutines.CoroutineScope
@@ -77,17 +75,13 @@ class GetCredentialsActivity : FragmentActivity() {
     }
 
     private val activityScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private lateinit var storageManager: CredentialStorageManager
-    private lateinit var database: CredentialDatabase
-    private lateinit var mukEscrowManager: MukEscrowManager
-    private lateinit var biometricPrompt: BiometricPrompt
-    private lateinit var promptInfo: BiometricPrompt.PromptInfo
+	private lateinit var database: CredentialDatabase
+	private lateinit var mukEscrowManager: MukEscrowManager
     private val allowlistJson: String by lazy {
         loadAllowlistJson()
     }
 
-    private var credentialId: String? = null  // Legacy storage
-    private var itemId: String? = null        // Unified storage
+	private var itemId: String? = null
     private var passkeyCredentialId: String? = null
     private var requestType: String? = null
 
@@ -95,34 +89,28 @@ class GetCredentialsActivity : FragmentActivity() {
         super.onCreate(savedInstanceState)
         VaultStateManager.initialize(applicationContext)
 
-        storageManager = CredentialStorageManager(applicationContext)
-        database = CredentialDatabase.getInstance(applicationContext)
+		database = CredentialDatabase.getInstance(applicationContext)
         mukEscrowManager = MukEscrowManager(applicationContext)
 
-        credentialId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_CREDENTIAL_ID)
-        itemId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_ITEM_ID)
+		itemId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_ITEM_ID)
         passkeyCredentialId = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_PASSKEY_CREDENTIAL_ID)
         requestType = intent.getStringExtra(BitteryCredentialProviderService.EXTRA_REQUEST_TYPE)
 
         Log.d(
             TAG,
-            "Activity started - requestType: $requestType, credentialId: $credentialId, itemId: $itemId, passkeyCredentialId: $passkeyCredentialId, pid=${android.os.Process.myPid()}"
+			"Activity started - requestType: $requestType, itemId: $itemId, passkeyCredentialId: $passkeyCredentialId, pid=${android.os.Process.myPid()}"
         )
         VaultStateManager.dumpDebugState("GetCredentialsActivity.onCreate")
         Log.d(TAG, "MUK Escrow state: hasValidEscrow=${mukEscrowManager.hasValidEscrow()}, canUseBiometricUnlock=${mukEscrowManager.canUseBiometricUnlock()}, escrowUserId=${mukEscrowManager.getEscrowUserId()}")
 
-        setupBiometricPrompt()
-
-        when (requestType) {
-            BitteryCredentialProviderService.REQUEST_TYPE_GET -> {
-                // Check which storage type we're using
-                if (itemId != null) {
-                    handleGetItemCredential()
-                } else {
-                    handleGetCredential()
-                }
-            }
-            BitteryCredentialProviderService.REQUEST_TYPE_CREATE -> handleCreateCredential()
+		when (requestType) {
+			BitteryCredentialProviderService.REQUEST_TYPE_GET -> {
+				if (itemId != null) {
+					handleGetItemCredential()
+				} else {
+					finishWithError("No item ID provided")
+				}
+			}
             BitteryCredentialProviderService.REQUEST_TYPE_GET_PASSKEY -> handleGetPasskeyCredential()
             BitteryCredentialProviderService.REQUEST_TYPE_CREATE_PASSKEY -> handleCreatePasskeyCredential()
             BitteryCredentialProviderService.REQUEST_TYPE_UNLOCK -> handleUnlock()
@@ -133,83 +121,6 @@ class GetCredentialsActivity : FragmentActivity() {
         }
     }
 
-    private fun setupBiometricPrompt() {
-        val executor = ContextCompat.getMainExecutor(this)
-
-        biometricPrompt = BiometricPrompt(this, executor, object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                Log.d(TAG, "Biometric authentication succeeded")
-                result.cryptoObject?.cipher?.let { cipher ->
-                    when (requestType) {
-                        BitteryCredentialProviderService.REQUEST_TYPE_GET -> {
-                            completeGetCredential(cipher)
-                        }
-                        BitteryCredentialProviderService.REQUEST_TYPE_CREATE -> {
-                            completeCreateCredential(cipher)
-                        }
-                    }
-                } ?: run {
-                    Log.e(TAG, "Cipher not available after authentication")
-                    finishWithError("Authentication failed - no cipher")
-                }
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                Log.e(TAG, "Biometric authentication error: $errorCode - $errString")
-                finishWithError("Authentication error: $errString")
-            }
-
-            override fun onAuthenticationFailed() {
-                Log.w(TAG, "Biometric authentication failed")
-                // Don't finish - let user retry
-            }
-        })
-
-        promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Bittery Authentication")
-            .setSubtitle("Authenticate to access your passwords")
-            .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_STRONG or
-                BiometricManager.Authenticators.DEVICE_CREDENTIAL
-            )
-            .build()
-    }
-
-    /**
-     * Handle legacy credential retrieval (uses BiometricKeyManager encryption).
-     */
-    private fun handleGetCredential() {
-        val credId = credentialId
-        if (credId == null) {
-            finishWithError("No credential ID provided")
-            return
-        }
-
-        activityScope.launch {
-            try {
-                // Get the IV for this credential to initialize the decrypt cipher
-                val iv = storageManager.getCredentialIv(credId)
-                if (iv == null) {
-                    finishWithError("Credential not found")
-                    return@launch
-                }
-
-                // Get decrypt cipher initialized with the credential's IV
-                val cipher = storageManager.biometricKeyManager.getDecryptCipher(iv)
-
-                // Start biometric authentication with the cipher
-                withContext(Dispatchers.Main) {
-                    biometricPrompt.authenticate(
-                        promptInfo,
-                        BiometricPrompt.CryptoObject(cipher)
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error preparing credential retrieval", e)
-                finishWithError("Failed to prepare authentication: ${e.message}")
-            }
-        }
-    }
 
     /**
      * Handle unified storage credential retrieval (uses VaultStateManager MUK).
@@ -565,8 +476,8 @@ class GetCredentialsActivity : FragmentActivity() {
                             PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
                             setResult(Activity.RESULT_OK, resultIntent)
                         } else {
-                            Log.w(TAG, "No provider request found, using legacy response")
-                            setResult(Activity.RESULT_OK)
+                            finishWithError("Credential provider request is missing")
+                            return@withContext
                         }
                         finish()
                     }
@@ -1011,126 +922,6 @@ class GetCredentialsActivity : FragmentActivity() {
         }
     }
 
-    private fun completeGetCredential(cipher: javax.crypto.Cipher) {
-        val credId = credentialId ?: return
-
-        activityScope.launch {
-            try {
-                // Get credential and decrypt password
-                val credential = storageManager.getCredentialById(credId)
-                if (credential == null) {
-                    finishWithError("Credential not found")
-                    return@launch
-                }
-
-                val password = storageManager.getDecryptedPassword(cipher, credId)
-                if (password == null) {
-                    finishWithError("Failed to decrypt password")
-                    return@launch
-                }
-
-                Log.d(TAG, "Successfully decrypted credential for ${credential.username}")
-
-                // Create the password credential response
-                val passwordCredential = PasswordCredential(
-                    id = credential.username,
-                    password = password
-                )
-
-                // Get the original request to build proper response
-                val getRequest = PendingIntentHandler.retrieveProviderGetCredentialRequest(intent)
-                if (getRequest != null) {
-                    val response = GetCredentialResponse(passwordCredential)
-                    val resultIntent = Intent()
-                    PendingIntentHandler.setGetCredentialResponse(resultIntent, response)
-                    setResult(Activity.RESULT_OK, resultIntent)
-                } else {
-                    Log.w(TAG, "No provider request found, using legacy response")
-                    setResult(Activity.RESULT_OK)
-                }
-
-                finish()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error completing credential retrieval", e)
-                finishWithError("Failed to retrieve credential: ${e.message}")
-            }
-        }
-    }
-
-    private fun handleCreateCredential() {
-        // For create requests, we need to get an encrypt cipher
-        activityScope.launch {
-            try {
-                val cipher = storageManager.biometricKeyManager.getEncryptCipher()
-
-                withContext(Dispatchers.Main) {
-                    biometricPrompt.authenticate(
-                        promptInfo,
-                        BiometricPrompt.CryptoObject(cipher)
-                    )
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error preparing credential creation", e)
-                finishWithError("Failed to prepare authentication: ${e.message}")
-            }
-        }
-    }
-
-    private fun completeCreateCredential(cipher: javax.crypto.Cipher) {
-        activityScope.launch {
-            try {
-                // Get the create request from the intent
-                val createRequest = PendingIntentHandler.retrieveProviderCreateCredentialRequest(intent)
-                if (createRequest == null) {
-                    finishWithError("No create request found")
-                    return@launch
-                }
-
-                // Extract username and password from the request
-                val callingRequest = createRequest.callingRequest
-                if (callingRequest !is androidx.credentials.CreatePasswordRequest) {
-                    finishWithError("Not a password credential request")
-                    return@launch
-                }
-
-                val username = callingRequest.id
-                val password = callingRequest.password
-                val rawOrigin = try {
-                    createRequest.callingAppInfo?.getOrigin(allowlistJson)
-                } catch (e: Exception) {
-                    null
-                }
-                val origin = resolveCallingOrigin(rawOrigin, createRequest.callingAppInfo?.packageName)
-
-                val domain = extractDomain(origin)
-
-                Log.d(TAG, "Creating credential for $username at $domain")
-
-                // Save the credential
-                val credentialId = storageManager.saveCredential(
-                    cipher = cipher,
-                    vaultId = "external", // External credentials not linked to vault
-                    itemId = "external_${System.currentTimeMillis()}",
-                    domain = domain,
-                    username = username,
-                    password = password,
-                    displayName = "$username @ $domain"
-                )
-
-                Log.d(TAG, "Created credential with ID: $credentialId")
-
-                // Return success
-                val response = CreatePasswordResponse()
-                val resultIntent = Intent()
-                PendingIntentHandler.setCreateCredentialResponse(resultIntent, response)
-                setResult(Activity.RESULT_OK, resultIntent)
-                finish()
-            } catch (e: Exception) {
-                Log.e(TAG, "Error creating credential", e)
-                finishWithError("Failed to save credential: ${e.message}")
-            }
-        }
-    }
 
     private suspend fun loadPasskeyCreateCandidates(
         userIds: List<String>,
@@ -1150,15 +941,6 @@ class GetCredentialsActivity : FragmentActivity() {
                 for (item in items) {
                     results[item.id] = item
                 }
-            }
-            // Fallback for legacy/stale rows where item_domains is missing but primaryDomain is populated.
-            val primaryDomainItems = database.itemDao().getLoginItemsByPrimaryDomain(
-                domain = normalizedRpId,
-                canonicalDomain = canonicalRpId,
-                userId = userId
-            )
-            for (item in primaryDomainItems) {
-                results[item.id] = item
             }
         }
 
@@ -1192,14 +974,6 @@ class GetCredentialsActivity : FragmentActivity() {
 
         val byDomain = database.itemDao().getLoginItemsByDomainsAnyUser(domainsToQuery)
         for (item in byDomain) {
-            results[item.id] = item
-        }
-
-        val byPrimaryDomain = database.itemDao().getLoginItemsByPrimaryDomainAnyUser(
-            domain = normalizedRpId,
-            canonicalDomain = canonicalRpId
-        )
-        for (item in byPrimaryDomain) {
             results[item.id] = item
         }
 

@@ -151,16 +151,6 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 			window.location.href = "/login";
 		}
 	}, [queryClient]);
-	const resolveLegacyAccountId = useCallback(async (email: string) => {
-		await initializeStorage();
-		const matches = (await storage.getAccountsList()).filter(
-			(account) => account.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (matches.length !== 1)
-			throw new Error(`Ambiguous legacy account queue for ${email}`);
-		return matches[0]?.accountId;
-	}, []);
-
 	// A queued mutation carries the account that produced it, so the drain must
 	// authenticate as that account rather than as whichever one is active now.
 	const getClientForAccount = useCallback(
@@ -205,7 +195,6 @@ export function useWebSync(queryClient: QueryClient, enabled = true) {
 		getClientForAccount,
 		refreshFromServer,
 		initializeFromServer,
-		resolveLegacyAccountId,
 		onSessionRevoked,
 		onTerminalCommandFailure,
 	});

@@ -26,30 +26,8 @@ export type { ItemSyncReconciler };
 export type OutboundQueueApiClient = Pick<AppApiClient, "items">;
 
 const QUEUE_DOCUMENT_KEY = "bittery_pending_mutation_queues_v3";
-const LEGACY_ACCOUNT_ID_INDEX_KEY = "bittery_pending_mutation_account_ids_v2";
-const LEGACY_QUEUE_INDEX_KEY = "bittery_pending_mutation_accounts";
 
 type QueueDocument = Record<string, PendingMutation[]>;
-
-function normalizeEmail(email: string): string {
-	return email.toLowerCase();
-}
-
-function sanitizeEmailLegacy(email: string): string {
-	return normalizeEmail(email).replace(/[^a-z0-9]/g, "_");
-}
-
-function getQueueKeyForEmail(email: string): string {
-	return `bittery_pending_mutations_${encodeURIComponent(normalizeEmail(email))}`;
-}
-
-function getQueueKeyForAccountId(accountId: string): string {
-	return `bittery_pending_mutations_v2_${encodeURIComponent(accountId)}`;
-}
-
-function getLegacyQueueKeyForEmail(email: string): string {
-	return `bittery_pending_mutations_${sanitizeEmailLegacy(email)}`;
-}
 
 function isNetworkError(error: unknown): boolean {
 	if (error instanceof ApiError) {
@@ -107,13 +85,6 @@ function isReadyMutation(mutation: PendingMutation, now: number): boolean {
 	);
 }
 
-function isRestorableCommand(command: PendingMutation): boolean {
-	return (
-		command.type !== "adopt_encryption_context" ||
-		command.migrationTrigger === "explicit_open"
-	);
-}
-
 function newAttemptId(mutation: PendingMutation): string {
 	const suffix =
 		globalThis.crypto?.randomUUID?.() ??
@@ -134,7 +105,6 @@ const MAX_RETRY_DELAY_MS = 60_000;
 
 export class ItemSyncEngine {
 	private readonly queuesByAccountId = new Map<string, PendingMutation[]>();
-	private readonly unresolvedLegacyEmails = new Set<string>();
 	private readonly listeners = new Set<() => void>();
 	private latestMappings: TempIdMapping[] = [];
 	private draining = false;
@@ -149,9 +119,6 @@ export class ItemSyncEngine {
 	constructor(
 		private readonly storage: SyncStorage,
 		private readonly clientId: string,
-		private readonly resolveLegacyAccountId?: (
-			email: string,
-		) => string | undefined | Promise<string | undefined>,
 		private readonly reconciler?: ItemSyncReconciler,
 		private readonly now: () => number = Date.now,
 	) {}
@@ -240,15 +207,15 @@ export class ItemSyncEngine {
 			encryptionAlgorithm: item.encryptionAlgorithm,
 			version: item.version,
 			lastModifiedBy: item.lastModifiedBy ?? null,
-			encryptionVersion: item.encryptionVersion ?? undefined,
-			encryptedByUserId: item.encryptedByUserId ?? undefined,
+			encryptionVersion: item.encryptionVersion,
+			encryptedByUserId: item.encryptedByUserId,
 			createdAt: String(item.createdAt),
 			updatedAt: String(item.updatedAt),
 			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
 			attachments: item.attachments?.map((attachment) => ({
 				...attachment,
-				encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? null,
-				uploadedBy: attachment.uploadedBy ?? null,
+				encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+				uploadedBy: attachment.uploadedBy,
 			})),
 		};
 	}
@@ -619,18 +586,12 @@ export class ItemSyncEngine {
 		this.queuesByAccountId.clear();
 		this.persistedOperationIds.clear();
 		this.persistedCommandSignatures.clear();
-		this.unresolvedLegacyEmails.clear();
-		const deferredMigrationAccounts = new Set<string>();
 
 		const document =
 			(await this.storage.get<QueueDocument>(QUEUE_DOCUMENT_KEY)) ?? {};
 		for (const [accountId, queue] of Object.entries(document)) {
 			if (queue.length === 0) continue;
-			const activeQueue = queue.filter(isRestorableCommand);
-			if (activeQueue.length !== queue.length) {
-				deferredMigrationAccounts.add(accountId);
-			}
-			const normalized = activeQueue
+			const normalized = queue
 				.map((entry) => normalizeMutation({ ...entry, accountId }))
 				.sort((a, b) => a.timestamp - b.timestamp);
 			if (normalized.length > 0) {
@@ -638,91 +599,6 @@ export class ItemSyncEngine {
 			}
 			this.rememberPersistedCommands(accountId, queue);
 		}
-
-		const accountIds =
-			(await this.storage.get<string[]>(LEGACY_ACCOUNT_ID_INDEX_KEY)) ?? [];
-		for (const accountId of accountIds) {
-			const queue =
-				(await this.storage.get<PendingMutation[]>(
-					getQueueKeyForAccountId(accountId),
-				)) ?? [];
-			if (queue.length > 0) {
-				const activeQueue = queue.filter(isRestorableCommand);
-				if (activeQueue.length !== queue.length) {
-					deferredMigrationAccounts.add(accountId);
-				}
-				const existing = this.queuesByAccountId.get(accountId) ?? [];
-				const merged = new Map(
-					existing.map((entry) => [entry.operationId ?? entry.id, entry]),
-				);
-				for (const entry of activeQueue) {
-					const normalized = normalizeMutation({ ...entry, accountId });
-					merged.set(normalized.operationId ?? normalized.id, normalized);
-				}
-				const migrated = Array.from(merged.values()).sort(
-					(a, b) => a.timestamp - b.timestamp,
-				);
-				this.queuesByAccountId.set(accountId, migrated);
-				this.rememberPersistedCommands(accountId, migrated);
-				await this.persistQueue(accountId);
-				await this.storage.remove(getQueueKeyForAccountId(accountId));
-			}
-		}
-		if (accountIds.length > 0) {
-			await this.storage.remove(LEGACY_ACCOUNT_ID_INDEX_KEY);
-		}
-		for (const accountId of deferredMigrationAccounts) {
-			await this.persistQueue(accountId);
-		}
-
-		const emails =
-			(await this.storage.get<string[]>(LEGACY_QUEUE_INDEX_KEY))?.map(
-				normalizeEmail,
-			) ?? [];
-		for (const email of emails) {
-			const queueKey = getQueueKeyForEmail(email);
-			const legacyQueueKey = getLegacyQueueKeyForEmail(email);
-			let queue = (await this.storage.get<PendingMutation[]>(queueKey)) ?? [];
-			if (queue.length === 0 && legacyQueueKey !== queueKey) {
-				const legacyQueue =
-					(await this.storage.get<PendingMutation[]>(legacyQueueKey)) ?? [];
-				if (legacyQueue.length > 0) {
-					queue = legacyQueue;
-				}
-			}
-			if (queue.length > 0) {
-				let accountId: string | undefined;
-				try {
-					accountId = await this.resolveLegacyAccountId?.(email);
-				} catch {
-					accountId = undefined;
-				}
-				if (!accountId) {
-					this.unresolvedLegacyEmails.add(email);
-					continue;
-				}
-				const migrated = queue.filter(isRestorableCommand).map((entry) =>
-					normalizeMutation({
-						...entry,
-						accountId,
-						accountEmail: entry.accountEmail ?? email,
-					}),
-				);
-				const existing = this.queuesByAccountId.get(accountId) ?? [];
-				this.queuesByAccountId.set(
-					accountId,
-					[...existing, ...migrated].sort((a, b) => a.timestamp - b.timestamp),
-				);
-				await this.persistQueue(accountId);
-				await this.storage.remove(queueKey);
-				if (legacyQueueKey !== queueKey)
-					await this.storage.remove(legacyQueueKey);
-			}
-		}
-		await this.storage.set(
-			LEGACY_QUEUE_INDEX_KEY,
-			Array.from(this.unresolvedLegacyEmails),
-		);
 
 		if (this.reconciler) {
 			const conflicts: PendingMutation[] = [];
@@ -965,26 +841,6 @@ export class ItemSyncEngine {
 				);
 				return { etag: response.etag };
 			}
-			case "adopt_encryption_context": {
-				const payload = mutation.encryptedPayload;
-				if (
-					payload?.encryptionVersion === undefined ||
-					!payload.encryptedByUserId
-				) {
-					throw new Error(
-						`Invalid encryption context migration for ${mutation.entityId}`,
-					);
-				}
-				const response = await client.items.update(
-					mutation.entityId,
-					{
-						encryptionVersion: payload.encryptionVersion,
-						encryptedByUserId: payload.encryptedByUserId,
-					},
-					writeOptions(mutation),
-				);
-				return { etag: response.etag };
-			}
 		}
 	}
 
@@ -1071,12 +927,6 @@ export class ItemSyncEngine {
 			accountId: string,
 		) => OutboundQueueApiClient | Promise<OutboundQueueApiClient>,
 	): Promise<void> {
-		if (this.unresolvedLegacyEmails.size > 0) {
-			throw new Error(
-				`Cannot drain ambiguous legacy queues: ${Array.from(this.unresolvedLegacyEmails).join(", ")}`,
-			);
-		}
-
 		const accountEntries = Array.from(this.queuesByAccountId.entries()).sort(
 			(a, b) => a[0].localeCompare(b[0]),
 		);
@@ -1246,20 +1096,13 @@ export class ItemSyncEngine {
 			return;
 		}
 
-		const accountIds = Array.from(this.queuesByAccountId.keys());
 		this.queuesByAccountId.clear();
 		this.persistedOperationIds.clear();
 		this.persistedCommandSignatures.clear();
 		const persistence = this.persistenceTail
 			.catch(() => undefined)
 			.then(async () => {
-				await Promise.all(
-					accountIds.map((queuedAccountId) =>
-						this.storage.remove(getQueueKeyForAccountId(queuedAccountId)),
-					),
-				);
 				await this.storage.remove(QUEUE_DOCUMENT_KEY);
-				await this.storage.remove(LEGACY_ACCOUNT_ID_INDEX_KEY);
 			});
 		this.persistenceTail = persistence.catch(() => undefined);
 		await persistence;

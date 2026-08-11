@@ -19,7 +19,6 @@ import type {
 	CachedAttachment,
 	CachedEncryptedItem,
 	CachedVaultMetadata,
-	ItemEncryptionContextMigrationPort,
 	ItemSyncAcknowledgement,
 	ItemSyncCommand,
 } from "@bittery/types";
@@ -42,9 +41,8 @@ export interface VaultRepositoryItem extends DecryptedItem {
 	deletedAt: string | null;
 	version: number;
 	lastModifiedBy: string | null;
-	encryptionVersion?: number | null;
-	encryptedByUserId?: string | null;
-	encryptionContextPendingMigration?: boolean;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 	attachments?: CachedAttachment[];
 	_encrypted: {
 		data: string;
@@ -58,21 +56,9 @@ export interface EncryptedPayload {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
-	encryptionVersion?: number;
-	encryptedByUserId?: string;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 }
-
-export type {
-	DiscoveredItemEncryptionContext,
-	ItemEncryptionContextMigrationPort,
-} from "@bittery/types";
-
-const LEGACY_ENCRYPTION_VERSION_WINDOW = 8;
-const LEGACY_ENCRYPTION_AUTHOR_LIMIT = 32;
-
-export type LegacyEncryptionAuthorProvider = (
-	vaultId: string,
-) => Promise<string[]>;
 
 type BootstrapRequest = Parameters<AppApiClient["sync"]["bootstrap"]>[0];
 
@@ -85,19 +71,14 @@ interface BootstrapItemPage {
 		encryptedData: string;
 		encryptionIv: string;
 		encryptionAlgorithm: string;
-		version?: number;
+		version: number;
 		lastModifiedBy?: string | null;
-		encryptionVersion?: number | null;
-		encryptedByUserId?: string | null;
+		encryptionVersion: number;
+		encryptedByUserId: string;
 		createdAt: string | Date;
 		updatedAt: string | Date;
 		deletedAt?: string | Date | null;
-		attachments?: ReadonlyArray<
-			Omit<CachedAttachment, "encryptedContentTypeIv" | "uploadedBy"> & {
-				encryptedContentTypeIv?: string | null;
-				uploadedBy?: string | null;
-			}
-		>;
+		attachments?: ReadonlyArray<CachedAttachment>;
 		vault?: ServerVaultSummary | null;
 	}>;
 	hasMore: boolean;
@@ -122,10 +103,6 @@ export class VaultRepository {
 	private readonly pendingCommands = new Map<string, ItemSyncCommand>();
 	private readonly vaults = new Map<string, CachedVaultMetadata>();
 	private readonly vaultKeyEntries = new Map<string, VaultKeyData>();
-	private readonly legacyEncryptionAuthorsByVaultId = new Map<
-		string,
-		Promise<string[]>
-	>();
 	private readonly listeners = new Set<() => void>();
 	private snapshot = 0;
 	private hydrated = false;
@@ -145,8 +122,6 @@ export class VaultRepository {
 		private readonly accountId: string,
 		serverUrl?: string,
 		private readonly accountEmail?: string,
-		private readonly onEncryptionContextDiscovered?: ItemEncryptionContextMigrationPort,
-		private readonly getLegacyEncryptionAuthors?: LegacyEncryptionAuthorProvider,
 	) {
 		this.serverUrl = serverUrl;
 	}
@@ -331,195 +306,25 @@ export class VaultRepository {
 		return resolveUserIdForAccount(this.storage, this.accountId);
 	}
 
-	private getLegacyVersionCandidates(version: number): number[] {
-		const normalized =
-			Number.isFinite(version) && version > 0 ? Math.floor(version) : 1;
-		const candidates: number[] = [];
-		const minimum = Math.max(
-			1,
-			normalized - LEGACY_ENCRYPTION_VERSION_WINDOW + 1,
-		);
-		for (let candidate = normalized; candidate >= minimum; candidate -= 1) {
-			candidates.push(candidate);
-		}
-		return candidates;
-	}
-
-	private getLegacyAuthors(vaultId: string): Promise<string[]> {
-		const existing = this.legacyEncryptionAuthorsByVaultId.get(vaultId);
-		if (existing) return existing;
-		const lookup = Promise.resolve(
-			this.getLegacyEncryptionAuthors?.(vaultId) ?? [],
-		)
-			.then((authors) => authors.slice(0, LEGACY_ENCRYPTION_AUTHOR_LIMIT))
-			.catch((error) => {
-				this.legacyEncryptionAuthorsByVaultId.delete(vaultId);
-				throw error;
-			});
-		this.legacyEncryptionAuthorsByVaultId.set(vaultId, lookup);
-		return lookup;
-	}
-
-	private async getEncryptionContextCandidates(
-		item: CachedEncryptedItem,
-		defaultUserId: string,
-	): Promise<Array<{ version: number; userId: string; legacy: boolean }>> {
-		const hasVersion = item.encryptionVersion != null;
-		const hasAuthor = item.encryptedByUserId != null;
-		if (hasVersion || hasAuthor) {
-			if (
-				!hasVersion ||
-				!hasAuthor ||
-				!Number.isInteger(item.encryptionVersion) ||
-				(item.encryptionVersion ?? 0) < 1 ||
-				item.encryptedByUserId === ""
-			) {
-				return [];
-			}
-			return [
-				{
-					version: item.encryptionVersion as number,
-					userId: item.encryptedByUserId as string,
-					legacy: false,
-				},
-			];
-		}
-
-		let vaultAuthors: string[] = [];
-		try {
-			vaultAuthors = await this.getLegacyAuthors(item.vaultId);
-		} catch {
-			// The bounded local candidates still cover personal Vaults while offline.
-		}
-		const authors = Array.from(
-			new Set(
-				[item.lastModifiedBy, defaultUserId, ...vaultAuthors].filter(
-					(author): author is string =>
-						typeof author === "string" && author !== "",
-				),
-			),
-		).slice(0, LEGACY_ENCRYPTION_AUTHOR_LIMIT);
-		return this.getLegacyVersionCandidates(item.version).flatMap((version) =>
-			authors.map((userId) => ({ version, userId, legacy: true })),
-		);
-	}
-
-	private async persistDiscoveredEncryptionContext(
-		item: CachedEncryptedItem,
-		version: number,
-		encryptedByUserId: string,
-		publish = true,
-	): Promise<CachedEncryptedItem> {
-		const migrated = {
-			...item,
-			encryptionVersion: version,
-			encryptedByUserId,
-			encryptionContextPendingMigration: true,
-		};
-		await this.persistItem(migrated);
-		try {
-			if (publish)
-				await this.onEncryptionContextDiscovered?.({
-					accountId: this.accountId,
-					itemId: item.id,
-					vaultId: item.vaultId,
-					baseVersion: item.version,
-					encryptionVersion: version,
-					encryptedByUserId,
-				});
-		} catch (error) {
-			console.warn(
-				`[VaultRepository] Failed to publish discovered encryption context for item ${item.id}:`,
-				error,
-			);
-		}
-		return migrated;
-	}
-
 	private async decryptItemPayload(
 		item: CachedEncryptedItem,
 		vaultKey: KeyRef,
-		userId: string,
 	): Promise<{ plaintext: string; item: CachedEncryptedItem }> {
-		let lastError: unknown = null;
-
-		for (const context of await this.getEncryptionContextCandidates(
-			item,
-			userId,
-		)) {
-			try {
-				const decrypted = await this.vaultCrypto.decryptItem(
-					{
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
-					vaultKey,
-					{
-						vaultId: item.vaultId,
-						itemId: item.id,
-						version: context.version,
-						userId: context.userId,
-					},
-				);
-
-				if (context.legacy) {
-					console.debug(
-						`[VaultRepository] Recovered item ${item.id} with legacy encryption context version ${context.version} (stored version ${item.version})`,
-					);
-					return {
-						plaintext: decrypted,
-						item: await this.persistDiscoveredEncryptionContext(
-							item,
-							context.version,
-							context.userId,
-							false,
-						),
-					};
-				}
-
-				return { plaintext: decrypted, item };
-			} catch (error) {
-				lastError = error;
-			}
-		}
-
-		throw lastError ?? new Error(`Failed to decrypt item ${item.id}`);
-	}
-
-	/**
-	 * Which of this account's vault keys, if any, opens a payload its own vault key
-	 * could not. Decrypts without AAD on purpose: that isolates "wrong key" from
-	 * "wrong encryption context", which is the only distinction worth making here.
-	 */
-	private async findVaultKeyThatOpens(
-		item: CachedEncryptedItem,
-	): Promise<string | null> {
-		for (const vaultId of this.vaultKeyEntries.keys()) {
-			let vaultKey: KeyRef;
-			try {
-				vaultKey = await this.decryptVaultKey(vaultId);
-			} catch {
-				continue;
-			}
-			try {
-				await this.crypto.decrypt(
-					{
-						ciphertext: item.encryptedData,
-						iv: item.encryptionIv,
-						algorithm: item.encryptionAlgorithm,
-					},
-					vaultKey,
-					null,
-				);
-				return vaultId;
-			} catch {
-				// Not this key.
-			} finally {
-				await this.crypto.destroyKey(vaultKey);
-			}
-		}
-		return null;
+		const plaintext = await this.vaultCrypto.decryptItem(
+			{
+				ciphertext: item.encryptedData,
+				iv: item.encryptionIv,
+				algorithm: item.encryptionAlgorithm,
+			},
+			vaultKey,
+			{
+				vaultId: item.vaultId,
+				itemId: item.id,
+				version: item.encryptionVersion,
+				userId: item.encryptedByUserId,
+			},
+		);
+		return { plaintext, item };
 	}
 
 	/**
@@ -529,8 +334,7 @@ export class VaultRepository {
 	private async describeUndecryptableItem(
 		item: CachedEncryptedItem,
 	): Promise<string> {
-		const openedBy = await this.findVaultKeyThatOpens(item);
-		return `item ${item.id} vault=${item.vaultId} version=${item.version} lastModifiedBy=${item.lastModifiedBy ?? "null"} encryptedDataLength=${item.encryptedData.length} openedByVaultKey=${openedBy ?? "none"}`;
+		return `item ${item.id} vault=${item.vaultId} version=${item.version} lastModifiedBy=${item.lastModifiedBy ?? "null"} encryptedDataLength=${item.encryptedData.length}`;
 	}
 
 	private async decryptItemBatch(
@@ -542,7 +346,6 @@ export class VaultRepository {
 		>
 	> {
 		if (items.length === 0) return [];
-		const defaultUserId = await this.resolveUserId();
 		const vaultKeys = new Map<string, KeyRef>();
 		const keyErrors = new Map<string, unknown>();
 
@@ -555,19 +358,13 @@ export class VaultRepository {
 				}
 			}
 
-			const candidates = await Promise.all(
-				items.map(async (item) => {
-					const vaultKey = vaultKeys.get(item.vaultId);
-					const contexts = await this.getEncryptionContextCandidates(
-						item,
-						defaultUserId,
-					);
-					return vaultKey && contexts[0] ? { item, vaultKey, contexts } : null;
-				}),
-			);
+			const candidates = items.map((item) => {
+				const vaultKey = vaultKeys.get(item.vaultId);
+				return vaultKey ? { item, vaultKey } : null;
+			});
 			const decryptable = candidates.filter((entry) => entry !== null);
 			const primary = await this.vaultCrypto.decryptItems(
-				decryptable.map(({ item, vaultKey, contexts }) => ({
+				decryptable.map(({ item, vaultKey }) => ({
 					id: item.id,
 					data: {
 						ciphertext: item.encryptedData,
@@ -578,8 +375,8 @@ export class VaultRepository {
 					scope: {
 						vaultId: item.vaultId,
 						itemId: item.id,
-						version: contexts[0]?.version ?? item.version,
-						userId: contexts[0]?.userId ?? defaultUserId,
+						version: item.encryptionVersion,
+						userId: item.encryptedByUserId,
 					},
 				})),
 			);
@@ -593,70 +390,19 @@ export class VaultRepository {
 				const entry = decryptable[index];
 				if (!entry) continue;
 				if (result.ok) {
-					const primaryContext = entry.contexts[0];
-					const migratedItem = primaryContext?.legacy
-						? await this.persistDiscoveredEncryptionContext(
-								entry.item,
-								primaryContext.version,
-								primaryContext.userId,
-								false,
-							)
-						: entry.item;
 					outcomeByItem.set(entry.item, {
 						ok: true,
 						decrypted: this.buildItem(
-							migratedItem,
+							entry.item,
 							JSON.parse(result.plaintext) as DecryptedItemData,
 						),
 					});
 					continue;
 				}
-
-				let fallbackError: unknown = new Error(result.error);
-				for (const context of entry.contexts.slice(1)) {
-					try {
-						const plaintext = await this.vaultCrypto.decryptItem(
-							{
-								ciphertext: entry.item.encryptedData,
-								iv: entry.item.encryptionIv,
-								algorithm: entry.item.encryptionAlgorithm,
-							},
-							entry.vaultKey,
-							{
-								vaultId: entry.item.vaultId,
-								itemId: entry.item.id,
-								version: context.version,
-								userId: context.userId,
-							},
-						);
-						console.debug(
-							`[VaultRepository] Recovered item ${entry.item.id} with legacy encryption context version ${context.version} (stored version ${entry.item.version})`,
-						);
-						const migratedItem = await this.persistDiscoveredEncryptionContext(
-							entry.item,
-							context.version,
-							context.userId,
-							false,
-						);
-						outcomeByItem.set(entry.item, {
-							ok: true,
-							decrypted: this.buildItem(
-								migratedItem,
-								JSON.parse(plaintext) as DecryptedItemData,
-							),
-						});
-						fallbackError = null;
-						break;
-					} catch (error) {
-						fallbackError = error;
-					}
-				}
-				if (fallbackError) {
-					outcomeByItem.set(entry.item, {
-						ok: false,
-						error: fallbackError,
-					});
-				}
+				outcomeByItem.set(entry.item, {
+					ok: false,
+					error: new Error(result.error),
+				});
 			}
 
 			return items.map((item) => {
@@ -695,7 +441,6 @@ export class VaultRepository {
 			lastModifiedBy: item.lastModifiedBy,
 			encryptionVersion: item.encryptionVersion,
 			encryptedByUserId: item.encryptedByUserId,
-			encryptionContextPendingMigration: item.encryptionContextPendingMigration,
 			createdAt: item.createdAt,
 			updatedAt: item.updatedAt,
 			deletedAt: item.deletedAt,
@@ -749,9 +494,9 @@ export class VaultRepository {
 				encryptedData: payload.encryptedData,
 				encryptionIv: payload.encryptionIv,
 				encryptionAlgorithm: payload.encryptionAlgorithm,
-				version: payload.encryptionVersion ?? 1,
-				lastModifiedBy: payload.encryptedByUserId ?? null,
-				encryptionVersion: payload.encryptionVersion ?? 1,
+				version: payload.encryptionVersion,
+				lastModifiedBy: payload.encryptedByUserId,
+				encryptionVersion: payload.encryptionVersion,
 				encryptedByUserId: payload.encryptedByUserId,
 				createdAt: timestamp,
 				updatedAt: timestamp,
@@ -780,11 +525,10 @@ export class VaultRepository {
 					encryptedData: payload.encryptedData,
 					encryptionIv: payload.encryptionIv,
 					encryptionAlgorithm: payload.encryptionAlgorithm,
-					version: payload.encryptionVersion ?? base.version + 1,
-					lastModifiedBy: payload.encryptedByUserId ?? base.lastModifiedBy,
-					encryptionVersion: payload.encryptionVersion ?? base.version + 1,
-					encryptedByUserId:
-						payload.encryptedByUserId ?? base.encryptedByUserId,
+					version: payload.encryptionVersion,
+					lastModifiedBy: payload.encryptedByUserId,
+					encryptionVersion: payload.encryptionVersion,
+					encryptedByUserId: payload.encryptedByUserId,
 					updatedAt: timestamp,
 				};
 			}
@@ -797,17 +541,6 @@ export class VaultRepository {
 					...base,
 					favorite: command.favorite ?? false,
 					updatedAt: timestamp,
-				};
-			case "adopt_encryption_context":
-				return {
-					...base,
-					encryptionVersion:
-						command.encryptedPayload?.encryptionVersion ??
-						base.encryptionVersion,
-					encryptedByUserId:
-						command.encryptedPayload?.encryptedByUserId ??
-						base.encryptedByUserId,
-					encryptionContextPendingMigration: true,
 				};
 		}
 	}
@@ -914,8 +647,6 @@ export class VaultRepository {
 			lastModifiedBy: cached.lastModifiedBy,
 			encryptionVersion: cached.encryptionVersion,
 			encryptedByUserId: cached.encryptedByUserId,
-			encryptionContextPendingMigration:
-				cached.encryptionContextPendingMigration,
 			attachments: cached.attachments,
 			...decryptedData,
 			_encrypted: {
@@ -941,38 +672,18 @@ export class VaultRepository {
 		}
 
 		const userId = await this.resolveUserId();
-		try {
-			return await this.vaultCrypto.unwrapStoredVaultKey({
-				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-				vaultId,
-				userId,
-				accountId: this.accountId,
-			});
-		} catch (error) {
-			const message =
-				error instanceof Error ? error.message : String(error ?? "");
-			if (
-				message !== "Vault key wrap vault mismatch" &&
-				message !== "Vault key wrap user mismatch"
-			) {
-				throw error;
-			}
-
-			return this.vaultCrypto.unwrapStoredVaultKey({
-				encryptedVaultKey: vaultKeyData.encryptedVaultKey,
-				accountId: this.accountId,
-			});
-		}
+		return this.vaultCrypto.unwrapStoredVaultKey({
+			encryptedVaultKey: vaultKeyData.encryptedVaultKey,
+			vaultId,
+			userId,
+			accountId: this.accountId,
+		});
 	}
 
 	async decryptItem(item: CachedEncryptedItem): Promise<VaultRepositoryItem> {
 		const vaultKey = await this.decryptVaultKey(item.vaultId);
 		try {
-			const decrypted = await this.decryptItemPayload(
-				item,
-				vaultKey,
-				await this.resolveUserId(),
-			);
+			const decrypted = await this.decryptItemPayload(item, vaultKey);
 			return this.buildItem(
 				decrypted.item,
 				JSON.parse(decrypted.plaintext) as DecryptedItemData,
@@ -1015,8 +726,7 @@ export class VaultRepository {
 		const existing = this.items.get(item.id);
 		const now = new Date().toISOString();
 		const version = (existing?.version ?? 0) + 1;
-		const encryptedByUserId =
-			encryptedPayload.encryptedByUserId ?? (await this.resolveUserId());
+		const encryptedByUserId = encryptedPayload.encryptedByUserId;
 		const next: VaultRepositoryItem = {
 			...existing,
 			...item,
@@ -1029,7 +739,7 @@ export class VaultRepository {
 			deletedAt: existing?.deletedAt ?? null,
 			version,
 			lastModifiedBy: existing?.lastModifiedBy ?? null,
-			encryptionVersion: encryptedPayload.encryptionVersion ?? version,
+			encryptionVersion: encryptedPayload.encryptionVersion,
 			encryptedByUserId,
 			attachments: existing?.attachments,
 			_encrypted: {
@@ -1201,7 +911,6 @@ export class VaultRepository {
 			lastModifiedBy: _lastModifiedBy,
 			encryptionVersion: _encryptionVersion,
 			encryptedByUserId: _encryptedByUserId,
-			encryptionContextPendingMigration: _pendingMigration,
 			attachments: _attachments,
 			_encrypted,
 			vault: _vault,
@@ -1282,42 +991,9 @@ export class VaultRepository {
 			id: acknowledgement.entityId,
 			version,
 		};
-		if (command.type === "adopt_encryption_context") {
-			acknowledged.encryptionVersion =
-				command.encryptedPayload?.encryptionVersion ??
-				acknowledged.encryptionVersion;
-			acknowledged.encryptedByUserId =
-				command.encryptedPayload?.encryptedByUserId ??
-				acknowledged.encryptedByUserId;
-			acknowledged.encryptionContextPendingMigration = false;
-		}
 		this.authoritativeItems.set(acknowledgement.entityId, acknowledged);
 		await this.persistItem(acknowledged);
 		await this.rebuildItemProjection(acknowledgement.entityId);
-	}
-
-	async publishPendingEncryptionContextMigration(
-		itemId: string,
-	): Promise<void> {
-		if (!this.onEncryptionContextDiscovered) return;
-		const item = (await this.itemCache.getCachedItems(this.accountId))?.find(
-			(candidate) => candidate.id === itemId,
-		);
-		if (
-			!item?.encryptionContextPendingMigration ||
-			item.encryptionVersion == null ||
-			!item.encryptedByUserId
-		) {
-			return;
-		}
-		await this.onEncryptionContextDiscovered({
-			accountId: this.accountId,
-			itemId: item.id,
-			vaultId: item.vaultId,
-			baseVersion: item.version,
-			encryptionVersion: item.encryptionVersion,
-			encryptedByUserId: item.encryptedByUserId,
-		});
 	}
 
 	/**
@@ -1344,10 +1020,8 @@ export class VaultRepository {
 			vaultId: targetVaultId,
 			updatedAt: new Date().toISOString(),
 			version: existing.version + 1,
-			encryptionVersion:
-				newEncryptedPayload.encryptionVersion ?? existing.version + 1,
-			encryptedByUserId:
-				newEncryptedPayload.encryptedByUserId ?? (await this.resolveUserId()),
+			encryptionVersion: newEncryptedPayload.encryptionVersion,
+			encryptedByUserId: newEncryptedPayload.encryptedByUserId,
 			_encrypted: {
 				data: newEncryptedPayload.ciphertext,
 				iv: newEncryptedPayload.iv,
@@ -1387,7 +1061,6 @@ export class VaultRepository {
 			this.authoritativeItems.clear();
 			this.vaults.clear();
 			this.vaultKeyEntries.clear();
-			this.legacyEncryptionAuthorsByVaultId.clear();
 
 			for (const vault of cachedVaults ?? []) {
 				if (!this.serverUrl && vault.serverUrl) {
@@ -1496,17 +1169,17 @@ export class VaultRepository {
 						encryptedData: rawItem.encryptedData,
 						encryptionIv: rawItem.encryptionIv,
 						encryptionAlgorithm: rawItem.encryptionAlgorithm,
-						version: rawItem.version ?? 0,
+						version: rawItem.version,
 						lastModifiedBy: rawItem.lastModifiedBy ?? null,
-						encryptionVersion: rawItem.encryptionVersion ?? null,
-						encryptedByUserId: rawItem.encryptedByUserId ?? null,
+						encryptionVersion: rawItem.encryptionVersion,
+						encryptedByUserId: rawItem.encryptedByUserId,
 						createdAt: String(rawItem.createdAt),
 						updatedAt: String(rawItem.updatedAt),
 						deletedAt: rawItem.deletedAt ? String(rawItem.deletedAt) : null,
 						attachments: (rawItem.attachments ?? []).map((attachment) => ({
 							...attachment,
-							encryptedContentTypeIv: attachment.encryptedContentTypeIv ?? null,
-							uploadedBy: attachment.uploadedBy ?? null,
+							encryptedContentTypeIv: attachment.encryptedContentTypeIv,
+							uploadedBy: attachment.uploadedBy,
 						})),
 					};
 					await staging.upsertCachedItem(cachedItem);
@@ -1571,7 +1244,6 @@ export class VaultRepository {
 
 		this.items.clear();
 		this.authoritativeItems.clear();
-		this.legacyEncryptionAuthorsByVaultId.clear();
 		for (const outcome of await this.decryptItemBatch(cachedItems)) {
 			if ("decrypted" in outcome) {
 				this.items.set(outcome.item.id, outcome.decrypted);
@@ -1604,7 +1276,6 @@ export class VaultRepository {
 		this.authoritativeItems.clear();
 		this.vaults.clear();
 		this.vaultKeyEntries.clear();
-		this.legacyEncryptionAuthorsByVaultId.clear();
 		this.hydrated = false;
 		this.hydrating = false;
 		this.hasCacheSnapshotFlag = false;
@@ -1709,18 +1380,15 @@ export class VaultRepository {
 	async encryptWithVaultKey(
 		vaultId: string,
 		data: DecryptedItemData,
-		options?: {
-			itemId?: string;
-			version?: number;
+		options: {
+			itemId: string;
+			version: number;
 			userId?: string;
 		},
 	): Promise<EncryptedPayload> {
 		const vaultKey = await this.decryptVaultKey(vaultId);
 		try {
-			if (!options?.itemId) {
-				return this.crypto.encrypt(JSON.stringify(data), vaultKey, null);
-			}
-			const encryptionVersion = options.version ?? 1;
+			const encryptionVersion = options.version;
 			const encryptedByUserId = options.userId ?? (await this.resolveUserId());
 			const encrypted = await this.vaultCrypto.encryptItem(
 				JSON.stringify(data),

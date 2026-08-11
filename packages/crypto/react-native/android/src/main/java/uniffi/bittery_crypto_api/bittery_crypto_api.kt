@@ -849,7 +849,7 @@ external fun uniffi_bittery_crypto_api_fn_func_rsa_encrypt(`plaintext`: RustBuff
 ): Long
 external fun uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion(`privateKeyBase64`: RustBuffer.ByValue,`rpId`: RustBuffer.ByValue,`clientDataHashBase64`: RustBuffer.ByValue,`signCount`: Int,
 ): Long
-external fun uniffi_bittery_crypto_api_fn_func_unwrap_key(`data`: RustBuffer.ByValue,`wrappingKey`: Long,`context`: RustBuffer.ByValue,`legacyMarker`: RustBuffer.ByValue,`legacyContext`: RustBuffer.ByValue,
+external fun uniffi_bittery_crypto_api_fn_func_unwrap_key(`data`: RustBuffer.ByValue,`wrappingKey`: Long,`context`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_bittery_crypto_api_fn_func_validate_recovery_key(`recoveryKey`: RustBuffer.ByValue,
 ): Long
@@ -1085,7 +1085,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_crypto_api_checksum_func_sign_passkey_assertion() != 32518) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_bittery_crypto_api_checksum_func_unwrap_key() != 34433) {
+    if (lib.uniffi_bittery_crypto_api_checksum_func_unwrap_key() != 60728) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_crypto_api_checksum_func_validate_recovery_key() != 314) {
@@ -4381,9 +4381,9 @@ public object FfiConverterSequenceTypeReEncryptedItem: FfiConverterRustBuffer<Li
 
     @Throws(CryptoException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `unwrapKey`(`data`: EncryptedData, `wrappingKey`: KeyHandle, `context`: EncryptionContext?, `legacyMarker`: kotlin.String?, `legacyContext`: kotlin.String?) : KeyHandle {
+     suspend fun `unwrapKey`(`data`: EncryptedData, `wrappingKey`: KeyHandle, `context`: EncryptionContext?) : KeyHandle {
         return uniffiRustCallAsync(
-        UniffiLib.uniffi_bittery_crypto_api_fn_func_unwrap_key(FfiConverterTypeEncryptedData.lower(`data`),FfiConverterTypeKeyHandle.lower(`wrappingKey`),FfiConverterOptionalTypeEncryptionContext.lower(`context`),FfiConverterOptionalString.lower(`legacyMarker`),FfiConverterOptionalString.lower(`legacyContext`),),
+        UniffiLib.uniffi_bittery_crypto_api_fn_func_unwrap_key(FfiConverterTypeEncryptedData.lower(`data`),FfiConverterTypeKeyHandle.lower(`wrappingKey`),FfiConverterOptionalTypeEncryptionContext.lower(`context`),),
         { future, callback, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_poll_u64(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_complete_u64(future, continuation) },
         { future -> UniffiLib.ffi_bittery_crypto_api_rust_future_free_u64(future) },

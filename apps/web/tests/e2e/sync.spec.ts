@@ -8,9 +8,8 @@ import {
 	type TestUser,
 	test,
 } from "../fixtures/auth";
-import { runE2eSql, sqlString } from "../fixtures/e2e-database";
 import { uiText } from "../fixtures/messages";
-import { waitForNetworkIdleExceptSSE } from "../fixtures/network-helpers";
+import { waitForPageReady } from "../fixtures/network-helpers";
 import {
 	createItem,
 	createVault,
@@ -72,7 +71,7 @@ let reader: Page;
 /** Put one context on the shared vault and wait for it to have hydrated. */
 async function openSharedVault(page: Page, expectedTitle: string) {
 	await openVault(page, vaultId);
-	await waitForNetworkIdleExceptSSE(page);
+	await waitForPageReady(page);
 	// Seeing an item that already existed proves this context finished its
 	// bootstrap and holds the vault key, so anything it misses afterwards is the
 	// stream's fault rather than a half-open session.
@@ -201,83 +200,6 @@ test("the two contexts are two sync clients of one account", async () => {
 	// users who happen to see the same names.
 	expect(new URL(writer.url()).pathname).toBe(`/vaults/${vaultId}`);
 	expect(new URL(reader.url()).pathname).toBe(`/vaults/${vaultId}`);
-});
-
-test("fresh hydration defers legacy encryption migrations until one Item is opened", async ({
-	browser,
-}) => {
-	test.setTimeout(TEST_BUDGET_MS);
-
-	const resetContexts = runE2eSql(
-		`UPDATE item SET encryption_version = NULL, encrypted_by_user_id = NULL WHERE vault_id = '${sqlString(vaultId)}'`,
-	);
-	if (!/^UPDATE [1-9]\d*$/.test(resetContexts)) {
-		throw new Error(
-			`Expected legacy Items to reset, psql said: ${resetContexts}`,
-		);
-	}
-
-	type ObservedMigration = {
-		status: number;
-		ifMatch: string | undefined;
-		etag: string | undefined;
-		itemId: string;
-	};
-	const itemReads: string[] = [];
-	const migrations: ObservedMigration[] = [];
-	const context = await browser.newContext();
-	const page = await context.newPage();
-	const observeItemRequest = async (
-		response: import("@playwright/test").Response,
-	) => {
-		const request = response.request();
-		const match = new URL(response.url()).pathname.match(
-			/^\/api\/v1\/items\/([^/]+)$/,
-		);
-		if (!match?.[1]) return;
-		if (request.method() === "GET") {
-			itemReads.push(match[1]);
-			return;
-		}
-		if (request.method() !== "PATCH") return;
-		const requestHeaders = await request.allHeaders();
-		const responseHeaders = await response.allHeaders();
-		migrations.push({
-			status: response.status(),
-			ifMatch: requestHeaders["if-match"],
-			etag: responseHeaders.etag,
-			itemId: match[1],
-		});
-	};
-	page.on("response", observeItemRequest);
-
-	try {
-		await signIn(page, user);
-		await openSharedVault(page, seedTitle);
-		await page.waitForTimeout(1_000);
-		expect(itemReads).toEqual([]);
-		expect(migrations).toEqual([]);
-
-		await openItem(page, seedTitle);
-		const openedItemId = await page
-			.getByTestId("item-detail-pane")
-			.getAttribute("data-item-id");
-		if (!openedItemId) throw new Error("The opened legacy Item has no id.");
-		await expect
-			.poll(() => migrations.length, { timeout: SYNC_BUDGET_MS })
-			.toBe(1);
-		expect(migrations).toEqual([
-			{
-				status: 200,
-				ifMatch: '"1"',
-				etag: '"2"',
-				itemId: openedItemId,
-			},
-		]);
-	} finally {
-		page.off("response", observeItemRequest);
-		await context.close();
-	}
 });
 
 test("Trash acknowledgement advances Delete Forever's If-Match and converges both clients", async () => {

@@ -1420,8 +1420,6 @@ export async function unwrapKey(
   data: EncryptedData,
   wrappingKey: KeyHandleLike,
   context: EncryptionContext | undefined,
-  legacyMarker: string | undefined,
-  legacyContext: string | undefined,
   asyncOpts_?: { signal: AbortSignal },
 ): Promise<KeyHandleLike> /*throws*/ {
   return await uniffiRustCallAsync(
@@ -1438,14 +1436,6 @@ export async function unwrapKey(
         ),
         FfiConverterOptionalTypeEncryptionContext.lower(
           context,
-          nativeModule().rustbuffer_alloc,
-        ),
-        FfiConverterOptionalString.lower(
-          legacyMarker,
-          nativeModule().rustbuffer_alloc,
-        ),
-        FfiConverterOptionalString.lower(
-          legacyContext,
           nativeModule().rustbuffer_alloc,
         ),
       );
@@ -4449,7 +4439,7 @@ function uniffiEnsureInitialized() {
   }
   if (
     nativeModule().ubrn_uniffi_bittery_crypto_api_checksum_func_unwrap_key() !==
-    34433
+    60728
   ) {
     throw new UniffiInternalError.ApiChecksumMismatch(
       "uniffi_bittery_crypto_api_checksum_func_unwrap_key",

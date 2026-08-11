@@ -155,12 +155,8 @@ export class VaultService {
 		if (!masterUnlockKey) {
 			throw new Error("Master Unlock Key not found. Please sign in again.");
 		}
-		// Migrated to the canonical session→metadata→active triad
-		// (resolveUserIdForAccount). This is a superset of the previous
-		// metadata→active lookup: it also tries the account's live session
-		// first. Session userId and account metadata userId are written
-		// together at login (see storeLoginSession/registerLoginAccount), so
-		// for the same accountId they are always in sync — this is benign.
+		// Session and account metadata are written together at login, so the
+		// canonical resolver keeps this context bound to the requested account.
 		const currentUserId = await resolveUserIdForAccount(
 			this.storage,
 			accountId,

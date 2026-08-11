@@ -271,10 +271,9 @@ struct RotationItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]

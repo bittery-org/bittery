@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 use tokio::io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-// Kept at 1: additive fields remain compatible with older desktop peers.
 pub const DESKTOP_PROTOCOL_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -78,8 +77,6 @@ pub enum DesktopRequest {
     TriggerDesktopUnlock,
     #[serde(rename = "OPEN_DESKTOP_APP")]
     OpenDesktopApp {
-        // Additive, protocol v1: older peers omit these and older hosts
-        // ignore them, simply opening the app without the intent.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         intent: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]

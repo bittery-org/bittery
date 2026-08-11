@@ -257,12 +257,8 @@ fn base_share_url_uses_trimmed_env_value_and_default_fallback() {
 }
 
 #[test]
-fn bittery_mode_normalizes_self_hosted_aliases_and_defaults_to_cloud() {
-    with_env_vars(Some("self_hosted"), None, None, || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-
-    with_env_vars(Some("SELFHOSTED"), None, None, || {
+fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
+    with_env_vars(Some("SELF-HOSTED"), None, None, || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
 

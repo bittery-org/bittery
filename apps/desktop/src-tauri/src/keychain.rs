@@ -85,25 +85,6 @@ fn save_vault(data: &HashMap<String, String>) -> Result<(), String> {
     Ok(())
 }
 
-/// Try to migrate a key from a legacy individual keychain entry into the vault.
-/// Returns the value if migration succeeded, `None` otherwise.
-fn migrate_legacy_key(key: &str) -> Option<String> {
-    let legacy_entry = match Entry::new(SERVICE, key) {
-        Ok(e) => e,
-        Err(_) => return None,
-    };
-
-    let value = match legacy_entry.get_password() {
-        Ok(v) => v,
-        Err(_) => return None,
-    };
-
-    // Best-effort delete of the old individual entry
-    let _ = legacy_entry.delete_credential();
-
-    Some(value)
-}
-
 /// Store a value in the OS keychain (inside the single vault blob)
 #[tauri::command]
 pub fn keychain_set(key: &str, value: &str) -> Result<(), String> {
@@ -128,35 +109,9 @@ pub fn keychain_set(key: &str, value: &str) -> Result<(), String> {
 }
 
 /// Retrieve a value from the OS keychain (from the single vault blob)
-///
-/// On cache miss for a specific key, attempts lazy migration from a legacy
-/// individual keychain entry.
 #[tauri::command]
 pub fn keychain_get(key: &str) -> Result<Option<String>, String> {
-    let mut vault = load_vault()?;
-
-    if let Some(value) = vault.get(key) {
-        return Ok(Some(value.clone()));
-    }
-
-    // Key not in vault — try migrating from a legacy individual entry
-    if let Some(value) = migrate_legacy_key(key) {
-        // Store in vault for future reads
-        vault.insert(key.to_string(), value.clone());
-
-        // Update cache
-        let mut cache = VAULT_CACHE
-            .lock()
-            .map_err(|e| format!("Vault cache lock poisoned: {}", e))?;
-        *cache = Some(vault.clone());
-
-        // Persist vault with the migrated key
-        save_vault(&vault)?;
-
-        return Ok(Some(value));
-    }
-
-    Ok(None)
+    Ok(load_vault()?.get(key).cloned())
 }
 
 /// Delete a value from the OS keychain (from the single vault blob)
@@ -180,11 +135,6 @@ pub fn keychain_delete(key: &str) -> Result<bool, String> {
 
     if removed {
         save_vault(data)?;
-    }
-
-    // Also try to clean up any legacy individual entry for this key
-    if let Ok(legacy_entry) = Entry::new(SERVICE, key) {
-        let _ = legacy_entry.delete_credential();
     }
 
     Ok(removed)

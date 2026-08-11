@@ -100,8 +100,8 @@ describe("extension Item mutations", () => {
 		};
 		expect(
 			openAfterRestart(
-				restoredPayload.encryptionVersion ?? 0,
-				restoredPayload.encryptedByUserId ?? "",
+				restoredPayload.encryptionVersion,
+				restoredPayload.encryptedByUserId,
 			),
 		).toBe("sealed-for-8");
 	});

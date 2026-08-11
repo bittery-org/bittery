@@ -253,7 +253,7 @@ describe("native-messaging-client", () => {
 		unsubscribe();
 	});
 
-	test("rejects a legacy response without waiting for the request timeout", async () => {
+	test("rejects a response without a protocol version before the request timeout", async () => {
 		const fakePort = createFakePort();
 		const client = new NativeMessagingClient({
 			connectNative: () => fakePort.port,

@@ -29,25 +29,10 @@ describe("stored Item encryption context", () => {
 			buildStoredItemEncryptionContext({
 				vaultId: VAULT_ID,
 				itemId: "item_1",
-				version: 9,
-				lastModifiedBy: "metadata_writer",
 				encryptionVersion: 3,
 				encryptedByUserId: "ciphertext_author",
-				userId: USER_ID,
 			}),
 		).toMatchObject({ version: 3, userId: "ciphertext_author" });
-	});
-
-	test("falls back to legacy OCC metadata only while migration is incomplete", () => {
-		expect(
-			buildStoredItemEncryptionContext({
-				vaultId: VAULT_ID,
-				itemId: "legacy_item",
-				version: 4,
-				lastModifiedBy: "legacy_author",
-				userId: USER_ID,
-			}),
-		).toMatchObject({ version: 4, userId: "legacy_author" });
 	});
 });
 
@@ -133,40 +118,6 @@ async function seedOwnerWrappedVault(
 		{ vaultId: options.vaultId ?? VAULT_ID, encryptedVaultKey },
 	];
 	return { vaultKey, encryptedVaultKey };
-}
-
-/**
- * A record in the pre-AAD format: sealed with no context at all, carrying the context as a
- * JSON envelope inside the plaintext. Written out literally rather than through a helper,
- * because the marker and the NUL-joined field order ARE the back-compat contract.
- */
-async function sealLegacyEnvelope(
-	crypto: InMemoryCryptoPort,
-	key: KeyRef,
-	plaintext: string,
-	context: {
-		vaultId: string;
-		entityId: string;
-		entityType: string;
-		version: number;
-		userId: string;
-	},
-): Promise<EncryptedData> {
-	return crypto.encrypt(
-		JSON.stringify({
-			marker: "bittery-context-envelope-v1",
-			context: [
-				context.vaultId,
-				context.entityId,
-				context.entityType,
-				String(context.version),
-				context.userId,
-			].join("\0"),
-			payload: plaintext,
-		}),
-		key,
-		null,
-	);
 }
 
 describe("wrapped vault key envelope", () => {
@@ -314,123 +265,7 @@ describe("wrap context binding", () => {
 	});
 });
 
-describe("the pre-AAD ciphertext fallback", () => {
-	test("opens a vault key written before AAD binding existed", async () => {
-		const harness = createHarness();
-		const muk = await harness.crypto.generateEncryptionKey();
-		harness.state.masterUnlockKey = muk;
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const vaultKeyBase64 = await materialOf(harness.crypto, vaultKey);
-
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			muk,
-			vaultKeyBase64,
-			{
-				vaultId: VAULT_ID,
-				entityId: VAULT_KEY_WRAP_PURPOSE,
-				entityType: "vault_key",
-				version: 1,
-				userId: USER_ID,
-			},
-		);
-
-		const unwrapped = await harness.vaultCrypto.unwrapStoredVaultKey({
-			encryptedVaultKey: JSON.stringify({
-				...legacy,
-				context: {
-					vaultId: VAULT_ID,
-					userId: USER_ID,
-					keyVersion: 1,
-					purpose: VAULT_KEY_WRAP_PURPOSE,
-				},
-			}),
-			vaultId: VAULT_ID,
-			userId: USER_ID,
-		});
-
-		expect(await materialOf(harness.crypto, unwrapped)).toBe(vaultKeyBase64);
-	});
-
-	test("opens an item written before AAD binding existed", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = {
-			vaultId: VAULT_ID,
-			itemId: "item_1",
-			version: 2,
-			userId: USER_ID,
-		};
-		const legacy = await sealLegacyEnvelope(harness.crypto, vaultKey, "{}", {
-			vaultId: VAULT_ID,
-			entityId: "item_1",
-			entityType: "item",
-			version: 2,
-			userId: USER_ID,
-		});
-
-		expect(await harness.vaultCrypto.decryptItem(legacy, vaultKey, scope)).toBe(
-			"{}",
-		);
-	});
-
-	test("opens an attachment written before AAD binding existed", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = {
-			vaultId: VAULT_ID,
-			attachmentKey: "attachment_1",
-			userId: USER_ID,
-		};
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			vaultKey,
-			"secret.txt",
-			{
-				vaultId: scope.vaultId,
-				entityId: scope.attachmentKey,
-				entityType: "attachment_name",
-				version: 1,
-				userId: scope.userId,
-			},
-		);
-
-		expect(
-			await harness.vaultCrypto.decryptAttachment(
-				legacy,
-				vaultKey,
-				scope,
-				"name",
-			),
-		).toBe("secret.txt");
-	});
-
-	test("still refuses a legacy envelope bound to another entity", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			vaultKey,
-			"secret",
-			{
-				vaultId: VAULT_ID,
-				entityId: "item_1",
-				entityType: "item",
-				version: 1,
-				userId: USER_ID,
-			},
-		);
-
-		await expect(
-			harness.vaultCrypto.decryptItem(legacy, vaultKey, {
-				vaultId: VAULT_ID,
-				itemId: "item_2",
-				version: 1,
-				userId: USER_ID,
-			}),
-		).rejects.toThrow("Encryption context mismatch");
-	});
-
+describe("item context binding", () => {
 	test("reports the plaintext is not an envelope when the key is simply wrong", async () => {
 		const harness = createHarness();
 		const vaultKey = await harness.crypto.generateEncryptionKey();
@@ -510,35 +345,6 @@ describe("batch item decryption", () => {
 		expect(results[0]).toEqual({ id: "item_1", ok: true, plaintext: "first" });
 		expect(results[1]?.ok).toBe(false);
 		expect(results[2]).toEqual({ id: "item_3", ok: true, plaintext: "third" });
-	});
-
-	test("opens a legacy item without failing the rest of the batch", async () => {
-		const harness = createHarness();
-		const vaultKey = await harness.crypto.generateEncryptionKey();
-		const scope = {
-			vaultId: VAULT_ID,
-			itemId: "legacy_item",
-			version: 2,
-			userId: USER_ID,
-		};
-		const legacy = await sealLegacyEnvelope(
-			harness.crypto,
-			vaultKey,
-			"legacy",
-			{
-				vaultId: scope.vaultId,
-				entityId: scope.itemId,
-				entityType: "item",
-				version: scope.version,
-				userId: scope.userId,
-			},
-		);
-
-		expect(
-			await harness.vaultCrypto.decryptItems([
-				{ id: scope.itemId, data: legacy, vaultKey, scope },
-			]),
-		).toEqual([{ id: scope.itemId, ok: true, plaintext: "legacy" }]);
 	});
 
 	test("borrows every vault key ref in the batch", async () => {

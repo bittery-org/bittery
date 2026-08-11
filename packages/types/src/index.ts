@@ -195,9 +195,8 @@ export interface CachedEncryptedItem {
 	encryptionAlgorithm: string;
 	version: number;
 	lastModifiedBy: string | null;
-	encryptionVersion?: number | null;
-	encryptedByUserId?: string | null;
-	encryptionContextPendingMigration?: boolean;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 	createdAt: string;
 	updatedAt: string;
 	deletedAt?: string | null;
@@ -245,10 +244,10 @@ export interface CachedAttachment {
 	encryptedName: string;
 	encryptedContentType: string;
 	encryptionIv: string;
-	encryptedContentTypeIv: string | null;
+	encryptedContentTypeIv: string;
 	encryptionAlgorithm: string;
 	fileSize: number;
-	uploadedBy: string | null;
+	uploadedBy: string;
 	createdAt: string;
 }
 
@@ -260,8 +259,7 @@ export type ItemSyncCommandType =
 	| "restore"
 	| "move"
 	| "cross_account_move"
-	| "toggle_favorite"
-	| "adopt_encryption_context";
+	| "toggle_favorite";
 
 export type ItemSyncCommandStatus =
 	| "staged"
@@ -275,8 +273,8 @@ export interface ItemSyncEncryptedPayload {
 	encryptedData: string;
 	encryptionIv: string;
 	encryptionAlgorithm: string;
-	encryptionVersion?: number;
-	encryptedByUserId?: string;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 }
 
 /** A durable semantic Item operation. HTTP attempts are replaceable; this identity is not. */
@@ -303,7 +301,6 @@ export interface ItemSyncCommand {
 	lastError?: string;
 	nextAttemptAt?: number;
 	conflictCopyId?: string;
-	migrationTrigger?: "explicit_open";
 	projectionClaimId?: string;
 	projectionClaimExpiresAt?: number;
 }
@@ -313,19 +310,6 @@ export interface ItemSyncAcknowledgement {
 	etag: string | null;
 	version: number | undefined;
 }
-
-export interface DiscoveredItemEncryptionContext {
-	accountId: string;
-	itemId: string;
-	vaultId: string;
-	baseVersion: number;
-	encryptionVersion: number;
-	encryptedByUserId: string;
-}
-
-export type ItemEncryptionContextMigrationPort = (
-	context: DiscoveredItemEncryptionContext,
-) => Promise<void> | void;
 
 export interface ItemSyncReconciler {
 	apply(command: ItemSyncCommand): Promise<void>;
@@ -415,10 +399,10 @@ export interface RawEncryptedItem {
 	encryptedData: string;
 	encryptionIv: string;
 	encryptionAlgorithm: string;
-	version?: number;
+	version: number;
 	lastModifiedBy?: string | null;
-	encryptionVersion?: number | null;
-	encryptedByUserId?: string | null;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 	createdAt: string | Date;
 	updatedAt: string | Date;
 	deletedAt?: string | Date | null;

@@ -38,11 +38,11 @@ export interface AttachmentMeta {
 	encryptedName: string;
 	encryptedContentType: string;
 	encryptionIv: string;
-	/** IV used specifically for encryptedContentType. Falls back to encryptionIv for old rows. */
-	encryptedContentTypeIv: string | null;
+	/** IV used specifically for encryptedContentType. */
+	encryptedContentTypeIv: string;
 	encryptionAlgorithm: string;
 	fileSize: number;
-	uploadedBy: string | null;
+	uploadedBy: string;
 	createdAt: Date | string;
 }
 
@@ -186,7 +186,7 @@ export function useItemAttachments(
 		attachment: AttachmentMeta,
 	): Promise<DecryptedAttachment> {
 		return withVaultKey(async (vaultKey) => {
-			const contextUserId = attachment.uploadedBy || (await getCurrentUserId());
+			const contextUserId = attachment.uploadedBy;
 			const { name, contentType } = await decryptAttachmentMetaShared(
 				vaultCrypto,
 				vaultKey,
@@ -281,8 +281,7 @@ export function useItemAttachments(
 	const downloadMutation = useMutation({
 		mutationFn: async (attachment: AttachmentMeta) => {
 			return withVaultKey(async (vaultKey) => {
-				const contextUserId =
-					attachment.uploadedBy || (await getCurrentUserId());
+				const contextUserId = attachment.uploadedBy;
 				const scope = {
 					vaultId: attachment.vaultId,
 					attachmentKey: attachment.storageKey,
@@ -350,8 +349,7 @@ export function useItemAttachments(
 				throw new Error("Attachment metadata not found");
 			}
 			return withVaultKey(async (vaultKey) => {
-				const contextUserId =
-					attachment.uploadedBy || (await getCurrentUserId());
+				const contextUserId = attachment.uploadedBy;
 				const encryptedName = await encryptAttachmentName(
 					vaultCrypto,
 					vaultKey,

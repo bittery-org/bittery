@@ -85,7 +85,7 @@ struct CreateItemBody {
     #[schema(max_length = 1048576)]
     encrypted_data: String,
     encryption_iv: String,
-    encryption_algorithm: Option<String>,
+    encryption_algorithm: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -104,7 +104,7 @@ struct BulkImportItemInput {
     #[schema(max_length = 1048576)]
     encrypted_data: String,
     encryption_iv: String,
-    encryption_algorithm: Option<String>,
+    encryption_algorithm: String,
 }
 
 impl From<BulkImportItemInput> for vault::BulkImportItemInput {
@@ -155,9 +155,9 @@ struct AllItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
     created_at: String,
     updated_at: String,
     deleted_at: Option<String>,
@@ -244,12 +244,6 @@ struct UpdateItemBody {
     #[serde(default)]
     #[schema(value_type = Option<String>, nullable = true)]
     encryption_algorithm: PatchField<String>,
-    #[serde(default)]
-    #[schema(value_type = Option<i32>, nullable = true, minimum = 1)]
-    encryption_version: PatchField<i32>,
-    #[serde(default)]
-    #[schema(value_type = Option<String>, nullable = true)]
-    encrypted_by_user_id: PatchField<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -266,7 +260,7 @@ struct MoveItemBody {
     #[schema(max_length = 1048576)]
     encrypted_data: String,
     encryption_iv: String,
-    encryption_algorithm: Option<String>,
+    encryption_algorithm: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -285,7 +279,7 @@ struct CreateAttachmentBody {
     encrypted_content_type: String,
     encryption_iv: String,
     encrypted_content_type_iv: String,
-    encryption_algorithm: Option<String>,
+    encryption_algorithm: String,
     file_size: i32,
 }
 
@@ -294,7 +288,7 @@ struct CreateAttachmentBody {
 struct UpdateAttachmentBody {
     encrypted_name: String,
     encryption_iv: String,
-    encryption_algorithm: Option<String>,
+    encryption_algorithm: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -540,10 +534,10 @@ struct VaultAttachmentResponse {
     encrypted_name: String,
     encrypted_content_type: String,
     encryption_iv: String,
-    encrypted_content_type_iv: Option<String>,
+    encrypted_content_type_iv: String,
     encryption_algorithm: String,
     file_size: i32,
-    uploaded_by: Option<String>,
+    uploaded_by: String,
     created_at: String,
 }
 
@@ -603,9 +597,9 @@ struct VaultItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
     created_at: String,
     updated_at: String,
     deleted_at: Option<String>,
@@ -643,9 +637,9 @@ struct VaultItemDetailsResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
     created_at: String,
     updated_at: String,
     deleted_at: Option<String>,
@@ -685,9 +679,9 @@ struct DeletedVaultItemWithVaultResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
     created_at: String,
     updated_at: String,
     deleted_at: Option<String>,
@@ -782,9 +776,9 @@ struct VaultRotationItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
 }
 
 impl From<vault::VaultRotationItemResponse> for VaultRotationItemResponse {
@@ -959,9 +953,9 @@ struct ItemResponseDto {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
-    encryption_version: Option<i32>,
-    encrypted_by_user_id: Option<String>,
-    last_modified_by: Option<String>,
+    encryption_version: i32,
+    encrypted_by_user_id: String,
+    last_modified_by: String,
     created_at: String,
     updated_at: String,
     deleted_at: Option<String>,
@@ -1605,30 +1599,6 @@ async fn update_item(
     let encryption_iv = optional_patch_value(body.encryption_iv, "/encryptionIv")?;
     let encryption_algorithm =
         optional_patch_value(body.encryption_algorithm, "/encryptionAlgorithm")?;
-    let encryption_version = match body.encryption_version {
-        PatchField::Missing => None,
-        PatchField::Value(value) if value > 0 => Some(value),
-        PatchField::Value(_) => {
-            return Err(ApiError::bad_request(
-                "INVALID_ENCRYPTION_CONTEXT",
-                "encryptionVersion must be positive.",
-            ));
-        }
-        PatchField::Null => {
-            return Err(ApiError::bad_request(
-                "FIELD_CANNOT_BE_CLEARED",
-                "/encryptionVersion cannot be null.",
-            ));
-        }
-    };
-    let encrypted_by_user_id =
-        optional_patch_value(body.encrypted_by_user_id, "/encryptedByUserId")?;
-    if encryption_version.is_some() != encrypted_by_user_id.is_some() {
-        return Err(ApiError::bad_request(
-            "INVALID_ENCRYPTION_CONTEXT",
-            "encryptionVersion and encryptedByUserId must be provided together.",
-        ));
-    }
     if let Some(value) = encrypted_data.as_deref() {
         check_ciphertext(value)?;
     }
@@ -1651,8 +1621,6 @@ async fn update_item(
                     encrypted_data,
                     encryption_iv,
                     encryption_algorithm,
-                    encryption_version,
-                    encrypted_by_user_id,
                     expected_version: Some(expected_version),
                     client_id,
                 },
@@ -2246,7 +2214,7 @@ mod tests {
             favorite: None,
             encrypted_data: ciphertext,
             encryption_iv: "iv".to_string(),
-            encryption_algorithm: None,
+            encryption_algorithm: "AES-GCM-AAD-V1".to_string(),
         }
     }
 
@@ -2333,9 +2301,9 @@ mod tests {
             encryption_iv: "iv".to_string(),
             encryption_algorithm: "aes-gcm".to_string(),
             version: 7,
-            encryption_version: Some(3),
-            encrypted_by_user_id: Some("user_test".to_string()),
-            last_modified_by: Some("user_test".to_string()),
+            encryption_version: 3,
+            encrypted_by_user_id: "user_test".to_string(),
+            last_modified_by: "user_test".to_string(),
             created_at: "2026-08-10T00:00:00Z".to_string(),
             updated_at: "2026-08-10T00:01:00Z".to_string(),
             deleted_at: None,
@@ -2347,10 +2315,10 @@ mod tests {
                 encrypted_name: "name".to_string(),
                 encrypted_content_type: "type".to_string(),
                 encryption_iv: "attachment-iv".to_string(),
-                encrypted_content_type_iv: Some("content-type-iv".to_string()),
+                encrypted_content_type_iv: "content-type-iv".to_string(),
                 encryption_algorithm: "aes-gcm".to_string(),
                 file_size: 128,
-                uploaded_by: Some("user_test".to_string()),
+                uploaded_by: "user_test".to_string(),
                 created_at: "2026-08-10T00:00:00Z".to_string(),
             }],
         };
@@ -2411,9 +2379,9 @@ mod tests {
                 encryption_iv: "iv".to_string(),
                 encryption_algorithm: "aes-gcm".to_string(),
                 version: 1,
-                encryption_version: None,
-                encrypted_by_user_id: None,
-                last_modified_by: None,
+                encryption_version: 1,
+                encrypted_by_user_id: "user_test".to_string(),
+                last_modified_by: "user_test".to_string(),
                 created_at: "2026-08-10T00:00:00Z".to_string(),
                 updated_at: "2026-08-10T00:00:00Z".to_string(),
                 deleted_at: None,
@@ -2439,9 +2407,9 @@ mod tests {
                 encryption_iv: "iv".to_string(),
                 encryption_algorithm: "aes-gcm".to_string(),
                 version: 2,
-                encryption_version: None,
-                encrypted_by_user_id: None,
-                last_modified_by: None,
+                encryption_version: 1,
+                encrypted_by_user_id: "user_test".to_string(),
+                last_modified_by: "user_test".to_string(),
                 created_at: "2026-08-10T00:00:00Z".to_string(),
                 updated_at: "2026-08-10T00:00:00Z".to_string(),
                 deleted_at: Some("2026-08-10T00:01:00Z".to_string()),

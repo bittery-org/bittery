@@ -157,7 +157,6 @@ describe("sync-cache-service", () => {
 				getAuthToken: async () => null,
 				clearCache: () => {},
 			},
-			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
 			deltaSync: async () => {},
 			refreshFromServer: async () => {
@@ -209,7 +208,6 @@ describe("sync-cache-service", () => {
 			storage,
 			itemCache: createItemCacheStub(),
 			desktopClient: desktop,
-			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
 			deltaSync: async (
 				_client,
@@ -270,7 +268,6 @@ describe("sync-cache-service", () => {
 				getAuthToken: async () => null,
 				clearCache: () => {},
 			},
-			defaultClient: createClientStub(),
 			createAccountClient: () => client,
 			deltaSync: async () => {},
 			logger: console,
@@ -312,7 +309,6 @@ describe("sync-cache-service", () => {
 				getAuthToken: async () => null,
 				clearCache: () => {},
 			},
-			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
 			deltaSync: async (_client, _cache, _event, accountScope) => {
 				deltaCalls.push(accountScope);
@@ -354,7 +350,6 @@ describe("sync-cache-service", () => {
 				getAuthToken: async () => null,
 				clearCache: () => {},
 			},
-			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
 			deltaSync: async (_client, _cache, _event, accountId) => {
 				attemptedAccountIds.push(accountId ?? "global");
@@ -403,7 +398,6 @@ describe("sync-cache-service", () => {
 				getAuthToken: async () => null,
 				clearCache: () => {},
 			},
-			defaultClient: createClientStub(),
 			createAccountClient: () => createClientStub(),
 			deltaSync: async (_client, _cache, event, accountScope) => {
 				deltaCalls.push(`${event.type}:${accountScope ?? "global"}`);

@@ -16,6 +16,7 @@ function account(accountId: string): AccountMetadata {
 		addedAt: 1,
 		lastActiveAt: 1,
 		biometricEnabled: false,
+		insecureTransportConfirmed: false,
 	};
 }
 

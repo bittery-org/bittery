@@ -202,30 +202,7 @@ function captureCredentials(
 				return true;
 			}
 
-			// Legacy check for backwards compatibility
-			const name = input.name?.toLowerCase() || "";
-			const id = input.id?.toLowerCase() || "";
-			const autocomplete = input.autocomplete?.toLowerCase() || "";
-			const placeholder = input.placeholder?.toLowerCase() || "";
-
-			return (
-				input.type === "email" ||
-				autocomplete.includes("username") ||
-				autocomplete.includes("email") ||
-				name.includes("user") ||
-				name.includes("email") ||
-				name.includes("login") ||
-				name.includes("identifier") ||
-				name.includes("account") ||
-				id.includes("user") ||
-				id.includes("email") ||
-				id.includes("login") ||
-				id.includes("identifier") ||
-				id.includes("account") ||
-				placeholder.includes("user") ||
-				placeholder.includes("email") ||
-				placeholder.includes("login")
-			);
+			return false;
 		});
 
 		if (candidateFields.length > 0) {

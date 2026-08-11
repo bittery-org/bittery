@@ -14,8 +14,8 @@ interface EncryptedPayload {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
-	encryptionVersion?: number;
-	encryptedByUserId?: string;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 }
 
 interface LocalItemCreatedInput {
@@ -32,14 +32,8 @@ interface LocalItemUpdatedInput {
 	accountEmail?: string;
 }
 
-interface LegacyLocalCache {
-	onItemCreated: (input: LocalItemCreatedInput) => Promise<void>;
-	onItemUpdated: (input: LocalItemUpdatedInput) => Promise<void>;
-}
-
 interface LocalItemCacheServiceDeps {
 	vaultCoordinator?: typeof core.vaultCoordinator;
-	cache?: LegacyLocalCache;
 	desktopClient: {
 		clearCache: () => void;
 	};
@@ -75,12 +69,6 @@ export function createLocalItemCacheService(
 
 	return {
 		async onLocalItemCreated(input: LocalItemCreatedInput): Promise<void> {
-			if (deps.cache) {
-				await deps.cache.onItemCreated(input);
-				deps.desktopClient.clearCache();
-				return;
-			}
-
 			const vaultCoordinator = deps.vaultCoordinator;
 			if (!vaultCoordinator) {
 				return;
@@ -110,8 +98,8 @@ export function createLocalItemCacheService(
 				encryptionIv: input.encryptedData.iv,
 				encryptionAlgorithm: input.encryptedData.algorithm,
 				version: 1,
-				lastModifiedBy: input.encryptedData.encryptedByUserId ?? null,
-				encryptionVersion: input.encryptedData.encryptionVersion ?? 1,
+				lastModifiedBy: input.encryptedData.encryptedByUserId,
+				encryptionVersion: input.encryptedData.encryptionVersion,
 				encryptedByUserId: input.encryptedData.encryptedByUserId,
 				createdAt: now,
 				updatedAt: now,
@@ -122,12 +110,6 @@ export function createLocalItemCacheService(
 		},
 
 		async onLocalItemUpdated(input: LocalItemUpdatedInput): Promise<void> {
-			if (deps.cache) {
-				await deps.cache.onItemUpdated(input);
-				deps.desktopClient.clearCache();
-				return;
-			}
-
 			const vaultCoordinator = deps.vaultCoordinator;
 			if (!vaultCoordinator) {
 				return;
@@ -153,13 +135,10 @@ export function createLocalItemCacheService(
 				encryptedData: input.encryptedData.ciphertext,
 				encryptionIv: input.encryptedData.iv,
 				encryptionAlgorithm: input.encryptedData.algorithm,
-				version: input.encryptedData.encryptionVersion ?? existing.version + 1,
-				lastModifiedBy:
-					input.encryptedData.encryptedByUserId ?? existing.lastModifiedBy,
-				encryptionVersion:
-					input.encryptedData.encryptionVersion ?? existing.version + 1,
-				encryptedByUserId:
-					input.encryptedData.encryptedByUserId ?? existing.encryptedByUserId,
+				version: input.encryptedData.encryptionVersion,
+				lastModifiedBy: input.encryptedData.encryptedByUserId,
+				encryptionVersion: input.encryptedData.encryptionVersion,
+				encryptedByUserId: input.encryptedData.encryptedByUserId,
 				createdAt: existing.createdAt,
 				updatedAt: new Date().toISOString(),
 				deletedAt: existing.deletedAt,

@@ -5,8 +5,6 @@ import type { VaultKeyData } from "@bittery/storage/types";
 import type {
 	CachedEncryptedItem,
 	CachedVaultMetadata,
-	DiscoveredItemEncryptionContext,
-	ItemEncryptionContextMigrationPort,
 	ItemSyncAcknowledgement,
 	ItemSyncCommand,
 } from "@bittery/types";
@@ -62,11 +60,6 @@ export class VaultRepositoryCoordinator {
 	>();
 	private readonly verifyingAccounts = new Map<string, Promise<void>>();
 	private snapshot = 0;
-	private encryptionContextMigrationPort?: ItemEncryptionContextMigrationPort;
-	private readonly deferredEncryptionContextMigrations = new Map<
-		string,
-		DiscoveredItemEncryptionContext
-	>();
 
 	constructor(
 		private readonly crypto: CryptoPort,
@@ -130,26 +123,6 @@ export class VaultRepositoryCoordinator {
 		this.repos.set(accountId, { repo, unsubscribe });
 	}
 
-	private encryptionContextMigrationKey(
-		context: DiscoveredItemEncryptionContext,
-	): string {
-		return `${context.accountId}:${context.itemId}`;
-	}
-
-	private async publishOrDeferEncryptionContextMigration(
-		context: DiscoveredItemEncryptionContext,
-	): Promise<void> {
-		const port = this.encryptionContextMigrationPort;
-		if (!port) {
-			this.deferredEncryptionContextMigrations.set(
-				this.encryptionContextMigrationKey(context),
-				context,
-			);
-			return;
-		}
-		await port(context);
-	}
-
 	getOrCreate(
 		accountId: string,
 		serverUrl?: string,
@@ -171,13 +144,6 @@ export class VaultRepositoryCoordinator {
 			accountId,
 			serverUrl,
 			accountEmail,
-			(context) => this.publishOrDeferEncryptionContextMigration(context),
-			async (vaultId) => {
-				const client = this.apiClientByAccountId.get(accountId);
-				if (!client) return [];
-				const { data: members } = await client.vaults.members.list(vaultId);
-				return members.map((member) => member.userId);
-			},
 		);
 		this.attachRepo(accountId, repo);
 		return repo;
@@ -194,11 +160,6 @@ export class VaultRepositoryCoordinator {
 		this.accountInfoByAccountId.delete(accountId);
 		this.apiClientByAccountId.delete(accountId);
 		this.activeAccountIds.delete(accountId);
-		for (const [key, context] of this.deferredEncryptionContextMigrations) {
-			if (context.accountId === accountId) {
-				this.deferredEncryptionContextMigrations.delete(key);
-			}
-		}
 		this.emit();
 	}
 
@@ -499,25 +460,6 @@ export class VaultRepositoryCoordinator {
 			if (!item) {
 				continue;
 			}
-			// The repo that actually held the item is authoritative. Prefer its
-			// accountId directly; only fall back to legacy email canonicalization
-			// when this account's info is unknown (so we never override a
-			// known-correct accountId — which matters for two accounts sharing an
-			// email across different servers).
-			if (!this.accountInfoByAccountId.has(accountId) && item.accountEmail) {
-				const accountInfo = Array.from(
-					this.accountInfoByAccountId.values(),
-				).find(
-					(info) =>
-						info.email.toLowerCase() === item.accountEmail?.toLowerCase(),
-				);
-				if (accountInfo) {
-					return {
-						accountId: accountInfo.accountId,
-						repo: this.getOrCreate(accountInfo.accountId),
-					};
-				}
-			}
 			return { accountId, repo: entry.repo };
 		}
 		return undefined;
@@ -533,25 +475,6 @@ export class VaultRepositoryCoordinator {
 		for (const [accountId, entry] of this.repos.entries()) {
 			if (!entry.repo.hasVault(vaultId)) {
 				continue;
-			}
-			const vault = entry.repo.getVaultById(vaultId);
-			// The repo that actually held the vault is authoritative. Prefer its
-			// accountId directly; only fall back to legacy email canonicalization
-			// when this account's info is unknown, so a shared email across
-			// servers can't redirect to the wrong account's repo.
-			if (!this.accountInfoByAccountId.has(accountId) && vault?.accountEmail) {
-				const accountInfo = Array.from(
-					this.accountInfoByAccountId.values(),
-				).find(
-					(info) =>
-						info.email.toLowerCase() === vault.accountEmail?.toLowerCase(),
-				);
-				if (accountInfo) {
-					return {
-						accountId: accountInfo.accountId,
-						repo: this.getOrCreate(accountInfo.accountId),
-					};
-				}
 			}
 			return { accountId, repo: entry.repo };
 		}
@@ -592,7 +515,6 @@ export class VaultRepositoryCoordinator {
 		this.activeAccountIds.clear();
 		this.accountInfoByAccountId.clear();
 		this.apiClientByAccountId.clear();
-		this.deferredEncryptionContextMigrations.clear();
 		for (const entry of this.repos.values()) {
 			entry.unsubscribe();
 			entry.repo.clear();
@@ -602,26 +524,6 @@ export class VaultRepositoryCoordinator {
 	}
 
 	// --- SyncItemCache surface (packages/sync/src/types.ts) ---
-	async setEncryptionContextMigrationPort(
-		port: ItemEncryptionContextMigrationPort | undefined,
-	): Promise<void> {
-		this.encryptionContextMigrationPort = port;
-		if (!port) return;
-		for (const [key, context] of this.deferredEncryptionContextMigrations) {
-			await port(context);
-			this.deferredEncryptionContextMigrations.delete(key);
-		}
-	}
-
-	async publishPendingEncryptionContextMigration(
-		accountId: string,
-		itemId: string,
-	): Promise<void> {
-		await this.getOrCreate(accountId).publishPendingEncryptionContextMigration(
-			itemId,
-		);
-	}
-
 	async applyItemCommand(command: ItemSyncCommand): Promise<void> {
 		await this.getOrCreate(command.accountId).applyItemCommand(command);
 	}

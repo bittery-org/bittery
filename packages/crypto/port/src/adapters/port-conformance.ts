@@ -451,6 +451,7 @@ export function runCryptoPortConformance(
 			const restored = await port.unwrapKey(
 				await port.wrapKey(key, wrappingKey),
 				wrappingKey,
+				null,
 			);
 
 			expect([...(await port.exportKey(restored))]).toEqual([
@@ -467,7 +468,7 @@ export function runCryptoPortConformance(
 			const wrapped = await port.wrapKey(key, wrappingKey);
 
 			await expectPortError(
-				() => port.unwrapKey(wrapped, otherWrappingKey),
+				() => port.unwrapKey(wrapped, otherWrappingKey, null),
 				"decryption-failed",
 			);
 		});
@@ -479,6 +480,7 @@ export function runCryptoPortConformance(
 			const restored = await port.unwrapKey(
 				await port.wrapKey(key, wrappingKey),
 				wrappingKey,
+				null,
 			);
 
 			await port.destroyKey(restored);
@@ -487,7 +489,7 @@ export function runCryptoPortConformance(
 			expect((await port.exportKey(key)).length).toBeGreaterThan(0);
 		});
 
-		test("authenticated and legacy-envelope key plaintext stays behind the seam", async () => {
+		test("authenticated key plaintext stays behind the seam", async () => {
 			const port = await make();
 			const wrappingKey = await port.generateEncryptionKey();
 			const context = {
@@ -499,44 +501,14 @@ export function runCryptoPortConformance(
 			};
 			const keyBase64 = encodeBase64(AWKWARD_KEY_BYTES);
 			const authenticated = await port.encrypt(keyBase64, wrappingKey, context);
-			const restored = await port.unwrapKey(authenticated, wrappingKey, {
+			const restored = await port.unwrapKey(
+				authenticated,
+				wrappingKey,
 				context,
-			});
+			);
 			expect([...(await port.exportKey(restored))]).toEqual([
 				...AWKWARD_KEY_BYTES,
 			]);
-
-			const legacy = await port.encrypt(
-				JSON.stringify({
-					marker: "legacy-marker",
-					context: "legacy-context",
-					payload: keyBase64,
-				}),
-				wrappingKey,
-				null,
-			);
-			const legacyRestored = await port.unwrapKey(legacy, wrappingKey, {
-				context: null,
-				legacyEnvelope: {
-					marker: "legacy-marker",
-					context: "legacy-context",
-				},
-			});
-			expect([...(await port.exportKey(legacyRestored))]).toEqual([
-				...AWKWARD_KEY_BYTES,
-			]);
-
-			await expectPortError(
-				() =>
-					port.unwrapKey(legacy, wrappingKey, {
-						context: null,
-						legacyEnvelope: {
-							marker: "wrong-marker",
-							context: "legacy-context",
-						},
-					}),
-				"invalid-input",
-			);
 		});
 
 		test("wrapping a destroyed key throws", async () => {
@@ -1063,41 +1035,16 @@ export function runCryptoPortConformance(
 			);
 		});
 
-		test("reEncryptItem leaves an unbound item unbound", async () => {
-			const port = await make();
-			const oldKey = await port.generateEncryptionKey();
-			const newKey = await port.generateEncryptionKey();
-			const sealed = await port.encrypt(UNICODE_PLAINTEXT, oldKey, null);
-
-			const reEncrypted = await port.reEncryptItem(
-				{
-					id: "item-7",
-					encryptedData: sealed.ciphertext,
-					encryptionIv: sealed.iv,
-					encryptionAlgorithm: sealed.algorithm,
-					context: itemContext("item-7"),
-				},
-				oldKey,
-				newKey,
-			);
-
-			const rotated = {
-				ciphertext: reEncrypted.encryptedData,
-				iv: reEncrypted.encryptionIv,
-				algorithm: sealed.algorithm,
-			};
-			expect(await port.decrypt(rotated, newKey, null)).toBe(UNICODE_PLAINTEXT);
-			await expectPortError(() =>
-				port.decrypt(rotated, newKey, itemContext("item-7")),
-			);
-		});
-
 		test("reEncryptItem rejects an item the old key cannot open", async () => {
 			const port = await make();
 			const oldKey = await port.generateEncryptionKey();
 			const newKey = await port.generateEncryptionKey();
 			const stranger = await port.generateEncryptionKey();
-			const sealed = await port.encrypt("plain", stranger, null);
+			const sealed = await port.encrypt(
+				"plain",
+				stranger,
+				itemContext("item-7"),
+			);
 
 			await expectPortError(() =>
 				port.reEncryptItem(

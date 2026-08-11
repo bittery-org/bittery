@@ -26,15 +26,12 @@ import {
 
 // Storage keys
 const LAST_SYNC_CURSOR_KEY_PREFIX = "bittery_last_sync_cursor_v3";
-const LEGACY_ACCOUNT_CURSOR_KEY_PREFIX = "bittery_last_sync_cursor_v2";
-const LEGACY_LAST_SYNC_KEY = "bittery_last_sync_timestamp";
 const SYNC_ALARM_NAME = "bittery_sync_reconnect";
 
 // Connection state
 let abortController: AbortController | null = null;
 let connectionStatus: ConnectionStatus = "disconnected";
 let reconnectAttempt = 0;
-let syncConnectionEmail: string | null = null;
 let syncConnectionAccountId: string | null = null;
 let syncConnectionServerUrl: string | null = null;
 let syncBaselineValidated = false;
@@ -48,7 +45,6 @@ setSyncPort({ disconnect });
 
 /** The revocation payload names a session, never an account, so the machine needs this identity. */
 function setSyncConnectionEmail(email: string | null): void {
-	syncConnectionEmail = email;
 	setSessionFallbackEmail(email);
 }
 
@@ -136,8 +132,14 @@ async function catchUpMissedEvents(): Promise<void> {
 			syncBaselineValidated = true;
 		}
 
-		const client =
-			await syncCacheService.getClientForEmail(syncConnectionEmail);
+		const client = await syncCacheService.getClientForAccountId(
+			syncConnectionAccountId,
+		);
+		if (!client) {
+			throw new Error(
+				"No account-scoped client is available for sync catch-up",
+			);
+		}
 		const result = await runCatchUp({
 			client,
 			initialCursor: lastCursor ?? { id: "" },
@@ -369,7 +371,6 @@ export function disconnect(
 		abortController.abort();
 		abortController = null;
 	}
-	syncConnectionEmail = null;
 	syncConnectionAccountId = null;
 	syncConnectionServerUrl = null;
 	syncBaselineValidated = false;
@@ -398,20 +399,15 @@ export async function cleanupSync(): Promise<void> {
 	const serverUrl = syncConnectionServerUrl;
 	disconnect("logout cleanup");
 	revoked = false;
-	const keys = [LEGACY_LAST_SYNC_KEY];
+	const keys: string[] = [];
 	if (accountId && serverUrl) {
 		keys.push(lastSyncCursorKey(accountId, serverUrl));
-		keys.push(legacyAccountCursorKey(accountId));
 	}
 	await chrome.storage.local.remove(keys);
 }
 
 function lastSyncCursorKey(accountId: string, serverUrl: string): string {
 	return `${LAST_SYNC_CURSOR_KEY_PREFIX}:${encodeURIComponent(normalizeAccountServerUrl(serverUrl))}:${encodeURIComponent(accountId)}`;
-}
-
-function legacyAccountCursorKey(accountId: string): string {
-	return `${LEGACY_ACCOUNT_CURSOR_KEY_PREFIX}:${encodeURIComponent(accountId)}`;
 }
 
 /**
@@ -429,7 +425,6 @@ export async function setLastSyncCursor(
 
 /**
  * Get last sync cursor.
- * Supports migration from legacy timestamp+id storage.
  */
 export async function getLastSyncCursor(
 	accountId: string,

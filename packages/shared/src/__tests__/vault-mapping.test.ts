@@ -44,20 +44,6 @@ describe("toVaultKeyEntry", () => {
 		expect(toVaultKeyEntry(serverEntry()).vaultType).toBe("team");
 	});
 
-	it("never produces a vault key entry without a usable type", () => {
-		const payloadWithLegacyKey = {
-			...serverEntry(),
-			type: "team",
-		} as unknown as ServerVaultListEntry;
-
-		for (const entry of [serverEntry(), payloadWithLegacyKey]) {
-			const mapped = toVaultKeyEntry(entry);
-			expect(
-				mapped.vaultType === "team" || mapped.vaultType === "personal",
-			).toBe(true);
-		}
-	});
-
 	it("maps the remaining fields onto the local record", () => {
 		expect(toVaultKeyEntry(serverEntry())).toEqual({
 			vaultId: "vault_1",

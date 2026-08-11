@@ -760,23 +760,18 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 		const parsed = parseJson<AccountsListDocument>(
 			await readGlobal("accounts_list"),
 		);
-		const accounts = (parsed?.accounts ?? []).map((account) => ({
-			...account,
-			insecureTransportConfirmed: account.insecureTransportConfirmed === true,
-		}));
 		if (
-			parsed &&
-			(parsed.version !== ACCOUNTS_LIST_VERSION ||
-				parsed.accounts.some(
-					(account) => typeof account.insecureTransportConfirmed !== "boolean",
-				))
+			!parsed ||
+			parsed.version !== ACCOUNTS_LIST_VERSION ||
+			parsed.accounts.some(
+				(account) =>
+					!account.serverUrl ||
+					typeof account.insecureTransportConfirmed !== "boolean",
+			)
 		) {
-			await writeGlobal(
-				"accounts_list",
-				JSON.stringify({ version: ACCOUNTS_LIST_VERSION, accounts }),
-			);
+			return [];
 		}
-		return accounts;
+		return parsed.accounts;
 	}
 
 	/** Every accounts-list write goes through here so the projection stays fresh. */
@@ -1061,6 +1056,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 			return await cryptoPort.unwrapKey(
 				session.encryptedMasterUnlockKey,
 				deviceKey,
+				null,
 			);
 		} catch (error) {
 			console.error(
@@ -1181,7 +1177,7 @@ export function createAccountStore(options: AccountStoreOptions): AccountStore {
 				...withId,
 				accountId,
 				biometricEnabled,
-				insecureTransportConfirmed: withId.insecureTransportConfirmed === true,
+				insecureTransportConfirmed: withId.insecureTransportConfirmed,
 			};
 
 			if (existing) {

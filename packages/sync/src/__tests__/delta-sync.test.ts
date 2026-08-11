@@ -79,7 +79,6 @@ function recordingCache() {
 		discardItemCommandAcknowledgedElsewhere: async () => undefined,
 		preserveItemConflict: async () => undefined,
 		acknowledgeItemCommand: async () => undefined,
-		setEncryptionContextMigrationPort: async () => undefined,
 	};
 
 	return { cache, items, removedItems, vaultKeys, vaults };

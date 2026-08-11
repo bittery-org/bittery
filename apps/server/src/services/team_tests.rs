@@ -71,7 +71,6 @@ where
         std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok(),
         std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok(),
         std::env::var("BITTERY_STORAGE_REGION").ok(),
-        std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok(),
         std::env::var("BITTERY_STORAGE_CDN_URL").ok(),
     );
     set_env_var(
@@ -82,10 +81,6 @@ where
     set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
     set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
     set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
-    set_env_var(
-        "BITTERY_STORAGE_PUBLIC_URL",
-        Some("https://cdn.example.invalid/public"),
-    );
     set_env_var(
         "BITTERY_STORAGE_CDN_URL",
         Some("https://cdn.example.invalid/assets"),
@@ -99,7 +94,6 @@ where
         previous_access_key,
         previous_secret_key,
         previous_region,
-        previous_public_url,
         previous_cdn_url,
     ) = previous;
     restore_env_var("BITTERY_STORAGE_ENDPOINT", previous_endpoint);
@@ -107,7 +101,6 @@ where
     restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
     restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
     restore_env_var("BITTERY_STORAGE_REGION", previous_region);
-    restore_env_var("BITTERY_STORAGE_PUBLIC_URL", previous_public_url);
     restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
 
     result
@@ -424,17 +417,14 @@ async fn seed_team_invitation(
 }
 
 #[test]
-fn bittery_mode_normalizes_self_hosted_aliases_and_defaults_to_cloud() {
+fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
     with_bittery_mode(None, || {
         assert_eq!(bittery_mode(), "cloud");
     });
     with_bittery_mode(Some("self-hosted"), || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
-    with_bittery_mode(Some("SELF_HOSTED"), || {
-        assert_eq!(bittery_mode(), "self-hosted");
-    });
-    with_bittery_mode(Some("selfhosted"), || {
+    with_bittery_mode(Some("SELF-HOSTED"), || {
         assert_eq!(bittery_mode(), "self-hosted");
     });
     with_bittery_mode(Some("cloud"), || {
@@ -444,7 +434,7 @@ fn bittery_mode_normalizes_self_hosted_aliases_and_defaults_to_cloud() {
 
 #[test]
 fn assert_team_management_entitlement_respects_mode_and_billing() {
-    with_bittery_mode(Some("self_hosted"), || {
+    with_bittery_mode(Some("self-hosted"), || {
         assert!(assert_team_management_entitlement("free", "none").is_ok());
     });
 
@@ -2114,7 +2104,7 @@ async fn team_delete_paths() {
 
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
         let self_hosted_delete = with_bittery_mode_async(
-            Some("self_hosted"),
+            Some("self-hosted"),
             app.api_json(
                 Method::DELETE,
                 &format!("/api/v1/teams/{}", fixture.team_id),

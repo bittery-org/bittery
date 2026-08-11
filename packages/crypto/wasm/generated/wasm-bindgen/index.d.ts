@@ -288,7 +288,7 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_rsa_encrypt(plaintext: Ui
 
 export function ubrn_uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion(private_key_base64: Uint8Array, rp_id: Uint8Array, client_data_hash_base64: Uint8Array, sign_count: number): bigint;
 
-export function ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(data: Uint8Array, wrapping_key: bigint, context: Uint8Array, legacy_marker: Uint8Array, legacy_context: Uint8Array): bigint;
+export function ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(data: Uint8Array, wrapping_key: bigint, context: Uint8Array): bigint;
 
 export function ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key(recovery_key: Uint8Array): bigint;
 
@@ -348,7 +348,7 @@ export interface InitOutput {
     readonly ffi_bittery_crypto_api_rust_future_poll_u16: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_u16: (a: bigint) => void;
     readonly uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion: (a: number, b: number, c: number, d: number) => bigint;
-    readonly uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: bigint, c: number, d: number, e: number) => bigint;
+    readonly uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: bigint, c: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_validate_recovery_key: (a: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_validate_rotation_data: (a: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_validate_secret_key: (a: number) => bigint;
@@ -591,7 +591,7 @@ export interface InitOutput {
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_rsa_decrypt: (a: number, b: number, c: number, d: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_rsa_encrypt: (a: number, b: number, c: number, d: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
-    readonly ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
+    readonly ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: number, c: bigint, d: number, e: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key: (a: number, b: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data: (a: number, b: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key: (a: number, b: number) => bigint;

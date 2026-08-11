@@ -39,8 +39,8 @@ interface BasePendingMutation {
 		encryptedData: string;
 		encryptionIv: string;
 		encryptionAlgorithm: string;
-		encryptionVersion?: number;
-		encryptedByUserId?: string;
+		encryptionVersion: number;
+		encryptedByUserId: string;
 	};
 	favorite?: boolean;
 	baseVersion: number;
@@ -65,8 +65,8 @@ interface EncryptedPayloadLike {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
-	encryptionVersion?: number;
-	encryptedByUserId?: string;
+	encryptionVersion: number;
+	encryptedByUserId: string;
 }
 
 export function createLocalId(prefix: string): string {

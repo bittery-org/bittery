@@ -140,6 +140,8 @@ describe("VaultRepository.moveItem", () => {
 			ciphertext: "not-read-by-moveItem",
 			iv: "aXY=",
 			algorithm: "AES-GCM",
+			encryptionVersion: 2,
+			encryptedByUserId: USER_ID,
 		};
 
 		await repo.moveItem("item_1", "vault_2", payload, { title: "Item" });
@@ -165,6 +167,8 @@ describe("VaultRepository.moveItem", () => {
 			ciphertext: "not-read-by-moveItem",
 			iv: "aXY=",
 			algorithm: "AES-GCM",
+			encryptionVersion: 2,
+			encryptedByUserId: USER_ID,
 		};
 
 		await repo.upsertEncrypted(

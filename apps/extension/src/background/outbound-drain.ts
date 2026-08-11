@@ -7,7 +7,6 @@ import {
 	type SyncCommandSummary,
 } from "@bittery/sync";
 import type { ItemSyncCommand } from "@bittery/types";
-import { storage } from "../lib/storage";
 import { ChromeSyncStorage } from "../lib/sync-storage";
 import { core } from "./core-instance";
 import { syncCacheService } from "./services/sync-cache-service";
@@ -16,20 +15,6 @@ import { getOrCreateSyncClientId } from "./sync-client-id";
 const OUTBOUND_RETRY_ALARM_NAME = "bittery_outbound_retry";
 const POPUP_PROJECTION_LEASE_MS = 30_000;
 
-async function resolveLegacyAccountId(email: string): Promise<string> {
-	const matches = (await storage.getAccountsList()).filter(
-		(account) => account.email.toLowerCase() === email.toLowerCase(),
-	);
-	if (matches.length !== 1) {
-		throw new Error(`Ambiguous legacy account queue for ${email}`);
-	}
-	const accountId = matches[0]?.accountId;
-	if (!accountId) {
-		throw new Error(`No account id for legacy queue ${email}`);
-	}
-	return accountId;
-}
-
 let queuePromise: Promise<ItemSyncEngine> | null = null;
 
 function getQueue(): Promise<ItemSyncEngine> {
@@ -37,7 +22,6 @@ function getQueue(): Promise<ItemSyncEngine> {
 		const queue = new ItemSyncEngine(
 			new ChromeSyncStorage(),
 			await getOrCreateSyncClientId(),
-			resolveLegacyAccountId,
 			{
 				apply: (command) => core.vaultCoordinator.applyItemCommand(command),
 				executeSemanticCommand: (command) =>
@@ -62,30 +46,6 @@ function getQueue(): Promise<ItemSyncEngine> {
 			},
 		);
 		await queue.restore();
-		await core.vaultCoordinator.setEncryptionContextMigrationPort(
-			async (context) => {
-				const operationId = `adopt-context:${context.accountId}:${context.itemId}:${context.encryptionVersion}:${context.encryptedByUserId}`;
-				await queue.enqueue({
-					accountId: context.accountId,
-					id: operationId,
-					operationId,
-					type: "adopt_encryption_context",
-					entityId: context.itemId,
-					vaultId: context.vaultId,
-					encryptedPayload: {
-						encryptedData: "",
-						encryptionIv: "",
-						encryptionAlgorithm: "",
-						encryptionVersion: context.encryptionVersion,
-						encryptedByUserId: context.encryptedByUserId,
-					},
-					baseVersion: context.baseVersion,
-					timestamp: Date.now(),
-					retryCount: 0,
-					migrationTrigger: "explicit_open",
-				});
-			},
-		);
 		queue.subscribe(() => {
 			chrome.runtime
 				.sendMessage({
@@ -150,18 +110,6 @@ export async function activateAndDrainOutboundCommand(
 	}
 	await drainOutboundQueue();
 	return true;
-}
-
-export async function publishOpenedItemEncryptionContextMigration(
-	itemId: string,
-): Promise<void> {
-	await getQueue();
-	const resolved = core.vaultCoordinator.findAccountForItem(itemId);
-	if (!resolved) return;
-	await resolved.repo.publishPendingEncryptionContextMigration(itemId);
-	void drainOutboundQueue().catch((error) => {
-		console.error("[OutboundQueue] Encryption-context drain failed:", error);
-	});
 }
 
 let draining: Promise<void> | null = null;

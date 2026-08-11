@@ -61,7 +61,7 @@ export interface AccountMetadata {
 	email: string;
 	userId: string;
 	name: string;
-	serverUrl?: string;
+	serverUrl: string;
 	teamName?: string;
 	teamAvatarUrl?: string | null;
 	secretKeyHint: string;
@@ -69,7 +69,7 @@ export interface AccountMetadata {
 	lastActiveAt: number;
 	biometricEnabled: boolean;
 	/** Explicit consent for this account to send credentials over remote HTTP. */
-	insecureTransportConfirmed?: boolean;
+	insecureTransportConfirmed: boolean;
 }
 
 /**

@@ -164,7 +164,7 @@ pub struct DbRotationItemRow {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
-    pub encryption_version: Option<i32>,
-    pub encrypted_by_user_id: Option<String>,
-    pub last_modified_by: Option<String>,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
+    pub last_modified_by: String,
 }

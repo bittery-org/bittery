@@ -157,7 +157,7 @@ mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 				},
 			},
 		}),
-		getClientForEmail: async () => ({}),
+		getClientForAccountId: async () => ({}),
 		applyDeltaSyncForEvent: async () => {
 			if (deltaSyncError) throw deltaSyncError;
 		},
@@ -314,16 +314,6 @@ describe("account-scoped sync cursors", () => {
 		expect(
 			await getLastSyncCursor("shared-account", "https://two.example/"),
 		).toEqual({ id: "evt-two" });
-	});
-
-	test("ignores an ambiguous legacy account-only cursor", async () => {
-		storageLocal["bittery_last_sync_cursor_v2:shared-account"] = {
-			id: "legacy-event",
-		};
-
-		expect(
-			await getLastSyncCursor("shared-account", "https://one.example"),
-		).toBeNull();
 	});
 
 	test("cleanup removes only the connected account and server cursor", async () => {

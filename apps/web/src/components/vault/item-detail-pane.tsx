@@ -1,8 +1,4 @@
-import {
-	useOpenedItemEncryptionContextMigration,
-	useToggleFavorite,
-	useUpdateItem,
-} from "@bittery/core/hooks";
+import { useToggleFavorite, useUpdateItem } from "@bittery/core/hooks";
 import { detectCardBrand } from "@bittery/shared/credit-card";
 import type { DecryptedItem, DecryptedItemData } from "@bittery/shared/types";
 import {
@@ -85,7 +81,6 @@ export function ItemDetailPane({
 	emptyIcon,
 }: ItemDetailPaneProps) {
 	const { m } = useI18n();
-	useOpenedItemEncryptionContextMigration(selectedItem);
 	const toggleFavorite = useToggleFavorite();
 	const updateItem = useUpdateItem();
 	const [isShareDialogOpen, setIsShareDialogOpen] = useState(false);

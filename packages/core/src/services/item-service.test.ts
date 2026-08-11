@@ -175,6 +175,8 @@ function crossAccountMoveCommand(
 			encryptedData: "target_ciphertext",
 			encryptionIv: "target_iv",
 			encryptionAlgorithm: "AES-GCM-AAD-V1",
+			encryptionVersion: 1,
+			encryptedByUserId: TARGET.userId,
 		},
 		baseVersion: 1,
 		timestamp: 1,
@@ -227,6 +229,8 @@ describe("ItemService", () => {
 			encryptedData: trashedEncrypted.ciphertext,
 			encryptionIv: trashedEncrypted.iv,
 			encryptionAlgorithm: trashedEncrypted.algorithm,
+			encryptionVersion: 1,
+			encryptedByUserId: SOURCE.userId,
 			version: 1,
 			lastModifiedBy: SOURCE.userId,
 			createdAt: "2026-08-10T00:00:00Z",
@@ -250,6 +254,8 @@ describe("ItemService", () => {
 							encryptedData: activeEncrypted.ciphertext,
 							encryptionIv: activeEncrypted.iv,
 							encryptionAlgorithm: activeEncrypted.algorithm,
+							encryptionVersion: 1,
+							encryptedByUserId: SOURCE.userId,
 							version: 1,
 							lastModifiedBy: SOURCE.userId,
 							createdAt: "2026-08-10T00:00:00Z",
@@ -352,7 +358,7 @@ describe("ItemService", () => {
 		await fixture.crypto.destroyKey(vaultKey);
 	});
 
-	test("falls back to older encryption versions when cached item metadata drifted", async () => {
+	test("uses the explicit encryption version rather than the item revision", async () => {
 		const fixture = await createFixture([SOURCE]);
 		const vaultKey = await fixture.vaultCrypto.getVaultKey({
 			vaultId: "vault_source",
@@ -381,6 +387,8 @@ describe("ItemService", () => {
 			encryptionAlgorithm: encrypted.algorithm,
 			version: 3,
 			lastModifiedBy: SOURCE.userId,
+			encryptionVersion: 1,
+			encryptedByUserId: SOURCE.userId,
 			createdAt: "2026-03-13T00:00:00.000Z",
 			updatedAt: "2026-03-13T00:00:00.000Z",
 		};

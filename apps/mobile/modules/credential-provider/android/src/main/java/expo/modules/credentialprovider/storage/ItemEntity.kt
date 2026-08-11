@@ -104,9 +104,9 @@ data class ItemEntity(
      */
     val lastModifiedBy: String? = null,
 
-    /** Exact revision bound into this ciphertext's AES-GCM AAD. */
-    val encryptionVersion: Long? = null,
+	/** Exact revision bound into this ciphertext's AES-GCM AAD. */
+	val encryptionVersion: Long,
 
-    /** Exact author bound into this ciphertext's AES-GCM AAD. */
-    val encryptedByUserId: String? = null
+	/** Exact author bound into this ciphertext's AES-GCM AAD. */
+	val encryptedByUserId: String
 )

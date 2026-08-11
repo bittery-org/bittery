@@ -1382,20 +1382,14 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion(pr
  * @param {Uint8Array} data
  * @param {bigint} wrapping_key
  * @param {Uint8Array} context
- * @param {Uint8Array} legacy_marker
- * @param {Uint8Array} legacy_context
  * @returns {bigint}
  */
-export function ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(data, wrapping_key, context, legacy_marker, legacy_context) {
+export function ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(data, wrapping_key, context) {
     const ptr0 = passArray8ToWasm0(data, wasm.__wbindgen_malloc);
     const len0 = WASM_VECTOR_LEN;
     const ptr1 = passArray8ToWasm0(context, wasm.__wbindgen_malloc);
     const len1 = WASM_VECTOR_LEN;
-    const ptr2 = passArray8ToWasm0(legacy_marker, wasm.__wbindgen_malloc);
-    const len2 = WASM_VECTOR_LEN;
-    const ptr3 = passArray8ToWasm0(legacy_context, wasm.__wbindgen_malloc);
-    const len3 = WASM_VECTOR_LEN;
-    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(ptr0, len0, wrapping_key, ptr1, len1, ptr2, len2, ptr3, len3);
+    const ret = wasm.ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(ptr0, len0, wrapping_key, ptr1, len1);
     return BigInt.asUintN(64, ret);
 }
 

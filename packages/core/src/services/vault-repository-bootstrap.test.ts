@@ -131,11 +131,7 @@ function createClient(): BootstrapItemsClient {
 	} as unknown as BootstrapItemsClient;
 }
 
-async function setup(
-	onEncryptionContextDiscovered?: ConstructorParameters<
-		typeof VaultRepository
-	>[7],
-) {
+async function setup() {
 	const { storage, itemCache, recordPort, crypto } = await createLayers();
 	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	await getTravelModeEnforcer(storage, itemCache).applyConfig(ACCOUNT_ID, {
@@ -151,7 +147,6 @@ async function setup(
 		ACCOUNT_ID,
 		"https://bittery.test",
 		"user@bittery.test",
-		onEncryptionContextDiscovered,
 	);
 
 	return { repo, storage, itemCache, recordPort, crypto, vaultCrypto };
@@ -417,6 +412,8 @@ describe("VaultRepository.hydrateFromServer", () => {
 					encryptionAlgorithm: "AES-GCM",
 					version: 1,
 					lastModifiedBy: null,
+					encryptionVersion: 1,
+					encryptedByUserId: USER_ID,
 					createdAt: "2026-08-01T00:00:00.000Z",
 					updatedAt: "2026-08-01T00:00:00.000Z",
 					deletedAt: null,
@@ -852,77 +849,6 @@ describe("VaultRepository encryption context migration", () => {
 		expect(cached?.encryptionVersion).toBe(1);
 	});
 
-	it("persists a bounded legacy version discovery and uses the exact context after restart", async () => {
-		const discoveries: unknown[] = [];
-		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup(
-			(context) => {
-				discoveries.push(context);
-			},
-		);
-		const legacy = {
-			...(await cachedItem("legacy_item", crypto, vaultCrypto)),
-			version: 3,
-			encryptionVersion: undefined,
-			encryptedByUserId: undefined,
-		};
-		await itemCache.setCachedItems([legacy], ACCOUNT_ID);
-
-		await repo.hydrate();
-
-		expect(repo.getById("legacy_item")?.title).toBe("Item");
-		const migrated = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
-		expect(migrated?.version).toBe(3);
-		expect(migrated?.encryptionVersion).toBe(1);
-		expect(migrated?.encryptedByUserId).toBe(USER_ID);
-		expect(discoveries).toEqual([]);
-
-		await repo.publishPendingEncryptionContextMigration("legacy_item");
-
-		expect(discoveries).toEqual([
-			{
-				accountId: ACCOUNT_ID,
-				itemId: "legacy_item",
-				vaultId: "vault_1",
-				baseVersion: 3,
-				encryptionVersion: 1,
-				encryptedByUserId: USER_ID,
-			},
-		]);
-
-		const restarted = new VaultRepository(
-			crypto,
-			vaultCrypto,
-			storage,
-			itemCache,
-			ACCOUNT_ID,
-			"https://bittery.test",
-			"user@bittery.test",
-		);
-		await restarted.hydrate();
-
-		expect(restarted.getById("legacy_item")?.encryptionVersion).toBe(1);
-		expect(restarted.getById("legacy_item")?.encryptedByUserId).toBe(USER_ID);
-	});
-
-	it("does not scan an unbounded OCC history for legacy ciphertext", async () => {
-		const { repo, itemCache, crypto, vaultCrypto } = await setup();
-		await itemCache.setCachedItems(
-			[
-				{
-					...(await cachedItem("old_legacy_item", crypto, vaultCrypto)),
-					version: 100,
-					encryptionVersion: undefined,
-					encryptedByUserId: undefined,
-				},
-			],
-			ACCOUNT_ID,
-		);
-
-		await repo.hydrate();
-
-		expect(repo.getById("old_legacy_item")).toBeUndefined();
-	});
-
 	it("keeps the ciphertext author when another member trashes and restores an item", async () => {
 		const { repo, itemCache, crypto, vaultCrypto } = await setup();
 		const authorId = "user-author";
@@ -974,133 +900,6 @@ describe("VaultRepository encryption context migration", () => {
 		expect(cached?.lastModifiedBy).toBe(metadataWriterId);
 		expect(cached?.encryptionVersion).toBe(1);
 		expect(cached?.encryptedByUserId).toBe(authorId);
-	});
-
-	it("recovers a legacy shared Item after another member changed only metadata", async () => {
-		const { storage, itemCache, crypto, vaultCrypto } = await setup();
-		const authorId = "user-author";
-		const metadataWriterId = "user-trash-writer";
-		const key = await vaultCrypto.getVaultKey({
-			vaultId: "vault_1",
-			accountId: ACCOUNT_ID,
-			userId: USER_ID,
-		});
-		if (!key) throw new Error("Missing test vault key");
-		const encrypted = await vaultCrypto.encryptItem(
-			JSON.stringify({ title: "Legacy Shared Item" }),
-			key,
-			{
-				vaultId: "vault_1",
-				itemId: "legacy_shared_item",
-				version: 1,
-				userId: authorId,
-			},
-		);
-		await crypto.destroyKey(key);
-		await itemCache.setCachedItems(
-			[
-				{
-					id: "legacy_shared_item",
-					vaultId: "vault_1",
-					category: "login",
-					favorite: false,
-					encryptedData: encrypted.ciphertext,
-					encryptionIv: encrypted.iv,
-					encryptionAlgorithm: encrypted.algorithm,
-					version: 3,
-					lastModifiedBy: metadataWriterId,
-					encryptionVersion: null,
-					encryptedByUserId: null,
-					createdAt: "2026-08-01T00:00:00.000Z",
-					updatedAt: "2026-08-03T00:00:00.000Z",
-					deletedAt: null,
-				},
-			],
-			ACCOUNT_ID,
-		);
-
-		const restarted = new VaultRepository(
-			crypto,
-			vaultCrypto,
-			storage,
-			itemCache,
-			ACCOUNT_ID,
-			"https://bittery.test",
-			"reader@bittery.test",
-			undefined,
-			async () => [metadataWriterId, authorId],
-		);
-		await restarted.hydrate();
-
-		expect(restarted.getById("legacy_shared_item")?.title).toBe(
-			"Legacy Shared Item",
-		);
-		const migrated = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
-		expect(migrated?.encryptionVersion).toBe(1);
-		expect(migrated?.encryptedByUserId).toBe(authorId);
-	});
-
-	it("loads legacy author candidates once per Vault during a fresh hydration", async () => {
-		const { storage, itemCache, crypto, vaultCrypto } = await setup();
-		const authorId = "user-author";
-		const key = await vaultCrypto.getVaultKey({
-			vaultId: "vault_1",
-			accountId: ACCOUNT_ID,
-			userId: USER_ID,
-		});
-		if (!key) throw new Error("Missing test vault key");
-		const legacyItems = await Promise.all(
-			["legacy_shared_one", "legacy_shared_two"].map(async (itemId) => {
-				const encrypted = await vaultCrypto.encryptItem(
-					JSON.stringify({ title: itemId }),
-					key,
-					{ vaultId: "vault_1", itemId, version: 1, userId: authorId },
-				);
-				return {
-					id: itemId,
-					vaultId: "vault_1",
-					category: "login",
-					favorite: false,
-					encryptedData: encrypted.ciphertext,
-					encryptionIv: encrypted.iv,
-					encryptionAlgorithm: encrypted.algorithm,
-					version: 2,
-					lastModifiedBy: "metadata-writer",
-					encryptionVersion: null,
-					encryptedByUserId: null,
-					createdAt: "2026-08-01T00:00:00.000Z",
-					updatedAt: "2026-08-02T00:00:00.000Z",
-					deletedAt: null,
-				};
-			}),
-		);
-		await crypto.destroyKey(key);
-		await itemCache.setCachedItems(legacyItems, ACCOUNT_ID);
-		let authorLookups = 0;
-		const restarted = new VaultRepository(
-			crypto,
-			vaultCrypto,
-			storage,
-			itemCache,
-			ACCOUNT_ID,
-			"https://bittery.test",
-			"reader@bittery.test",
-			undefined,
-			async () => {
-				authorLookups += 1;
-				return [authorId];
-			},
-		);
-
-		await restarted.hydrate();
-
-		expect(authorLookups).toBe(1);
-		expect(
-			restarted
-				.getAll()
-				.map((item) => item.title)
-				.sort(),
-		).toEqual(legacyItems.map((item) => item.id).sort());
 	});
 });
 

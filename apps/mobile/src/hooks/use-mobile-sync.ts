@@ -181,15 +181,6 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		},
 		[clientId],
 	);
-	const resolveLegacyAccountId = useCallback(async (email: string) => {
-		const matches = (await storage.getAccountsList()).filter(
-			(account) => account.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (matches.length !== 1)
-			throw new Error(`Ambiguous legacy account queue for ${email}`);
-		return matches[0]?.accountId;
-	}, []);
-
 	const syncStorage = useMemo(() => new ReactNativeSyncStorage(), []);
 	const vaultCoordinator = useMemo(
 		() =>
@@ -273,7 +264,6 @@ export function useMobileSync(queryClient: QueryClient, enabled = true) {
 		getClientForAccount,
 		refreshFromServer,
 		initializeFromServer,
-		resolveLegacyAccountId,
 		onEventProcessed: onTravelModeEvent,
 		onTerminalCommandFailure,
 	});

@@ -101,7 +101,7 @@ pub struct CreateAttachmentInput {
     pub encrypted_content_type: String,
     pub encryption_iv: String,
     pub encrypted_content_type_iv: String,
-    pub encryption_algorithm: Option<String>,
+    pub encryption_algorithm: String,
     pub file_size: i32,
 }
 
@@ -125,7 +125,7 @@ pub struct UpdateAttachmentInput {
     pub attachment_id: String,
     pub encrypted_name: String,
     pub encryption_iv: String,
-    pub encryption_algorithm: Option<String>,
+    pub encryption_algorithm: String,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -200,7 +200,7 @@ pub struct CreateItemInput {
     pub category: String,
     pub encrypted_data: String,
     pub encryption_iv: String,
-    pub encryption_algorithm: Option<String>,
+    pub encryption_algorithm: String,
     pub client_id: Option<String>,
 }
 
@@ -220,7 +220,7 @@ pub struct BulkImportItemInput {
     pub favorite: Option<bool>,
     pub encrypted_data: String,
     pub encryption_iv: String,
-    pub encryption_algorithm: Option<String>,
+    pub encryption_algorithm: String,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -248,8 +248,6 @@ pub struct UpdateItemInput {
     pub encrypted_data: Option<String>,
     pub encryption_iv: Option<String>,
     pub encryption_algorithm: Option<String>,
-    pub encryption_version: Option<i32>,
-    pub encrypted_by_user_id: Option<String>,
     pub expected_version: Option<i32>,
     pub client_id: Option<String>,
 }
@@ -270,7 +268,7 @@ pub struct MoveItemInput {
     pub target_vault_id: String,
     pub encrypted_data: String,
     pub encryption_iv: String,
-    pub encryption_algorithm: Option<String>,
+    pub encryption_algorithm: String,
     pub expected_version: Option<i32>,
     pub client_id: Option<String>,
 }
@@ -318,9 +316,9 @@ pub struct VaultItemResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
-    pub encryption_version: Option<i32>,
-    pub encrypted_by_user_id: Option<String>,
-    pub last_modified_by: Option<String>,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
+    pub last_modified_by: String,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -417,10 +415,10 @@ pub struct VaultAttachmentResponse {
     pub encrypted_name: String,
     pub encrypted_content_type: String,
     pub encryption_iv: String,
-    pub encrypted_content_type_iv: Option<String>,
+    pub encrypted_content_type_iv: String,
     pub encryption_algorithm: String,
     pub file_size: i32,
-    pub uploaded_by: Option<String>,
+    pub uploaded_by: String,
     pub created_at: String,
 }
 
@@ -435,9 +433,9 @@ pub struct VaultItemDetailsResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
-    pub encryption_version: Option<i32>,
-    pub encrypted_by_user_id: Option<String>,
-    pub last_modified_by: Option<String>,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
+    pub last_modified_by: String,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -467,9 +465,9 @@ pub struct VaultItemWithVaultResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
-    pub encryption_version: Option<i32>,
-    pub encrypted_by_user_id: Option<String>,
-    pub last_modified_by: Option<String>,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
+    pub last_modified_by: String,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -488,9 +486,9 @@ pub struct DeletedVaultItemWithVaultResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
-    pub encryption_version: Option<i32>,
-    pub encrypted_by_user_id: Option<String>,
-    pub last_modified_by: Option<String>,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
+    pub last_modified_by: String,
     pub created_at: String,
     pub updated_at: String,
     pub deleted_at: Option<String>,
@@ -539,9 +537,9 @@ pub struct VaultRotationItemResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
-    pub encryption_version: Option<i32>,
-    pub encrypted_by_user_id: Option<String>,
-    pub last_modified_by: Option<String>,
+    pub encryption_version: i32,
+    pub encrypted_by_user_id: String,
+    pub last_modified_by: String,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -915,7 +913,7 @@ pub(crate) async fn create_vault_attachment(
 	.bind(&input.encrypted_content_type)
 	.bind(&input.encryption_iv)
 	.bind(&input.encrypted_content_type_iv)
-	.bind(input.encryption_algorithm.as_deref().unwrap_or("AES-GCM-AAD-V1"))
+	.bind(&input.encryption_algorithm)
 	.bind(reservation.file_size)
 	.bind(reservation.storage_size)
 	.bind(user_id)
@@ -996,9 +994,7 @@ pub(crate) async fn get_attachment_download_url(
         encrypted_name: attachment.encrypted_name,
         encrypted_content_type: attachment.encrypted_content_type,
         encryption_iv: attachment.encryption_iv.clone(),
-        encrypted_content_type_iv: attachment
-            .encrypted_content_type_iv
-            .unwrap_or_else(|| attachment.encryption_iv.clone()),
+        encrypted_content_type_iv: attachment.encrypted_content_type_iv,
         encryption_algorithm: attachment.encryption_algorithm,
         file_size: attachment.file_size,
     })
@@ -1022,7 +1018,7 @@ pub(crate) async fn update_vault_attachment(
 	)
 	.bind(&input.encrypted_name)
 	.bind(&input.encryption_iv)
-	.bind(input.encryption_algorithm.as_deref().unwrap_or("AES-GCM-AAD-V1"))
+	.bind(&input.encryption_algorithm)
 	.bind(&input.attachment_id)
 	.execute(&mut *transaction)
 	.await
@@ -1053,7 +1049,7 @@ pub(crate) async fn delete_vault_attachment(
     let _actor = load_attachment_actor(pool, user_id).await?;
     let attachment = load_attachment_access(pool, &input.attachment_id, user_id).await?;
     if attachment.role == "member" {
-        if attachment.uploaded_by.as_deref() != Some(user_id.to_string().as_str()) {
+        if attachment.uploaded_by != user_id {
             return Err(AppError::forbidden(
                 "You can only delete your own attachments",
             ));
@@ -1937,11 +1933,6 @@ pub(crate) async fn create_vault_item(
         .clone()
         .unwrap_or_else(|| generate_resource_id("item"));
     let version = 1;
-    let encryption_algorithm = input
-        .encryption_algorithm
-        .as_deref()
-        .unwrap_or("AES-GCM-AAD-V1");
-
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start item transaction");
         AppError::internal("Failed to start item transaction")
@@ -1954,7 +1945,7 @@ pub(crate) async fn create_vault_item(
 	.bind(&input.category)
 	.bind(&input.encrypted_data)
 	.bind(&input.encryption_iv)
-	.bind(encryption_algorithm)
+	.bind(&input.encryption_algorithm)
 	.bind(version)
 	.bind(user_id)
 	.execute(&mut *transaction)
@@ -2036,7 +2027,7 @@ pub(crate) async fn bulk_import_vault_items(
 		.bind(item.favorite.unwrap_or(false))
 		.bind(&item.encrypted_data)
 		.bind(&item.encryption_iv)
-		.bind(item.encryption_algorithm.as_deref().unwrap_or("AES-GCM-AAD-V1"))
+		.bind(&item.encryption_algorithm)
 		.bind(user_id)
 		.execute(&mut *transaction)
 		.await
@@ -2079,62 +2070,22 @@ pub(crate) async fn update_vault_item(
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
-    if input.encryption_version.is_some() != input.encrypted_by_user_id.is_some() {
-        return Err(AppError::bad_request(
-            "encryptionVersion and encryptedByUserId must be provided together",
-        ));
-    }
-    if input.encryption_version.is_some_and(|version| version <= 0) {
-        return Err(AppError::bad_request("encryptionVersion must be positive"));
-    }
-    if input
-        .encryption_version
-        .is_some_and(|version| version > existing_item.version)
-    {
-        return Err(AppError::bad_request(
-            "encryptionVersion cannot exceed the current item version",
-        ));
-    }
-    if let (
-        Some(stored_version),
-        Some(stored_author),
-        Some(requested_version),
-        Some(requested_author),
-    ) = (
-        existing_item.encryption_version,
-        existing_item.encrypted_by_user_id.as_deref(),
-        input.encryption_version,
-        input.encrypted_by_user_id.as_deref(),
-    ) {
-        if stored_version != requested_version || stored_author != requested_author {
-            return Err(AppError::conflict(
-                "Item encryption context has already been adopted",
-            ));
-        }
-    }
     let updates_ciphertext = input.encrypted_data.is_some()
         || input.encryption_iv.is_some()
         || input.encryption_algorithm.is_some();
-    if updates_ciphertext && input.encryption_version.is_some() {
-        return Err(AppError::bad_request(
-            "Encryption context is assigned by the server when ciphertext changes",
-        ));
-    }
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start item update transaction");
         AppError::internal("Failed to start item update transaction")
     })?;
     let new_version = query_scalar::<_, i32>(
-		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = version + 1, encryption_version = CASE WHEN $4 THEN version + 1 ELSE COALESCE($5, encryption_version) END, encrypted_by_user_id = CASE WHEN $4 THEN $6 ELSE COALESCE($7, encrypted_by_user_id) END, last_modified_by = $6, updated_at = $8 WHERE id = $9 AND version = $10 RETURNING version",
+		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = version + 1, encryption_version = CASE WHEN $4 THEN version + 1 ELSE encryption_version END, encrypted_by_user_id = CASE WHEN $4 THEN $5 ELSE encrypted_by_user_id END, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
 	.bind(input.encrypted_data.as_deref())
 	.bind(input.encryption_iv.as_deref())
 	.bind(input.encryption_algorithm.as_deref())
 	.bind(updates_ciphertext)
-	.bind(input.encryption_version)
 	.bind(user_id)
-	.bind(input.encrypted_by_user_id.as_deref())
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
 	.bind(expected_version)
@@ -2428,12 +2379,12 @@ pub(crate) async fn move_vault_item(
         AppError::internal("Failed to start item move transaction")
     })?;
     let new_version = query_scalar::<_, i32>(
-		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = COALESCE($4, encryption_algorithm), version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $5, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
+		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = $4, version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $5, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
 	.bind(&input.target_vault_id)
 	.bind(&input.encrypted_data)
 	.bind(&input.encryption_iv)
-	.bind(input.encryption_algorithm.as_deref())
+	.bind(&input.encryption_algorithm)
 	.bind(user_id)
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
@@ -3127,12 +3078,12 @@ pub(crate) mod member_handlers {
         }
 
         #[test]
-        fn bittery_mode_normalizes_self_hosted_aliases_and_defaults_to_cloud() {
+        fn bittery_mode_accepts_the_canonical_value_and_defaults_to_cloud() {
             with_bittery_mode(None, || {
                 assert_eq!(bittery_mode(), "cloud");
             });
 
-            for value in ["self-hosted", "self_hosted", "selfhosted", " SELF_HOSTED "] {
+            for value in ["self-hosted", " SELF-HOSTED "] {
                 with_bittery_mode(Some(value), || {
                     assert_eq!(bittery_mode(), "self-hosted");
                 });

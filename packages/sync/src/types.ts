@@ -252,9 +252,4 @@ export interface SyncItemCache extends ItemCacheAdapter {
 		command: import("@bittery/types").ItemSyncCommand,
 		acknowledgement: import("@bittery/types").ItemSyncAcknowledgement,
 	): Promise<void>;
-	setEncryptionContextMigrationPort(
-		port:
-			| import("@bittery/types").ItemEncryptionContextMigrationPort
-			| undefined,
-	): Promise<void>;
 }

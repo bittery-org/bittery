@@ -21,7 +21,6 @@ import androidx.autofill.inline.UiVersions
 import expo.modules.credentialprovider.activity.AutofillAuthActivity
 import expo.modules.credentialprovider.state.VaultStateManager
 import expo.modules.credentialprovider.storage.CredentialDatabase
-import expo.modules.credentialprovider.storage.CredentialStorageManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,13 +56,9 @@ class BitteryAutofillService : AutofillService() {
         CredentialDatabase.getInstance(applicationContext)
     }
 
-    private val storageManager: CredentialStorageManager by lazy {
-        CredentialStorageManager(applicationContext)
-    }
-
-    private val datasetBuilder: AutofillDatasetBuilder by lazy {
-        AutofillDatasetBuilder(applicationContext, database, storageManager)
-    }
+	private val datasetBuilder: AutofillDatasetBuilder by lazy {
+		AutofillDatasetBuilder(applicationContext, database)
+	}
 
     private var lastAttributionIntent: PendingIntent? = null
 

@@ -26,7 +26,6 @@ export function isWorkerItemCommandAcknowledgedMessage(
 		"move",
 		"cross_account_move",
 		"toggle_favorite",
-		"adopt_encryption_context",
 	]);
 	return (
 		candidate.type === "SYNC_ITEM_COMMAND_ACKNOWLEDGED" &&

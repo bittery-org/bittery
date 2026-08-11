@@ -12611,6 +12611,9 @@
           "encryptionIv",
           "encryptionAlgorithm",
           "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy",
           "createdAt",
           "updatedAt"
         ],
@@ -12637,10 +12640,7 @@
             ]
           },
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -12652,10 +12652,7 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "favorite": {
@@ -12665,10 +12662,7 @@
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "updatedAt": {
             "type": "string"
@@ -13175,8 +13169,10 @@
           "encryptedName",
           "encryptedContentType",
           "encryptionIv",
+          "encryptedContentTypeIv",
           "encryptionAlgorithm",
           "fileSize",
+          "uploadedBy",
           "createdAt"
         ],
         "properties": {
@@ -13187,10 +13183,7 @@
             "type": "string"
           },
           "encryptedContentTypeIv": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedName": {
             "type": "string"
@@ -13215,10 +13208,7 @@
             "type": "string"
           },
           "uploadedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "vaultId": {
             "type": "string"
@@ -13236,6 +13226,9 @@
           "encryptionIv",
           "encryptionAlgorithm",
           "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy",
           "createdAt",
           "updatedAt",
           "attachments"
@@ -13260,10 +13253,7 @@
             ]
           },
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -13275,10 +13265,7 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "favorite": {
@@ -13288,10 +13275,7 @@
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "updatedAt": {
             "type": "string"
@@ -13410,7 +13394,8 @@
           "itemId",
           "category",
           "encryptedData",
-          "encryptionIv"
+          "encryptionIv",
+          "encryptionAlgorithm"
         ],
         "properties": {
           "category": {
@@ -13421,10 +13406,7 @@
             "maxLength": 1048576
           },
           "encryptionAlgorithm": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptionIv": {
             "type": "string"
@@ -13554,6 +13536,7 @@
           "encryptedContentType",
           "encryptionIv",
           "encryptedContentTypeIv",
+          "encryptionAlgorithm",
           "fileSize"
         ],
         "properties": {
@@ -13567,10 +13550,7 @@
             "type": "string"
           },
           "encryptionAlgorithm": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptionIv": {
             "type": "string"
@@ -13601,7 +13581,8 @@
         "required": [
           "category",
           "encryptedData",
-          "encryptionIv"
+          "encryptionIv",
+          "encryptionAlgorithm"
         ],
         "properties": {
           "category": {
@@ -13612,10 +13593,7 @@
             "maxLength": 1048576
           },
           "encryptionAlgorithm": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptionIv": {
             "type": "string"
@@ -13859,6 +13837,9 @@
                 "encryptionIv",
                 "encryptionAlgorithm",
                 "version",
+                "encryptionVersion",
+                "encryptedByUserId",
+                "lastModifiedBy",
                 "createdAt",
                 "updatedAt"
               ],
@@ -13876,10 +13857,7 @@
                   ]
                 },
                 "encryptedByUserId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "encryptedData": {
                   "type": "string"
@@ -13891,10 +13869,7 @@
                   "type": "string"
                 },
                 "encryptionVersion": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": "integer",
                   "format": "int32"
                 },
                 "favorite": {
@@ -13904,10 +13879,7 @@
                   "type": "string"
                 },
                 "lastModifiedBy": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "updatedAt": {
                   "type": "string"
@@ -14344,8 +14316,10 @@
                 "encryptedName",
                 "encryptedContentType",
                 "encryptionIv",
+                "encryptedContentTypeIv",
                 "encryptionAlgorithm",
                 "fileSize",
+                "uploadedBy",
                 "createdAt"
               ],
               "properties": {
@@ -14356,10 +14330,7 @@
                   "type": "string"
                 },
                 "encryptedContentTypeIv": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "encryptedName": {
                   "type": "string"
@@ -14384,10 +14355,7 @@
                   "type": "string"
                 },
                 "uploadedBy": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "vaultId": {
                   "type": "string"
@@ -14480,6 +14448,9 @@
                 "encryptionIv",
                 "encryptionAlgorithm",
                 "version",
+                "encryptionVersion",
+                "encryptedByUserId",
+                "lastModifiedBy",
                 "createdAt",
                 "updatedAt",
                 "attachments"
@@ -14504,10 +14475,7 @@
                   ]
                 },
                 "encryptedByUserId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "encryptedData": {
                   "type": "string"
@@ -14519,10 +14487,7 @@
                   "type": "string"
                 },
                 "encryptionVersion": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": "integer",
                   "format": "int32"
                 },
                 "favorite": {
@@ -14532,10 +14497,7 @@
                   "type": "string"
                 },
                 "lastModifiedBy": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "updatedAt": {
                   "type": "string"
@@ -14586,6 +14548,9 @@
                 "encryptionIv",
                 "encryptionAlgorithm",
                 "version",
+                "encryptionVersion",
+                "encryptedByUserId",
+                "lastModifiedBy",
                 "createdAt",
                 "updatedAt"
               ],
@@ -14603,10 +14568,7 @@
                   ]
                 },
                 "encryptedByUserId": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "encryptedData": {
                   "type": "string"
@@ -14618,10 +14580,7 @@
                   "type": "string"
                 },
                 "encryptionVersion": {
-                  "type": [
-                    "integer",
-                    "null"
-                  ],
+                  "type": "integer",
                   "format": "int32"
                 },
                 "favorite": {
@@ -14631,10 +14590,7 @@
                   "type": "string"
                 },
                 "lastModifiedBy": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "updatedAt": {
                   "type": "string"
@@ -14812,6 +14768,9 @@
           "encryptionIv",
           "encryptionAlgorithm",
           "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy",
           "createdAt",
           "updatedAt"
         ],
@@ -14829,10 +14788,7 @@
             ]
           },
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -14844,10 +14800,7 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "favorite": {
@@ -14857,10 +14810,7 @@
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "updatedAt": {
             "type": "string"
@@ -15279,6 +15229,9 @@
           "encryptionIv",
           "encryptionAlgorithm",
           "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy",
           "createdAt",
           "updatedAt"
         ],
@@ -15296,10 +15249,7 @@
             ]
           },
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -15311,10 +15261,7 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "favorite": {
@@ -15324,10 +15271,7 @@
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "updatedAt": {
             "type": "string"
@@ -15701,7 +15645,8 @@
           "sourceVaultId",
           "targetVaultId",
           "encryptedData",
-          "encryptionIv"
+          "encryptionIv",
+          "encryptionAlgorithm"
         ],
         "properties": {
           "encryptedData": {
@@ -15709,10 +15654,7 @@
             "maxLength": 1048576
           },
           "encryptionAlgorithm": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptionIv": {
             "type": "string"
@@ -16364,14 +16306,14 @@
           "encryptedData",
           "encryptionIv",
           "encryptionAlgorithm",
-          "version"
+          "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy"
         ],
         "properties": {
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -16383,20 +16325,14 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "id": {
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "version": {
             "type": "integer",
@@ -17475,17 +17411,15 @@
         "type": "object",
         "required": [
           "encryptedName",
-          "encryptionIv"
+          "encryptionIv",
+          "encryptionAlgorithm"
         ],
         "properties": {
           "encryptedName": {
             "type": "string"
           },
           "encryptionAlgorithm": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptionIv": {
             "type": "string"
@@ -17496,12 +17430,6 @@
       "UpdateItemBody": {
         "type": "object",
         "properties": {
-          "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "encryptedData": {
             "type": [
               "string",
@@ -17520,14 +17448,6 @@
               "string",
               "null"
             ]
-          },
-          "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int32",
-            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -17640,8 +17560,10 @@
           "encryptedName",
           "encryptedContentType",
           "encryptionIv",
+          "encryptedContentTypeIv",
           "encryptionAlgorithm",
           "fileSize",
+          "uploadedBy",
           "createdAt"
         ],
         "properties": {
@@ -17652,10 +17574,7 @@
             "type": "string"
           },
           "encryptedContentTypeIv": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedName": {
             "type": "string"
@@ -17680,10 +17599,7 @@
             "type": "string"
           },
           "uploadedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "vaultId": {
             "type": "string"
@@ -17771,6 +17687,9 @@
           "encryptionIv",
           "encryptionAlgorithm",
           "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy",
           "createdAt",
           "updatedAt",
           "attachments"
@@ -17795,10 +17714,7 @@
             ]
           },
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -17810,10 +17726,7 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "favorite": {
@@ -17823,10 +17736,7 @@
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "updatedAt": {
             "type": "string"
@@ -17851,6 +17761,9 @@
           "encryptionIv",
           "encryptionAlgorithm",
           "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy",
           "createdAt",
           "updatedAt"
         ],
@@ -17868,10 +17781,7 @@
             ]
           },
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -17883,10 +17793,7 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "favorite": {
@@ -17896,10 +17803,7 @@
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "updatedAt": {
             "type": "string"
@@ -18091,14 +17995,14 @@
           "encryptedData",
           "encryptionIv",
           "encryptionAlgorithm",
-          "version"
+          "version",
+          "encryptionVersion",
+          "encryptedByUserId",
+          "lastModifiedBy"
         ],
         "properties": {
           "encryptedByUserId": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "encryptedData": {
             "type": "string"
@@ -18110,20 +18014,14 @@
             "type": "string"
           },
           "encryptionVersion": {
-            "type": [
-              "integer",
-              "null"
-            ],
+            "type": "integer",
             "format": "int32"
           },
           "id": {
             "type": "string"
           },
           "lastModifiedBy": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": "string"
           },
           "version": {
             "type": "integer",

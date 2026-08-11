@@ -37,7 +37,7 @@ export const ffi_bittery_crypto_api_rust_future_complete_i8: (a: bigint, b: numb
 export const ffi_bittery_crypto_api_rust_future_poll_u16: (a: bigint, b: number, c: bigint) => void;
 export const ffi_bittery_crypto_api_rust_future_cancel_u16: (a: bigint) => void;
 export const uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion: (a: number, b: number, c: number, d: number) => bigint;
-export const uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: bigint, c: number, d: number, e: number) => bigint;
+export const uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: bigint, c: number) => bigint;
 export const uniffi_bittery_crypto_api_fn_func_validate_recovery_key: (a: number) => bigint;
 export const uniffi_bittery_crypto_api_fn_func_validate_rotation_data: (a: number) => bigint;
 export const uniffi_bittery_crypto_api_fn_func_validate_secret_key: (a: number) => bigint;
@@ -280,7 +280,7 @@ export const ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item: (a: number,
 export const ubrn_uniffi_bittery_crypto_api_fn_func_rsa_decrypt: (a: number, b: number, c: number, d: number) => bigint;
 export const ubrn_uniffi_bittery_crypto_api_fn_func_rsa_encrypt: (a: number, b: number, c: number, d: number) => bigint;
 export const ubrn_uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
-export const ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: number, c: bigint, d: number, e: number, f: number, g: number, h: number, i: number) => bigint;
+export const ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: number, c: bigint, d: number, e: number) => bigint;
 export const ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key: (a: number, b: number) => bigint;
 export const ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data: (a: number, b: number) => bigint;
 export const ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key: (a: number, b: number) => bigint;

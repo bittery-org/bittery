@@ -320,28 +320,6 @@ export async function waitForNetworkIdle(
 }
 
 /**
- * @deprecated Use waitForPageReady() or specific DOM-based waits instead.
- * This function exists for backward compatibility but should be replaced
- * with more reliable DOM-based waiting strategies.
- */
-export async function waitForNetworkIdleExceptSSE(
-	page: Page,
-	_timeout = 30000,
-): Promise<void> {
-	await page.waitForLoadState("load");
-	// Wait for React hydration by checking for interactive elements
-	await page.waitForFunction(
-		() => {
-			return (
-				document.readyState === "complete" &&
-				!document.querySelector('[data-loading="true"]')
-			);
-		},
-		{ timeout: _timeout },
-	);
-}
-
-/**
  * Wait for page to be ready by checking for common loading indicators.
  * This is a more reliable approach than fixed timeouts.
  */

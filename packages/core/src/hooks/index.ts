@@ -132,10 +132,8 @@ export {
 	useDeletedItems,
 } from "./use-deleted-items";
 export {
-	type EncryptionContextMigrationItem,
 	type UseItemResult,
 	useItem,
-	useOpenedItemEncryptionContextMigration,
 } from "./use-item";
 export {
 	type AttachmentMeta,

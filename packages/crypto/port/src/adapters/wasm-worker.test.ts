@@ -137,7 +137,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 		const sealed = await port.encrypt("secret", vaultKey, null);
 		await port.decrypt(sealed, vaultKey, null);
 		const wrapped = await port.wrapKey(vaultKey, derived.masterUnlockKey);
-		await port.unwrapKey(wrapped, derived.masterUnlockKey);
+		await port.unwrapKey(wrapped, derived.masterUnlockKey, null);
 		await port.encryptVaultKeyWithMuk(
 			vaultKey,
 			derived.masterUnlockKey,
@@ -181,7 +181,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 			version: 1,
 			userId: "user-opaque",
 		};
-		await port.unwrapKey(ownerEnvelope, muk, { context: ownerContext });
+		await port.unwrapKey(ownerEnvelope, muk, ownerContext);
 
 		const encryptedPrivateKey = await port.encrypt(pair.privateKey, muk, null);
 		const memberEnvelope = await port.encryptVaultKeyForMember(

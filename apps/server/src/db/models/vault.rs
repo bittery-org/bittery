@@ -5,14 +5,8 @@ use time::OffsetDateTime;
 pub struct DbTombstoneCandidate {
     pub id: String,
     pub vault_id: String,
-    pub last_modified_by: Option<String>,
-    pub version: Option<i32>,
-}
-
-#[derive(Clone, Debug, FromRow)]
-pub struct DbVaultOwnerRow {
-    pub id: String,
-    pub created_by_id: String,
+    pub last_modified_by: String,
+    pub version: i32,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -37,10 +31,10 @@ pub struct DbScopedAttachmentAccessRow {
     pub encrypted_name: String,
     pub encrypted_content_type: String,
     pub encryption_iv: String,
-    pub encrypted_content_type_iv: Option<String>,
+    pub encrypted_content_type_iv: String,
     pub encryption_algorithm: String,
     pub file_size: i32,
-    pub uploaded_by: Option<String>,
+    pub uploaded_by: String,
     pub created_at: OffsetDateTime,
     pub role: String,
 }

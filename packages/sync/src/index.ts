@@ -12,7 +12,6 @@ export type { DeltaSyncApiClient } from "./delta-sync";
 export { performDeltaSync } from "./delta-sync";
 export {
 	createNativeItemSyncCommand,
-	isLegacyNativeItemConflict,
 	type NativeEncryptedItemHandoff,
 } from "./native-command-handoff";
 export {

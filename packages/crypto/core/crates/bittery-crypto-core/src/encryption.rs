@@ -456,7 +456,7 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_algorithm_is_rejected() {
+    fn unsupported_algorithm_is_rejected() {
         let key = generate_encryption_key();
         let encrypted = EncryptedData {
             ciphertext: "Zm9v".to_string(),

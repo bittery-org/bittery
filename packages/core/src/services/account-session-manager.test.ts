@@ -301,8 +301,8 @@ describe("AccountSessionManager", () => {
 	});
 
 	it("treats a stored active accountId that matches no account as null", async () => {
-		// Older builds persisted an email into the accountId field. It reads back
-		// as a valid-looking id, so refresh must validate it against the list.
+		// A corrupted pointer can still look like an id, so refresh must validate
+		// it against the account list.
 		const storage = await createStore();
 		await storage.setActiveAccount("a@test.com");
 		const manager = new AccountSessionManager({

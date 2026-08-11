@@ -227,16 +227,6 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		[clientId, serverUrl],
 	);
 
-	const resolveLegacyAccountId = useCallback(async (email: string) => {
-		const matches = (await storage.getAccountsList()).filter(
-			(account) => account.email.toLowerCase() === email.toLowerCase(),
-		);
-		if (matches.length !== 1) {
-			throw new Error(`Ambiguous legacy account queue for ${email}`);
-		}
-		return matches[0]?.accountId;
-	}, []);
-
 	/** The UI half of an invalidation; the record half already happened in core. */
 	const applyInvalidatedSession = useCallback(
 		async (outcome: LifecycleOutcome) => {
@@ -426,7 +416,6 @@ export function useDesktopSync(queryClient: QueryClient, enabled = true) {
 		itemCacheAdapter: vaultCoordinator,
 		sources: syncSources,
 		getClientForAccount,
-		resolveLegacyAccountId,
 		onSessionRevoked,
 		onEventProcessed: onTravelModeEvent,
 		onTerminalCommandFailure,

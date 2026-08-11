@@ -124,7 +124,8 @@ class PasskeyMutationDaoTest {
         encryptedKey = "vault-key",
         encryptionIv = "vault-key-iv",
         encryptionAlgorithm = "AES-GCM-AAD-V1",
-        role = "owner"
+        role = "owner",
+        keyVersion = 1L
     )
 
     private fun item(id: String, encryptedData: String, version: Long) = ItemEntity(

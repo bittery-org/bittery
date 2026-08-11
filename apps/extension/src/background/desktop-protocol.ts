@@ -1,4 +1,3 @@
-// Kept at 1: additive fields remain compatible with older desktop peers.
 export const DESKTOP_PROTOCOL_VERSION = 1;
 
 export type DesktopTheme = "light" | "dark" | "system";
@@ -60,8 +59,6 @@ export type DesktopRequest =
 			extension_id: string;
 	  }
 	| { type: "TRIGGER_DESKTOP_UNLOCK" }
-	// Intent fields are additive (protocol v1): older desktop hosts ignore
-	// them and simply open the app without acting on the intent.
 	| {
 			type: "OPEN_DESKTOP_APP";
 			intent?: "create_item" | "view_item";
@@ -112,12 +109,14 @@ export type DesktopResponse =
 				email: string;
 				userId: string;
 				name: string;
+				serverUrl: string;
 				secretKeyHint: string;
 				teamName?: string;
 				teamAvatarUrl?: string | null;
 				addedAt: number;
 				lastActiveAt: number;
 				biometricEnabled: boolean;
+				insecureTransportConfirmed: boolean;
 			}>;
 			activeAccount?: string | null;
 			unlockedAccounts: string[];
@@ -191,7 +190,7 @@ export class DesktopProtocolMismatchError extends Error {
 
 	constructor(expectedVersion: number, receivedVersion: number | undefined) {
 		super(
-			`Desktop protocol mismatch (expected ${expectedVersion}, received ${receivedVersion ?? "legacy"})`,
+			`Desktop protocol mismatch (expected ${expectedVersion}, received ${receivedVersion ?? "missing"})`,
 		);
 		this.name = "DesktopProtocolMismatchError";
 		this.expectedVersion = expectedVersion;

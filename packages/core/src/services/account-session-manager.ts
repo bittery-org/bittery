@@ -141,10 +141,8 @@ export class AccountSessionManager {
 		]);
 
 		this.accounts = accounts;
-		// The stored id is not trustworthy on its own: older builds persisted an
-		// email here, and an account may have been removed elsewhere. Anything
-		// that does not resolve to a known account is treated as "no active
-		// account" so the normal selection path takes over.
+		// An account may have been removed by another surface. Treat an unknown
+		// pointer as "no active account" so the normal selection path takes over.
 		this.active =
 			active && !resolveActiveAccountId(active, accounts) ? null : active;
 		this.lockState.clear();
@@ -251,6 +249,7 @@ export class AccountSessionManager {
 			addedAt: Date.now(),
 			lastActiveAt: Date.now(),
 			biometricEnabled: await this.storage.isBiometricEnabled(accountId),
+			insecureTransportConfirmed: false,
 		};
 
 		await this.storage.addAccount(metadata);

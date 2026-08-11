@@ -51,7 +51,6 @@ where
         std::env::var("BITTERY_STORAGE_ACCESS_KEY_ID").ok(),
         std::env::var("BITTERY_STORAGE_SECRET_ACCESS_KEY").ok(),
         std::env::var("BITTERY_STORAGE_REGION").ok(),
-        std::env::var("BITTERY_STORAGE_PUBLIC_URL").ok(),
         std::env::var("BITTERY_STORAGE_CDN_URL").ok(),
         std::env::var("BITTERY_ATTACHMENT_UPLOAD_SECRET").ok(),
     );
@@ -63,10 +62,6 @@ where
     set_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", Some("test-access-key"));
     set_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", Some("test-secret-key"));
     set_env_var("BITTERY_STORAGE_REGION", Some("auto"));
-    set_env_var(
-        "BITTERY_STORAGE_PUBLIC_URL",
-        Some("https://cdn.example.invalid/public"),
-    );
     set_env_var(
         "BITTERY_STORAGE_CDN_URL",
         Some("https://cdn.example.invalid/assets"),
@@ -84,7 +79,6 @@ where
         previous_access_key,
         previous_secret_key,
         previous_region,
-        previous_public_url,
         previous_cdn_url,
         previous_attachment_secret,
     ) = previous;
@@ -93,7 +87,6 @@ where
     restore_env_var("BITTERY_STORAGE_ACCESS_KEY_ID", previous_access_key);
     restore_env_var("BITTERY_STORAGE_SECRET_ACCESS_KEY", previous_secret_key);
     restore_env_var("BITTERY_STORAGE_REGION", previous_region);
-    restore_env_var("BITTERY_STORAGE_PUBLIC_URL", previous_public_url);
     restore_env_var("BITTERY_STORAGE_CDN_URL", previous_cdn_url);
     restore_env_var(
         "BITTERY_ATTACHMENT_UPLOAD_SECRET",
@@ -1510,76 +1503,6 @@ async fn attachment_update_event_names_the_parent_item() {
         .await
         .unwrap();
         assert_eq!(entity_id, fixture.active_item_id);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn legacy_encryption_context_can_be_adopted_without_replacing_ciphertext() {
-    with_api_test_app("legacy_encryption_context_adoption", |app| async move {
-        let fixture = build_vault_router_fixture(&app.pool).await;
-        query("UPDATE item SET version = 4 WHERE id = $1")
-            .bind(&fixture.active_item_id)
-            .execute(&app.pool)
-            .await
-            .unwrap();
-        let session = app.issue_session(&fixture.owner_user_id).await;
-        let stale_response = app
-            .api_json(
-                Method::PATCH,
-                &format!("/api/v1/items/{}", fixture.active_item_id),
-                Some(json!({
-                    "encryptionVersion": 1,
-                    "encryptedByUserId": fixture.owner_user_id
-                })),
-                with_if_match(authenticated_json_headers(&session.token), 3),
-            )
-            .await;
-        assert_eq!(stale_response.status, StatusCode::PRECONDITION_FAILED);
-        let unchanged_item: (String, String, i32, Option<i32>, Option<String>) = sqlx::query_as(
-            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
-        )
-        .bind(&fixture.active_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
-        assert_eq!(
-            unchanged_item,
-            (
-                "active-encrypted-data".to_string(),
-                "active-iv".to_string(),
-                4,
-                None,
-                None,
-            )
-        );
-
-        let response = app
-            .api_json(
-                Method::PATCH,
-                &format!("/api/v1/items/{}", fixture.active_item_id),
-                Some(json!({
-                    "encryptionVersion": 1,
-                    "encryptedByUserId": fixture.owner_user_id
-                })),
-                with_if_match(authenticated_json_headers(&session.token), 4),
-            )
-            .await;
-
-        assert_eq!(response.status, StatusCode::OK);
-        assert_eq!(response.headers.get(ETAG).unwrap(), "\"5\"");
-        let item: (String, String, i32, Option<i32>, Option<String>) = sqlx::query_as(
-            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
-        )
-        .bind(&fixture.active_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .unwrap();
-        assert_eq!(item.0, "active-encrypted-data");
-        assert_eq!(item.1, "active-iv");
-        assert_eq!(item.2, 5);
-        assert_eq!(item.3, Some(1));
-        assert_eq!(item.4, Some(fixture.owner_user_id));
     })
     .await;
 }

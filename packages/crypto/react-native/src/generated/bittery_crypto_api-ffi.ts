@@ -108,7 +108,7 @@ interface NativeModuleInterface {
     ubrn_uniffi_bittery_crypto_api_fn_func_rsa_decrypt(ciphertext: Uint8Array, privateKeyPem: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_func_rsa_encrypt(plaintext: Uint8Array, publicKeyPem: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion(privateKeyBase64: Uint8Array, rpId: Uint8Array, clientDataHashBase64: Uint8Array, signCount: number): bigint;
-    ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(data: Uint8Array, wrappingKey: bigint, context: Uint8Array, legacyMarker: Uint8Array, legacyContext: Uint8Array): bigint;
+    ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(data: Uint8Array, wrappingKey: bigint, context: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key(recoveryKey: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(members: Uint8Array): bigint;
     ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key(secretKey: Uint8Array): bigint;
