@@ -257,7 +257,7 @@ pub async fn fetch_bootstrap_items(
         .is_some_and(|last| last.position < last.candidate_count);
     let item_ids: Vec<String> = weights.into_iter().map(|weight| weight.id).collect();
     let rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
     )
     .bind(&item_ids)
     .fetch_all(pool)

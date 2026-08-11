@@ -116,6 +116,8 @@ async function cachedItem(
 		encryptionAlgorithm: encrypted.algorithm,
 		version,
 		lastModifiedBy: USER_ID,
+		encryptionVersion: version,
+		encryptedByUserId: USER_ID,
 		createdAt: "2026-08-01T00:00:00.000Z",
 		updatedAt: "2026-08-01T00:00:00.000Z",
 		deletedAt: null,

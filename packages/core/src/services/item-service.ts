@@ -139,7 +139,11 @@ type DecryptableItemRecord = {
 	encryptionAlgorithm: string;
 	version?: number;
 	lastModifiedBy?: string | null;
+	encryptionVersion?: number | null;
+	encryptedByUserId?: string | null;
 };
+
+const LEGACY_ENCRYPTION_VERSION_WINDOW = 8;
 
 type ApiVaultSummary =
 	| (Omit<ServerVaultSummary, "icon" | "imageUrl"> & {
@@ -267,16 +271,55 @@ export class ItemService {
 		return merged;
 	}
 
-	private getVersionCandidates(version?: number): number[] {
+	private getLegacyVersionCandidates(version?: number): number[] {
 		const normalized =
 			typeof version === "number" && Number.isFinite(version) && version > 0
 				? Math.floor(version)
 				: 1;
 		const candidates: number[] = [];
-		for (let candidate = normalized; candidate >= 1; candidate -= 1) {
+		const minimum = Math.max(
+			1,
+			normalized - LEGACY_ENCRYPTION_VERSION_WINDOW + 1,
+		);
+		for (let candidate = normalized; candidate >= minimum; candidate -= 1) {
 			candidates.push(candidate);
 		}
 		return candidates;
+	}
+
+	private getEncryptionContextCandidates(
+		item: DecryptableItemRecord,
+		fallbackUserId: string,
+	): Array<{ version: number; userId: string; legacy: boolean }> {
+		const hasVersion = item.encryptionVersion != null;
+		const hasAuthor = item.encryptedByUserId != null;
+		if (hasVersion || hasAuthor) {
+			if (
+				!hasVersion ||
+				!hasAuthor ||
+				!Number.isInteger(item.encryptionVersion) ||
+				(item.encryptionVersion ?? 0) < 1 ||
+				item.encryptedByUserId === ""
+			) {
+				return [];
+			}
+			return [
+				{
+					version: item.encryptionVersion as number,
+					userId: item.encryptedByUserId as string,
+					legacy: false,
+				},
+			];
+		}
+
+		const authors = Array.from(
+			new Set(
+				[item.lastModifiedBy, fallbackUserId].filter(Boolean) as string[],
+			),
+		);
+		return this.getLegacyVersionCandidates(item.version).flatMap((version) =>
+			authors.map((userId) => ({ version, userId, legacy: true })),
+		);
 	}
 
 	private async decryptItemPayload(
@@ -284,14 +327,12 @@ export class ItemService {
 		vaultKey: KeyRef,
 		fallbackUserId: string,
 	): Promise<string> {
-		const storedVersion =
-			typeof item.version === "number" && Number.isFinite(item.version)
-				? Math.floor(item.version)
-				: 1;
-		const userId = item.lastModifiedBy ?? fallbackUserId;
 		let lastError: unknown = null;
 
-		for (const version of this.getVersionCandidates(storedVersion)) {
+		for (const context of this.getEncryptionContextCandidates(
+			item,
+			fallbackUserId,
+		)) {
 			try {
 				const decrypted = await this.vaultCrypto.decryptItem(
 					{
@@ -300,12 +341,17 @@ export class ItemService {
 						algorithm: item.encryptionAlgorithm,
 					},
 					vaultKey,
-					{ vaultId: item.vaultId, itemId: item.id, version, userId },
+					{
+						vaultId: item.vaultId,
+						itemId: item.id,
+						version: context.version,
+						userId: context.userId,
+					},
 				);
 
-				if (version !== storedVersion) {
+				if (context.legacy) {
 					console.warn(
-						`[ItemService] Recovered item ${item.id} with fallback encryption version ${version} (stored version ${storedVersion})`,
+						`[ItemService] Recovered item ${item.id} with legacy encryption context version ${context.version} (stored version ${item.version ?? 1})`,
 					);
 				}
 
@@ -351,6 +397,10 @@ export class ItemService {
 					encryptedData: item.encryptedData,
 					encryptionIv: item.encryptionIv,
 					encryptionAlgorithm: item.encryptionAlgorithm,
+					version: item.version,
+					lastModifiedBy: item.lastModifiedBy,
+					encryptionVersion: item.encryptionVersion,
+					encryptedByUserId: item.encryptedByUserId,
 					createdAt: item.createdAt,
 					updatedAt: item.updatedAt,
 					deletedAt: item.deletedAt,
@@ -391,6 +441,8 @@ export class ItemService {
 			version: (item as { version?: number }).version ?? 1,
 			lastModifiedBy:
 				(item as { lastModifiedBy?: string | null }).lastModifiedBy ?? null,
+			encryptionVersion: item.encryptionVersion ?? null,
+			encryptedByUserId: item.encryptedByUserId ?? null,
 			createdAt: String(item.createdAt),
 			updatedAt: String(item.updatedAt),
 			deletedAt: item.deletedAt ? String(item.deletedAt) : null,
@@ -630,6 +682,8 @@ export class ItemService {
 					encryptionAlgorithm: item.encryptionAlgorithm,
 					version: item.version,
 					lastModifiedBy: item.lastModifiedBy,
+					encryptionVersion: item.encryptionVersion,
+					encryptedByUserId: item.encryptedByUserId,
 					createdAt: item.createdAt,
 					updatedAt: item.updatedAt,
 				}));
@@ -736,6 +790,8 @@ export class ItemService {
 				encryptionAlgorithm: cached.encryptionAlgorithm,
 				version: cached.version,
 				lastModifiedBy: cached.lastModifiedBy,
+				encryptionVersion: cached.encryptionVersion,
+				encryptedByUserId: cached.encryptedByUserId,
 				createdAt: cached.createdAt,
 				updatedAt: cached.updatedAt,
 				deletedAt: cached.deletedAt ?? null,
@@ -759,6 +815,12 @@ export class ItemService {
 				encryptionAlgorithm: fetched.encryptionAlgorithm,
 				version: fetched.version,
 				lastModifiedBy: fetched.lastModifiedBy ?? null,
+				encryptionVersion:
+					(fetched as { encryptionVersion?: number | null })
+						.encryptionVersion ?? null,
+				encryptedByUserId:
+					(fetched as { encryptedByUserId?: string | null })
+						.encryptedByUserId ?? null,
 				createdAt: fetched.createdAt,
 				updatedAt: fetched.updatedAt,
 				deletedAt: fetched.deletedAt,

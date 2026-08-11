@@ -35,6 +35,8 @@ interface BasePendingMutation {
 		encryptedData: string;
 		encryptionIv: string;
 		encryptionAlgorithm: string;
+		encryptionVersion?: number;
+		encryptedByUserId?: string;
 	};
 	favorite?: boolean;
 	baseVersion: number;
@@ -59,6 +61,8 @@ interface EncryptedPayloadLike {
 	ciphertext: string;
 	iv: string;
 	algorithm: string;
+	encryptionVersion?: number;
+	encryptedByUserId?: string;
 }
 
 export function createLocalId(prefix: string): string {
@@ -72,13 +76,17 @@ export function createLocalId(prefix: string): string {
 export function enqueuePendingMutation(
 	queue: IPendingMutationQueue,
 	mutation: BasePendingMutation,
-): void {
-	queue.enqueue({
-		id: createLocalId("mutation"),
-		...mutation,
-		timestamp: Date.now(),
-		retryCount: 0,
-	});
+	applyOptimistic?: () => Promise<void>,
+): Promise<void> {
+	return queue.enqueue(
+		{
+			id: createLocalId("mutation"),
+			...mutation,
+			timestamp: Date.now(),
+			retryCount: 0,
+		},
+		applyOptimistic,
+	);
 }
 
 export function toQueueEncryptedPayload(
@@ -88,6 +96,8 @@ export function toQueueEncryptedPayload(
 		encryptedData: payload.ciphertext,
 		encryptionIv: payload.iv,
 		encryptionAlgorithm: payload.algorithm,
+		encryptionVersion: payload.encryptionVersion,
+		encryptedByUserId: payload.encryptedByUserId,
 	};
 }
 
@@ -155,13 +165,18 @@ export function enqueueItemMutation(
 		BasePendingMutation,
 		"baseVersion" | "accountId" | "accountEmail"
 	>,
-): void {
-	enqueuePendingMutation(queue, {
-		...mutation,
-		baseVersion: context.baseVersion,
-		accountId: context.accountId,
-		accountEmail: context.accountEmail,
-	});
+	applyOptimistic?: () => Promise<void>,
+): Promise<void> {
+	return enqueuePendingMutation(
+		queue,
+		{
+			...mutation,
+			baseVersion: context.baseVersion,
+			accountId: context.accountId,
+			accountEmail: context.accountEmail,
+		},
+		applyOptimistic,
+	);
 }
 
 export function extractDecryptedItemData(item: unknown): DecryptedItemData {
@@ -175,6 +190,8 @@ export function extractDecryptedItemData(item: unknown): DecryptedItemData {
 	delete data.deletedAt;
 	delete data.version;
 	delete data.lastModifiedBy;
+	delete data.encryptionVersion;
+	delete data.encryptedByUserId;
 	delete data.attachments;
 	delete data.accountEmail;
 	delete data.accountId;

@@ -23,7 +23,7 @@ import {
 
 // Storage keys
 const CLIENT_ID_KEY = "bittery_sync_client_id";
-const LAST_SYNC_CURSOR_KEY = "bittery_last_sync_cursor";
+const LAST_SYNC_CURSOR_KEY_PREFIX = "bittery_last_sync_cursor_v2";
 const LEGACY_LAST_SYNC_KEY = "bittery_last_sync_timestamp";
 const SYNC_ALARM_NAME = "bittery_sync_reconnect";
 
@@ -32,6 +32,7 @@ let abortController: AbortController | null = null;
 let connectionStatus: ConnectionStatus = "disconnected";
 let reconnectAttempt = 0;
 let syncConnectionEmail: string | null = null;
+let syncConnectionAccountId: string | null = null;
 /** Set once the server revoked this session; the JWT is dead, so reconnecting only loops 401s. */
 let revoked = false;
 
@@ -118,15 +119,16 @@ export function getStatus(): ConnectionStatus {
  */
 async function catchUpMissedEvents(): Promise<void> {
 	try {
-		const lastCursor = await getLastSyncCursor();
+		if (!syncConnectionAccountId) {
+			throw new Error("Sync catch-up requires an accountId cursor scope");
+		}
+		const lastCursor = await getLastSyncCursor(syncConnectionAccountId);
 
-		const clientId = await getClientId();
 		const client =
 			await syncCacheService.getClientForEmail(syncConnectionEmail);
 		const result = await runCatchUp({
 			client,
 			initialCursor: lastCursor ?? { id: "" },
-			shouldProcessEvent: (event) => event.clientId !== clientId,
 			onEvent: async (event) => {
 				await syncCacheService.applyDeltaSyncForEvent(event);
 			},
@@ -136,7 +138,7 @@ async function catchUpMissedEvents(): Promise<void> {
 			},
 		});
 
-		await setLastSyncCursor(result.cursor);
+		await setLastSyncCursor(syncConnectionAccountId, result.cursor);
 		if (result.processedCount > 0) {
 			sendRuntimeMessage({
 				type: "SYNC_FULL_REFRESH_REQUIRED",
@@ -169,6 +171,7 @@ export async function connect(): Promise<void> {
 		}
 
 		setSyncConnectionEmail(context.email);
+		syncConnectionAccountId = context.accountId;
 		abortController = new AbortController();
 
 		const response = await context.client.sync.events(abortController.signal);
@@ -346,6 +349,7 @@ export function disconnect(
 		abortController = null;
 	}
 	syncConnectionEmail = null;
+	syncConnectionAccountId = null;
 	// A revoked teardown keeps the fallback identity: the session invalidation it
 	// triggers runs after this disconnect and resolves by email.
 	if (!suppressReconnect) {
@@ -367,31 +371,40 @@ export async function initializeSync(): Promise<void> {
  * Cleanup sync on logout.
  */
 export async function cleanupSync(): Promise<void> {
+	const accountId = syncConnectionAccountId;
 	disconnect("logout cleanup");
 	revoked = false;
-	await chrome.storage.local.remove([
-		LAST_SYNC_CURSOR_KEY,
-		LEGACY_LAST_SYNC_KEY,
-	]);
+	const keys = [LEGACY_LAST_SYNC_KEY];
+	if (accountId) {
+		keys.push(lastSyncCursorKey(accountId));
+	}
+	await chrome.storage.local.remove(keys);
+}
+
+function lastSyncCursorKey(accountId: string): string {
+	return `${LAST_SYNC_CURSOR_KEY_PREFIX}:${encodeURIComponent(accountId)}`;
 }
 
 /**
  * Persist last sync cursor.
  */
-export async function setLastSyncCursor(cursor: SyncCursor): Promise<void> {
-	await chrome.storage.local.set({ [LAST_SYNC_CURSOR_KEY]: cursor });
+export async function setLastSyncCursor(
+	accountId: string,
+	cursor: SyncCursor,
+): Promise<void> {
+	await chrome.storage.local.set({ [lastSyncCursorKey(accountId)]: cursor });
 }
 
 /**
  * Get last sync cursor.
  * Supports migration from legacy timestamp+id storage.
  */
-export async function getLastSyncCursor(): Promise<SyncCursor | null> {
-	const result = await chrome.storage.local.get([
-		LAST_SYNC_CURSOR_KEY,
-		LEGACY_LAST_SYNC_KEY,
-	]);
-	const cursor = result[LAST_SYNC_CURSOR_KEY] as SyncCursor | undefined;
+export async function getLastSyncCursor(
+	accountId: string,
+): Promise<SyncCursor | null> {
+	const key = lastSyncCursorKey(accountId);
+	const result = await chrome.storage.local.get(key);
+	const cursor = result[key] as SyncCursor | undefined;
 	if (cursor && typeof cursor.id === "string") {
 		return cursor;
 	}

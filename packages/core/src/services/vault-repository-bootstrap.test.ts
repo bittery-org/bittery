@@ -95,6 +95,8 @@ function createClient(): BootstrapItemsClient {
 							encryptionAlgorithm: "AES-GCM",
 							version: 1,
 							lastModifiedBy: null,
+							encryptionVersion: 1,
+							encryptedByUserId: USER_ID,
 							createdAt: "2026-08-01T00:00:00.000Z",
 							updatedAt: "2026-08-01T00:00:00.000Z",
 							deletedAt: null,
@@ -129,7 +131,11 @@ function createClient(): BootstrapItemsClient {
 	} as unknown as BootstrapItemsClient;
 }
 
-async function setup() {
+async function setup(
+	onEncryptionContextDiscovered?: ConstructorParameters<
+		typeof VaultRepository
+	>[7],
+) {
 	const { storage, itemCache, recordPort, crypto } = await createLayers();
 	const vaultCrypto = createVaultCrypto({ crypto, storage });
 	await getTravelModeEnforcer(storage, itemCache).applyConfig(ACCOUNT_ID, {
@@ -145,6 +151,7 @@ async function setup() {
 		ACCOUNT_ID,
 		"https://bittery.test",
 		"user@bittery.test",
+		onEncryptionContextDiscovered,
 	);
 
 	return { repo, storage, itemCache, recordPort, crypto, vaultCrypto };
@@ -177,6 +184,8 @@ async function cachedItem(
 		encryptionAlgorithm: encrypted.algorithm,
 		version: 1,
 		lastModifiedBy: USER_ID,
+		encryptionVersion: 1,
+		encryptedByUserId: USER_ID,
 		createdAt: "2026-08-01T00:00:00.000Z",
 		updatedAt: "2026-08-01T00:00:00.000Z",
 		deletedAt: null,
@@ -215,6 +224,17 @@ describe("VaultRepository.hydrateFromServer", () => {
 		);
 		expect(cached?.type).toBe("team");
 		expect(cached?.name).toBe("Team Vault");
+	});
+
+	it("caches the exact ciphertext context returned by bootstrap", async () => {
+		const { repo, itemCache } = await setup();
+
+		await repo.hydrateFromServer(createClient());
+
+		const cached = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(cached?.version).toBe(1);
+		expect(cached?.encryptionVersion).toBe(1);
+		expect(cached?.encryptedByUserId).toBe(USER_ID);
 	});
 
 	it("keeps hidden vaults out of every promoted bootstrap layer", async () => {
@@ -630,5 +650,158 @@ describe("VaultRepository absorbs an undecryptable sync write", () => {
 		const cached = await itemCache.getCachedItems(ACCOUNT_ID);
 		expect(cached?.[0]?.version).toBe(2);
 		expect(cached?.[0]?.encryptedData).toBe(UNOPENABLE);
+	});
+});
+
+describe("VaultRepository encryption context migration", () => {
+	beforeEach(() => {
+		resetTravelModeEnforcerForTests();
+	});
+
+	it("stores the exact context used by a new local ciphertext", async () => {
+		const { repo, itemCache } = await setup();
+		const encrypted = await repo.encryptWithVaultKey(
+			"vault_1",
+			{ title: "New Item" },
+			{ itemId: "new_item", version: 1 },
+		);
+
+		await repo.upsertLocal(
+			{
+				id: "new_item",
+				vaultId: "vault_1",
+				category: "login",
+				favorite: false,
+				createdAt: "2026-08-01T00:00:00.000Z",
+				updatedAt: "2026-08-01T00:00:00.000Z",
+				title: "New Item",
+			},
+			encrypted,
+		);
+
+		const cached = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(cached?.version).toBe(1);
+		expect(cached?.encryptionVersion).toBe(1);
+		expect(cached?.encryptedByUserId).toBe(USER_ID);
+	});
+
+	it("persists a bounded legacy version discovery and uses the exact context after restart", async () => {
+		const discoveries: unknown[] = [];
+		const { repo, storage, itemCache, crypto, vaultCrypto } = await setup(
+			(context) => {
+				discoveries.push(context);
+			},
+		);
+		const legacy = {
+			...(await cachedItem("legacy_item", crypto, vaultCrypto)),
+			version: 3,
+			encryptionVersion: undefined,
+			encryptedByUserId: undefined,
+		};
+		await itemCache.setCachedItems([legacy], ACCOUNT_ID);
+
+		await repo.hydrate();
+
+		expect(repo.getById("legacy_item")?.title).toBe("Item");
+		const migrated = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+		expect(migrated?.version).toBe(3);
+		expect(migrated?.encryptionVersion).toBe(1);
+		expect(migrated?.encryptedByUserId).toBe(USER_ID);
+		expect(discoveries).toEqual([
+			{
+				accountId: ACCOUNT_ID,
+				itemId: "legacy_item",
+				vaultId: "vault_1",
+				baseVersion: 3,
+				encryptionVersion: 1,
+				encryptedByUserId: USER_ID,
+			},
+		]);
+
+		const restarted = new VaultRepository(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+			ACCOUNT_ID,
+			"https://bittery.test",
+			"user@bittery.test",
+		);
+		await restarted.hydrate();
+
+		expect(restarted.getById("legacy_item")?.encryptionVersion).toBe(1);
+		expect(restarted.getById("legacy_item")?.encryptedByUserId).toBe(USER_ID);
+	});
+
+	it("does not scan an unbounded OCC history for legacy ciphertext", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		await itemCache.setCachedItems(
+			[
+				{
+					...(await cachedItem("old_legacy_item", crypto, vaultCrypto)),
+					version: 100,
+					encryptionVersion: undefined,
+					encryptedByUserId: undefined,
+				},
+			],
+			ACCOUNT_ID,
+		);
+
+		await repo.hydrate();
+
+		expect(repo.getById("old_legacy_item")).toBeUndefined();
+	});
+
+	it("keeps the ciphertext author when another member trashes and restores an item", async () => {
+		const { repo, itemCache, crypto, vaultCrypto } = await setup();
+		const authorId = "user-author";
+		const metadataWriterId = "user-trash-writer";
+		const key = await vaultCrypto.getVaultKey({
+			vaultId: "vault_1",
+			accountId: ACCOUNT_ID,
+			userId: USER_ID,
+		});
+		if (!key) throw new Error("Missing test vault key");
+		const encrypted = await vaultCrypto.encryptItem(
+			JSON.stringify({ title: "Shared Item" }),
+			key,
+			{
+				vaultId: "vault_1",
+				itemId: "shared_item",
+				version: 1,
+				userId: authorId,
+			},
+		);
+		await crypto.destroyKey(key);
+
+		await repo.upsertEncrypted(
+			{
+				id: "shared_item",
+				vaultId: "vault_1",
+				category: "login",
+				favorite: false,
+				encryptedData: encrypted.ciphertext,
+				encryptionIv: encrypted.iv,
+				encryptionAlgorithm: encrypted.algorithm,
+				version: 3,
+				lastModifiedBy: metadataWriterId,
+				encryptionVersion: 1,
+				encryptedByUserId: authorId,
+				createdAt: "2026-08-01T00:00:00.000Z",
+				updatedAt: "2026-08-01T00:00:00.000Z",
+				deletedAt: "2026-08-02T00:00:00.000Z",
+			},
+			ACCOUNT_ID,
+		);
+		expect(repo.getDeleted()[0]?.title).toBe("Shared Item");
+
+		await repo.restore("shared_item");
+		await repo.softDelete("shared_item");
+		const cached = (await itemCache.getCachedItems(ACCOUNT_ID))?.[0];
+
+		expect(cached?.version).toBe(3);
+		expect(cached?.lastModifiedBy).toBe(metadataWriterId);
+		expect(cached?.encryptionVersion).toBe(1);
+		expect(cached?.encryptedByUserId).toBe(authorId);
 	});
 });

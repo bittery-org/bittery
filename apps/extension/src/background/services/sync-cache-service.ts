@@ -30,6 +30,7 @@ import { desktopClient } from "../desktop-client";
 const DEFAULT_SERVER_URL = "http://localhost:3000";
 
 export type SyncConnectionContext = {
+	accountId: string | null;
 	email: string | null;
 	client: SyncEventApiClient;
 };
@@ -284,6 +285,7 @@ export function createSyncCacheService(
 				`[sync-cache-service] Selected account-scoped sync context: ${accountId}`,
 			);
 			return {
+				accountId,
 				email: email ? normalizeEmail(email) : null,
 				client,
 			};
@@ -302,6 +304,7 @@ export function createSyncCacheService(
 			"[sync-cache-service] Using fallback sync context without explicit account scope",
 		);
 		return {
+			accountId: activeAccountId,
 			email: null,
 			client: deps.defaultClient,
 		};

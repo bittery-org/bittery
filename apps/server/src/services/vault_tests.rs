@@ -1418,6 +1418,7 @@ async fn favorite_service_advances_item_version() {
                 item_id: fixture.active_item_id.clone(),
                 favorite: true,
                 expected_version: None,
+                client_id: Some("favorite-service-client".to_string()),
             },
         )
         .await
@@ -1429,6 +1430,228 @@ async fn favorite_service_advances_item_version() {
             .await
             .unwrap();
         assert_eq!(version, 2);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn favorite_event_retains_the_request_client_id_and_encryption_context() {
+    with_api_test_app("favorite_event_client_and_context", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        query(
+            "UPDATE item SET encryption_version = 1, encrypted_by_user_id = $1 WHERE id = $2",
+        )
+        .bind(&fixture.owner_user_id)
+        .bind(&fixture.active_item_id)
+        .execute(&app.pool)
+        .await
+        .unwrap();
+        let session = app.issue_session(&fixture.owner_user_id).await;
+        let mut headers = with_if_match(authenticated_json_headers(&session.token), 1);
+        headers.insert(
+            "bittery-client-id",
+            HeaderValue::from_static("favorite-regression-client"),
+        );
+
+        let response = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/items/{}/favorite", fixture.active_item_id),
+                Some(json!({ "favorite": true })),
+                headers,
+            )
+            .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.headers.get(ETAG).unwrap(), "\"2\"");
+        let event: (Option<String>, String) = sqlx::query_as(
+            "SELECT client_id, entity_id FROM sync_event WHERE event_type = 'item_updated'::sync_event_type ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(event.0.as_deref(), Some("favorite-regression-client"));
+        assert_eq!(event.1, fixture.active_item_id);
+        let context: (Option<i32>, Option<String>) = sqlx::query_as(
+            "SELECT encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        )
+        .bind(&fixture.active_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(context, (Some(1), Some(fixture.owner_user_id)));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn attachment_update_event_names_the_parent_item() {
+    with_api_test_app("attachment_update_parent_item_event", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        let response = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/attachments/{}", fixture.attachment_id),
+                Some(json!({
+                    "encryptedName": "renamed-attachment",
+                    "encryptionIv": "renamed-iv"
+                })),
+                authenticated_json_headers(&session.token),
+            )
+            .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        let entity_id: String = query_scalar(
+            "SELECT entity_id FROM sync_event WHERE event_type = 'item_updated'::sync_event_type ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(entity_id, fixture.active_item_id);
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn legacy_encryption_context_can_be_adopted_without_replacing_ciphertext() {
+    with_api_test_app("legacy_encryption_context_adoption", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        query("UPDATE item SET version = 4 WHERE id = $1")
+            .bind(&fixture.active_item_id)
+            .execute(&app.pool)
+            .await
+            .unwrap();
+        let session = app.issue_session(&fixture.owner_user_id).await;
+
+        let response = app
+            .api_json(
+                Method::PATCH,
+                &format!("/api/v1/items/{}", fixture.active_item_id),
+                Some(json!({
+                    "encryptionVersion": 1,
+                    "encryptedByUserId": fixture.owner_user_id
+                })),
+                with_if_match(authenticated_json_headers(&session.token), 4),
+            )
+            .await;
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.headers.get(ETAG).unwrap(), "\"5\"");
+        let item: (String, String, i32, Option<i32>, Option<String>) = sqlx::query_as(
+            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        )
+        .bind(&fixture.active_item_id)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(item.0, "active-encrypted-data");
+        assert_eq!(item.1, "active-iv");
+        assert_eq!(item.2, 5);
+        assert_eq!(item.3, Some(1));
+        assert_eq!(item.4, Some(fixture.owner_user_id));
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn item_encryption_context_tracks_ciphertext_not_metadata_revisions() {
+    with_api_test_app("item_encryption_context_revisions", |app| async move {
+        let fixture = build_vault_router_fixture(&app.pool).await;
+        let owner_session = app.issue_session(&fixture.owner_user_id).await;
+        let member_session = app.issue_session(&fixture.member_user_id).await;
+        let item_id = "item_encryption_context_revisions";
+        let item_uri = format!("/api/v1/items/{item_id}");
+
+        let created = app
+            .api_json(
+                Method::PUT,
+                &format!("/api/v1/vaults/{}/items/{item_id}", fixture.main_vault_id),
+                Some(json!({
+                    "category": "login",
+                    "encryptedData": "created-ciphertext",
+                    "encryptionIv": "created-iv"
+                })),
+                authenticated_json_headers(&owner_session.token),
+            )
+            .await;
+        assert_eq!(created.status, StatusCode::OK);
+        let created_context: (i32, Option<i32>, Option<String>) = sqlx::query_as(
+            "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        )
+        .bind(item_id)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            created_context,
+            (1, Some(1), Some(fixture.owner_user_id.clone()))
+        );
+
+        let favorite = app
+            .api_json(
+                Method::PATCH,
+                &format!("{item_uri}/favorite"),
+                Some(json!({ "favorite": true })),
+                with_if_match(authenticated_json_headers(&owner_session.token), 1),
+            )
+            .await;
+        assert_eq!(favorite.status, StatusCode::OK);
+        let trashed = app
+            .api_json(
+                Method::DELETE,
+                &item_uri,
+                None,
+                with_if_match(authenticated_json_headers(&member_session.token), 2),
+            )
+            .await;
+        assert_eq!(trashed.status, StatusCode::OK);
+        let restored = app
+            .api_json(
+                Method::POST,
+                &format!("{item_uri}/restore"),
+                None,
+                with_if_match(authenticated_json_headers(&member_session.token), 3),
+            )
+            .await;
+        assert_eq!(restored.status, StatusCode::OK);
+        let after_metadata: (i32, Option<i32>, Option<String>, Option<String>) =
+            sqlx::query_as(
+                "SELECT version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE id = $1",
+            )
+            .bind(item_id)
+            .fetch_one(&app.pool)
+            .await
+            .unwrap();
+        assert_eq!(after_metadata.0, 4);
+        assert_eq!(after_metadata.1, Some(1));
+        assert_eq!(after_metadata.2, Some(fixture.owner_user_id));
+        assert_eq!(after_metadata.3, Some(fixture.member_user_id.clone()));
+
+        let updated = app
+            .api_json(
+                Method::PATCH,
+                &item_uri,
+                Some(json!({
+                    "encryptedData": "member-ciphertext",
+                    "encryptionIv": "member-iv"
+                })),
+                with_if_match(authenticated_json_headers(&member_session.token), 4),
+            )
+            .await;
+        assert_eq!(updated.status, StatusCode::OK);
+        let after_content: (i32, Option<i32>, Option<String>) = sqlx::query_as(
+            "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
+        )
+        .bind(item_id)
+        .fetch_one(&app.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            after_content,
+            (5, Some(5), Some(fixture.member_user_id))
+        );
     })
     .await;
 }

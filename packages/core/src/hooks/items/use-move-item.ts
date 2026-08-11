@@ -84,20 +84,24 @@ export function useMoveItem() {
 					userId: contextUserId,
 				},
 			);
-			await sourceContext.repo.moveItem(
-				input.itemId,
-				input.targetVaultId,
-				encryptedData,
-				input.decryptedData,
+			await enqueueItemMutation(
+				queue,
+				sourceContext,
+				{
+					type: "move",
+					entityId: input.itemId,
+					vaultId: input.sourceVaultId,
+					targetVaultId: input.targetVaultId,
+					encryptedPayload: toQueueEncryptedPayload(encryptedData),
+				},
+				() =>
+					sourceContext.repo.moveItem(
+						input.itemId,
+						input.targetVaultId,
+						encryptedData,
+						input.decryptedData,
+					),
 			);
-
-			enqueueItemMutation(queue, sourceContext, {
-				type: "move",
-				entityId: input.itemId,
-				vaultId: input.sourceVaultId,
-				targetVaultId: input.targetVaultId,
-				encryptedPayload: toQueueEncryptedPayload(encryptedData),
-			});
 
 			return {
 				crossAccount: false,

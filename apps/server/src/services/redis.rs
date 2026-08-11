@@ -3,6 +3,17 @@ use std::env;
 use fred::prelude::*;
 use tracing::{info, warn};
 
+pub fn validate_sync_fanout_requirement(
+    node_env: Option<&str>,
+    redis_available: bool,
+) -> Result<(), &'static str> {
+    let production = node_env.is_some_and(|value| value.trim().eq_ignore_ascii_case("production"));
+    if production && !redis_available {
+        return Err("REDIS_URL must connect successfully in production because durable Item catch-up notifications require cross-instance fan-out");
+    }
+    Ok(())
+}
+
 pub async fn init_redis() -> Option<Pool> {
     let url = match env::var("REDIS_URL") {
         Ok(url) if !url.is_empty() => url,
@@ -42,5 +53,18 @@ pub async fn init_redis() -> Option<Pool> {
             warn!(error = %error, "failed to connect to Redis — running in local-only mode");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_sync_fanout_requirement;
+
+    #[test]
+    fn production_requires_redis_for_cross_instance_sync() {
+        assert!(validate_sync_fanout_requirement(Some("production"), false).is_err());
+        assert!(validate_sync_fanout_requirement(Some("production"), true).is_ok());
+        assert!(validate_sync_fanout_requirement(Some("development"), false).is_ok());
+        assert!(validate_sync_fanout_requirement(None, false).is_ok());
     }
 }

@@ -219,6 +219,25 @@ describe("ItemCache per-account isolation", () => {
 // ============================================================================
 
 describe("ItemCache O(1) single-record writes", () => {
+	it("round-trips the immutable ciphertext context independently of the OCC revision", async () => {
+		const { cache } = makeCache();
+		await cache.upsertCachedItem(
+			item("i1", "v1", {
+				version: 4,
+				lastModifiedBy: "metadata-writer",
+				encryptionVersion: 1,
+				encryptedByUserId: "ciphertext-author",
+			}),
+			"a",
+		);
+
+		const cached = (await cache.getCachedItems("a"))?.[0];
+		expect(cached?.version).toBe(4);
+		expect(cached?.lastModifiedBy).toBe("metadata-writer");
+		expect(cached?.encryptionVersion).toBe(1);
+		expect(cached?.encryptedByUserId).toBe("ciphertext-author");
+	});
+
 	it("upsertCachedItem costs one recordPut and two constant-time reads", async () => {
 		const { cache, port } = makeCache();
 		await cache.setCachedItems(

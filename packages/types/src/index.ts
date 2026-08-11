@@ -195,6 +195,8 @@ export interface CachedEncryptedItem {
 	encryptionAlgorithm: string;
 	version: number;
 	lastModifiedBy: string | null;
+	encryptionVersion?: number | null;
+	encryptedByUserId?: string | null;
 	createdAt: string;
 	updatedAt: string;
 	deletedAt?: string | null;
@@ -264,7 +266,10 @@ export interface IQueryInvalidator {
 }
 
 export interface IPendingMutationQueue {
-	enqueue(mutation: unknown): void;
+	enqueue(
+		mutation: unknown,
+		applyOptimistic?: () => Promise<void>,
+	): Promise<void>;
 	getPendingCount?(): number;
 	hasPendingForItem?(itemId: string): boolean;
 }
@@ -311,6 +316,8 @@ export interface RawEncryptedItem {
 	encryptionAlgorithm: string;
 	version?: number;
 	lastModifiedBy?: string | null;
+	encryptionVersion?: number | null;
+	encryptedByUserId?: string | null;
 	createdAt: string | Date;
 	updatedAt: string | Date;
 	deletedAt?: string | Date | null;

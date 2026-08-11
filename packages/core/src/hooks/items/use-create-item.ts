@@ -59,20 +59,7 @@ export function useCreateItem() {
 			);
 			const now = new Date().toISOString();
 
-			await repo.upsertLocal(
-				{
-					id: localItemId,
-					vaultId: input.vaultId,
-					category: input.category,
-					favorite: false,
-					createdAt: now,
-					updatedAt: now,
-					...input.data,
-				},
-				encryptedData,
-			);
-
-			enqueueItemMutation(
+			await enqueueItemMutation(
 				queue,
 				{
 					accountId,
@@ -86,6 +73,19 @@ export function useCreateItem() {
 					category: input.category,
 					encryptedPayload: toQueueEncryptedPayload(encryptedData),
 				},
+				() =>
+					repo.upsertLocal(
+						{
+							id: localItemId,
+							vaultId: input.vaultId,
+							category: input.category,
+							favorite: false,
+							createdAt: now,
+							updatedAt: now,
+							...input.data,
+						},
+						encryptedData,
+					),
 			);
 
 			return {

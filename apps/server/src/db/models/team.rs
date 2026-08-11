@@ -163,7 +163,8 @@ pub struct DbRotationItemRow {
     pub encrypted_data: String,
     pub encryption_iv: String,
     pub encryption_algorithm: String,
-    /// Bound into the item's AAD, so a rotation has to re-encrypt under the same pair.
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
 }

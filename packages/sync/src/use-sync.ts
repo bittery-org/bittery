@@ -126,6 +126,16 @@ export function selectScopedSyncSources(sources: SyncSource[]): SyncSource[] {
 	return sources.filter((source) => !!source.itemCacheAccountId);
 }
 
+export function buildDefaultSyncSourceId(
+	serverUrl: string,
+	accountId: string | null | undefined,
+): string {
+	if (!accountId) {
+		return "unscoped";
+	}
+	return `account:${encodeURIComponent(accountId)}:server:${encodeURIComponent(serverUrl)}`;
+}
+
 /**
  * Options for useSync hook
  */
@@ -219,7 +229,7 @@ export function useSync(options: UseSyncOptions) {
 
 		return selectScopedSyncSources([
 			{
-				id: "default",
+				id: buildDefaultSyncSourceId(serverUrl, itemCacheAccountId),
 				serverUrl,
 				getAuthToken,
 				apiClient,

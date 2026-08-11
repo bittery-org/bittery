@@ -1,8 +1,8 @@
 use std::{env, net::SocketAddr};
 
 use bittery_server::{
-    build_rate_limiter, create_app, db, init_redis, load_edge_http_config, AppState, JobRunner,
-    SyncPubSub,
+    build_rate_limiter, create_app, db, init_redis, load_edge_http_config,
+    validate_sync_fanout_requirement, AppState, JobRunner, SyncPubSub,
 };
 use tokio::net::TcpListener;
 use tracing::info;
@@ -29,6 +29,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let bind_address = read_bind_address();
     let edge_http_config = load_edge_http_config().map_err(std::io::Error::other)?;
     let redis_pool = init_redis().await;
+    validate_sync_fanout_requirement(
+        env::var("NODE_ENV").ok().as_deref(),
+        redis_pool.is_some(),
+    )
+    .map_err(std::io::Error::other)?;
     let mut app_state = match db::connect_from_env().await? {
         Some(pool) => {
             db::run_migrations(&pool).await?;

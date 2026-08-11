@@ -36,7 +36,7 @@ pub use jobs::JobRunner;
 pub use services::auth::request_context_middleware;
 pub use services::connection_registry::ConnectionRegistry;
 pub use services::rate_limit::{build_rate_limiter, RateLimiter};
-pub use services::redis::init_redis;
+pub use services::redis::{init_redis, validate_sync_fanout_requirement};
 pub use services::session::{SeededSession, SessionService};
 pub use services::sync_pubsub::SyncPubSub;
 

@@ -28,12 +28,16 @@ export function useDeleteItem() {
 	return useMutation({
 		mutationFn: async (input: DeleteItemInput) => {
 			const context = requireLocalItemMutationContext(core, input.itemId);
-			await context.repo.softDelete(input.itemId);
-			enqueueItemMutation(queue, context, {
-				type: "delete",
-				entityId: input.itemId,
-				vaultId: input.vaultId,
-			});
+			await enqueueItemMutation(
+				queue,
+				context,
+				{
+					type: "delete",
+					entityId: input.itemId,
+					vaultId: input.vaultId,
+				},
+				() => context.repo.softDelete(input.itemId),
+			);
 
 			return {
 				_accountEmail: context.accountEmail,

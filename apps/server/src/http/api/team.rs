@@ -271,6 +271,8 @@ struct RotationItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
+    encryption_version: Option<i32>,
+    encrypted_by_user_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_modified_by: Option<String>,
 }
@@ -322,6 +324,8 @@ impl From<team::RotationDataResponse> for RotationDataResponse {
                             encryption_iv: item.encryption_iv,
                             encryption_algorithm: item.encryption_algorithm,
                             version: item.version,
+                            encryption_version: item.encryption_version,
+                            encrypted_by_user_id: item.encrypted_by_user_id,
                             last_modified_by: item.last_modified_by,
                         })
                         .collect(),

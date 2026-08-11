@@ -64,6 +64,7 @@ export class SyncOrchestrator {
 	private readonly unsubscribeQueue: () => void;
 
 	private catchUpInFlight = false;
+	private catchUpRequested = false;
 	private drainingInFlight = false;
 
 	constructor(private readonly options: SyncOrchestratorOptions) {
@@ -164,11 +165,6 @@ export class SyncOrchestrator {
 	}
 
 	private async applyEvent(event: SyncEvent): Promise<void> {
-		if (this.options.outboundQueue.hasPendingForItem(event.entityId)) {
-			await this.acknowledgeEvent(event);
-			return;
-		}
-
 		await performDeltaSync(
 			this.options.apiClient,
 			this.options.itemCache,
@@ -194,34 +190,35 @@ export class SyncOrchestrator {
 
 	private async runCatchUp(): Promise<void> {
 		if (this.catchUpInFlight) {
+			this.catchUpRequested = true;
 			return;
 		}
 		this.catchUpInFlight = true;
 
 		try {
-			const cursor = await this.syncManager.getStoredLastSyncCursor();
+			do {
+				this.catchUpRequested = false;
+				const cursor = await this.syncManager.getStoredLastSyncCursor();
 
-			const result = await runCatchUp({
-				client: this.options.apiClient,
-				initialCursor: cursor ?? { id: "" },
-				shouldProcessEvent: (event) =>
-					event.clientId !== this.options.outboundQueue.getClientId() &&
-					!this.options.outboundQueue.hasPendingForItem(event.entityId),
-				onEvent: async (event) => {
-					await this.applyEvent(event);
-				},
-				onRequiresFullRefresh: async () => {
-					if (!this.options.refreshFromServer) {
-						throw new Error("Sync requires a staged full-refresh handler");
-					}
-					await this.options.refreshFromServer(
-						this.options.apiClient,
-						this.getDeltaSyncAccountScope(),
-					);
-				},
-			});
+				const result = await runCatchUp({
+					client: this.options.apiClient,
+					initialCursor: cursor ?? { id: "" },
+					onEvent: async (event) => {
+						await this.applyEvent(event);
+					},
+					onRequiresFullRefresh: async () => {
+						if (!this.options.refreshFromServer) {
+							throw new Error("Sync requires a staged full-refresh handler");
+						}
+						await this.options.refreshFromServer(
+							this.options.apiClient,
+							this.getDeltaSyncAccountScope(),
+						);
+					},
+				});
 
-			await this.syncManager.setStoredLastSyncCursor(result.cursor);
+				await this.syncManager.setStoredLastSyncCursor(result.cursor);
+			} while (this.catchUpRequested);
 		} finally {
 			this.catchUpInFlight = false;
 		}

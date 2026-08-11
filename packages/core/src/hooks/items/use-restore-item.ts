@@ -31,12 +31,16 @@ export function useRestoreItem() {
 				vaultId: input.vaultId,
 				includeDeleted: true,
 			});
-			await context.repo.restore(input.itemId);
-			enqueueItemMutation(queue, context, {
-				type: "restore",
-				entityId: input.itemId,
-				vaultId: input.vaultId,
-			});
+			await enqueueItemMutation(
+				queue,
+				context,
+				{
+					type: "restore",
+					entityId: input.itemId,
+					vaultId: input.vaultId,
+				},
+				() => context.repo.restore(input.itemId),
+			);
 
 			return {
 				_accountEmail: context.accountEmail,

@@ -190,7 +190,13 @@ describe("VaultRepositoryCoordinator", () => {
 					updatedAt: new Date().toISOString(),
 					title: "Example",
 				} as never,
-				{ ciphertext: "c", iv: "i", algorithm: "a" },
+				{
+					ciphertext: "c",
+					iv: "i",
+					algorithm: "a",
+					encryptionVersion: 1,
+					encryptedByUserId: "user-b",
+				},
 			);
 
 			const located = coordinator.findAccountForItem("item-1");

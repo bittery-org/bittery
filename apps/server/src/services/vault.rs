@@ -248,6 +248,8 @@ pub struct UpdateItemInput {
     pub encrypted_data: Option<String>,
     pub encryption_iv: Option<String>,
     pub encryption_algorithm: Option<String>,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub expected_version: Option<i32>,
     pub client_id: Option<String>,
 }
@@ -280,6 +282,7 @@ pub struct ToggleFavoriteInput {
     pub item_id: String,
     pub favorite: bool,
     pub expected_version: Option<i32>,
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -315,6 +318,8 @@ pub struct VaultItemResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -430,6 +435,8 @@ pub struct VaultItemDetailsResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -460,6 +467,8 @@ pub struct VaultItemWithVaultResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -479,6 +488,8 @@ pub struct DeletedVaultItemWithVaultResponse {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -527,8 +538,9 @@ pub struct VaultRotationItemResponse {
     pub encrypted_data: String,
     pub encryption_iv: String,
     pub encryption_algorithm: String,
-    /// The client rebuilds this item's AAD from these; rotation does not change either.
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
 }
 
@@ -1018,7 +1030,7 @@ pub(crate) async fn update_vault_attachment(
     insert_item_sync_event(
         &mut transaction,
         "item_updated",
-        &input.attachment_id,
+        &attachment.item_id,
         &attachment.vault_id,
         user_id,
         request_client_id,
@@ -1628,7 +1640,7 @@ pub(crate) async fn list_vault_items_page(
         });
     }
     let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
     )
     .bind(&item_ids)
     .fetch_all(pool)
@@ -1723,7 +1735,7 @@ pub(crate) async fn list_all_vault_items_page(
         });
     }
     let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
     )
     .bind(&item_ids)
     .fetch_all(pool)
@@ -1754,6 +1766,8 @@ pub(crate) async fn list_all_vault_items_page(
             encryption_iv: item.encryption_iv,
             encryption_algorithm: item.encryption_algorithm,
             version: item.version,
+            encryption_version: item.encryption_version,
+            encrypted_by_user_id: item.encrypted_by_user_id,
             last_modified_by: item.last_modified_by,
             created_at: format_timestamp(item.created_at),
             updated_at: format_timestamp(item.updated_at),
@@ -1828,7 +1842,7 @@ pub(crate) async fn list_all_deleted_vault_items_page(
         });
     }
     let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
     )
     .bind(&item_ids)
     .fetch_all(pool)
@@ -1853,6 +1867,8 @@ pub(crate) async fn list_all_deleted_vault_items_page(
             encryption_iv: item.encryption_iv,
             encryption_algorithm: item.encryption_algorithm,
             version: item.version,
+            encryption_version: item.encryption_version,
+            encrypted_by_user_id: item.encrypted_by_user_id,
             last_modified_by: item.last_modified_by,
             created_at: format_timestamp(item.created_at),
             updated_at: format_timestamp(item.updated_at),
@@ -1872,7 +1888,7 @@ pub(crate) async fn get_vault_item(
     input: ItemIdInput,
 ) -> Result<VaultItemDetailsResponse, AppError> {
     let item_row = query_as::<_, DbBootstrapItemRow>(
-		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
+		"SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
 	)
 	.bind(&input.item_id)
 	.fetch_optional(pool)
@@ -1931,7 +1947,7 @@ pub(crate) async fn create_vault_item(
         AppError::internal("Failed to start item transaction")
     })?;
     query(
-		"INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, $8)",
+		"INSERT INTO item (id, vault_id, category, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, $7, $8, $8)",
 	)
 	.bind(&item_id)
 	.bind(&input.vault_id)
@@ -2012,7 +2028,7 @@ pub(crate) async fn bulk_import_vault_items(
     })?;
     for item in &input.items {
         query(
-			"INSERT INTO item (id, vault_id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, 1, $8)",
+			"INSERT INTO item (id, vault_id, category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by) VALUES ($1, $2, $3::item_category, $4, $5, $6, $7, 1, 1, $8, $8)",
 		)
 		.bind(&item.item_id)
 		.bind(&input.vault_id)
@@ -2063,18 +2079,62 @@ pub(crate) async fn update_vault_item(
     let access = load_vault_access(pool, &existing_item.vault_id, user_id).await?;
     assert_item_write_access(&access.role, "Access denied")?;
     let expected_version = input.expected_version.unwrap_or(existing_item.version);
+    if input.encryption_version.is_some() != input.encrypted_by_user_id.is_some() {
+        return Err(AppError::bad_request(
+            "encryptionVersion and encryptedByUserId must be provided together",
+        ));
+    }
+    if input.encryption_version.is_some_and(|version| version <= 0) {
+        return Err(AppError::bad_request("encryptionVersion must be positive"));
+    }
+    if input
+        .encryption_version
+        .is_some_and(|version| version > existing_item.version)
+    {
+        return Err(AppError::bad_request(
+            "encryptionVersion cannot exceed the current item version",
+        ));
+    }
+    if let (
+        Some(stored_version),
+        Some(stored_author),
+        Some(requested_version),
+        Some(requested_author),
+    ) = (
+        existing_item.encryption_version,
+        existing_item.encrypted_by_user_id.as_deref(),
+        input.encryption_version,
+        input.encrypted_by_user_id.as_deref(),
+    ) {
+        if stored_version != requested_version || stored_author != requested_author {
+            return Err(AppError::conflict(
+                "Item encryption context has already been adopted",
+            ));
+        }
+    }
+    let updates_ciphertext = input.encrypted_data.is_some()
+        || input.encryption_iv.is_some()
+        || input.encryption_algorithm.is_some();
+    if updates_ciphertext && input.encryption_version.is_some() {
+        return Err(AppError::bad_request(
+            "Encryption context is assigned by the server when ciphertext changes",
+        ));
+    }
 
     let mut transaction = pool.begin().await.map_err(|e| {
         tracing::error!(error = %e, "Failed to start item update transaction");
         AppError::internal("Failed to start item update transaction")
     })?;
     let new_version = query_scalar::<_, i32>(
-		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = version + 1, last_modified_by = $4, updated_at = $5 WHERE id = $6 AND version = $7 RETURNING version",
+		"UPDATE item SET encrypted_data = COALESCE($1, encrypted_data), encryption_iv = COALESCE($2, encryption_iv), encryption_algorithm = COALESCE($3, encryption_algorithm), version = version + 1, encryption_version = CASE WHEN $4 THEN version + 1 ELSE COALESCE($5, encryption_version) END, encrypted_by_user_id = CASE WHEN $4 THEN $6 ELSE COALESCE($7, encrypted_by_user_id) END, last_modified_by = $6, updated_at = $8 WHERE id = $9 AND version = $10 RETURNING version",
 	)
 	.bind(input.encrypted_data.as_deref())
 	.bind(input.encryption_iv.as_deref())
 	.bind(input.encryption_algorithm.as_deref())
+	.bind(updates_ciphertext)
+	.bind(input.encryption_version)
 	.bind(user_id)
+	.bind(input.encrypted_by_user_id.as_deref())
 	.bind(OffsetDateTime::now_utc())
 	.bind(&input.item_id)
 	.bind(expected_version)
@@ -2141,7 +2201,7 @@ pub(crate) async fn toggle_vault_favorite(
         &input.item_id,
         &existing_item.vault_id,
         user_id,
-        None,
+        input.client_id.as_deref(),
         new_version,
     )
     .await?;
@@ -2262,7 +2322,7 @@ pub(crate) async fn list_deleted_vault_items_page(
         });
     }
     let item_rows = query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = ANY($1) ORDER BY array_position($1::text[], id)",
     )
     .bind(&item_ids)
     .fetch_all(pool)
@@ -2368,7 +2428,7 @@ pub(crate) async fn move_vault_item(
         AppError::internal("Failed to start item move transaction")
     })?;
     let new_version = query_scalar::<_, i32>(
-		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = COALESCE($4, encryption_algorithm), version = version + 1, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
+		"UPDATE item SET vault_id = $1, encrypted_data = $2, encryption_iv = $3, encryption_algorithm = COALESCE($4, encryption_algorithm), version = version + 1, encryption_version = version + 1, encrypted_by_user_id = $5, last_modified_by = $5, updated_at = $6 WHERE id = $7 AND version = $8 RETURNING version",
 	)
 	.bind(&input.target_vault_id)
 	.bind(&input.encrypted_data)
@@ -2716,7 +2776,7 @@ pub(crate) mod member_handlers {
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); AppError::internal("Failed to load rotation members") })?;
         let items = query_as::<_, DbRotationItemRow>(
-			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
+			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
 		)
 		.bind(&input.vault_id)
 		.fetch_all(pool)
@@ -2740,6 +2800,8 @@ pub(crate) mod member_handlers {
                     encryption_iv: item.encryption_iv,
                     encryption_algorithm: item.encryption_algorithm,
                     version: item.version,
+                    encryption_version: item.encryption_version,
+                    encrypted_by_user_id: item.encrypted_by_user_id,
                     last_modified_by: item.last_modified_by,
                 })
                 .collect(),
@@ -3291,6 +3353,8 @@ fn map_item(item: DbBootstrapItemRow) -> VaultItemResponse {
         encryption_iv: item.encryption_iv,
         encryption_algorithm: item.encryption_algorithm,
         version: item.version,
+        encryption_version: item.encryption_version,
+        encrypted_by_user_id: item.encrypted_by_user_id,
         last_modified_by: item.last_modified_by,
         created_at: format_timestamp(item.created_at),
         updated_at: format_timestamp(item.updated_at),
@@ -3325,6 +3389,8 @@ fn map_item_details(item: DbBootstrapItemRow) -> VaultItemDetailsResponse {
         encryption_iv: item.encryption_iv,
         encryption_algorithm: item.encryption_algorithm,
         version: item.version,
+        encryption_version: item.encryption_version,
+        encrypted_by_user_id: item.encrypted_by_user_id,
         last_modified_by: item.last_modified_by,
         created_at: format_timestamp(item.created_at),
         updated_at: format_timestamp(item.updated_at),
@@ -3749,7 +3815,7 @@ fn resolve_vault_sharing_entitlement(plan: &str, status: &str) -> VaultSharingEn
 
 async fn load_item_row(pool: &PgPool, item_id: &str) -> Result<DbBootstrapItemRow, AppError> {
     query_as::<_, DbBootstrapItemRow>(
-        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
+        "SELECT id, vault_id, category::text AS category, favorite, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by, created_at, updated_at, deleted_at FROM item WHERE id = $1 LIMIT 1",
     )
     .bind(item_id)
     .fetch_optional(pool)

@@ -12620,6 +12620,12 @@
               "null"
             ]
           },
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -12628,6 +12634,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "favorite": {
             "type": "boolean"
@@ -13230,6 +13243,12 @@
               "null"
             ]
           },
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -13238,6 +13257,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "favorite": {
             "type": "boolean"
@@ -13823,6 +13849,12 @@
                     "null"
                   ]
                 },
+                "encryptedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "encryptedData": {
                   "type": "string"
                 },
@@ -13831,6 +13863,13 @@
                 },
                 "encryptionIv": {
                   "type": "string"
+                },
+                "encryptionVersion": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32"
                 },
                 "favorite": {
                   "type": "boolean"
@@ -14438,6 +14477,12 @@
                     "null"
                   ]
                 },
+                "encryptedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "encryptedData": {
                   "type": "string"
                 },
@@ -14446,6 +14491,13 @@
                 },
                 "encryptionIv": {
                   "type": "string"
+                },
+                "encryptionVersion": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32"
                 },
                 "favorite": {
                   "type": "boolean"
@@ -14524,6 +14576,12 @@
                     "null"
                   ]
                 },
+                "encryptedByUserId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "encryptedData": {
                   "type": "string"
                 },
@@ -14532,6 +14590,13 @@
                 },
                 "encryptionIv": {
                   "type": "string"
+                },
+                "encryptionVersion": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "format": "int32"
                 },
                 "favorite": {
                   "type": "boolean"
@@ -14737,6 +14802,12 @@
               "null"
             ]
           },
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -14745,6 +14816,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "favorite": {
             "type": "boolean"
@@ -15191,6 +15269,12 @@
               "null"
             ]
           },
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -15199,6 +15283,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "favorite": {
             "type": "boolean"
@@ -16250,6 +16341,12 @@
           "version"
         ],
         "properties": {
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -16258,6 +16355,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "id": {
             "type": "string"
@@ -17366,6 +17470,12 @@
       "UpdateItemBody": {
         "type": "object",
         "properties": {
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": [
               "string",
@@ -17384,6 +17494,14 @@
               "string",
               "null"
             ]
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "minimum": 1
           }
         },
         "additionalProperties": false
@@ -17650,6 +17768,12 @@
               "null"
             ]
           },
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -17658,6 +17782,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "favorite": {
             "type": "boolean"
@@ -17710,6 +17841,12 @@
               "null"
             ]
           },
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -17718,6 +17855,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "favorite": {
             "type": "boolean"
@@ -17924,6 +18068,12 @@
           "version"
         ],
         "properties": {
+          "encryptedByUserId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "encryptedData": {
             "type": "string"
           },
@@ -17932,6 +18082,13 @@
           },
           "encryptionIv": {
             "type": "string"
+          },
+          "encryptionVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
           },
           "id": {
             "type": "string"

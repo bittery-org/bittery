@@ -134,8 +134,9 @@ pub struct RotationItemResponse {
     pub encrypted_data: String,
     pub encryption_iv: String,
     pub encryption_algorithm: String,
-    /// The client rebuilds this item's AAD from these; rotation does not change either.
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
 }
 
@@ -2023,7 +2024,7 @@ async fn load_rotation_vault_data(
 		.await
 		.map_err(|e| { tracing::error!(error = %e, "Failed to load rotation members"); AppError::internal("Failed to load rotation members") })?;
         let items = query_as::<_, DbRotationItemRow>(
-			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm, version, last_modified_by FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
+			"SELECT id, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE vault_id = $1 ORDER BY created_at ASC",
 		)
 		.bind(&vault.id)
 		.fetch_all(pool)
@@ -2050,6 +2051,8 @@ async fn load_rotation_vault_data(
                     encryption_iv: item.encryption_iv,
                     encryption_algorithm: item.encryption_algorithm,
                     version: item.version,
+                    encryption_version: item.encryption_version,
+                    encrypted_by_user_id: item.encrypted_by_user_id,
                     last_modified_by: item.last_modified_by,
                 })
                 .collect(),

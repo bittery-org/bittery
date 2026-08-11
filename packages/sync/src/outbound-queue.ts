@@ -24,12 +24,18 @@ export interface PendingMutation {
 		encryptedData: string;
 		encryptionIv: string;
 		encryptionAlgorithm: string;
+		encryptionVersion?: number;
+		encryptedByUserId?: string;
 	};
 	favorite?: boolean;
 	baseVersion: number;
 	accountEmail?: string;
 	timestamp: number;
 	retryCount: number;
+	operationId?: string;
+	attemptId?: string;
+	status?: "pending" | "retrying" | "conflicted" | "failed";
+	lastError?: string;
 }
 
 export interface TempIdMapping {
@@ -79,26 +85,36 @@ function writeOptions(mutation: PendingMutation): {
 } {
 	return {
 		etag: `"${mutation.baseVersion}"`,
-		idempotencyKey: mutation.id,
+		idempotencyKey: mutation.attemptId ?? mutation.id,
 	};
 }
 
-function findLastIndexByEntityAndType(
-	queue: PendingMutation[],
-	entityId: string,
-	type: PendingMutation["type"],
-): number {
-	for (let i = queue.length - 1; i >= 0; i--) {
-		const entry = queue[i];
-		if (!entry) {
-			continue;
-		}
-		if (entry.entityId === entityId && entry.type === type) {
-			return i;
-		}
-	}
-	return -1;
+function strongNumericEtag(
+	etag: string | null | undefined,
+): number | undefined {
+	const match = /^"(\d+)"$/.exec(etag ?? "");
+	if (!match?.[1]) return undefined;
+	const version = Number(match[1]);
+	return Number.isSafeInteger(version) ? version : undefined;
 }
+
+function normalizeMutation(mutation: PendingMutation): PendingMutation {
+	return {
+		...mutation,
+		operationId: mutation.operationId ?? mutation.id,
+		attemptId: mutation.attemptId ?? mutation.id,
+		status: mutation.status ?? "pending",
+	};
+}
+
+function newAttemptId(mutation: PendingMutation): string {
+	const suffix =
+		globalThis.crypto?.randomUUID?.() ??
+		`${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	return `${mutation.operationId ?? mutation.id}:attempt:${suffix}`;
+}
+
+const MAX_RETRY_COUNT = 5;
 
 export class OutboundQueue {
 	private readonly queuesByAccountId = new Map<string, PendingMutation[]>();
@@ -107,6 +123,7 @@ export class OutboundQueue {
 	private latestMappings: TempIdMapping[] = [];
 	private draining = false;
 	private drainRequested = false;
+	private persistenceTail: Promise<void> = Promise.resolve();
 
 	constructor(
 		private readonly storage: SyncStorage,
@@ -133,6 +150,14 @@ export class OutboundQueue {
 		await this.persistIndex();
 	}
 
+	private schedulePersistence(accountId: string): Promise<void> {
+		const persistence = this.persistenceTail
+			.catch(() => undefined)
+			.then(() => this.persistQueue(accountId));
+		this.persistenceTail = persistence.catch(() => undefined);
+		return persistence;
+	}
+
 	private emit(): void {
 		for (const listener of this.listeners) {
 			listener();
@@ -150,13 +175,20 @@ export class OutboundQueue {
 		return this.clientId;
 	}
 
-	enqueue(mutation: PendingMutation): void {
+	async enqueue(
+		mutation: PendingMutation,
+		applyOptimistic?: () => Promise<void>,
+	): Promise<void> {
 		const queue = this.queuesByAccountId.get(mutation.accountId) ?? [];
-		queue.push({ ...mutation });
+		queue.push(normalizeMutation(mutation));
 		queue.sort((a, b) => a.timestamp - b.timestamp);
 		this.queuesByAccountId.set(mutation.accountId, queue);
-		void this.persistQueue(mutation.accountId);
-		this.emit();
+		await this.schedulePersistence(mutation.accountId);
+		try {
+			await applyOptimistic?.();
+		} finally {
+			this.emit();
+		}
 	}
 
 	async restore(): Promise<void> {
@@ -174,7 +206,7 @@ export class OutboundQueue {
 				this.queuesByAccountId.set(
 					accountId,
 					queue
-						.map((entry) => ({ ...entry, accountId }))
+						.map((entry) => normalizeMutation({ ...entry, accountId }))
 						.sort((a, b) => a.timestamp - b.timestamp),
 				);
 			}
@@ -206,11 +238,13 @@ export class OutboundQueue {
 					this.unresolvedLegacyEmails.add(email);
 					continue;
 				}
-				const migrated = queue.map((entry) => ({
-					...entry,
-					accountId,
-					accountEmail: entry.accountEmail ?? email,
-				}));
+				const migrated = queue.map((entry) =>
+					normalizeMutation({
+						...entry,
+						accountId,
+						accountEmail: entry.accountEmail ?? email,
+					}),
+				);
 				const existing = this.queuesByAccountId.get(accountId) ?? [];
 				this.queuesByAccountId.set(
 					accountId,
@@ -257,7 +291,15 @@ export class OutboundQueue {
 		return undefined;
 	}
 
-	rewritePendingIds(tempId: string, realId: string): void {
+	getCommands(accountId?: string): PendingMutation[] {
+		const queues = accountId
+			? [this.queuesByAccountId.get(accountId) ?? []]
+			: Array.from(this.queuesByAccountId.values());
+		return queues.flat().map((mutation) => ({ ...mutation }));
+	}
+
+	async rewritePendingIds(tempId: string, realId: string): Promise<void> {
+		const writes: Promise<void>[] = [];
 		for (const [accountId, queue] of this.queuesByAccountId.entries()) {
 			let touched = false;
 			for (const mutation of queue) {
@@ -267,16 +309,17 @@ export class OutboundQueue {
 				}
 			}
 			if (touched) {
-				void this.persistQueue(accountId);
+				writes.push(this.schedulePersistence(accountId));
 			}
 		}
+		await Promise.all(writes);
 		this.emit();
 	}
 
 	private async processMutation(
 		client: OutboundQueueApiClient,
 		mutation: PendingMutation,
-	): Promise<void> {
+	): Promise<{ etag: string | null }> {
 		switch (mutation.type) {
 			case "create": {
 				const payload = mutation.encryptedPayload;
@@ -285,7 +328,7 @@ export class OutboundQueue {
 						`Invalid create mutation payload for ${mutation.entityId}`,
 					);
 				}
-				const { data: result } = await client.items.create(
+				const response = await client.items.create(
 					mutation.vaultId,
 					mutation.entityId,
 					{
@@ -294,8 +337,9 @@ export class OutboundQueue {
 						encryptionIv: payload.encryptionIv,
 						encryptionAlgorithm: payload.encryptionAlgorithm,
 					},
-					{ idempotencyKey: mutation.id },
+					{ idempotencyKey: mutation.attemptId ?? mutation.id },
 				);
+				const result = response.data;
 
 				const fallbackId =
 					result.id && result.id !== mutation.vaultId ? result.id : undefined;
@@ -307,9 +351,9 @@ export class OutboundQueue {
 						accountId: mutation.accountId,
 						accountEmail: mutation.accountEmail,
 					});
-					this.rewritePendingIds(mutation.entityId, realId);
+					await this.rewritePendingIds(mutation.entityId, realId);
 				}
-				break;
+				return { etag: response.etag };
 			}
 			case "update": {
 				const payload = mutation.encryptedPayload;
@@ -318,7 +362,7 @@ export class OutboundQueue {
 						`Invalid update mutation payload for ${mutation.entityId}`,
 					);
 				}
-				await client.items.update(
+				const response = await client.items.update(
 					mutation.entityId,
 					{
 						encryptedData: payload.encryptedData,
@@ -327,26 +371,29 @@ export class OutboundQueue {
 					},
 					writeOptions(mutation),
 				);
-				break;
+				return { etag: response.etag };
 			}
-			case "delete":
-				await client.items.trash(mutation.entityId, writeOptions(mutation));
-				break;
-			case "permanent_delete":
-				await client.items.deletePermanently(
+			case "delete": {
+				const response = await client.items.trash(
 					mutation.entityId,
 					writeOptions(mutation),
 				);
-				break;
+				return { etag: response.etag };
+			}
+			case "permanent_delete":
+				return client.items
+					.deletePermanently(mutation.entityId, writeOptions(mutation))
+					.then((response) => ({ etag: response.etag }));
 			case "restore":
-				await client.items.restore(mutation.entityId, writeOptions(mutation));
-				break;
+				return client.items
+					.restore(mutation.entityId, writeOptions(mutation))
+					.then((response) => ({ etag: response.etag }));
 			case "move": {
 				const payload = mutation.encryptedPayload;
 				if (!payload || !mutation.targetVaultId) {
 					throw new Error(`Invalid move payload for ${mutation.entityId}`);
 				}
-				await client.items.move(
+				const response = await client.items.move(
 					mutation.entityId,
 					{
 						sourceVaultId: mutation.vaultId,
@@ -357,15 +404,62 @@ export class OutboundQueue {
 					},
 					writeOptions(mutation),
 				);
-				break;
+				return { etag: response.etag };
 			}
-			case "toggle_favorite":
-				await client.items.setFavorite(
+			case "toggle_favorite": {
+				const response = await client.items.setFavorite(
 					mutation.entityId,
 					{ favorite: mutation.favorite ?? false },
 					writeOptions(mutation),
 				);
-				break;
+				return { etag: response.etag };
+			}
+		}
+	}
+
+	private async rebaseMetadataMutation(
+		client: OutboundQueueApiClient,
+		mutation: PendingMutation,
+	): Promise<boolean> {
+		if (
+			mutation.type === "update" ||
+			mutation.type === "move" ||
+			mutation.type === "create"
+		) {
+			mutation.status = "conflicted";
+			mutation.lastError = "The Item changed on another device";
+			return false;
+		}
+
+		mutation.retryCount += 1;
+		if (mutation.retryCount >= MAX_RETRY_COUNT) {
+			mutation.status = "failed";
+			mutation.lastError = "Conflict retry limit reached";
+			return false;
+		}
+
+		try {
+			const current = await client.items.get(mutation.entityId);
+			const version =
+				strongNumericEtag(current.etag) ??
+				(typeof current.data.version === "number"
+					? current.data.version
+					: undefined);
+			if (version === undefined) {
+				mutation.status = "failed";
+				mutation.lastError = "Server returned no authoritative Item revision";
+				return false;
+			}
+			mutation.baseVersion = version;
+			mutation.attemptId = newAttemptId(mutation);
+			mutation.status = "retrying";
+			mutation.lastError = undefined;
+			return true;
+		} catch (error) {
+			mutation.status = "retrying";
+			mutation.lastError =
+				error instanceof Error ? error.message : String(error);
+			return false;
 		}
 	}
 
@@ -410,41 +504,91 @@ export class OutboundQueue {
 		);
 
 		for (const [accountId, queue] of accountEntries) {
-			while (queue.length > 0) {
+			const attemptedOperationIds = new Set<string>();
+			let client: OutboundQueueApiClient;
+			try {
+				client = await getClient(accountId);
+			} catch (error) {
 				const mutation = queue[0];
+				if (mutation) {
+					mutation.retryCount += 1;
+					mutation.status =
+						mutation.retryCount >= MAX_RETRY_COUNT ? "failed" : "retrying";
+					mutation.lastError =
+						error instanceof Error ? error.message : String(error);
+					await this.schedulePersistence(accountId);
+					this.emit();
+				}
+				continue;
+			}
+			while (queue.length > 0) {
+				const mutationIndex = queue.findIndex(
+					(candidate, index) =>
+						(candidate.status === undefined ||
+							candidate.status === "pending" ||
+							candidate.status === "retrying") &&
+						!attemptedOperationIds.has(candidate.operationId ?? candidate.id) &&
+						!queue
+							.slice(0, index)
+							.some((earlier) => earlier.entityId === candidate.entityId),
+				);
+				if (mutationIndex < 0) break;
+				const mutation = queue[mutationIndex];
 				if (!mutation) {
 					break;
 				}
-				const client = await getClient(accountId);
 
 				try {
-					await this.processMutation(client, mutation);
-					queue.shift();
-					await this.persistQueue(accountId);
+					const result = await this.processMutation(client, mutation);
+					queue.splice(mutationIndex, 1);
+					const serverVersion = strongNumericEtag(result.etag);
+					const next =
+						serverVersion === undefined
+							? undefined
+							: queue.find(
+									(candidate) => candidate.entityId === mutation.entityId,
+								);
+					if (
+						serverVersion !== undefined &&
+						next &&
+						next.baseVersion !== serverVersion
+					) {
+						next.baseVersion = serverVersion;
+						next.attemptId = newAttemptId(next);
+						next.status = "pending";
+					}
+					await this.schedulePersistence(accountId);
 					this.emit();
 				} catch (error) {
 					if (isApiErrorStatus(error, 409) || isApiErrorStatus(error, 412)) {
-						mutation.retryCount += 1;
-						await this.persistQueue(accountId);
+						const retryImmediately = await this.rebaseMetadataMutation(
+							client,
+							mutation,
+						);
+						await this.schedulePersistence(accountId);
 						this.emit();
-						break;
+						if (retryImmediately) continue;
+						continue;
 					}
 
 					if (isApiErrorStatus(error, 400) || isApiErrorStatus(error, 404)) {
-						console.warn(
-							`[OutboundQueue] Discarding mutation ${mutation.id} (${mutation.type}) due to ${error.status}`,
-						);
-						queue.shift();
-						await this.persistQueue(accountId);
+						mutation.status = "failed";
+						mutation.lastError = error.message;
+						await this.schedulePersistence(accountId);
 						this.emit();
 						continue;
 					}
 
 					if (isNetworkError(error)) {
 						mutation.retryCount += 1;
-						await this.persistQueue(accountId);
+						attemptedOperationIds.add(mutation.operationId ?? mutation.id);
+						mutation.status =
+							mutation.retryCount >= MAX_RETRY_COUNT ? "failed" : "retrying";
+						mutation.lastError =
+							error instanceof Error ? error.message : String(error);
+						await this.schedulePersistence(accountId);
 						this.emit();
-						break;
+						continue;
 					}
 
 					console.error(
@@ -452,9 +596,13 @@ export class OutboundQueue {
 						error,
 					);
 					mutation.retryCount += 1;
-					await this.persistQueue(accountId);
+					attemptedOperationIds.add(mutation.operationId ?? mutation.id);
+					mutation.status =
+						mutation.retryCount >= MAX_RETRY_COUNT ? "failed" : "retrying";
+					mutation.lastError =
+						error instanceof Error ? error.message : String(error);
+					await this.schedulePersistence(accountId);
 					this.emit();
-					break;
 				}
 			}
 		}
@@ -467,101 +615,31 @@ export class OutboundQueue {
 	}
 
 	compact(): void {
-		for (const [accountId, sourceQueue] of this.queuesByAccountId.entries()) {
-			const sourceWithIndex = sourceQueue.map((mutation, index) => ({
-				mutation,
-				index,
-			}));
-			let compacted = [...sourceWithIndex];
-
-			// Drop updates/moves/favorite toggles for items that are subsequently deleted.
-			for (const { mutation, index: mutationIndex } of sourceWithIndex) {
-				if (
-					mutation.type !== "delete" &&
-					mutation.type !== "permanent_delete"
-				) {
-					continue;
-				}
-				compacted = compacted.filter((candidate) => {
-					if (candidate.mutation.entityId !== mutation.entityId) {
-						return true;
-					}
-					if (candidate.mutation.id === mutation.id) {
-						return true;
-					}
-					if (candidate.index > mutationIndex) {
-						return true;
-					}
-					return !(
-						candidate.mutation.type === "update" ||
-						candidate.mutation.type === "toggle_favorite" ||
-						candidate.mutation.type === "move"
-					);
-				});
-			}
-
-			// Collapse sequential updates/toggles/moves for the same item, keep latest.
-			const result: PendingMutation[] = [];
-			for (const { mutation } of compacted) {
-				if (
-					mutation.type === "update" ||
-					mutation.type === "toggle_favorite" ||
-					mutation.type === "move"
-				) {
-					const previousIndex = findLastIndexByEntityAndType(
-						result,
-						mutation.entityId,
-						mutation.type,
-					);
-					if (previousIndex >= 0) {
-						result.splice(previousIndex, 1, mutation);
-					} else {
-						result.push(mutation);
-					}
-					continue;
-				}
-
-				if (mutation.type === "permanent_delete") {
-					// delete + permanent_delete => keep only permanent_delete
-					for (let i = result.length - 1; i >= 0; i--) {
-						const candidate = result[i];
-						if (!candidate) {
-							continue;
-						}
-						if (
-							candidate.entityId === mutation.entityId &&
-							candidate.type === "delete"
-						) {
-							result.splice(i, 1);
-						}
-					}
-				}
-
-				result.push(mutation);
-			}
-
-			result.sort((a, b) => a.timestamp - b.timestamp);
-			this.queuesByAccountId.set(accountId, result);
-			void this.persistQueue(accountId);
-		}
-
-		this.emit();
+		// Semantic commands are retained until an equivalence-preserving compactor exists.
 	}
 
-	clear(accountId?: string): void {
+	async clear(accountId?: string): Promise<void> {
 		if (accountId) {
 			this.queuesByAccountId.delete(accountId);
-			void this.persistQueue(accountId);
+			await this.schedulePersistence(accountId);
 			this.emit();
 			return;
 		}
 
 		const accountIds = Array.from(this.queuesByAccountId.keys());
 		this.queuesByAccountId.clear();
-		for (const queuedAccountId of accountIds) {
-			void this.storage.remove(getQueueKeyForAccountId(queuedAccountId));
-		}
-		void this.storage.remove(QUEUE_INDEX_KEY);
+		const persistence = this.persistenceTail
+			.catch(() => undefined)
+			.then(async () => {
+				await Promise.all(
+					accountIds.map((queuedAccountId) =>
+						this.storage.remove(getQueueKeyForAccountId(queuedAccountId)),
+					),
+				);
+				await this.storage.remove(QUEUE_INDEX_KEY);
+			});
+		this.persistenceTail = persistence.catch(() => undefined);
+		await persistence;
 		this.emit();
 	}
 }

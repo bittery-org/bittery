@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { ApiError } from "@bittery/shared/api-client";
 import {
 	OutboundQueue,
 	type OutboundQueueApiClient,
@@ -26,7 +27,7 @@ function stubItemCache(overrides: Partial<SyncItemCache> = {}): SyncItemCache {
 }
 
 class MemoryStorage implements SyncStorage {
-	private readonly data = new Map<string, unknown>();
+	protected readonly data = new Map<string, unknown>();
 
 	async get<T>(key: string): Promise<T | null> {
 		return (this.data.get(key) as T | undefined) ?? null;
@@ -38,6 +39,24 @@ class MemoryStorage implements SyncStorage {
 
 	async remove(key: string): Promise<void> {
 		this.data.delete(key);
+	}
+}
+
+class GatedStorage extends MemoryStorage {
+	private releaseWrite: (() => void) | undefined;
+	readonly writeStarted = new Promise<void>((resolve) => {
+		this.releaseWrite = resolve;
+	});
+	private readonly writeGate = Promise.withResolvers<void>();
+
+	override async set<T>(key: string, value: T): Promise<void> {
+		this.releaseWrite?.();
+		await this.writeGate.promise;
+		await super.set(key, structuredClone(value));
+	}
+
+	release(): void {
+		this.writeGate.resolve();
 	}
 }
 
@@ -447,6 +466,129 @@ describe("sync engine regressions", () => {
 		orchestrator.dispose();
 	});
 
+	test("applies and acknowledges an own event even while its command is pending", async () => {
+		const storage = new MemoryStorage();
+		const outboundQueue = new OutboundQueue(storage, "self_client");
+		await outboundQueue.enqueue(
+			buildDeleteMutation("account_a", "item_1", {
+				type: "toggle_favorite",
+				favorite: true,
+			}),
+		);
+		const upsertedVersions: number[] = [];
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				getItem: async (id) => ({
+					id,
+					vaultId: "vault_1",
+					category: "login",
+					favorite: true,
+					encryptedData: "ciphertext",
+					encryptionIv: "iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+					version: 2,
+					lastModifiedBy: "user_1",
+					createdAt: "2026-03-13T00:00:00.000Z",
+					updatedAt: "2026-03-13T00:00:00.000Z",
+					deletedAt: null,
+					attachments: [],
+				}),
+			}),
+			itemCache: stubItemCache({
+				upsertCachedItem: async (item) => {
+					upsertedVersions.push(item.version);
+				},
+			}),
+			itemCacheAccountId: "account_a",
+			outboundQueue,
+		});
+		const event = buildEvent({
+			id: "evt_own",
+			clientId: "self_client",
+			entityId: "item_1",
+			version: 2,
+		});
+
+		await (orchestrator as any).applyEvent(event);
+
+		expect(upsertedVersions).toEqual([2]);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_own",
+		);
+		orchestrator.dispose();
+	});
+
+	test("does not discard earlier events for the same Item before advancing", async () => {
+		const storage = new MemoryStorage();
+		const processed: string[] = [];
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				changes: async () => ({
+					events: [
+						buildEvent({ id: "evt_1", entityId: "item_1" }),
+						buildEvent({ id: "evt_2", entityId: "item_1" }),
+					],
+					hasMore: false,
+					requiresFullRefresh: false,
+					cursor: { id: "evt_2" },
+				}),
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			outboundQueue: new OutboundQueue(storage, "self_client"),
+			onEventProcessed: async (event) => {
+				processed.push(event.id);
+			},
+		});
+
+		await (orchestrator as any).runCatchUp();
+
+		expect(processed).toEqual(["evt_1", "evt_2"]);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_2",
+		);
+		orchestrator.dispose();
+	});
+
+	test("coalesces a ping during catch-up into a follow-up pass", async () => {
+		const storage = new MemoryStorage();
+		const outboundQueue = new OutboundQueue(storage, "self_client");
+		const firstPage = Promise.withResolvers<void>();
+		let changesCalls = 0;
+		const orchestrator = new SyncOrchestrator({
+			syncManager: { clientId: "self_client", storage },
+			apiClient: testApiClient({
+				changes: async () => {
+					changesCalls += 1;
+					if (changesCalls === 1) await firstPage.promise;
+					return {
+						events: [],
+						hasMore: false,
+						requiresFullRefresh: false,
+						cursor: { id: `evt_${changesCalls}` },
+					};
+				},
+			}),
+			itemCache: stubItemCache(),
+			itemCacheAccountId: "account_a",
+			outboundQueue,
+		});
+
+		const catchUp = (orchestrator as any).runCatchUp();
+		await Promise.resolve();
+		await (orchestrator as any).runCatchUp();
+		firstPage.resolve();
+		await catchUp;
+
+		expect(changesCalls).toBe(2);
+		expect((await storage.get<{ id: string }>("lastSyncCursor"))?.id).toBe(
+			"evt_2",
+		);
+		orchestrator.dispose();
+	});
+
 	test("calls onSyncPing when receiving sync ping event", async () => {
 		const storage = new MemoryStorage();
 		let pingCount = 0;
@@ -750,7 +892,248 @@ function networkError(): Error {
 	return error;
 }
 
+function conflictError(status: 409 | 412): ApiError {
+	return new ApiError(
+		{
+			type: "https://bittery.com/problems/conflict",
+			title: "Conflict",
+			status,
+			code: status === 409 ? "CONFLICT" : "PRECONDITION_FAILED",
+		},
+		null,
+	);
+}
+
 describe("outbound queue multi-account drain isolation", () => {
+	test("enqueue resolves only after the command is durably persisted", async () => {
+		const storage = new GatedStorage();
+		const queue = new OutboundQueue(storage, "self_client");
+		let resolved = false;
+		const enqueue = queue
+			.enqueue(buildDeleteMutation("account_a", "item_a"))
+			.then(() => {
+				resolved = true;
+			});
+
+		await storage.writeStarted;
+		expect(resolved).toBe(false);
+		storage.release();
+		await enqueue;
+
+		const restored = new OutboundQueue(storage, "self_client");
+		await restored.restore();
+		expect(restored.hasPendingForItem("item_a")).toBe(true);
+	});
+
+	test("compaction preserves semantic command order", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		const commands: PendingMutation[] = [
+			buildDeleteMutation("account_a", "item_a", {
+				id: "edit_1",
+				type: "update",
+				encryptedPayload: {
+					encryptedData: "cipher_1",
+					encryptionIv: "iv_1",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+				},
+			}),
+			buildDeleteMutation("account_a", "item_a", {
+				id: "trash",
+				type: "delete",
+				timestamp: 2,
+			}),
+			buildDeleteMutation("account_a", "item_a", {
+				id: "forever",
+				type: "permanent_delete",
+				timestamp: 3,
+			}),
+			buildDeleteMutation("account_a", "item_b", {
+				id: "trash_b",
+				type: "delete",
+				timestamp: 4,
+			}),
+			buildDeleteMutation("account_a", "item_b", {
+				id: "restore_b",
+				type: "restore",
+				timestamp: 5,
+			}),
+		];
+		for (const command of commands) await queue.enqueue(command);
+		queue.compact();
+
+		const sent: string[] = [];
+		await queue.drain(() =>
+			outboundApiClient({
+				update: async () => {
+					sent.push("edit_1");
+				},
+				trash: async (itemId) => {
+					sent.push(`trash:${itemId}`);
+				},
+				deletePermanently: async () => {
+					sent.push("forever");
+				},
+				restore: async () => {
+					sent.push("restore_b");
+				},
+			}),
+		);
+
+		expect(sent).toEqual([
+			"edit_1",
+			"trash:item_a",
+			"forever",
+			"trash:item_b",
+			"restore_b",
+		]);
+	});
+
+	test("compaction retains repeated encrypted edits and moves", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		for (const [index, type] of [
+			"update",
+			"update",
+			"move",
+			"move",
+		].entries()) {
+			await queue.enqueue(
+				buildDeleteMutation("account_a", "item_a", {
+					id: `${type}_${index}`,
+					type: type as "update" | "move",
+					targetVaultId: type === "move" ? `vault_${index}` : undefined,
+					encryptedPayload: {
+						encryptedData: `cipher_${index}`,
+						encryptionIv: `iv_${index}`,
+						encryptionAlgorithm: "AES-GCM-AAD-V1",
+					},
+					timestamp: index,
+				}),
+			);
+		}
+		queue.compact();
+		const sent: string[] = [];
+
+		await queue.drain(() =>
+			outboundApiClient({
+				update: async () => {
+					sent.push("update");
+				},
+				move: async () => {
+					sent.push("move");
+				},
+			}),
+		);
+
+		expect(sent).toEqual(["update", "update", "move", "move"]);
+	});
+
+	test("adopts an acknowledgement ETag for the next Item command", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", { id: "trash" }),
+		);
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				id: "forever",
+				type: "permanent_delete",
+				timestamp: 2,
+			}),
+		);
+		const requests: TestWriteOptions[] = [];
+		const client = outboundApiClient() as any;
+		client.items.trash = async (_id: string, options: TestWriteOptions) => {
+			requests.push(options);
+			return { ...apiResult({}), etag: '"2"' };
+		};
+		client.items.deletePermanently = async (
+			_id: string,
+			options: TestWriteOptions,
+		) => {
+			requests.push(options);
+			return { ...apiResult({}), etag: '"3"' };
+		};
+
+		await queue.drain(() => client);
+
+		expect(requests[0]).toEqual({ etag: '"1"', idempotencyKey: "trash" });
+		expect(requests[1]?.etag).toBe('"2"');
+		expect(requests[1]?.idempotencyKey).not.toBe("forever");
+	});
+
+	test("keeps an attempt ID across a lost-response retry", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		const attempts: string[] = [];
+		let fail = true;
+		const client = outboundApiClient({
+			trash: async (_id, options) => {
+				attempts.push(options?.idempotencyKey ?? "");
+				if (fail) throw networkError();
+			},
+		});
+
+		await queue.drain(() => client);
+		fail = false;
+		await queue.drain(() => client);
+
+		expect(attempts).toHaveLength(2);
+		expect(attempts[1]).toBe(attempts[0]);
+	});
+
+	test("rebases a metadata command after 412 with a fresh attempt ID", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		const requests: TestWriteOptions[] = [];
+		let first = true;
+		const client = outboundApiClient() as any;
+		client.items.get = async () => ({
+			...apiResult({ id: "item_a", version: 2 }),
+			etag: '"2"',
+		});
+		client.items.trash = async (_id: string, options: TestWriteOptions) => {
+			requests.push(options);
+			if (first) {
+				first = false;
+				throw conflictError(412);
+			}
+			return { ...apiResult({}), etag: '"3"' };
+		};
+
+		await queue.drain(() => client);
+
+		expect(requests.map((request) => request.etag)).toEqual(['"1"', '"2"']);
+		expect(requests[1]?.idempotencyKey).not.toBe(requests[0]?.idempotencyKey);
+		expect(queue.getPendingCount()).toBe(0);
+	});
+
+	test("marks encrypted updates conflicted instead of silently rebasing", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(
+			buildDeleteMutation("account_a", "item_a", {
+				type: "update",
+				encryptedPayload: {
+					encryptedData: "cipher",
+					encryptionIv: "iv",
+					encryptionAlgorithm: "AES-GCM-AAD-V1",
+				},
+			}),
+		);
+		let getCalls = 0;
+		const client = outboundApiClient() as any;
+		client.items.get = async () => {
+			getCalls += 1;
+			return apiResult({ id: "item_a", version: 2 });
+		};
+		client.items.update = async () => {
+			throw conflictError(412);
+		};
+
+		await queue.drain(() => client);
+
+		expect(getCalls).toBe(0);
+		expect(queue.getCommands("account_a")[0]?.status).toBe("conflicted");
+	});
+
 	test("sends stable idempotency keys and version ETags", async () => {
 		const storage = new MemoryStorage();
 		const queue = new OutboundQueue(storage, "self_client");
@@ -838,6 +1221,25 @@ describe("outbound queue multi-account drain isolation", () => {
 		expect(queue.hasPendingForItem("item_a")).toBe(true);
 		expect(queue.hasPendingForItem("item_b")).toBe(false);
 		expect(queue.getPendingCount()).toBe(1);
+	});
+
+	test("one account's client creation failure does not starve another account", async () => {
+		const queue = new OutboundQueue(new MemoryStorage(), "self_client");
+		await queue.enqueue(buildDeleteMutation("account_a", "item_a"));
+		await queue.enqueue(buildDeleteMutation("account_b", "item_b"));
+		const sent: string[] = [];
+
+		await queue.drain((accountId) => {
+			if (accountId === "account_a") throw new Error("locked account");
+			return outboundApiClient({
+				trash: async (id) => {
+					sent.push(id);
+				},
+			});
+		});
+
+		expect(sent).toEqual(["item_b"]);
+		expect(queue.hasPendingForItem("item_a")).toBe(true);
 	});
 
 	test("serializes concurrent drains so mutations are not double-sent", async () => {

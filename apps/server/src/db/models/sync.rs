@@ -78,6 +78,8 @@ pub struct DbBootstrapItemRow {
     pub encryption_iv: String,
     pub encryption_algorithm: String,
     pub version: i32,
+    pub encryption_version: Option<i32>,
+    pub encrypted_by_user_id: Option<String>,
     pub last_modified_by: Option<String>,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,

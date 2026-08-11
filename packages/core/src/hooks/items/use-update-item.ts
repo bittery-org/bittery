@@ -49,21 +49,25 @@ export function useUpdateItem() {
 				},
 			);
 
-			await context.repo.upsertLocal(
+			await enqueueItemMutation(
+				queue,
+				context,
 				{
-					...existing,
-					...mergedData,
-					updatedAt: new Date().toISOString(),
+					type: "update",
+					entityId: input.itemId,
+					vaultId: existing.vaultId,
+					encryptedPayload: toQueueEncryptedPayload(encrypted),
 				},
-				encrypted,
+				() =>
+					context.repo.upsertLocal(
+						{
+							...existing,
+							...mergedData,
+							updatedAt: new Date().toISOString(),
+						},
+						encrypted,
+					),
 			);
-
-			enqueueItemMutation(queue, context, {
-				type: "update",
-				entityId: input.itemId,
-				vaultId: existing.vaultId,
-				encryptedPayload: toQueueEncryptedPayload(encrypted),
-			});
 
 			return {
 				_encryptedData: encrypted,

@@ -272,6 +272,7 @@ describe("sync-cache-service", () => {
 
 		const context = await service.resolveConnectionContext();
 		expect(context).toEqual({
+			accountId: bobAccountId,
 			email: "bob@example.com",
 			client,
 		});

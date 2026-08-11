@@ -36,7 +36,7 @@ function getRuntimeClientId(): string | undefined {
 	if (typeof window === "undefined") return undefined;
 
 	try {
-		return window.localStorage.getItem("bittery_sync_client_id") ?? undefined;
+		return window.sessionStorage.getItem("bittery_sync_client_id") ?? undefined;
 	} catch {
 		return undefined;
 	}
@@ -51,7 +51,7 @@ function resolveClientId(clientId?: string): string {
 	const resolved = clientId ?? getRuntimeClientId() ?? createClientId();
 	if (typeof window !== "undefined" && !getRuntimeClientId()) {
 		try {
-			window.localStorage.setItem("bittery_sync_client_id", resolved);
+			window.sessionStorage.setItem("bittery_sync_client_id", resolved);
 		} catch {
 			// The generated ID remains valid for this process when storage is unavailable.
 		}

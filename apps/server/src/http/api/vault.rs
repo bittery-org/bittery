@@ -155,6 +155,8 @@ struct AllItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
+    encryption_version: Option<i32>,
+    encrypted_by_user_id: Option<String>,
     last_modified_by: Option<String>,
     created_at: String,
     updated_at: String,
@@ -195,6 +197,8 @@ impl From<vault::VaultItemWithVaultResponse> for AllItemResponse {
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
             version: value.version,
+            encryption_version: value.encryption_version,
+            encrypted_by_user_id: value.encrypted_by_user_id,
             last_modified_by: value.last_modified_by,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -216,6 +220,8 @@ impl From<vault::DeletedVaultItemWithVaultResponse> for AllItemResponse {
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
             version: value.version,
+            encryption_version: value.encryption_version,
+            encrypted_by_user_id: value.encrypted_by_user_id,
             last_modified_by: value.last_modified_by,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -238,6 +244,12 @@ struct UpdateItemBody {
     #[serde(default)]
     #[schema(value_type = Option<String>, nullable = true)]
     encryption_algorithm: PatchField<String>,
+    #[serde(default)]
+    #[schema(value_type = Option<i32>, nullable = true, minimum = 1)]
+    encryption_version: PatchField<i32>,
+    #[serde(default)]
+    #[schema(value_type = Option<String>, nullable = true)]
+    encrypted_by_user_id: PatchField<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -591,6 +603,8 @@ struct VaultItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
+    encryption_version: Option<i32>,
+    encrypted_by_user_id: Option<String>,
     last_modified_by: Option<String>,
     created_at: String,
     updated_at: String,
@@ -608,6 +622,8 @@ impl From<vault::VaultItemResponse> for VaultItemResponse {
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
             version: value.version,
+            encryption_version: value.encryption_version,
+            encrypted_by_user_id: value.encrypted_by_user_id,
             last_modified_by: value.last_modified_by,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -627,6 +643,8 @@ struct VaultItemDetailsResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
+    encryption_version: Option<i32>,
+    encrypted_by_user_id: Option<String>,
     last_modified_by: Option<String>,
     created_at: String,
     updated_at: String,
@@ -645,6 +663,8 @@ impl From<vault::VaultItemDetailsResponse> for VaultItemDetailsResponse {
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
             version: value.version,
+            encryption_version: value.encryption_version,
+            encrypted_by_user_id: value.encrypted_by_user_id,
             last_modified_by: value.last_modified_by,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -665,6 +685,8 @@ struct DeletedVaultItemWithVaultResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
+    encryption_version: Option<i32>,
+    encrypted_by_user_id: Option<String>,
     last_modified_by: Option<String>,
     created_at: String,
     updated_at: String,
@@ -683,6 +705,8 @@ impl From<vault::DeletedVaultItemWithVaultResponse> for DeletedVaultItemWithVaul
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
             version: value.version,
+            encryption_version: value.encryption_version,
+            encrypted_by_user_id: value.encrypted_by_user_id,
             last_modified_by: value.last_modified_by,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -758,6 +782,8 @@ struct VaultRotationItemResponse {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
+    encryption_version: Option<i32>,
+    encrypted_by_user_id: Option<String>,
     last_modified_by: Option<String>,
 }
 
@@ -769,6 +795,8 @@ impl From<vault::VaultRotationItemResponse> for VaultRotationItemResponse {
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
             version: value.version,
+            encryption_version: value.encryption_version,
+            encrypted_by_user_id: value.encrypted_by_user_id,
             last_modified_by: value.last_modified_by,
         }
     }
@@ -931,6 +959,8 @@ struct ItemResponseDto {
     encryption_iv: String,
     encryption_algorithm: String,
     version: i32,
+    encryption_version: Option<i32>,
+    encrypted_by_user_id: Option<String>,
     last_modified_by: Option<String>,
     created_at: String,
     updated_at: String,
@@ -948,6 +978,8 @@ impl From<vault::VaultItemDetailsResponse> for ItemResponseDto {
             encryption_iv: value.encryption_iv,
             encryption_algorithm: value.encryption_algorithm,
             version: value.version,
+            encryption_version: value.encryption_version,
+            encrypted_by_user_id: value.encrypted_by_user_id,
             last_modified_by: value.last_modified_by,
             created_at: value.created_at,
             updated_at: value.updated_at,
@@ -1573,6 +1605,30 @@ async fn update_item(
     let encryption_iv = optional_patch_value(body.encryption_iv, "/encryptionIv")?;
     let encryption_algorithm =
         optional_patch_value(body.encryption_algorithm, "/encryptionAlgorithm")?;
+    let encryption_version = match body.encryption_version {
+        PatchField::Missing => None,
+        PatchField::Value(value) if value > 0 => Some(value),
+        PatchField::Value(_) => {
+            return Err(ApiError::bad_request(
+                "INVALID_ENCRYPTION_CONTEXT",
+                "encryptionVersion must be positive.",
+            ));
+        }
+        PatchField::Null => {
+            return Err(ApiError::bad_request(
+                "FIELD_CANNOT_BE_CLEARED",
+                "/encryptionVersion cannot be null.",
+            ));
+        }
+    };
+    let encrypted_by_user_id =
+        optional_patch_value(body.encrypted_by_user_id, "/encryptedByUserId")?;
+    if encryption_version.is_some() != encrypted_by_user_id.is_some() {
+        return Err(ApiError::bad_request(
+            "INVALID_ENCRYPTION_CONTEXT",
+            "encryptionVersion and encryptedByUserId must be provided together.",
+        ));
+    }
     if let Some(value) = encrypted_data.as_deref() {
         check_ciphertext(value)?;
     }
@@ -1595,6 +1651,8 @@ async fn update_item(
                     encrypted_data,
                     encryption_iv,
                     encryption_algorithm,
+                    encryption_version,
+                    encrypted_by_user_id,
                     expected_version: Some(expected_version),
                     client_id,
                 },
@@ -1621,6 +1679,7 @@ async fn set_favorite(
     >,
 ) -> Result<Response, ApiError> {
     let expected_version = required_item_version(&headers)?;
+    let client_id = auth.effective_client_id();
     let pool = db_pool(&state)?.clone();
     let route_target = format!("/api/v1/items/{item_id}/favorite");
     idempotency::execute(
@@ -1638,6 +1697,7 @@ async fn set_favorite(
                     item_id,
                     favorite: body.favorite,
                     expected_version: Some(expected_version),
+                    client_id,
                 },
             )
             .await
@@ -2273,6 +2333,8 @@ mod tests {
             encryption_iv: "iv".to_string(),
             encryption_algorithm: "aes-gcm".to_string(),
             version: 7,
+            encryption_version: Some(3),
+            encrypted_by_user_id: Some("user_test".to_string()),
             last_modified_by: Some("user_test".to_string()),
             created_at: "2026-08-10T00:00:00Z".to_string(),
             updated_at: "2026-08-10T00:01:00Z".to_string(),
@@ -2349,6 +2411,8 @@ mod tests {
                 encryption_iv: "iv".to_string(),
                 encryption_algorithm: "aes-gcm".to_string(),
                 version: 1,
+                encryption_version: None,
+                encrypted_by_user_id: None,
                 last_modified_by: None,
                 created_at: "2026-08-10T00:00:00Z".to_string(),
                 updated_at: "2026-08-10T00:00:00Z".to_string(),
@@ -2375,6 +2439,8 @@ mod tests {
                 encryption_iv: "iv".to_string(),
                 encryption_algorithm: "aes-gcm".to_string(),
                 version: 2,
+                encryption_version: None,
+                encrypted_by_user_id: None,
                 last_modified_by: None,
                 created_at: "2026-08-10T00:00:00Z".to_string(),
                 updated_at: "2026-08-10T00:00:00Z".to_string(),

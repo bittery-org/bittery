@@ -79,7 +79,7 @@ async function getSyncClientIdHeader(): Promise<string | null> {
 	}
 
 	try {
-		return getOrCreateClientId(window.localStorage);
+		return getOrCreateClientId(window.sessionStorage);
 	} catch {
 		return null;
 	}

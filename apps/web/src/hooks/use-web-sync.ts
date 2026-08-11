@@ -21,7 +21,7 @@ function getClientId(): string {
 	if (typeof window === "undefined") {
 		return "server";
 	}
-	return getOrCreateClientId(window.localStorage);
+	return getOrCreateClientId(window.sessionStorage);
 }
 
 class WebSyncStorage implements SyncStorage {

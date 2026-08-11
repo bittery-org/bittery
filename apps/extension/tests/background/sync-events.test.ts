@@ -127,6 +127,7 @@ mock.module(path.join(bgDir, "desktop-sync.ts"), () => ({
 mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 	syncCacheService: {
 		resolveConnectionContext: async () => ({
+			accountId: ACCOUNT.accountId,
 			email: CONNECTION_EMAIL,
 			client: {
 				sync: {
@@ -142,7 +143,13 @@ mock.module(path.join(bgDir, "services/sync-cache-service.ts"), () => ({
 	},
 }));
 
-const { connect, disconnect, handleSyncSseFrame } = await import(
+const {
+	connect,
+	disconnect,
+	getLastSyncCursor,
+	handleSyncSseFrame,
+	setLastSyncCursor,
+} = await import(
 	path.join(bgDir, "sync-manager.ts")
 );
 const { parseSseFrame } = await import(
@@ -196,6 +203,17 @@ beforeEach(() => {
 	lastSseRequest = null;
 	openSyncEvents = async () => new Response(null, { status: 401 });
 	invalidateResult = () => [ACCOUNT];
+	for (const key of Object.keys(storageLocal)) delete storageLocal[key];
+});
+
+describe("account-scoped sync cursors", () => {
+	test("keeps independent durable cursors for two accounts", async () => {
+		await setLastSyncCursor("acc-1", { id: "evt-1" });
+		await setLastSyncCursor("acc-2", { id: "evt-9" });
+
+		expect(await getLastSyncCursor("acc-1")).toEqual({ id: "evt-1" });
+		expect(await getLastSyncCursor("acc-2")).toEqual({ id: "evt-9" });
+	});
 });
 
 describe("session_revoked over SSE", () => {
