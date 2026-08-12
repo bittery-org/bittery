@@ -505,10 +505,12 @@ export function useVaultImport() {
 						});
 					}
 
+					// No account scope: `useAllVaultKeys` only ever lists the active
+					// account's vaults, so `resolveAccountScopeId` resolving an omitted
+					// scope to the active account is exactly this vault's account.
 					resolvedTargets.set(sourceVault.id, {
 						vaultId: targetVault.vaultId,
 						vaultName: targetVault.vaultName,
-						accountEmail: targetVault.accountEmail,
 					});
 				}
 

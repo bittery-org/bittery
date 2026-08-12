@@ -173,11 +173,11 @@ export default function CreateItemScreen() {
 			}
 
 			// Encryption happens inside the hook — nothing plaintext leaves this screen.
+			// No account hint: the vault coordinator derives the account from the vault.
 			await createItem.mutateAsync({
 				vaultId: selectedVaultId,
 				category: categoryValue,
 				data: itemData,
-				accountEmail: selectedVault?.accountEmail,
 			});
 
 			toast.show({

@@ -331,15 +331,6 @@ function RouteComponent() {
 							type: v.vaultType,
 							icon: v.vaultIcon,
 							imageUrl: v.vaultImageUrl,
-							accountId: v.accountId,
-							accountEmail: "accountEmail" in v ? v.accountEmail : undefined,
-							accountName: "accountName" in v ? v.accountName : undefined,
-							accountTeamName:
-								"accountTeamName" in v ? v.accountTeamName : undefined,
-							accountTeamAvatarUrl:
-								"accountTeamAvatarUrl" in v
-									? v.accountTeamAvatarUrl
-									: undefined,
 						})) || []
 					}
 					selectedVaultId={params.id}

@@ -183,11 +183,6 @@ export function SearchCombobox() {
 												className="size-6 shrink-0"
 											/>
 											<span className="font-medium">{vault.name}</span>
-											{vault.teamName && (
-												<span className="text-muted-foreground text-xs">
-													{vault.teamName}
-												</span>
-											)}
 										</div>
 									</CommandItem>
 								))}

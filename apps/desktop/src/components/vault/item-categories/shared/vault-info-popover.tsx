@@ -12,10 +12,8 @@ interface VaultInfoPopoverProps {
 	vaultName: string;
 	vaultIcon?: string | null;
 	vaultImageUrl?: string | null;
-	vaultType?: "personal" | "team";
 	accountName?: string;
 	accountTeamName?: string;
-	accountTeamAvatarUrl?: string | null;
 	children?: React.ReactNode;
 }
 
