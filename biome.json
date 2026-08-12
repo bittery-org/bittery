@@ -59,7 +59,7 @@
 	"linter": {
 		"enabled": true,
 		"rules": {
-			"recommended": true,
+			"preset": "recommended",
 			"correctness": {
 				"useExhaustiveDependencies": "info"
 			},
@@ -129,6 +129,26 @@
 		}
 	},
 	"overrides": [
+		{
+			"includes": ["apps/*/public/**/*.svg"],
+			"linter": {
+				"rules": {
+					"a11y": {
+						"noSvgWithoutTitle": "off"
+					}
+				}
+			}
+		},
+		{
+			"includes": ["apps/mobile/global.css"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noDuplicateCustomProperties": "off"
+					}
+				}
+			}
+		},
 		{
 			"includes": ["apps/extension/src/background/desktop-protocol.ts"],
 			"linter": {

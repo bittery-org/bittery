@@ -122,8 +122,8 @@ export type {
 	ApiClientPlatform,
 	ApiFetch,
 	ApiRequestOrigin,
-	InsecureTransportPolicy,
 	InsecureTransportAuthorizer,
+	InsecureTransportPolicy,
 };
 
 export interface ApiClientOptions {

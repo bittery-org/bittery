@@ -34,7 +34,7 @@
 		"test": "bun test ./src"
 	},
 	"devDependencies": {
-		"@inlang/paraglide-js": "^2.13.1",
+		"@inlang/paraglide-js": "^2.23.2",
 		"@bittery/config": "workspace:*",
 		"@types/react": "catalog:",
 		"react": "catalog:",
