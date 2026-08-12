@@ -35,7 +35,7 @@
 		"tailwind-merge": "^3.3.1",
 		"@tanstack/react-query": "^5.85.5",
 		"@tanstack/react-form": "^1.23.5",
-		"nanoid": "^5.1.6"
+		"nanoid": "^6.0.1"
 	},
 	"devDependencies": {
 		"@bittery/config": "workspace:*",
