@@ -9,10 +9,10 @@ packages:
 catalog:
   '@types/react': ~19.2.18
   '@types/react-dom': ~19.2.4
-  dotenv: ^17.2.2
+  dotenv: ^17.4.2
   hono: ^4.8.2
-  react: 19.2.3
-  react-dom: 19.2.3
+  react: 19.2.8
+  react-dom: 19.2.8
   zod: ^4.1.13
 
 onlyBuiltDependencies:

@@ -144,8 +144,8 @@ function getFaviconLuminance(
 	return analyzeFaviconLuminance(url);
 }
 
-export { readCachedLuminance, analyzeFaviconLuminance, getFaviconLuminance };
 export type { LuminanceResult };
+export { analyzeFaviconLuminance, getFaviconLuminance, readCachedLuminance };
 
 // Deterministic per-item gradient stops (mid -> deep), 135deg. Mirrors the
 // palette used elsewhere for avatar-style gradients so login tiles without a

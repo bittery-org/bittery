@@ -16,11 +16,11 @@ import {
 } from "../sync-manager";
 
 export {
-	getSyncStatus,
-	getSyncClientId,
+	cleanupSync,
 	connectSync,
 	disconnectSync,
-	cleanupSync,
+	getSyncClientId,
+	getSyncStatus,
 };
 
 export function ensureSyncInitialized(_reason: string): void {

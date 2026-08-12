@@ -15,7 +15,7 @@ import type { VaultKeyEntry, VaultSummary } from "@bittery/types";
  * `@bittery/shared/vault-mapping` stays the one import for the vault vocabulary — aliasing
  * a generated type is allowed, restating it is not (ADR 0012).
  */
-export type { VaultRole, VaultType, VaultKeyEntry, VaultSummary };
+export type { VaultKeyEntry, VaultRole, VaultSummary, VaultType };
 
 /**
  * The vault fields every server payload carries. Derived from the generated vault-list
