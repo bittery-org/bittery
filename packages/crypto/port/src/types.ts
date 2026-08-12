@@ -48,6 +48,7 @@ export interface EncryptionContext {
 		| "attachment_name"
 		| "attachment_content_type"
 		| "attachment_blob"
+		| "attachment_key"
 		| "vault_key";
 	version: number;
 	userId: string;
@@ -184,28 +185,4 @@ export interface ReEncryptedItem {
 	itemId: string;
 	encryptedData: string;
 	encryptionIv: string;
-}
-
-/**
- * Member with encrypted vault key
- */
-export interface MemberEncryptedKey {
-	userId: string;
-	encryptedVaultKey: string;
-}
-
-/**
- * Key rotation result
- */
-export interface KeyRotationResult {
-	memberEncryptedKeys: MemberEncryptedKey[];
-	reEncryptedItems: ReEncryptedItem[];
-}
-
-/**
- * Validation result for rotation data
- */
-export interface ValidationResult {
-	valid: boolean;
-	errors: string[];
 }

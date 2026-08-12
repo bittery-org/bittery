@@ -65,7 +65,7 @@ pub async fn fetch_visible_cursor_event(
     }
 
     query_as::<_, DbSyncEventCursorRow>(
-		"SELECT id, seq FROM sync_event WHERE id = $1 AND (vault_id = ANY($2) OR (user_id = $3 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type))) LIMIT 1",
+		"SELECT id, seq FROM sync_event WHERE id = $1 AND ((vault_id = ANY($2) AND event_type NOT IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $3 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type))) LIMIT 1",
 	)
 	.bind(since_id)
 	.bind(target_vault_ids)
@@ -92,7 +92,7 @@ pub async fn fetch_latest_visible_event_id(
     }
 
     query_as::<_, DbSyncEventIdRow>(
-		"SELECT id FROM sync_event WHERE vault_id = ANY($1) OR (user_id = $2 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) ORDER BY seq DESC LIMIT 1",
+		"SELECT id FROM sync_event WHERE (vault_id = ANY($1) AND event_type NOT IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $2 AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) ORDER BY seq DESC LIMIT 1",
 	)
 	.bind(target_vault_ids)
 	.bind(user_id)
@@ -144,7 +144,8 @@ pub async fn fetch_visible_events_since(
                         + coalesce(octet_length(vault_id), 0) + coalesce(octet_length(client_id), 0)
                         + octet_length(user_id) + coalesce(octet_length(metadata), 0))::bigint AS estimated_bytes
                 FROM sync_event
-                WHERE (vault_id = ANY($1) OR (user_id = $2
+                WHERE ((vault_id = ANY($1) AND event_type NOT IN
+                  ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)) OR (user_id = $2
                   AND event_type IN ('vault_access_revoked'::sync_event_type, 'travel_mode_updated'::sync_event_type)))
                   AND seq > $3 ORDER BY seq ASC LIMIT $4
             ), weighted AS (
@@ -274,7 +275,7 @@ pub async fn load_bootstrap_attachment_rows(
     item_ids: &[String],
 ) -> Result<Vec<DbBootstrapAttachmentRow>, AppError> {
     query_as::<_, DbBootstrapAttachmentRow>(
-		"SELECT id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = ANY($1) ORDER BY created_at ASC",
+		"SELECT id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, uploaded_by, created_at FROM item_attachment WHERE item_id = ANY($1) ORDER BY created_at ASC",
 	)
 	.bind(item_ids)
 	.fetch_all(pool)

@@ -557,13 +557,8 @@ export class VaultRepository {
 			return null;
 		}
 
-		try {
-			const { data: vaults } = await client.vaults.list();
-			return vaults.map(toVaultKeyEntry);
-		} catch (error) {
-			console.error("[VaultRepository] Failed to refresh vault keys:", error);
-			return null;
-		}
+		const { data: vaults } = await client.vaults.list();
+		return vaults.map(toVaultKeyEntry);
 	}
 
 	private async ensureServerUrl(): Promise<void> {

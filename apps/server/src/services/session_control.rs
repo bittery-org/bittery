@@ -1,6 +1,6 @@
 use rand::random;
 use serde_json::Value;
-use sqlx::{query, query_as, query_scalar, PgPool};
+use sqlx::{query, query_as, PgPool};
 use time::OffsetDateTime;
 
 const SESSION_REVOKED_AUDIT_ACTION: &str = "session_revoked";
@@ -15,16 +15,6 @@ pub struct SessionRevocationRecord {
 struct DbSessionRevocationAuditRow {
     metadata: Option<String>,
     created_at: OffsetDateTime,
-}
-
-pub async fn load_user_session_ids(
-    pool: &PgPool,
-    user_id: &str,
-) -> Result<Vec<String>, sqlx::Error> {
-    query_scalar::<_, String>("SELECT id FROM session WHERE user_id = $1")
-        .bind(user_id)
-        .fetch_all(pool)
-        .await
 }
 
 pub async fn record_session_revocations(

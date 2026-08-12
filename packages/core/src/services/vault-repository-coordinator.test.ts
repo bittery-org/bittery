@@ -94,6 +94,49 @@ describe("VaultRepositoryCoordinator", () => {
 		resetTravelModeEnforcerForTests();
 	});
 
+	it("runs an explicit refresh after a bootstrap that was already in flight", async () => {
+		const { storage, itemCache, crypto, vaultCrypto } = await createLayers();
+		await unlock({ storage, crypto }, "acc-a");
+		await getTravelModeEnforcer(storage, itemCache).applyConfig("acc-a", {
+			enabled: false,
+			hiddenVaultIds: [],
+		});
+		let releaseFirst: (() => void) | undefined;
+		let bootstrapCalls = 0;
+		const account = makeAccountInfo(
+			"acc-a",
+			"a@example.com",
+			"https://a.example.com",
+		);
+		account.apiClient.sync.bootstrap = mock(async () => {
+			bootstrapCalls += 1;
+			if (bootstrapCalls === 1) {
+				await new Promise<void>((resolve) => {
+					releaseFirst = resolve;
+				});
+			}
+			return {
+				data: { items: [], hasMore: false, nextCursor: null },
+			};
+		}) as never;
+		const coordinator = new VaultRepositoryCoordinator(
+			crypto,
+			vaultCrypto,
+			storage,
+			itemCache,
+		);
+
+		const first = coordinator.refreshFromServer([account]);
+		while (!releaseFirst) await Promise.resolve();
+		const second = coordinator.refreshFromServer([account]);
+		expect(bootstrapCalls).toBe(1);
+
+		releaseFirst();
+		await first;
+		await second;
+		expect(bootstrapCalls).toBe(2);
+	});
+
 	describe("M5 — findAccount resolution with shared email across servers", () => {
 		it("findAccountForVault returns the repo that actually holds the vault, not the first email match", async () => {
 			const { storage, itemCache, crypto, vaultCrypto } = await createLayers();

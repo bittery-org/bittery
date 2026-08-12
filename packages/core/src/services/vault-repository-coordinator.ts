@@ -230,10 +230,15 @@ export class VaultRepositoryCoordinator {
 
 	private refreshAccountFromServer(
 		account: AccountInfo,
+		afterInFlight = false,
 	): Promise<{ id: string } | null> {
 		const existing = this.serverRefreshes.get(account.accountId);
 		if (existing) {
-			return existing;
+			return afterInFlight
+				? existing
+						.catch(() => null)
+						.then(() => this.refreshAccountFromServer(account, true))
+				: existing;
 		}
 
 		const refresh = this.getOrCreate(
@@ -365,7 +370,10 @@ export class VaultRepositoryCoordinator {
 		await Promise.all(
 			accounts.map(async (account) => {
 				await this.accountHydrations.get(account.accountId);
-				await this.refreshAccountFromServer(account);
+				// A caller asking for authoritative state must not join a bootstrap that
+				// may have started before its triggering server commit. Queue one full pass
+				// behind it; refreshes arriving after this call coalesce into that pass.
+				await this.refreshAccountFromServer(account, true);
 			}),
 		);
 	}

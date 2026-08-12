@@ -275,7 +275,8 @@ export function createCryptoUniffiBackend(
 						: { id: result.id, ok: true, plaintext: result.plaintext },
 			);
 		},
-		wrapKey: (key, wrappingKey) => wasm.wrapKey(key, wrappingKey),
+		wrapKey: (key, wrappingKey, encryptionContext) =>
+			wasm.wrapKey(key, wrappingKey, context(encryptionContext)),
 		unwrapKey: (data, wrappingKey, encryptionContext) =>
 			wasm.unwrapKey(data, wrappingKey, context(encryptionContext)),
 		generateRsaKeyPair: () => wasm.generateRsaKeyPair(),
@@ -313,25 +314,20 @@ export function createCryptoUniffiBackend(
 			),
 		reEncryptItem: (itemData, oldVaultKey, newVaultKey) =>
 			wasm.reEncryptItem(item(itemData), oldVaultKey, newVaultKey),
-		performKeyRotation: (
+		rewrapAttachmentKey: (
+			encryptedAttachmentKey,
 			oldVaultKey,
-			members,
-			items,
-			vaultId,
-			keyVersion,
-			currentUserId,
-			masterUnlockKey,
+			newVaultKey,
+			oldAttachmentContext,
+			newAttachmentContext,
 		) =>
-			wasm.performKeyRotation(
+			wasm.rewrapAttachmentKey(
+				encryptedAttachmentKey,
 				oldVaultKey,
-				[...members],
-				items.map(item),
-				vaultId,
-				BigInt(keyVersion),
-				currentUserId,
-				masterUnlockKey,
+				newVaultKey,
+				encryptionContext(oldAttachmentContext),
+				encryptionContext(newAttachmentContext),
 			),
-		validateRotationData: (members) => wasm.validateRotationData([...members]),
 		generateSecretKey: () => wasm.generateSecretKey(),
 		validateSecretKey: (secretKey) => wasm.validateSecretKey(secretKey),
 		generateRecoveryKey: () => wasm.generateRecoveryKey(),

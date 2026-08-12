@@ -14,6 +14,7 @@ pub(crate) mod sync;
 pub(crate) mod team;
 pub(crate) mod travel_mode;
 pub(crate) mod vault;
+pub(crate) mod vault_key_rotation;
 
 pub(crate) const ORDINARY_API_BODY_LIMIT_BYTES: usize = 1_048_576;
 
@@ -90,6 +91,7 @@ fn openapi_router() -> OpenApiRouter<AppState> {
             "/v1",
             auth::router()
                 .merge(vault::router())
+                .merge(vault_key_rotation::router())
                 .merge(sync::router())
                 .merge(team::router())
                 .merge(share::router())
@@ -186,8 +188,8 @@ mod tests {
             })
             .sum::<usize>();
 
-        assert_eq!(paths.len(), 86);
-        assert_eq!(operation_count, 101);
+        assert_eq!(paths.len(), 90);
+        assert_eq!(operation_count, 105);
     }
 
     /// Every `ToSchema` type reaches the document under its short Rust name, so two types that

@@ -172,9 +172,9 @@ export function ubrn_uniffi_bittery_crypto_api_checksum_func_import_key(): numbe
 
 export function ubrn_uniffi_bittery_crypto_api_checksum_func_initialize(): number;
 
-export function ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation(): number;
-
 export function ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(): number;
+
+export function ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key(): number;
 
 export function ubrn_uniffi_bittery_crypto_api_checksum_func_rsa_decrypt(): number;
 
@@ -185,8 +185,6 @@ export function ubrn_uniffi_bittery_crypto_api_checksum_func_sign_passkey_assert
 export function ubrn_uniffi_bittery_crypto_api_checksum_func_unwrap_key(): number;
 
 export function ubrn_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key(): number;
-
-export function ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data(): number;
 
 export function ubrn_uniffi_bittery_crypto_api_checksum_func_validate_secret_key(): number;
 
@@ -278,9 +276,9 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_import_key(key: Uint8Arra
 
 export function ubrn_uniffi_bittery_crypto_api_fn_func_initialize(): bigint;
 
-export function ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation(old_vault_key: bigint, members: Uint8Array, items: Uint8Array, vault_id: Uint8Array, key_version: bigint, current_user_id: Uint8Array, master_unlock_key: bigint): bigint;
-
 export function ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item(item: Uint8Array, old_vault_key: bigint, new_vault_key: bigint): bigint;
+
+export function ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(encrypted_attachment_key: Uint8Array, old_vault_key: bigint, new_vault_key: bigint, old_context: Uint8Array, new_context: Uint8Array): bigint;
 
 export function ubrn_uniffi_bittery_crypto_api_fn_func_rsa_decrypt(ciphertext: Uint8Array, private_key_pem: Uint8Array): bigint;
 
@@ -292,13 +290,11 @@ export function ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key(data: Uint8Arr
 
 export function ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key(recovery_key: Uint8Array): bigint;
 
-export function ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data(members: Uint8Array): bigint;
-
 export function ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key(secret_key: Uint8Array): bigint;
 
 export function ubrn_uniffi_bittery_crypto_api_fn_func_verify_server_session(client_public_ephemeral: Uint8Array, session: Uint8Array, server_session_proof: Uint8Array): bigint;
 
-export function ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key: bigint, wrapping_key: bigint): bigint;
+export function ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key(key: bigint, wrapping_key: bigint, context: Uint8Array): bigint;
 
 export function ubrn_uniffi_bittery_crypto_api_fn_method_srpclient_derive_safe_private_key(ptr: bigint, salt: Uint8Array, password: Uint8Array): bigint;
 
@@ -334,11 +330,10 @@ export interface InitOutput {
     readonly uniffi_bittery_crypto_api_fn_func_generate_passkey_credential_id: () => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_generate_passkey_keypair: () => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_generate_recovery_key: () => bigint;
-    readonly uniffi_bittery_crypto_api_fn_func_perform_key_rotation: (a: bigint, b: number, c: number, d: number, e: bigint, f: number, g: bigint) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_re_encrypt_item: (a: number, b: bigint, c: bigint) => bigint;
+    readonly uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key: (a: number, b: bigint, c: bigint, d: number, e: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_rsa_decrypt: (a: number, b: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_rsa_encrypt: (a: number, b: number) => bigint;
-    readonly ffi_bittery_crypto_api_rust_future_cancel_u8: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_free_u8: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_complete_u8: (a: bigint, b: number) => number;
     readonly ffi_bittery_crypto_api_rust_future_poll_i8: (a: bigint, b: number, c: bigint) => void;
@@ -347,18 +342,18 @@ export interface InitOutput {
     readonly ffi_bittery_crypto_api_rust_future_complete_i8: (a: bigint, b: number) => number;
     readonly ffi_bittery_crypto_api_rust_future_poll_u16: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_u16: (a: bigint) => void;
+    readonly ffi_bittery_crypto_api_rust_future_free_u16: (a: bigint) => void;
     readonly uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion: (a: number, b: number, c: number, d: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: bigint, c: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_validate_recovery_key: (a: number) => bigint;
-    readonly uniffi_bittery_crypto_api_fn_func_validate_rotation_data: (a: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_validate_secret_key: (a: number) => bigint;
     readonly uniffi_bittery_crypto_api_fn_func_verify_server_session: (a: number, b: number, c: number) => bigint;
-    readonly uniffi_bittery_crypto_api_fn_func_wrap_key: (a: bigint, b: bigint) => bigint;
+    readonly uniffi_bittery_crypto_api_fn_func_wrap_key: (a: bigint, b: bigint, c: number) => bigint;
     readonly ffi_bittery_crypto_api_rust_future_poll_u8: (a: bigint, b: number, c: bigint) => void;
-    readonly ffi_bittery_crypto_api_rust_future_free_u16: (a: bigint) => void;
+    readonly ffi_bittery_crypto_api_rust_future_cancel_u8: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_complete_u16: (a: bigint, b: number) => number;
     readonly ffi_bittery_crypto_api_rust_future_poll_i16: (a: bigint, b: number, c: bigint) => void;
-    readonly ffi_bittery_crypto_api_rust_future_free_i32: (a: bigint) => void;
+    readonly ffi_bittery_crypto_api_rust_future_cancel_i16: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_complete_i32: (a: bigint, b: number) => number;
     readonly ffi_bittery_crypto_api_rust_future_poll_u64: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_u64: (a: bigint) => void;
@@ -367,7 +362,7 @@ export interface InitOutput {
     readonly ffi_bittery_crypto_api_rust_future_poll_i64: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_i64: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_free_i64: (a: bigint) => void;
-    readonly ffi_bittery_crypto_api_rust_future_cancel_i16: (a: bigint) => void;
+    readonly ffi_bittery_crypto_api_rust_future_complete_i64: (a: bigint, b: number) => bigint;
     readonly ffi_bittery_crypto_api_rust_future_free_i16: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_complete_i16: (a: bigint, b: number) => number;
     readonly ffi_bittery_crypto_api_rust_future_poll_u32: (a: bigint, b: number, c: bigint) => void;
@@ -376,10 +371,10 @@ export interface InitOutput {
     readonly ffi_bittery_crypto_api_rust_future_complete_u32: (a: bigint, b: number) => number;
     readonly ffi_bittery_crypto_api_rust_future_poll_i32: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_i32: (a: bigint) => void;
-    readonly ffi_bittery_crypto_api_rust_future_complete_i64: (a: bigint, b: number) => bigint;
+    readonly ffi_bittery_crypto_api_rust_future_free_i32: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_poll_f32: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_f32: (a: bigint) => void;
-    readonly ffi_bittery_crypto_api_rust_future_complete_rust_buffer: (a: number, b: bigint, c: number) => void;
+    readonly ffi_bittery_crypto_api_rust_future_free_f32: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_poll_void: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_void: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_free_void: (a: bigint) => void;
@@ -387,8 +382,8 @@ export interface InitOutput {
     readonly uniffi_bittery_crypto_api_checksum_func_build_passkey_attestation_object: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_clone_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_decrypt: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_func_decrypt_many: () => number;
     readonly uniffi_bittery_crypto_api_fn_clone_srpclient: (a: bigint, b: number) => bigint;
-    readonly ffi_bittery_crypto_api_rust_future_free_f32: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_complete_f32: (a: bigint, b: number) => number;
     readonly ffi_bittery_crypto_api_rust_future_poll_f64: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_f64: (a: bigint) => void;
@@ -397,11 +392,11 @@ export interface InitOutput {
     readonly ffi_bittery_crypto_api_rust_future_poll_rust_buffer: (a: bigint, b: number, c: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_cancel_rust_buffer: (a: bigint) => void;
     readonly ffi_bittery_crypto_api_rust_future_free_rust_buffer: (a: bigint) => void;
-    readonly uniffi_bittery_crypto_api_checksum_func_decrypt_many: () => number;
+    readonly ffi_bittery_crypto_api_rust_future_complete_rust_buffer: (a: number, b: bigint, c: number) => void;
     readonly uniffi_bittery_crypto_api_checksum_func_decrypt_master_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_decrypt_rsa_wrapped_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_derive_client_session: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_func_encrypt_vault_key_with_muk: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_func_derive_keys: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_export_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_generate_client_ephemeral: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_generate_encryption_key: () => number;
@@ -410,7 +405,7 @@ export interface InitOutput {
     readonly uniffi_bittery_crypto_api_checksum_func_generate_recovery_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_generate_rsa_key_pair: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_generate_secret_key: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_func_derive_keys: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_func_generate_srp_registration: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_derive_keys_from_master_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_derive_master_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_derive_srp_password: () => number;
@@ -418,11 +413,10 @@ export interface InitOutput {
     readonly uniffi_bittery_crypto_api_checksum_func_encrypt: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_encrypt_master_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_encrypt_vault_key_for_member: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_func_generate_srp_registration: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_func_encrypt_vault_key_with_muk: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_generate_totp: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_generate_totp_at: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_func_validate_recovery_key: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_func_validate_rotation_data: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_func_generate_uuid: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_validate_secret_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_verify_server_session: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_wrap_key: () => number;
@@ -430,17 +424,17 @@ export interface InitOutput {
     readonly uniffi_bittery_crypto_api_checksum_method_srpclient_derive_verifier: () => number;
     readonly uniffi_bittery_crypto_api_checksum_method_srpclient_generate_salt: () => number;
     readonly uniffi_bittery_crypto_api_checksum_method_srpserver_generate_ephemeral: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_func_generate_uuid: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_constructor_srpclient_new: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_constructor_srpserver_new: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_import_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_initialize: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_func_perform_key_rotation: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_re_encrypt_item: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_rsa_decrypt: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_rsa_encrypt: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_sign_passkey_assertion: () => number;
     readonly uniffi_bittery_crypto_api_checksum_func_unwrap_key: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_constructor_srpclient_new: () => number;
-    readonly uniffi_bittery_crypto_api_checksum_constructor_srpserver_new: () => number;
+    readonly uniffi_bittery_crypto_api_checksum_func_validate_recovery_key: () => number;
     readonly ffi_bittery_crypto_api_uniffi_contract_version: () => number;
     readonly uniffi_bittery_crypto_api_fn_free_srpclient: (a: bigint, b: number) => void;
     readonly uniffi_bittery_crypto_api_fn_func_clone_key: (a: bigint) => bigint;
@@ -542,14 +536,13 @@ export interface InitOutput {
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_generate_uuid: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_import_key: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_initialize: () => number;
-    readonly ubrn_uniffi_bittery_crypto_api_checksum_func_perform_key_rotation: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_re_encrypt_item: () => number;
+    readonly ubrn_uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_rsa_decrypt: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_rsa_encrypt: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_sign_passkey_assertion: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_unwrap_key: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_validate_recovery_key: () => number;
-    readonly ubrn_uniffi_bittery_crypto_api_checksum_func_validate_rotation_data: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_validate_secret_key: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_verify_server_session: () => number;
     readonly ubrn_uniffi_bittery_crypto_api_checksum_func_wrap_key: () => number;
@@ -586,17 +579,16 @@ export interface InitOutput {
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_generate_totp: (a: number, b: number, c: number, d: number, e: number, f: bigint) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_generate_totp_at: (a: number, b: number, c: number, d: number, e: number, f: bigint, g: bigint) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_import_key: (a: number, b: number) => bigint;
-    readonly ubrn_uniffi_bittery_crypto_api_fn_func_perform_key_rotation: (a: bigint, b: number, c: number, d: number, e: number, f: number, g: number, h: bigint, i: number, j: number, k: bigint) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_re_encrypt_item: (a: number, b: number, c: bigint, d: bigint) => bigint;
+    readonly ubrn_uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key: (a: number, b: number, c: bigint, d: bigint, e: number, f: number, g: number, h: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_rsa_decrypt: (a: number, b: number, c: number, d: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_rsa_encrypt: (a: number, b: number, c: number, d: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_sign_passkey_assertion: (a: number, b: number, c: number, d: number, e: number, f: number, g: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_unwrap_key: (a: number, b: number, c: bigint, d: number, e: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_validate_recovery_key: (a: number, b: number) => bigint;
-    readonly ubrn_uniffi_bittery_crypto_api_fn_func_validate_rotation_data: (a: number, b: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_validate_secret_key: (a: number, b: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_func_verify_server_session: (a: number, b: number, c: number, d: number, e: number, f: number) => bigint;
-    readonly ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key: (a: bigint, b: bigint) => bigint;
+    readonly ubrn_uniffi_bittery_crypto_api_fn_func_wrap_key: (a: bigint, b: bigint, c: number, d: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_method_srpclient_derive_safe_private_key: (a: bigint, b: number, c: number, d: number, e: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_method_srpclient_derive_verifier: (a: bigint, b: number, c: number) => bigint;
     readonly ubrn_uniffi_bittery_crypto_api_fn_method_srpclient_generate_salt: (a: bigint) => bigint;

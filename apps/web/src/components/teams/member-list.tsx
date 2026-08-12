@@ -1,7 +1,4 @@
 import type { TeamMember } from "@bittery/api-contract";
-import { useCoreContext, usePlatformCrypto } from "@bittery/core/hooks";
-import { buildStoredItemEncryptionContext } from "@bittery/core/services/vault-crypto";
-import { useApiClient } from "@bittery/shared/api";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -20,6 +17,7 @@ import {
 } from "@bittery/ui";
 import { IconUser as UserMinus } from "@bittery/ui/icons";
 import { useState } from "react";
+import { useVaultKeyRotation } from "@/hooks/use-vault-key-rotation";
 import { formatDate } from "@/lib/i18n-format";
 import { storage } from "@/lib/storage";
 import { useI18n } from "@/providers/i18n-provider";
@@ -41,176 +39,31 @@ export function MemberList({
 	canManageMembers,
 	isSelfHostedMode = false,
 }: MemberListProps) {
-	const api = useApiClient();
-	const crypto = usePlatformCrypto();
-	const { vaultCrypto } = useCoreContext();
+	const rotation = useVaultKeyRotation();
 	const invalidator = useQueryInvalidator();
 	const [removingUserId, setRemovingUserId] = useState<string | null>(null);
 	const [isRotating, setIsRotating] = useState(false);
 	const { m } = useI18n();
 
-	/**
-	 * Handle member removal with key rotation for ALL team vaults.
-	 *
-	 * Steps:
-	 * 1. Get the Master Unlock Key and current user ID from storage
-	 * 2. Fetch team rotation data (all team vaults with members' public keys and items)
-	 * 3. For each team vault: decrypt current vault key, perform key rotation
-	 * 4. Submit all vault rotations to server in a single atomic call
-	 * 5. Update local vault keys in storage
-	 */
 	const handleRemoveMember = async (userId: string) => {
 		setIsRotating(true);
 		setRemovingUserId(userId);
 
 		try {
-			// Step 1: Get MUK and current user ID
-			const masterUnlockKey = await storage.getMasterUnlockKey();
-			if (!masterUnlockKey) {
-				throw new TeamRotationError("MASTER_UNLOCK_KEY_MISSING");
-			}
-
 			const currentUserId = await storage.getActiveAccountUserId();
 			if (!currentUserId) {
 				throw new TeamRotationError("SESSION_DATA_MISSING");
 			}
 
-			// Step 2: Fetch team rotation data from server
-			const teamRotationData = (
-				await api.teams.members.removalRotationData(teamId, userId)
-			).data;
-
-			// Step 3: Perform key rotation for each team vault
-			const vaultRotations: Array<{
-				vaultId: string;
-				keyRotation: {
-					memberKeys: Array<{
-						userId: string;
-						encryptedVaultKey: string;
-					}>;
-					reEncryptedItems: Array<{
-						itemId: string;
-						encryptedData: string;
-						encryptionIv: string;
-					}>;
-				};
-			}> = [];
-
-			for (const vaultData of teamRotationData.vaults) {
-				const currentVaultKey = await vaultCrypto.getVaultKey({
-					vaultId: vaultData.vaultId,
-				});
-
-				if (!currentVaultKey) {
-					throw new TeamRotationError("VAULT_KEY_DECRYPT_FAILED", {
-						vaultName: vaultData.vaultName,
-					});
-				}
-
-				try {
-					const rotationResult = await crypto.performKeyRotation(
-						currentVaultKey,
-						vaultData.members.map((m) => ({
-							userId: m.userId,
-							publicKey: m.publicKey,
-						})),
-						vaultData.items.map((item) => ({
-							id: item.id,
-							encryptedData: item.encryptedData,
-							encryptionIv: item.encryptionIv,
-							encryptionAlgorithm: item.encryptionAlgorithm,
-							context: buildStoredItemEncryptionContext({
-								...item,
-								vaultId: vaultData.vaultId,
-							}),
-						})),
-						vaultData.vaultId,
-						vaultData.keyVersion + 1,
-						currentUserId,
-						masterUnlockKey,
-					);
-
-					vaultRotations.push({
-						vaultId: vaultData.vaultId,
-						keyRotation: {
-							memberKeys: rotationResult.memberEncryptedKeys,
-							reEncryptedItems: rotationResult.reEncryptedItems,
-						},
-					});
-				} finally {
-					// `getVaultKey` mints a fresh ref per call; the store's master unlock key
-					// is not ours to touch.
-					await crypto.destroyKey(currentVaultKey);
-				}
-			}
-
-			// Step 4: Submit to server
-			const result = (
-				await api.teams.members.remove(
-					teamId,
-					userId,
-					{
-						vaultRotations,
-					},
-					{},
-				)
-			).data;
-
-			// Step 5: Update local vault keys in storage
-			const vaultKeys = await storage.getVaultKeys();
-			if (vaultKeys) {
-				const updatedVaultKeys = vaultKeys.map((vk) => {
-					// Find if this vault was rotated
-					const rotationIdx = teamRotationData.vaults.findIndex(
-						(v) => v.vaultId === vk.vaultId,
-					);
-					if (rotationIdx === -1) return vk;
-
-					const rotation = vaultRotations[rotationIdx];
-					if (!rotation) return vk;
-
-					// Find the current user's new encrypted key
-					const myNewKey = rotation.keyRotation.memberKeys.find(
-						(mk) => mk.userId === currentUserId,
-					);
-					if (myNewKey) {
-						return { ...vk, encryptedVaultKey: myNewKey.encryptedVaultKey };
-					}
-					return vk;
-				});
-				await storage.storeVaultKeys(updatedVaultKeys);
-			}
-
-			const totalItems =
-				result.vaultRotations?.reduce(
-					(sum, _vr, i) =>
-						sum + (vaultRotations[i]?.keyRotation.reEncryptedItems.length ?? 0),
-					0,
-				) ?? 0;
-
-			const rotatedVaultsLabel =
-				(result.vaultRotations?.length ?? 0) === 1
-					? m.team_members_toast_rotated_vaults_single({
-							count: result.vaultRotations?.length ?? 0,
-						})
-					: m.team_members_toast_rotated_vaults_plural({
-							count: result.vaultRotations?.length ?? 0,
-						});
-
-			const reEncryptedItemsLabel =
-				totalItems === 1
-					? m.team_members_toast_reencrypted_items_single({
-							count: totalItems,
-						})
-					: m.team_members_toast_reencrypted_items_plural({
-							count: totalItems,
-						});
-
+			const outcome = await rotation.rotate({
+				intent: { kind: "team-member-removal", teamId, userId },
+				currentUserId,
+			});
 			toast.success(
-				m.team_members_toast_removed_summary({
-					rotatedVaults: rotatedVaultsLabel,
-					reEncryptedItems: reEncryptedItemsLabel,
-				}),
+				m.team_members_toast_remove_success(),
+				outcome.kind === "refresh_required"
+					? { description: m.vault_key_rotation_refresh_required() }
+					: undefined,
 			);
 			await invalidator.invalidateTeam();
 		} catch (error) {

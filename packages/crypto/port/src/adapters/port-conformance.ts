@@ -59,8 +59,7 @@ export const CRYPTO_PORT_MEMBERS = [
 	"encryptVaultKeyForMember",
 	"encryptVaultKeyWithMuk",
 	"reEncryptItem",
-	"performKeyRotation",
-	"validateRotationData",
+	"rewrapAttachmentKey",
 	"generateSecretKey",
 	"validateSecretKey",
 	"generateRecoveryKey",
@@ -481,7 +480,7 @@ export function runCryptoPortConformance(
 			const wrappingKey = await port.generateEncryptionKey();
 
 			const restored = await port.unwrapKey(
-				await port.wrapKey(key, wrappingKey),
+				await port.wrapKey(key, wrappingKey, null),
 				wrappingKey,
 				null,
 			);
@@ -497,7 +496,7 @@ export function runCryptoPortConformance(
 			const wrappingKey = await port.generateEncryptionKey();
 			const otherWrappingKey = await port.generateEncryptionKey();
 
-			const wrapped = await port.wrapKey(key, wrappingKey);
+			const wrapped = await port.wrapKey(key, wrappingKey, null);
 
 			await expectPortError(
 				() => port.unwrapKey(wrapped, otherWrappingKey, null),
@@ -510,7 +509,7 @@ export function runCryptoPortConformance(
 			const key = await port.generateEncryptionKey();
 			const wrappingKey = await port.generateEncryptionKey();
 			const restored = await port.unwrapKey(
-				await port.wrapKey(key, wrappingKey),
+				await port.wrapKey(key, wrappingKey, null),
 				wrappingKey,
 				null,
 			);
@@ -551,7 +550,7 @@ export function runCryptoPortConformance(
 			await port.destroyKey(key);
 
 			await expectPortError(
-				() => port.wrapKey(key, wrappingKey),
+				() => port.wrapKey(key, wrappingKey, null),
 				"key-destroyed",
 			);
 		});
@@ -1093,135 +1092,45 @@ export function runCryptoPortConformance(
 			);
 		});
 
-		test("validateRotationData accepts real public keys", async () => {
-			const port = await make();
-			const member = await port.generateRsaKeyPair();
-
-			const result = await port.validateRotationData([
-				{ userId: "user-1", publicKey: member.publicKey },
-			]);
-
-			expect(result.valid).toBe(true);
-			expect(result.errors).toEqual([]);
-		});
-
-		test("validateRotationData names every member it rejects", async () => {
-			const port = await make();
-
-			const result = await port.validateRotationData([
-				{ userId: "user-blank", publicKey: "" },
-				{ userId: "user-garbage", publicKey: "not a pem" },
-			]);
-
-			expect(result.valid).toBe(false);
-			expect(result.errors.length).toBe(2);
-			expect(result.errors.join(" ")).toContain("user-blank");
-			expect(result.errors.join(" ")).toContain("user-garbage");
-		});
-
-		test("performKeyRotation covers every member and every item, in order", async () => {
+		test("rewrapAttachmentKey preserves its attachment envelope context", async () => {
 			const port = await make();
 			const oldVaultKey = await port.generateEncryptionKey();
-			const muk = await port.generateEncryptionKey();
-			const member = await port.generateRsaKeyPair();
-			const items: ItemData[] = [];
-			for (const id of ["item-a", "item-b"]) {
-				const sealed = await port.encrypt(
-					`plain-${id}`,
-					oldVaultKey,
-					itemContext(id),
-				);
-				items.push({
-					id,
-					encryptedData: sealed.ciphertext,
-					encryptionIv: sealed.iv,
-					encryptionAlgorithm: sealed.algorithm,
-					context: itemContext(id),
-				});
-			}
-
-			const result = await port.performKeyRotation(
+			const newVaultKey = await port.generateEncryptionKey();
+			const context = {
+				vaultId: "vault-1",
+				entityId: "attachment-7",
+				entityType: "attachment_key" as const,
+				version: 2,
+				userId: "user-1",
+			};
+			const attachmentKeyBase64 = encodeBase64(AWKWARD_KEY_BYTES);
+			const nextContext = { ...context, version: context.version + 1 };
+			const original = await port.encrypt(
+				attachmentKeyBase64,
 				oldVaultKey,
-				[
-					{ userId: "owner", publicKey: "" },
-					{ userId: "member", publicKey: member.publicKey },
-				],
-				items,
-				"vault-9",
-				7,
-				"owner",
-				muk,
+				context,
 			);
 
-			expect(result.memberEncryptedKeys.map((entry) => entry.userId)).toEqual([
-				"owner",
-				"member",
-			]);
-			expect(result.reEncryptedItems.map((entry) => entry.itemId)).toEqual([
-				"item-a",
-				"item-b",
-			]);
-			expect(
-				JSON.parse(result.memberEncryptedKeys[0]?.encryptedVaultKey ?? "{}")
-					.context,
-			).toEqual({
-				vaultId: "vault-9",
-				userId: "owner",
-				keyVersion: 7,
-				purpose: "vault-key-wrap",
-			});
-		});
-
-		test("a rotated member can open every re-encrypted item", async () => {
-			const port = await make();
-			const oldVaultKey = await port.generateEncryptionKey();
-			const muk = await port.generateEncryptionKey();
-			const member = await port.generateRsaKeyPair();
-			const sealed = await port.encrypt(
-				UNICODE_PLAINTEXT,
+			const rewrapped = await port.rewrapAttachmentKey(
+				original,
 				oldVaultKey,
-				itemContext("item-a"),
+				newVaultKey,
+				context,
+				nextContext,
 			);
 
-			const result = await port.performKeyRotation(
-				oldVaultKey,
-				[{ userId: "member", publicKey: member.publicKey }],
-				[
-					{
-						id: "item-a",
-						encryptedData: sealed.ciphertext,
-						encryptionIv: sealed.iv,
-						encryptionAlgorithm: sealed.algorithm,
-						context: itemContext("item-a"),
-					},
-				],
-				"vault-9",
-				7,
-				"owner",
-				muk,
+			expect(await port.decrypt(rewrapped, newVaultKey, nextContext)).toBe(
+				attachmentKeyBase64,
 			);
-
-			const newVaultKey = await port.importKey(
-				decodeBase64(
-					await port.rsaDecrypt(
-						result.memberEncryptedKeys[0]?.encryptedVaultKey ?? "",
-						member.privateKey,
-					),
-				),
+			await expectPortError(() =>
+				port.decrypt(rewrapped, oldVaultKey, nextContext),
 			);
-			const rotatedItem = result.reEncryptedItems[0];
-
-			expect(
-				await port.decrypt(
-					{
-						ciphertext: rotatedItem?.encryptedData ?? "",
-						iv: rotatedItem?.encryptionIv ?? "",
-						algorithm: sealed.algorithm,
-					},
-					newVaultKey,
-					itemContext("item-a"),
-				),
-			).toBe(UNICODE_PLAINTEXT);
+			await expectPortError(() =>
+				port.decrypt(rewrapped, newVaultKey, {
+					...nextContext,
+					entityId: "attachment-8",
+				}),
+			);
 		});
 	});
 

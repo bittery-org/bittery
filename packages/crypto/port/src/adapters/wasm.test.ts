@@ -195,16 +195,13 @@ describe("wasm adapter — failure", () => {
 			"backend-failure",
 			"CryptoError.Srp: unsupported prime group",
 		],
-	])(
-		"generated %s error becomes %s",
-		async (_variant, build, code, message) => {
-			const { port, doubles } = await makePort();
-			doubles.wasm.nextUuidFailure = build();
+	])("generated %s error becomes %s", async (_variant, build, code, message) => {
+		const { port, doubles } = await makePort();
+		doubles.wasm.nextUuidFailure = build();
 
-			await expect(port.generateUuid()).rejects.toMatchObject({
-				code,
-				message,
-			});
-		},
-	);
+		await expect(port.generateUuid()).rejects.toMatchObject({
+			code,
+			message,
+		});
+	});
 });

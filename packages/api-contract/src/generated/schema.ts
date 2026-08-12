@@ -852,7 +852,7 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
-    readonly "/api/v1/teams/{teamId}/leave": {
+    readonly "/api/v1/teams/{teamId}/leave-rotation-plans": {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
@@ -861,23 +861,23 @@ export interface paths {
         };
         readonly get?: never;
         readonly put?: never;
-        readonly post: operations["leaveTeam"];
+        readonly post: operations["createTeamLeaveRotationPlans"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
         readonly patch?: never;
         readonly trace?: never;
     };
-    readonly "/api/v1/teams/{teamId}/leave-rotation-data": {
+    readonly "/api/v1/teams/{teamId}/leave-rotation-plans/finalize": {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
             readonly path?: never;
             readonly cookie?: never;
         };
-        readonly get: operations["getTeamLeaveRotationData"];
+        readonly get?: never;
         readonly put?: never;
-        readonly post?: never;
+        readonly post: operations["finalizeTeamLeaveRotationPlans"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -900,22 +900,6 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
-    readonly "/api/v1/teams/{teamId}/members/{userId}": {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path?: never;
-            readonly cookie?: never;
-        };
-        readonly get?: never;
-        readonly put?: never;
-        readonly post?: never;
-        readonly delete: operations["removeTeamMember"];
-        readonly options?: never;
-        readonly head?: never;
-        readonly patch?: never;
-        readonly trace?: never;
-    };
     readonly "/api/v1/teams/{teamId}/members/{userId}/access": {
         readonly parameters: {
             readonly query?: never;
@@ -932,16 +916,32 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
-    readonly "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-data": {
+    readonly "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans": {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
             readonly path?: never;
             readonly cookie?: never;
         };
-        readonly get: operations["getTeamMemberRemovalRotationData"];
+        readonly get?: never;
         readonly put?: never;
-        readonly post?: never;
+        readonly post: operations["createTeamMemberRemovalRotationPlans"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/teams/{teamId}/members/{userId}/removal-rotation-plans/finalize": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["finalizeTeamMemberRemovalRotationPlans"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1172,6 +1172,54 @@ export interface paths {
         readonly patch?: never;
         readonly trace?: never;
     };
+    readonly "/api/v1/vault-key-rotation-plans/{planId}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete: operations["abandonVaultKeyRotationPlan"];
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/vault-key-rotation-plans/{planId}/preparation/{kind}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get: operations["getVaultKeyRotationPreparationPage"];
+        readonly put?: never;
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/vault-key-rotation-plans/{planId}/staged/{kind}": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put: operations["stageVaultKeyRotationOutputs"];
+        readonly post?: never;
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
     readonly "/api/v1/vault-stats": {
         readonly parameters: {
             readonly query?: never;
@@ -1342,22 +1390,38 @@ export interface paths {
         readonly get?: never;
         readonly put: operations["addVaultMember"];
         readonly post?: never;
-        readonly delete: operations["removeVaultMember"];
+        readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
         readonly patch: operations["updateVaultMemberRole"];
         readonly trace?: never;
     };
-    readonly "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-data": {
+    readonly "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans": {
         readonly parameters: {
             readonly query?: never;
             readonly header?: never;
             readonly path?: never;
             readonly cookie?: never;
         };
-        readonly get: operations["getVaultMemberRemovalRotationData"];
+        readonly get?: never;
         readonly put?: never;
-        readonly post?: never;
+        readonly post: operations["createVaultMemberRemovalRotationPlans"];
+        readonly delete?: never;
+        readonly options?: never;
+        readonly head?: never;
+        readonly patch?: never;
+        readonly trace?: never;
+    };
+    readonly "/api/v1/vaults/{vaultId}/members/{userId}/removal-rotation-plans/finalize": {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path?: never;
+            readonly cookie?: never;
+        };
+        readonly get?: never;
+        readonly put?: never;
+        readonly post: operations["finalizeVaultMemberRemovalRotationPlans"];
         readonly delete?: never;
         readonly options?: never;
         readonly head?: never;
@@ -1456,6 +1520,11 @@ export interface components {
             /** Format: int32 */
             readonly fileSize: number;
         };
+        readonly AttachmentUploadResponse: {
+            readonly attachmentId: string;
+            readonly key: string;
+            readonly uploadUrl: string;
+        };
         readonly AttachmentUsageResponse: {
             readonly attachmentsEnabled: boolean;
             readonly committedStorageBytes: components["schemas"]["DecimalString"];
@@ -1533,12 +1602,17 @@ export interface components {
             readonly stripeSubscriptionId?: string | null;
         };
         readonly BootstrapAttachmentResponse: {
+            readonly attachmentKeyAlgorithm: string;
+            readonly attachmentKeyIv: string;
             readonly createdAt: string;
+            readonly encryptedAttachmentKey: string;
             readonly encryptedContentType: string;
             readonly encryptedContentTypeIv: string;
             readonly encryptedName: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly envelopeVersion: number;
             /** Format: int32 */
             readonly fileSize: number;
             readonly id: string;
@@ -1618,11 +1692,17 @@ export interface components {
             readonly vaultId: string;
         };
         readonly CreateAttachmentBody: {
+            readonly attachmentId: string;
+            readonly attachmentKeyAlgorithm: string;
+            readonly attachmentKeyIv: string;
+            readonly encryptedAttachmentKey: string;
             readonly encryptedContentType: string;
             readonly encryptedContentTypeIv: string;
             readonly encryptedName: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly envelopeVersion: number;
             /** Format: int32 */
             readonly fileSize: number;
             readonly storageKey: string;
@@ -1784,12 +1864,17 @@ export interface components {
         readonly CursorPage_VaultAttachmentResponse: {
             readonly hasMore: boolean;
             readonly items: readonly {
+                readonly attachmentKeyAlgorithm: string;
+                readonly attachmentKeyIv: string;
                 readonly createdAt: string;
+                readonly encryptedAttachmentKey: string;
                 readonly encryptedContentType: string;
                 readonly encryptedContentTypeIv: string;
                 readonly encryptedName: string;
                 readonly encryptionAlgorithm: string;
                 readonly encryptionIv: string;
+                /** Format: int32 */
+                readonly envelopeVersion: number;
                 /** Format: int32 */
                 readonly fileSize: number;
                 readonly id: string;
@@ -1949,11 +2034,25 @@ export interface components {
          * @description A stable, machine-readable Bittery error code.
          * @enum {string}
          */
-        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE";
+        readonly ErrorCode: "INTERNAL_ERROR" | "BAD_REQUEST" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "CONFLICT" | "RATE_LIMITED" | "PAYLOAD_TOO_LARGE" | "INVALID_REQUEST" | "UNSUPPORTED_MEDIA_TYPE" | "PRECONDITION_REQUIRED" | "VERSION_CONFLICT" | "API_ROUTE_NOT_FOUND" | "METHOD_NOT_ALLOWED" | "SERVICE_UNAVAILABLE" | "INVALID_QUERY" | "INVALID_PAGE_LIMIT" | "INVALID_LIMIT" | "INVALID_CURSOR" | "INVALID_IF_MATCH" | "INVALID_VERSION" | "INVALID_ITEM_STATE" | "INVALID_EMAIL" | "FIELD_CANNOT_BE_CLEARED" | "SEARCH_TOO_LONG" | "TOO_MANY_HIDDEN_VAULTS" | "INVALID_IDEMPOTENCY_KEY" | "IDEMPOTENCY_KEY_REUSED" | "IDEMPOTENCY_NOT_ALLOWED" | "IDEMPOTENCY_REQUEST_IN_PROGRESS" | "IDEMPOTENCY_OUTCOME_INDETERMINATE" | "IDEMPOTENCY_RESPONSE_UNAVAILABLE" | "ROTATION_STALE_VAULT_VERSION" | "ROTATION_STALE_MEMBER_SET" | "ROTATION_STALE_ITEM_STATE" | "ROTATION_STALE_ATTACHMENT_STATE";
         /** @enum {string} */
         readonly EventSource: "audit_log" | "share_access_log";
         readonly FavoriteBody: {
             readonly favorite: boolean;
+        };
+        readonly FinalizePlanSetRequest: {
+            readonly planIds: readonly string[];
+        };
+        readonly FinalizePlanSetResponse: {
+            readonly personalTeamId?: string | null;
+            readonly rotations: readonly components["schemas"]["FinalizeResponse"][];
+        };
+        readonly FinalizeResponse: {
+            /** Format: int32 */
+            readonly keyVersion: number;
+            readonly planId: string;
+            readonly rotationId: string;
+            readonly vaultId: string;
         };
         readonly FinishLoginRequest: {
             readonly clientProof: string;
@@ -2149,8 +2248,21 @@ export interface components {
             readonly encryptedVaultKey: string;
             readonly vaultId: string;
         };
+        readonly PlanSetResponse: {
+            readonly plans: readonly components["schemas"]["RotationPlanSummary"][];
+        };
         readonly PortalSessionResponse: {
             readonly url: string;
+        };
+        readonly PreparationPage: {
+            readonly nextCursor?: string | null;
+            readonly records: readonly components["schemas"]["PreparationRecord"][];
+        };
+        readonly PreparationRecord: {
+            /** Format: int32 */
+            readonly expectedVersion: number;
+            readonly id: string;
+            readonly payload: string;
         };
         /**
          * @description The authorization to upload one object to storage.
@@ -2235,20 +2347,6 @@ export interface components {
             readonly reason?: string | null;
             readonly requiresEmailVerification: boolean;
         };
-        readonly RemoveMemberResponse: {
-            readonly success: boolean;
-            readonly vaultRotations: readonly components["schemas"]["TeamVaultRotationResponse"][];
-        };
-        readonly RemoveTeamMemberRequest: {
-            readonly vaultRotations: readonly components["schemas"]["RotationVaultRequest"][];
-        };
-        readonly RemoveVaultMemberBody: {
-            readonly keyRotation: components["schemas"]["VaultKeyRotationInput"];
-        };
-        readonly RemoveVaultMemberResponse: {
-            readonly keyRotation: components["schemas"]["VaultKeyRotationSummaryResponse"];
-            readonly success: boolean;
-        };
         readonly RenameSessionRequest: {
             readonly deviceName: string;
         };
@@ -2273,55 +2371,15 @@ export interface components {
             readonly token: string;
             readonly userId: string;
         };
-        readonly RotationDataResponse: {
-            readonly vaults: readonly components["schemas"]["RotationVaultResponse"][];
-        };
-        readonly RotationItemRequest: {
-            readonly encryptedData: string;
-            readonly encryptionIv: string;
-            readonly itemId: string;
-        };
-        readonly RotationItemResponse: {
-            readonly encryptedByUserId: string;
-            readonly encryptedData: string;
-            readonly encryptionAlgorithm: string;
-            readonly encryptionIv: string;
+        readonly RotationPlanSummary: {
+            readonly absoluteExpiresAt: string;
             /** Format: int32 */
-            readonly encryptionVersion: number;
+            readonly expectedKeyVersion: number;
             readonly id: string;
-            readonly lastModifiedBy: string;
-            /** Format: int32 */
-            readonly version: number;
-        };
-        readonly RotationMemberKeyInput: {
-            readonly encryptedVaultKey: string;
-            readonly userId: string;
-        };
-        readonly RotationMemberKeyRequest: {
-            readonly encryptedVaultKey: string;
-            readonly userId: string;
-        };
-        readonly RotationMemberResponse: {
-            readonly publicKey: string;
-            readonly role: components["schemas"]["VaultRole"];
-            readonly userId: string;
-        };
-        readonly RotationReEncryptedItemInput: {
-            readonly encryptedData: string;
-            readonly encryptionIv: string;
-            readonly itemId: string;
-        };
-        readonly RotationVaultRequest: {
-            readonly keyRotation: components["schemas"]["VaultKeyRotationRequest"];
+            readonly idleExpiresAt: string;
+            readonly initiatorUserId: string;
+            readonly state: components["schemas"]["VaultKeyRotationPlanState"];
             readonly vaultId: string;
-        };
-        readonly RotationVaultResponse: {
-            readonly items: readonly components["schemas"]["RotationItemResponse"][];
-            /** Format: int32 */
-            readonly keyVersion: number;
-            readonly members: readonly components["schemas"]["RotationMemberResponse"][];
-            readonly vaultId: string;
-            readonly vaultName: string;
         };
         readonly SecretKeyRotationRequest: {
             readonly encryptedPrivateKey: string;
@@ -2426,6 +2484,13 @@ export interface components {
             readonly email: string;
             readonly invitationToken?: string | null;
         };
+        readonly StageRequest: {
+            readonly outputs: readonly components["schemas"]["StagedOutputRequest"][];
+        };
+        readonly StagedOutputRequest: {
+            readonly id: string;
+            readonly payload: string;
+        };
         readonly StartLoginRequest: {
             readonly clientPublicKey: string;
             readonly email: string;
@@ -2509,9 +2574,6 @@ export interface components {
         };
         /** @enum {string} */
         readonly TeamEventResult: "success" | "failure";
-        readonly TeamLeaveRequest: {
-            readonly vaultRotations: readonly components["schemas"]["RotationVaultRequest"][];
-        };
         readonly TeamMemberResponse: {
             readonly email: string;
             readonly joinedAt: string;
@@ -2557,12 +2619,6 @@ export interface components {
             readonly id: string;
             readonly name: string;
         };
-        readonly TeamVaultRotationResponse: {
-            /** Format: int32 */
-            readonly newKeyVersion: number;
-            readonly rotationId: string;
-            readonly vaultId: string;
-        };
         readonly TravelModeResponse: {
             readonly enabled: boolean;
             readonly enabledAt?: string | null;
@@ -2603,12 +2659,17 @@ export interface components {
             readonly name: string;
         };
         readonly VaultAttachmentResponse: {
+            readonly attachmentKeyAlgorithm: string;
+            readonly attachmentKeyIv: string;
             readonly createdAt: string;
+            readonly encryptedAttachmentKey: string;
             readonly encryptedContentType: string;
             readonly encryptedContentTypeIv: string;
             readonly encryptedName: string;
             readonly encryptionAlgorithm: string;
             readonly encryptionIv: string;
+            /** Format: int32 */
+            readonly envelopeVersion: number;
             /** Format: int32 */
             readonly fileSize: number;
             readonly id: string;
@@ -2671,21 +2732,8 @@ export interface components {
             /** Format: int32 */
             readonly version: number;
         };
-        readonly VaultKeyRotationInput: {
-            readonly memberKeys: readonly components["schemas"]["RotationMemberKeyInput"][];
-            readonly reEncryptedItems: readonly components["schemas"]["RotationReEncryptedItemInput"][];
-        };
-        readonly VaultKeyRotationRequest: {
-            readonly memberKeys: readonly components["schemas"]["RotationMemberKeyRequest"][];
-            readonly reEncryptedItems: readonly components["schemas"]["RotationItemRequest"][];
-        };
-        readonly VaultKeyRotationSummaryResponse: {
-            readonly id: string;
-            readonly itemsReEncrypted: number;
-            readonly membersUpdated: number;
-            /** Format: int32 */
-            readonly newKeyVersion: number;
-        };
+        /** @enum {string} */
+        readonly VaultKeyRotationPlanState: "preparing" | "ready" | "completed" | "stale" | "failed" | "abandoned" | "expired";
         readonly VaultListEntryResponse: {
             readonly createdById: string;
             readonly encryptedVaultKey: string;
@@ -2708,29 +2756,6 @@ export interface components {
          * @enum {string}
          */
         readonly VaultRole: "owner" | "admin" | "member" | "read-only";
-        readonly VaultRotationDataResponse: {
-            readonly items: readonly components["schemas"]["VaultRotationItemResponse"][];
-            /** Format: int32 */
-            readonly keyVersion: number;
-            readonly members: readonly components["schemas"]["VaultRotationMemberResponse"][];
-        };
-        readonly VaultRotationItemResponse: {
-            readonly encryptedByUserId: string;
-            readonly encryptedData: string;
-            readonly encryptionAlgorithm: string;
-            readonly encryptionIv: string;
-            /** Format: int32 */
-            readonly encryptionVersion: number;
-            readonly id: string;
-            readonly lastModifiedBy: string;
-            /** Format: int32 */
-            readonly version: number;
-        };
-        readonly VaultRotationMemberResponse: {
-            readonly publicKey: string;
-            readonly role: components["schemas"]["VaultRole"];
-            readonly userId: string;
-        };
         readonly VaultStatsResponseDto: {
             readonly itemCount: components["schemas"]["DecimalString"];
             /** Format: int32 */
@@ -4907,7 +4932,7 @@ export interface operations {
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["PresignedUploadResponse"];
+                    readonly "application/json": components["schemas"]["AttachmentUploadResponse"];
                 };
             };
             /** @description Bad request */
@@ -8200,109 +8225,12 @@ export interface operations {
             };
         };
     };
-    readonly leaveTeam: {
+    readonly createTeamLeaveRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                readonly teamId: string;
+            readonly header?: {
+                readonly "Idempotency-Key"?: string | null;
             };
-            readonly cookie?: never;
-        };
-        readonly requestBody: {
-            readonly content: {
-                readonly "application/json": components["schemas"]["TeamLeaveRequest"];
-            };
-        };
-        readonly responses: {
-            readonly 200: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/json": components["schemas"]["SuccessResponse"];
-                };
-            };
-            /** @description Bad request */
-            readonly 400: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Authentication required */
-            readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Unsupported media type */
-            readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Rate limited */
-            readonly 429: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Internal error */
-            readonly 500: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-        };
-    };
-    readonly getTeamLeaveRotationData: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
             readonly path: {
                 readonly teamId: string;
             };
@@ -8312,84 +8240,41 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["RotationDataResponse"];
+                    readonly "application/json": components["schemas"]["PlanSetResponse"];
                 };
             };
-            /** @description Bad request */
-            readonly 400: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+        };
+    };
+    readonly finalizeTeamLeaveRotationPlans: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: {
+                readonly "Idempotency-Key"?: string | null;
             };
-            /** @description Authentication required */
-            readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+            readonly path: {
+                readonly teamId: string;
             };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["FinalizePlanSetRequest"];
             };
-            /** @description Not found */
-            readonly 404: {
+        };
+        readonly responses: {
+            readonly 200: {
                 headers: {
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Unsupported media type */
-            readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Rate limited */
-            readonly 429: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Internal error */
-            readonly 500: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                    readonly "application/json": components["schemas"]["FinalizePlanSetResponse"];
                 };
             };
         };
@@ -8414,106 +8299,6 @@ export interface operations {
                 };
                 content: {
                     readonly "application/json": components["schemas"]["CursorPage_TeamMemberResponse"];
-                };
-            };
-            /** @description Bad request */
-            readonly 400: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Authentication required */
-            readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Unsupported media type */
-            readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Rate limited */
-            readonly 429: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Internal error */
-            readonly 500: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-        };
-    };
-    readonly removeTeamMember: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                readonly teamId: string;
-                readonly userId: string;
-            };
-            readonly cookie?: never;
-        };
-        readonly requestBody: {
-            readonly content: {
-                readonly "application/json": components["schemas"]["RemoveTeamMemberRequest"];
-            };
-        };
-        readonly responses: {
-            readonly 200: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/json": components["schemas"]["RemoveMemberResponse"];
                 };
             };
             /** @description Bad request */
@@ -8688,10 +8473,12 @@ export interface operations {
             };
         };
     };
-    readonly getTeamMemberRemovalRotationData: {
+    readonly createTeamMemberRemovalRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: never;
+            readonly header?: {
+                readonly "Idempotency-Key"?: string | null;
+            };
             readonly path: {
                 readonly teamId: string;
                 readonly userId: string;
@@ -8702,84 +8489,42 @@ export interface operations {
         readonly responses: {
             readonly 200: {
                 headers: {
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["RotationDataResponse"];
+                    readonly "application/json": components["schemas"]["PlanSetResponse"];
                 };
             };
-            /** @description Bad request */
-            readonly 400: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+        };
+    };
+    readonly finalizeTeamMemberRemovalRotationPlans: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: {
+                readonly "Idempotency-Key"?: string | null;
             };
-            /** @description Authentication required */
-            readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+            readonly path: {
+                readonly teamId: string;
+                readonly userId: string;
             };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["FinalizePlanSetRequest"];
             };
-            /** @description Not found */
-            readonly 404: {
+        };
+        readonly responses: {
+            readonly 200: {
                 headers: {
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Unsupported media type */
-            readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Rate limited */
-            readonly 429: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Internal error */
-            readonly 500: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                    readonly "application/json": components["schemas"]["FinalizePlanSetResponse"];
                 };
             };
         };
@@ -9749,6 +9494,74 @@ export interface operations {
                 content: {
                     readonly "application/problem+json": components["schemas"]["ProblemDetails"];
                 };
+            };
+        };
+    };
+    readonly abandonVaultKeyRotationPlan: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly planId: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    readonly getVaultKeyRotationPreparationPage: {
+        readonly parameters: {
+            readonly query?: {
+                readonly cursor?: string;
+                readonly limit?: number;
+            };
+            readonly header?: never;
+            readonly path: {
+                readonly planId: string;
+                readonly kind: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody?: never;
+        readonly responses: {
+            readonly 200: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content: {
+                    readonly "application/json": components["schemas"]["PreparationPage"];
+                };
+            };
+        };
+    };
+    readonly stageVaultKeyRotationOutputs: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: never;
+            readonly path: {
+                readonly planId: string;
+                readonly kind: string;
+            };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["StageRequest"];
+            };
+        };
+        readonly responses: {
+            readonly 204: {
+                headers: {
+                    readonly [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -11644,143 +11457,6 @@ export interface operations {
             };
         };
     };
-    readonly removeVaultMember: {
-        readonly parameters: {
-            readonly query?: never;
-            readonly header?: never;
-            readonly path: {
-                readonly vaultId: string;
-                readonly userId: string;
-            };
-            readonly cookie?: never;
-        };
-        readonly requestBody: {
-            readonly content: {
-                readonly "application/json": components["schemas"]["RemoveVaultMemberBody"];
-            };
-        };
-        readonly responses: {
-            /** @description Success */
-            readonly 200: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/json": components["schemas"]["RemoveVaultMemberResponse"];
-                };
-            };
-            /** @description Bad request */
-            readonly 400: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Authentication required */
-            readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Not found */
-            readonly 404: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Payload too large */
-            readonly 413: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Unsupported media type */
-            readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Idempotency key was reused with a different request */
-            readonly 422: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description If-Match is required */
-            readonly 428: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Internal error */
-            readonly 500: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-        };
-    };
     readonly updateVaultMemberRole: {
         readonly parameters: {
             readonly query?: never;
@@ -11918,10 +11594,12 @@ export interface operations {
             };
         };
     };
-    readonly getVaultMemberRemovalRotationData: {
+    readonly createVaultMemberRemovalRotationPlans: {
         readonly parameters: {
             readonly query?: never;
-            readonly header?: never;
+            readonly header?: {
+                readonly "Idempotency-Key"?: string | null;
+            };
             readonly path: {
                 readonly vaultId: string;
                 readonly userId: string;
@@ -11930,123 +11608,44 @@ export interface operations {
         };
         readonly requestBody?: never;
         readonly responses: {
-            /** @description Success */
             readonly 200: {
                 headers: {
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/json": components["schemas"]["VaultRotationDataResponse"];
+                    readonly "application/json": components["schemas"]["PlanSetResponse"];
                 };
             };
-            /** @description Bad request */
-            readonly 400: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+        };
+    };
+    readonly finalizeVaultMemberRemovalRotationPlans: {
+        readonly parameters: {
+            readonly query?: never;
+            readonly header?: {
+                readonly "Idempotency-Key"?: string | null;
             };
-            /** @description Authentication required */
-            readonly 401: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+            readonly path: {
+                readonly vaultId: string;
+                readonly userId: string;
             };
-            /** @description Forbidden */
-            readonly 403: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
+            readonly cookie?: never;
+        };
+        readonly requestBody: {
+            readonly content: {
+                readonly "application/json": components["schemas"]["FinalizePlanSetRequest"];
             };
-            /** @description Not found */
-            readonly 404: {
+        };
+        readonly responses: {
+            readonly 200: {
                 headers: {
+                    /** @description true when this is a stored replay */
+                    readonly "Idempotency-Replayed"?: string;
                     readonly [name: string]: unknown;
                 };
                 content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Conflict */
-            readonly 409: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Item version does not match */
-            readonly 412: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Payload too large */
-            readonly 413: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Unsupported media type */
-            readonly 415: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Idempotency key was reused with a different request */
-            readonly 422: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description If-Match is required */
-            readonly 428: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description Internal error */
-            readonly 500: {
-                headers: {
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
-                };
-            };
-            /** @description An identical idempotent request is still pending */
-            readonly 503: {
-                headers: {
-                    /** @description Seconds before retrying */
-                    readonly "Retry-After"?: string;
-                    readonly [name: string]: unknown;
-                };
-                content: {
-                    readonly "application/problem+json": components["schemas"]["ProblemDetails"];
+                    readonly "application/json": components["schemas"]["FinalizePlanSetResponse"];
                 };
             };
         };

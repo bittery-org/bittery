@@ -35,9 +35,8 @@ pub use key_derivation::{
 };
 pub use key_rotation::{
     decrypt_vault_key_with_muk, encrypt_vault_key_for_member, encrypt_vault_key_with_muk,
-    perform_key_rotation, re_encrypt_item, validate_rotation_data, ItemData, KeyRotationResult,
-    MemberEncryptedKey, MemberKeyData, ReEncryptedItem, ValidationResult, VaultKeyWrapContext,
-    WrappedVaultKeyData, VAULT_KEY_WRAP_ENTITY_TYPE, VAULT_KEY_WRAP_PURPOSE,
+    re_encrypt_item, rewrap_attachment_key, ItemData, MemberKeyData, ReEncryptedItem,
+    VaultKeyWrapContext, WrappedVaultKeyData, VAULT_KEY_WRAP_ENTITY_TYPE, VAULT_KEY_WRAP_PURPOSE,
 };
 pub use passkey::{
     build_attestation_object, build_authenticator_data, build_passkey_attestation_object,

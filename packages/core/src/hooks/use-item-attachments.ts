@@ -20,6 +20,7 @@ import { createStoredAccountApiClient } from "../services/api-client";
 import {
 	attachmentBase64ToBytes,
 	attachmentBytesToBase64,
+	createAttachmentKeyEnvelope,
 	decryptAttachmentBlob,
 	decryptAttachmentMeta as decryptAttachmentMetaShared,
 	decryptAttachmentName,
@@ -27,6 +28,7 @@ import {
 	encryptAttachmentName,
 	encryptAttachmentParts,
 	parseAttachmentBlobEnvelope,
+	unwrapAttachmentKey,
 } from "../services/attachment-crypto";
 import { useItem } from "./use-item";
 
@@ -35,6 +37,10 @@ export interface AttachmentMeta {
 	itemId: string;
 	vaultId: string;
 	storageKey: string;
+	encryptedAttachmentKey: string;
+	attachmentKeyIv: string;
+	attachmentKeyAlgorithm: string;
+	envelopeVersion: number;
 	encryptedName: string;
 	encryptedContentType: string;
 	encryptionIv: string;
@@ -187,17 +193,29 @@ export function useItemAttachments(
 	): Promise<DecryptedAttachment> {
 		return withVaultKey(async (vaultKey) => {
 			const contextUserId = attachment.uploadedBy;
-			const { name, contentType } = await decryptAttachmentMetaShared(
+			const scope = {
+				vaultId: attachment.vaultId,
+				attachmentId: attachment.id,
+				userId: contextUserId,
+				envelopeVersion: attachment.envelopeVersion,
+			};
+			const attachmentKey = await unwrapAttachmentKey(
 				vaultCrypto,
 				vaultKey,
-				{
-					vaultId: attachment.vaultId,
-					attachmentKey: attachment.storageKey,
-					userId: contextUserId,
-				},
+				scope,
 				attachment,
 			);
-			return { ...attachment, name, contentType };
+			try {
+				const { name, contentType } = await decryptAttachmentMetaShared(
+					vaultCrypto,
+					attachmentKey,
+					scope,
+					attachment,
+				);
+				return { ...attachment, name, contentType };
+			} finally {
+				await crypto.destroyKey(attachmentKey);
+			}
 		});
 	}
 
@@ -235,41 +253,58 @@ export function useItemAttachments(
 				const nameToEncrypt = file.displayName?.trim() || file.name;
 
 				// Encrypt blob, name and content-type (each with its own IV) in one shot.
-				const encrypted = await encryptAttachmentParts(
+				const scope = {
+					vaultId,
+					attachmentId: upload.attachmentId,
+					userId,
+					envelopeVersion: 1,
+				};
+				const attachment = await createAttachmentKeyEnvelope(
 					vaultCrypto,
 					vaultKey,
-					{ vaultId, attachmentKey: upload.key, userId },
-					{
-						base64File,
-						name: nameToEncrypt,
-						contentType: file.type || "application/octet-stream",
-					},
+					scope,
 				);
+				try {
+					const encrypted = await encryptAttachmentParts(
+						vaultCrypto,
+						attachment.key,
+						scope,
+						{
+							base64File,
+							name: nameToEncrypt,
+							contentType: file.type || "application/octet-stream",
+						},
+					);
 
-				// Upload encrypted file content to S3
-				const encryptedBlob = encodeAttachmentBlobEnvelope(
-					encrypted.blobEnvelope,
-				);
-				const uploadResponse = await fetch(upload.uploadUrl, {
-					method: "PUT",
-					headers: { "Content-Type": "application/octet-stream" },
-					body: encryptedBlob,
-				});
+					// Upload encrypted file content to S3
+					const encryptedBlob = encodeAttachmentBlobEnvelope(
+						encrypted.blobEnvelope,
+					);
+					const uploadResponse = await fetch(upload.uploadUrl, {
+						method: "PUT",
+						headers: { "Content-Type": "application/octet-stream" },
+						body: encryptedBlob,
+					});
 
-				if (!uploadResponse.ok) {
-					throw new Error("Failed to upload attachment");
+					if (!uploadResponse.ok) {
+						throw new Error("Failed to upload attachment");
+					}
+
+					// Save metadata
+					await accountClient.attachments.create(itemId, {
+						attachmentId: upload.attachmentId,
+						storageKey: upload.key,
+						...attachment.encryptedAttachmentKey,
+						encryptedName: encrypted.encryptedName,
+						encryptedContentType: encrypted.encryptedContentType,
+						encryptionIv: encrypted.encryptionIv,
+						encryptedContentTypeIv: encrypted.encryptedContentTypeIv,
+						encryptionAlgorithm: encrypted.encryptionAlgorithm,
+						fileSize: file.size,
+					});
+				} finally {
+					await crypto.destroyKey(attachment.key);
 				}
-
-				// Save metadata
-				await accountClient.attachments.create(itemId, {
-					storageKey: upload.key,
-					encryptedName: encrypted.encryptedName,
-					encryptedContentType: encrypted.encryptedContentType,
-					encryptionIv: encrypted.encryptionIv,
-					encryptedContentTypeIv: encrypted.encryptedContentTypeIv,
-					encryptionAlgorithm: encrypted.encryptionAlgorithm,
-					fileSize: file.size,
-				});
 			});
 		},
 		onSuccess: () => {
@@ -284,53 +319,63 @@ export function useItemAttachments(
 				const contextUserId = attachment.uploadedBy;
 				const scope = {
 					vaultId: attachment.vaultId,
-					attachmentKey: attachment.storageKey,
+					attachmentId: attachment.id,
 					userId: contextUserId,
+					envelopeVersion: attachment.envelopeVersion,
 				};
-
-				// Get presigned download URL + encrypted metadata from server
-				const {
-					data: {
-						downloadUrl,
-						encryptionIv,
-						encryptionAlgorithm,
-						encryptedName,
-					},
-				} = await (await getAccountApiClient()).attachments.createDownloadUrl(
-					attachment.id,
-				);
-
-				// Fetch encrypted file from S3
-				const response = await fetch(downloadUrl);
-				if (!response.ok) throw new Error("Failed to download attachment");
-
-				const encryptedJson = await response.text();
-				const encryptedFile = parseAttachmentBlobEnvelope(encryptedJson);
-
-				// Decrypt file contents
-				const base64File = await decryptAttachmentBlob(
+				const attachmentKey = await unwrapAttachmentKey(
 					vaultCrypto,
 					vaultKey,
 					scope,
-					encryptedFile,
+					attachment,
 				);
+				try {
+					// Get presigned download URL + encrypted metadata from server
+					const {
+						data: {
+							downloadUrl,
+							encryptionIv,
+							encryptionAlgorithm,
+							encryptedName,
+						},
+					} = await (await getAccountApiClient()).attachments.createDownloadUrl(
+						attachment.id,
+					);
 
-				// Decrypt filename
-				const fileName = await decryptAttachmentName(
-					vaultCrypto,
-					vaultKey,
-					scope,
-					{
-						ciphertext: encryptedName,
-						iv: encryptionIv,
-						algorithm: encryptionAlgorithm,
-					},
-				);
+					// Fetch encrypted file from S3
+					const response = await fetch(downloadUrl);
+					if (!response.ok) throw new Error("Failed to download attachment");
 
-				// Convert base64 back to binary
-				const bytes = attachmentBase64ToBytes(base64File);
+					const encryptedJson = await response.text();
+					const encryptedFile = parseAttachmentBlobEnvelope(encryptedJson);
 
-				return { bytes, fileName };
+					// Decrypt file contents
+					const base64File = await decryptAttachmentBlob(
+						vaultCrypto,
+						attachmentKey,
+						scope,
+						encryptedFile,
+					);
+
+					// Decrypt filename
+					const fileName = await decryptAttachmentName(
+						vaultCrypto,
+						attachmentKey,
+						scope,
+						{
+							ciphertext: encryptedName,
+							iv: encryptionIv,
+							algorithm: encryptionAlgorithm,
+						},
+					);
+
+					// Convert base64 back to binary
+					const bytes = attachmentBase64ToBytes(base64File);
+
+					return { bytes, fileName };
+				} finally {
+					await crypto.destroyKey(attachmentKey);
+				}
 			});
 		},
 	});
@@ -350,21 +395,33 @@ export function useItemAttachments(
 			}
 			return withVaultKey(async (vaultKey) => {
 				const contextUserId = attachment.uploadedBy;
-				const encryptedName = await encryptAttachmentName(
+				const scope = {
+					vaultId: attachment.vaultId,
+					attachmentId: attachment.id,
+					userId: contextUserId,
+					envelopeVersion: attachment.envelopeVersion,
+				};
+				const attachmentKey = await unwrapAttachmentKey(
 					vaultCrypto,
 					vaultKey,
-					{
-						vaultId: attachment.vaultId,
-						attachmentKey: attachment.storageKey,
-						userId: contextUserId,
-					},
-					newName.trim(),
+					scope,
+					attachment,
 				);
-				await (await getAccountApiClient()).attachments.update(attachmentId, {
-					encryptedName: encryptedName.ciphertext,
-					encryptionIv: encryptedName.iv,
-					encryptionAlgorithm: encryptedName.algorithm,
-				});
+				try {
+					const encryptedName = await encryptAttachmentName(
+						vaultCrypto,
+						attachmentKey,
+						scope,
+						newName.trim(),
+					);
+					await (await getAccountApiClient()).attachments.update(attachmentId, {
+						encryptedName: encryptedName.ciphertext,
+						encryptionIv: encryptedName.iv,
+						encryptionAlgorithm: encryptedName.algorithm,
+					});
+				} finally {
+					await crypto.destroyKey(attachmentKey);
+				}
 			});
 		},
 		onSuccess: () => {

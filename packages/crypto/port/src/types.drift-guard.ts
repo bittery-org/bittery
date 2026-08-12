@@ -24,8 +24,6 @@ import type {
 	EncryptionContext as GeneratedEncryptionContext,
 	ItemData as GeneratedItemData,
 	KdfProfile as GeneratedKdfProfile,
-	KeyRotationResult as GeneratedKeyRotationResult,
-	MemberEncryptedKey as GeneratedMemberEncryptedKey,
 	MemberKeyData as GeneratedMemberKeyData,
 	PasskeyAssertion as GeneratedPasskeyAssertion,
 	PasskeyAttestation as GeneratedPasskeyAttestation,
@@ -37,7 +35,6 @@ import type {
 	SrpRegistration as GeneratedSrpRegistration,
 	SrpServerChallenge as GeneratedSrpServerChallenge,
 	TotpResult as GeneratedTotpResult,
-	ValidationResult as GeneratedValidationResult,
 } from "@bittery/crypto-wasm";
 import type {
 	DecryptRequest,
@@ -50,8 +47,6 @@ import type {
 	EncryptionContext,
 	ItemData,
 	KdfProfile,
-	KeyRotationResult,
-	MemberEncryptedKey,
 	MemberKeyData,
 	ReEncryptedItem,
 	RsaKeyPair,
@@ -60,7 +55,6 @@ import type {
 	SRPRegistration,
 	SRPServerChallenge,
 	TotpResult,
-	ValidationResult,
 } from "./types";
 import type {
 	UniffiEncryptionContext,
@@ -124,17 +118,8 @@ export type SrpClientSessionMatchesGenerated = Assert<
 export type MemberKeyDataMatchesGenerated = Assert<
 	Matches<MemberKeyData, GeneratedMemberKeyData>
 >;
-export type MemberEncryptedKeyMatchesGenerated = Assert<
-	Matches<MemberEncryptedKey, GeneratedMemberEncryptedKey>
->;
 export type ReEncryptedItemMatchesGenerated = Assert<
 	Matches<ReEncryptedItem, GeneratedReEncryptedItem>
->;
-export type KeyRotationResultMatchesGenerated = Assert<
-	Matches<KeyRotationResult, GeneratedKeyRotationResult>
->;
-export type ValidationResultMatchesGenerated = Assert<
-	Matches<ValidationResult, GeneratedValidationResult>
 >;
 
 // ============================================================================

@@ -251,6 +251,34 @@ impl From<AppError> for ApiError {
                 error.message,
                 false,
             ),
+            AppErrorCode::RotationStaleVaultVersion => (
+                StatusCode::CONFLICT,
+                ErrorCode::RotationStaleVaultVersion,
+                "Rotation plan stale",
+                error.message,
+                false,
+            ),
+            AppErrorCode::RotationStaleMemberSet => (
+                StatusCode::CONFLICT,
+                ErrorCode::RotationStaleMemberSet,
+                "Rotation plan stale",
+                error.message,
+                false,
+            ),
+            AppErrorCode::RotationStaleItemState => (
+                StatusCode::CONFLICT,
+                ErrorCode::RotationStaleItemState,
+                "Rotation plan stale",
+                error.message,
+                false,
+            ),
+            AppErrorCode::RotationStaleAttachmentState => (
+                StatusCode::CONFLICT,
+                ErrorCode::RotationStaleAttachmentState,
+                "Rotation plan stale",
+                error.message,
+                false,
+            ),
         };
 
         let api_error = Self::new(status, code, title, detail, retryable);

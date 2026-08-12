@@ -136,7 +136,7 @@ describe("wasm-worker adapter — the thread boundary", () => {
 		const vaultKey = await port.importKey(new Uint8Array(32).fill(7));
 		const sealed = await port.encrypt("secret", vaultKey, null);
 		await port.decrypt(sealed, vaultKey, null);
-		const wrapped = await port.wrapKey(vaultKey, derived.masterUnlockKey);
+		const wrapped = await port.wrapKey(vaultKey, derived.masterUnlockKey, null);
 		await port.unwrapKey(wrapped, derived.masterUnlockKey, null);
 		await port.encryptVaultKeyWithMuk(
 			vaultKey,
@@ -405,16 +405,13 @@ describe("wasm-worker adapter — failure", () => {
 			"backend-failure",
 			"CryptoError.BackgroundTaskFailed",
 		],
-	])(
-		"generated %s error becomes %s",
-		async (_variant, build, code, message) => {
-			const { port, doubles } = await makePort();
-			doubles.wasm.nextUuidFailure = build();
+	])("generated %s error becomes %s", async (_variant, build, code, message) => {
+		const { port, doubles } = await makePort();
+		doubles.wasm.nextUuidFailure = build();
 
-			await expect(port.generateUuid()).rejects.toMatchObject({
-				code,
-				message,
-			});
-		},
-	);
+		await expect(port.generateUuid()).rejects.toMatchObject({
+			code,
+			message,
+		});
+	});
 });

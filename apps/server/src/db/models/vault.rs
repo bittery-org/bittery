@@ -20,6 +20,7 @@ pub struct DbPendingAttachmentUploadRow {
 #[derive(Clone, Debug, FromRow)]
 pub struct DbPendingAttachmentReservationRow {
     pub id: String,
+    pub attachment_id: String,
     pub file_size: i32,
     pub storage_size: i32,
 }
@@ -30,6 +31,10 @@ pub struct DbScopedAttachmentAccessRow {
     pub item_id: String,
     pub vault_id: String,
     pub storage_key: String,
+    pub encrypted_attachment_key: String,
+    pub attachment_key_iv: String,
+    pub attachment_key_algorithm: String,
+    pub envelope_version: i32,
     pub encrypted_name: String,
     pub encrypted_content_type: String,
     pub encryption_iv: String,

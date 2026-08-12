@@ -284,12 +284,16 @@ async fn seed_attachment(
     storage_size: i32,
 ) {
     query(
-			"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)",
+			"INSERT INTO item_attachment (id, item_id, vault_id, storage_key, encrypted_attachment_key, attachment_key_iv, attachment_key_algorithm, envelope_version, encrypted_name, encrypted_content_type, encryption_iv, encrypted_content_type_iv, encryption_algorithm, file_size, storage_size, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
 		)
 		.bind(attachment_id)
 		.bind(item_id)
 		.bind(vault_id)
 		.bind(format!("attachments/{attachment_id}"))
+		.bind("encrypted-attachment-key")
+		.bind("attachment-key-iv")
+		.bind("AES-GCM-AAD-V1")
+		.bind(1_i32)
 		.bind("encrypted-name")
 		.bind("encrypted-content-type")
 		.bind("attachment-iv")

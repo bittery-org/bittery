@@ -11,6 +11,7 @@ use super::sql::{
     prune_rate_limit_state, prune_sync_events,
 };
 use crate::integrations::favicon::{fetch_and_store_favicon, list_domains_to_refresh};
+use crate::services::vault_key_rotation::{cleanup_rotation_plans, MAX_CLEANUP_BATCH};
 
 type JobError = Box<dyn std::error::Error + Send + Sync>;
 type JobFuture = Pin<Box<dyn Future<Output = Result<(), JobError>> + Send>>;
@@ -54,6 +55,12 @@ impl JobRunner {
                 "0 30 3 * * * *",
                 pool.clone(),
                 run_rate_limit_state_pruning,
+            )?,
+            spawn_job(
+                "vault-key-rotation-plan-cleanup",
+                "0 */15 * * * * *",
+                pool.clone(),
+                run_rotation_plan_cleanup,
             )?,
             spawn_job(
                 "favicon-refresh",
@@ -149,6 +156,13 @@ fn run_rate_limit_state_pruning(pool: PgPool) -> JobFuture {
 fn run_tombstone_cleanup(pool: PgPool) -> JobFuture {
     Box::pin(async move {
         cleanup_tombstones(&pool).await?;
+        Ok(())
+    })
+}
+
+fn run_rotation_plan_cleanup(pool: PgPool) -> JobFuture {
+    Box::pin(async move {
+        cleanup_rotation_plans(&pool, MAX_CLEANUP_BATCH).await?;
         Ok(())
     })
 }

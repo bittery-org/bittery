@@ -166,6 +166,7 @@ export interface ApiTransportRequest {
 	};
 	body?: unknown;
 	headers?: HeadersInit;
+	signal?: AbortSignal;
 }
 
 export interface ApiTransportResponse<T> {

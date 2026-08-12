@@ -20,8 +20,11 @@ import {
 	signUpFromInvite,
 } from "../fixtures/team";
 import {
+	createItem,
 	createVault,
 	gotoRoute,
+	itemRow,
+	openItem,
 	openVault,
 	toastWithText,
 	VAULT_READY_TIMEOUT_MS,
@@ -56,16 +59,6 @@ const TEST_BUDGET_MS = 240000;
 const SECOND_ACCOUNT_BUDGET_MS = 480000;
 
 /**
- * The fixed head of a parameterised message. The removal toast counts the
- * vaults it rotated, and that count depends on how many shared vaults this
- * file's owner has accumulated by then, so only the head is assertable.
- */
-function messagePrefix(key: string): string {
-	const [head] = uiText(key).split("{");
-	return (head ?? "").trim();
-}
-
-/**
  * A per-test invitee address, lowercase on purpose: signup lowercases the
  * address it stores while `send_invitation` stores the one it was given as-is,
  * and `get_pending_invitations` matches the two with `=`.
@@ -93,10 +86,6 @@ test.beforeAll(async ({ browser }) => {
 
 /**
  * A shared vault for a team member to be added to.
- *
- * Deliberately empty: `re_encrypt_item` decrypts with no AAD while items are
- * encrypted with one, so a rotation over a vault that holds anything fails.
- * See the product bug reported for this step.
  */
 async function createSharedVault(page: Page): Promise<string> {
 	const vaultId = await createVault(page, `Team vault ${nanoid(6)}`);
@@ -111,6 +100,45 @@ async function createSharedVault(page: Page): Promise<string> {
 		),
 	).toBeVisible();
 	return vaultId;
+}
+
+/** Add a login and optionally an Attachment, exercising both rotation manifests. */
+async function populateSharedVault(
+	page: Page,
+	vaultLabel: string,
+	attachmentName?: string,
+): Promise<string> {
+	const itemTitle = `${vaultLabel} login ${nanoid(6)}`;
+	await createItem(page, "login", async (sheet) => {
+		await sheet.locator("#title").fill(itemTitle);
+		await sheet.locator("#username").fill(`${vaultLabel.toLowerCase()}-user`);
+		await sheet.locator("#password").fill(`secret-${nanoid(10)}`);
+	});
+
+	if (attachmentName) {
+		const pane = page.getByTestId("item-detail-pane");
+		await pane.locator('input[type="file"]').setInputFiles({
+			name: attachmentName,
+			mimeType: "text/plain",
+			buffer: Buffer.from(`rotation attachment ${nanoid(12)}`),
+		});
+		await pane
+			.getByRole("button", {
+				name: uiText("vaults_detail_items_attachments_action_upload"),
+			})
+			.click();
+		await expect(
+			toastWithText(
+				page,
+				uiText("vaults_detail_items_attachments_toast_uploaded"),
+			),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+		await expect(pane.getByText(attachmentName, { exact: true })).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+	}
+
+	return itemTitle;
 }
 
 /** Open the members dialog of the vault the page is showing. */
@@ -325,14 +353,22 @@ test("an invitation can be resent for a fresh link and then cancelled", async ({
 	}
 });
 
-test("an invited member joins, takes a vault role, and is removed with key rotation", async ({
+test("member departure rotates multiple shared vaults and an attachment", async ({
 	page,
 	browser,
 }) => {
 	// Pays for one second signup: the only way onto someone else's team.
 	test.setTimeout(SECOND_ACCOUNT_BUDGET_MS);
 	await signIn(page, owner);
-	const vaultId = await createSharedVault(page);
+	const firstVaultId = await createSharedVault(page);
+	const attachmentName = `departure-${nanoid(6)}.txt`;
+	const firstItemTitle = await populateSharedVault(
+		page,
+		"First",
+		attachmentName,
+	);
+	const secondVaultId = await createSharedVault(page);
+	const secondItemTitle = await populateSharedVault(page, "Second");
 
 	const joined = await joinTeamThroughInvite(page, browser);
 	try {
@@ -350,7 +386,7 @@ test("an invited member joins, takes a vault role, and is removed with key rotat
 		await expect(row).toContainText(joined.invitee.name);
 		await expect(row).toContainText(uiText("team_role_member"));
 
-		await openVault(page, vaultId);
+		await openVault(page, firstVaultId);
 		await addVaultMember(page, joined.invitee.email);
 
 		// Vault roles are the only roles the product lets an owner change.
@@ -369,6 +405,53 @@ test("an invited member joins, takes a vault role, and is removed with key rotat
 			{ timeout: VAULT_READY_TIMEOUT_MS },
 		);
 		await page.keyboard.press("Escape");
+		await openVault(page, secondVaultId);
+		await addVaultMember(page, joined.invitee.email);
+		await page.keyboard.press("Escape");
+
+		// Both Vault grants are visible to the member before departure, including
+		// the Vault whose rotation manifest contains an Attachment key envelope.
+		await joined.memberPage.reload();
+		await waitForAppReady(joined.memberPage);
+		await gotoRoute(
+			joined.memberPage,
+			"/vaults",
+			joined.memberPage.locator(`a[href="/vaults/${firstVaultId}"]`),
+		);
+		await expect(
+			joined.memberPage.locator(`a[href="/vaults/${secondVaultId}"]`),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+
+		// Let finalization commit, then lose only its response. Replaying the exact
+		// request proves recovery returns the stored result instead of rotating a
+		// second time or treating the already-removed member as a new operation.
+		let finishLostFinalize: (request: {
+			url: string;
+			headers: Record<string, string>;
+			body: string | null;
+		}) => void = () => {};
+		const lostFinalize = new Promise<{
+			url: string;
+			headers: Record<string, string>;
+			body: string | null;
+		}>((resolve) => {
+			finishLostFinalize = resolve;
+		});
+		await page.route(
+			/\/teams\/[^/]+\/members\/[^/]+\/removal-rotation-plans\/finalize$/,
+			async (route) => {
+				const request = route.request();
+				const response = await route.fetch();
+				expect(response.ok()).toBe(true);
+				finishLostFinalize({
+					url: request.url(),
+					headers: request.headers(),
+					body: request.postData(),
+				});
+				await route.fulfill({ response });
+			},
+			{ times: 1 },
+		);
 
 		await openTeamPage(page);
 		await memberRow(page, joined.invitee.email)
@@ -386,18 +469,22 @@ test("an invited member joins, takes a vault role, and is removed with key rotat
 			})
 			.click();
 
-		// The summary proves the rotation ran; the vault is empty, so nothing had
-		// to be re-encrypted.
-		const removalToast = toastWithText(
-			page,
-			messagePrefix("team_members_toast_removed_summary"),
-		);
-		await expect(removalToast).toBeVisible({
+		const finalizeRequest = await lostFinalize;
+		const replay = await page.request.fetch(finalizeRequest.url, {
+			method: "POST",
+			headers: finalizeRequest.headers,
+			data: finalizeRequest.body ?? undefined,
+		});
+		expect(replay.ok()).toBe(true);
+		expect(replay.headers()["idempotency-replayed"]).toBe("true");
+		await expect(
+			toastWithText(page, uiText("team_members_toast_remove_success")),
+		).toBeVisible({ timeout: VAULT_READY_TIMEOUT_MS });
+
+		await openVault(page, firstVaultId);
+		await expect(itemRow(page, firstItemTitle)).toBeVisible({
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
-		await expect(removalToast).toContainText(
-			uiText("team_members_toast_reencrypted_items_plural", { count: 0 }),
-		);
 
 		// Reloaded because the team queries are never invalidated - see the
 		// product bug reported for this step.
@@ -409,11 +496,35 @@ test("an invited member joins, takes a vault role, and is removed with key rotat
 
 		// The rotation has to leave the owner's own copy of the vault key usable,
 		// and the vault has to be theirs alone again.
-		await openVault(page, vaultId);
+		await openVault(page, firstVaultId);
+		await openItem(page, firstItemTitle);
+		await expect(page.getByText(attachmentName, { exact: true })).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
 		const remaining = await openVaultMembers(page);
 		await expect(remaining.getByTestId("member-row")).toHaveCount(1, {
 			timeout: VAULT_READY_TIMEOUT_MS,
 		});
+		await page.keyboard.press("Escape");
+		await page.goto("about:blank");
+		await openVault(page, secondVaultId);
+		await expect(itemRow(page, secondItemTitle)).toBeVisible({
+			timeout: VAULT_READY_TIMEOUT_MS,
+		});
+
+		// Finalization revokes the departed member's sessions. A stale tab cannot
+		// reopen either Vault after it asks the server for authoritative state.
+		await joined.memberPage.goto(`/vaults/${firstVaultId}`);
+		await expect(joined.memberPage.getByTestId("new-item-button")).toHaveCount(
+			0,
+			{
+				timeout: VAULT_READY_TIMEOUT_MS,
+			},
+		);
+		await expect(joined.memberPage).not.toHaveURL(
+			new RegExp(`/vaults/${firstVaultId}$`),
+			{ timeout: VAULT_READY_TIMEOUT_MS },
+		);
 	} finally {
 		await joined.close();
 	}

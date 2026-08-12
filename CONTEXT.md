@@ -57,6 +57,10 @@ _Avoid_: MUK in user-facing copy, master key, unlock key
 The symmetric key that encrypts every item in one vault, wrapped separately for each person who may open that vault.
 _Avoid_: vault secret, collection key
 
+**Attachment key**:
+A random key that encrypts one Attachment's bytes, filename and content type. It is wrapped under the Vault key so Key rotation can revoke access by rewrapping the key without rewriting the Attachment blob.
+_Avoid_: file key, upload key, attachment secret
+
 **Device key**:
 A per-device key that wraps the stored copy of the master unlock key so quick unlock can survive a restart. It is generated locally, tied to no credential, and never leaves the device.
 _Avoid_: local key, machine key
@@ -76,6 +80,10 @@ _Avoid_: KDF params, iteration settings
 **Key rotation**:
 Replacing a vault key and re-encrypting the whole vault under the new one, so someone who lost access cannot read anything written afterwards.
 _Avoid_: re-key, key refresh
+
+**Rotation plan**:
+A short-lived, server-recorded intention to perform Key rotation. It fixes the initiating User, reason, affected Vault, expected key version and Member set so the completed rotation can be rejected if its security assumptions have gone stale.
+_Avoid_: rotation request, rotation draft, pending rotation
 
 ### Vault contents
 
@@ -104,7 +112,7 @@ The previous passwords an item carried, kept inside its encrypted payload so a c
 _Avoid_: revisions, versions (a version is the item's sync counter)
 
 **Attachment**:
-A file bound to an item. Its bytes, filename and content type are each encrypted under the vault key.
+A file bound to an item. Its bytes, filename and content type are encrypted under its Attachment key, which is wrapped under the Vault key.
 _Avoid_: file, document, upload
 
 **Tag**:
@@ -206,6 +214,10 @@ _Avoid_: organization, workspace, company, family
 **Member**:
 A user who belongs to a team, or a user granted access to a particular vault. Always qualified by a role, and always distinct from the vault's owner.
 _Avoid_: collaborator, participant, user
+
+**Member departure**:
+A Member ceasing to belong to a Team, either by leaving voluntarily or by being removed by an authorised Member. Departure includes the required loss-of-access consequences for that Member.
+_Avoid_: removal (when the departure is voluntary), leave (when the departure is administrative), membership change
 
 **Role**:
 The permission level a member holds. A team role is owner, admin or member; a vault role adds read-only. The two are separate — a team admin is not automatically in a vault.

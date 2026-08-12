@@ -8,6 +8,7 @@ import {
 } from "@bittery/shared/testing/item-fixtures";
 import type { ItemSyncCommand } from "@bittery/types";
 import {
+	createAttachmentKeyEnvelope,
 	encodeAttachmentBlobEnvelope,
 	encryptAttachmentParts,
 } from "./attachment-crypto";
@@ -263,6 +264,10 @@ describe("ItemService", () => {
 									id: "attachment-1",
 									itemId: "active-item",
 									vaultId: "vault_source",
+									encryptedAttachmentKey: "attachment-key",
+									attachmentKeyIv: "attachment-key-iv",
+									attachmentKeyAlgorithm: "AES-GCM-AAD-V1",
+									envelopeVersion: 1,
 									encryptedName: "name",
 									encryptedContentType: "type",
 									encryptedContentTypeIv: "iv",
@@ -493,16 +498,24 @@ describe("ItemService", () => {
 			userId: SOURCE.userId,
 		});
 		if (!sourceVaultKey) throw new Error("Missing source key");
-		const sourceParts = await encryptAttachmentParts(
+		const sourceScope = {
+			vaultId: "vault_source",
+			attachmentId: "attachment_1",
+			userId: SOURCE.userId,
+			envelopeVersion: 1,
+		};
+		const sourceAttachment = await createAttachmentKeyEnvelope(
 			fixture.vaultCrypto,
 			sourceVaultKey,
-			{
-				vaultId: "vault_source",
-				attachmentKey: "source_key",
-				userId: SOURCE.userId,
-			},
+			sourceScope,
+		);
+		const sourceParts = await encryptAttachmentParts(
+			fixture.vaultCrypto,
+			sourceAttachment.key,
+			sourceScope,
 			{ base64File: "ZmlsZQ==", name: "secret.txt", contentType: "text/plain" },
 		);
+		await fixture.crypto.destroyKey(sourceAttachment.key);
 		await fixture.crypto.destroyKey(sourceVaultKey);
 		const originalFetch = globalThis.fetch;
 		const events: string[] = [];
@@ -532,6 +545,7 @@ describe("ItemService", () => {
 							attachments: {
 								createUpload: async () => ({
 									data: {
+										attachmentId: "target_attachment_1",
 										key: "target_key",
 										uploadUrl: "https://upload.test",
 									},
@@ -548,6 +562,7 @@ describe("ItemService", () => {
 										{
 											id: "attachment_1",
 											storageKey: "source_key",
+											...sourceAttachment.encryptedAttachmentKey,
 											encryptedName: sourceParts.encryptedName,
 											encryptedContentType: sourceParts.encryptedContentType,
 											encryptionIv: sourceParts.encryptionIv,
@@ -859,16 +874,24 @@ describe("ItemService", () => {
 			userId: SOURCE.userId,
 		});
 		if (!sourceVaultKey) throw new Error("Missing source key");
-		const sourceParts = await encryptAttachmentParts(
+		const sourceScope = {
+			vaultId: "vault_source",
+			attachmentId: "attachment_1",
+			userId: SOURCE.userId,
+			envelopeVersion: 1,
+		};
+		const sourceAttachment = await createAttachmentKeyEnvelope(
 			fixture.vaultCrypto,
 			sourceVaultKey,
-			{
-				vaultId: "vault_source",
-				attachmentKey: "source_key",
-				userId: SOURCE.userId,
-			},
+			sourceScope,
+		);
+		const sourceParts = await encryptAttachmentParts(
+			fixture.vaultCrypto,
+			sourceAttachment.key,
+			sourceScope,
 			{ base64File: "ZmlsZQ==", name: "secret.txt", contentType: "text/plain" },
 		);
+		await fixture.crypto.destroyKey(sourceAttachment.key);
 		await fixture.crypto.destroyKey(sourceVaultKey);
 		const originalFetch = globalThis.fetch;
 		globalThis.fetch = (async (_url: string, init?: RequestInit) => {
@@ -904,7 +927,11 @@ describe("ItemService", () => {
 									throw notFound();
 								},
 								createUpload: async () => ({
-									data: { key: "target_key", uploadUrl: "https://upload.test" },
+									data: {
+										attachmentId: "target_attachment_1",
+										key: "target_key",
+										uploadUrl: "https://upload.test",
+									},
 								}),
 								create: async (
 									_itemId: string,
@@ -929,6 +956,7 @@ describe("ItemService", () => {
 										{
 											id: "attachment_1",
 											storageKey: "source_key",
+											...sourceAttachment.encryptedAttachmentKey,
 											encryptedName: sourceParts.encryptedName,
 											encryptedContentType: sourceParts.encryptedContentType,
 											encryptionIv: sourceParts.encryptionIv,

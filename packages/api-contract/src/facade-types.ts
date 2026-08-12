@@ -150,15 +150,18 @@ export type CreateAttachmentInput = Schema<"CreateAttachmentBody">;
 export type CreateAttachmentResponse = Schema<"CreateAttachmentResponse">;
 export type UpdateAttachmentInput = Schema<"UpdateAttachmentBody">;
 export type AttachmentUploadInput = Schema<"AttachmentUploadBody">;
+export type AttachmentUpload = Schema<"AttachmentUploadResponse">;
 export type AttachmentDownload = Schema<"AttachmentDownloadResponse">;
 
 export type AvailableTeamMember = Schema<"VaultAvailableMemberResponse">;
 export type VaultMember = Schema<"VaultMemberResponse">;
 export type AddVaultMemberInput = Schema<"AddVaultMemberBody">;
 export type UpdateVaultMemberRoleInput = Schema<"UpdateVaultMemberRoleBody">;
-export type RemoveVaultMemberInput = Schema<"RemoveVaultMemberBody">;
-export type RemoveVaultMemberResponse = Schema<"RemoveVaultMemberResponse">;
-export type VaultRotationData = Schema<"VaultRotationDataResponse">;
+export type RotationPlanSet = Schema<"PlanSetResponse">;
+export type RotationPlanSetFinalizeInput = Schema<"FinalizePlanSetRequest">;
+export type RotationPlanSetFinalizeResponse = Schema<"FinalizePlanSetResponse">;
+export type RotationPreparationPage = Schema<"PreparationPage">;
+export type RotationStageInput = Schema<"StageRequest">;
 
 export type CreateTeamInput = Schema<"CreateTeamRequest">;
 export type UpdateTeamInput = Schema<"UpdateTeamRequest">;
@@ -172,11 +175,7 @@ export type SendTeamInvitationInput = Schema<"SendInvitationRequest">;
 export type SendTeamInvitationResponse = Schema<"SendInvitationResponse">;
 export type ResendTeamInvitationResponse = Schema<"ResendInvitationResponse">;
 export type AcceptTeamInvitationResponse = Schema<"AcceptInvitationResponse">;
-export type TeamLeaveInput = Schema<"TeamLeaveRequest">;
-export type TeamRotationData = Schema<"RotationDataResponse">;
 export type TeamMember = Schema<"TeamMemberResponse">;
-export type RemoveTeamMemberInput = Schema<"RemoveTeamMemberRequest">;
-export type RemoveTeamMemberResponse = Schema<"RemoveMemberResponse">;
 export type TeamMemberAccess = Schema<"MemberAccessResponse">;
 export type TeamVault = Schema<"TeamVaultResponse">;
 

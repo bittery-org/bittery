@@ -135,10 +135,7 @@ pub(crate) use shape_from;
 pub(crate) use shape_value;
 pub(crate) use wire_struct;
 
-pub(crate) use self::item::{
-    attachment_shape, item_shape, rotation_item_shape, AttachmentPayload, ItemPayload,
-    RotationItemPayload,
-};
+pub(crate) use self::item::{attachment_shape, item_shape, AttachmentPayload, ItemPayload};
 
 pub(crate) use self::billing::*;
 pub(crate) use self::share::*;

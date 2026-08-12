@@ -182,6 +182,12 @@ Status legend:
 ### Finding 1 — Public CDN proxy bypasses attachment authorization and survives membership revocation
 
 - Severity: Critical
+- Resolution (2026-08-12): The private-object authorization fix remains required at the download
+  seam, while the revocation half is now addressed cryptographically. Every Attachment has a
+  random Attachment key; bytes, filename, and content type use that key, and only its authenticated
+  envelope is wrapped under the Vault key. Member departure and Vault Member removal atomically
+  rotate the Vault key and rewrap those envelopes, so a former Member's old Vault key cannot open
+  current Attachment keys without rewriting object-storage blobs.
 - Location:
   - `apps/server/src/index.ts:56-84`
   - `packages/api/src/routers/vault.ts:1924-1958`

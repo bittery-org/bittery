@@ -25,8 +25,6 @@ import type {
 	EncryptionContext,
 	ItemData,
 	KdfProfile,
-	KeyRotationResult,
-	MemberKeyData,
 	ReEncryptedItem,
 	RsaKeyPair,
 	SRPClientEphemeral,
@@ -34,7 +32,6 @@ import type {
 	SRPRegistration,
 	SRPServerChallenge,
 	TotpResult,
-	ValidationResult,
 } from "./types";
 
 declare const KEY_REF_BRAND: unique symbol;
@@ -189,8 +186,12 @@ export interface CryptoPort {
 		requests: readonly DecryptRequest[],
 	): Promise<readonly DecryptManyResult[]>;
 
-	/** Wrap `key` under `wrappingKey` so it can be persisted. */
-	wrapKey(key: KeyRef, wrappingKey: KeyRef): Promise<EncryptedData>;
+	/** Wrap `key` under `wrappingKey`, authenticated to its persisted context. */
+	wrapKey(
+		key: KeyRef,
+		wrappingKey: KeyRef,
+		context: EncryptionContext | null,
+	): Promise<EncryptedData>;
 
 	/** Restore a wrapped key as a fresh ref without exposing its plaintext above the seam. */
 	unwrapKey(
@@ -256,23 +257,17 @@ export interface CryptoPort {
 	): Promise<ReEncryptedItem>;
 
 	/**
-	 * A whole rotation in one backend call: the new vault key is generated, wrapped and
-	 * discarded below the seam, so it never reaches JS on any platform. Each item keeps the
-	 * binding {@link reEncryptItem} describes.
+	 * Rewraps one Attachment key envelope under a rotated Vault key. The Attachment key stays
+	 * below the port. `oldContext` opens the persisted envelope; `newContext` seals the
+	 * replacement after its envelope version advances.
 	 */
-	performKeyRotation(
+	rewrapAttachmentKey(
+		encryptedAttachmentKey: EncryptedData,
 		oldVaultKey: KeyRef,
-		members: readonly MemberKeyData[],
-		items: readonly ItemData[],
-		vaultId: string,
-		keyVersion: number,
-		currentUserId: string,
-		masterUnlockKey: KeyRef,
-	): Promise<KeyRotationResult>;
-
-	validateRotationData(
-		members: readonly MemberKeyData[],
-	): Promise<ValidationResult>;
+		newVaultKey: KeyRef,
+		oldContext: EncryptionContext,
+		newContext: EncryptionContext,
+	): Promise<EncryptedData>;
 
 	// ------------------------------------------------------------------
 	// Secret Key

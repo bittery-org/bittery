@@ -1,22 +1,20 @@
 use super::{
     assert_optional_team_management_entitlement, assert_team_management_entitlement, bittery_mode,
-    ensure_exact_rotation_vault_set, ensure_team_admin, generate_secure_token,
-    normalize_pending_vault_keys, parse_pending_vault_keys, validate_rotation_vault_inputs,
-    validate_token, PendingVaultKeyEntry, RotationMemberKeyInput, RotationReEncryptedItemInput,
-    RotationVaultInput, VaultKeyRotationInput, TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE,
+    ensure_team_admin, generate_secure_token, normalize_pending_vault_keys,
+    parse_pending_vault_keys, validate_token, PendingVaultKeyEntry,
+    TEAM_MANAGEMENT_UNAVAILABLE_MESSAGE,
 };
 use crate::db::enums::{BillingPlan, BillingStatus, TeamRole};
 use crate::error::AppErrorCode;
 use crate::repo::common::hash_token;
-use crate::services::session_control::load_session_revocation;
 use crate::test_support::{
     acquire_env_lock, acquire_env_lock_async, assign_user_to_team, authenticated_json_headers,
-    seed_item, seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
+    seed_team, seed_user, seed_vault, seed_vault_key, with_api_test_app,
 };
 use axum::http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, Method};
 use serde_json::{json, Value};
 use sqlx::{query, query_scalar, PgPool};
-use std::{collections::HashSet, future::Future};
+use std::future::Future;
 use time::{Duration, OffsetDateTime};
 
 fn set_env_var(key: &str, value: Option<&str>) {
@@ -148,9 +146,7 @@ fn assert_invalid_params_error(body: &Value) {
 
 struct TeamRouterFixture {
     owner_user_id: String,
-    admin_user_id: String,
     member_user_id: String,
-    remove_target_user_id: String,
     no_team_user_id: String,
     outsider_user_id: String,
     team_id: String,
@@ -159,17 +155,11 @@ struct TeamRouterFixture {
     accept_user_id: String,
     decline_user_id: String,
     accessible_vault_id: String,
-    _hidden_vault_id: String,
-    admin_inaccessible_vault_id: String,
-    accessible_item_id: String,
-    admin_inaccessible_item_id: String,
 }
 
 async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
     let owner_user_id = "team_owner_user".to_string();
-    let admin_user_id = "team_admin_user".to_string();
     let member_user_id = "team_member_user".to_string();
-    let remove_target_user_id = "team_remove_target_user".to_string();
     let no_team_user_id = "team_no_team_user".to_string();
     let outsider_user_id = "team_outsider_user".to_string();
     let invitee_user_id = "team_invitee_user".to_string();
@@ -178,25 +168,13 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
     let team_id = "team_router_main".to_string();
     let outsider_team_id = "team_router_other".to_string();
     let accessible_vault_id = "team_router_accessible_vault".to_string();
-    let hidden_vault_id = "team_router_hidden_vault".to_string();
-    let admin_inaccessible_vault_id = "team_router_admin_hidden_vault".to_string();
-    let accessible_item_id = "team_router_accessible_item".to_string();
-    let admin_inaccessible_item_id = "team_router_admin_hidden_item".to_string();
 
     seed_user(pool, &owner_user_id, "Team Owner", "team-owner@example.com").await;
-    seed_user(pool, &admin_user_id, "Team Admin", "team-admin@example.com").await;
     seed_user(
         pool,
         &member_user_id,
         "Team Member",
         "team-member@example.com",
-    )
-    .await;
-    seed_user(
-        pool,
-        &remove_target_user_id,
-        "Remove Target",
-        "team-remove-target@example.com",
     )
     .await;
     seed_user(pool, &no_team_user_id, "No Team", "team-none@example.com").await;
@@ -240,9 +218,7 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
     )
     .await;
     assign_user_to_team(pool, &owner_user_id, &team_id, "owner").await;
-    assign_user_to_team(pool, &admin_user_id, &team_id, "admin").await;
     assign_user_to_team(pool, &member_user_id, &team_id, "member").await;
-    assign_user_to_team(pool, &remove_target_user_id, &team_id, "member").await;
 
     seed_team(
         pool,
@@ -265,24 +241,6 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
         Some(&team_id),
     )
     .await;
-    seed_vault(
-        pool,
-        &hidden_vault_id,
-        "Hidden Vault",
-        "personal",
-        &owner_user_id,
-        Some(&team_id),
-    )
-    .await;
-    seed_vault(
-        pool,
-        &admin_inaccessible_vault_id,
-        "Admin Inaccessible Vault",
-        "personal",
-        &owner_user_id,
-        Some(&team_id),
-    )
-    .await;
 
     seed_vault_key(
         pool,
@@ -295,15 +253,6 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
     .await;
     seed_vault_key(
         pool,
-        "team_router_accessible_admin_key",
-        &accessible_vault_id,
-        &admin_user_id,
-        "admin-accessible-key",
-        "admin",
-    )
-    .await;
-    seed_vault_key(
-        pool,
         "team_router_accessible_member_key",
         &accessible_vault_id,
         &member_user_id,
@@ -311,69 +260,9 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
         "member",
     )
     .await;
-    seed_vault_key(
-        pool,
-        "team_router_accessible_target_key",
-        &accessible_vault_id,
-        &remove_target_user_id,
-        "target-accessible-key",
-        "member",
-    )
-    .await;
-    seed_vault_key(
-        pool,
-        "team_router_hidden_owner_key",
-        &hidden_vault_id,
-        &owner_user_id,
-        "owner-hidden-key",
-        "owner",
-    )
-    .await;
-    seed_vault_key(
-        pool,
-        "team_router_admin_hidden_owner_key",
-        &admin_inaccessible_vault_id,
-        &owner_user_id,
-        "owner-admin-hidden-key",
-        "owner",
-    )
-    .await;
-    seed_vault_key(
-        pool,
-        "team_router_admin_hidden_target_key",
-        &admin_inaccessible_vault_id,
-        &remove_target_user_id,
-        "target-admin-hidden-key",
-        "member",
-    )
-    .await;
-
-    seed_item(
-        pool,
-        &accessible_item_id,
-        &accessible_vault_id,
-        "login",
-        "accessible-ciphertext",
-        "accessible-iv",
-        &owner_user_id,
-    )
-    .await;
-    seed_item(
-        pool,
-        &admin_inaccessible_item_id,
-        &admin_inaccessible_vault_id,
-        "login",
-        "admin-hidden-ciphertext",
-        "admin-hidden-iv",
-        &owner_user_id,
-    )
-    .await;
-
     TeamRouterFixture {
         owner_user_id,
-        admin_user_id,
         member_user_id,
-        remove_target_user_id,
         no_team_user_id,
         outsider_user_id,
         team_id,
@@ -382,10 +271,6 @@ async fn build_team_router_fixture(pool: &PgPool) -> TeamRouterFixture {
         accept_user_id,
         decline_user_id,
         accessible_vault_id,
-        _hidden_vault_id: hidden_vault_id,
-        admin_inaccessible_vault_id,
-        accessible_item_id,
-        admin_inaccessible_item_id,
     }
 }
 
@@ -535,73 +420,7 @@ fn normalize_pending_vault_keys_rejects_blank_entries() {
 }
 
 #[test]
-fn validate_rotation_vault_inputs_rejects_too_many_vaults() {
-    let error = validate_rotation_vault_inputs(
-        &(0..101)
-            .map(|index| RotationVaultInput {
-                vault_id: format!("vault_{index}"),
-                key_rotation: VaultKeyRotationInput {
-                    member_keys: Vec::new(),
-                    re_encrypted_items: Vec::new(),
-                },
-            })
-            .collect::<Vec<_>>(),
-    )
-    .unwrap_err();
-
-    assert_eq!(error.code, AppErrorCode::BadRequest);
-    assert_eq!(error.message, "Too many vault rotations provided.");
-}
-
-#[test]
-fn validate_rotation_vault_inputs_rejects_too_many_member_keys() {
-    let error = validate_rotation_vault_inputs(&[RotationVaultInput {
-        vault_id: "vault_1".to_string(),
-        key_rotation: VaultKeyRotationInput {
-            member_keys: (0..101)
-                .map(|index| RotationMemberKeyInput {
-                    user_id: format!("user_{index}"),
-                    encrypted_vault_key: "wrapped".to_string(),
-                })
-                .collect(),
-            re_encrypted_items: Vec::new(),
-        },
-    }])
-    .unwrap_err();
-
-    assert_eq!(error.code, AppErrorCode::BadRequest);
-    assert_eq!(
-        error.message,
-        "Too many member key rotations provided for a vault.",
-    );
-}
-
-#[test]
-fn validate_rotation_vault_inputs_rejects_too_many_reencrypted_items() {
-    let error = validate_rotation_vault_inputs(&[RotationVaultInput {
-        vault_id: "vault_1".to_string(),
-        key_rotation: VaultKeyRotationInput {
-            member_keys: Vec::new(),
-            re_encrypted_items: (0..101)
-                .map(|index| RotationReEncryptedItemInput {
-                    item_id: format!("item_{index}"),
-                    encrypted_data: "ciphertext".to_string(),
-                    encryption_iv: "iv".to_string(),
-                })
-                .collect(),
-        },
-    }])
-    .unwrap_err();
-
-    assert_eq!(error.code, AppErrorCode::BadRequest);
-    assert_eq!(
-        error.message,
-        "Too many re-encrypted items provided for a vault.",
-    );
-}
-
-#[test]
-fn team_invitation_and_rotation_reject_oversized_vault_keys() {
+fn team_invitation_rejects_oversized_vault_keys() {
     let oversized = "k".repeat(crate::services::vault_key::ENCRYPTED_VAULT_KEY_MAX_BYTES + 1);
     assert!(
         normalize_pending_vault_keys(Some(vec![PendingVaultKeyEntry {
@@ -610,98 +429,6 @@ fn team_invitation_and_rotation_reject_oversized_vault_keys() {
         }]))
         .is_err()
     );
-    assert!(validate_rotation_vault_inputs(&[RotationVaultInput {
-        vault_id: "vault_rotation_limit".to_string(),
-        key_rotation: VaultKeyRotationInput {
-            member_keys: vec![RotationMemberKeyInput {
-                user_id: "user_rotation_limit".to_string(),
-                encrypted_vault_key: oversized,
-            }],
-            re_encrypted_items: Vec::new(),
-        },
-    }])
-    .is_err());
-}
-
-#[test]
-fn ensure_exact_rotation_vault_set_rejects_duplicates() {
-    let expected = HashSet::from(["vault_1".to_string()]);
-    let error = ensure_exact_rotation_vault_set(
-        &expected,
-        &[
-            RotationVaultInput {
-                vault_id: "vault_1".to_string(),
-                key_rotation: VaultKeyRotationInput {
-                    member_keys: Vec::new(),
-                    re_encrypted_items: Vec::new(),
-                },
-            },
-            RotationVaultInput {
-                vault_id: "vault_1".to_string(),
-                key_rotation: VaultKeyRotationInput {
-                    member_keys: Vec::new(),
-                    re_encrypted_items: Vec::new(),
-                },
-            },
-        ],
-        "Rotation mismatch.",
-    )
-    .unwrap_err();
-
-    assert_eq!(error.code, AppErrorCode::BadRequest);
-    assert_eq!(
-        error.message,
-        "Duplicate vault rotation entries are not allowed.",
-    );
-}
-
-#[test]
-fn ensure_exact_rotation_vault_set_rejects_extra_vaults() {
-    let expected = HashSet::from(["vault_1".to_string()]);
-    let error = ensure_exact_rotation_vault_set(
-        &expected,
-        &[
-            RotationVaultInput {
-                vault_id: "vault_1".to_string(),
-                key_rotation: VaultKeyRotationInput {
-                    member_keys: Vec::new(),
-                    re_encrypted_items: Vec::new(),
-                },
-            },
-            RotationVaultInput {
-                vault_id: "vault_2".to_string(),
-                key_rotation: VaultKeyRotationInput {
-                    member_keys: Vec::new(),
-                    re_encrypted_items: Vec::new(),
-                },
-            },
-        ],
-        "Rotation mismatch.",
-    )
-    .unwrap_err();
-
-    assert_eq!(error.code, AppErrorCode::BadRequest);
-    assert_eq!(error.message, "Rotation mismatch.");
-}
-
-#[test]
-fn ensure_exact_rotation_vault_set_rejects_missing_vaults() {
-    let expected = HashSet::from(["vault_1".to_string(), "vault_2".to_string()]);
-    let error = ensure_exact_rotation_vault_set(
-        &expected,
-        &[RotationVaultInput {
-            vault_id: "vault_1".to_string(),
-            key_rotation: VaultKeyRotationInput {
-                member_keys: Vec::new(),
-                re_encrypted_items: Vec::new(),
-            },
-        }],
-        "Rotation mismatch.",
-    )
-    .unwrap_err();
-
-    assert_eq!(error.code, AppErrorCode::BadRequest);
-    assert_eq!(error.message, "Rotation mismatch.");
 }
 
 #[test]
@@ -750,29 +477,7 @@ async fn team_protected_handlers_require_authentication() {
                 })),
             ),
             (Method::DELETE, "/api/v1/teams/team_test", None),
-            (
-                Method::POST,
-                "/api/v1/teams/team_test/leave",
-                Some(json!({ "vaultRotations": [] })),
-            ),
-            (
-                Method::GET,
-                "/api/v1/teams/team_test/leave-rotation-data",
-                None,
-            ),
             (Method::GET, "/api/v1/teams/team_test/members", None),
-            (
-                Method::GET,
-                "/api/v1/teams/team_test/members/user_test/removal-rotation-data",
-                None,
-            ),
-            (
-                Method::DELETE,
-                "/api/v1/teams/team_test/members/user_test",
-                Some(json!({
-                    "vaultRotations": []
-                })),
-            ),
             (Method::GET, "/api/v1/teams/team_test/invitations", None),
             (Method::GET, "/api/v1/users/me/team-invitations", None),
             (
@@ -1260,7 +965,7 @@ async fn team_list_get_create_update_and_image_upload_paths() {
 }
 
 #[tokio::test]
-async fn team_vaults_members_and_leave_rotation_queries() {
+async fn team_vault_and_member_queries() {
     with_api_test_app("team_query_paths", |app| async move {
         let fixture = build_team_router_fixture(&app.pool).await;
         let owner_session = app.issue_session(&fixture.owner_user_id).await;
@@ -1282,7 +987,7 @@ async fn team_vaults_members_and_leave_rotation_queries() {
                 .and_then(Value::as_array)
                 .expect("vaults should be an array")
                 .len(),
-            3
+            1
         );
         assert_eq!(
             vaults_response.body["items"][0]["encryptedVaultKey"],
@@ -1319,13 +1024,10 @@ async fn team_vaults_members_and_leave_rotation_queries() {
             .get("items")
             .and_then(Value::as_array)
             .expect("members should be an array");
-        assert_eq!(members.len(), 4);
+        assert_eq!(members.len(), 2);
         assert!(members
             .iter()
             .any(|member| member["role"] == json!("owner")));
-        assert!(members
-            .iter()
-            .any(|member| member["role"] == json!("admin")));
         assert!(members
             .iter()
             .any(|member| member["role"] == json!("member")));
@@ -1345,33 +1047,6 @@ async fn team_vaults_members_and_leave_rotation_queries() {
             "FORBIDDEN",
             "You are not a member of this team",
         );
-
-        let leave_rotation_response = app
-            .api_json(
-                Method::GET,
-                &format!("/api/v1/teams/{}/leave-rotation-data", fixture.team_id),
-                None,
-                authenticated_json_headers(&member_session.token),
-            )
-            .await;
-        leave_rotation_response.assert_contract_status();
-        let rotation_vaults = leave_rotation_response.body["vaults"]
-            .as_array()
-            .expect("rotation vaults should be an array");
-        assert_eq!(rotation_vaults.len(), 1);
-        assert_eq!(
-            rotation_vaults[0]["vaultId"],
-            json!(fixture.accessible_vault_id)
-        );
-        assert_eq!(
-            rotation_vaults[0]["items"][0]["id"],
-            json!(fixture.accessible_item_id)
-        );
-        assert!(rotation_vaults[0]["members"]
-            .as_array()
-            .expect("members should be an array")
-            .iter()
-            .all(|member| member["userId"] != json!(fixture.member_user_id.clone())));
     })
     .await;
 }
@@ -1941,218 +1616,6 @@ async fn team_invitation_accept_and_decline_paths() {
     .await;
 }
 
-/// Same invariant as the vault-side rotation: the team member-removal rotation re-seals each
-/// ciphertext under the context it already carried, so the apply step must not re-stamp
-/// `encryption_version`/`encrypted_by_user_id`. Doing so leaves the stored context describing a
-/// binding the ciphertext never had, and the item becomes permanently undecryptable.
-#[tokio::test]
-async fn team_rotation_advances_version_without_rebinding_encryption_context() {
-    with_api_test_app("team_rotation_preserves_encryption_context", |app| async move {
-        let fixture = build_team_router_fixture(&app.pool).await;
-
-        let before: (i32, i32, String) = sqlx::query_as(
-            "SELECT version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
-        )
-        .bind(&fixture.accessible_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("pre-rotation item context should load");
-        assert_eq!(before, (1, 1, fixture.owner_user_id.clone()));
-
-        // The leaving member drives the rotation; the item was sealed by the owner.
-        let leaving_session = app.issue_session(&fixture.member_user_id).await;
-        let leave_response = app
-            .api_json(
-                Method::POST,
-                &format!("/api/v1/teams/{}/leave", fixture.team_id),
-                Some(json!({
-                    "vaultRotations": [{
-                        "vaultId": fixture.accessible_vault_id,
-                        "keyRotation": {
-                            "memberKeys": [
-                                { "userId": fixture.owner_user_id, "encryptedVaultKey": "rotated-owner-key" },
-                                { "userId": fixture.admin_user_id, "encryptedVaultKey": "rotated-admin-key" },
-                                { "userId": fixture.remove_target_user_id, "encryptedVaultKey": "rotated-target-key" }
-                            ],
-                            "reEncryptedItems": [{
-                                "itemId": fixture.accessible_item_id,
-                                "encryptedData": "rotated-item-ciphertext",
-                                "encryptionIv": "rotated-item-iv"
-                            }]
-                        }
-                    }]
-                })),
-                authenticated_json_headers(&leaving_session.token),
-            )
-            .await;
-        leave_response.assert_contract_status();
-        assert_eq!(leave_response.body["success"], json!(true));
-
-        let after: (String, String, i32, i32, String, String) = sqlx::query_as(
-            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id, last_modified_by FROM item WHERE id = $1",
-        )
-        .bind(&fixture.accessible_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("rotated item should load");
-
-        assert_eq!(after.0, "rotated-item-ciphertext");
-        assert_eq!(after.1, "rotated-item-iv");
-        assert_eq!(after.2, before.0 + 1);
-        assert_eq!(after.3, before.1);
-        assert_eq!(after.4, before.2);
-        assert_eq!(after.5, fixture.member_user_id);
-    })
-    .await;
-}
-
-#[tokio::test]
-async fn team_leave_paths() {
-    with_api_test_app("team_leave", |app| async move {
-        let fixture = build_team_router_fixture(&app.pool).await;
-
-        let owner_session = app.issue_session(&fixture.owner_user_id).await;
-        let owner_leave = app
-            .api_json(
-                Method::POST,
-                &format!("/api/v1/teams/{}/leave", fixture.team_id),
-                Some(json!({  "vaultRotations": [] })),
-                authenticated_json_headers(&owner_session.token),
-            )
-            .await;
-        owner_leave.assert_contract_status();
-        assert_handler_error(
-            &owner_leave.body,
-            "BAD_REQUEST",
-            "The team owner cannot leave. Transfer ownership first.",
-        );
-
-        let leaving_session = app.issue_session(&fixture.member_user_id).await;
-        let additional_session = app.issue_session(&fixture.member_user_id).await;
-        let leave_response = app
-            .api_json(
-                Method::POST,
-                &format!("/api/v1/teams/{}/leave", fixture.team_id),
-                Some(json!({
-
-                    "vaultRotations": [{
-                        "vaultId": fixture.accessible_vault_id,
-                        "keyRotation": {
-                            "memberKeys": [
-                                {
-                                    "userId": fixture.owner_user_id,
-                                    "encryptedVaultKey": "rotated-owner-key"
-                                },
-                                {
-                                    "userId": fixture.admin_user_id,
-                                    "encryptedVaultKey": "rotated-admin-key"
-                                },
-                                {
-                                    "userId": fixture.remove_target_user_id,
-                                    "encryptedVaultKey": "rotated-target-key"
-                                }
-                            ],
-                            "reEncryptedItems": [{
-                                "itemId": fixture.accessible_item_id,
-                                "encryptedData": "rotated-item-ciphertext",
-                                "encryptionIv": "rotated-item-iv"
-                            }]
-                        }
-                    }]
-                })),
-                authenticated_json_headers(&leaving_session.token),
-            )
-            .await;
-        leave_response.assert_contract_status();
-        assert_eq!(leave_response.body["success"], json!(true));
-
-        let new_team_id =
-            query_scalar::<_, Option<String>>("SELECT team_id FROM \"user\" WHERE id = $1")
-                .bind(&fixture.member_user_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("leaving user team should load")
-                .expect("leaving user should have a new team");
-        let new_role = query_scalar::<_, String>("SELECT role::text FROM \"user\" WHERE id = $1")
-            .bind(&fixture.member_user_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("leaving user role should load");
-        let old_vault_key_exists = query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM vault_key WHERE vault_id = $1 AND user_id = $2)",
-        )
-        .bind(&fixture.accessible_vault_id)
-        .bind(&fixture.member_user_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("vault key existence query should succeed");
-        let rotated_owner_key = query_scalar::<_, String>(
-            "SELECT encrypted_vault_key FROM vault_key WHERE vault_id = $1 AND user_id = $2",
-        )
-        .bind(&fixture.accessible_vault_id)
-        .bind(&fixture.owner_user_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("rotated owner key should load");
-        let new_key_version = query_scalar::<_, i32>("SELECT key_version FROM vault WHERE id = $1")
-            .bind(&fixture.accessible_vault_id)
-            .fetch_one(&app.pool)
-            .await
-            .expect("rotated vault version should load");
-        let completed_rotations = query_scalar::<_, i64>(
-				"SELECT COUNT(*)::bigint FROM vault_key_rotation WHERE vault_id = $1 AND status = 'completed'",
-			)
-			.bind(&fixture.accessible_vault_id)
-			.fetch_one(&app.pool)
-			.await
-			.expect("rotation count should load");
-        let rotated_item: (String, String, i32, Option<i32>, Option<String>) = sqlx::query_as(
-            "SELECT encrypted_data, encryption_iv, version, encryption_version, encrypted_by_user_id FROM item WHERE id = $1",
-        )
-        .bind(&fixture.accessible_item_id)
-        .fetch_one(&app.pool)
-        .await
-        .expect("rotated item should load");
-        let remaining_sessions =
-            query_scalar::<_, i64>("SELECT COUNT(*)::bigint FROM session WHERE user_id = $1")
-                .bind(&fixture.member_user_id)
-                .fetch_one(&app.pool)
-                .await
-                .expect("session count should load");
-
-        assert_ne!(new_team_id, fixture.team_id);
-        assert_eq!(new_role, "owner");
-        assert!(!old_vault_key_exists);
-        assert_eq!(rotated_owner_key, "rotated-owner-key");
-        assert_eq!(new_key_version, 2);
-        assert_eq!(completed_rotations, 1);
-        // Rotation advances the concurrency counter but leaves the AAD binding
-        // (`encryption_version`/`encrypted_by_user_id`) exactly as the ciphertext was sealed.
-        assert_eq!(
-            rotated_item,
-            (
-                "rotated-item-ciphertext".to_string(),
-                "rotated-item-iv".to_string(),
-                2,
-                Some(1),
-                Some(fixture.owner_user_id.clone()),
-            )
-        );
-        assert_eq!(remaining_sessions, 0);
-
-        let revoked_session = load_session_revocation(
-            &app.pool,
-            &fixture.member_user_id,
-            &additional_session.session_id,
-        )
-        .await
-        .expect("revoked session should load")
-        .expect("revoked session record should exist");
-        assert_eq!(revoked_session.reason.as_deref(), Some("team_left"));
-    })
-    .await;
-}
-
 #[tokio::test]
 async fn team_delete_paths() {
     with_api_test_app("team_delete", |app| async move {
@@ -2308,209 +1771,4 @@ async fn team_delete_paths() {
         assert_eq!(reassigned_team_type, "personal");
     })
     .await;
-}
-
-#[tokio::test]
-async fn team_member_rotation_remove_and_delete_account_paths() {
-    with_api_test_app(
-			"team_member_remove",
-			|app| async move {
-				let fixture = build_team_router_fixture(&app.pool).await;
-
-				let owner_session = app.issue_session(&fixture.owner_user_id).await;
-				let owner_headers = authenticated_json_headers(&owner_session.token);
-				let owner_rotation = app
-					.api_json(Method::GET, &format!("/api/v1/teams/{}/members/{}/removal-rotation-data", fixture.team_id, fixture.remove_target_user_id), None, owner_headers.clone())
-					.await;
-				owner_rotation.assert_contract_status();
-				let owner_vaults = owner_rotation.body["vaults"]
-					.as_array()
-					.expect("owner rotation vaults should be an array");
-				assert_eq!(owner_vaults.len(), 2);
-				assert!(owner_vaults.iter().any(|vault| vault["vaultId"] == json!(fixture.accessible_vault_id.clone())));
-				assert!(owner_vaults.iter().any(|vault| vault["vaultId"] == json!(fixture.admin_inaccessible_vault_id.clone())));
-
-				let admin_session = app.issue_session(&fixture.admin_user_id).await;
-				let admin_rotation = app
-					.api_json(Method::GET, &format!("/api/v1/teams/{}/members/{}/removal-rotation-data", fixture.team_id, fixture.remove_target_user_id), None, authenticated_json_headers(&admin_session.token))
-					.await;
-				admin_rotation.assert_contract_status();
-				assert_handler_error(
-					&admin_rotation.body,
-					"FORBIDDEN",
-					"You cannot remove this member from only part of their team vault access.",
-				);
-
-				let member_session = app.issue_session(&fixture.member_user_id).await;
-				let member_rotation = app
-					.api_json(Method::GET, &format!("/api/v1/teams/{}/members/{}/removal-rotation-data", fixture.team_id, fixture.remove_target_user_id), None, authenticated_json_headers(&member_session.token))
-					.await;
-				member_rotation.assert_contract_status();
-				assert_handler_error(
-					&member_rotation.body,
-					"FORBIDDEN",
-					"Only owner or admin can perform key rotation",
-				);
-
-				let missing_target = app
-					.api_json(Method::DELETE, &format!("/api/v1/teams/{}/members/{}", fixture.team_id, "missing-user"), Some(json!({
-
-
-							"vaultRotations": []
-						})), owner_headers.clone())
-					.await;
-				missing_target.assert_contract_status();
-				assert_handler_error(
-					&missing_target.body,
-					"NOT_FOUND",
-					"Team member not found",
-				);
-
-				let self_remove = app
-					.api_json(Method::DELETE, &format!("/api/v1/teams/{}/members/{}", fixture.team_id, fixture.owner_user_id), Some(json!({
-
-
-							"vaultRotations": []
-						})), owner_headers.clone())
-					.await;
-				self_remove.assert_contract_status();
-				assert_handler_error(
-					&self_remove.body,
-					"BAD_REQUEST",
-					"You cannot remove yourself from the team",
-				);
-
-				let removed_session = app.issue_session(&fixture.remove_target_user_id).await;
-				let remove_response = app
-					.api_json(Method::DELETE, &format!("/api/v1/teams/{}/members/{}", fixture.team_id, fixture.remove_target_user_id), Some(json!({
-
-
-							"vaultRotations": [
-								{
-									"vaultId": fixture.accessible_vault_id,
-									"keyRotation": {
-										"memberKeys": [
-											{
-												"userId": fixture.owner_user_id,
-												"encryptedVaultKey": "remove-owner-key"
-											},
-											{
-												"userId": fixture.admin_user_id,
-												"encryptedVaultKey": "remove-admin-key"
-											},
-											{
-												"userId": fixture.member_user_id,
-												"encryptedVaultKey": "remove-member-key"
-											}
-										],
-										"reEncryptedItems": [{
-											"itemId": fixture.accessible_item_id,
-											"encryptedData": "remove-accessible-ciphertext",
-											"encryptionIv": "remove-accessible-iv"
-										}]
-									}
-								},
-								{
-									"vaultId": fixture.admin_inaccessible_vault_id,
-									"keyRotation": {
-										"memberKeys": [{
-											"userId": fixture.owner_user_id,
-											"encryptedVaultKey": "remove-owner-hidden-key"
-										}],
-										"reEncryptedItems": [{
-											"itemId": fixture.admin_inaccessible_item_id,
-											"encryptedData": "remove-hidden-ciphertext",
-											"encryptionIv": "remove-hidden-iv"
-										}]
-									}
-								}
-							]
-						})), owner_headers)
-					.await;
-				remove_response.assert_contract_status();
-				assert_eq!(remove_response.body["success"], json!(true));
-				assert_eq!(
-					remove_response.body["vaultRotations"]
-						.as_array()
-						.expect("rotation results should be an array")
-						.len(),
-					2
-				);
-
-				let removed_user_team = query_scalar::<_, Option<String>>(
-					"SELECT team_id FROM \"user\" WHERE id = $1",
-				)
-				.bind(&fixture.remove_target_user_id)
-				.fetch_one(&app.pool)
-				.await
-				.expect("removed user team should load")
-				.expect("removed user should have a personal team");
-				let removed_user_role = query_scalar::<_, String>(
-					"SELECT role::text FROM \"user\" WHERE id = $1",
-				)
-				.bind(&fixture.remove_target_user_id)
-				.fetch_one(&app.pool)
-				.await
-				.expect("removed user role should load");
-				let removed_user_old_key_exists = query_scalar::<_, bool>(
-					"SELECT EXISTS(SELECT 1 FROM vault_key WHERE vault_id = $1 AND user_id = $2)",
-				)
-				.bind(&fixture.accessible_vault_id)
-				.bind(&fixture.remove_target_user_id)
-				.fetch_one(&app.pool)
-				.await
-				.expect("removed user old vault key query should succeed");
-				let accessible_version = query_scalar::<_, i32>(
-					"SELECT key_version FROM vault WHERE id = $1",
-				)
-				.bind(&fixture.accessible_vault_id)
-				.fetch_one(&app.pool)
-				.await
-				.expect("accessible vault version should load");
-				let hidden_version = query_scalar::<_, i32>(
-					"SELECT key_version FROM vault WHERE id = $1",
-				)
-				.bind(&fixture.admin_inaccessible_vault_id)
-				.fetch_one(&app.pool)
-				.await
-				.expect("hidden vault version should load");
-				let completed_rotations = query_scalar::<_, i64>(
-					"SELECT COUNT(*)::bigint FROM vault_key_rotation WHERE removed_user_id = $1 AND status = 'completed'",
-				)
-				.bind(&fixture.remove_target_user_id)
-				.fetch_one(&app.pool)
-				.await
-				.expect("completed rotation count should load");
-				let removed_user_session_count = query_scalar::<_, i64>(
-					"SELECT COUNT(*)::bigint FROM session WHERE user_id = $1",
-				)
-				.bind(&fixture.remove_target_user_id)
-				.fetch_one(&app.pool)
-				.await
-				.expect("removed user session count should load");
-
-				assert_ne!(removed_user_team, fixture.team_id);
-				assert_eq!(removed_user_role, "owner");
-				assert!(!removed_user_old_key_exists);
-				assert_eq!(accessible_version, 2);
-				assert_eq!(hidden_version, 2);
-				assert_eq!(completed_rotations, 2);
-				assert_eq!(removed_user_session_count, 0);
-
-				let removed_session_revoked = load_session_revocation(
-					&app.pool,
-					&fixture.remove_target_user_id,
-					&removed_session.session_id,
-				)
-				.await
-				.expect("removed session revocation should load")
-				.expect("removed session revocation record should exist");
-				assert_eq!(
-					removed_session_revoked.reason.as_deref(),
-					Some("team_member_removed")
-				);
-
-			},
-		)
-		.await;
 }

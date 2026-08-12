@@ -57,6 +57,10 @@ pub fn decrypt_with_handle(data: JsEncryptedData, key_handle: u64) -> Result<Str
 
 ### Finding 2 — Key rotation returns the plaintext new vault key to the caller
 - Severity: High
+- Resolution (2026-08-12): Resolved by the shared Rotation-plan ceremony. The fresh Vault key is
+  represented only by a caller-owned opaque `KeyRef`, is used across bounded preparation pages,
+  and is destroyed after success, failure, cancellation, or lock. Rotation outputs contain only
+  wrapped Member keys, re-encrypted Item ciphertext, and rewrapped Attachment-key envelopes.
 - Location:
   - `packages/crypto/core/crates/bittery-crypto-core/src/key_rotation.rs:57-65`
   - `packages/crypto/core/crates/bittery-crypto-core/src/key_rotation.rs:191-193`
@@ -79,6 +83,9 @@ pub fn decrypt_with_handle(data: JsEncryptedData, key_handle: u64) -> Result<Str
 
 ### Finding 3 — Vault-key wrapping with MUK is not context-bound (no vault/user/version AAD)
 - Severity: High
+- Resolution (2026-08-12): Resolved. Vault-key and Attachment-key envelopes are authenticated to
+  explicit Vault, entity, User, purpose, and version context. Unwrap rejects substituted context;
+  Attachment rotation authenticates version N and writes a new envelope at N+1.
 - Location:
   - `packages/crypto/core/crates/bittery-crypto-core/src/key_rotation.rs:107-122`
   - `packages/core/src/services/vault-service.ts:159-168`

@@ -16,12 +16,9 @@ use crate::{
     shapes::{
         attachment_download_shape, attachment_shape, bulk_import_item_shape,
         bulk_import_result_shape, convert_vault_type_shape, create_attachment_shape,
-        create_item_shape, create_vault_shape, item_shape, remove_vault_member_shape,
-        rotation_item_shape, rotation_member_key_shape, rotation_reencrypted_item_shape,
-        update_item_shape, update_vault_shape, vault_available_member_shape, vault_details_shape,
-        vault_key_rotation_shape, vault_list_entry_shape, vault_member_shape,
-        vault_rotation_data_shape, vault_rotation_member_shape, vault_rotation_summary_shape,
-        vault_stats_shape, vault_summary_shape,
+        create_item_shape, create_vault_shape, item_shape, update_item_shape, update_vault_shape,
+        vault_available_member_shape, vault_details_shape, vault_list_entry_shape,
+        vault_member_shape, vault_stats_shape, vault_summary_shape,
     },
     AppState, NotifySyncExt,
 };
@@ -229,13 +226,26 @@ struct AttachmentUploadBody {
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CreateAttachmentBody {
+    attachment_id: String,
     storage_key: String,
+    encrypted_attachment_key: String,
+    attachment_key_iv: String,
+    attachment_key_algorithm: String,
+    envelope_version: i32,
     encrypted_name: String,
     encrypted_content_type: String,
     encryption_iv: String,
     encrypted_content_type_iv: String,
     encryption_algorithm: String,
     file_size: i32,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+struct AttachmentUploadResponse {
+    attachment_id: String,
+    key: String,
+    upload_url: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -259,39 +269,6 @@ struct AddVaultMemberBody {
 struct UpdateVaultMemberRoleBody {
     role: VaultRole,
 }
-
-#[derive(Debug, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoveVaultMemberBody {
-    key_rotation: VaultKeyRotationInput,
-}
-
-rotation_member_key_shape!(wire_struct {
-    #[derive(Debug, Deserialize, ToSchema)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct RotationMemberKeyInput
-});
-rotation_member_key_shape!(shape_from {
-    RotationMemberKeyInput => vault::RotationMemberKeyInput
-});
-
-rotation_reencrypted_item_shape!(wire_struct {
-    #[derive(Debug, Deserialize, ToSchema)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct RotationReEncryptedItemInput
-});
-rotation_reencrypted_item_shape!(shape_from {
-    RotationReEncryptedItemInput => vault::RotationReEncryptedItemInput
-});
-
-vault_key_rotation_shape!(wire_struct {
-    #[derive(Debug, Deserialize, ToSchema)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct VaultKeyRotationInput
-}, member = RotationMemberKeyInput, item = RotationReEncryptedItemInput);
-vault_key_rotation_shape!(shape_from {
-    VaultKeyRotationInput => vault::VaultKeyRotationInput
-}, member = RotationMemberKeyInput, item = RotationReEncryptedItemInput);
 
 create_vault_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
@@ -432,54 +409,6 @@ vault_available_member_shape!(wire_struct {
 });
 vault_available_member_shape!(shape_from {
     vault::VaultAvailableMemberResponse => VaultAvailableMemberResponse
-});
-
-vault_rotation_member_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct VaultRotationMemberResponse
-});
-vault_rotation_member_shape!(shape_from {
-    vault::VaultRotationMemberResponse => VaultRotationMemberResponse
-});
-
-rotation_item_shape! {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct VaultRotationItemResponse {}
-}
-
-impl From<vault::VaultRotationItemResponse> for VaultRotationItemResponse {
-    fn from(value: vault::VaultRotationItemResponse) -> Self {
-        Self::compose(value.decompose().0)
-    }
-}
-
-vault_rotation_data_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct VaultRotationDataResponse
-});
-vault_rotation_data_shape!(shape_from {
-    vault::VaultRotationDataResponse => VaultRotationDataResponse
-});
-
-vault_rotation_summary_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct VaultKeyRotationSummaryResponse
-});
-vault_rotation_summary_shape!(shape_from {
-    vault::VaultKeyRotationSummaryResponse => VaultKeyRotationSummaryResponse
-});
-
-remove_vault_member_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct RemoveVaultMemberResponse
-});
-remove_vault_member_shape!(shape_from {
-    vault::RemoveVaultMemberResponse => RemoveVaultMemberResponse
 });
 
 attachment_download_shape!(wire_struct {
@@ -1389,28 +1318,30 @@ async fn stats(
     ))
 }
 
-#[utoipa::path(post, path = "/items/{itemId}/attachment-uploads", operation_id = "createAttachmentUpload", tag = "attachments", params(("itemId" = String, Path)), request_body = AttachmentUploadBody, responses((status = 200, description = "Success", body = PresignedUploadResponse), VaultErrorResponses))]
+#[utoipa::path(post, path = "/items/{itemId}/attachment-uploads", operation_id = "createAttachmentUpload", tag = "attachments", params(("itemId" = String, Path)), request_body = AttachmentUploadBody, responses((status = 200, description = "Success", body = AttachmentUploadResponse), VaultErrorResponses))]
 async fn create_attachment_upload(
     State(state): State<AppState>,
     auth: AuthenticatedRequest,
     Path(item_id): Path<String>,
     ApiJson(body): ApiJson<AttachmentUploadBody>,
-) -> Result<Json<PresignedUploadResponse>, ApiError> {
+) -> Result<Json<AttachmentUploadResponse>, ApiError> {
     let pool = db_pool(&state)?;
-    Ok(Json(
-        vault::create_vault_attachment_upload(
-            pool,
-            &auth.session.user_id,
-            vault::CreateAttachmentUploadInput {
-                item_id,
-                file_name: body.file_name,
-                content_type: body.content_type,
-                file_size: body.file_size,
-            },
-        )
-        .await?
-        .into(),
-    ))
+    let result = vault::create_vault_attachment_upload(
+        pool,
+        &auth.session.user_id,
+        vault::CreateAttachmentUploadInput {
+            item_id,
+            file_name: body.file_name,
+            content_type: body.content_type,
+            file_size: body.file_size,
+        },
+    )
+    .await?;
+    Ok(Json(AttachmentUploadResponse {
+        attachment_id: result.attachment_id,
+        key: result.storage_key,
+        upload_url: result.upload_url,
+    }))
 }
 
 #[utoipa::path(post, path = "/items/{itemId}/attachments", operation_id = "createAttachment", tag = "attachments", params(("itemId" = String, Path)), request_body = CreateAttachmentBody, responses((status = 200, description = "Success", body = CreateAttachmentResponse), VaultErrorResponses))]
@@ -1427,7 +1358,12 @@ async fn create_attachment(
         auth.effective_client_id().as_deref(),
         vault::CreateAttachmentInput {
             item_id,
+            attachment_id: body.attachment_id,
             storage_key: body.storage_key,
+            encrypted_attachment_key: body.encrypted_attachment_key,
+            attachment_key_iv: body.attachment_key_iv,
+            attachment_key_algorithm: body.attachment_key_algorithm,
+            envelope_version: body.envelope_version,
             encrypted_name: body.encrypted_name,
             encrypted_content_type: body.encrypted_content_type,
             encryption_iv: body.encryption_iv,
@@ -1634,51 +1570,6 @@ async fn update_member_role(
     Ok(Json(result.into()))
 }
 
-#[utoipa::path(get, path = "/vaults/{vaultId}/members/{userId}/removal-rotation-data", operation_id = "getVaultMemberRemovalRotationData", tag = "vault-members", params(("vaultId" = String, Path), ("userId" = String, Path)), responses((status = 200, description = "Success", body = VaultRotationDataResponse), VaultErrorResponses))]
-async fn get_rotation_data(
-    State(state): State<AppState>,
-    auth: AuthenticatedRequest,
-    Path((vault_id, user_id)): Path<(String, String)>,
-) -> Result<Json<VaultRotationDataResponse>, ApiError> {
-    let pool = db_pool(&state)?;
-    Ok(Json(
-        vault::member_handlers::get_vault_rotation_data(
-            pool,
-            &auth.session.user_id,
-            vault::GetVaultRotationDataInput {
-                vault_id,
-                exclude_user_id: user_id,
-            },
-        )
-        .await?
-        .into(),
-    ))
-}
-
-#[utoipa::path(delete, path = "/vaults/{vaultId}/members/{userId}", operation_id = "removeVaultMember", tag = "vault-members", params(("vaultId" = String, Path), ("userId" = String, Path)), request_body = RemoveVaultMemberBody, responses((status = 200, description = "Success", body = RemoveVaultMemberResponse), VaultErrorResponses))]
-async fn remove_member(
-    State(state): State<AppState>,
-    auth: AuthenticatedRequest,
-    Path((vault_id, user_id)): Path<(String, String)>,
-    ApiJson(body): ApiJson<RemoveVaultMemberBody>,
-) -> Result<Json<RemoveVaultMemberResponse>, ApiError> {
-    let pool = db_pool(&state)?;
-    let result = vault::member_handlers::remove_vault_member(
-        pool,
-        &auth.session.user_id,
-        auth.effective_client_id().as_deref(),
-        vault::RemoveVaultMemberInput {
-            vault_id,
-            user_id,
-            key_rotation: body.key_rotation.into(),
-            client_id: auth.effective_client_id(),
-        },
-    )
-    .await
-    .notify_sync(&state)?;
-    Ok(Json(result.into()))
-}
-
 pub(crate) fn router() -> OpenApiRouter<AppState> {
     let reads = OpenApiRouter::new()
         .routes(routes!(list_vaults))
@@ -1691,8 +1582,7 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(stats))
         .routes(routes!(list_attachments))
         .routes(routes!(list_members))
-        .routes(routes!(available_team_members))
-        .routes(routes!(get_rotation_data));
+        .routes(routes!(available_team_members));
     let ordinary_writes = OpenApiRouter::new()
         .routes(routes!(create_vault))
         .routes(routes!(update_vault))
@@ -1710,7 +1600,6 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(delete_attachment))
         .routes(routes!(add_member))
         .routes(routes!(update_member_role))
-        .routes(routes!(remove_member))
         .route_layer(DefaultBodyLimit::max(ORDINARY_API_BODY_LIMIT_BYTES));
     let item_writes = OpenApiRouter::new()
         .routes(routes!(create_item))
@@ -1736,8 +1625,8 @@ mod tests {
 
     use super::{
         check_bulk_import, check_ciphertext, nullable_patch_value, router, AllItemsResponse,
-        BulkImportBody, BulkImportItemInput, FavoriteBody, ItemCategory, RemoveVaultMemberBody,
-        UpdateVaultBody, VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
+        BulkImportBody, BulkImportItemInput, FavoriteBody, ItemCategory, UpdateVaultBody,
+        VaultItemDetailsResponse, VaultStatsResponseDto, ITEM_BODY_LIMIT_BYTES,
     };
     use crate::{
         http::api::{
@@ -1819,17 +1708,6 @@ mod tests {
             }]
         }))
         .is_err());
-        assert!(serde_json::from_value::<RemoveVaultMemberBody>(json!({
-            "keyRotation": {
-                "memberKeys": [{
-                    "userId": "user_test",
-                    "encryptedVaultKey": "wrapped",
-                    "unknown": true
-                }],
-                "reEncryptedItems": []
-            }
-        }))
-        .is_err());
     }
 
     /// The two types now share one field list, so their schemas can no longer drift apart and the
@@ -1857,6 +1735,10 @@ mod tests {
                 item_id: "item_test".to_string(),
                 vault_id: "vault_test".to_string(),
                 storage_key: "attachments/test".to_string(),
+                encrypted_attachment_key: "attachment-key".to_string(),
+                attachment_key_iv: "attachment-key-iv".to_string(),
+                attachment_key_algorithm: "aes-gcm".to_string(),
+                envelope_version: 1,
                 encrypted_name: "name".to_string(),
                 encrypted_content_type: "type".to_string(),
                 encryption_iv: "attachment-iv".to_string(),

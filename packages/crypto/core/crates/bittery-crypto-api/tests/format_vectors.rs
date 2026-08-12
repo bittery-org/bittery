@@ -214,97 +214,6 @@ fn recovery_and_vault_key_wrapping_interoperate_with_core() {
 }
 
 #[test]
-fn key_rotation_preserves_each_item_context() {
-    let old_vault_key = [0x11; 32];
-    let master_unlock_key = [0x22; 32];
-
-    let bound = block_on(api::encrypt(
-        "bound payload".into(),
-        block_on(api::import_key(old_vault_key.to_vec())).unwrap(),
-        Some(context()),
-    ))
-    .unwrap();
-    let second_context = api::EncryptionContext {
-        entity_id: "item-8".into(),
-        ..context()
-    };
-    let second = block_on(api::encrypt(
-        "second payload".into(),
-        block_on(api::import_key(old_vault_key.to_vec())).unwrap(),
-        Some(second_context.clone()),
-    ))
-    .unwrap();
-
-    let result = block_on(api::perform_key_rotation(
-        block_on(api::import_key(old_vault_key.to_vec())).unwrap(),
-        vec![api::MemberKeyData {
-            user_id: "user-9".into(),
-            public_key: String::new(),
-        }],
-        vec![
-            api::ItemData {
-                id: "item-7".into(),
-                encrypted_data: bound.ciphertext,
-                encryption_iv: bound.iv,
-                encryption_algorithm: bound.algorithm,
-                context: context(),
-            },
-            api::ItemData {
-                id: "item-8".into(),
-                encrypted_data: second.ciphertext,
-                encryption_iv: second.iv,
-                encryption_algorithm: second.algorithm,
-                context: second_context,
-            },
-        ],
-        "vault-1".into(),
-        4,
-        "user-9".into(),
-        block_on(api::import_key(master_unlock_key.to_vec())).unwrap(),
-    ))
-    .unwrap();
-
-    let new_vault_key = core::decrypt_vault_key_with_muk(
-        &result.member_encrypted_keys[0].encrypted_vault_key,
-        &master_unlock_key,
-        &core::VaultKeyWrapContext::new("vault-1", "user-9", 4),
-    )
-    .unwrap();
-
-    let rotated = |index: usize| core::EncryptedData {
-        ciphertext: result.re_encrypted_items[index].encrypted_data.clone(),
-        iv: result.re_encrypted_items[index].encryption_iv.clone(),
-        algorithm: "AES-GCM-AAD-V1".into(),
-    };
-    let core_context = core::AadContext {
-        vault_id: "vault-1".into(),
-        entity_id: "item-7".into(),
-        entity_type: "item".into(),
-        version: 3,
-        user_id: "user-9".into(),
-    };
-
-    assert_eq!(
-        core::decrypt_with_aad(&rotated(0), &new_vault_key, &core_context).unwrap(),
-        "bound payload"
-    );
-    assert!(core::decrypt(&rotated(0), &new_vault_key).is_err());
-    assert_eq!(
-        core::decrypt_with_aad(
-            &rotated(1),
-            &new_vault_key,
-            &core::AadContext {
-                entity_id: "item-8".into(),
-                ..core_context
-            }
-        )
-        .unwrap(),
-        "second payload"
-    );
-    assert!(core::decrypt(&rotated(1), &new_vault_key).is_err());
-}
-
-#[test]
 fn key_handle_destroy_is_idempotent_and_blocks_later_use() {
     let handle = block_on(api::import_key(vec![7; 32])).unwrap();
     block_on(api::destroy_key(handle.clone())).unwrap();
@@ -320,8 +229,9 @@ fn unwrap_key_requires_the_exact_authenticated_context() {
     let wrapping_key = block_on(api::import_key(vec![9; 32])).unwrap();
     let payload = vec![0x42; 32];
     let encryption_context = context();
-    let encrypted = block_on(api::encrypt(
-        BASE64.encode(&payload),
+    let payload_key = block_on(api::import_key(payload.clone())).unwrap();
+    let encrypted = block_on(api::wrap_key(
+        payload_key,
         wrapping_key.clone(),
         Some(encryption_context.clone()),
     ))

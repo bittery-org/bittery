@@ -17,12 +17,8 @@ use crate::{
         access::{self, MemberAccessInput},
         team::{self, invitation_handlers, member_handlers},
     },
-    shapes::{
-        rotation_data_shape, rotation_item_shape, rotation_member_key_shape, rotation_member_shape,
-        rotation_reencrypted_item_shape, rotation_vault_shape, team_details_shape,
-        team_summary_shape, vault_key_rotation_shape,
-    },
-    AppState, NotifySyncExt,
+    shapes::{team_details_shape, team_summary_shape},
+    AppState,
 };
 
 use super::{
@@ -92,46 +88,6 @@ request_dto!(SendInvitationRequest {
     #[schema(max_items = 100)]
     pending_vault_keys: Option<Vec<PendingVaultKeyRequest>>,
 });
-rotation_member_key_shape!(wire_struct {
-    #[derive(Debug, Deserialize, ToSchema)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct RotationMemberKeyRequest
-});
-rotation_member_key_shape!(shape_from {
-    RotationMemberKeyRequest => team::RotationMemberKeyInput
-});
-
-rotation_reencrypted_item_shape!(wire_struct {
-    #[derive(Debug, Deserialize, ToSchema)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct RotationItemRequest
-});
-rotation_reencrypted_item_shape!(shape_from {
-    RotationItemRequest => team::RotationReEncryptedItemInput
-});
-
-vault_key_rotation_shape!(wire_struct {
-    #[derive(Debug, Deserialize, ToSchema)]
-    #[serde(rename_all = "camelCase", deny_unknown_fields)]
-    struct VaultKeyRotationRequest
-}, member = RotationMemberKeyRequest, item = RotationItemRequest);
-vault_key_rotation_shape!(shape_from {
-    VaultKeyRotationRequest => team::VaultKeyRotationInput
-}, member = RotationMemberKeyRequest, item = RotationItemRequest);
-
-request_dto!(RotationVaultRequest {
-    vault_id: String,
-    key_rotation: VaultKeyRotationRequest,
-});
-request_dto!(TeamLeaveRequest {
-    #[schema(max_items = 100)]
-    vault_rotations: Vec<RotationVaultRequest>,
-});
-request_dto!(RemoveTeamMemberRequest {
-    #[schema(max_items = 100)]
-    vault_rotations: Vec<RotationVaultRequest>,
-});
-
 team_summary_shape!(wire_struct {
     #[derive(Debug, Serialize, ToSchema)]
     #[serde(rename_all = "camelCase")]
@@ -204,45 +160,6 @@ response_dto!(ResendInvitationResponse from team::ResendInvitationResponse {
 response_dto!(AcceptInvitationResponse from team::AcceptInvitationResponse {
     team_id: String,
     team_name: String,
-});
-
-rotation_member_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct RotationMemberResponse
-});
-rotation_member_shape!(shape_from {
-    team::RotationMemberResponse => RotationMemberResponse
-});
-
-rotation_item_shape! {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct RotationItemResponse {}
-}
-
-impl From<team::RotationItemResponse> for RotationItemResponse {
-    fn from(value: team::RotationItemResponse) -> Self {
-        Self::compose(value.decompose().0)
-    }
-}
-
-rotation_vault_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct RotationVaultResponse
-});
-rotation_vault_shape!(shape_from {
-    team::RotationVaultResponse => RotationVaultResponse
-});
-
-rotation_data_shape!(wire_struct {
-    #[derive(Debug, Serialize, ToSchema)]
-    #[serde(rename_all = "camelCase")]
-    struct RotationDataResponse
-});
-rotation_data_shape!(shape_from {
-    team::RotationDataResponse => RotationDataResponse
 });
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -357,39 +274,6 @@ impl From<access::MemberAccessResponse> for MemberAccessResponse {
     }
 }
 
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct TeamVaultRotationResponse {
-    vault_id: String,
-    rotation_id: String,
-    new_key_version: i32,
-}
-
-#[derive(Debug, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-struct RemoveMemberResponse {
-    success: bool,
-    #[schema(max_items = 100)]
-    vault_rotations: Vec<TeamVaultRotationResponse>,
-}
-
-impl From<team::RemoveTeamMemberResponse> for RemoveMemberResponse {
-    fn from(value: team::RemoveTeamMemberResponse) -> Self {
-        Self {
-            success: value.success,
-            vault_rotations: value
-                .vault_rotations
-                .into_iter()
-                .map(|rotation| TeamVaultRotationResponse {
-                    vault_id: rotation.vault_id,
-                    rotation_id: rotation.rotation_id,
-                    new_key_version: rotation.new_key_version,
-                })
-                .collect(),
-        }
-    }
-}
-
 #[derive(IntoResponses)]
 #[allow(dead_code)]
 enum TeamErrorResponses {
@@ -446,16 +330,6 @@ enum TeamErrorResponses {
 
 fn default_member_role() -> TeamRole {
     TeamRole::Member
-}
-
-fn rotations(values: Vec<RotationVaultRequest>) -> Vec<team::RotationVaultInput> {
-    values
-        .into_iter()
-        .map(|value| team::RotationVaultInput {
-            vault_id: value.vault_id,
-            key_rotation: value.key_rotation.into(),
-        })
-        .collect()
 }
 
 #[utoipa::path(get, path = "/teams/current", operation_id = "getCurrentTeam", tag = "teams", responses((status = 200, body = TeamSummaryResponse), TeamErrorResponses))]
@@ -602,45 +476,6 @@ async fn delete_team(
 ) -> Result<Json<SuccessResponse>, ApiError> {
     Ok(Json(
         team::delete_team(
-            db_pool(&state)?,
-            &request.session.user_id,
-            team::TeamIdInput { team_id },
-        )
-        .await?
-        .into(),
-    ))
-}
-
-#[utoipa::path(post, path = "/teams/{teamId}/leave", operation_id = "leaveTeam", tag = "teams", params(("teamId" = String, Path)), request_body = TeamLeaveRequest, responses((status = 200, body = SuccessResponse), TeamErrorResponses))]
-async fn leave_team(
-    State(state): State<AppState>,
-    request: AuthenticatedRequest,
-    Path(team_id): Path<String>,
-    ApiJson(body): ApiJson<TeamLeaveRequest>,
-) -> Result<Json<SuccessResponse>, ApiError> {
-    let response = team::leave_team(
-        db_pool(&state)?,
-        &request.session.user_id,
-        request.effective_client_id().as_deref(),
-        team::LeaveTeamInput {
-            team_id,
-            vault_rotations: rotations(body.vault_rotations),
-            client_id: request.effective_client_id(),
-        },
-    )
-    .await
-    .notify_sync(&state)?;
-    Ok(Json(response.into()))
-}
-
-#[utoipa::path(get, path = "/teams/{teamId}/leave-rotation-data", operation_id = "getTeamLeaveRotationData", tag = "teams", params(("teamId" = String, Path)), responses((status = 200, body = RotationDataResponse), TeamErrorResponses))]
-async fn leave_rotation_data(
-    State(state): State<AppState>,
-    request: AuthenticatedRequest,
-    Path(team_id): Path<String>,
-) -> Result<Json<RotationDataResponse>, ApiError> {
-    Ok(Json(
-        team::get_leave_rotation_data(
             db_pool(&state)?,
             &request.session.user_id,
             team::TeamIdInput { team_id },
@@ -895,49 +730,6 @@ async fn member_access(
     ))
 }
 
-#[utoipa::path(get, path = "/teams/{teamId}/members/{userId}/removal-rotation-data", operation_id = "getTeamMemberRemovalRotationData", tag = "team-members", params(("teamId" = String, Path), ("userId" = String, Path)), responses((status = 200, body = RotationDataResponse), TeamErrorResponses))]
-async fn member_rotation_data(
-    State(state): State<AppState>,
-    request: AuthenticatedRequest,
-    Path((team_id, user_id)): Path<(String, String)>,
-) -> Result<Json<RotationDataResponse>, ApiError> {
-    Ok(Json(
-        member_handlers::get_team_rotation_data(
-            db_pool(&state)?,
-            &request.session.user_id,
-            team::TeamRotationInput {
-                team_id,
-                exclude_user_id: user_id,
-            },
-        )
-        .await?
-        .into(),
-    ))
-}
-
-#[utoipa::path(delete, path = "/teams/{teamId}/members/{userId}", operation_id = "removeTeamMember", tag = "team-members", params(("teamId" = String, Path), ("userId" = String, Path)), request_body = RemoveTeamMemberRequest, responses((status = 200, body = RemoveMemberResponse), TeamErrorResponses))]
-async fn remove_member(
-    State(state): State<AppState>,
-    request: AuthenticatedRequest,
-    Path((team_id, user_id)): Path<(String, String)>,
-    ApiJson(body): ApiJson<RemoveTeamMemberRequest>,
-) -> Result<Json<RemoveMemberResponse>, ApiError> {
-    let response = member_handlers::remove_team_member(
-        db_pool(&state)?,
-        &request.session.user_id,
-        request.effective_client_id().as_deref(),
-        team::RemoveTeamMemberInput {
-            team_id,
-            user_id,
-            vault_rotations: rotations(body.vault_rotations),
-            client_id: request.effective_client_id(),
-        },
-    )
-    .await
-    .notify_sync(&state)?;
-    Ok(Json(response.into()))
-}
-
 pub(crate) fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(current_team))
@@ -947,8 +739,6 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(update_team))
         .routes(routes!(create_image_upload))
         .routes(routes!(delete_team))
-        .routes(routes!(leave_team))
-        .routes(routes!(leave_rotation_data))
         .routes(routes!(invitation_by_token))
         .routes(routes!(pending_invitations))
         .routes(routes!(list_invitations))
@@ -961,8 +751,6 @@ pub(crate) fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(resend_invitation))
         .routes(routes!(list_members))
         .routes(routes!(member_access))
-        .routes(routes!(member_rotation_data))
-        .routes(routes!(remove_member))
         .route_layer(DefaultBodyLimit::max(ORDINARY_API_BODY_LIMIT_BYTES))
 }
 
@@ -982,7 +770,7 @@ mod tests {
             .values()
             .map(|path| path.as_object().unwrap().len())
             .sum::<usize>();
-        assert_eq!(operation_count, 23);
+        assert_eq!(operation_count, 19);
         let serialized = document.to_string();
         assert!(!serialized.contains("deleteTeamAccount"));
         assert!(!serialized.contains("delete-account"));

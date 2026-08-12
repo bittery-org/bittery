@@ -48,24 +48,6 @@ pub struct MemberKeyData {
     pub public_key: String,
 }
 
-/// Member with encrypted vault key
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MemberEncryptedKey {
-    /// User ID
-    pub user_id: String,
-    /// Encrypted vault key (RSA-encrypted for other members, AES-GCM for current user)
-    pub encrypted_vault_key: String,
-}
-
-/// Key rotation result
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KeyRotationResult {
-    /// Encrypted keys for each member
-    pub member_encrypted_keys: Vec<MemberEncryptedKey>,
-    /// Re-encrypted items
-    pub re_encrypted_items: Vec<ReEncryptedItem>,
-}
-
 /// Fixed entity type for MUK-wrapped vault keys.
 pub const VAULT_KEY_WRAP_ENTITY_TYPE: &str = "vault_key";
 /// Fixed purpose for MUK-wrapped vault keys.
@@ -113,15 +95,6 @@ pub struct WrappedVaultKeyData {
     #[serde(flatten)]
     pub encrypted: EncryptedData,
     pub context: VaultKeyWrapContext,
-}
-
-/// Validation result for rotation data
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValidationResult {
-    /// Whether the data is valid
-    pub valid: bool,
-    /// Error messages if invalid
-    pub errors: Vec<String>,
 }
 
 /// Generate a new vault key for rotation
@@ -240,107 +213,37 @@ pub fn re_encrypt_item(
     })
 }
 
-/// Perform a complete key rotation
-///
-/// 1. Generate a new vault key
-/// 2. Encrypt the new key for each remaining member:
-///    - For the current user: encrypt with Master Unlock Key (AES-GCM)
-///    - For other members: encrypt with their RSA public keys
-/// 3. Re-encrypt all items with the new key
-///
-/// # Arguments
-/// * `old_vault_key` - 32-byte old vault encryption key
-/// * `members` - Member data with public keys
-/// * `items` - Items to re-encrypt
-/// * `current_user_id` - Current user's ID (for MUK encryption)
-/// * `master_unlock_key` - Current user's Master Unlock Key
-///
-/// # Returns
-/// Key rotation result with new keys and re-encrypted items
-pub fn perform_key_rotation(
+/// Rewrap an Attachment key under a rotated Vault key without exposing the Attachment key or
+/// touching its encrypted object-storage bytes. The caller supplies the persisted envelope's
+/// old and new contexts: the Vault, Attachment and owner stay fixed while the envelope version
+/// advances. Changing any other context field makes this fail.
+pub fn rewrap_attachment_key(
+    encrypted_attachment_key: &EncryptedData,
     old_vault_key: &[u8],
-    members: &[MemberKeyData],
-    items: &[ItemData],
-    vault_id: &str,
-    key_version: u64,
-    current_user_id: &str,
-    master_unlock_key: &[u8],
-) -> Result<KeyRotationResult, CryptoError> {
-    // 1. Generate new vault key
-    let mut new_vault_key = generate_new_vault_key();
+    new_vault_key: &[u8],
+    old_context: &AadContext,
+    new_context: &AadContext,
+) -> Result<EncryptedData, CryptoError> {
+    let mut encoded_attachment_key =
+        decrypt_with_aad(encrypted_attachment_key, old_vault_key, old_context)?;
+    let mut attachment_key = BASE64
+        .decode(encoded_attachment_key.as_bytes())
+        .map_err(|error| CryptoError::Base64Decode(error.to_string()))?;
+    encoded_attachment_key.zeroize();
 
-    // 2. Encrypt new vault key for each member
-    let mut member_encrypted_keys = Vec::with_capacity(members.len());
-    for member in members {
-        let encrypted_key = if member.user_id == current_user_id {
-            // Current user: encrypt with AES-GCM using Master Unlock Key
-            let wrap_context = VaultKeyWrapContext::new(vault_id, current_user_id, key_version);
-            match encrypt_vault_key_with_muk(&new_vault_key, master_unlock_key, &wrap_context) {
-                Ok(value) => value,
-                Err(e) => {
-                    new_vault_key.zeroize();
-                    return Err(e);
-                }
-            }
-        } else {
-            // Other members: encrypt with RSA using their public key
-            match encrypt_vault_key_for_member(&new_vault_key, &member.public_key) {
-                Ok(value) => value,
-                Err(e) => {
-                    new_vault_key.zeroize();
-                    return Err(e);
-                }
-            }
-        };
-
-        member_encrypted_keys.push(MemberEncryptedKey {
-            user_id: member.user_id.clone(),
-            encrypted_vault_key: encrypted_key,
+    if attachment_key.len() != 32 {
+        attachment_key.zeroize();
+        return Err(CryptoError::InvalidKeyLength {
+            expected: 32,
+            actual: attachment_key.len(),
         });
     }
 
-    // 3. Re-encrypt all items with the new key
-    let mut re_encrypted_items = Vec::with_capacity(items.len());
-    for item in items {
-        let re_encrypted = match re_encrypt_item(item, old_vault_key, &new_vault_key) {
-            Ok(value) => value,
-            Err(e) => {
-                new_vault_key.zeroize();
-                return Err(e);
-            }
-        };
-        re_encrypted_items.push(re_encrypted);
-    }
-
-    let result = KeyRotationResult {
-        member_encrypted_keys,
-        re_encrypted_items,
-    };
-    new_vault_key.zeroize();
-    Ok(result)
-}
-
-/// Validate that rotation can be performed
-///
-/// Checks that all members have valid public keys.
-pub fn validate_rotation_data(members: &[MemberKeyData]) -> ValidationResult {
-    let mut errors = Vec::new();
-
-    for member in members {
-        if member.public_key.is_empty() {
-            errors.push(format!("Member {} has no public key", member.user_id));
-        } else if !member.public_key.contains("-----BEGIN PUBLIC KEY-----") {
-            errors.push(format!(
-                "Member {} has invalid public key format",
-                member.user_id
-            ));
-        }
-    }
-
-    ValidationResult {
-        valid: errors.is_empty(),
-        errors,
-    }
+    let mut encoded_for_new_envelope = BASE64.encode(&attachment_key);
+    attachment_key.zeroize();
+    let result = encrypt_with_aad(&encoded_for_new_envelope, new_vault_key, new_context);
+    encoded_for_new_envelope.zeroize();
+    result
 }
 
 #[cfg(test)]
@@ -506,138 +409,46 @@ mod tests {
     }
 
     #[test]
-    fn test_perform_key_rotation() {
-        let owner_keys = generate_rsa_key_pair().unwrap();
-        let member_keys = generate_rsa_key_pair().unwrap();
-
+    fn test_rewrap_attachment_key_keeps_its_exact_context() {
         let old_vault_key = generate_new_vault_key();
-        let muk = generate_new_vault_key();
+        let new_vault_key = generate_new_vault_key();
+        let attachment_key = generate_new_vault_key();
+        let context = AadContext {
+            vault_id: "vault-1".to_string(),
+            entity_id: "attachment-1".to_string(),
+            entity_type: "attachment_key".to_string(),
+            version: 2,
+            user_id: "user-1".to_string(),
+        };
+        let original =
+            encrypt_with_aad(&BASE64.encode(attachment_key), &old_vault_key, &context).unwrap();
 
-        // Every item is bound to its exact context.
-        let item1 =
-            encrypt_with_aad("Item 1 data", &old_vault_key, &item_context("item-1")).unwrap();
-        let item2 =
-            encrypt_with_aad("Item 2 data", &old_vault_key, &item_context("item-2")).unwrap();
-
-        let items = vec![
-            ItemData {
-                id: "item-1".to_string(),
-                encrypted_data: item1.ciphertext,
-                encryption_iv: item1.iv,
-                encryption_algorithm: item1.algorithm,
-                context: item_context("item-1"),
-            },
-            ItemData {
-                id: "item-2".to_string(),
-                encrypted_data: item2.ciphertext,
-                encryption_iv: item2.iv,
-                encryption_algorithm: item2.algorithm,
-                context: item_context("item-2"),
-            },
-        ];
-
-        let members = vec![
-            MemberKeyData {
-                user_id: "owner-id".to_string(),
-                public_key: owner_keys.public_key.clone(),
-            },
-            MemberKeyData {
-                user_id: "member-id".to_string(),
-                public_key: member_keys.public_key.clone(),
-            },
-        ];
-
-        let result = perform_key_rotation(
+        let next_context = AadContext {
+            version: context.version + 1,
+            ..context.clone()
+        };
+        let rewrapped = rewrap_attachment_key(
+            &original,
             &old_vault_key,
-            &members,
-            &items,
-            "vault-1",
-            2,
-            "owner-id",
-            &muk,
+            &new_vault_key,
+            &context,
+            &next_context,
         )
         .unwrap();
 
-        // Should have encrypted keys for all members
-        assert_eq!(result.member_encrypted_keys.len(), 2);
-
-        // Should have re-encrypted all items
-        assert_eq!(result.re_encrypted_items.len(), 2);
-
-        // Owner's key should be AES-GCM encrypted (JSON format)
-        let owner_key_entry = result
-            .member_encrypted_keys
-            .iter()
-            .find(|k| k.user_id == "owner-id")
-            .unwrap();
-        let owner_decrypted = decrypt_vault_key_with_muk(
-            &owner_key_entry.encrypted_vault_key,
-            &muk,
-            &VaultKeyWrapContext::new("vault-1", "owner-id", 2),
-        )
-        .unwrap();
-
-        // Member's key should be RSA encrypted
-        let member_key_entry = result
-            .member_encrypted_keys
-            .iter()
-            .find(|k| k.user_id == "member-id")
-            .unwrap();
-        let member_decrypted = rsa_decrypt(
-            &member_key_entry.encrypted_vault_key,
-            &member_keys.private_key,
-        )
-        .unwrap();
-        let member_key_bytes = BASE64.decode(member_decrypted.as_bytes()).unwrap();
-        assert_eq!(member_key_bytes, owner_decrypted);
-
-        // Each item keeps its authenticated context.
-        let rotated_1 = EncryptedData {
-            ciphertext: result.re_encrypted_items[0].encrypted_data.clone(),
-            iv: result.re_encrypted_items[0].encryption_iv.clone(),
-            algorithm: "AES-GCM-AAD-V1".to_string(),
-        };
-        let rotated_2 = EncryptedData {
-            ciphertext: result.re_encrypted_items[1].encrypted_data.clone(),
-            iv: result.re_encrypted_items[1].encryption_iv.clone(),
-            algorithm: "AES-GCM-AAD-V1".to_string(),
-        };
         assert_eq!(
-            decrypt_with_aad(&rotated_1, &member_key_bytes, &item_context("item-1")).unwrap(),
-            "Item 1 data"
+            decrypt_with_aad(&rewrapped, &new_vault_key, &next_context).unwrap(),
+            BASE64.encode(attachment_key)
         );
-        assert_eq!(
-            decrypt_with_aad(&rotated_2, &member_key_bytes, &item_context("item-2")).unwrap(),
-            "Item 2 data"
-        );
-    }
-
-    #[test]
-    fn test_validate_rotation_data() {
-        // Valid data
-        let valid_members = vec![MemberKeyData {
-            user_id: "user1".to_string(),
-            public_key: "-----BEGIN PUBLIC KEY-----\nMIIB...\n-----END PUBLIC KEY-----".to_string(),
-        }];
-        let valid_result = validate_rotation_data(&valid_members);
-        assert!(valid_result.valid);
-        assert!(valid_result.errors.is_empty());
-
-        // Missing public key
-        let invalid_members = vec![MemberKeyData {
-            user_id: "user2".to_string(),
-            public_key: "".to_string(),
-        }];
-        let invalid_result = validate_rotation_data(&invalid_members);
-        assert!(!invalid_result.valid);
-        assert!(!invalid_result.errors.is_empty());
-
-        // Invalid format
-        let bad_format = vec![MemberKeyData {
-            user_id: "user3".to_string(),
-            public_key: "not-a-valid-key".to_string(),
-        }];
-        let bad_result = validate_rotation_data(&bad_format);
-        assert!(!bad_result.valid);
+        assert!(decrypt_with_aad(&rewrapped, &old_vault_key, &next_context).is_err());
+        assert!(decrypt_with_aad(
+            &rewrapped,
+            &new_vault_key,
+            &AadContext {
+                entity_id: "attachment-2".to_string(),
+                ..next_context
+            },
+        )
+        .is_err());
     }
 }

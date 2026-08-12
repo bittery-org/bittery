@@ -703,9 +703,9 @@ internal object IntegrityCheckingUniffiLib {
     ): Int
     external fun uniffi_bittery_crypto_api_checksum_func_initialize(
     ): Int
-    external fun uniffi_bittery_crypto_api_checksum_func_perform_key_rotation(
-    ): Int
     external fun uniffi_bittery_crypto_api_checksum_func_re_encrypt_item(
+    ): Int
+    external fun uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key(
     ): Int
     external fun uniffi_bittery_crypto_api_checksum_func_rsa_decrypt(
     ): Int
@@ -716,8 +716,6 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_bittery_crypto_api_checksum_func_unwrap_key(
     ): Int
     external fun uniffi_bittery_crypto_api_checksum_func_validate_recovery_key(
-    ): Int
-    external fun uniffi_bittery_crypto_api_checksum_func_validate_rotation_data(
     ): Int
     external fun uniffi_bittery_crypto_api_checksum_func_validate_secret_key(
     ): Int
@@ -839,9 +837,9 @@ external fun uniffi_bittery_crypto_api_fn_func_import_key(`key`: RustBuffer.ByVa
 ): Long
 external fun uniffi_bittery_crypto_api_fn_func_initialize(
 ): Long
-external fun uniffi_bittery_crypto_api_fn_func_perform_key_rotation(`oldVaultKey`: Long,`members`: RustBuffer.ByValue,`items`: RustBuffer.ByValue,`vaultId`: RustBuffer.ByValue,`keyVersion`: Long,`currentUserId`: RustBuffer.ByValue,`masterUnlockKey`: Long,
-): Long
 external fun uniffi_bittery_crypto_api_fn_func_re_encrypt_item(`item`: RustBuffer.ByValue,`oldVaultKey`: Long,`newVaultKey`: Long,
+): Long
+external fun uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(`encryptedAttachmentKey`: RustBuffer.ByValue,`oldVaultKey`: Long,`newVaultKey`: Long,`oldContext`: RustBuffer.ByValue,`newContext`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_bittery_crypto_api_fn_func_rsa_decrypt(`ciphertext`: RustBuffer.ByValue,`privateKeyPem`: RustBuffer.ByValue,
 ): Long
@@ -853,13 +851,11 @@ external fun uniffi_bittery_crypto_api_fn_func_unwrap_key(`data`: RustBuffer.ByV
 ): Long
 external fun uniffi_bittery_crypto_api_fn_func_validate_recovery_key(`recoveryKey`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_bittery_crypto_api_fn_func_validate_rotation_data(`members`: RustBuffer.ByValue,
-): Long
 external fun uniffi_bittery_crypto_api_fn_func_validate_secret_key(`secretKey`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_bittery_crypto_api_fn_func_verify_server_session(`clientPublicEphemeral`: RustBuffer.ByValue,`session`: RustBuffer.ByValue,`serverSessionProof`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_bittery_crypto_api_fn_func_wrap_key(`key`: Long,`wrappingKey`: Long,
+external fun uniffi_bittery_crypto_api_fn_func_wrap_key(`key`: Long,`wrappingKey`: Long,`context`: RustBuffer.ByValue,
 ): Long
 external fun ffi_bittery_crypto_api_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1070,10 +1066,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_crypto_api_checksum_func_initialize() != 30669) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_bittery_crypto_api_checksum_func_perform_key_rotation() != 10957) {
+    if (lib.uniffi_bittery_crypto_api_checksum_func_re_encrypt_item() != 40513) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_bittery_crypto_api_checksum_func_re_encrypt_item() != 40513) {
+    if (lib.uniffi_bittery_crypto_api_checksum_func_rewrap_attachment_key() != 43871) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_crypto_api_checksum_func_rsa_decrypt() != 34811) {
@@ -1091,16 +1087,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_bittery_crypto_api_checksum_func_validate_recovery_key() != 314) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_bittery_crypto_api_checksum_func_validate_rotation_data() != 26621) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_bittery_crypto_api_checksum_func_validate_secret_key() != 29683) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_crypto_api_checksum_func_verify_server_session() != 33486) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_bittery_crypto_api_checksum_func_wrap_key() != 24393) {
+    if (lib.uniffi_bittery_crypto_api_checksum_func_wrap_key() != 45322) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_bittery_crypto_api_checksum_method_srpclient_derive_safe_private_key() != 20216) {
@@ -2642,82 +2635,6 @@ public object FfiConverterTypeKdfProfile: FfiConverterRustBuffer<KdfProfile> {
 
 
 
-data class KeyRotationResult (
-    var `memberEncryptedKeys`: List<MemberEncryptedKey>
-    , 
-    var `reEncryptedItems`: List<ReEncryptedItem>
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeKeyRotationResult: FfiConverterRustBuffer<KeyRotationResult> {
-    override fun read(buf: ByteBuffer): KeyRotationResult {
-        return KeyRotationResult(
-            FfiConverterSequenceTypeMemberEncryptedKey.read(buf),
-            FfiConverterSequenceTypeReEncryptedItem.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: KeyRotationResult) = (
-            FfiConverterSequenceTypeMemberEncryptedKey.allocationSize(value.`memberEncryptedKeys`) +
-            FfiConverterSequenceTypeReEncryptedItem.allocationSize(value.`reEncryptedItems`)
-    )
-
-    override fun write(value: KeyRotationResult, buf: ByteBuffer) {
-            FfiConverterSequenceTypeMemberEncryptedKey.write(value.`memberEncryptedKeys`, buf)
-            FfiConverterSequenceTypeReEncryptedItem.write(value.`reEncryptedItems`, buf)
-    }
-}
-
-
-
-data class MemberEncryptedKey (
-    var `userId`: kotlin.String
-    , 
-    var `encryptedVaultKey`: kotlin.String
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeMemberEncryptedKey: FfiConverterRustBuffer<MemberEncryptedKey> {
-    override fun read(buf: ByteBuffer): MemberEncryptedKey {
-        return MemberEncryptedKey(
-            FfiConverterString.read(buf),
-            FfiConverterString.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: MemberEncryptedKey) = (
-            FfiConverterString.allocationSize(value.`userId`) +
-            FfiConverterString.allocationSize(value.`encryptedVaultKey`)
-    )
-
-    override fun write(value: MemberEncryptedKey, buf: ByteBuffer) {
-            FfiConverterString.write(value.`userId`, buf)
-            FfiConverterString.write(value.`encryptedVaultKey`, buf)
-    }
-}
-
-
-
 data class MemberKeyData (
     var `userId`: kotlin.String
     , 
@@ -3151,44 +3068,6 @@ public object FfiConverterTypeTotpResult: FfiConverterRustBuffer<TotpResult> {
             FfiConverterULong.write(value.`remainingSeconds`, buf)
             FfiConverterULong.write(value.`period`, buf)
             FfiConverterDouble.write(value.`progress`, buf)
-    }
-}
-
-
-
-data class ValidationResult (
-    var `valid`: kotlin.Boolean
-    , 
-    var `errors`: List<kotlin.String>
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeValidationResult: FfiConverterRustBuffer<ValidationResult> {
-    override fun read(buf: ByteBuffer): ValidationResult {
-        return ValidationResult(
-            FfiConverterBoolean.read(buf),
-            FfiConverterSequenceString.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: ValidationResult) = (
-            FfiConverterBoolean.allocationSize(value.`valid`) +
-            FfiConverterSequenceString.allocationSize(value.`errors`)
-    )
-
-    override fun write(value: ValidationResult, buf: ByteBuffer) {
-            FfiConverterBoolean.write(value.`valid`, buf)
-            FfiConverterSequenceString.write(value.`errors`, buf)
     }
 }
 
@@ -3655,34 +3534,6 @@ public object FfiConverterOptionalTypeEncryptionContext: FfiConverterRustBuffer<
 /**
  * @suppress
  */
-public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
-    override fun read(buf: ByteBuffer): List<kotlin.String> {
-        val len = buf.getInt()
-        return List<kotlin.String>(len) {
-            FfiConverterString.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<kotlin.String>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterString.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<kotlin.String>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterString.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
 public object FfiConverterSequenceTypeDecryptManyResult: FfiConverterRustBuffer<List<DecryptManyResult>> {
     override fun read(buf: ByteBuffer): List<DecryptManyResult> {
         val len = buf.getInt()
@@ -3729,118 +3580,6 @@ public object FfiConverterSequenceTypeDecryptRequest: FfiConverterRustBuffer<Lis
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeDecryptRequest.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypeItemData: FfiConverterRustBuffer<List<ItemData>> {
-    override fun read(buf: ByteBuffer): List<ItemData> {
-        val len = buf.getInt()
-        return List<ItemData>(len) {
-            FfiConverterTypeItemData.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<ItemData>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeItemData.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<ItemData>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeItemData.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypeMemberEncryptedKey: FfiConverterRustBuffer<List<MemberEncryptedKey>> {
-    override fun read(buf: ByteBuffer): List<MemberEncryptedKey> {
-        val len = buf.getInt()
-        return List<MemberEncryptedKey>(len) {
-            FfiConverterTypeMemberEncryptedKey.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<MemberEncryptedKey>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeMemberEncryptedKey.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<MemberEncryptedKey>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeMemberEncryptedKey.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypeMemberKeyData: FfiConverterRustBuffer<List<MemberKeyData>> {
-    override fun read(buf: ByteBuffer): List<MemberKeyData> {
-        val len = buf.getInt()
-        return List<MemberKeyData>(len) {
-            FfiConverterTypeMemberKeyData.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<MemberKeyData>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeMemberKeyData.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<MemberKeyData>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeMemberKeyData.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypeReEncryptedItem: FfiConverterRustBuffer<List<ReEncryptedItem>> {
-    override fun read(buf: ByteBuffer): List<ReEncryptedItem> {
-        val len = buf.getInt()
-        return List<ReEncryptedItem>(len) {
-            FfiConverterTypeReEncryptedItem.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<ReEncryptedItem>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeReEncryptedItem.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<ReEncryptedItem>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeReEncryptedItem.write(it, buf)
         }
     }
 }
@@ -4306,21 +4045,6 @@ public object FfiConverterSequenceTypeReEncryptedItem: FfiConverterRustBuffer<Li
 
     @Throws(CryptoException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `performKeyRotation`(`oldVaultKey`: KeyHandle, `members`: List<MemberKeyData>, `items`: List<ItemData>, `vaultId`: kotlin.String, `keyVersion`: kotlin.ULong, `currentUserId`: kotlin.String, `masterUnlockKey`: KeyHandle) : KeyRotationResult {
-        return uniffiRustCallAsync(
-        UniffiLib.uniffi_bittery_crypto_api_fn_func_perform_key_rotation(FfiConverterTypeKeyHandle.lower(`oldVaultKey`),FfiConverterSequenceTypeMemberKeyData.lower(`members`),FfiConverterSequenceTypeItemData.lower(`items`),FfiConverterString.lower(`vaultId`),FfiConverterULong.lower(`keyVersion`),FfiConverterString.lower(`currentUserId`),FfiConverterTypeKeyHandle.lower(`masterUnlockKey`),),
-        { future, callback, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_poll_rust_buffer(future, callback, continuation) },
-        { future, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_complete_rust_buffer(future, continuation) },
-        { future -> UniffiLib.ffi_bittery_crypto_api_rust_future_free_rust_buffer(future) },
-        // lift function
-        { FfiConverterTypeKeyRotationResult.lift(it) },
-        // Error FFI converter
-        CryptoException.ErrorHandler,
-    )
-    }
-
-    @Throws(CryptoException::class)
-    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
      suspend fun `reEncryptItem`(`item`: ItemData, `oldVaultKey`: KeyHandle, `newVaultKey`: KeyHandle) : ReEncryptedItem {
         return uniffiRustCallAsync(
         UniffiLib.uniffi_bittery_crypto_api_fn_func_re_encrypt_item(FfiConverterTypeItemData.lower(`item`),FfiConverterTypeKeyHandle.lower(`oldVaultKey`),FfiConverterTypeKeyHandle.lower(`newVaultKey`),),
@@ -4329,6 +4053,26 @@ public object FfiConverterSequenceTypeReEncryptedItem: FfiConverterRustBuffer<Li
         { future -> UniffiLib.ffi_bittery_crypto_api_rust_future_free_rust_buffer(future) },
         // lift function
         { FfiConverterTypeReEncryptedItem.lift(it) },
+        // Error FFI converter
+        CryptoException.ErrorHandler,
+    )
+    }
+
+        /**
+         * Rewraps an Attachment key envelope after Vault key rotation. The attachment key stays below
+         * the FFI boundary. The old context opens the envelope and the new context seals it with the
+         * next envelope version.
+         */
+    @Throws(CryptoException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+     suspend fun `rewrapAttachmentKey`(`encryptedAttachmentKey`: EncryptedData, `oldVaultKey`: KeyHandle, `newVaultKey`: KeyHandle, `oldContext`: EncryptionContext, `newContext`: EncryptionContext) : EncryptedData {
+        return uniffiRustCallAsync(
+        UniffiLib.uniffi_bittery_crypto_api_fn_func_rewrap_attachment_key(FfiConverterTypeEncryptedData.lower(`encryptedAttachmentKey`),FfiConverterTypeKeyHandle.lower(`oldVaultKey`),FfiConverterTypeKeyHandle.lower(`newVaultKey`),FfiConverterTypeEncryptionContext.lower(`oldContext`),FfiConverterTypeEncryptionContext.lower(`newContext`),),
+        { future, callback, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_bittery_crypto_api_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterTypeEncryptedData.lift(it) },
         // Error FFI converter
         CryptoException.ErrorHandler,
     )
@@ -4411,21 +4155,6 @@ public object FfiConverterSequenceTypeReEncryptedItem: FfiConverterRustBuffer<Li
 
     @Throws(CryptoException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `validateRotationData`(`members`: List<MemberKeyData>) : ValidationResult {
-        return uniffiRustCallAsync(
-        UniffiLib.uniffi_bittery_crypto_api_fn_func_validate_rotation_data(FfiConverterSequenceTypeMemberKeyData.lower(`members`),),
-        { future, callback, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_poll_rust_buffer(future, callback, continuation) },
-        { future, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_complete_rust_buffer(future, continuation) },
-        { future -> UniffiLib.ffi_bittery_crypto_api_rust_future_free_rust_buffer(future) },
-        // lift function
-        { FfiConverterTypeValidationResult.lift(it) },
-        // Error FFI converter
-        CryptoException.ErrorHandler,
-    )
-    }
-
-    @Throws(CryptoException::class)
-    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
      suspend fun `validateSecretKey`(`secretKey`: kotlin.String) : kotlin.Boolean {
         return uniffiRustCallAsync(
         UniffiLib.uniffi_bittery_crypto_api_fn_func_validate_secret_key(FfiConverterString.lower(`secretKey`),),
@@ -4457,9 +4186,9 @@ public object FfiConverterSequenceTypeReEncryptedItem: FfiConverterRustBuffer<Li
 
     @Throws(CryptoException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
-     suspend fun `wrapKey`(`key`: KeyHandle, `wrappingKey`: KeyHandle) : EncryptedData {
+     suspend fun `wrapKey`(`key`: KeyHandle, `wrappingKey`: KeyHandle, `context`: EncryptionContext?) : EncryptedData {
         return uniffiRustCallAsync(
-        UniffiLib.uniffi_bittery_crypto_api_fn_func_wrap_key(FfiConverterTypeKeyHandle.lower(`key`),FfiConverterTypeKeyHandle.lower(`wrappingKey`),),
+        UniffiLib.uniffi_bittery_crypto_api_fn_func_wrap_key(FfiConverterTypeKeyHandle.lower(`key`),FfiConverterTypeKeyHandle.lower(`wrappingKey`),FfiConverterOptionalTypeEncryptionContext.lower(`context`),),
         { future, callback, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_poll_rust_buffer(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_bittery_crypto_api_rust_future_complete_rust_buffer(future, continuation) },
         { future -> UniffiLib.ffi_bittery_crypto_api_rust_future_free_rust_buffer(future) },

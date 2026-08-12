@@ -146,33 +146,3 @@ pub struct DbDeleteTeamActorRow {
     pub role: TeamRole,
     pub team_type: TeamType,
 }
-
-#[derive(Clone, Debug, FromRow)]
-pub struct DbTeamRotationVaultRow {
-    pub id: String,
-    pub name: String,
-    pub key_version: i32,
-}
-
-#[derive(Clone, Debug, FromRow)]
-pub struct DbRotationMemberRow {
-    pub user_id: String,
-    pub public_key: String,
-    pub role: VaultRole,
-}
-
-/// Column list for `item` SELECTs that populate `DbRotationItemRow`.
-/// Must stay in sync with that struct's field order.
-pub(crate) const ROTATION_ITEM_COLUMNS: &str = "id, encrypted_data, encryption_iv, encryption_algorithm, version, encryption_version, encrypted_by_user_id, last_modified_by";
-
-#[derive(Clone, Debug, FromRow)]
-pub struct DbRotationItemRow {
-    pub id: String,
-    pub encrypted_data: String,
-    pub encryption_iv: String,
-    pub encryption_algorithm: String,
-    pub version: i32,
-    pub encryption_version: i32,
-    pub encrypted_by_user_id: String,
-    pub last_modified_by: String,
-}

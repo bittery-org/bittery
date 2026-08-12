@@ -79,22 +79,24 @@ describe("Share access gate — unusable links never reach a consuming screen", 
 		).toBe("missing-key");
 	});
 
-	test.each(["expired", "revoked", "exhausted", "disabled"])(
-		"renders the unavailable card for a %s link",
-		(reason) => {
-			expect(
-				resolve({
-					linkInfo: {
-						valid: false,
-						reason,
-						accessMode: "anyone",
-						isOneTimeUse: null,
-						expiresAt: null,
-					},
-				}),
-			).toBe("link-unavailable");
-		},
-	);
+	test.each([
+		"expired",
+		"revoked",
+		"exhausted",
+		"disabled",
+	])("renders the unavailable card for a %s link", (reason) => {
+		expect(
+			resolve({
+				linkInfo: {
+					valid: false,
+					reason,
+					accessMode: "anyone",
+					isOneTimeUse: null,
+					expiresAt: null,
+				},
+			}),
+		).toBe("link-unavailable");
+	});
 
 	test("an unavailable link wins over a missing key", () => {
 		expect(
